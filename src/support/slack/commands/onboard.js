@@ -12,9 +12,7 @@
 
 // todo: prototype - untested
 /* c8 ignore start */
-import { Site as SiteModel, Organization as OrganizationModel } from '@adobe/spacecat-shared-data-access';
-import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
-import { isValidUrl, isObject, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
+import { isNonEmptyArray } from '@adobe/spacecat-shared-utils';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
@@ -24,10 +22,10 @@ import {
   postErrorMessage,
   loadProfileConfig,
   parseCSV,
+  sendFile,
 } from '../../../utils/slack/base.js';
 
-import { findDeliveryType, triggerImportRun } from '../../utils.js';
-
+import { onboardSingleSite as sharedOnboardSingleSite } from '../../utils.js';
 import BaseCommand from './base.js';
 
 import { createObjectCsvStringifier } from '../../../utils/slack/csvHelper.cjs';
@@ -45,13 +43,29 @@ function OnboardCommand(context) {
   const baseCommand = BaseCommand({
     id: 'onboard-site',
     name: 'Onboard Site(s)',
-    description: 'Onboards a new site (or batch of sites from CSV) to Success Studio.',
+    description: 'Onboards a new site (or batch of sites from CSV) to AEM Sites Optimizer using an interactive modal interface.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site} {imsOrgId} [profile]`, // todo: add usageText for batch onboarding with file
+    usageText: `${PHRASES[0]}
+
+*Interactive Onboarding:* This command opens a modal form where you can configure:
+• Site URL (required)
+• IMS Organization ID (optional)
+• Configuration profile (demo/production)
+• Delivery type (auto-detect/manual)
+• Authoring type (optional)
+• Workflow wait time (optional)
+• Preview environment URL (optional)
+• Entitlement Tier (optional, defaults to FREE_TRIAL)
+
+*Batch Processing:* Upload a CSV file with ${PHRASES[1]} using the format:
+\`Site URL, IMS Org ID, [Reserved], Delivery Type, Authoring Type, Tier\`
+`,
   });
 
-  const { dataAccess, log, imsClient } = context;
-  const { Configuration, Site, Organization } = dataAccess;
+  const {
+    dataAccess, log, env,
+  } = context;
+  const { Configuration } = dataAccess;
 
   const csvStringifier = createObjectCsvStringifier({
     header: [
@@ -62,6 +76,8 @@ function OnboardCommand(context) {
       { id: 'profile', title: 'Profile' },
       { id: 'existingSite', title: 'Already existing site?' },
       { id: 'deliveryType', title: 'Delivery Type' },
+      { id: 'authoringType', title: 'Authoring Type' },
+      { id: 'tier', title: 'Entitlement Tier' },
       { id: 'audits', title: 'Audits' },
       { id: 'imports', title: 'Imports' },
       { id: 'errors', title: 'Errors' },
@@ -73,199 +89,44 @@ function OnboardCommand(context) {
    * Onboards a single site.
    *
    * @param {string} baseURLInput - The site URL.
-   * @param {string} imsOrgID - The IMS Org ID.
+   * @param {string} imsOrganizationID - The IMS Org ID.
    * @param {object} configuration - The configuration object.
    * @param {string} profileName - The profile name.
+   * @param {number} workflowWaitTime - Optional wait time in seconds.
    * @param {Object} slackContext - Slack context.
+   * @param {Object} additionalParams - Additional onboarding parameters.
+   * @param {string} additionalParams.deliveryType - Forced delivery type.
+   * @param {string} additionalParams.authoringType - Authoring type.
+   * @param {string} additionalParams.tier - Entitlement tier.
    * @returns {Promise<Object>} - A report line containing execution details.
    */
   const onboardSingleSite = async (
     baseURLInput,
-    imsOrgID,
+    imsOrganizationID,
     configuration,
     profileName,
+    workflowWaitTime,
     slackContext,
+    additionalParams = {},
   ) => {
-    const { say } = slackContext;
+    // Load the profile configuration
+    const profile = await loadProfileConfig(profileName);
 
-    const baseURL = extractURLFromSlackInput(baseURLInput);
-
-    const reportLine = {
-      site: baseURL,
-      imsOrgId: imsOrgID,
-      spacecatOrgId: '',
-      siteId: '',
-      profile: profileName,
-      deliveryType: '',
-      audits: '',
-      imports: '',
-      errors: '',
-      status: 'Success',
-      existingSite: 'No',
-    };
-
-    try {
-      if (!isValidUrl(baseURL)) {
-        reportLine.errors = 'Invalid site base URL';
-        reportLine.status = 'Failed';
-        return reportLine;
-      }
-
-      if (!OrganizationModel.IMS_ORG_ID_REGEX.test(imsOrgID)) {
-        reportLine.errors = 'Invalid IMS Org ID';
-        reportLine.status = 'Failed';
-        return reportLine;
-      }
-
-      // check if the organization with IMS Org ID already exists; create if it doesn't
-      let organization = await Organization.findByImsOrgId(imsOrgID);
-      if (!organization) {
-        let imsOrgDetails;
-        try {
-          imsOrgDetails = await imsClient.getImsOrganizationDetails(imsOrgID);
-          log.info(`IMS Org Details: ${imsOrgDetails}`);
-        } catch (error) {
-          log.error(`Error retrieving IMS Org details: ${error.message}`);
-          reportLine.errors = `Error retrieving IMS org with the ID *${imsOrgID}*.`;
-          reportLine.status = 'Failed';
-          return reportLine;
-        }
-
-        if (!imsOrgDetails) {
-          reportLine.errors = `Could not find details of IMS org with the ID *${imsOrgID}*.`;
-          reportLine.status = 'Failed';
-          return reportLine;
-        }
-
-        organization = await Organization.create({
-          name: imsOrgDetails.orgName,
-          imsOrgId: imsOrgID,
-        });
-
-        const message = `:white_check_mark: A new organization has been created. Organization ID: ${organization.getId()} Organization name: ${organization.getName()} IMS Org ID: ${imsOrgID}.`;
-        await say(message);
-        log.info(message);
-      }
-
-      const organizationId = organization.getId();
-      log.info(`Organization ${organizationId} was successfully retrieved or created`);
-      reportLine.spacecatOrgId = organizationId;
-
-      let site = await Site.findByBaseURL(baseURL);
-      if (site) {
-        reportLine.existingSite = 'Yes';
-        reportLine.deliveryType = site.getDeliveryType();
-        log.info(`Site ${baseURL} already exists. Site ID: ${site.getId()}, Delivery Type: ${reportLine.deliveryType}`);
-
-        const siteOrgId = site.getOrganizationId();
-        if (siteOrgId !== organizationId) {
-          site.setOrganizationId(organizationId);
-          log.info(`Site ${baseURL} organization ID updated to ${organizationId}`);
-        }
-      } else {
-        log.info(`Site ${baseURL} doesn't exist. Finding delivery type...`);
-        const deliveryType = await findDeliveryType(baseURL);
-        log.info(`Found delivery type for site ${baseURL}: ${deliveryType}`);
-        reportLine.deliveryType = deliveryType;
-        const isLive = deliveryType === SiteModel.DELIVERY_TYPES.AEM_EDGE;
-
-        try {
-          site = await Site.create({
-            baseURL, deliveryType, isLive, organizationId,
-          });
-        } catch (error) {
-          log.error(`Error creating site: ${error.message}`);
-          reportLine.errors = error.message;
-          reportLine.status = 'Failed';
-          return reportLine;
-        }
-      }
-
-      const siteID = site.getId();
-      log.info(`Site ${baseURL} was successfully retrieved or created. Site ID: ${siteID}`);
-
-      reportLine.siteId = siteID;
-
-      const profile = await loadProfileConfig(profileName);
-      log.info(`Profile ${profileName} was successfully loaded`);
-
-      if (!isObject(profile)) {
-        const error = `Profile "${profileName}" not found or invalid.`;
-        log.error(error);
-        reportLine.errors = error;
-        reportLine.status = 'Failed';
-        return reportLine;
-      }
-
-      if (!isObject(profile?.audits)) {
-        const error = `Profile "${profileName}" does not have a valid audits section.`;
-        log.error(error);
-        reportLine.errors = error;
-        reportLine.status = 'Failed';
-        return reportLine;
-      }
-
-      if (!isObject(profile?.imports)) {
-        const error = `Profile "${profileName}" does not have a valid imports section.`;
-        log.error(error);
-        reportLine.errors = error;
-        reportLine.status = 'Failed';
-        return reportLine;
-      }
-
-      const importTypes = Object.keys(profile.imports);
-      reportLine.imports = importTypes.join(',');
-      const siteConfig = site.getConfig();
-      for (const importType of importTypes) {
-        siteConfig.enableImport(importType);
-      }
-
-      log.info(`Enabled the following imports for ${siteID}: ${reportLine.imports}`);
-
-      site.setConfig(Config.toDynamoItem(siteConfig));
-      try {
-        await site.save();
-      } catch (error) {
-        log.error(error);
-        reportLine.errors = error.message;
-        reportLine.status = 'Failed';
-        return reportLine;
-      }
-
-      log.info(`Site config succesfully saved for site ${siteID}`);
-
-      for (const importType of importTypes) {
-        /* eslint-disable no-await-in-loop */
-        await triggerImportRun(
-          configuration,
-          importType,
-          siteID,
-          profile.imports[importType].startDate,
-          profile.imports[importType].endDate,
-          slackContext,
-          context,
-        );
-      }
-
-      log.info(`Triggered the following imports for site ${siteID}: ${reportLine.imports}`);
-
-      const auditTypes = Object.keys(profile.audits);
-
-      auditTypes.forEach((auditType) => {
-        configuration.enableHandlerForSite(auditType, site);
-      });
-
-      reportLine.audits = auditTypes.join(',');
-      log.info(`Enabled the following audits for site ${siteID}: ${reportLine.audits}`);
-    } catch (error) {
-      log.error(error);
-      reportLine.errors = error.message;
-      reportLine.status = 'Failed';
-
-      throw error; // re-throw the error to ensure that the outer function detects failure
-    }
-    // eslint-disable-next-line consistent-return
-    return reportLine;
+    // Use the shared onboarding function from utils
+    return sharedOnboardSingleSite(
+      baseURLInput,
+      imsOrganizationID,
+      configuration,
+      profile,
+      workflowWaitTime,
+      slackContext,
+      context,
+      additionalParams,
+      {
+        urlProcessor: extractURLFromSlackInput, // Pass URL processor for Slack input format
+        profileName,
+      },
+    );
   };
 
   /**
@@ -278,10 +139,8 @@ function OnboardCommand(context) {
    */
   const handleExecution = async (args, slackContext) => {
     const {
-      say, botToken, files, channelId, client, threadTs,
+      say, botToken, files, channelId, threadTs,
     } = slackContext;
-
-    await say(':spacecat: Mission Control, we are go for *onboarding*! :satellite:');
 
     try {
       if (isNonEmptyArray(files)) {
@@ -299,7 +158,7 @@ function OnboardCommand(context) {
           return;
         }
 
-        const profileName = args[0] || 'default';
+        const profileName = args[0] || 'demo';
 
         await say(`:gear: Processing CSV file with profile *${profileName}*...`);
 
@@ -321,75 +180,96 @@ function OnboardCommand(context) {
         // Process batch onboarding
         for (const row of csvData) {
           /* eslint-disable no-await-in-loop */
-          const [baseURL, imsOrgID] = row;
+          const [baseURL, imsOrgID, tier] = row;
           const reportLine = await onboardSingleSite(
             baseURL,
             imsOrgID,
             configuration,
             profileName,
+            env.WORKFLOW_WAIT_TIME_IN_SECONDS, // Use environment default wait time in batch mode
             slackContext,
+            { tier },
           );
+
+          // Add individual site status reporting for CSV processing
+          if (reportLine.errors) {
+            await say(`:warning: Site ${baseURL}: ${reportLine.errors}`);
+          } else {
+            await say(`:white_check_mark: Site ${baseURL}: Onboarding started`);
+          }
+
           fileStream.write(csvStringifier.stringifyRecords([reportLine]));
         }
-
-        await configuration.save();
-
-        log.info('All sites were processed and onboarded.');
 
         fileStream.end();
 
         fileStream.on('finish', async () => {
           try {
-            const uploadResponse = client.files.upload({
-              channels: channelId,
-              file: fs.createReadStream(tempFilePath),
-              filename: 'spacecat_onboarding_report.csv',
-              title: 'Spacecat Onboarding Report',
-              initial_comment: ':spacecat: *Onboarding complete!* :satellite:\nHere you can find the *execution report*. :memo:',
-              thread_ts: threadTs,
-            });
-            log.info(uploadResponse);
+            const stats = fs.statSync(tempFilePath);
+            const fileWithSize = {
+              ...fs.createReadStream(tempFilePath),
+              size: stats.size,
+            };
+            await sendFile(
+              slackContext,
+              fileWithSize,
+              'spacecat_onboarding_report.csv',
+              'Spacecat Onboarding Report',
+              ':spacecat: *Batch onboarding in progress!* :satellite:\nHere you can find the *execution report*. :memo:',
+              channelId,
+            );
           } catch (error) {
             await say(`:warning: Failed to upload the report to Slack: ${error.message}`);
           }
         });
-
-        await say(':white_check_mark: Batch onboarding process finished successfully.');
       } else {
-        if (args.length < 2) {
-          await say(':warning: Missing required arguments. Please provide *Site URL* and *IMS Org ID*.');
-          return;
+        // Handle backwards compatibility with command line arguments
+        const [site, imsOrgId, profile, workflowWaitTime, tier] = args;
+
+        // Show button to start onboarding with optional pre-populated values
+        const initialValues = {};
+        if (site) {
+          const normalizedSite = extractURLFromSlackInput(site);
+          if (normalizedSite) {
+            initialValues.site = normalizedSite;
+          }
         }
+        if (imsOrgId) initialValues.imsOrgId = imsOrgId;
+        if (profile) initialValues.profile = profile;
+        if (workflowWaitTime) initialValues.workflowWaitTime = workflowWaitTime;
+        if (tier) initialValues.tier = tier;
 
-        const [baseURLInput, imsOrgID, profileName = 'default'] = args;
-        const configuration = await Configuration.findLatest();
+        const buttonValue = Object.keys(initialValues).length > 0
+          ? JSON.stringify(initialValues)
+          : 'start_onboarding';
 
-        const reportLine = await onboardSingleSite(
-          baseURLInput,
-          imsOrgID,
-          configuration,
-          profileName,
-          slackContext,
-        );
-
-        await configuration.save();
-
-        if (reportLine.errors) {
-          await say(`:warning: ${reportLine.errors}`);
-        }
-
-        const message = `
-        *:spacecat: :satellite: Onboarding complete for ${reportLine.site}*
-        :ims: *IMS Org ID:* ${reportLine.imsOrgId || 'n/a'}
-        :space-cat: *Spacecat Org ID:* ${reportLine.spacecatOrgId || 'n/a'}
-        :identification_card: *Site ID:* ${reportLine.siteId || 'n/a'}
-        :cat-egory-white: *Delivery Type:* ${reportLine.deliveryType || 'n/a'}
-        :question: *Already existing:* ${reportLine.existingSite}
-        :gear: *Profile:* ${reportLine.profile}
-        :clipboard: *Audits:* ${reportLine.audits || 'None'}
-        :inbox_tray: *Imports:* ${reportLine.imports || 'None'}
-        ${reportLine.errors ? `:x: *Errors:* ${reportLine.errors}` : `:check: *Status:* ${reportLine.status}`}
-        `;
+        const message = {
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: ':rocket: *Site Onboarding*\n\nClick the button below to start the interactive onboarding process.',
+              },
+            },
+            {
+              type: 'actions',
+              elements: [
+                {
+                  type: 'button',
+                  text: {
+                    type: 'plain_text',
+                    text: 'Start Onboarding',
+                  },
+                  value: buttonValue,
+                  action_id: 'start_onboarding',
+                  style: 'primary',
+                },
+              ],
+            },
+          ],
+          thread_ts: threadTs,
+        };
 
         await say(message);
       }

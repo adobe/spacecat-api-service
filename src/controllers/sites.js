@@ -23,12 +23,14 @@ import {
   hasText,
   isBoolean,
   isObject,
+  isArray,
   getStoredMetrics,
   isValidUUID,
   deepEqual,
   isNonEmptyObject,
 } from '@adobe/spacecat-shared-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
 import { SiteDto } from '../dto/site.js';
@@ -49,6 +51,42 @@ const AHREFS = 'ahrefs';
 const ORGANIC_TRAFFIC = 'organic-traffic';
 const MONTH_DAYS = 30;
 const TOTAL_METRICS = 'totalMetrics';
+
+/**
+ * Validates that pageTypes array contains valid regex patterns
+ * @param {Array} pageTypes - Array of page type objects with name and pattern
+ * @returns {object} Validation result with isValid boolean and error message
+ */
+const validatePageTypes = (pageTypes) => {
+  const validationResults = pageTypes.map((pageType, index) => {
+    if (!isObject(pageType)) {
+      return { isValid: false, error: `pageTypes[${index}] must be an object` };
+    }
+
+    if (!hasText(pageType.name)) {
+      return { isValid: false, error: `pageTypes[${index}] must have a name` };
+    }
+
+    if (!hasText(pageType.pattern)) {
+      return { isValid: false, error: `pageTypes[${index}] must have a pattern` };
+    }
+
+    try {
+      // eslint-disable-next-line no-new
+      new RegExp(pageType.pattern);
+      return { isValid: true };
+    } catch (error) {
+      return {
+        isValid: false,
+        error: `pageTypes[${index}] has invalid regex pattern: ${error.message}`,
+      };
+    }
+  });
+
+  const firstError = validationResults.find((result) => !result.isValid);
+
+  return firstError || { isValid: true };
+};
 
 function SitesController(ctx, log, env) {
   if (!isNonEmptyObject(ctx)) {
@@ -313,8 +351,13 @@ function SitesController(ctx, log, env) {
       updates = true;
     }
 
+    if (isBoolean(requestBody.isSandbox) && requestBody.isSandbox !== site.getIsSandbox()) {
+      site.setIsSandbox(requestBody.isSandbox);
+      updates = true;
+    }
+
     if (hasText(requestBody.organizationId)
-        && requestBody.organizationId !== site.getOrganizationId()) {
+      && requestBody.organizationId !== site.getOrganizationId()) {
       site.setOrganizationId(requestBody.organizationId);
       updates = true;
     }
@@ -330,14 +373,8 @@ function SitesController(ctx, log, env) {
     }
 
     if (requestBody.deliveryType !== site.getDeliveryType()
-        && Object.values(SiteModel.DELIVERY_TYPES).includes(requestBody.deliveryType)) {
+      && Object.values(SiteModel.DELIVERY_TYPES).includes(requestBody.deliveryType)) {
       site.setDeliveryType(requestBody.deliveryType);
-      updates = true;
-    }
-
-    if (isObject(requestBody.deliveryConfig)
-        && !deepEqual(requestBody.deliveryConfig, site.getDeliveryConfig())) {
-      site.setDeliveryConfig(requestBody.deliveryConfig);
       updates = true;
     }
 
@@ -346,8 +383,40 @@ function SitesController(ctx, log, env) {
       updates = true;
     }
 
-    if (isObject(requestBody.hlxConfig) && !deepEqual(requestBody.hlxConfig, site.getHlxConfig())) {
-      site.setHlxConfig(requestBody.hlxConfig);
+    const nextAuthoringType = Object.values(SiteModel.AUTHORING_TYPES)
+      .includes(requestBody.authoringType)
+      ? requestBody.authoringType
+      : site.getAuthoringType();
+
+    const nextDeliveryConfig = isObject(requestBody.deliveryConfig)
+      ? requestBody.deliveryConfig
+      : site.getDeliveryConfig();
+
+    const nextHlxConfig = isObject(requestBody.hlxConfig)
+      ? requestBody.hlxConfig
+      : site.getHlxConfig();
+
+    const authoringTypeChanged = nextAuthoringType !== site.getAuthoringType();
+    const deliveryConfigChanged = !deepEqual(nextDeliveryConfig, site.getDeliveryConfig());
+    const hlxConfigChanged = !deepEqual(nextHlxConfig, site.getHlxConfig());
+
+    const authoringUpdate = authoringTypeChanged || deliveryConfigChanged || hlxConfigChanged;
+
+    if (authoringUpdate) {
+      site.setAuthoringType(nextAuthoringType);
+      site.setDeliveryConfig(nextDeliveryConfig);
+      site.setHlxConfig(nextHlxConfig);
+      updates = true;
+    }
+
+    if (isArray(requestBody.pageTypes) && !deepEqual(requestBody.pageTypes, site.getPageTypes())) {
+      // Validate pageTypes before setting
+      const validation = validatePageTypes(requestBody.pageTypes);
+      if (!validation.isValid) {
+        return badRequest(validation.error);
+      }
+
+      site.setPageTypes(requestBody.pageTypes);
       updates = true;
     }
 
@@ -520,8 +589,6 @@ function SitesController(ctx, log, env) {
 
       const projectedTrafficValue = pageViewsChange * cpc;
 
-      log.info(`Got RUM metrics for site ${siteId} current: ${current.length}`);
-
       return ok({
         pageViewsChange,
         ctrChange,
@@ -577,6 +644,72 @@ function SitesController(ctx, log, env) {
     return ok(metrics);
   };
 
+  const updateCdnLogsConfig = async (context) => {
+    const siteId = context.params?.siteId;
+    const { cdnLogsConfig } = context.data || {};
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!isObject(cdnLogsConfig)) {
+      return badRequest('Cdn logs config required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can update its sites');
+    }
+
+    try {
+      const siteConfig = site.getConfig();
+      siteConfig.updateCdnLogsConfig(cdnLogsConfig);
+
+      const configObj = Config.toDynamoItem(siteConfig);
+      site.setConfig(configObj);
+
+      const updatedSite = await site.save();
+      return ok(SiteDto.toJSON(updatedSite));
+    } catch (error) {
+      log.error(`Error updating CDN logs config for site ${siteId}: ${error.message}`);
+      return badRequest('Failed to update CDN logs config');
+    }
+  };
+
+  const getTopPages = async (context) => {
+    const { siteId, source, geo } = context.params;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view its top pages');
+    }
+
+    const { SiteTopPage } = dataAccess;
+
+    let topPages = [];
+    if (hasText(source) && hasText(geo)) {
+      topPages = await SiteTopPage.allBySiteIdAndSourceAndGeo(siteId, source, geo);
+    } else if (hasText(source)) {
+      topPages = await SiteTopPage.allBySiteIdAndSource(siteId, source);
+    } else {
+      topPages = await SiteTopPage.allBySiteId(siteId);
+    }
+
+    return ok(topPages);
+  };
+
   return {
     createSite,
     getAll,
@@ -589,6 +722,8 @@ function SitesController(ctx, log, env) {
     getByID,
     removeSite,
     updateSite,
+    updateCdnLogsConfig,
+    getTopPages,
 
     // key events
     createKeyEvent,

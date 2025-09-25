@@ -17,7 +17,7 @@ import { isValidUUID } from '@adobe/spacecat-shared-utils';
 import { ErrorWithStatusCode } from './utils.js';
 import { STATUS_BAD_REQUEST } from '../utils/constants.js';
 
-const PRE_SIGNED_URL_TTL_SECONDS = 3600; // 1 hour
+const PRE_SIGNED_URL_TTL_SECONDS = 3600 * 24; // 1 day
 
 /**
  * Import Supervisor provides functionality to start and manage import jobs.
@@ -156,6 +156,8 @@ function ImportSupervisor(services, config) {
       processingType = 'import';
     } else if (options.type === ImportJobModel.ImportOptionTypes.XWALK) {
       processingType = 'import-xwalk';
+    } else if (options.type === ImportJobModel.ImportOptionTypes.DA) {
+      processingType = 'import-da';
     }
 
     // Send a single message containing all URLs and the new job ID
@@ -240,7 +242,6 @@ function ImportSupervisor(services, config) {
 
     // if the job type is 'xwalk', then we need to write the 3 files to S3
     if (options?.type === ImportJobModel.ImportOptionTypes.XWALK) {
-      log.info('Writing component models, filters, and definitions to S3 for jobId: ', newImportJob.getId());
       await writeFileToS3('component-models.json', newImportJob.getId(), models);
       await writeFileToS3('component-filters.json', newImportJob.getId(), filters);
       await writeFileToS3('component-definition.json', newImportJob.getId(), definitions);
@@ -361,8 +362,8 @@ function ImportSupervisor(services, config) {
    */
   function isJobInTerminalState(job) {
     return job.getStatus() === ImportJobModel.ImportJobStatus.FAILED
-        || job.getStatus() === ImportJobModel.ImportJobStatus.COMPLETE
-        || job.getStatus() === ImportJobModel.ImportJobStatus.STOPPED;
+      || job.getStatus() === ImportJobModel.ImportJobStatus.COMPLETE
+      || job.getStatus() === ImportJobModel.ImportJobStatus.STOPPED;
   }
 
   /**
@@ -383,10 +384,6 @@ function ImportSupervisor(services, config) {
 
     job.setStatus(ImportJobModel.ImportJobStatus.STOPPED);
     await job.save();
-
-    log.info(`Stopping import job with jobId: ${jobId} invoked by hashed API key: ${hashWithSHA256(importApiKey)}`);
-
-    log.info(`Purging the queue ${importQueueUrlPrefix}${job.getImportQueueId()} for the import job with jobId: ${jobId}`);
 
     await sqs.purgeQueue(`${importQueueUrlPrefix}${job.getImportQueueId()}`);
 

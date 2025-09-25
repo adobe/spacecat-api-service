@@ -58,6 +58,8 @@ AuditType:
     - 'product-metatags'
     - 'broken-internal-links'
     - 'experimentation-opportunities'
+    - 'llm-error-pages'
+    - 'prerender'
   example: 'cwv'
 URL:
   type: string
@@ -110,7 +112,7 @@ HandlerConfig:
             description: Pattern representing the URL path structure to group
             type: string
   patternProperties:
-    "^(404|broken-backlinks)$":
+    '^(404|broken-backlinks)$':
       type: object
       properties:
         mentions:
@@ -158,12 +160,42 @@ Config:
     contentAiConfig:
       description: Optional. The ContentAi configuration
       $ref: '#/ContentAiConfig'
+    cdnLogsConfig:
+      description: Optional. The CDN logs configuration
+      $ref: '#/CdnLogsConfig'
 ContentAiConfig:
   type: object
   properties:
     index:
       description: Optional. The index name for website in the content AI service
       type: string
+CdnLogsConfig:
+  type: object
+  properties:
+    bucketName:
+      description: The name of the S3 bucket to store CDN logs
+      type: string
+    outputLocation:
+      description: The output location for sharepoint folder
+      type: string
+    filters:
+      description: The filters for CDN logs
+      type: array
+      items:
+        type: object
+        properties:
+          key:
+            description: The key to filter
+            type: string
+          value:
+            description: The value to filter
+            type: array
+            items:
+              type: string
+  example:
+    bucketName: 'test-bucket'
+    filters: [{ key: 'test-key', value: ['test-value'] }]
+    outputLocation: 'test-output-location'
 OrganizationConfig:
   allOf:
     - $ref: '#/Config'
@@ -214,7 +246,7 @@ Organization:
               - '@user5'
               - '@user6'
       contentAiConfig:
-          index: 'example-index-name'
+        index: 'example-index-name'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
 OrganizationList:
@@ -307,8 +339,8 @@ Site:
       description: The type of the delivery this site is using
       $ref: '#/DeliveryType'
     deliveryConfig:
-        description: The delivery configuration of the site
-        $ref: '#/DeliveryConfig'
+      description: The delivery configuration of the site
+      $ref: '#/DeliveryConfig'
     gitHubURL:
       description: The optional GitHub URL of the site
       $ref: '#/URL'
@@ -373,6 +405,10 @@ Site:
                   type: string
       contentAiConfig:
         index: 'example-index-name'
+      cdnLogsConfig:
+        bucketName: 'test-bucket'
+        filters: [{ key: 'test-key', value: ['test-value'] }]
+        outputLocation: 'test-output-location'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
 SiteWithLatestAudit:
@@ -459,8 +495,8 @@ SiteUpdate:
       description: The type of the delivery this site is using
       $ref: '#/DeliveryType'
     deliveryConfig:
-        description: The delivery configuration of the site
-        $ref: '#/DeliveryConfig'
+      description: The delivery configuration of the site
+      $ref: '#/DeliveryConfig'
     goLiveDate:
       description: The date and time when the site went live on AEM Edge
       nullable: true
@@ -478,6 +514,19 @@ SiteUpdate:
       authorURL: 'https://author-p12652-e16854-cmstg.adobeaemcloud.com/'
       siteId: '1234'
     goLiveDate: '2024-01-20T10:00:00Z'
+CdnLogsConfigUpdate:
+  type: object
+  required:
+    - cdnLogsConfig
+  properties:
+    cdnLogsConfig:
+      description: The CDN logs configuration to update
+      $ref: '#/CdnLogsConfig'
+  example:
+    cdnLogsConfig:
+      bucketName: 'test-bucket'
+      outputLocation: 'test-output-location'
+      filters: [{ key: 'test-key', value: ['test-value'] }]
 UpdateHandlerTypeConfig:
   type: object
   properties:
@@ -781,6 +830,47 @@ AuditResult:
                 - Supports catalog and storeview context through URL structure analysis
                 - Focuses on e-commerce product page optimization
               type: string
+      description: The result of LLM error pages audit.
+      properties:
+        success:
+          type: boolean
+          description: Whether the audit was successful
+        totalErrors:
+          type: integer
+          description: Total number of LLM error requests found
+        periodIdentifier:
+          type: string
+          description: The reporting period identifier
+          example: 'w01-2025'
+        summary:
+          type: object
+          description: Summary statistics of the audit
+          properties:
+            uniqueUrls:
+              type: integer
+              description: Number of unique URLs with errors
+            uniqueUserAgents:
+              type: integer
+              description: Number of unique LLM user agents
+        errorPages:
+          type: array
+          description: List of LLM error page details
+          items:
+            type: object
+            properties:
+              user_agent:
+                type: string
+                description: The LLM user agent string
+              url:
+                type: string
+                description: The URL that returned an error
+              status:
+                type: integer
+                description: HTTP status code
+              total_requests:
+                type: integer
+                description: Number of requests for this URL/user agent combination
+      additionalProperties: true
     - type: object
       description: The result of CWV audit
       properties:
@@ -792,30 +882,30 @@ AuditResult:
             properties:
               type:
                 type: string
-                enum: ["group", "url"]
+                enum: ['group', 'url']
                 description: "Specifies if the metric applies to a 'group' or an individual 'url'"
               name:
                 type: string
                 description: "Name of the group (only applicable when type is 'group')"
-                example: "Homepage Group"
+                example: 'Homepage Group'
               pattern:
                 type: string
                 description: "URL pattern for the group (only applicable when type is 'group')"
-                example: "https://www.aem.live/home*"
+                example: 'https://www.aem.live/home*'
               url:
                 description: "URL of the page (only applicable when type is 'url')"
                 $ref: '#/URL'
               pageviews:
                 type: integer
-                description: "Total pageviews for this group or URL"
+                description: 'Total pageviews for this group or URL'
                 example: 4620
               organic:
                 type: integer
-                description: "Total organic traffic for this group or URL"
+                description: 'Total organic traffic for this group or URL'
                 example: 2510
               metrics:
                 type: array
-                description: "Array of performance metrics by device type"
+                description: 'Array of performance metrics by device type'
                 items:
                   $ref: './schemas.yaml#/CWVMetric'
 AuditList:
@@ -827,48 +917,48 @@ CWVMetric:
   properties:
     deviceType:
       type: string
-      description: "The type of device"
-      enum: ["mobile", "desktop"]
-      example: "mobile"
+      description: 'The type of device'
+      enum: ['mobile', 'desktop']
+      example: 'mobile'
     pageviews:
       type: integer
-      description: "Total pageviews for this device type"
+      description: 'Total pageviews for this device type'
       example: 2120
     lcp:
       type: number
       format: float
-      description: "Largest Contentful Paint (LCP) metric"
+      description: 'Largest Contentful Paint (LCP) metric'
       example: 2099.7
     lcpCount:
       type: integer
-      description: "The count of LCP samples"
+      description: 'The count of LCP samples'
       example: 9
     cls:
       type: number
       format: float
-      description: "Cumulative Layout Shift (CLS) metric"
+      description: 'Cumulative Layout Shift (CLS) metric'
       example: 0.02066
     clsCount:
       type: integer
-      description: "The count of CLS samples"
+      description: 'The count of CLS samples'
       example: 7
     inp:
       type: integer
       format: float
-      description: "Interaction to Next Paint (INP) metric"
+      description: 'Interaction to Next Paint (INP) metric'
       example: 12
     inpCount:
       type: integer
-      description: "The count of INP samples"
+      description: 'The count of INP samples'
       example: 3
     ttfb:
       type: number
       format: float
-      description: "Time to First Byte (TTFB) metric"
+      description: 'Time to First Byte (TTFB) metric'
       example: 520.45
     ttfbCount:
       type: integer
-      description: "The count of TTFB samples"
+      description: 'The count of TTFB samples'
       example: 18
 ExperimentationOpportunity:
   type: object
@@ -886,7 +976,7 @@ ExperimentationOpportunity:
       type: string
       format: url
       description: A URL pointing to the screenshot of the webpage.
-      example: "https://space.cat/screenshots/some-cool-page.png"
+      example: 'https://space.cat/screenshots/some-cool-page.png'
     trackedPageKPIName:
       type: string
       description: The name of KPI tracked.
@@ -1029,7 +1119,7 @@ HoolihanHeaders:
       type: array
       items:
         type: string
-        example: "1705914000000"
+        example: '1705914000000'
     x-api-key:
       description: The API key of the client which published the original event
       type: array
@@ -1055,7 +1145,7 @@ HoolihanHeaders:
       type: array
       items:
         type: string
-        example: "application/json"
+        example: 'application/json'
 HoolihanEventValue:
   type: object
   required:
@@ -1093,8 +1183,8 @@ HoolihanEvent:
       description: The offset of the event within the partition
       type: integer
   example:
-    id: "b7fyJDj1bu5yrt82RxLX89a98a73KSqR4ptC5MRvlEoLshbgAB3emGKdjQleAMyINZcoAkM6cB7ma2aV"
-    topic: "example_fulfillment_topic"
+    id: 'b7fyJDj1bu5yrt82RxLX89a98a73KSqR4ptC5MRvlEoLshbgAB3emGKdjQleAMyINZcoAkM6cB7ma2aV'
+    topic: 'example_fulfillment_topic'
     partition: 0
     offset: 1234
     value:
@@ -1119,25 +1209,25 @@ HoolihanEvent:
         IH0KICAgIF0KfQ==
       headers:
         x-request-id:
-          - "123e4567-e89b-12d3-a456-426614174000"
+          - '123e4567-e89b-12d3-a456-426614174000'
         miso-trace-id:
-          - "12345678abcdef12:12345678abcdef12:12345678abcdef12:1"
+          - '12345678abcdef12:12345678abcdef12:12345678abcdef12:1'
         com-adobe-hoolihan-source-partition:
-          - "0"
+          - '0'
         com-adobe-hoolihan-source-offset:
-          - "1234"
+          - '1234'
         com-adobe-hoolihan-publish-time:
-          - "1705915000000"
+          - '1705915000000'
         x-api-key:
-          - "example_publisher_client_id"
+          - 'example_publisher_client_id'
         com-adobe-hoolihan-publisher:
-          - "example_publisher_client_id"
+          - 'example_publisher_client_id'
         com-adobe-hoolihan-source-topic:
-          - "example_source_topic"
+          - 'example_source_topic'
         com-adobe-hoolihan-on-behalf-of:
-          - "example_other_client_id"
+          - 'example_other_client_id'
         Content-Type:
-          - "application/json"
+          - 'application/json'
 HoolihanEvents:
   type: array
   items:
@@ -1689,11 +1779,15 @@ PageMetricList:
     oneOf:
       - $ref: './schemas.yaml#/PageOrganicKeywords'
 DocImportData:
-  title: "Doc Import"
-  description: "There are no data properties available for doc based imports."
+  title: 'Doc Import'
+  description: 'There are no data properties available for doc based imports.'
+  properties: {}
+DAImportData:
+  title: 'DA Import'
+  description: 'There are no data properties available for DA based imports.'
   properties: {}
 XWalkImportData:
-  title: "Xwalk Import"
+  title: 'Xwalk Import'
   properties:
     siteName:
       type: string
@@ -1702,7 +1796,9 @@ XWalkImportData:
   required:
     - siteName
     - assetFolder
-ImportOptionsBase:
+
+BrowserOptions:
+  description: Common browser options for page loading operations
   properties:
     pageLoadTimeout:
       description: The time in milliseconds to wait for the page to load
@@ -1710,16 +1806,28 @@ ImportOptionsBase:
     enableJavascript:
       description: Whether to enable JavaScript on the page
       type: boolean
+      default: true
   example:
-    pageLoadTimeout: 100
+    pageLoadTimeout: 200
     enableJavascript: true
+
+ImportOptionsBase:
+  description: Base options for import operations, extends BrowserOptions with import-specific features
+  allOf:
+    - $ref: '#/BrowserOptions'
+    - type: object
+      properties: {}
+  example:
+    pageLoadTimeout: 200
+    enableJavascript: true
+
 ImportOptions:
   allOf: #/ImportOptionsBase
     - $ref: '#/ImportOptionsBase'
   properties:
     type:
-      enum: ['doc', 'xwalk']
-      description: The type of import job. Options are 'doc' or 'xwalk'.
+      enum: ['doc', 'xwalk', 'da']
+      description: The type of import job. Valid options are 'doc', 'da' or 'xwalk'.
       type: string
       default: 'doc'
     data:
@@ -1728,6 +1836,8 @@ ImportOptions:
       oneOf:
         - $ref: '#/DocImportData'
         - $ref: '#/XWalkImportData'
+        - $ref: '#/DAImportData'
+
 ImportJobRequest:
   type: object
   required:
@@ -1831,35 +1941,103 @@ ImportJobArchive:
   example:
     jobId: '12d6ac8e-d5e4-4788-90eb-b69e10e745fd'
     downloadUrl: 'https://spacecat-example-bucket.s3.example-region.amazonaws.com/import/12d6ac8e-d5e4-4788-90eb-b69e10e745fd/import-result.zip?X-Amz-Algorithm=AWS...'
+ScrapeOptions:
+  description: Options specific to scraping operations, extends BrowserOptions with scraping-specific features
+  allOf:
+    - $ref: '#/BrowserOptions'
+    - type: object
+      properties:
+        hideConsentBanners:
+          description: Whether to hide consent banners on the page
+          type: boolean
+          default: false
+        waitForSelector:
+          description: The selector to wait for before considering the page loaded
+          type: string
+          pattern: '^[.#]?[a-zA-Z][a-zA-Z0-9_-]*(\.[a-zA-Z][a-zA-Z0-9_-]*)*$'
+        sectionLoadWaitTime:
+          description: The time in milliseconds to wait for the section to load
+          type: integer
+          minimum: 0
+          maximum: 30000
+          default: 2000
+        screenshotTypes:
+          description: The types of screenshots to take
+          type: array
+          minItems: 1
+          maxItems: 5
+          items:
+            type: string
+            enum:
+              - 'fullPage'
+              - 'thumbnail'
+              - 'section'
+              - 'block'
+              - 'scroll'
+        rejectRedirects:
+          description: Whether to reject redirects
+          type: boolean
+          default: true
+  example:
+    pageLoadTimeout: 200
+    enableJavascript: true
+    hideConsentBanners: true
 ScrapeRequest:
   type: object
   required:
     - urls
+    - processingType
   properties:
-    jobId:
-      description: Optional ID of the scrape job
-      $ref: '#/Id'
+    processingType:
+      description: The name of the scrape handler to use.
+      type: string
+      default: 'default'
+    maxScrapeAge:
+      description: The maximum age of a scrape in hours. Providing the value of 0 will result in forcing the scrape (disabling this caching feature)
+      type: integer
+      minimum: 0
+      default: 24
     options:
       description: Optional configuration params, defined as a JSON object
-      $ref: '#/ImportOptionsBase'
+      $ref: '#/ScrapeOptions'
     customHeaders:
       description: Optional custom headers to send with each HTTP request
       type: object
     urls:
-      description: The URLs to scrape. The URLs must be unique. Limit of 10 URLs per request.
+      description: The URLs to scrape. The URLs must be unique.
       type: array
       items:
-        $ref: '#/URL'
+        type: string
+        format: url
       example:
-        urls:
-          - 'https://example.com/en/page1'
-          - 'https://example.com/fr/page2'
+        - 'https://example.com/en/page1'
+        - 'https://example.com/fr/page2'
+
 ScrapeResponse:
   type: object
   properties:
     id:
       description: The ID of the scrape job
       $ref: '#/Id'
+    baseURL:
+      description: The base URL of the scrape job
+      type: string
+      format: uri
+    processingType:
+      description: The scrape handler to use for the scrape job
+      type: string
+    startedAt:
+      description: The date and time when the scrape job started
+      type: string
+      format: date-time
+    endedAt:
+      description: The date and time when the scrape job ended, if finished
+      type: string
+      format: date-time
+    duration:
+      description: The duration of the scrape job in milliseconds
+      type: integer
+      format: int32
     status:
       description: The status of the scrape job
       type: string
@@ -1867,12 +2045,6 @@ ScrapeResponse:
         - 'IN_PROGRESS'
         - 'COMPLETE'
         - 'FAILED'
-    startTime:
-      description: The date and time when the scrape job started
-      $ref: '#/DateTime'
-    endTime:
-      description: The date and time when the scrape job ended, if finished
-      $ref: '#/DateTime'
     urlCount:
       description: The total number of URLs in the job
       type: integer
@@ -1882,50 +2054,68 @@ ScrapeResponse:
     failedCount:
       description: The number of URLs that failed to scrape
       type: integer
-    results:
-      description: The scrape results
-      $ref: '#/ScrapeResult'
+
   example:
     id: '12d6ac8e-d5e4-4788-90eb-b69e10e745fd'
+    baseURL: 'https://myBaseUrl.com'
+    processingType: 'default'
+    options:
+      enableJavascript: true
+      hideConsentBanners: true
+    startedAt: '2024-01-19T14:20:30Z'
+    endedAt: '2024-01-19T14:20:30Z'
+    duration: 33771,
     status: 'COMPLETE'
-    startTime: '2024-01-19T14:20:30Z'
     urlCount: 10
     successCount: 9
     failedCount: 1
+
+ScrapeJobUrlResultsResponse:
+  type: object
+  properties:
+    jobId:
+      description: The ID of the scrape job
+      $ref: '#/Id'
     results:
-      - url: 'https://example.com/en/page1'
-        status: 'COMPLETE'
-        content: '...'
-      - url: 'https://example.com/fr/page2'
-        status: 'FAILED'
-        error: '...'
+      description: The results of the scrape job
+      type: array
+      items:
+        $ref: '#/ScrapeResult'
+
 ScrapeResult:
+  type: object
+  properties:
+    url:
+      description: The URL of the scraped page
+      $ref: '#/URL'
+    status:
+      description: The status of the scrape job
+      type: string
+      enum:
+        - 'COMPLETE'
+        - 'FAILED'
+        - 'PENDING'
+    reason:
+      description: The error message if the scrape failed
+      type: string
+    path:
+      description: The s3 path of the scraped page if the scrape was successful
+      type: string
+  example:
+    url: 'https://example.com/en/page1'
+    status: 'COMPLETE'
+    path: 'scrapes/12d6ac8e-d5e4-4788-90eb-b69e10e74abc/page1.html'
+
+ScrapeJobsByDateRangeResponse:
   type: array
   items:
-    type: object
-    properties:
-      url:
-        description: The URL of the scraped page
-        $ref: '#/URL'
-      status:
-        description: The status of the scrape job
-        type: string
-        enum:
-          - 'COMPLETE'
-          - 'FAILED'
-      content:
-        description: The content of the scraped page
-        type: string
-      error:
-        description: The error message if the scrape failed
-        type: string
-    example:
-      - url: 'https://example.com/en/page1'
-        status: 'COMPLETE'
-        content: '<body>...</body>'
-      - url: 'https://example.com/fr/page2'
-        status: 'FAILED'
-        error: 'Timeout'
+    $ref: '#/CreateAsyncJobAcceptedResponse'
+
+ScrapeJobsByBaseURLResponse:
+  type: array
+  items:
+    $ref: '#/CreateAsyncJobAcceptedResponse'
+
 BrokenBacklink:
   type: object
   properties:
@@ -1941,6 +2131,7 @@ BrokenBacklink:
     traffic_domain:
       description: The referring domain's estimated monthly organic traffic from search.
       type: number
+
 BrokenInternalLink:
   type: object
   properties:
@@ -1982,7 +2173,7 @@ ApiKeyRequest:
         $ref: '#/Domain'
   example:
     name: 'Example API Key'
-    features: [ 'imports' ]
+    features: ['imports']
     domains:
       - 'example.com'
 ApiKeyMetadataResponse:
@@ -2229,11 +2420,11 @@ SuggestionStatus:
   description: Status of this suggestion; status reflects overall fix execution, flagged here for optimization
   type: string
   enum:
-      - 'NEW'
-      - 'APPROVED'
-      - 'SKIPPED'
-      - 'FIXED'
-      - 'ERROR'
+    - 'NEW'
+    - 'APPROVED'
+    - 'SKIPPED'
+    - 'FIXED'
+    - 'ERROR'
   example: 'NEW'
 SuggestionType:
   description: |
@@ -2621,12 +2812,12 @@ CWVGuidance:
       items:
         type: string
 Priority:
-      type: string
-      enum:
-        - 'high'
-        - 'medium'
-        - 'low'
-      example: 'high'
+  type: string
+  enum:
+    - 'high'
+    - 'medium'
+    - 'low'
+  example: 'high'
 Brand:
   type: object
   properties:
@@ -2646,11 +2837,11 @@ Brand:
       description: The date and time when the brand was last updated
       $ref: '#/DateTime'
   example:
-    id: "urn:aaid:sc:VA6C2:e64205e7-13ca-51e8-8b83-8d8ef1ebf911"
-    name: "Brand Foo Bar Example"
-    imsOrgId: "1234567890ABCDEF12345678@AdobeOrg"
-    createdAt: "2025-01-01T00:00:00Z"
-    updatedAt: "2025-02-01T00:00:00Z"
+    id: 'urn:aaid:sc:VA6C2:e64205e7-13ca-51e8-8b83-8d8ef1ebf911'
+    name: 'Brand Foo Bar Example'
+    imsOrgId: '1234567890ABCDEF12345678@AdobeOrg'
+    createdAt: '2025-01-01T00:00:00Z'
+    updatedAt: '2025-02-01T00:00:00Z'
 BrandList:
   type: array
   items:
@@ -2692,40 +2883,18 @@ BrandGuidelines:
           items:
             $ref: '#/BrandGuideline'
       example:
-        toneOfVoice: [
-          {
-            "text": "Encourage Action"
-          },
-          {
-            "text": "Be optimistic"
-          }
-        ]
-        coreValues: [
-          {
-            "text": "Inspiring"
-          },
-          {
-            "text": "Human"
-          }
-        ]
-        guidelines: [
-          {
-            "text": "Use gender-neutral pronouns like 'they', 'them', 'theirs'"
-          },
-          {
-            "text": "Always use sentence case"
-          }
-        ]
-        restrictions: [
-          {
-            "text": "Don't use rhetorical questions"
-          }
-        ]
-        additionalGuidelines: [
-          {
-            "text": "Always use sentence case"
-          }
-        ]
+        toneOfVoice:
+          [{ 'text': 'Encourage Action' }, { 'text': 'Be optimistic' }]
+        coreValues: [{ 'text': 'Inspiring' }, { 'text': 'Human' }]
+        guidelines:
+          [
+            {
+              'text': "Use gender-neutral pronouns like 'they', 'them', 'theirs'",
+            },
+            { 'text': 'Always use sentence case' },
+          ]
+        restrictions: [{ 'text': "Don't use rhetorical questions" }]
+        additionalGuidelines: [{ 'text': 'Always use sentence case' }]
 AsyncJob:
   type: object
   properties:
@@ -2795,19 +2964,41 @@ AsyncJob:
 
 CreateAsyncJobAcceptedResponse:
   properties:
-    jobId:
+    id:
       type: string
       format: uuid
-    status:
-      type: string
-      enum: [ IN_PROGRESS, COMPLETED, FAILED ]
-    createdAt:
-      type: string
-      format: date-time
-    pollUrl:
+      description: The ID of the newly created scrape job.
+    baseURL:
       type: string
       format: uri
-      description: URL to poll for job status
+      description: The base URL of the scrape job
+    processingType:
+      type: string
+      description: The scrape handler to use for the scrape job
+    options:
+      type: object
+      description: The options used for the scrape job
+    startedAt:
+      type: string
+      format: date-time
+    status:
+      type: string
+      enum: [RUNNING, COMPLETE, FAILED]
+    urlCount:
+      type: integer
+      description: The number of URLs in the scrape job
+    successCount:
+      type: integer
+      description: The number of successful URLs in the scrape job
+    failedCount:
+      type: integer
+      description: The number of failed URLs in the scrape job
+    redirectCount:
+      type: integer
+      description: The number of redirected URLs in the scrape job
+    customHeaders:
+      type: object
+      description: The custom headers used for the scrape job
 
 ScrapedContentResponse:
   type: array
@@ -2824,24 +3015,23 @@ ScrapedContentResponse:
       size:
         type:
           - integer
-          - "null"
+          - 'null'
         description: File size in bytes
       lastModified:
         type:
           - string
-          - "null"
+          - 'null'
         format: date-time
         description: Timestamp of the last file modification
   example:
-    - key: "about-us/scrape.json"
-      name: "scrape.json"
+    - key: 'about-us/scrape.json'
+      name: 'scrape.json'
       size: 2048
-      lastModified: "2025-04-11T00:44:31Z"
-    - key: "about-us/screenshot-desktop-fullpage.png"
-      name: "screenshot-desktop-fullpage.png"
+      lastModified: '2025-04-11T00:44:31Z'
+    - key: 'about-us/screenshot-desktop-fullpage.png'
+      name: 'screenshot-desktop-fullpage.png'
       size: 123456
-      lastModified: "2025-04-11T00:44:31Z"
-
+      lastModified: '2025-04-11T00:44:31Z'
 
 FixStatus:
   description: |
@@ -2859,7 +3049,6 @@ FixStatus:
     - 'PUBLISHED'
     - 'FAILED'
     - 'ROLLED_BACK'
-
 
 Fix:
   type: object
@@ -2888,7 +3077,6 @@ Fix:
       additionalProperties: true
     status:
       $ref: '#/FixStatus'
-
 
 FixList:
   type: array
@@ -3049,3 +3237,909 @@ FixStatusUpdateListResponse:
   required:
     - fixes
     - metadata
+
+PaidSiteTopPage:
+  type: object
+  required:
+    - url
+    - ctr
+    - avgClicksPerSession
+    - pageViews
+    - clickedSessions
+    - bounceRate
+    - totalNumClicks
+    - source
+  properties:
+    url:
+      type: string
+      format: uri
+    ctr:
+      type: number
+      format: float
+    avgClicksPerSession:
+      type: number
+      format: float
+    pageViews:
+      type: integer
+    clickedSessions:
+      type: integer
+    bounceRate:
+      type: number
+      format: float
+    totalNumClicks:
+      type: integer
+    source:
+      type: string
+      description: Paid traffic source (e.g., paid:search:google)
+  example:
+    url: 'https://www.example.com/uk/'
+    ctr: 0.015
+    avgClicksPerSession: 1.82
+    pageViews: 6100
+    clickedSessions: 1800
+    bounceRate: 0.98
+    totalNumClicks: 5100
+    source: 'paid:affiliate:'
+PaidSiteTopPageList:
+  type: array
+  items:
+    $ref: './schemas.yaml#/PaidSiteTopPage'
+
+LlmoQuestion:
+  type: object
+  required:
+    - key
+    - question
+  properties:
+    key:
+      description: Unique identifier for the question
+      type: string
+      format: uuid
+      example: '123e4567-e89b-12d3-a456-426614174000'
+    question:
+      description: The question text
+      type: string
+      example: 'What is the main value proposition of this product?'
+    source:
+      description: Source of the question
+      type: string
+      example: 'human'
+    country:
+      description: Country context for the question
+      type: string
+      example: 'US'
+    product:
+      description: Product context for the question
+      type: string
+      example: 'Adobe Creative Cloud'
+    volume:
+      description: Volume or traffic context
+      type: string
+      example: 'high'
+    importTime:
+      description: Time when the question was imported
+      type: string
+      format: date-time
+      example: '2024-01-20T12:00:00Z'
+    keyword:
+      description: Associated keyword for the question
+      type: string
+      example: 'creative software'
+    url:
+      description: URL context for the question
+      type: string
+      format: uri
+      example: 'https://www.adobe.com/creativecloud.html'
+    tags:
+      description: Array of tags associated with the question
+      type: array
+      items:
+        type: string
+      example: ['product', 'pricing', 'features']
+  additionalProperties: true
+
+LlmoQuestions:
+  type: object
+  description: LLMO questions configuration containing both human and AI questions
+  properties:
+    Human:
+      description: Array of human-generated questions
+      type: array
+      items:
+        $ref: '#/LlmoQuestion'
+      example:
+        - key: '123e4567-e89b-12d3-a456-426614174000'
+          question: 'What is the main value proposition of this product?'
+          source: 'human'
+          country: 'US'
+          product: 'Adobe Creative Cloud'
+          volume: 'high'
+          importTime: '2024-01-20T12:00:00Z'
+          keyword: 'creative software'
+          url: 'https://www.adobe.com/creativecloud.html'
+          tags: ['product', 'pricing', 'features']
+        - key: '456e7890-e89b-12d3-a456-426614174001'
+          question: 'How does this service solve customer problems?'
+          source: 'ai'
+          country: 'US'
+          product: 'Adobe Creative Cloud'
+          volume: 'medium'
+          importTime: '2024-01-20T12:00:00Z'
+          keyword: 'customer support'
+          url: 'https://www.adobe.com/support.html'
+          tags: ['support', 'benefits']
+    AI:
+      description: Array of AI-generated questions
+      type: array
+      items:
+        $ref: '#/LlmoQuestion'
+      example:
+        - key: '789e0123-e89b-12d3-a456-426614174002'
+          question: 'What are the key features that differentiate this product?'
+          source: 'ai'
+          country: 'US'
+          product: 'Adobe Creative Cloud'
+          volume: 'high'
+          importTime: '2024-01-20T12:00:00Z'
+          keyword: 'features comparison'
+          url: 'https://www.adobe.com/features.html'
+          tags: ['features', 'differentiation']
+        - key: '012e3456-e89b-12d3-a456-426614174003'
+          question: 'How does this compare to competitors in the market?'
+          source: 'ai'
+          country: 'US'
+          product: 'Adobe Creative Cloud'
+          volume: 'medium'
+          importTime: '2024-01-20T12:00:00Z'
+          keyword: 'competitive analysis'
+          url: 'https://www.adobe.com/competitive.html'
+          tags: ['competitive', 'analysis']
+  additionalProperties: false
+
+LlmoQuestionsInput:
+  type: object
+  description: Input format for adding new LLMO questions
+  properties:
+    Human:
+      description: Array of human questions to add
+      type: array
+      items:
+        type: object
+        properties:
+          question:
+            description: The question text
+            type: string
+            example: 'What is the main value proposition of this product?'
+          source:
+            description: Source of the question
+            type: string
+            example: 'human'
+          country:
+            description: Country context for the question
+            type: string
+            example: 'US'
+          product:
+            description: Product context for the question
+            type: string
+            example: 'Adobe Creative Cloud'
+          volume:
+            description: Volume or traffic context
+            type: string
+            example: 'high'
+          importTime:
+            description: Time when the question was imported
+            type: string
+            format: date-time
+            example: '2024-01-20T12:00:00Z'
+          keyword:
+            description: Associated keyword for the question
+            type: string
+            example: 'creative software'
+          url:
+            description: URL context for the question
+            type: string
+            format: uri
+            example: 'https://www.adobe.com/creativecloud.html'
+          tags:
+            description: Array of tags associated with the question
+            type: array
+            items:
+              type: string
+            example: ['product', 'pricing', 'features']
+        required:
+          - question
+        additionalProperties: true
+      example:
+        - question: 'What is the main value proposition of this product?'
+          source: 'human'
+          country: 'US'
+          product: 'Adobe Creative Cloud'
+          volume: 'high'
+          importTime: '2024-01-20T12:00:00Z'
+          keyword: 'creative software'
+          url: 'https://www.adobe.com/creativecloud.html'
+          tags: ['product', 'pricing', 'features']
+    AI:
+      description: Array of AI questions to add
+      type: array
+      items:
+        type: object
+        properties:
+          question:
+            description: The question text
+            type: string
+            example: 'What are the key features that differentiate this product?'
+          source:
+            description: Source of the question
+            type: string
+            example: 'ai'
+          country:
+            description: Country context for the question
+            type: string
+            example: 'US'
+          product:
+            description: Product context for the question
+            type: string
+            example: 'Adobe Creative Cloud'
+          volume:
+            description: Volume or traffic context
+            type: string
+            example: 'high'
+          importTime:
+            description: Time when the question was imported
+            type: string
+            format: date-time
+            example: '2024-01-20T12:00:00Z'
+          keyword:
+            description: Associated keyword for the question
+            type: string
+            example: 'features comparison'
+          url:
+            description: URL context for the question
+            type: string
+            format: uri
+            example: 'https://www.adobe.com/features.html'
+          tags:
+            description: Array of tags associated with the question
+            type: array
+            items:
+              type: string
+            example: ['features', 'differentiation']
+        required:
+          - question
+        additionalProperties: true
+      example:
+        - question: 'What are the key features that differentiate this product?'
+          source: 'ai'
+          country: 'US'
+          product: 'Adobe Creative Cloud'
+          volume: 'high'
+          importTime: '2024-01-20T12:00:00Z'
+          keyword: 'features comparison'
+          url: 'https://www.adobe.com/features.html'
+          tags: ['features', 'differentiation']
+  additionalProperties: false
+
+LlmoQuestionUpdate:
+  type: object
+  description: Update format for modifying an existing LLMO question
+  properties:
+    question:
+      description: Updated question text
+      type: string
+      example: 'What is the updated value proposition of this product?'
+    source:
+      description: Updated source of the question
+      type: string
+      example: 'human'
+    country:
+      description: Updated country context for the question
+      type: string
+      example: 'US'
+    product:
+      description: Updated product context for the question
+      type: string
+      example: 'Adobe Creative Cloud'
+    volume:
+      description: Updated volume or traffic context
+      type: string
+      example: 'high'
+    importTime:
+      description: Updated import time
+      type: string
+      format: date-time
+      example: '2024-01-20T12:00:00Z'
+    keyword:
+      description: Updated associated keyword for the question
+      type: string
+      example: 'creative software'
+    url:
+      description: Updated URL context for the question
+      type: string
+      format: uri
+      example: 'https://www.adobe.com/creativecloud.html'
+    tags:
+      description: Updated array of tags associated with the question
+      type: array
+      items:
+        type: string
+      example: ['product', 'pricing', 'features']
+  additionalProperties: true
+
+LlmoCustomerIntentItem:
+  type: object
+  description: A single customer intent key-value pair
+  required:
+    - key
+    - value
+  properties:
+    key:
+      description: The customer intent key identifier
+      type: string
+      example: 'target_audience'
+    value:
+      description: The customer intent value
+      type: string
+      example: 'small business owners'
+  additionalProperties: false
+
+LlmoCustomerIntent:
+  type: array
+  description: Array of customer intent key-value pairs
+  items:
+    $ref: '#/LlmoCustomerIntentItem'
+  example:
+    - key: 'target_audience'
+      value: 'small business owners'
+    - key: 'primary_goal'
+      value: 'increase conversions'
+    - key: 'user_persona'
+      value: 'marketing director'
+
+LlmoCustomerIntentInput:
+  type: array
+  description: Input format for adding new customer intent items
+  items:
+    $ref: '#/LlmoCustomerIntentItem'
+  example:
+    - key: 'target_audience'
+      value: 'small business owners'
+    - key: 'primary_goal'
+      value: 'increase conversions'
+
+LlmoCustomerIntentUpdate:
+  type: object
+  description: Update format for modifying an existing customer intent item
+  properties:
+    key:
+      description: Updated customer intent key
+      type: string
+      example: 'updated_target_audience'
+    value:
+      description: Updated customer intent value
+      type: string
+      example: 'enterprise customers'
+  additionalProperties: false
+
+LlmoCdnLogsFilter:
+  type: array
+  description: Array of CDN logs filter items
+  items:
+    type: object
+    required:
+      - key
+      - value
+    properties:
+      key:
+        type: string
+        example: 'host'
+      value:
+        type: array
+        items:
+          type: string
+        example: ['example.com', 'abc.com']
+      type:
+        type: string
+        enum: ['include', 'exclude']
+        example: 'include'
+  example:
+    - key: 'host'
+      value: ['example.com', 'abc.com']
+      type: 'include'
+    - key: 'status'
+      value: ['404', '500']
+      type: 'exclude'
+
+LlmoCdnBucketConfig:
+  type: object
+  description: CDN bucket configuration for LLMO
+  properties:
+    bucketName:
+      description: The name of the S3 bucket for CDN logs
+      type: string
+      example: 'my-cdn-logs-bucket'
+    orgId:
+      description: The ID associated with the bucket, for adobe orgs this is the imsOrgId ID and for non-adobe orgs this is the org ID
+      type: string
+      example: 'org-12345'
+    cdnProvider:
+      description: The CDN provider (e.g., aem-cs-fastly, byocdn-fastly, etc.)
+      type: string
+      example: 'aem-cs-fastly'
+  additionalProperties: false
+
+LlmoConfig:
+  type: object
+  description: LLMO (Large Language Model Optimizer) configuration for a site
+  required:
+    - dataFolder
+    - brand
+  properties:
+    dataFolder:
+      description: The data folder identifier for the LLMO configuration
+      type: string
+      example: 'adobe'
+    brand:
+      description: The brand identifier for the LLMO configuration
+      type: string
+      example: 'adobe'
+    questions:
+      description: The questions configuration containing both human and AI questions
+      $ref: '#/LlmoQuestions'
+    customerIntent:
+      description: The customer intent configuration containing key-value pairs
+      $ref: '#/LlmoCustomerIntent'
+    cdnlogsFilter:
+      description: The CDN logs filter configuration for filtering log entries
+      $ref: '#/LlmoCdnLogsFilter'
+    cdnBucketConfig:
+      description: The CDN bucket configuration for log storage
+      $ref: '#/LlmoCdnBucketConfig'
+  additionalProperties: false
+
+LlmoSheetDataQuery:
+  type: object
+  description: Query parameters for LLMO sheet data
+  properties:
+    sheets:
+      description: Sheets to include from the data
+      type: object
+      additionalProperties: true
+    filters:
+      description: Filters to apply to the data
+      type: object
+    include:
+      description: Fields to include from the data
+      type: array
+      additionalProperties: true
+    exclude:
+      description: Fields to exclude from the data
+      type: array
+      items:
+        type: string
+    groupBy:
+      description: Fields to group the data by
+      type: array
+      items:
+        type: string
+  additionalProperties: false
+
+# New schemas for entitlements, trial users, and site enrollments APIs
+Entitlement:
+  type: object
+  description: An entitlement represents product access and quotas for an organization
+
+  properties:
+    id:
+      description: Unique identifier for the entitlement
+      $ref: '#/Id'
+    organizationId:
+      description: Reference to the organization this entitlement belongs to
+      $ref: '#/Id'
+    productCode:
+      description: The product code this entitlement provides access to
+      type: string
+      enum: [LLMO, ASO]
+    tier:
+      description: The tier level of the entitlement
+      type: string
+      enum: [FREE_TRIAL, PAID]
+    quotas:
+      description: Usage quotas and limits for the entitlement
+      type: object
+      properties:
+        llmo_trial_prompts:
+          type: number
+          description: Number of LLMO trial prompts available
+    createdAt:
+      description: When the entitlement was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: When the entitlement was last updated
+      $ref: '#/DateTime'
+    updatedBy:
+      description: Who last updated the entitlement
+      $ref: '#/Id'
+
+  example:
+    id: "123e4567-e89b-12d3-a456-426614174000"
+    organizationId: "987fcdeb-51a2-43d7-9876-543210987654"
+    productCode: "LLMO"
+    tier: "FREE_TRIAL"
+    quotas:
+      llmo_trial_prompts: 100
+    createdAt: "2024-01-15T10:30:00Z"
+    updatedAt: "2024-01-15T10:30:00Z"
+    updatedBy: "system"
+
+SiteEnrollment:
+  type: object
+  description: A site enrollment represents a site's participation in a product or service
+
+  properties:
+    id:
+      description: Unique identifier for the site enrollment
+      $ref: '#/Id'
+    siteId:
+      description: Reference to the site this enrollment belongs to
+      $ref: '#/Id'
+    entitlementId:
+      description: Reference to the entitlement this enrollment is based on
+      $ref: '#/Id'
+    createdAt:
+      description: When the site enrollment was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: When the site enrollment was last updated
+      $ref: '#/DateTime'
+    updatedBy:
+      description: Who last updated the site enrollment
+      $ref: '#/Id'
+  example:
+    id: "123e4567-e89b-12d3-a456-426614174000"
+    siteId: "987fcdeb-51a2-43d7-9876-543210987654"
+    entitlementId: "456e4567-e89b-12d3-a456-426614174000"
+    createdAt: "2024-01-15T10:30:00Z"
+    updatedAt: "2024-01-15T10:30:00Z"
+    updatedBy: "system"
+
+TrialUser:
+  type: object
+  description: A trial user represents a user participating in a trial program
+
+  properties:
+    id:
+      description: Unique identifier for the trial user
+      $ref: '#/Id'
+    organizationId:
+      description: Reference to the organization this trial user belongs to
+      $ref: '#/Id'
+    emailId:
+      description: Email ID of the trial user
+      type: string
+      format: email
+      example: 'user123@adobe.com'
+    firstName:
+      description: First name of the trial user
+      type: string
+      example: 'John'
+    lastName:
+      description: Last name of the trial user
+      type: string
+      example: 'Doe'
+    externalUserId:
+      description: External user ID from the identity provider
+      type: string
+      example: '1234567890'
+    provider:
+      description: The identity provider (IMS, Microsoft, Google, etc.)
+      type: string
+      example: 'IMS'
+    status:
+      description: Current status of the trial user
+      type: string
+      enum: [INVITED, REGISTERED, BLOCKED, DELETED]
+    lastSeenAt:
+      description: When the trial user was last seen/active
+      $ref: '#/DateTime'
+    metadata:
+      description: Additional metadata for the trial user
+      type: object
+      properties:
+        origin:
+          description: Origin information for the trial user (e.g., "INVITED", "SELF_SIGNUP", "PARTNER")
+          type: string
+          example: "INVITED"
+      additionalProperties: true
+    createdAt:
+      description: When the trial user was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: When the trial user was last updated
+      $ref: '#/DateTime'
+    updatedBy:
+      description: Who last updated the trial user
+      $ref: '#/Id'
+  example:
+    id: "123e4567-e89b-12d3-a456-426614174000"
+    organizationId: "987fcdeb-51a2-43d7-9876-543210987654"
+    emailId: "user123@adobe.com"
+    firstName: "John"
+    lastName: "Doe"
+    externalUserId: "1234567890"
+    provider: "IMS"
+    status: "INVITED"
+    lastSeenAt: "2024-01-15T10:30:00Z"
+    metadata:
+      origin: "INVITED"
+    createdAt: "2024-01-15T10:30:00Z"
+    updatedAt: "2024-01-15T10:30:00Z"
+    updatedBy: "system"
+
+TrialUserActivity:
+  type: object
+  description: A trial user activity represents an action performed by a trial user
+
+  properties:
+    id:
+      description: Unique identifier for the trial user activity
+      $ref: '#/Id'
+    siteId:
+      description: Reference to the site where the activity occurred
+      $ref: '#/Id'
+    trialUserId:
+      description: Reference to the trial user who performed the activity
+      $ref: '#/Id'
+    entitlementId:
+      description: Reference to the entitlement associated with this activity
+      $ref: '#/Id'
+    type:
+      description: The type of activity performed
+      type: string
+      enum: [SIGN_UP, SIGN_IN, CREATE_SITE, RUN_AUDIT, PROMPT_RUN, DOWNLOAD]
+      example: 'SIGN_IN'
+    details:
+      description: Additional details about the activity
+      type: object
+      additionalProperties: true
+      example:
+        browser: 'Chrome'
+        ip: '192.168.1.1'
+    productCode:
+      description: The product code associated with the activity
+      type: string
+      enum: [LLMO, ASO]
+      example: 'LLMO'
+    createdAt:
+      description: When the activity was recorded
+      $ref: '#/DateTime'
+    updatedAt:
+      description: When the activity was last updated
+      $ref: '#/DateTime'
+    updatedBy:
+      description: Who last updated the activity
+      $ref: '#/Id'
+  example:
+    id: "123e4567-e89b-12d3-a456-426614174000"
+    siteId: "987fcdeb-51a2-43d7-9876-543210987654"
+    trialUserId: "456e4567-e89b-12d3-a456-426614174000"
+    entitlementId: "789e4567-e89b-12d3-a456-426614174000"
+    type: "SIGN_IN"
+    details:
+      browser: "Chrome"
+      ip: "192.168.1.1"
+    productCode: "LLMO"
+    createdAt: "2024-01-15T10:30:00Z"
+    updatedAt: "2024-01-15T10:30:00Z"
+    updatedBy: "system"
+
+OrganizationIdentityProvider:
+  type: object
+  description: An organization identity provider represents the mapping between an organization and an identity provider
+
+  properties:
+    id:
+      description: Unique identifier for the organization identity provider
+      $ref: '#/Id'
+    organizationId:
+      description: Reference to the organization this mapping belongs to
+      $ref: '#/Id'
+    provider:
+      description: The identity provider (IMS, Microsoft, Google, etc.)
+      type: string
+      example: 'IMS'
+    externalId:
+      description: External ID from the identity provider
+      type: string
+      example: 'org123@adobe.com'
+    metadata:
+      description: Additional metadata for the organization identity provider
+      type: object
+      properties:
+        domain:
+          description: Domain associated with the identity provider
+          type: string
+          example: "adobe.com"
+        ssoEnabled:
+          description: Whether SSO is enabled for this provider
+          type: boolean
+          example: true
+      additionalProperties: true
+    createdAt:
+      description: When the identity provider mapping was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: When the identity provider mapping was last updated
+      $ref: '#/DateTime'
+    updatedBy:
+      description: Who last updated the identity provider mapping
+      $ref: '#/Id'
+  example:
+    id: "123e4567-e89b-12d3-a456-426614174000"
+    organizationId: "987fcdeb-51a2-43d7-9876-543210987654"
+    provider: "IMS"
+    externalId: "org123@adobe.com"
+    metadata:
+      domain: "adobe.com"
+      ssoEnabled: true
+    createdAt: "2024-01-15T10:30:00Z"
+    updatedAt: "2024-01-15T10:30:00Z"
+    updatedBy: "system"
+
+# Sandbox Audit API Schemas
+SandboxAuditType:
+  type: string
+  description: Supported audit types for sandbox environments
+  enum:
+    - 'meta-tags'
+    - 'alt-text'
+  example: 'meta-tags'
+
+SandboxAuditResult:
+  type: object
+  description: |
+    Result of a single sandbox audit. Fields present depend on status:
+    - triggered: only auditType and status
+    - skipped: includes nextAllowedAt and minutesRemaining
+    - failed: includes error message
+  required:
+    - auditType
+    - status
+  properties:
+    auditType:
+      $ref: '#/SandboxAuditType'
+    status:
+      type: string
+      description: Status of the audit
+      enum:
+        - 'triggered'
+        - 'skipped'
+        - 'failed'
+      example: "triggered"
+    nextAllowedAt:
+      type: string
+      format: date-time
+      description: When the audit can be run again (present when status is "skipped")
+      example: "2025-08-15T15:37:48.419Z"
+    minutesRemaining:
+      type: integer
+      description: Minutes until the audit can be run again (present when status is "skipped")
+      example: 45
+    error:
+      type: string
+      description: Error message (present when status is "failed")
+      example: "Failed to enqueue audit job"
+
+SandboxAuditResponse:
+  type: object
+  description: Response for sandbox audit trigger operation. Same schema used for both success (200) and rate limit (429) responses.
+  required:
+    - message
+    - siteId
+    - baseURL
+    - results
+  properties:
+    message:
+      type: string
+      description: Human-readable summary of operation
+      example: "Triggered 2 of 3 audits for https://sandbox.example.com"
+    siteId:
+      description: The site ID that was audited
+      $ref: '#/Id'
+    baseURL:
+      description: The base URL of the site
+      $ref: '#/URL'
+    results:
+      type: array
+      description: Array of audit results
+      items:
+        $ref: '#/SandboxAuditResult'
+
+Report:
+  type: object
+  properties:
+    id:
+      $ref: '#/Id'
+      description: Unique identifier for the report
+    siteId:
+      $ref: '#/Id'
+      description: The site ID this report belongs to
+    reportType:
+      type: string
+      enum: [performance, accessibility, seo, security, conversion, cwv, optimization]
+      description: The type of report generated
+      example: 'performance'
+    status:
+      type: string
+      enum: [processing, success, failed]
+      description: Current status of the report
+      example: 'success'
+    reportPeriod:
+      type: object
+      properties:
+        startDate:
+          type: string
+          format: date
+          description: Start date for the report period
+          example: '2024-01-01'
+        endDate:
+          type: string
+          format: date
+          description: End date for the report period
+          example: '2024-01-31'
+      required: [startDate, endDate]
+    comparisonPeriod:
+      type: object
+      properties:
+        startDate:
+          type: string
+          format: date
+          description: Start date for comparison period
+          example: '2023-12-01'
+        endDate:
+          type: string
+          format: date
+          description: End date for comparison period
+          example: '2023-12-31'
+      required: [startDate, endDate]
+    storagePath:
+      type: string
+      description: Storage path for the report files
+      example: 'reports/550e8400-e29b-41d4-a716-446655440000/performance/550e8400-e29b-41d4-a716-446655440001/'
+    createdAt:
+      $ref: '#/DateTime'
+      description: When the report was initially created
+    updatedAt:
+      $ref: '#/DateTime'
+      description: When the report was last updated
+    updatedBy:
+      type: string
+      description: User or system that last updated the report
+      example: 'user@adobe.com'
+    data:
+      type: object
+      description: Optional data containing presigned URLs for downloading reports (only present for successful reports)
+      properties:
+        rawPresignedUrl:
+          type: string
+          format: uri
+          description: Presigned URL for downloading the raw report data
+          example: 'https://s3.amazonaws.com/bucket/reports/raw/report.json?signature=...'
+        rawPresignedUrlExpiresAt:
+          type: string
+          format: date-time
+          description: Expiration time for the raw report presigned URL
+          example: '2024-01-22T10:30:00Z'
+        mystiquePresignedUrl:
+          type: string
+          format: uri
+          description: Presigned URL for downloading the enhanced report with AI insights
+          example: 'https://s3.amazonaws.com/bucket/reports/mystique/report.json?signature=...'
+        mystiquePresignedUrlExpiresAt:
+          type: string
+          format: date-time
+          description: Expiration time for the enhanced report presigned URL
+          example: '2024-01-22T10:30:00Z'
+      additionalProperties: false
+  required: [id, siteId, reportType, status, reportPeriod, createdAt, updatedAt]
+  additionalProperties: false

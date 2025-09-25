@@ -36,8 +36,6 @@ export default function approveOrg(lambdaContext) {
       const { message = {}, user } = body;
       const { blocks } = message;
 
-      log.info(JSON.stringify(body));
-
       await ack(); // slack expects acknowledgement within 3s
 
       const messageText = blocks[0]?.text?.text;
@@ -66,8 +64,6 @@ export default function approveOrg(lambdaContext) {
         ...replyText,
         replace_original: true,
       };
-
-      log.info(`Responding org approval with: ${JSON.stringify(reply)}`);
 
       await respond(reply);
     } catch (e) {

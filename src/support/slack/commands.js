@@ -15,6 +15,7 @@ import addSite from './commands/add-site.js';
 import getExpCandidates from './commands/get-exp-candidates.js';
 import getSite from './commands/get-site.js';
 import getSites from './commands/get-sites.js';
+import getSiteAudits from './commands/get-site-audits.js';
 import martechImpact from './commands/martech-impact.js';
 import runAudit from './commands/run-audit.js';
 import runImport from './commands/run-import.js';
@@ -25,8 +26,11 @@ import getGoogleLink from './commands/create-google-link.js';
 import help from './commands/help.js';
 import toggleSiteAudit from './commands/toggle-site-audit.js';
 import onboard from './commands/onboard.js';
+import llmoOnboard from './commands/llmo-onboard.js';
 import setSiteOrganizationCommand from './commands/set-ims-org.js';
 import toggleSiteImport from './commands/toggle-site-import.js';
+import runTrafficAnalysisBackfill from './commands/run-traffic-analysis-backfill.js';
+import backfillLlmo from './commands/backfill-llmo.js';
 
 /**
  * Returns all commands.
@@ -40,16 +44,20 @@ export default (context) => [
   getExpCandidates(context),
   getSite(context),
   getSites(context),
+  getSiteAudits(context),
   martechImpact(context),
   runAudit(context),
   runImport(context),
   runInternalReport(context),
   runScrape(context),
+  runTrafficAnalysisBackfill(context),
   setLiveStatus(context),
   getGoogleLink(context),
   help(context),
   toggleSiteAudit(context),
   onboard(context),
+  llmoOnboard(context),
   setSiteOrganizationCommand(context),
   toggleSiteImport(context),
+  backfillLlmo(context),
 ];

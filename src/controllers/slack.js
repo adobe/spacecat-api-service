@@ -77,6 +77,11 @@ export function initSlackBot(lambdaContext, App) {
   Object.entries(actions)
     .forEach(([action, fn]) => app.action(action, fn(lambdaContext)));
 
+  app.view('onboard_site_modal', actions.onboardSiteModal(lambdaContext));
+  app.view('preflight_config_modal', actions.preflight_config_modal(lambdaContext));
+  app.view('onboard_llmo_modal', actions.onboardLLMOModal(lambdaContext));
+  app.view('update_ims_org_modal', actions.updateIMSOrgModal(lambdaContext));
+
   return app;
 }
 
@@ -118,7 +123,7 @@ function SlackController(SlackApp) {
 
     // Suppress retry events due to HTTP timeout (usually caused by cold starts)
     if (headers['x-slack-retry-reason'] === 'http_timeout') {
-      log.info(`Ignoring retry event: ${payload.event_id}`);
+      log.debug(`Ignoring retry event: ${payload.event_id}`);
       return new Response('', { headers: { 'x-error': 'ignored-event' } });
     }
 
@@ -181,8 +186,6 @@ function SlackController(SlackApp) {
       log.error(`No Slack channel found for the IMS org ID: ${imsOrgId} in its organization configuration.`);
       return notFound('Slack channel not found for this organization.');
     }
-
-    log.info(`Inviting userId: ${userProfile.userId} to the Slack channel for IMS org ID: ${imsOrgId} (organizationId ${spaceCatOrg.getId()}).`);
 
     try {
       await elevatedClient.inviteUsersByEmail(orgSlackChannelId, [userProfile]);

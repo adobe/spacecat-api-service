@@ -114,7 +114,6 @@ describe('RunScrapeCommand', () => {
       await command.handleExecution(['https://example.com'], slackContext);
 
       expect(slackContext.say.called).to.be.true;
-      expect(context.log.info.firstCall.args[0]).to.include('Found top pages for site `https://example.com`');
       expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering scrape run for site `https://example.com`');
     });
 
@@ -274,6 +273,12 @@ describe('RunScrapeCommand', () => {
       await command.handleExecution([], slackContext);
 
       expect(slackContext.say.calledWith(':warning: Failed scrape for `https://valid.url`: Test Error')).to.be.true;
+    });
+
+    it('handles invalid batch size', async () => {
+      const command = RunScrapeCommand(context);
+      await command.handleExecution(['https://example.com', 'invalid', 'true'], slackContext);
+      expect(slackContext.say.calledWith(':error: Batch size must be a number.')).to.be.true;
     });
   });
 });

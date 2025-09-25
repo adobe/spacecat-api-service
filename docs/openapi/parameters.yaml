@@ -119,8 +119,16 @@ metric:
   schema:
     type: string
     enum:
-      - 'organic-traffic'
-      - 'organic-keywords'
+      - all-traffic
+      - cwv-daily
+      - cwv-weekly
+      - organic-keywords
+      - organic-keywords-ai-overview
+      - organic-keywords-feature-snippets
+      - organic-keywords-nonbranded
+      - organic-keywords-questions
+      - organic-traffic
+      - top-pages
     example: 'organic-traffic'
 jobId:
   name: jobId
@@ -187,3 +195,134 @@ fixId:
   required: true
   schema:
     $ref: './schemas.yaml#/Id'
+startDate:
+  name: startDate
+  description: The start date in ISO 8601 format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/DateTime'
+endDate:
+  name: endDate
+  description: The end date in ISO 8601 format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/DateTime'
+processingType:
+  name: processingType
+  description: The processing type/handler used by the scrape job
+  in: path
+  required: true
+  schema:
+    type: string
+weekNumber:
+  name: weekNumber
+  description: The ISO week number (1-53)
+  in: query
+  required: false
+  schema:
+    type: integer
+    minimum: 1
+    maximum: 53
+month:
+  name: month
+  description: The month number (1-12). Provide either weekNumber or month.
+  in: query
+  required: false
+  schema:
+    type: integer
+    minimum: 1
+    maximum: 12
+    example: 5
+year:
+  name: year
+  description: The 4-digit year
+  in: query
+  required: true
+  schema:
+    type: integer
+    example: 2024
+
+trafficType:
+  name: trafficType
+  description: Filter by traffic type (owned, earned, paid) or all
+  in: query
+  required: false
+  schema:
+    type: string
+    enum:
+      - 'all'
+      - 'owned'
+      - 'earned'
+      - 'paid'
+    example: 'paid'
+
+# New parameters for entitlements API
+entitlementId:
+  name: entitlementId
+  description: The entitlement ID in uuid format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/Id'
+
+productCode:
+  name: productCode
+  description: The product code (LLMO or ASO)
+  in: path
+  required: true
+  schema:
+    type: string
+    enum:
+      - 'LLMO'
+      - 'ASO'
+
+# New parameters for site enrollments API
+siteEnrollmentId:
+  name: siteEnrollmentId
+  description: The site enrollment ID in uuid format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/Id'
+
+# New parameters for trial users API
+trialUserId:
+  name: trialUserId
+  description: The trial user ID in uuid format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/Id'
+
+externalUserId:
+  name: externalUserId
+  description: The external user ID from the identity provider
+  in: path
+  required: true
+  schema:
+    type: string
+    example: 'user123@adobe.com'
+
+externalId:
+  name: externalId
+  description: The external ID from the identity provider
+  in: path
+  required: true
+  schema:
+    type: string
+    example: 'user123@adobe.com'
+
+sandboxAuditType:
+  name: auditType
+  description: Comma-separated list of audit types to run
+  in: query
+  required: false
+  schema:
+    type: string
+    description: Comma-separated list of audit types
+    example: "meta-tags,alt-text"
+    enum:
+      - 'meta-tags'
+      - 'alt-text'

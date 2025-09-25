@@ -38,6 +38,9 @@ To set up local development for `spacecat-api-service`, follow these steps:
 AWS_REGION=your_aws_region
 AWS_ACCESS_KEY_ID=your_access_key_id
 AWS_SECRET_ACCESS_KEY=your_secret_access_key
+AWS_SESSION_TOKEN=your_session_token
+USER_API_KEY=api_key_for_user_requests
+ADMIN_API_KEY=api_key_for_admin_requests
 ```
 
 2. Start the development server
@@ -97,6 +100,16 @@ IMS_CLIENT_SECRET=client secret for the IMS API
 
 SLACK_TOKEN_WORKSPACE_EXTERNAL_ELEVATED=Slack token for the external workspace, elevated permissions
 SLACK_OPS_CHANNEL_WORKSPACE_EXTERNAL=channel ID to use for operations messages in the external workspace
+```
+
+Sandbox audit rate-limit (optional):
+
+Minimum hours that must elapse before the same audit can run again for the same site. 
+Default is 4 hrs. Set the variable to 0 to disable the rate-limit
+entirely.
+
+```plaintext
+SANDBOX_AUDIT_RATE_LIMIT_HOURS=4
 ```
 
 Import controller requires the following env variables:

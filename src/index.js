@@ -57,13 +57,22 @@ import { s3ClientWrapper } from './support/s3.js';
 import { multipartFormData } from './support/multipart-form-data.js';
 import ApiKeyController from './controllers/api-key.js';
 import OpportunitiesController from './controllers/opportunities.js';
+import PaidController from './controllers/paid.js';
+import TrafficController from './controllers/paid/traffic.js';
 import SuggestionsController from './controllers/suggestions.js';
 import BrandsController from './controllers/brands.js';
 import PreflightController from './controllers/preflight.js';
 import DemoController from './controllers/demo.js';
+import ConsentBannerController from './controllers/consentBanner.js';
 import ScrapeController from './controllers/scrape.js';
-import McpController from './controllers/mcp.js';
-import buildRegistry from './mcp/registry.js';
+import ScrapeJobController from './controllers/scrapeJob.js';
+import ReportsController from './controllers/reports.js';
+import LlmoController from './controllers/llmo/llmo.js';
+import UserActivitiesController from './controllers/user-activities.js';
+import SiteEnrollmentsController from './controllers/site-enrollments.js';
+import TrialUsersController from './controllers/trial-users.js';
+import EntitlementsController from './controllers/entitlements.js';
+import SandboxAuditController from './controllers/sandbox-audit.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -111,19 +120,21 @@ async function run(request, context) {
     const opportunitiesController = OpportunitiesController(context);
     const suggestionsController = SuggestionsController(context, context.sqs, context.env);
     const brandsController = BrandsController(context, log, context.env);
+    const paidController = PaidController(context);
+    const trafficController = TrafficController(context, log, context.env);
     const preflightController = PreflightController(context, log, context.env);
     const demoController = DemoController(context);
+    const consentBannerController = ConsentBannerController(context);
     const scrapeController = ScrapeController(context);
+    const scrapeJobController = ScrapeJobController(context);
+    const reportsController = ReportsController(context, log, context.env);
+    const llmoController = LlmoController(context);
     const fixesController = new FixesController(context);
-
-    /* ---------- build MCP registry & controller ---------- */
-    const mcpRegistry = buildRegistry({
-      auditsController,
-      sitesController,
-      scrapeController,
-      context,
-    });
-    const mcpController = McpController(context, mcpRegistry);
+    const userActivitiesController = UserActivitiesController(context);
+    const siteEnrollmentsController = SiteEnrollmentsController(context);
+    const trialUsersController = TrialUsersController(context);
+    const entitlementsController = EntitlementsController(context);
+    const sandboxAuditController = SandboxAuditController(context);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -143,9 +154,19 @@ async function run(request, context) {
       brandsController,
       preflightController,
       demoController,
+      consentBannerController,
       scrapeController,
-      mcpController,
+      scrapeJobController,
+      paidController,
+      trafficController,
       fixesController,
+      llmoController,
+      userActivitiesController,
+      siteEnrollmentsController,
+      trialUsersController,
+      entitlementsController,
+      sandboxAuditController,
+      reportsController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -156,7 +177,8 @@ async function run(request, context) {
       if (params.siteId && !isValidUUIDV4(params.siteId)) {
         return badRequest('Site Id is invalid. Please provide a valid UUID.');
       }
-      if (params.organizationId && (!isValidUUIDV4(params.organizationId) && params.organizationId !== 'default')) {
+      if (params.organizationId
+        && (!isValidUUIDV4(params.organizationId) && params.organizationId !== 'default')) {
         return badRequest('Organization Id is invalid. Please provide a valid UUID.');
       }
       context.params = params;
@@ -164,7 +186,6 @@ async function run(request, context) {
       return await handler(context);
     } else {
       const notFoundMessage = `no such route /${route}`;
-      log.info(notFoundMessage);
       return notFound(notFoundMessage);
     }
   } catch (e) {

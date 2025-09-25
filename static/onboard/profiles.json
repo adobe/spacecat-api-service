@@ -10,6 +10,7 @@
 			"meta-tags": {},
 			"product-metatags": {},
 			"sitemap": {},
+			"redirect-chains": {},
 			"structured-data": {},
 			"forms-opportunities": {}
 		},
@@ -28,7 +29,7 @@
 		"audits": {
 			"scrape-top-pages": {},
 			"alt-text": {},
-			"broken-backlinks": {}, 
+			"broken-backlinks": {},
 			"broken-internal-links-auto-suggest": {},
 			"cwv": {},
 			"broken-internal-links": {},
@@ -53,7 +54,7 @@
 		"audits": {
 			"scrape-top-pages": {},
 			"alt-text": {},
-			"broken-backlinks": {}, 
+			"broken-backlinks": {},
 			"broken-internal-links-auto-suggest": {},
 			"cwv": {},
 			"broken-internal-links": {},
@@ -69,5 +70,33 @@
 		},
 		"config": {},
 		"integrations": {}
-	}	
+	},
+	"demo":  {
+		"audits": {
+			"scrape-top-pages": {},
+			"broken-backlinks": {},
+			"broken-internal-links": {},
+			"experimentation-opportunities": {},
+			"meta-tags": {},
+			"sitemap": {},
+			"redirect-chains": {},
+			"cwv": {},
+			"alt-text": {},
+			"broken-backlinks-auto-suggest": {},
+			"meta-tags-auto-suggest": {},
+			"broken-internal-links-auto-suggest": {},
+			"broken-backlinks-auto-fix": {},
+			"meta-tags-auto-fix": {},
+			"broken-internal-links-auto-fix": {},
+			"forms-opportunities": {}
+		},
+		"imports": {
+			"organic-traffic" : {},
+			"top-pages" : {},
+			"organic-keywords" :{},
+			"all-traffic": {}
+		},
+		"config": {},
+		"integrations": {}
+	}
 }

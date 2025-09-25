@@ -12,11 +12,21 @@
 
 /* eslint-env mocha */
 
+// Add global fetch polyfill for tests
+import { fetch } from '@adobe/fetch';
+
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
+import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import esmock from 'esmock';
+
+import * as utils from '../../src/support/utils.js';
 import PreflightController from '../../src/controllers/preflight.js';
+
+// Make fetch available globally
+global.fetch = fetch;
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -46,7 +56,7 @@ describe('Preflight Controller', () => {
     getMetadata: () => ({
       payload: {
         siteId: 'test-site-123',
-        urls: ['https://example.com/test.html'],
+        urls: ['https://main--example-site.aem.page/test.html'],
         step: 'identify',
       },
       jobType: 'preflight',
@@ -55,15 +65,18 @@ describe('Preflight Controller', () => {
     remove: sandbox.stub().resolves(),
   };
 
+  const mockSite = {
+    getId: () => 'test-site-123',
+    getAuthoringType: () => SiteModel.AUTHORING_TYPES.SP,
+  };
+
   const mockDataAccess = {
     AsyncJob: {
       create: sandbox.stub().resolves(mockJob),
       findById: sandbox.stub().resolves(mockJob),
     },
     Site: {
-      findByBaseURL: sandbox.stub().resolves({
-        getId: () => 'test-site-123',
-      }),
+      findByPreviewURL: sandbox.stub().resolves(mockSite),
     },
   };
 
@@ -86,9 +99,7 @@ describe('Preflight Controller', () => {
     // Reset and recreate stubs
     mockDataAccess.AsyncJob.create = sandbox.stub().resolves(mockJob);
     mockDataAccess.AsyncJob.findById = sandbox.stub().resolves(mockJob);
-    mockDataAccess.Site.findByBaseURL = sandbox.stub().resolves({
-      getId: () => 'test-site-123',
-    });
+    mockDataAccess.Site.findByPreviewURL = sandbox.stub().resolves(mockSite);
     mockSqs.sendMessage = sandbox.stub().resolves();
   });
 
@@ -113,10 +124,28 @@ describe('Preflight Controller', () => {
   });
 
   describe('createPreflightJob', () => {
+    let fetchStub;
+    const headResponse = { status: 401 };
+
+    beforeEach(() => {
+      // Ensure fetch is available globally before stubbing
+      if (!global.fetch) {
+        global.fetch = fetch;
+      }
+      fetchStub = sinon.stub(global, 'fetch');
+      fetchStub.resolves(headResponse);
+    });
+
+    afterEach(() => {
+      if (fetchStub && fetchStub.restore) {
+        fetchStub.restore();
+      }
+    });
+
     it('creates a preflight job successfully in production environment', async () => {
       const context = {
         data: {
-          urls: ['https://example.com/test.html'],
+          urls: ['https://main--example-site.aem.page/test.html'],
           step: 'identify',
         },
       };
@@ -137,8 +166,10 @@ describe('Preflight Controller', () => {
         metadata: {
           payload: {
             siteId: 'test-site-123',
-            urls: ['https://example.com/test.html'],
+            urls: ['https://main--example-site.aem.page/test.html'],
             step: 'identify',
+            enableAuthentication: true,
+            checks: ['canonical', 'links', 'metatags', 'body-size', 'lorem-ipsum', 'h1-count', 'accessibility', 'readability'],
           },
           jobType: 'preflight',
           tags: ['preflight'],
@@ -150,14 +181,146 @@ describe('Preflight Controller', () => {
         {
           jobId,
           type: 'preflight',
+          siteId: 'test-site-123',
         },
       );
+    });
+
+    it('creates a preflight job successfully in production environment with authentication enabled', async () => {
+      if (fetchStub && fetchStub.restore) {
+        fetchStub.restore();
+      }
+      fetchStub = sinon.stub(global, 'fetch').resolves({ status: 200 });
+
+      const context = {
+        data: {
+          urls: ['https://main--example-site.aem.page/test.html'],
+          step: 'identify',
+        },
+      };
+
+      const response = await preflightController.createPreflightJob(context);
+      expect(response.status).to.equal(202);
+
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        jobId,
+        status: 'IN_PROGRESS',
+        createdAt: '2024-03-20T10:00:00Z',
+        pollUrl: `https://spacecat.experiencecloud.live/api/v1/preflight/jobs/${jobId}`,
+      });
+
+      expect(mockDataAccess.AsyncJob.create).to.have.been.calledWith({
+        status: 'IN_PROGRESS',
+        metadata: {
+          payload: {
+            siteId: 'test-site-123',
+            urls: ['https://main--example-site.aem.page/test.html'],
+            step: 'identify',
+            enableAuthentication: false,
+            checks: ['canonical', 'links', 'metatags', 'body-size', 'lorem-ipsum', 'h1-count', 'accessibility', 'readability'],
+          },
+          jobType: 'preflight',
+          tags: ['preflight'],
+        },
+      });
+
+      expect(mockSqs.sendMessage).to.have.been.calledWith(
+        'https://sqs.test.amazonaws.com/audit-queue',
+        {
+          jobId,
+          type: 'preflight',
+          siteId: 'test-site-123',
+        },
+      );
+    });
+
+    it('creates a preflight job with specific checks', async () => {
+      const context = {
+        data: {
+          urls: ['https://example.com/test.html'],
+          step: 'identify',
+          checks: ['canonical', 'metatags'],
+        },
+      };
+
+      const response = await preflightController.createPreflightJob(context);
+      expect(response.status).to.equal(202);
+
+      expect(mockDataAccess.AsyncJob.create).to.have.been.calledWith({
+        status: 'IN_PROGRESS',
+        metadata: {
+          payload: {
+            siteId: 'test-site-123',
+            urls: ['https://example.com/test.html'],
+            step: 'identify',
+            enableAuthentication: true,
+            checks: ['canonical', 'metatags'],
+          },
+          jobType: 'preflight',
+          tags: ['preflight'],
+        },
+      });
+    });
+
+    it('returns 400 Bad Request for empty checks array', async () => {
+      const context = {
+        data: {
+          urls: ['https://example.com/test.html'],
+          step: 'identify',
+          checks: [],
+        },
+      };
+
+      const response = await preflightController.createPreflightJob(context);
+      expect(response.status).to.equal(400);
+
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: 'Invalid request: checks must be a non-empty array of strings',
+      });
+    });
+
+    it('returns 400 Bad Request for invalid check type', async () => {
+      const context = {
+        data: {
+          urls: ['https://example.com/test.html'],
+          step: 'identify',
+          checks: ['invalid-check'],
+        },
+      };
+
+      const response = await preflightController.createPreflightJob(context);
+      expect(response.status).to.equal(400);
+
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: 'Invalid request: checks must be one of: canonical, links, metatags, body-size, lorem-ipsum, h1-count, accessibility, readability',
+      });
+    });
+
+    it('returns 400 Bad Request if checks is not an array', async () => {
+      const context = {
+        data: {
+          urls: ['https://example.com/test.html'],
+          step: 'identify',
+          checks: 'canonical',
+        },
+      };
+
+      const response = await preflightController.createPreflightJob(context);
+      expect(response.status).to.equal(400);
+
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: 'Invalid request: checks must be a non-empty array of strings',
+      });
     });
 
     it('creates a preflight job successfully in CI environment', async () => {
       const context = {
         data: {
-          urls: ['https://example.com/test.html'],
+          urls: ['https://main--example-site.aem.page/test.html'],
           step: 'identify',
         },
       };
@@ -187,8 +350,10 @@ describe('Preflight Controller', () => {
         metadata: {
           payload: {
             siteId: 'test-site-123',
-            urls: ['https://example.com/test.html'],
+            urls: ['https://main--example-site.aem.page/test.html'],
             step: 'identify',
+            enableAuthentication: true,
+            checks: ['canonical', 'links', 'metatags', 'body-size', 'lorem-ipsum', 'h1-count', 'accessibility', 'readability'],
           },
           jobType: 'preflight',
           tags: ['preflight'],
@@ -200,6 +365,7 @@ describe('Preflight Controller', () => {
         {
           jobId,
           type: 'preflight',
+          siteId: 'test-site-123',
         },
       );
     });
@@ -207,18 +373,18 @@ describe('Preflight Controller', () => {
     it('extracts base URL correctly from full URL', async () => {
       const context = {
         data: {
-          urls: ['https://example.com/path/to/page?query=123'],
+          urls: ['https://main--example-site.aem.page/path/to/page?query=123'],
           step: 'identify',
         },
       };
 
       await preflightController.createPreflightJob(context);
 
-      expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
+      expect(mockDataAccess.Site.findByPreviewURL).to.have.been.calledWith('https://main--example-site.aem.page');
     });
 
     it('handles errors during site lookup', async () => {
-      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.findByPreviewURL.resolves(null);
 
       const context = {
         data: {
@@ -232,7 +398,7 @@ describe('Preflight Controller', () => {
 
       const result = await response.json();
       expect(result).to.deep.equal({
-        message: 'No site found for base URL: https://non-registered-site.com',
+        message: 'No site found for preview URL: https://non-registered-site.com',
       });
     });
 
@@ -270,7 +436,7 @@ describe('Preflight Controller', () => {
     it('returns 400 Bad Request if urls is not an array', async () => {
       const context = {
         data: {
-          urls: 'https://example.com/test.html',
+          urls: 'https://main--example-site.aem.page/test.html',
           step: 'identify',
         },
       };
@@ -304,7 +470,7 @@ describe('Preflight Controller', () => {
     it('returns 400 Bad Request for invalid step', async () => {
       const context = {
         data: {
-          urls: ['https://example.com/test.html'],
+          urls: ['https://main--example-site.aem.page/test.html'],
           step: 'invalid-step',
         },
       };
@@ -322,7 +488,7 @@ describe('Preflight Controller', () => {
       const context = {
         data: {
           urls: [
-            'https://example.com/page1.html',
+            'https://main--example-site.aem.page/page1.html',
             'https://different-site.com/page2.html',
           ],
           step: 'identify',
@@ -343,7 +509,7 @@ describe('Preflight Controller', () => {
 
       const context = {
         data: {
-          urls: ['https://example.com/test.html'],
+          urls: ['https://main--example-site.aem.page/test.html'],
           step: 'identify',
         },
       };
@@ -362,7 +528,7 @@ describe('Preflight Controller', () => {
 
       const context = {
         data: {
-          urls: ['https://example.com/test.html'],
+          urls: ['https://main--example-site.aem.page/test.html'],
           step: 'identify',
         },
       };
@@ -377,6 +543,129 @@ describe('Preflight Controller', () => {
 
       expect(mockDataAccess.AsyncJob.create).to.have.been.calledOnce;
       expect(mockJob.remove).to.have.been.calledOnce;
+    });
+
+    it('creates a preflight job with crosswalk authoring type and includes promise token', async () => {
+      const aemCsSite = {
+        getId: () => 'test-site-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS_CW,
+      };
+      mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
+
+      const mockPromiseToken = { promise_token: 'test-token', expires_in: 3600, token_type: 'Bearer' };
+      const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
+        '../../src/support/utils.js': {
+          ...utils,
+          getCSPromiseToken: async () => mockPromiseToken,
+          ErrorWithStatusCode: utils.ErrorWithStatusCode,
+        },
+      });
+
+      const preflightControllerWithMock = PreflightControllerWithMock(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const context = {
+        data: {
+          urls: ['https://example.com/test.html'],
+          step: 'identify',
+        },
+      };
+
+      const response = await preflightControllerWithMock.createPreflightJob(context);
+      expect(response.status).to.equal(202);
+      expect(mockSqs.sendMessage).to.have.been.calledWith(
+        'https://sqs.test.amazonaws.com/audit-queue',
+        {
+          jobId,
+          siteId: mockSite.getId(),
+          type: 'preflight',
+          promiseToken: mockPromiseToken,
+        },
+      );
+    });
+
+    it('handles promise token error for AEM_CS site', async () => {
+      const aemCsSite = {
+        getId: () => 'test-site-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
+      };
+      mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
+
+      const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
+        '../../src/support/utils.js': {
+          ...utils,
+          getCSPromiseToken: async () => { throw new utils.ErrorWithStatusCode('Missing Authorization header', 400); },
+          ErrorWithStatusCode: utils.ErrorWithStatusCode,
+        },
+      });
+
+      const preflightControllerWithMock = PreflightControllerWithMock(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const context = {
+        data: {
+          urls: ['https://example.com/test.html'],
+          step: 'identify',
+        },
+      };
+
+      const response = await preflightControllerWithMock.createPreflightJob(context);
+      expect(response.status).to.equal(400);
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: 'Missing Authorization header',
+      });
+    });
+
+    it('handles promise token error for AEM_CS site with generic error', async () => {
+      const aemCsSite = {
+        getId: () => 'test-site-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
+      };
+      mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
+
+      const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
+        '../../src/support/utils.js': {
+          ...utils,
+          getCSPromiseToken: async () => { throw new Error('Generic error'); },
+          ErrorWithStatusCode: utils.ErrorWithStatusCode,
+        },
+      });
+
+      const preflightControllerWithMock = PreflightControllerWithMock(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const context = {
+        data: {
+          urls: ['https://example.com/test.html'],
+          step: 'identify',
+        },
+      };
+
+      const response = await preflightControllerWithMock.createPreflightJob(context);
+      expect(response.status).to.equal(500);
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        message: 'Error getting promise token',
+      });
     });
   });
 
@@ -407,7 +696,7 @@ describe('Preflight Controller', () => {
         metadata: {
           payload: {
             siteId: 'test-site-123',
-            urls: ['https://example.com/test.html'],
+            urls: ['https://main--example-site.aem.page/test.html'],
             step: 'identify',
           },
           jobType: 'preflight',

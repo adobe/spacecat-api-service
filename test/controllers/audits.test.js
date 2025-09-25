@@ -182,6 +182,9 @@ describe('Audits Controller', () => {
     name: 'Test Org',
     imsOrgId: 'org-id@AdobeOrg',
   });
+
+  // Ensure the mock organization has the required methods
+  sinon.stub(mockOrganization, 'getImsOrgId').returns('org-id@AdobeOrg');
   const mockSite = new Site(
     {
       entities: {
@@ -254,6 +257,9 @@ describe('Audits Controller', () => {
     };
     const ctx = {
       dataAccess: mockDataAccess,
+      pathInfo: {
+        headers: { 'x-product': 'abcd' },
+      },
       ...authContextAdmin,
     };
 
@@ -341,9 +347,11 @@ describe('Audits Controller', () => {
     it('returns forbidden if user does not have access to the site', async () => {
       const controller = AuditsController({
         dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
         ...authContextUser,
       });
 
+      // Ensure the mock site has the organization properly set up
       mockDataAccess.Site.findById.resolves(mockSite);
       mockDataAccess.Audit.allBySiteId.resolves(mockAudits);
       const result = await controller.getAllForSite({ params: { siteId } });
@@ -387,6 +395,7 @@ describe('Audits Controller', () => {
     it('returns forbidden if user does not have access to the site', async () => {
       const controller = AuditsController({
         dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
         ...authContextUser,
       });
 
@@ -430,6 +439,7 @@ describe('Audits Controller', () => {
     it('returns forbidden if user does not have access to the site', async () => {
       const controller = AuditsController({
         dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
         ...authContextUser,
       });
 
@@ -494,6 +504,7 @@ describe('Audits Controller', () => {
     it('returns forbidden if user does not have access to the site', async () => {
       const controller = AuditsController({
         dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
         ...authContextUser,
       });
 
@@ -533,6 +544,7 @@ describe('Audits Controller', () => {
     it('returns forbidden if user does not have access to the site', async () => {
       const controller = AuditsController({
         dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
         ...authContextUser,
       });
 
@@ -617,6 +629,8 @@ describe('Audits Controller', () => {
         getHandlers: () => (({ [auditType]: {} })),
         getFetchConfig: () => {},
         getBrandConfig: () => ({ brandId: 'test-brand' }),
+        getCdnLogsConfig: () => ({}),
+        getLlmoConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -652,6 +666,8 @@ describe('Audits Controller', () => {
         getImports: () => [],
         getFetchConfig: () => {},
         getBrandConfig: () => ({ brandId: 'test-brand' }),
+        getCdnLogsConfig: () => ({}),
+        getLlmoConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -688,6 +704,8 @@ describe('Audits Controller', () => {
         getImports: () => [],
         getFetchConfig: () => {},
         getBrandConfig: () => ({ brandId: 'test-brand' }),
+        getCdnLogsConfig: () => ({}),
+        getLlmoConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -727,6 +745,8 @@ describe('Audits Controller', () => {
         getImports: () => [],
         getFetchConfig: () => {},
         getBrandConfig: () => ({ brandId: 'test-brand' }),
+        getCdnLogsConfig: () => ({}),
+        getLlmoConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -806,6 +826,8 @@ describe('Audits Controller', () => {
         getImports: () => [],
         getFetchConfig: () => {},
         getBrandConfig: () => ({ brandId: 'test-brand' }),
+        getCdnLogsConfig: () => ({}),
+        getLlmoConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -846,6 +868,8 @@ describe('Audits Controller', () => {
         getImports: () => [],
         getFetchConfig: () => {},
         getBrandConfig: () => ({ brandId: 'test-brand' }),
+        getCdnLogsConfig: () => ({}),
+        getLlmoConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -884,6 +908,8 @@ describe('Audits Controller', () => {
         getContentAiConfig: () => {},
         getHandlers: () => (({ [auditType]: {} })),
         getImports: () => [],
+        getCdnLogsConfig: () => ({}),
+        getLlmoConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -921,6 +947,8 @@ describe('Audits Controller', () => {
         getContentAiConfig: () => {},
         getHandlers: () => (({ [auditType]: {} })),
         getImports: () => [],
+        getCdnLogsConfig: () => ({}),
+        getLlmoConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -957,6 +985,8 @@ describe('Audits Controller', () => {
         getSlackConfig: () => {},
         getContentAiConfig: () => {},
         getHandlers: () => (({ [auditType]: {} })),
+        getCdnLogsConfig: () => ({}),
+        getLlmoConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -1019,6 +1049,8 @@ describe('Audits Controller', () => {
           getImports: () => {},
           getFetchConfig: () => {},
           getBrandConfig: () => ({ brandId: 'test-brand' }),
+          getCdnLogsConfig: () => ({}),
+          getLlmoConfig: () => ({}),
         };
 
         site.getConfig = () => siteConfig;

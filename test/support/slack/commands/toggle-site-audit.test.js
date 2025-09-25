@@ -301,7 +301,7 @@ describe('UpdateSitesAuditsCommand', () => {
       await command.handleExecution(args, slackContextMock);
 
       expect(configurationMock.enableHandlerForSite.callCount)
-        .to.equal(20);
+        .to.equal(22);
       expect(configurationMock.save.calledOnce).to.be.true;
       expect(slackContextMock.say.calledWith(sinon.match('Successfully'))).to.be.true;
     });
@@ -320,7 +320,7 @@ describe('UpdateSitesAuditsCommand', () => {
       await command.handleExecution(args, slackContextMock);
 
       expect(configurationMock.disableHandlerForSite.callCount)
-        .to.equal(20);
+        .to.equal(22);
       expect(configurationMock.save.calledOnce).to.be.true;
       expect(slackContextMock.say.calledWith(sinon.match('Successfully'))).to.be.true;
     });
@@ -495,6 +495,198 @@ describe('UpdateSitesAuditsCommand', () => {
       await command.handleExecution(['enable', 'invalid-profile'], slackContextMock);
 
       expect(slackContextMock.say.calledWith(sinon.match('Invalid audit type or profile'))).to.be.true;
+    });
+  });
+
+  describe('preflight audit configuration', () => {
+    let preflightSiteMock;
+
+    beforeEach(() => {
+      const auditConfig = new Map();
+      auditConfig.set('preflight', { type: 'preflight' });
+      configurationMock.getHandlers.returns(Object.fromEntries(auditConfig));
+
+      preflightSiteMock = {
+        getBaseURL: sandbox.stub().returns('https://example.com'),
+        getId: sandbox.stub().returns('site123'),
+        getAuthoringType: sandbox.stub(),
+        getDeliveryConfig: sandbox.stub(),
+        getHlxConfig: sandbox.stub(),
+      };
+
+      dataAccessMock.Site.findByBaseURL.resolves(preflightSiteMock);
+    });
+
+    it('should enable preflight audit when authoring type and delivery config are present for cs', async () => {
+      preflightSiteMock.getAuthoringType.returns('cs');
+      preflightSiteMock.getDeliveryConfig.returns({ programId: '12345', environmentId: '67890' });
+      preflightSiteMock.getHlxConfig.returns({});
+
+      const command = ToggleSiteAuditCommand(contextMock);
+      await command.handleExecution(['enable', 'https://example.com', 'preflight'], slackContextMock);
+
+      expect(configurationMock.enableHandlerForSite.calledWith('preflight', preflightSiteMock));
+      expect(configurationMock.save.called).to.be.true;
+      expect(slackContextMock.say.calledWith(':white_check_mark: The audit "preflight" has been *enabled* for "https://example.com".'));
+    });
+
+    it('should enable preflight audit when authoring type and helix config are present for documentauthoring', async () => {
+      preflightSiteMock.getAuthoringType.returns('documentauthoring');
+      preflightSiteMock.getDeliveryConfig.returns({});
+      preflightSiteMock.getHlxConfig.returns({ rso: { owner: 'test', site: 'testsite' } });
+
+      const command = ToggleSiteAuditCommand(contextMock);
+      await command.handleExecution(['enable', 'https://example.com', 'preflight'], slackContextMock);
+
+      expect(configurationMock.enableHandlerForSite.calledWith('preflight', preflightSiteMock));
+      expect(configurationMock.save.called).to.be.true;
+      expect(slackContextMock.say.calledWith(':white_check_mark: The audit "preflight" has been *enabled* for "https://example.com".'));
+    });
+
+    it('should prompt for configuration when authoring type is missing', async () => {
+      preflightSiteMock.getAuthoringType.returns(null);
+      preflightSiteMock.getDeliveryConfig.returns({});
+      preflightSiteMock.getHlxConfig.returns({});
+
+      const command = ToggleSiteAuditCommand(contextMock);
+      await command.handleExecution(['enable', 'https://example.com', 'preflight'], slackContextMock);
+
+      expect(slackContextMock.say.calledWith({
+        text: ':warning: Preflight audit requires additional configuration for `https://example.com`',
+        blocks: sinon.match.array,
+      }));
+      expect(configurationMock.enableHandlerForSite.called).to.be.false;
+    });
+
+    it('should prompt for configuration when documentauthoring type missing helix config', async () => {
+      preflightSiteMock.getAuthoringType.returns('documentauthoring');
+      preflightSiteMock.getDeliveryConfig.returns({});
+      preflightSiteMock.getHlxConfig.returns({});
+
+      const command = ToggleSiteAuditCommand(contextMock);
+      await command.handleExecution(['enable', 'https://example.com', 'preflight'], slackContextMock);
+
+      expect(slackContextMock.say.calledWith({
+        text: ':warning: Preflight audit requires additional configuration for `https://example.com`',
+        blocks: sinon.match.array,
+      }));
+      expect(configurationMock.enableHandlerForSite.called).to.be.false;
+    });
+
+    it('should prompt for configuration when cs type missing delivery config', async () => {
+      preflightSiteMock.getAuthoringType.returns('cs');
+      preflightSiteMock.getDeliveryConfig.returns({}); // Empty delivery config
+      preflightSiteMock.getHlxConfig.returns({});
+
+      const command = ToggleSiteAuditCommand(contextMock);
+      await command.handleExecution(['enable', 'https://example.com', 'preflight'], slackContextMock);
+
+      expect(slackContextMock.say.calledWith({
+        text: ':warning: Preflight audit requires additional configuration for `https://example.com`',
+        blocks: sinon.match.array,
+      }));
+      expect(configurationMock.enableHandlerForSite.called).to.be.false;
+    });
+
+    it('should prompt for configuration when cs/crosswalk type missing delivery config', async () => {
+      preflightSiteMock.getAuthoringType.returns('cs/crosswalk');
+      preflightSiteMock.getDeliveryConfig.returns({ programId: '12345' }); // Missing environmentId
+      preflightSiteMock.getHlxConfig.returns({});
+
+      const command = ToggleSiteAuditCommand(contextMock);
+      await command.handleExecution(['enable', 'https://example.com', 'preflight'], slackContextMock);
+
+      expect(slackContextMock.say.calledWith({
+        text: ':warning: Preflight audit requires additional configuration for `https://example.com`',
+        blocks: sinon.match.array,
+      })).to.be.true;
+      expect(configurationMock.enableHandlerForSite.called).to.be.false;
+    });
+
+    it('should show correct missing items for documentauthoring with missing helix config', async () => {
+      preflightSiteMock.getAuthoringType.returns('documentauthoring');
+      preflightSiteMock.getDeliveryConfig.returns(null);
+      preflightSiteMock.getHlxConfig.returns(null);
+
+      const command = ToggleSiteAuditCommand(contextMock);
+      await command.handleExecution(['enable', 'https://example.com', 'preflight'], slackContextMock);
+
+      // Verify the configuration prompt was called
+      expect(slackContextMock.say.called).to.be.true;
+
+      // Find calls that contain the expected text pattern
+      const sayCallsWithConfig = slackContextMock.say.getCalls().find((call) => {
+        const arg = call.args[0];
+        return typeof arg === 'object'
+               && arg.blocks
+               && arg.blocks[0]
+               && arg.blocks[0].text
+               && arg.blocks[0].text.text
+               && arg.blocks[0].text.text.includes('Helix Preview URL');
+      });
+
+      expect(sayCallsWithConfig).to.not.be.undefined;
+      expect(configurationMock.enableHandlerForSite.called).to.be.false;
+    });
+
+    it('should show correct missing items for cs with missing delivery config', async () => {
+      preflightSiteMock.getAuthoringType.returns('cs');
+      preflightSiteMock.getDeliveryConfig.returns({});
+      preflightSiteMock.getHlxConfig.returns({});
+
+      const command = ToggleSiteAuditCommand(contextMock);
+      await command.handleExecution(['enable', 'https://example.com', 'preflight'], slackContextMock);
+
+      // Verify the configuration prompt was called
+      expect(slackContextMock.say.called).to.be.true;
+
+      // Find calls that contain the expected text pattern
+      const sayCallsWithConfig = slackContextMock.say.getCalls().find((call) => {
+        const arg = call.args[0];
+        return typeof arg === 'object'
+               && arg.blocks
+               && arg.blocks[0]
+               && arg.blocks[0].text
+               && arg.blocks[0].text.text
+               && arg.blocks[0].text.text.includes('AEM CS Preview URL');
+      });
+
+      expect(sayCallsWithConfig).to.not.be.undefined;
+      expect(configurationMock.enableHandlerForSite.called).to.be.false;
+    });
+
+    it('should show correct button value with site and audit type', async () => {
+      preflightSiteMock.getAuthoringType.returns(null);
+      preflightSiteMock.getId.returns('site123');
+      preflightSiteMock.getDeliveryConfig.returns({});
+      preflightSiteMock.getHlxConfig.returns({});
+
+      const command = ToggleSiteAuditCommand(contextMock);
+      await command.handleExecution(['enable', 'https://example.com', 'preflight'], slackContextMock);
+
+      // Verify the configuration prompt was called
+      expect(slackContextMock.say.called).to.be.true;
+
+      // Find the call with button structure
+      const sayCallWithButton = slackContextMock.say.getCalls().find((call) => {
+        const arg = call.args[0];
+        return typeof arg === 'object'
+               && arg.blocks
+               && arg.blocks[1]
+               && arg.blocks[1].elements
+               && arg.blocks[1].elements[0]
+               && arg.blocks[1].elements[0].action_id === 'open_preflight_config';
+      });
+
+      expect(sayCallWithButton).to.not.be.undefined;
+
+      const button = sayCallWithButton.args[0].blocks[1].elements[0];
+      expect(button.action_id).to.equal('open_preflight_config');
+
+      const buttonValue = JSON.parse(button.value);
+      expect(buttonValue.siteId).to.equal('site123');
+      expect(buttonValue.auditType).to.equal('preflight');
+      expect(configurationMock.enableHandlerForSite.called).to.be.false;
     });
   });
 });

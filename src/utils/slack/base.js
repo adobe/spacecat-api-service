@@ -160,20 +160,67 @@ const sendMessageBlocks = async (
   }
 };
 
-const sendFile = async (slackContext, file, filename) => {
+const sendFile = async (slackContext, file, filename, title = '', initialComment = '', channels = null) => {
   const {
     client,
     channelId,
     threadTs,
   } = slackContext;
 
-  await client.files.uploadV2({
-    channel_id: channelId,
-    thread_ts: threadTs,
-    file,
+  const targetChannel = channels || channelId;
+
+  const getFileSize = (fileObj) => {
+    if (Buffer.isBuffer(fileObj)) return fileObj.length;
+    if (fileObj.size !== undefined) return fileObj.size;
+    if (fileObj.byteLength !== undefined) return fileObj.byteLength;
+    throw new Error('Cannot determine file size for upload. Please provide file size.');
+  };
+
+  // Step 1: Get upload URL
+  const uploadResponse = await client.files.getUploadURLExternal({
     filename,
-    unfurl_links: false,
+    length: getFileSize(file),
   });
+
+  if (!uploadResponse.ok) {
+    throw new Error(`Failed to get upload URL: ${uploadResponse.error}`);
+  }
+
+  // Step 2: Upload file to the URL
+  const formData = new FormData();
+  if (Buffer.isBuffer(file)) {
+    formData.append('file', new Blob([file]), filename);
+  } else {
+    const fileBlob = file instanceof Blob ? file : new Blob([file]);
+    formData.append('file', fileBlob, filename);
+  }
+
+  const uploadResult = await fetch(uploadResponse.upload_url, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!uploadResult.ok) {
+    throw new Error(`File upload failed: ${uploadResult.status} ${uploadResult.statusText}`);
+  }
+
+  // Step 3: Complete the upload
+  const completeResponse = await client.files.completeUploadExternal({
+    files: [{
+      id: uploadResponse.file_id,
+      title: title || filename,
+    }],
+    filename,
+    channel_id: targetChannel,
+    thread_ts: threadTs,
+    initial_comment: initialComment,
+  });
+
+  if (!completeResponse.ok) {
+    throw new Error(`Failed to complete upload: ${completeResponse.error}`);
+  }
+
+  return completeResponse;
 };
 
 /**
@@ -329,10 +376,11 @@ const fetchFile = async (file, token) => {
  *
  * @param {Object} file - The Slack file object.
  * @param {string} token - The Slack bot token for authentication.
+ * @param {number} [minColumns=2] - Minimum number of columns required per row.
  * @returns {Promise<Array<Array<string>>>} - Parsed CSV data as an array of rows.
  * @throws {Error} - Throws an error if the file cannot be parsed.
  */
-const parseCSV = async (file, token) => {
+const parseCSV = async (file, token, minColumns = 2) => {
   try {
     const csvString = await fetchFile(file, token);
     if (!hasText(csvString)) {
@@ -347,13 +395,13 @@ const parseCSV = async (file, token) => {
       csvStream
         .pipe(parse({ delimiter: ',', trim: true, skipEmptyLines: true }))
         .on('data', (row) => {
-          if (row.length >= 2) {
+          if (row.length >= minColumns) {
             parsedData.push(row);
           }
         })
         .on('end', () => {
           if (parsedData.length === 0) {
-            reject(new Error('CSV format invalid: Each row must have at least 2 columns.'));
+            reject(new Error(`CSV format invalid: Each row must have at least ${minColumns} columns.`));
           } else {
             resolve(parsedData);
           }

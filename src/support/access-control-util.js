@@ -10,11 +10,14 @@
  * governing permissions and limitations under the License.
  */
 
-import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
-import { Site, Organization } from '@adobe/spacecat-shared-data-access';
+import { isNonEmptyObject, hasText } from '@adobe/spacecat-shared-utils';
+import {
+  Site, Organization, TrialUser as TrialUserModel,
+  Entitlement as EntitlementModel,
+} from '@adobe/spacecat-shared-data-access';
+import TierClient from '@adobe/spacecat-shared-tier-client';
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
-import { sanitizePath } from '../utils/route-utils.js';
 
 const ANONYMOUS_ENDPOINTS = [
   /^GET \/slack\/events$/,
@@ -22,6 +25,7 @@ const ANONYMOUS_ENDPOINTS = [
   /^POST \/hooks\/site-detection.+/,
 ];
 const SERVICE_CODE = 'dx_aem_perf';
+const X_PRODUCT_HEADER = 'x-product';
 
 function isAnonymous(endpoint) {
   return ANONYMOUS_ENDPOINTS.some((rgx) => rgx.test(endpoint));
@@ -38,21 +42,29 @@ export default class AccessControlUtil {
 
   constructor(context) {
     const { log, pathInfo, attributes } = context;
-    this.authInfo = attributes?.authInfo;
-
     const endpoint = `${pathInfo?.method?.toUpperCase()} ${pathInfo?.suffix}`;
     if (isAnonymous(endpoint)) {
-      log.info(`Anonymous endpoint, skipping authorization: ${sanitizePath(endpoint)}`);
       const profile = { user_id: 'anonymous' };
       this.authInfo = new AuthInfo()
         .withAuthenticated(true)
         .withProfile(profile)
         .withType(this.name);
+    } else {
+      if (!isNonEmptyObject(attributes?.authInfo)) {
+        throw new Error('Missing authInfo');
+      }
+      this.authInfo = attributes?.authInfo;
+      this.Entitlement = context.dataAccess.Entitlement;
+      this.SiteEnrollment = context.dataAccess.SiteEnrollment;
+      this.TrialUser = context.dataAccess.TrialUser;
+      this.IdentityProvider = context.dataAccess.OrganizationIdentityProvider;
+      this.xProductHeader = pathInfo.headers[X_PRODUCT_HEADER];
     }
 
-    if (!isNonEmptyObject(this.authInfo)) {
-      throw new Error('Missing authInfo');
-    }
+    // Store context for TierClient usage
+    this.context = context;
+    // Always assign the log property
+    this.log = log;
   }
 
   isAccessTypeJWT() {
@@ -77,7 +89,53 @@ export default class AccessControlUtil {
     return this.authInfo.isAdmin();
   }
 
-  async hasAccess(entity, subService = '') {
+  async validateEntitlement(org, site, productCode) {
+    // Use TierClient to fetch entitlement
+    let tierClient;
+    if (site) {
+      tierClient = await TierClient.createForSite(this.context, site, productCode);
+    } else {
+      tierClient = TierClient.createForOrg(this.context, org, productCode);
+    }
+
+    const { entitlement, siteEnrollment } = await tierClient.checkValidEntitlement();
+
+    if (!entitlement) {
+      throw new Error('Missing entitlement for organization');
+    }
+
+    if (!hasText(entitlement.getTier())) {
+      throw new Error(`[Error] Entitlement tier is not set for ${productCode}`);
+    }
+
+    if (site && !siteEnrollment) {
+      throw new Error('Missing enrollment for site');
+    }
+
+    if (entitlement.getTier() === EntitlementModel.TIERS.FREE_TRIAL) {
+      const profile = this.authInfo.getProfile();
+      const trialUser = await this.TrialUser.findByEmailId(profile.trial_email);
+
+      if (!trialUser) {
+        await this.TrialUser.create({
+          emailId: profile.trial_email,
+          firstName: profile.first_name || '-',
+          lastName: profile.last_name || '-',
+          organizationId: org.getId(),
+          status: TrialUserModel.STATUSES.REGISTERED,
+          externalUserId: profile.email,
+          lastSeenAt: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  async hasAccess(entity, subService = '', productCode = '') {
+    if (hasText(productCode) && this.xProductHeader !== productCode) {
+      this.log.error(`Unauthorized request for product ${productCode}, x-product header: ${this.xProductHeader}`);
+      throw new Error('[Error] Unauthorized request');
+    }
+
     if (!isNonEmptyObject(entity)) {
       throw new Error('Missing entity');
     }
@@ -99,6 +157,22 @@ export default class AccessControlUtil {
     }
 
     const hasOrgAccess = authInfo.hasOrganization(imsOrgId);
+    if (hasOrgAccess && productCode.length > 0) {
+      let org;
+      let site;
+      if (entity instanceof Site) {
+        site = entity;
+        org = await entity.getOrganization();
+      } else if (entity instanceof Organization) {
+        org = entity;
+      }
+      try {
+        await this.validateEntitlement(org, site, productCode);
+      } catch (e) {
+        this.log.error(`Error validating entitlement for ${entity.getId()}: ${e.message}`);
+        return false;
+      }
+    }
     if (subService.length > 0) {
       return hasOrgAccess && authInfo.hasScope('user', `${SERVICE_CODE}_${subService}`);
     }

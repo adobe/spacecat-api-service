@@ -11,6 +11,7 @@
  */
 import {
   SendMessageCommand, SQSClient, PurgeQueueCommand, GetQueueUrlCommand,
+  GetQueueAttributesCommand,
 } from '@aws-sdk/client-sqs';
 
 /**
@@ -34,7 +35,7 @@ export class SQS {
    * @param {object} message - The message to send.
    * @returns {Promise<void>} - Promise that resolves when the message is sent.
    */
-  async sendMessage(queueNameOrUrl, message) {
+  async sendMessage(queueNameOrUrl, message, messageGroupId) {
     const body = {
       ...message,
       timestamp: new Date().toISOString(),
@@ -44,16 +45,36 @@ export class SQS {
     const msgCommand = new SendMessageCommand({
       MessageBody: JSON.stringify(body),
       QueueUrl: queueUrl,
+      MessageGroupId: messageGroupId, // Only needed for FIFO queues
     });
 
     try {
       const data = await this.sqsClient.send(msgCommand);
-      this.log.info(`Success, message sent. MessageID:  ${data.MessageId}`);
+      this.log.debug(`Success, message sent. MessageID:  ${data.MessageId}`);
     } catch (e) {
       const { type, code, message: msg } = e;
       this.log.error(`Message sent failed. Type: ${type}, Code: ${code}, Message: ${msg}`);
       throw e;
     }
+  }
+
+  /**
+   * Get the number of messages in the queue.
+   * @param {string} queueUrl - The URL of the queue.
+   * @returns {Promise<number>} - A promise that resolves to the number of messages in the queue.
+   */
+  getQueueMessageCount(queueUrl) {
+    return new Promise((resolve, reject) => {
+      const command = new GetQueueAttributesCommand({
+        QueueUrl: queueUrl,
+        AttributeNames: ['ApproximateNumberOfMessages'],
+      });
+      this.sqsClient.send(command).then((response) => {
+        resolve(response.Attributes.ApproximateNumberOfMessages);
+      }).catch((error) => {
+        reject(error);
+      });
+    });
   }
 
   /**
@@ -67,7 +88,7 @@ export class SQS {
 
     try {
       await this.sqsClient.send(purgeQueueCommand);
-      this.log.info(`Success, queue purged. QueueUrl: ${queueUrl}`);
+      this.log.debug(`Success, queue purged. QueueUrl: ${queueUrl}`);
     } catch (e) {
       const { type, code, message: msg } = e;
       this.log.error(`Queue purge failed. Type: ${type}, Code: ${code}, Message: ${msg}`);

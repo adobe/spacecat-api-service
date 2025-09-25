@@ -105,3 +105,591 @@ site:
         $ref: './responses.yaml#/404-site-not-found-with-id'
       '500':
         $ref: './responses.yaml#/500'
+
+site-cdn-logs-config:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  patch:
+    tags:
+      - site
+    summary: Update CDN logs configuration for a site
+    description: |
+      This endpoint allows updating the CDN logs configuration for a specific site.
+    operationId: updateSiteCdnLogsConfig
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/CdnLogsConfigUpdate'
+    responses:
+      '200':
+        description: CDN logs configuration updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Site'
+      '400':
+        $ref: './responses.yaml#/400-no-site-id'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+
+site-reports:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - reports
+    summary: Get all reports for a site
+    description: |
+      Retrieves all reports generated for the specified site, including their current status and download links.
+      Reports can be in various states: processing, failed or success.
+    operationId: getAllReportsBySiteId
+    responses:
+      '200':
+        description: Successful operation with array of reports
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                siteId:
+                  type: string
+                  format: uuid
+                  description: The site ID
+                reports:
+                  type: array
+                  items:
+                    $ref: './schemas.yaml#/Report'
+                count:
+                  type: integer
+                  description: Total number of reports
+              example:
+                siteId: "550e8400-e29b-41d4-a716-446655440000"
+                count: 2
+                reports:
+                  - id: "550e8400-e29b-41d4-a716-446655440001"
+                    siteId: "550e8400-e29b-41d4-a716-446655440000"
+                    reportType: "performance"
+                    status: "success"
+                    storagePath: "/reports/550e8400-e29b-41d4-a716-446655440000/performance/550e8400-e29b-41d4-a716-446655440001/"
+                    reportPeriod:
+                      startDate: "2024-01-01"
+                      endDate: "2024-01-31"
+                    comparisonPeriod:
+                      startDate: "2023-12-01"
+                      endDate: "2023-12-31"
+                    createdAt: "2024-01-15T10:30:00Z"
+                    updatedAt: "2024-01-15T11:45:00Z"
+                    updatedBy: "user@example.com"
+                    data:
+                      rawPresignedUrl: "https://s3.amazonaws.com/bucket/reports/raw/report.json?signature=..."
+                      rawPresignedUrlExpiresAt: "2024-01-22T10:30:00Z"
+                      mystiquePresignedUrl: "https://s3.amazonaws.com/bucket/reports/mystique/report.json?signature=..."
+                      mystiquePresignedUrlExpiresAt: "2024-01-22T10:30:00Z"
+                  - id: "550e8400-e29b-41d4-a716-446655440002"
+                    siteId: "550e8400-e29b-41d4-a716-446655440000"
+                    reportType: "seo"
+                    status: "processing"
+                    storagePath: "/reports/550e8400-e29b-41d4-a716-446655440000/seo/550e8400-e29b-41d4-a716-446655440002/"
+                    reportPeriod:
+                      startDate: "2024-02-01"
+                      endDate: "2024-02-28"
+                    comparisonPeriod:
+                      startDate: "2024-01-01"
+                      endDate: "2024-01-31"
+                    createdAt: "2024-02-15T10:30:00Z"
+                    updatedAt: "2024-02-15T10:30:00Z"
+                    updatedBy: "user@example.com"
+      '400':
+        description: Bad request - validation errors
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Error message describing the validation failure
+                  example: "Valid site ID is required"
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        description: Access denied - user does not have permission to access this resource
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+      '404':
+        description: Site or report not found
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+      '500':
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Error message describing the server error
+                  example: "Failed to get reports: [specific error message]"
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+  post:
+    tags:
+      - reports
+    summary: Create a new report generation job
+    description: |
+      Initiates the generation of a new report for the specified site and report type.
+      The report will go through multiple phases: generation, AI enhancement via Mystique, and finalization.
+    operationId: createReport
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - reportType
+              - name
+              - reportPeriod
+              - comparisonPeriod
+            properties:
+              reportType:
+                type: string
+                enum: [optimization, performance]
+                description: The type of report to generate
+                example: 'performance'
+              name:
+                type: string
+                description: The name of the report (required)
+                example: 'Hersheyland'
+              reportPeriod:
+                type: object
+                required:
+                  - startDate
+                  - endDate
+                properties:
+                  startDate:
+                    type: string
+                    pattern: '^\d{4}-\d{2}-\d{2}$'
+                    description: Start date for the report period in YYYY-MM-DD format
+                    example: "2024-01-01"
+                  endDate:
+                    type: string
+                    pattern: '^\d{4}-\d{2}-\d{2}$'
+                    description: End date for the report period in YYYY-MM-DD format
+                    example: "2024-01-31"
+              comparisonPeriod:
+                type: object
+                required:
+                  - startDate
+                  - endDate
+                properties:
+                  startDate:
+                    type: string
+                    pattern: '^\d{4}-\d{2}-\d{2}$'
+                    description: Start date for comparison period in YYYY-MM-DD format
+                    example: "2023-12-01"
+                  endDate:
+                    type: string
+                    pattern: '^\d{4}-\d{2}-\d{2}$'
+                    description: End date for comparison period in YYYY-MM-DD format
+                    example: "2023-12-31"
+            example:
+              reportType: "performance"
+              name: "Hersheyland"
+              reportPeriod:
+                startDate: "2024-01-01"
+                endDate: "2024-01-31"
+              comparisonPeriod:
+                startDate: "2023-12-01"
+                endDate: "2023-12-31"
+    responses:
+      '200':
+        description: Report generation job queued successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Report generation job queued successfully"
+                siteId:
+                  type: string
+                  format: uuid
+                  description: The unique identifier of the site
+                reportType:
+                  type: string
+                  description: The type of report requested
+                  example: "performance"
+                status:
+                  type: string
+                  enum: [processing]
+                  description: Current status of the report job
+                jobId:
+                  type: string
+                  format: uuid
+                  description: Unique identifier for the report job
+                timestamp:
+                  type: string
+                  format: date-time
+                  description: Timestamp when the job was created
+            example:
+              message: "Report generation job queued successfully"
+              siteId: "550e8400-e29b-41d4-a716-446655440000"
+              reportType: "performance"
+              status: "processing"
+              jobId: "550e8400-e29b-41d4-a716-446655440001"
+              timestamp: "2024-01-15T10:30:00Z"
+      '400':
+        description: Bad request - validation errors
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Error message describing the validation failure
+                  examples:
+                    - "Valid site ID is required"
+                    - "Request data is required"
+                    - "Report name is required"
+                    - "Report type is required"
+                    - "Invalid report type. Valid types are: optimization, performance"
+                    - "Report period is required"
+                    - "Report period start date is required"
+                    - "Report period end date is required"
+                    - "Report period start date must be in YYYY-MM-DD format"
+                    - "Report period end date must be in YYYY-MM-DD format"
+                    - "Report period start date is not a valid date"
+                    - "Report period end date is not a valid date"
+                    - "Report period start date must be less than or equal to end date"
+                    - "Comparison period is required"
+                    - "Comparison period start date is required"
+                    - "Comparison period end date is required"
+                    - "Comparison period start date must be in YYYY-MM-DD format"
+                    - "Comparison period end date must be in YYYY-MM-DD format"
+                    - "Comparison period start date is not a valid date"
+                    - "Comparison period end date is not a valid date"
+                    - "Comparison period start date must be less than or equal to end date"
+      '409':
+        description: Conflict - duplicate report exists
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Error message describing the conflict
+                  example: "Report already exists for site 550e8400-e29b-41d4-a716-446655440000 with the same parameters"
+                status:
+                  type: string
+                  description: Current status of the existing report
+                  example: "success"
+                reportId:
+                  type: string
+                  format: uuid
+                  description: ID of the existing report
+                  example: "550e8400-e29b-41d4-a716-446655440001"
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        description: Access denied - user does not have permission to access this resource
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        description: Internal server error - configuration or processing issues
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Error message describing the server error
+                  examples:
+                    - "Reports queue is not configured"
+                    - "Failed to create report job: SQS error"
+                    - "Failed to create report job: [specific error message]"
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
+site-report:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: reportId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: The unique identifier of the report
+  get:
+    tags:
+      - reports
+    summary: Get a specific report
+    description: |
+      Retrieves detailed information about a specific report, including download links 
+      for base and enhanced versions. Only returns reports with 'success' status.
+      Reports that are still processing will return a 400 error.
+    operationId: getReport
+    responses:
+      '200':
+        description: Successful operation with report details and download links
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Report'
+            example:
+              id: "550e8400-e29b-41d4-a716-446655440001"
+              siteId: "550e8400-e29b-41d4-a716-446655440000"
+              reportType: "performance"
+              status: "success"
+              storagePath: "/reports/550e8400-e29b-41d4-a716-446655440000/performance/550e8400-e29b-41d4-a716-446655440001/"
+              reportPeriod:
+                startDate: "2024-01-01"
+                endDate: "2024-01-31"
+              comparisonPeriod:
+                startDate: "2023-12-01"
+                endDate: "2023-12-31"
+              createdAt: "2024-01-15T10:30:00Z"
+              updatedAt: "2024-01-15T11:45:00Z"
+              updatedBy: "user@example.com"
+              data:
+                rawPresignedUrl: "https://s3.amazonaws.com/bucket/reports/raw/report.json?signature=..."
+                rawPresignedUrlExpiresAt: "2024-01-22T10:30:00Z"
+                mystiquePresignedUrl: "https://s3.amazonaws.com/bucket/reports/mystique/report.json?signature=..."
+                mystiquePresignedUrlExpiresAt: "2024-01-22T10:30:00Z"
+      '400':
+        description: Bad request - validation errors
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Error message
+                  examples:
+                    - "Valid site ID is required"
+                    - "Valid report ID is required"
+                    - "Report does not belong to the specified site"
+      '409':
+        description: Conflict - report is still processing
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Error message
+                  example: "Report is still processing."
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        description: Access denied - user does not have permission to access this resource
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+      '404':
+        description: Site or report not found
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+      '500':
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Error message describing the server error
+                  example: "Failed to get report: [specific error message]"
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+  patch:
+    tags:
+      - reports
+    summary: Update enhanced report data
+    description: |
+      Updates the enhanced report data in S3 storage for a specific report.
+      This endpoint only updates the enhanced report (Mystique analysis) and leaves the raw report unchanged.
+      Only reports with 'success' status can be updated.
+    operationId: patchReport
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - data
+            properties:
+              data:
+                type: object
+                description: The enhanced report data to update
+                additionalProperties: true
+            example:
+              data:
+                summary: "Updated performance analysis"
+                insights: ["Improved Core Web Vitals", "Better SEO optimization"]
+                recommendations: ["Optimize images", "Minimize CSS"]
+    responses:
+      '200':
+        description: Enhanced report data updated successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Enhanced report updated successfully"
+                siteId:
+                  type: string
+                  format: uuid
+                reportId:
+                  type: string
+                  format: uuid
+                updatedAt:
+                  type: string
+                  format: date-time
+                  description: Timestamp when the report was updated
+            example:
+              message: "Enhanced report updated successfully"
+              siteId: "550e8400-e29b-41d4-a716-446655440000"
+              reportId: "550e8400-e29b-41d4-a716-446655440001"
+              updatedAt: "2024-01-15T11:45:00Z"
+      '400':
+        description: Bad request - validation errors
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Error message
+                  examples:
+                    - "Valid site ID is required"
+                    - "Valid report ID is required"
+                    - "Request data is required"
+                    - "Report does not belong to the specified site"
+                    - "Can only update reports that are in success status"
+                    - "Report does not have a valid storage path"
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        description: Access denied - user does not have permission to access this resource
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+      '404':
+        description: Site or report not found
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+      '500':
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Error message describing the server error
+                  examples:
+                    - "Failed to update report in S3: [specific S3 error message]"
+                    - "Failed to update report: [specific error message]"
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+  delete:
+    tags:
+      - reports
+    summary: Delete a specific report
+    description: |
+      Deletes a specific report from the database and removes its associated files from S3 storage.
+      For successful reports, this includes both the raw report data and enhanced Mystique analysis files.
+      This action cannot be undone.
+    operationId: deleteReport
+    responses:
+      '200':
+        description: Report deleted successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Report deleted successfully"
+                siteId:
+                  type: string
+                  format: uuid
+                reportId:
+                  type: string
+                  format: uuid
+      '400':
+        description: Bad request - validation errors
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Error message describing the validation failure
+                  examples:
+                    - "Valid site ID is required"
+                    - "Valid report ID is required"
+                    - "Report does not belong to the specified site"
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        description: Access denied - user does not have permission to access this resource
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+      '404':
+        description: Site or report not found
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+      '500':
+        description: Internal server error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Error message describing the server error
+                  example: "Failed to delete report: [specific error message]"
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]

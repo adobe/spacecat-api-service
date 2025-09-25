@@ -1,0 +1,43 @@
+[
+  {
+    "trf_type": "owned",
+    "pageviews": "44984000",
+    "pct_pageviews": "0.7475629090208096",
+    "click_rate": "0.3025059254997523",
+    "engagement_rate": "0.39000562006162076",
+    "bounce_rate": "0.6099943799383792",
+    "p70_lcp": "1837",
+    "p70_cls": "0.017696236287247747",
+    "p70_inp": "29",
+    "path": "sample-path/",
+    "utm_campaign": "123",
+    "device": "mobile"
+  },
+  {
+    "trf_type": "earned",
+    "pageviews": "8686700",
+    "pct_pageviews": "0.14435921042573063",
+    "click_rate": "0.4087052620672983",
+    "engagement_rate": "0.7111561352412309",
+    "bounce_rate": "0.2888438647587691",
+    "p70_lcp": "1961",
+    "p70_cls": "0.011782114105621893",
+    "p70_inp": "68",
+    "path": "sample-path/",
+    "utm_campaign": "123",
+    "device": "desktop"
+  },
+  {
+    "trf_type": "paid",
+    "pageviews": "6503500",
+    "pct_pageviews": "0.10807788055345979",
+    "click_rate": "0.2605058814484508",
+    "engagement_rate": "0.5101560698085646",
+    "bounce_rate": "0.48984393019143535",
+    "p70_lcp": "2408",
+    "p70_cls": "0.011813458741289258",
+    "p70_inp": "74",
+    "path": "sample-path/",
+    "utm_campaign": "123"
+  }
+]
