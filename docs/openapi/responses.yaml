@@ -147,6 +147,11 @@
   headers:
     X-Error:
       $ref: './headers.yaml#/xError'
+'422':
+  description: Unprocessable Entity. The request was well-formed but contains semantic errors.
+  headers:
+    X-Error:
+      $ref: './headers.yaml#/xError'
 '429':
   description: Too many requests.
   headers:

@@ -3547,30 +3547,147 @@ LlmoConfig:
   type: object
   description: LLMO (Large Language Model Optimizer) configuration for a site
   required:
-    - dataFolder
-    - brand
+    - entities
+    - brands
+    - competitors
   properties:
-    dataFolder:
-      description: The data folder identifier for the LLMO configuration
-      type: string
-      example: 'adobe'
-    brand:
-      description: The brand identifier for the LLMO configuration
-      type: string
-      example: 'adobe'
-    questions:
-      description: The questions configuration containing both human and AI questions
-      $ref: '#/LlmoQuestions'
-    customerIntent:
-      description: The customer intent configuration containing key-value pairs
-      $ref: '#/LlmoCustomerIntent'
-    cdnlogsFilter:
-      description: The CDN logs filter configuration for filtering log entries
-      $ref: '#/LlmoCdnLogsFilter'
-    cdnBucketConfig:
-      description: The CDN bucket configuration for log storage
-      $ref: '#/LlmoCdnBucketConfig'
+    entities:
+      type: object
+      description: A record of entities (categories, topics, etc.) keyed by UUID
+      additionalProperties:
+        $ref: '#/LlmoEntity'
+      example:
+        "123e4567-e89b-12d3-a456-426614174000":
+          type: "category"
+          name: "Technology"
+        "456e7890-e89b-12d3-a456-426614174001":
+          type: "topic"
+          name: "AI/ML"
+    brands:
+      type: object
+      description: Brand configuration with aliases
+      required:
+        - aliases
+      properties:
+        aliases:
+          type: array
+          description: Array of brand alias configurations
+          items:
+            $ref: '#/LlmoBrandAlias'
+    competitors:
+      type: object
+      description: Competitor configuration
+      required:
+        - competitors
+      properties:
+        competitors:
+          type: array
+          description: Array of competitor configurations
+          items:
+            $ref: '#/LlmoCompetitor'
   additionalProperties: false
+
+LlmoEntity:
+  type: object
+  description: An entity in the LLMO configuration
+  required:
+    - type
+  properties:
+    type:
+      type: string
+      description: The type of entity (category, topic, or custom type)
+      example: "category"
+    name:
+      type: string
+      description: The name of the entity (required for category and topic types)
+      minLength: 1
+      example: "Technology"
+  additionalProperties: true
+
+LlmoBrandAlias:
+  type: object
+  description: A brand alias configuration
+  required:
+    - aliases
+    - category
+    - region
+    - topic
+  properties:
+    aliases:
+      type: array
+      description: Array of brand alias strings
+      items:
+        type: string
+        minLength: 1
+      example: ["Adobe", "Adobe Inc"]
+    category:
+      type: string
+      format: uuid
+      description: UUID reference to a category entity
+      example: "123e4567-e89b-12d3-a456-426614174000"
+    region:
+      oneOf:
+        - type: string
+          pattern: '^[a-z][a-z]$'
+          description: Two-letter region code
+          example: "us"
+        - type: array
+          items:
+            type: string
+            pattern: '^[a-z][a-z]$'
+          description: Array of two-letter region codes
+          example: ["us", "eu"]
+    topic:
+      type: string
+      format: uuid
+      description: UUID reference to a topic entity
+      example: "456e7890-e89b-12d3-a456-426614174001"
+
+LlmoCompetitor:
+  type: object
+  description: A competitor configuration
+  required:
+    - category
+    - region
+    - name
+    - aliases
+  properties:
+    category:
+      type: string
+      format: uuid
+      description: UUID reference to a category entity
+      example: "123e4567-e89b-12d3-a456-426614174000"
+    region:
+      oneOf:
+        - type: string
+          pattern: '^[a-z][a-z]$'
+          description: Two-letter region code
+          example: "us"
+        - type: array
+          items:
+            type: string
+            pattern: '^[a-z][a-z]$'
+          description: Array of two-letter region codes
+          example: ["us", "eu"]
+    name:
+      type: string
+      description: The competitor name
+      minLength: 1
+      example: "Microsoft"
+    aliases:
+      type: array
+      description: Array of competitor alias strings
+      items:
+        type: string
+        minLength: 1
+      example: ["MS", "Microsoft Corp"]
+    urls:
+      type: array
+      description: Array of competitor URLs (optional)
+      items:
+        type: string
+        format: uri
+      example: ["https://microsoft.com", "https://office.com"]
 
 LlmoSheetDataQuery:
   type: object

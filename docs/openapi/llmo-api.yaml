@@ -191,7 +191,8 @@ llmo-config:
     summary: Get LLMO configuration
     description: |
       Retrieves the LLMO (Large Language Model Optimizer) configuration for a specific site.
-      This includes the data folder, brand information, and questions configuration.
+      This endpoint retrieves the configuration directly from S3 storage. The configuration
+      includes entities (categories, topics), brand aliases, and competitor information.
     operationId: getLlmoConfig
     responses:
       '200':
@@ -204,6 +205,39 @@ llmo-config:
         $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+  post:
+    tags:
+      - llmo
+    summary: Update LLMO configuration
+    description: |
+      Updates the LLMO (Large Language Model Optimizer) configuration for a specific site.
+      This operation completely overwrites the existing configuration with the provided payload.
+      The payload is validated against the LLMO configuration schema before being stored in S3.
+      The configuration must include entities, brands, and competitors sections.
+    operationId: postLlmoConfig
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/LlmoConfig'
+    responses:
+      '200':
+        description: LLMO configuration updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/LlmoConfig'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '422':
+        $ref: './responses.yaml#/422'
       '500':
         $ref: './responses.yaml#/500'
     security:
