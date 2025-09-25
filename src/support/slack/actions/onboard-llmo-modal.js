@@ -449,7 +449,7 @@ async function updateIndexConfig(dataFolder, lambdaCtx, slackCtx) {
   await octokit.repos.createOrUpdateFileContents({
     owner,
     repo,
-    ref,
+    branch: ref,
     path,
     message: `Automation: Onboard ${dataFolder}`,
     content: Buffer.from(modifiedContent).toString('base64'),
