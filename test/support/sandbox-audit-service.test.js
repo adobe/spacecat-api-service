@@ -58,7 +58,7 @@ describe('sandbox-audit-service helpers', () => {
       expect(result).to.have.property('error');
       expect(result.error.status).to.equal(400);
       const body = await result.error.json();
-      expect(body).to.have.property('message', 'Invalid audit types: invalid-audit, cwv. Supported types: meta-tags, alt-text');
+      expect(body).to.have.property('message', 'Invalid audit types: invalid-audit, cwv. Supported types: meta-tags, product-metatags, alt-text');
     });
 
     it('returns error for mixed valid and invalid audit types', async () => {
@@ -66,7 +66,7 @@ describe('sandbox-audit-service helpers', () => {
       expect(result).to.have.property('error');
       expect(result.error.status).to.equal(400);
       const body = await result.error.json();
-      expect(body).to.have.property('message', 'Invalid audit types: invalid-audit. Supported types: meta-tags, alt-text');
+      expect(body).to.have.property('message', 'Invalid audit types: invalid-audit. Supported types: meta-tags, product-metatags, alt-text');
     });
 
     it('trims whitespace from comma-separated input', () => {

@@ -234,6 +234,66 @@ meta-tags-audit:
             issueDetails: "Title tag is missing"
             seoImpact: "High"
       finalUrl: "www.bulk.com/uk/"
+product-metatags-audit:
+  summary: Example for a product-metatags audit targeting Product Detail Pages (PDP) of commerce sites
+  value:
+    id: '123e4567-e89b-12d3-a456-426614174001'
+    siteId: "cccdac43-1a22-4659-9086-b762f59b9928"
+    auditedAt: "2025-01-03T10:14:41.798Z"
+    expiresAt: "2025-07-03T10:14:41.798Z"
+    deliveryType: 'aem_edge'
+    fullAuditRef: "https://example.com/product-metatags-audit"
+    auditResult:
+      sourceS3Folder: "spacecat-scraper-dev/scrapes/cccdac43-1a22-4659-9086-b762f59b9928/"
+      productDetailPages:
+        "/products/laptop-macbook-pro-16":
+          productMetadata:
+            sku: "MBP16-512-SPACE"
+            thumbnail: "https://example.com/images/macbook-pro-16-thumb.jpg"
+            catalogViewCode: "en_us"
+            storeViewCode: "us_store"
+          metaTagAnalysis:
+            productTitle:
+              current: "Laptop"
+              seoRecommendation: "Include brand, model, and key specs"
+              issue: "Generic product title missing brand and model"
+              issueDetails: "Title should be 'Apple MacBook Pro 16-inch M3 Max 512GB'"
+              seoImpact: "High"
+              autofixSuggestion: "Apple MacBook Pro 16-inch M3 Max 512GB - Space Gray"
+            productDescription:
+              current: "A great laptop for professionals"
+              seoRecommendation: "Include specific features and benefits"
+              issue: "Vague product description"
+              issueDetails: "Description lacks technical specifications and unique selling points"
+              seoImpact: "Medium"
+              autofixSuggestion: "Professional laptop with M3 Max chip, 16-inch Retina display, 512GB storage"
+            productPrice:
+              current: null
+              seoRecommendation: "Include structured pricing data for search engines"
+              issue: "Missing structured price markup"
+              issueDetails: "No Schema.org Product price data found"
+              seoImpact: "High"
+              autofixSuggestion: "Add structured data with price: $2599.00, currency: USD"
+            productAvailability:
+              current: null
+              seoRecommendation: "Include availability status in structured data"
+              issue: "Missing availability information"
+              issueDetails: "No stock status or availability data found"
+              seoImpact: "Medium"
+              autofixSuggestion: "Add structured data with availability: InStock"
+            productBrand:
+              current: null
+              seoRecommendation: "Include brand information in meta tags"
+              issue: "Missing brand metadata"
+              issueDetails: "Brand should be specified for better product discovery"
+              seoImpact: "Medium"
+              autofixSuggestion: "Add brand: Apple in structured data"
+      pdpOptimizationSummary:
+        totalPagesAnalyzed: 1
+        criticalIssues: 3
+        mediumIssues: 2
+        autofixableItems: 5
+      finalUrl: "www.example.com/products/"
 prerender-audit:
   summary: Example for a prerender audit
   value:

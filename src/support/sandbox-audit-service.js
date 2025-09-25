@@ -26,6 +26,7 @@ import {
 // TODO: Move ALL_AUDITS to spacecat-shared-data-access configuration object
 export const ALL_AUDITS = [
   'meta-tags',
+  'product-metatags',
   'alt-text',
 ];
 

@@ -37,6 +37,7 @@ const ALL_AUDITS = [
   'llm-error-pages',
   'experimentation-opportunities',
   'meta-tags',
+  'product-metatags',
   'structured-data',
   'forms-opportunities',
   'alt-text',
@@ -82,7 +83,7 @@ function RunAuditCommand(context) {
   const baseCommand = BaseCommand({
     id: 'run-audit',
     name: 'Run Audit',
-    description: 'Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits.',
+    description: 'Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. Use `product-metatags` for Product Detail Page (PDP) analysis of commerce sites.',
     phrases: PHRASES,
     usageText: `${PHRASES[0]} {site} [auditType] [auditData] OR {site} audit:{auditType} [key:value ...]`,
   });
