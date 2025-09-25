@@ -238,10 +238,6 @@ product-metatags-audit:
   summary: Example for a product-metatags audit targeting Product Detail Pages (PDP)
   value:
     id: '123e4567-e89b-12d3-a456-426614174000'
-prerender-audit:
-  summary: Example for a prerender audit
-  value:
-    id: '123e4567-e89b-12d3-a456-426614174001'
     siteId: "cccdac43-1a22-4659-9086-b762f59b9928"
     auditedAt: "2025-01-03T10:14:41.798Z"
     expiresAt: "2025-07-03T10:14:41.798Z"
@@ -277,6 +273,14 @@ prerender-audit:
       finalUrl: "www.example.com/"
       projectedTrafficLost: 1250
       projectedTrafficValue: 875
+prerender-audit:
+  summary: Example for a prerender audit
+  value:
+    id: '123e4567-e89b-12d3-a456-426614174001'
+    siteId: "cccdac43-1a22-4659-9086-b762f59b9928"
+    auditedAt: "2025-01-03T10:14:41.798Z"
+    expiresAt: "2025-07-03T10:14:41.798Z"
+    deliveryType: 'aem_edge'
     fullAuditRef: "https://example.com/prerender-audit"
     auditResult:
       totalUrlsChecked: 3

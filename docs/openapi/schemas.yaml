@@ -830,6 +830,7 @@ AuditResult:
                 - Supports catalog and storeview context through URL structure analysis
                 - Focuses on e-commerce product page optimization
               type: string
+    - type: object
       description: The result of LLM error pages audit.
       properties:
         success:
