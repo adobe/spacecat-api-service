@@ -145,6 +145,9 @@ describe('onboard-llmo-modal', () => {
         SiteEnrollment: mockSiteEnrollment,
 
       },
+      env: {
+        ENV: 'prod',
+      },
       imsClient: mockImsClient,
       sqs: mockSqs,
       ...overrides,
@@ -346,7 +349,7 @@ describe('onboard-llmo-modal', () => {
       expect(octokitInstance.repos.createOrUpdateFileContents).to.have.been.calledWith({
         owner: 'adobe',
         repo: 'project-elmo-ui-data',
-        ref: 'main',
+        branch: 'main',
         path: 'helix-query.yaml',
         message: 'Automation: Onboard example-com',
         content: sinon.match.string,
