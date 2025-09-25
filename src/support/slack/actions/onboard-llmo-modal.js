@@ -386,7 +386,6 @@ async function copyFilesToSharepoint(dataFolder, lambdaCtx, slackCtx) {
   const templateQueryIndex = sharepointClient.getDocument('/sites/elmo-ui-data/template/query-index.xlsx');
   const newQueryIndex = sharepointClient.getDocument(`/sites/elmo-ui-data/${dataFolder}/query-index.xlsx`);
 
-  // TODO: Instead of patching .exists, add this method https://github.com/adobe/spacecat-helix-content-sdk/issues/190
   const folderExists = await folder.exists();
   if (!folderExists) {
     await folder.createFolder(dataFolder, '/');
@@ -409,7 +408,7 @@ async function copyFilesToSharepoint(dataFolder, lambdaCtx, slackCtx) {
 
 // update https://github.com/adobe/project-elmo-ui-data/blob/main/helix-query.yaml
 async function updateIndexConfig(dataFolder, lambdaCtx, slackCtx) {
-  const { log } = lambdaCtx;
+  const { log, env } = lambdaCtx;
   const { say } = slackCtx;
 
   log.debug('Starting Git modification of helix query config');
@@ -419,7 +418,7 @@ async function updateIndexConfig(dataFolder, lambdaCtx, slackCtx) {
 
   const owner = 'adobe';
   const repo = 'project-elmo-ui-data';
-  const ref = 'main';
+  const ref = env.ENVIRONMENT === 'prod' ? 'main' : 'onboarding-bot-dev';
   const path = 'helix-query.yaml';
 
   const { data: file } = await octokit.repos.getContent({
@@ -495,13 +494,16 @@ async function createEntitlementAndEnrollment(site, lambdaCtx, slackCtx) {
 }
 
 export async function onboardSite(input, lambdaCtx, slackCtx) {
-  const { log, dataAccess, sqs } = lambdaCtx;
+  const {
+    log, dataAccess, sqs, env,
+  } = lambdaCtx;
   const { say } = slackCtx;
   const {
     baseURL, brandName, imsOrgId,
   } = input;
   const { hostname } = new URL(baseURL);
-  const dataFolder = hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+  const dataFolderName = hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+  const dataFolder = env.ENVIRONMENT === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
 
   const {
     Site, Configuration,
