@@ -653,6 +653,8 @@ export function onboardLLMOModal(lambdaContext) {
         return;
       }
 
+      await ack({ response_action: 'clear' });
+
       log.info('Onboarding request with parameters:', {
         brandName,
         imsOrgId,
@@ -661,10 +663,6 @@ export function onboardLLMOModal(lambdaContext) {
         originalChannel,
         originalThreadTs,
       });
-
-      // eslint-disable-next-line max-statements-per-line
-      await new Promise((resolve) => { setTimeout(resolve, 500); });
-      await ack();
 
       // Create a slack context for the onboarding process
       // Use original channel/thread if available, otherwise fall back to DM
@@ -890,7 +888,9 @@ export function updateIMSOrgModal(lambdaContext) {
         return;
       }
 
-      await ack();
+      await ack({
+        response_action: 'clear',
+      });
       const responseChannel = originalChannel;
       const responseThreadTs = originalThreadTs;
       const { Site } = dataAccess;
