@@ -388,7 +388,11 @@ async function copyFilesToSharepoint(dataFolder, lambdaCtx, slackCtx) {
 
   const folderExists = await folder.exists();
   if (!folderExists) {
-    await folder.createFolder(dataFolder, '/');
+    /* c8 ignore start */
+    const base = dataFolder.startsWith('dev/') ? '/dev' : '/';
+    const folderName = dataFolder.startsWith('dev/') ? dataFolder.split('/')[1] : dataFolder;
+    /* c8 ignore end */
+    await folder.createFolder(folderName, base);
   } else {
     log.warn(`Warning: Folder ${dataFolder} already exists. Skipping creation.`);
     await say(`Folder ${dataFolder} already exists. Skipping creation.`);
@@ -505,7 +509,7 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
   const { hostname } = new URL(baseURL);
   const dataFolderName = hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
   /* c8 ignore next */
-  const dataFolder = env.ENV === 'prod' ? dataFolderName : `${dataFolderName}-dev`;
+  const dataFolder = env.ENV === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
 
   const {
     Site, Configuration,
