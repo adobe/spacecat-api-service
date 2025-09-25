@@ -1,3 +1,17 @@
+## [1.183.5](https://github.com/adobe/spacecat-api-service/compare/v1.183.4...v1.183.5) (2025-09-25)
+
+
+### Bug Fixes
+
+* preflight API documentation ([#1278](https://github.com/adobe/spacecat-api-service/issues/1278)) ([77badc0](https://github.com/adobe/spacecat-api-service/commit/77badc0681fae40d7dcb5e5f13245514321e21ec))
+
+## [1.183.4](https://github.com/adobe/spacecat-api-service/compare/v1.183.3...v1.183.4) (2025-09-24)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.64.4 ([#1294](https://github.com/adobe/spacecat-api-service/issues/1294)) ([097b645](https://github.com/adobe/spacecat-api-service/commit/097b645c2bda56070be3a497019d763b398bff04))
+
 ## [1.183.3](https://github.com/adobe/spacecat-api-service/compare/v1.183.2...v1.183.3) (2025-09-24)
 
 
