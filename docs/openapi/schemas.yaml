@@ -4018,3 +4018,168 @@ Report:
       additionalProperties: false
   required: [id, siteId, reportType, status, reportPeriod, createdAt, updatedAt]
   additionalProperties: false
+
+CreatePreflightJobResponse:
+  type: object
+  properties:
+    createdAt:
+      type: string
+      format: date-time
+    jobId:
+      type: string
+      format: uuid
+      description: The ID of the newly created preflight job.
+    pollUrl:
+      type: string
+      format: uri
+      description: The URL to poll for the status of the preflight job
+    status:
+      type: string
+      enum: [IN_PROGRESS, COMPLETED, FAILED, CANCELLED]
+    error:
+      type: object
+      description: The error of the preflight job if it failed
+
+PreflightJobResponse:
+  type: object
+  properties:
+    createdAt:
+      type: string
+      format: date-time
+    jobId:
+      type: string
+      format: uuid
+      description: The ID of the preflight job.
+    metadata:
+      type: object
+      description: The metadata of the preflight job
+      properties:
+        jobType:
+          type: string
+          enum: [preflight]
+        payload:
+          type: object
+          description: The payload of the preflight job
+          properties:
+            checks:
+              type: array
+              items:
+                type: string
+            siteId:
+              type: string
+              format: uuid
+            step:
+              type: string
+              enum: [identify, suggest]
+            urls:
+              type: array
+              items:
+                type: string
+                format: uri
+            enableAuthentication:
+              type: boolean
+        tags:
+          type: array
+          items:
+            type: string
+    recordExpiresAt:
+      type: integer
+      format: int64
+      description: Unix epoch seconds for TTL in the database
+    startedAt:
+      type: string
+      format: date-time
+    status:
+      type: string
+      enum: [IN_PROGRESS, COMPLETED, FAILED, CANCELLED]
+    updatedAt:
+      type: string
+      format: date-time
+    result:
+      type: array
+      description: The result of the preflight job if it completed successfully
+      items:
+        $ref: '#/PreflightResultItem'
+    error:
+      type: object
+      description: The error of the preflight job if it failed
+
+PreflightResultItem:
+  type: object
+  properties:
+    audits:
+      type: array
+      items:
+        type: object
+        properties:
+          name:
+            type: string
+            description: The name of the audit
+          opportunities:
+            type: array
+            items:
+              type: object
+              properties:
+                check:
+                  type: string
+                  description: The title of the opportunity
+                issue:
+                  type: string
+                  description: The description of the opportunity
+                seoImpact:
+                  type: string
+                  description: The SEO impact of the opportunity
+                seoRecommendation:
+                  type: string
+                  description: The SEO recommendation of the opportunity
+                aiSuggestion:
+                  type: string
+                  description: The AI suggestion of the opportunity
+                aiRationale:
+                  type: string
+                  description: The AI rationale of the opportunity
+          type:
+            type: string
+            description: The type of the audit
+    pageUrl:
+      type: string
+      format: uri
+      description: The URL of the page that was audited
+    profiling:
+      type: object
+      description: The profiling information of the audit
+      properties:
+        startTime:
+          type: string
+          format: date-time
+          description: The start time of the audit
+        endTime:
+          type: string
+          format: date-time
+          description: The end time of the audit
+        total:
+          type: string
+          description: The total time taken for the audit in seconds
+        breakdown:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                description: The name of the check
+              startTime:
+                type: string
+                format: date-time
+                description: The start time of the check
+              endTime:
+                type: string
+                format: date-time
+                description: The end time of the check
+              duration:
+                type: string
+                description: The duration of the check in seconds
+    step:
+      type: string
+      enum: [identify, suggest]
+      description: The step of the preflight job when this result was generated
