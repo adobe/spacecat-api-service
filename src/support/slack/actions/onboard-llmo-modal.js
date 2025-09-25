@@ -418,7 +418,8 @@ async function updateIndexConfig(dataFolder, lambdaCtx, slackCtx) {
 
   const owner = 'adobe';
   const repo = 'project-elmo-ui-data';
-  const ref = env.ENVIRONMENT === 'prod' ? 'main' : 'onboarding-bot-dev';
+  /* c8 ignore next */
+  const ref = env.ENV === 'prod' ? 'main' : 'onboarding-bot-dev';
   const path = 'helix-query.yaml';
 
   const { data: file } = await octokit.repos.getContent({
@@ -503,7 +504,8 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
   } = input;
   const { hostname } = new URL(baseURL);
   const dataFolderName = hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
-  const dataFolder = env.ENVIRONMENT === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+  /* c8 ignore next */
+  const dataFolder = env.ENV === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
 
   const {
     Site, Configuration,

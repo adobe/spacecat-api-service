@@ -145,6 +145,9 @@ describe('onboard-llmo-modal', () => {
         SiteEnrollment: mockSiteEnrollment,
 
       },
+      env: {
+        ENV: 'prod',
+      },
       imsClient: mockImsClient,
       sqs: mockSqs,
       ...overrides,
