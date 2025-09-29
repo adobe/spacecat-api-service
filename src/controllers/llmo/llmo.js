@@ -10,7 +10,9 @@
  * governing permissions and limitations under the License.
  */
 
-import { ok, badRequest, forbidden, createResponse } from '@adobe/spacecat-shared-http-utils';
+import {
+  ok, badRequest, forbidden, createResponse,
+} from '@adobe/spacecat-shared-http-utils';
 import {
   SPACECAT_USER_AGENT,
   tracingFetch as fetch,
