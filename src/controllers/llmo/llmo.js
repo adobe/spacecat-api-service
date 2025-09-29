@@ -358,7 +358,7 @@ function LlmoController(ctx) {
       }
 
       log.info(`Fetching LLMO config from S3 for siteId: ${siteId}${version != null ? ` with version: ${version}` : ''}`);
-      const { config: s3Config, exists } = await readConfig(siteId, s3.s3Client, {
+      const { config, exists, version: configVersion } = await readConfig(siteId, s3.s3Client, {
         s3Bucket: s3.s3Bucket,
         version,
       });
@@ -368,7 +368,7 @@ function LlmoController(ctx) {
         return notFound(`LLMO config version '${version}' not found for site '${siteId}'`);
       }
 
-      return ok(s3Config);
+      return ok({ config, version: configVersion || null });
     } catch (error) {
       log.error(`Error getting llmo config for siteId: ${siteId}, error: ${error.message}`);
       return badRequest(error.message);

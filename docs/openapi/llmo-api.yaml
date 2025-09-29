@@ -206,7 +206,18 @@ llmo-config:
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/LlmoConfig'
+              type: object
+              properties:
+                config:
+                  $ref: './schemas.yaml#/LlmoConfig'
+                version:
+                  type: string
+                  nullable: true
+                  description: The S3 object version ID of the configuration, or null if default configuration is returned
+                  example: "abc123def456"
+              required:
+                - config
+                - version
       '400':
         $ref: './responses.yaml#/400'
       '401':

@@ -2206,13 +2206,14 @@ describe('LlmoController', () => {
         Body: {
           transformToString: () => Promise.resolve(JSON.stringify(config)),
         },
+        VersionId: 'v123',
       });
 
       const result = await controller.getLlmoConfig(mockContext);
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
-      expect(responseBody).to.deep.equal(config);
+      expect(responseBody).to.deep.equal({ config, version: 'v123' });
     });
 
     it('should return bad request when s3 client is missing', async () => {
@@ -2242,20 +2243,25 @@ describe('LlmoController', () => {
         name: 'test-category',
       };
 
-      s3Client.send.resolves({
-        Body: {
-          transformToString: () => Promise.resolve(JSON.stringify(config)),
-        },
-      });
+      const version = 'v123';
+
+      s3Client.send
+        .withArgs(sinon.match({ input: { VersionId: version } }))
+        .resolves({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify(config)),
+          },
+          VersionId: version,
+        });
 
       // Add version to context data
-      mockContext.data = { version: 'v123' };
+      mockContext.data = { version };
 
       const result = await controller.getLlmoConfig(mockContext);
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
-      expect(responseBody).to.deep.equal(config);
+      expect(responseBody).deep.equals({ config, version });
     });
 
     it('should return 404 when specific version does not exist', async () => {
@@ -2303,7 +2309,7 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
-      expect(responseBody).to.deep.equal(llmoConfig.defaultConfig());
+      expect(responseBody).to.deep.equal({ config: llmoConfig.defaultConfig(), version: null });
     });
 
     it('should handle empty string version parameter', async () => {
