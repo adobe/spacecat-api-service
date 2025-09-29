@@ -1,3 +1,10 @@
+## [1.184.2](https://github.com/adobe/spacecat-api-service/compare/v1.184.1...v1.184.2) (2025-09-29)
+
+
+### Bug Fixes
+
+* re-throw error within ELMO controller to not lose meaningful message ([#1295](https://github.com/adobe/spacecat-api-service/issues/1295)) ([32a295c](https://github.com/adobe/spacecat-api-service/commit/32a295c919d8637b2bd42da3b78da4cc522250ca))
+
 ## [1.184.1](https://github.com/adobe/spacecat-api-service/compare/v1.184.0...v1.184.1) (2025-09-29)
 
 
