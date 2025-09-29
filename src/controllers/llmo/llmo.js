@@ -21,6 +21,7 @@ import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/confi
 import crypto from 'crypto';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import AccessControlUtil from '../../support/access-control-util.js';
+import ElastiCacheService, { createElastiCacheService } from '../../support/elasticache.js';
 import {
   applyFilters,
   applyInclusions,
@@ -34,6 +35,17 @@ const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem
 
 function LlmoController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
+  const { log, env } = ctx;
+
+  // Initialize ElastiCache service
+  const cacheService = createElastiCacheService(env, log);
+
+  // Connect to ElastiCache if available
+  if (cacheService) {
+    cacheService.connect().catch((error) => {
+      log.error(`Failed to connect to ElastiCache: ${error.message}`);
+    });
+  }
   // Helper function to get site and validate LLMO config
   const getSiteAndValidateLlmo = async (context) => {
     const { siteId } = context.params;
@@ -54,12 +66,12 @@ function LlmoController(ctx) {
   };
 
   // Helper function to save site config with error handling
-  const saveSiteConfig = async (site, config, log, operation) => {
+  const saveSiteConfig = async (site, config, contextLog, operation) => {
     site.setConfig(Config.toDynamoItem(config));
     try {
       await site.save();
     } catch (error) {
-      log.error(`Error ${operation} for site's llmo config ${site.getId()}: ${error.message}`);
+      contextLog.error(`Error ${operation} for site's llmo config ${site.getId()}: ${error.message}`);
     }
   };
 
@@ -85,16 +97,42 @@ function LlmoController(ctx) {
 
   // Handles requests to the LLMO sheet data endpoint
   const getLlmoSheetData = async (context) => {
-    const { log } = context;
     const { siteId, dataSource, sheetType } = context.params;
-    const { env } = context;
+    const methodStartTime = Date.now();
+
     try {
       const { llmoConfig } = await getSiteAndValidateLlmo(context);
+      const { limit, offset, sheet } = context.data;
+
+      // Generate cache key
+      const queryParams = {};
+      if (limit) queryParams.limit = limit;
+      if (offset) queryParams.offset = offset;
+      if (sheet) queryParams.sheet = sheet;
+
+      let cacheKey = null;
+      let cachedData = null;
+
+      // Try to get from cache first
+      if (cacheService && cacheService.isReady()) {
+        cacheKey = ElastiCacheService
+          .generateCacheKey(siteId, llmoConfig.dataFolder, dataSource, sheetType, queryParams);
+        const cacheStartTime = Date.now();
+        cachedData = await cacheService.get(cacheKey);
+        const cacheDuration = Date.now() - cacheStartTime;
+
+        if (cachedData) {
+          // TODO: remove spam
+          log.info(`LLMO sheet data cache HIT - elapsed: ${Date.now() - methodStartTime}ms, cache fetch: ${cacheDuration}ms`);
+          return ok(cachedData);
+        }
+        log.info(`LLMO sheet data cache MISS - cache fetch: ${cacheDuration}ms`);
+      }
+
       const sheetURL = sheetType ? `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json` : `${llmoConfig.dataFolder}/${dataSource}.json`;
 
       // Add limit, offset and sheet query params to the url
       const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
-      const { limit, offset, sheet } = context.data;
       if (limit) {
         url.searchParams.set('limit', limit);
       }
@@ -107,6 +145,7 @@ function LlmoController(ctx) {
       }
 
       // Fetch data from the external endpoint using the dataFolder from config
+      const fetchStartTime = Date.now();
       const response = await fetch(url.toString(), {
         headers: {
           Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
@@ -122,13 +161,24 @@ function LlmoController(ctx) {
 
       // Get the response data
       const data = await response.json();
+      const fetchDuration = Date.now() - fetchStartTime;
+
+      // Cache the data for future requests
+      if (cacheService && cacheService.isReady() && cacheKey) {
+        const cacheSetStartTime = Date.now();
+        await cacheService.set(cacheKey, data);
+        const cacheSetDuration = Date.now() - cacheSetStartTime;
+        log.info(`LLMO sheet data cached - cache set: ${cacheSetDuration}ms`);
+      }
+
+      log.info(`LLMO sheet data fetch completed - total: ${Date.now() - methodStartTime}ms, fetch: ${fetchDuration}ms`);
 
       // Return the data and let the framework handle the compression
       return ok(data, {
         ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
       });
     } catch (error) {
-      log.error(`Error proxying data for siteId: ${siteId}, error: ${error.message}`);
+      log.error(`Error proxying data for siteId: ${siteId}, error: ${error.message} - elapsed: ${Date.now() - methodStartTime}ms`);
       return badRequest(error.message);
     }
   };
@@ -136,9 +186,7 @@ function LlmoController(ctx) {
   // Handles POST requests to the LLMO sheet data endpoint
   // with query capabilities (filtering, exclusions, grouping)
   const queryLlmoSheetData = async (context) => {
-    const { log } = context;
     const { siteId, dataSource, sheetType } = context.params;
-    const { env } = context;
 
     // Start timing for the entire method
     const methodStartTime = Date.now();
@@ -186,26 +234,68 @@ function LlmoController(ctx) {
       const setupTime = Date.now();
       log.info(`LLMO query setup completed - elapsed: ${setupTime - methodStartTime}ms`);
 
-      // Fetch data from the external endpoint using the dataFolder from config
-      const fetchStartTime = Date.now();
-      const response = await fetch(url.toString(), {
-        headers: {
-          Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
-          'User-Agent': SPACECAT_USER_AGENT,
-          'Accept-Encoding': 'gzip',
-        },
-      });
+      // Try to get raw data from cache first (before applying filters/transformations)
+      let rawData = null;
+      let cacheKey = null;
 
-      if (!response.ok) {
-        log.error(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
-        throw new Error(`External API returned ${response.status}: ${response.statusText}`);
+      if (cacheService && cacheService.isReady()) {
+        // Generate cache key for raw data (without query processing params)
+        cacheKey = ElastiCacheService
+          .generateCacheKey(
+            siteId,
+            llmoConfig.dataFolder,
+            dataSource,
+            sheetType,
+            { limit: FIXED_LLMO_LIMIT },
+          );
+        const cacheStartTime = Date.now();
+        rawData = await cacheService.get(cacheKey);
+        const cacheDuration = Date.now() - cacheStartTime;
+
+        if (rawData) {
+          log.info(`LLMO query raw data cache HIT - cache fetch: ${cacheDuration}ms`);
+        } else {
+          log.info(`LLMO query raw data cache MISS - cache fetch: ${cacheDuration}ms`);
+        }
       }
 
-      // Get the response data
-      let data = await response.json();
-      const fetchEndTime = Date.now();
-      const fetchDuration = fetchEndTime - fetchStartTime;
-      log.info(`External API fetch completed - elapsed: ${fetchEndTime - methodStartTime}ms, duration: ${fetchDuration}ms`);
+      let data;
+      let fetchDuration = 0;
+
+      if (rawData) {
+        // Use cached raw data
+        data = rawData;
+        log.info(`Using cached raw data - elapsed: ${Date.now() - methodStartTime}ms`);
+      } else {
+        // Fetch data from the external endpoint using the dataFolder from config
+        const fetchStartTime = Date.now();
+        const response = await fetch(url.toString(), {
+          headers: {
+            Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
+            'User-Agent': SPACECAT_USER_AGENT,
+            'Accept-Encoding': 'gzip',
+          },
+        });
+
+        if (!response.ok) {
+          log.error(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
+          throw new Error(`External API returned ${response.status}: ${response.statusText}`);
+        }
+
+        // Get the response data
+        data = await response.json();
+        const fetchEndTime = Date.now();
+        fetchDuration = fetchEndTime - fetchStartTime;
+        log.info(`External API fetch completed - elapsed: ${fetchEndTime - methodStartTime}ms, duration: ${fetchDuration}ms`);
+
+        // Cache the raw data for future requests
+        if (cacheService && cacheService.isReady() && cacheKey) {
+          const cacheSetStartTime = Date.now();
+          await cacheService.set(cacheKey, data);
+          const cacheSetDuration = Date.now() - cacheSetStartTime;
+          log.info(`LLMO query raw data cached - cache set: ${cacheSetDuration}ms`);
+        }
+      }
 
       // Keep only the required sheets
       if (sheets.length > 0 && (data[':type'] === 'multi-sheet')) {
@@ -275,9 +365,7 @@ function LlmoController(ctx) {
       log.info(`LLMO query completed - total duration: ${totalDuration}ms (fetch: ${fetchDuration}ms, inclusion: ${inclusionDuration}ms, filtering: ${filterDuration}ms, exclusion: ${exclusionDuration}ms, grouping: ${groupingDuration}ms, mapping: ${mappingDuration}ms)`);
 
       // Return the data and let the framework handle the compression
-      return ok(data, {
-        ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
-      });
+      return ok(data);
     } catch (error) {
       const errorTime = Date.now();
       log.error(`Error proxying data for siteId: ${siteId}, error: ${error.message} - elapsed: ${errorTime - methodStartTime}ms`);
@@ -287,20 +375,45 @@ function LlmoController(ctx) {
 
   // Handles requests to the LLMO global sheet data endpoint
   const getLlmoGlobalSheetData = async (context) => {
-    const { log } = context;
     const { siteId, configName } = context.params;
-    const { env } = context;
+
+    const methodStartTime = Date.now();
+
     try {
       log.info(`validating LLMO global sheet data for siteId: ${siteId}, configName: ${configName}`);
       // Validate LLMO access but don't use the site-specific dataFolder
       await getSiteAndValidateLlmo(context);
+
+      const { limit, offset, sheet } = context.data;
+
+      // Generate cache key for global data
+      const queryParams = {};
+      if (limit) queryParams.limit = limit;
+      if (offset) queryParams.offset = offset;
+      if (sheet) queryParams.sheet = sheet;
+
+      let cacheKey = null;
+      let cachedData = null;
+
+      // Try to get from cache first
+      if (cacheService && cacheService.isReady()) {
+        cacheKey = ElastiCacheService.generateGlobalCacheKey(siteId, configName, queryParams);
+        const cacheStartTime = Date.now();
+        cachedData = await cacheService.get(cacheKey);
+        const cacheDuration = Date.now() - cacheStartTime;
+
+        if (cachedData) {
+          log.info(`LLMO global sheet data cache HIT - elapsed: ${Date.now() - methodStartTime}ms, cache fetch: ${cacheDuration}ms`);
+          return ok(cachedData);
+        }
+        log.info(`LLMO global sheet data cache MISS - cache fetch: ${cacheDuration}ms`);
+      }
 
       // Use 'llmo-global' folder
       const sheetURL = `llmo-global/${configName}.json`;
 
       // Add limit, offset and sheet query params to the url
       const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
-      const { limit, offset, sheet } = context.data;
       if (limit) {
         url.searchParams.set('limit', limit);
       }
@@ -313,6 +426,7 @@ function LlmoController(ctx) {
       }
 
       // Fetch data from the external endpoint using the global llmo-global folder
+      const fetchStartTime = Date.now();
       const response = await fetch(url.toString(), {
         headers: {
           Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
@@ -328,21 +442,29 @@ function LlmoController(ctx) {
 
       // Get the response data
       const data = await response.json();
+      const fetchDuration = Date.now() - fetchStartTime;
 
-      log.info(`Successfully proxied global data for siteId: ${siteId}, sheetURL: ${sheetURL}`);
+      // Cache the data for future requests
+      if (cacheService && cacheService.isReady() && cacheKey) {
+        const cacheSetStartTime = Date.now();
+        await cacheService.set(cacheKey, data);
+        const cacheSetDuration = Date.now() - cacheSetStartTime;
+        log.info(`LLMO global sheet data cached - cache set: ${cacheSetDuration}ms`);
+      }
+
+      log.info(`Successfully proxied global data for siteId: ${siteId}, sheetURL: ${sheetURL} - total: ${Date.now() - methodStartTime}ms, fetch: ${fetchDuration}ms`);
       // Return the data and let the framework handle the compression
       return ok(data, {
         ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
       });
     } catch (error) {
-      log.error(`Error proxying global data for siteId: ${siteId}, error: ${error.message}`);
+      log.error(`Error proxying global data for siteId: ${siteId}, error: ${error.message} - elapsed: ${Date.now() - methodStartTime}ms`);
       return badRequest(error.message);
     }
   };
 
   // Handles requests to the LLMO config endpoint
   const getLlmoConfig = async (context) => {
-    const { log } = context;
     const { siteId } = context.params;
     try {
       const { llmoConfig } = await getSiteAndValidateLlmo(context);
@@ -362,7 +484,6 @@ function LlmoController(ctx) {
   // Handles requests to the LLMO questions endpoint, adds a new question
   // the body format is { Human: [question1, question2], AI: [question3, question4] }
   const addLlmoQuestion = async (context) => {
-    const { log } = context;
     const { site, config } = await getSiteAndValidateLlmo(context);
 
     // add the question to the llmoConfig
@@ -402,7 +523,6 @@ function LlmoController(ctx) {
 
   // Handles requests to the LLMO questions endpoint, removes a question
   const removeLlmoQuestion = async (context) => {
-    const { log } = context;
     const { questionKey } = context.params;
     const { site, config } = await getSiteAndValidateLlmo(context);
 
@@ -419,7 +539,6 @@ function LlmoController(ctx) {
 
   // Handles requests to the LLMO questions endpoint, updates a question
   const patchLlmoQuestion = async (context) => {
-    const { log } = context;
     const { questionKey } = context.params;
     const { data } = context;
     const { site, config } = await getSiteAndValidateLlmo(context);
@@ -450,8 +569,6 @@ function LlmoController(ctx) {
 
   // Handles requests to the LLMO customer intent endpoint, adds new customer intent items
   const addLlmoCustomerIntent = async (context) => {
-    const { log } = context;
-
     try {
       const { site, config } = await getSiteAndValidateLlmo(context);
 
@@ -497,7 +614,6 @@ function LlmoController(ctx) {
 
   // Handles requests to the LLMO customer intent endpoint, removes a customer intent item
   const removeLlmoCustomerIntent = async (context) => {
-    const { log } = context;
     const { intentKey } = context.params;
 
     try {
@@ -522,7 +638,6 @@ function LlmoController(ctx) {
 
   // Handles requests to the LLMO customer intent endpoint, updates a customer intent item
   const patchLlmoCustomerIntent = async (context) => {
-    const { log } = context;
     const { intentKey } = context.params;
     const { data } = context;
 
@@ -557,7 +672,6 @@ function LlmoController(ctx) {
 
   // Handles requests to the LLMO CDN logs filter endpoint, updates CDN logs filter configuration
   const patchLlmoCdnLogsFilter = async (context) => {
-    const { log } = context;
     const { data } = context;
     const { siteId } = context.params;
 
@@ -583,7 +697,6 @@ function LlmoController(ctx) {
 
   // Handles requests to the LLMO CDN bucket config endpoint, updates CDN bucket configuration
   const patchLlmoCdnBucketConfig = async (context) => {
-    const { log } = context;
     const { data } = context;
     const { siteId } = context.params;
 
