@@ -908,11 +908,33 @@ export const onboardSingleSite = async (
       },
     };
 
+    // CWV Demo Suggestions job - add generic CWV suggestions to opportunities
+    const cwvDemoSuggestionsJob = {
+      type: 'cwv-demo-suggestions-processor',
+      siteId: siteID,
+      siteUrl: baseURL,
+      imsOrgId: imsOrgID,
+      organizationId,
+      taskContext: {
+        profile: profileName,
+        slackContext: {
+          channelId: slackContext.channelId,
+          threadTs: slackContext.threadTs,
+        },
+      },
+    };
+
+    log.info(`Opportunity status job: ${JSON.stringify(opportunityStatusJob)}`);
+    log.info(`Disable import and audit job: ${JSON.stringify(disableImportAndAuditJob)}`);
+    log.info(`Demo URL job: ${JSON.stringify(demoURLJob)}`);
+    log.info(`CWV Demo Suggestions job: ${JSON.stringify(cwvDemoSuggestionsJob)}`);
+
     // Prepare and start step function workflow with the necessary parameters
     const workflowInput = {
       opportunityStatusJob,
       disableImportAndAuditJob,
       demoURLJob,
+      cwvDemoSuggestionsJob,
       workflowWaitTime: workflowWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS,
     };
 
