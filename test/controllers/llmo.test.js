@@ -18,7 +18,7 @@ import esmock from 'esmock';
 
 use(sinonChai);
 
-xdescribe('LlmoController', () => {
+describe('LlmoController', () => {
   let controller;
   let mockContext;
   let mockSite;
@@ -281,9 +281,6 @@ xdescribe('LlmoController', () => {
       await new Promise((resolve) => {
         setTimeout(resolve, 10);
       });
-
-      // Verify that the error was logged
-      expect(mockLog.error).to.have.been.calledWith('Failed to connect to ElastiCache: Connection failed');
 
       // Verify controller still works despite cache connection failure
       expect(controllerWithFailingCache).to.be.an('object');

@@ -37,15 +37,18 @@ function LlmoController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
   const { log, env } = ctx;
 
-  // Initialize ElastiCache service
   const cacheService = createElastiCacheService(env, log);
 
-  // Connect to ElastiCache if available
-  if (cacheService) {
-    cacheService.connect().catch((error) => {
-      log.error(`Failed to connect to ElastiCache: ${error.message}`);
-    });
-  }
+  // Helper function to ensure cache connection
+  const ensureCacheConnection = async () => {
+    if (cacheService && !cacheService.isReady()) {
+      try {
+        await cacheService.connect();
+      } catch (error) {
+        log.error(`Failed to connect to ElastiCache: ${error.message}`);
+      }
+    }
+  };
   // Helper function to get site and validate LLMO config
   const getSiteAndValidateLlmo = async (context) => {
     const { siteId } = context.params;
@@ -115,19 +118,17 @@ function LlmoController(ctx) {
       let cachedData = null;
 
       // Try to get from cache first
-      if (cacheService && cacheService.isReady()) {
-        cacheKey = ElastiCacheService
-          .generateCacheKey(siteId, llmoConfig.dataFolder, dataSource, sheetType, queryParams);
-        const cacheStartTime = Date.now();
-        cachedData = await cacheService.get(cacheKey);
-        const cacheDuration = Date.now() - cacheStartTime;
+      if (cacheService) {
+        await ensureCacheConnection();
+        if (cacheService.isReady()) {
+          cacheKey = ElastiCacheService
+            .generateCacheKey(siteId, llmoConfig.dataFolder, dataSource, sheetType, queryParams);
+          cachedData = await cacheService.get(cacheKey);
 
-        if (cachedData) {
-          // TODO: remove spam
-          log.info(`LLMO sheet data cache HIT - elapsed: ${Date.now() - methodStartTime}ms, cache fetch: ${cacheDuration}ms`);
-          return ok(cachedData);
+          if (cachedData) {
+            return ok(cachedData);
+          }
         }
-        log.info(`LLMO sheet data cache MISS - cache fetch: ${cacheDuration}ms`);
       }
 
       const sheetURL = sheetType ? `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json` : `${llmoConfig.dataFolder}/${dataSource}.json`;
@@ -166,10 +167,7 @@ function LlmoController(ctx) {
 
       // Cache the data for future requests
       if (cacheService && cacheService.isReady() && cacheKey) {
-        const cacheSetStartTime = Date.now();
         await cacheService.set(cacheKey, data);
-        const cacheSetDuration = Date.now() - cacheSetStartTime;
-        log.info(`LLMO sheet data cached - cache set: ${cacheSetDuration}ms`);
       }
 
       log.info(`LLMO sheet data fetch completed - total: ${Date.now() - methodStartTime}ms, fetch: ${fetchDuration}ms`);
@@ -239,24 +237,19 @@ function LlmoController(ctx) {
       let rawData = null;
       let cacheKey = null;
 
-      if (cacheService && cacheService.isReady()) {
-        // Generate cache key for raw data (without query processing params)
-        cacheKey = ElastiCacheService
-          .generateCacheKey(
-            siteId,
-            llmoConfig.dataFolder,
-            dataSource,
-            sheetType,
-            { limit: FIXED_LLMO_LIMIT },
-          );
-        const cacheStartTime = Date.now();
-        rawData = await cacheService.get(cacheKey);
-        const cacheDuration = Date.now() - cacheStartTime;
-
-        if (rawData) {
-          log.info(`LLMO query raw data cache HIT - cache fetch: ${cacheDuration}ms`);
-        } else {
-          log.info(`LLMO query raw data cache MISS - cache fetch: ${cacheDuration}ms`);
+      if (cacheService) {
+        await ensureCacheConnection();
+        if (cacheService.isReady()) {
+          // Generate cache key for raw data (without query processing params)
+          cacheKey = ElastiCacheService
+            .generateCacheKey(
+              siteId,
+              llmoConfig.dataFolder,
+              dataSource,
+              sheetType,
+              { limit: FIXED_LLMO_LIMIT },
+            );
+          rawData = await cacheService.get(cacheKey);
         }
       }
 
@@ -291,10 +284,7 @@ function LlmoController(ctx) {
 
         // Cache the raw data for future requests
         if (cacheService && cacheService.isReady() && cacheKey) {
-          const cacheSetStartTime = Date.now();
           await cacheService.set(cacheKey, data);
-          const cacheSetDuration = Date.now() - cacheSetStartTime;
-          log.info(`LLMO query raw data cached - cache set: ${cacheSetDuration}ms`);
         }
       }
 
@@ -397,17 +387,16 @@ function LlmoController(ctx) {
       let cachedData = null;
 
       // Try to get from cache first
-      if (cacheService && cacheService.isReady()) {
-        cacheKey = ElastiCacheService.generateGlobalCacheKey(siteId, configName, queryParams);
-        const cacheStartTime = Date.now();
-        cachedData = await cacheService.get(cacheKey);
-        const cacheDuration = Date.now() - cacheStartTime;
+      if (cacheService) {
+        await ensureCacheConnection();
+        if (cacheService.isReady()) {
+          cacheKey = ElastiCacheService.generateGlobalCacheKey(siteId, configName, queryParams);
+          cachedData = await cacheService.get(cacheKey);
 
-        if (cachedData) {
-          log.info(`LLMO global sheet data cache HIT - elapsed: ${Date.now() - methodStartTime}ms, cache fetch: ${cacheDuration}ms`);
-          return ok(cachedData);
+          if (cachedData) {
+            return ok(cachedData);
+          }
         }
-        log.info(`LLMO global sheet data cache MISS - cache fetch: ${cacheDuration}ms`);
       }
 
       // Use 'llmo-global' folder
@@ -447,10 +436,7 @@ function LlmoController(ctx) {
 
       // Cache the data for future requests
       if (cacheService && cacheService.isReady() && cacheKey) {
-        const cacheSetStartTime = Date.now();
         await cacheService.set(cacheKey, data);
-        const cacheSetDuration = Date.now() - cacheSetStartTime;
-        log.info(`LLMO global sheet data cached - cache set: ${cacheSetDuration}ms`);
       }
 
       log.info(`Successfully proxied global data for siteId: ${siteId}, sheetURL: ${sheetURL} - total: ${Date.now() - methodStartTime}ms, fetch: ${fetchDuration}ms`);
