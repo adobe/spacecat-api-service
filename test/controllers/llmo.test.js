@@ -71,25 +71,6 @@ describe('LlmoController', () => {
     // Create S3Client stub
     s3Client = sinon.createStubInstance(S3Client);
 
-    // x={
-    //   send: sinon.stub().callsFake((command) => {
-    //     // Handle GetObjectCommand for reading config
-    //     if (command.constructor.name === 'GetObjectCommand') {
-    //       return Promise.resolve({
-    //         Body: {
-    //           transformToString: () => Promise.resolve(JSON.stringify(mockLlmoConfig)),
-    //         },
-    //       });
-    //     }
-    //     // Handle PutObjectCommand for writing config
-    //     if (command.constructor.name === 'PutObjectCommand') {
-    //       return Promise.resolve({ VersionId: 'v1' });
-    //     }
-    //     // Default response
-    //     return Promise.resolve({});
-    //   }),
-    // };
-
     mockConfig = {
       getLlmoConfig: sinon.stub().returns(mockLlmoConfig),
       updateLlmoConfig: sinon.stub(),
