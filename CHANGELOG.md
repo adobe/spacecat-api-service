@@ -1,3 +1,10 @@
+# [1.186.0](https://github.com/adobe/spacecat-api-service/compare/v1.185.0...v1.186.0) (2025-09-29)
+
+
+### Features
+
+* add cwv suggestions task ([#1176](https://github.com/adobe/spacecat-api-service/issues/1176)) ([b0f5ddc](https://github.com/adobe/spacecat-api-service/commit/b0f5ddcbcbc8b41d51591cb6369b7e088eeb6d70))
+
 # [1.185.0](https://github.com/adobe/spacecat-api-service/compare/v1.184.3...v1.185.0) (2025-09-29)
 
 
