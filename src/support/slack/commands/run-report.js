@@ -153,7 +153,7 @@ function RunReportCommand(context) {
 
       // Validate required arguments (allow empty strings to pass through to period validation)
       if (siteInput === undefined || siteInput === null
-          || reportType === undefined || reportType === null) {
+        || reportType === undefined || reportType === null) {
         await say(`:warning: Missing required arguments. ${baseCommand.usage()}`);
         return;
       }
@@ -166,15 +166,15 @@ function RunReportCommand(context) {
       }
       // If name is not provided use a default one
       let reportName = name;
-      if (reportName === undefined || reportName == null) {
+      if (!reportName) {
         const { hostname } = new URL(baseURL);
         reportName = hostname.replace(/^www\./, '');
         reportName = reportName.charAt(0).toUpperCase() + reportName.slice(1);
       }
       let finalReportStartDate = reportStartDate;
       let finalReportEndDate = reportEndDate;
-      if ((finalReportStartDate === undefined || finalReportStartDate == null)
-        && (finalReportEndDate === undefined || finalReportEndDate == null)) {
+
+      if (!finalReportStartDate && !finalReportEndDate) {
         const d = new Date();
         d.setMonth(d.getMonth() - 1);
         [finalReportStartDate] = d.toISOString().split('T');
@@ -183,13 +183,20 @@ function RunReportCommand(context) {
 
       let finalComparisonStartDate = comparisonStartDate;
       let finalComparisonEndDate = comparisonEndDate;
-      if ((finalComparisonStartDate === undefined || finalComparisonStartDate == null)
-        && (finalComparisonEndDate === undefined || finalComparisonEndDate == null)) {
-        const d = new Date();
-        d.setMonth(d.getMonth() - 1);
-        [finalComparisonEndDate] = d.toISOString().split('T');
-        d.setMonth(d.getMonth() - 1);
-        [finalComparisonStartDate] = d.toISOString().split('T');
+
+      if (!finalComparisonStartDate && !finalComparisonEndDate) {
+        if (!reportStartDate && !reportEndDate) {
+          const d = new Date();
+          d.setMonth(d.getMonth() - 1);
+          [finalComparisonEndDate] = d.toISOString().split('T');
+          d.setMonth(d.getMonth() - 1);
+          [finalComparisonStartDate] = d.toISOString().split('T');
+        } else {
+          const d = new Date(reportStartDate);
+          [finalComparisonEndDate] = d.toISOString().split('T');
+          d.setDate(d.getDate() - 30);
+          [finalComparisonStartDate] = d.toISOString().split('T');
+        }
       }
 
       // Find the site

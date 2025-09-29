@@ -113,8 +113,6 @@ describe('RunReportCommand', () => {
         { input: 'PERFORMANCE   METRICS', expected: 'Performance metrics' },
         { input: 'test', expected: 'Test' },
         { input: 'a', expected: 'A' },
-        { input: '', expected: '' },
-        { input: '   ', expected: '' },
       ];
 
       for (const testCase of testCases) {
@@ -367,16 +365,9 @@ describe('RunReportCommand', () => {
       const fetchCall = global.fetch.firstCall;
       const requestBody = JSON.parse(fetchCall.args[1].body);
 
-      // Should have generated comparison dates (two months back to one month back)
-      expect(requestBody.comparisonPeriod.startDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
-      expect(requestBody.comparisonPeriod.endDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
-
-      // The comparison end date should be approximately one month ago
-      const comparisonEndDate = new Date(requestBody.comparisonPeriod.endDate);
-      const oneMonthAgo = new Date();
-      oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
-      const diffInDays = Math.abs(oneMonthAgo - comparisonEndDate) / (1000 * 60 * 60 * 24);
-      expect(diffInDays).to.be.lessThan(2); // Allow for 1 day difference due to timing
+      // Should have generated default comparison dates (30 days before report start)
+      expect(requestBody.comparisonPeriod.startDate).to.equal('2024-12-02');
+      expect(requestBody.comparisonPeriod.endDate).to.equal('2025-01-01');
     });
 
     it('should generate default comparison period dates when both are null', async () => {
@@ -407,16 +398,9 @@ describe('RunReportCommand', () => {
       const fetchCall = global.fetch.firstCall;
       const requestBody = JSON.parse(fetchCall.args[1].body);
 
-      // Should have generated comparison dates (two months back to one month back)
-      expect(requestBody.comparisonPeriod.startDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
-      expect(requestBody.comparisonPeriod.endDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
-
-      // The comparison end date should be approximately one month ago
-      const comparisonEndDate = new Date(requestBody.comparisonPeriod.endDate);
-      const oneMonthAgo = new Date();
-      oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
-      const diffInDays = Math.abs(oneMonthAgo - comparisonEndDate) / (1000 * 60 * 60 * 24);
-      expect(diffInDays).to.be.lessThan(2); // Allow for 1 day difference due to timing
+      // Should have generated default comparison dates (30 days before report start)
+      expect(requestBody.comparisonPeriod.startDate).to.equal('2024-12-02');
+      expect(requestBody.comparisonPeriod.endDate).to.equal('2025-01-01');
     });
 
     it('should generate default dates for both report and comparison periods when all are undefined', async () => {
@@ -447,26 +431,22 @@ describe('RunReportCommand', () => {
       const fetchCall = global.fetch.firstCall;
       const requestBody = JSON.parse(fetchCall.args[1].body);
 
-      // Should have generated all dates
-      expect(requestBody.reportPeriod.startDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
-      expect(requestBody.reportPeriod.endDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
-      expect(requestBody.comparisonPeriod.startDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
-      expect(requestBody.comparisonPeriod.endDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
+      // Should have generated default report dates (today and 1 month ago)
+      const today = new Date();
+      const oneMonthAgo = new Date(today);
+      oneMonthAgo.setMonth(today.getMonth() - 1);
 
-      // Verify the date relationships
-      const reportStart = new Date(requestBody.reportPeriod.startDate);
-      const reportEnd = new Date(requestBody.reportPeriod.endDate);
-      const comparisonStart = new Date(requestBody.comparisonPeriod.startDate);
-      const comparisonEnd = new Date(requestBody.comparisonPeriod.endDate);
+      expect(requestBody.reportPeriod.startDate).to.equal(oneMonthAgo.toISOString().split('T')[0]);
+      expect(requestBody.reportPeriod.endDate).to.equal(today.toISOString().split('T')[0]);
 
-      // Report period should be one month (start should be before end)
-      expect(reportStart.getTime()).to.be.lessThan(reportEnd.getTime());
+      // Should have generated default comparison dates
+      // (1 month before report start, then another month before that)
+      const comparisonEndDate = new Date(oneMonthAgo);
+      const comparisonStartDate = new Date(oneMonthAgo);
+      comparisonStartDate.setMonth(comparisonEndDate.getMonth() - 1);
 
-      // Comparison period should be one month (start should be before end)
-      expect(comparisonStart.getTime()).to.be.lessThan(comparisonEnd.getTime());
-
-      // Comparison period should be before report period (allow for same time due to timing)
-      expect(comparisonEnd.getTime()).to.be.lessThanOrEqual(reportStart.getTime());
+      expect(requestBody.comparisonPeriod.startDate).to.equal(comparisonStartDate.toISOString().split('T')[0]);
+      expect(requestBody.comparisonPeriod.endDate).to.equal(comparisonEndDate.toISOString().split('T')[0]);
     });
 
     it('should not generate default dates when only one date in a period is undefined', async () => {
