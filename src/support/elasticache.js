@@ -23,6 +23,10 @@ class ElastiCacheService {
     this.client = null;
     this.isConnected = false;
     this.defaultTTL = config.defaultTTL || 3600; // 1 hour default
+    this.connectionAttempts = 0;
+    this.maxConnectionAttempts = 3;
+    this.reconnectBackoff = 1000; // Start with 1 second
+    this.maxReconnectBackoff = 30000; // Max 30 seconds
     this.createClient = clientFactory
       || ((clusterNodes, options) => new Redis.Cluster(clusterNodes, options));
   }
@@ -35,17 +39,34 @@ class ElastiCacheService {
       return;
     }
 
+    if (this.connectionAttempts >= this.maxConnectionAttempts) {
+      this.log.warn(`Max connection attempts (${this.maxConnectionAttempts}) reached for ElastiCache. Disabling Redis caching.`);
+      return;
+    }
+
     try {
+      this.connectionAttempts += 1;
+
       // Configure cluster nodes
       const clusterNodes = [{
         host: this.config.host,
         port: this.config.port || 6379,
       }];
 
-      // Configure cluster options
+      // Configure cluster options with retry and timeout settings
       const clusterOptions = {
         dnsLookup: (address, callback) => callback(null, address),
-        redisOptions: {},
+        redisOptions: {
+          connectTimeout: 10000, // 10 seconds
+          lazyConnect: true,
+          maxRetriesPerRequest: 2,
+          retryDelayOnFailover: 100,
+        },
+        enableOfflineQueue: false,
+        maxRetriesPerRequest: 2,
+        retryDelayOnFailover: 100,
+        slotsRefreshTimeout: 10000,
+        slotsRefreshInterval: 30000,
       };
 
       // Add TLS configuration for ElastiCache serverless
@@ -58,11 +79,23 @@ class ElastiCacheService {
       this.client.on('error', (err) => {
         this.log.error(`Redis Client Error: ${err.message}`);
         this.isConnected = false;
+
+        // Prevent infinite reconnection loops
+        if (err.message.includes('Failed to refresh slots cache')
+          || err.message.includes('All nodes failed')
+          || err.message.includes('Connection timeout')) {
+          this.log.warn('Critical Redis error detected. Stopping reconnection attempts.');
+          this.connectionAttempts = this.maxConnectionAttempts;
+          if (this.client) {
+            this.client.disconnect();
+          }
+        }
       });
 
       this.client.on('connect', () => {
         this.log.info('Connected to ElastiCache Redis cluster');
         this.isConnected = true;
+        this.connectionAttempts = 0; // Reset on successful connection
       });
 
       this.client.on('close', () => {
@@ -74,7 +107,22 @@ class ElastiCacheService {
       // Set connected status once cluster is ready
       this.client.on('ready', () => {
         this.isConnected = true;
+        this.connectionAttempts = 0; // Reset on successful connection
         this.log.info('ElastiCache Redis cluster is ready');
+      });
+
+      // Add timeout for initial connection attempt
+      const connectionTimeout = setTimeout(() => {
+        if (!this.isConnected) {
+          this.log.warn('ElastiCache connection timeout. Disconnecting...');
+          if (this.client) {
+            this.client.disconnect();
+          }
+        }
+      }, 15000); // 15 seconds timeout
+
+      this.client.on('ready', () => {
+        clearTimeout(connectionTimeout);
       });
     } catch (error) {
       this.log.error(`Failed to connect to ElastiCache: ${error.message}`);
@@ -86,9 +134,15 @@ class ElastiCacheService {
                    * Disconnect from Redis
                    */
   async disconnect() {
-    if (this.client && this.isConnected) {
-      this.client.disconnect();
-      this.isConnected = false;
+    if (this.client) {
+      try {
+        this.client.removeAllListeners();
+        this.client.disconnect();
+        this.isConnected = false;
+        this.log.info('ElastiCache client disconnected successfully');
+      } catch (error) {
+        this.log.error(`Error disconnecting from ElastiCache: ${error.message}`);
+      }
     }
   }
 
@@ -257,18 +311,18 @@ class ElastiCacheService {
  * @returns {ElastiCacheService|null} ElastiCache service instance or null if not configured
  */
 export function createElastiCacheService(env, log) {
+  // Only create service if host is explicitly configured
+  if (!env.ELASTICACHE_HOST) {
+    log.info('ElastiCache not configured (ELASTICACHE_HOST not set), LLMO caching will be disabled');
+    return null;
+  }
+
   const config = {
-    host: env.ELASTICACHE_HOST || 'elmodata-u65bcl.serverless.use1.cache.amazonaws.com',
+    host: env.ELASTICACHE_HOST,
     port: env.ELASTICACHE_PORT || '6379',
     tls: env.ELASTICACHE_TLS === 'true',
     defaultTTL: parseInt(env.ELASTICACHE_DEFAULT_TTL || '3600', 10),
   };
-
-  // Only create service if host is configured
-  if (!config.host) {
-    log.info('ElastiCache not configured (ELASTICACHE_HOST not set), LLMO caching will be disabled');
-    return null;
-  }
 
   return new ElastiCacheService(config, log);
 }

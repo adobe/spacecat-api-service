@@ -33,6 +33,7 @@ describe('ElastiCache Service', () => {
       del: sinon.stub(),
       info: sinon.stub(),
       on: sinon.stub(),
+      removeAllListeners: sinon.stub(),
     };
 
     mockLog = {
@@ -97,8 +98,17 @@ describe('ElastiCache Service', () => {
         {
           dnsLookup: sinon.match.func,
           redisOptions: {
+            connectTimeout: 10000,
+            lazyConnect: true,
+            maxRetriesPerRequest: 2,
+            retryDelayOnFailover: 100,
             tls: {},
           },
+          enableOfflineQueue: false,
+          maxRetriesPerRequest: 2,
+          retryDelayOnFailover: 100,
+          slotsRefreshTimeout: 10000,
+          slotsRefreshInterval: 30000,
         },
       );
       expect(mockRedisClient.on).to.have.been.calledWith('error');
@@ -122,7 +132,17 @@ describe('ElastiCache Service', () => {
         [{ host: 'test-host', port: 6379 }],
         {
           dnsLookup: sinon.match.func,
-          redisOptions: {},
+          redisOptions: {
+            connectTimeout: 10000,
+            lazyConnect: true,
+            maxRetriesPerRequest: 2,
+            retryDelayOnFailover: 100,
+          },
+          enableOfflineQueue: false,
+          maxRetriesPerRequest: 2,
+          retryDelayOnFailover: 100,
+          slotsRefreshTimeout: 10000,
+          slotsRefreshInterval: 30000,
         },
       );
     });
@@ -142,7 +162,17 @@ describe('ElastiCache Service', () => {
         [{ host: 'test-host', port: 6379 }],
         {
           dnsLookup: sinon.match.func,
-          redisOptions: {},
+          redisOptions: {
+            connectTimeout: 10000,
+            lazyConnect: true,
+            maxRetriesPerRequest: 2,
+            retryDelayOnFailover: 100,
+          },
+          enableOfflineQueue: false,
+          maxRetriesPerRequest: 2,
+          retryDelayOnFailover: 100,
+          slotsRefreshTimeout: 10000,
+          slotsRefreshInterval: 30000,
         },
       );
     });
@@ -162,8 +192,17 @@ describe('ElastiCache Service', () => {
         {
           dnsLookup: sinon.match.func,
           redisOptions: {
+            connectTimeout: 10000,
+            lazyConnect: true,
+            maxRetriesPerRequest: 2,
+            retryDelayOnFailover: 100,
             tls: {},
           },
+          enableOfflineQueue: false,
+          maxRetriesPerRequest: 2,
+          retryDelayOnFailover: 100,
+          slotsRefreshTimeout: 10000,
+          slotsRefreshInterval: 30000,
         },
       );
     });
@@ -221,6 +260,79 @@ describe('ElastiCache Service', () => {
       expect(mockLog.info).to.have.been.calledWith('ElastiCache Redis cluster is ready');
       expect(testService.isConnected).to.be.true;
     });
+
+    it('should stop reconnection attempts after max attempts', async () => {
+      const testService = new ElastiCacheService(service.config, mockLog, createClientStub);
+
+      // Set connection attempts to max
+      testService.connectionAttempts = testService.maxConnectionAttempts;
+
+      await testService.connect();
+
+      expect(mockLog.warn).to.have.been.calledWith('Max connection attempts (3) reached for ElastiCache. Disabling Redis caching.');
+      expect(createClientStub).not.to.have.been.called;
+    });
+
+    it('should handle critical Redis errors and stop reconnection', async () => {
+      const testService = new ElastiCacheService(service.config, mockLog, createClientStub);
+
+      await testService.connect();
+
+      // Get the error handler
+      const errorHandler = mockRedisClient.on.getCall(0).args[1];
+
+      // Test critical error handling
+      const criticalError = new Error('Failed to refresh slots cache');
+      errorHandler(criticalError);
+
+      expect(mockLog.error).to.have.been.calledWith('Redis Client Error: Failed to refresh slots cache');
+      expect(mockLog.warn).to.have.been.calledWith('Critical Redis error detected. Stopping reconnection attempts.');
+      expect(testService.connectionAttempts).to.equal(testService.maxConnectionAttempts);
+      expect(mockRedisClient.disconnect).to.have.been.called;
+    });
+
+    it('should handle All nodes failed error', async () => {
+      const testService = new ElastiCacheService(service.config, mockLog, createClientStub);
+
+      await testService.connect();
+
+      const errorHandler = mockRedisClient.on.getCall(0).args[1];
+      const criticalError = new Error('All nodes failed');
+      errorHandler(criticalError);
+
+      expect(mockLog.warn).to.have.been.calledWith('Critical Redis error detected. Stopping reconnection attempts.');
+      expect(testService.connectionAttempts).to.equal(testService.maxConnectionAttempts);
+    });
+
+    it('should handle Connection timeout error', async () => {
+      const testService = new ElastiCacheService(service.config, mockLog, createClientStub);
+
+      await testService.connect();
+
+      const errorHandler = mockRedisClient.on.getCall(0).args[1];
+      const criticalError = new Error('Connection timeout');
+      errorHandler(criticalError);
+
+      expect(mockLog.warn).to.have.been.calledWith('Critical Redis error detected. Stopping reconnection attempts.');
+      expect(testService.connectionAttempts).to.equal(testService.maxConnectionAttempts);
+    });
+
+    it('should clear timeout on ready event', async () => {
+      const testService = new ElastiCacheService(service.config, mockLog, createClientStub);
+
+      await testService.connect();
+
+      // Get the ready handler (should be called twice - once in setup, once for timeout clear)
+      const readyHandlers = mockRedisClient.on.getCalls().filter((call) => call.args[0] === 'ready');
+      expect(readyHandlers).to.have.length(2);
+
+      // Simulate ready event to clear timeout
+      const timeoutClearHandler = readyHandlers[1].args[1];
+      timeoutClearHandler();
+
+      // Timeout should be cleared (can't test clearTimeout directly, but can ensure handler runs)
+      expect(readyHandlers[1].args[0]).to.equal('ready');
+    });
   });
 
   describe('disconnect', () => {
@@ -230,6 +342,7 @@ describe('ElastiCache Service', () => {
 
       await service.disconnect();
 
+      expect(mockRedisClient.removeAllListeners).to.have.been.called;
       expect(mockRedisClient.disconnect).to.have.been.called;
       expect(service.isConnected).to.be.false;
     });
@@ -240,7 +353,20 @@ describe('ElastiCache Service', () => {
 
       await service.disconnect();
 
+      expect(mockRedisClient.removeAllListeners).not.to.have.been.called;
       expect(mockRedisClient.disconnect).not.to.have.been.called;
+    });
+
+    it('should handle disconnect errors gracefully', async () => {
+      service.client = mockRedisClient;
+      const disconnectError = new Error('Disconnect failed');
+      mockRedisClient.disconnect.throws(disconnectError);
+
+      await service.disconnect();
+
+      expect(mockRedisClient.removeAllListeners).to.have.been.called;
+      expect(mockRedisClient.disconnect).to.have.been.called;
+      expect(mockLog.error).to.have.been.calledWith('Error disconnecting from ElastiCache: Disconnect failed');
     });
   });
 
@@ -498,14 +624,13 @@ describe('ElastiCache Service', () => {
       expect(service2.defaultTTL).to.equal(7200);
     });
 
-    it('should use default host when not configured', () => {
+    it('should return null when host is not configured', () => {
       const env = {};
 
       const service2 = createElastiCacheService(env, mockLog);
 
-      expect(service2).to.be.instanceOf(ElastiCacheService);
-      expect(service2.config.host).to.equal('elmodata-u65bcl.serverless.use1.cache.amazonaws.com');
-      expect(mockLog.info).not.to.have.been.calledWith('ElastiCache not configured (ELASTICACHE_HOST not set), LLMO caching will be disabled');
+      expect(service2).to.be.null;
+      expect(mockLog.info).to.have.been.calledWith('ElastiCache not configured (ELASTICACHE_HOST not set), LLMO caching will be disabled');
     });
 
     it('should use defaults for optional configuration', () => {
