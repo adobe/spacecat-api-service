@@ -59,7 +59,8 @@ function LlmoController(ctx) {
     if (!llmoConfig?.dataFolder) {
       throw new Error('LLM Optimizer is not enabled for this site, add llmo config to the site');
     }
-    if (!await accessControlUtil.hasAccess(site, '', EntitlementModel.PRODUCT_CODES.LLMO)) {
+    const hasAccessToElmo = await accessControlUtil.hasAccess(site, '', EntitlementModel.PRODUCT_CODES.LLMO);
+    if (!hasAccessToElmo) {
       throw new Error('Only users belonging to the organization can view its sites');
     }
     return { site, config, llmoConfig };
