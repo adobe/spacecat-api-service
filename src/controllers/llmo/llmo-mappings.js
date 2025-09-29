@@ -11,6 +11,7 @@
  */
 
 // LLMO Sheet Data Mapping Configurations
+// One entry per sheet type
 export const LLMO_SHEET_MAPPINGS = [{
   name: 'Brand Presence',
   type: 'multi-sheet',

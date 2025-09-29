@@ -15,6 +15,7 @@
 import { expect, use } from 'chai';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
+import nock from 'nock';
 
 import GetSitesCommand, { formatSitesToCSV } from '../../../../src/support/slack/commands/get-sites.js';
 
@@ -100,10 +101,27 @@ describe('GetSitesCommand', () => {
       say: sinon.spy(),
       client: {
         files: {
-          uploadV2: sinon.stub().resolves(),
+          getUploadURLExternal: sinon.stub().resolves({
+            ok: true,
+            file_id: 'test-file-id',
+            upload_url: 'https://test-upload-url.com',
+          }),
+          completeUploadExternal: sinon.stub().resolves({
+            ok: true,
+            file: { id: 'test-file-id' },
+          }),
         },
       },
     };
+
+    // Mock the HTTP request for file upload
+    nock('https://test-upload-url.com')
+      .post('/')
+      .reply(200, 'OK');
+  });
+
+  afterEach(() => {
+    nock.cleanAll();
   });
 
   describe('Initialization and BaseCommand Integration', () => {

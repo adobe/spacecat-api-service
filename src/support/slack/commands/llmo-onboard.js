@@ -47,6 +47,7 @@ function LlmoOnboardCommand(context) {
    */
   const handleExecution = async (args, slackContext) => {
     const { say, threadTs } = slackContext;
+    const { dataAccess } = context;
 
     const [site] = args;
 
@@ -58,33 +59,93 @@ function LlmoOnboardCommand(context) {
     }
 
     try {
-      const message = {
-        blocks: [
-          {
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: ':rocket: *LLMO Onboarding*\n\nClick the button below to start the interactive onboarding process.',
-            },
-          },
-          {
-            type: 'actions',
-            elements: [
-              {
-                type: 'button',
-                text: {
-                  type: 'plain_text',
-                  text: 'Start Onboarding',
-                },
-                value: normalizedSite,
-                action_id: 'start_llmo_onboarding',
-                style: 'primary',
+      // Check if site already exists to determine which buttons to show
+      const { Site } = dataAccess;
+      const existingSite = await Site.findByBaseURL(normalizedSite);
+      const config = await existingSite?.getConfig();
+      const brand = config?.getLlmoBrand();
+
+      let message;
+
+      if (brand) {
+        message = {
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: `:information_source: *Site Already Onboarded*\n\nThe site *${normalizedSite}* is already configured for LLMO with brand *${brand}*.\n\nChoose what you'd like to do:`,
               },
-            ],
-          },
-        ],
-        thread_ts: threadTs,
-      };
+            },
+            {
+              type: 'actions',
+              elements: [
+                {
+                  type: 'button',
+                  text: {
+                    type: 'plain_text',
+                    text: 'Add Entitlements',
+                  },
+                  value: JSON.stringify({
+                    brandURL: normalizedSite,
+                    siteId: existingSite.getId(),
+                    existingBrand: brand,
+                    originalChannel: 'current',
+                    originalThreadTs: threadTs,
+                  }),
+                  action_id: 'add_entitlements_action',
+                  style: 'primary',
+                },
+                {
+                  type: 'button',
+                  text: {
+                    type: 'plain_text',
+                    text: 'Update IMS Org',
+                  },
+                  value: JSON.stringify({
+                    brandURL: normalizedSite,
+                    siteId: existingSite.getId(),
+                    existingBrand: brand,
+                    currentOrgId: existingSite.getOrganizationId(),
+                    originalChannel: 'current',
+                    originalThreadTs: threadTs,
+                  }),
+                  action_id: 'update_org_action',
+                },
+              ],
+            },
+          ],
+          thread_ts: threadTs,
+        };
+      } else {
+        message = {
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: ':rocket: *LLMO Onboarding*\n\nClick the button below to start the interactive onboarding process.',
+              },
+            },
+            {
+              type: 'actions',
+              elements: [
+                {
+                  type: 'button',
+                  text: {
+                    type: 'plain_text',
+                    text: 'Start Onboarding',
+                  },
+                  value: normalizedSite,
+                  action_id: 'start_llmo_onboarding',
+                  style: 'primary',
+                },
+              ],
+            },
+          ],
+          thread_ts: threadTs,
+        };
+      }
 
       await say(message);
     } catch (error) {
