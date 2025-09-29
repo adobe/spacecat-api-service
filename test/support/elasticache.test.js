@@ -213,7 +213,7 @@ describe('ElastiCache Service', () => {
 
       // Test close handler
       closeHandler();
-      expect(mockLog.warn).to.have.been.calledWith('Disconnected from ElastiCache Redis cluster');
+      expect(mockLog.info).to.have.been.calledWith('Disconnected from ElastiCache Redis cluster');
       expect(testService.isConnected).to.be.false;
 
       // Test ready handler
@@ -498,13 +498,14 @@ describe('ElastiCache Service', () => {
       expect(service2.defaultTTL).to.equal(7200);
     });
 
-    it('should return null when host is not configured', () => {
+    it('should use default host when not configured', () => {
       const env = {};
 
       const service2 = createElastiCacheService(env, mockLog);
 
-      expect(service2).to.be.null;
-      expect(mockLog.info).to.have.been.calledWith('ElastiCache not configured (ELASTICACHE_HOST not set), LLMO caching will be disabled');
+      expect(service2).to.be.instanceOf(ElastiCacheService);
+      expect(service2.config.host).to.equal('elmodata-u65bcl.serverless.use1.cache.amazonaws.com');
+      expect(mockLog.info).not.to.have.been.calledWith('ElastiCache not configured (ELASTICACHE_HOST not set), LLMO caching will be disabled');
     });
 
     it('should use defaults for optional configuration', () => {
@@ -514,7 +515,7 @@ describe('ElastiCache Service', () => {
 
       const service2 = createElastiCacheService(env, mockLog);
 
-      expect(service2.config.port).to.be.undefined;
+      expect(service2.config.port).to.equal('6379');
       expect(service2.config.tls).to.be.false;
       expect(service2.defaultTTL).to.equal(3600);
     });
