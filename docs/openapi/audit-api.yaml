@@ -28,6 +28,8 @@ audit-for-site:
                 $ref: './examples.yaml#/costs-audit'
               meta-tags-audit:
                 $ref: './examples.yaml#/meta-tags-audit'
+              product-metatags-audit:
+                $ref: './examples.yaml#/product-metatags-audit'
               prerender-audit:
                 $ref: './examples.yaml#/prerender-audit'
               broken-internal-links-audit:
@@ -71,6 +73,8 @@ latest-audit-for-site:
                 $ref: './examples.yaml#/costs-audit'
               meta-tags-audit:
                 $ref: './examples.yaml#/meta-tags-audit'
+              product-metatags-audit:
+                $ref: './examples.yaml#/product-metatags-audit'
               prerender-audit:
                 $ref: './examples.yaml#/prerender-audit'
               broken-internal-links-audit:
