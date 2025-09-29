@@ -106,7 +106,6 @@ describe('RunReportCommand', () => {
       });
 
       const command = RunReportCommand(context);
-      // Test various name sanitization cases
       const testCases = [
         { input: 'MONTHLY REPORT', expected: 'Monthly report' },
         { input: '  weekly summary  ', expected: 'Weekly summary' },
@@ -114,6 +113,8 @@ describe('RunReportCommand', () => {
         { input: 'PERFORMANCE   METRICS', expected: 'Performance metrics' },
         { input: 'test', expected: 'Test' },
         { input: 'a', expected: 'A' },
+        { input: '', expected: '' },
+        { input: '   ', expected: '' },
       ];
 
       for (const testCase of testCases) {
@@ -140,7 +141,7 @@ describe('RunReportCommand', () => {
       }
     });
 
-    it('should handle empty and whitespace-only names', async () => {
+    it('should generate default names from URL when name is null or undefined', async () => {
       const mockApiResponse = {
         reportId: 'report-123',
         status: 'processing',
@@ -152,17 +153,18 @@ describe('RunReportCommand', () => {
       });
 
       const command = RunReportCommand(context);
-      // Test edge cases for name sanitization
       const testCases = [
-        { input: '', expected: '' },
-        { input: '   ', expected: '' }, // Whitespace-only gets trimmed to empty
+        { url: 'https://example.com', expected: 'Example.com' },
+        { url: 'https://www.example.com', expected: 'Example.com' },
+        { url: 'https://my-site.com', expected: 'My-site.com' },
+        { url: 'https://subdomain.example.com', expected: 'Subdomain.example.com' },
       ];
 
       for (const testCase of testCases) {
         const args = [
-          'https://example.com',
+          testCase.url,
           'performance',
-          testCase.input,
+          null, // null name
           '2025-01-01',
           '2025-01-31',
           '2024-12-01',
@@ -181,19 +183,29 @@ describe('RunReportCommand', () => {
         slackContext.say.resetHistory();
       }
     });
+  });
 
-    it('should handle null and undefined names gracefully', async () => {
+  describe('Date Validation', () => {
+    it('should validate date format correctly', async () => {
       const command = RunReportCommand(context);
+      const invalidDateFormats = [
+        '2025/01/01', // Wrong separator
+        '01-01-2025', // Wrong order
+        '2025-1-1', // Single digits
+        '25-01-01', // Two digit year
+        '2025-13-01', // Invalid month
+        '2025-01-32', // Invalid day
+        '2025-02-30', // Invalid date
+        'invalid-date', // Completely invalid
+        '   ', // Whitespace only
+      ];
 
-      // Test null and undefined cases - these should be caught by the missing arguments validation
-      const testCases = [null, undefined];
-
-      for (const testCase of testCases) {
+      for (const invalidDate of invalidDateFormats) {
         const args = [
           'https://example.com',
           'performance',
-          testCase,
-          '2025-01-01',
+          'Test report',
+          invalidDate,
           '2025-01-31',
           '2024-12-01',
           '2024-12-31',
@@ -201,9 +213,46 @@ describe('RunReportCommand', () => {
 
         // eslint-disable-next-line no-await-in-loop
         await command.handleExecution(args, slackContext);
-        // Should get missing arguments error, not a sanitization error
-        expect(slackContext.say).to.have.been.calledOnce;
-        expect(slackContext.say.firstCall.args[0]).to.include(':warning: Missing required arguments.');
+
+        expect(slackContext.say).to.have.been.calledTwice;
+        expect(slackContext.say.secondCall.args[0]).to.include(':warning: Report period start date must be in YYYY-MM-DD format');
+
+        // Reset for next iteration
+        slackContext.say.resetHistory();
+      }
+    });
+
+    it('should validate date relationships correctly', async () => {
+      const command = RunReportCommand(context);
+      const invalidDateRelations = [
+        {
+          reportStart: '2025-01-31',
+          reportEnd: '2025-01-01',
+          error: 'Report period start date must be less than or equal to end date',
+        },
+        {
+          comparisonStart: '2024-12-31',
+          comparisonEnd: '2024-12-01',
+          error: 'Comparison period start date must be less than or equal to end date',
+        },
+      ];
+
+      for (const testCase of invalidDateRelations) {
+        const args = [
+          'https://example.com',
+          'performance',
+          'Test report',
+          testCase.reportStart || '2025-01-01',
+          testCase.reportEnd || '2025-01-31',
+          testCase.comparisonStart || '2024-12-01',
+          testCase.comparisonEnd || '2024-12-31',
+        ];
+
+        // eslint-disable-next-line no-await-in-loop
+        await command.handleExecution(args, slackContext);
+
+        expect(slackContext.say).to.have.been.calledTwice;
+        expect(slackContext.say.secondCall.args[0]).to.include(`:warning: ${testCase.error}`);
 
         // Reset for next iteration
         slackContext.say.resetHistory();
@@ -211,68 +260,8 @@ describe('RunReportCommand', () => {
     });
   });
 
-  describe('Date Validation', () => {
-    it('should validate date format correctly', () => {
-      // We'll test this through the actual execution since the function is private
-      // This will be covered in the handleExecution tests below
-    });
-
-    it('should handle invalid date regex patterns', async () => {
-      const command = RunReportCommand(context);
-      const args = [
-        'https://example.com',
-        'performance',
-        'Test report',
-        '2025/01/01', // Invalid format - should fail regex test
-        '2025-01-31',
-        '2024-12-01',
-        '2024-12-31',
-      ];
-
-      await command.handleExecution(args, slackContext);
-
-      expect(slackContext.say).to.have.been.calledTwice;
-      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Generating performance report "Test report" for site https://example.com...');
-      expect(slackContext.say.secondCall.args[0]).to.include(':warning: Report period start date must be in YYYY-MM-DD format');
-    });
-
-    it('should handle invalid date values that pass regex but fail Date constructor', async () => {
-      const command = RunReportCommand(context);
-      const args = [
-        'https://example.com',
-        'performance',
-        'Test report',
-        '2025/02/30', // Invalid format - should fail regex
-        '2025-01-31',
-        '2024-12-01',
-        '2024-12-31',
-      ];
-
-      await command.handleExecution(args, slackContext);
-
-      expect(slackContext.say).to.have.been.calledTwice;
-      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Generating performance report "Test report" for site https://example.com...');
-      expect(slackContext.say.secondCall.args[0]).to.include(':warning: Report period start date must be in YYYY-MM-DD format');
-    });
-
-    it('should handle missing period object validation', async () => {
-      // This test is designed to cover the isNonEmptyObject validation in isValidPeriod
-      // We need to test the case where the period object itself is null/undefined
-      // However, since the period is constructed in the handleExecution method,
-      // we'll test edge cases that might trigger the validation
-
-      const command = RunReportCommand(context);
-      const args = [
-        'https://example.com',
-        'performance',
-        'Test report',
-        '2025-01-01',
-        '2025-01-31',
-        '2024-12-01',
-        '2024-12-31',
-      ];
-
-      // Mock successful API response
+  describe('Default Date Generation', () => {
+    it('should generate default report period dates when both are undefined', async () => {
       const mockApiResponse = {
         reportId: 'report-123',
         status: 'processing',
@@ -283,139 +272,35 @@ describe('RunReportCommand', () => {
         json: sinon.stub().resolves(mockApiResponse),
       });
 
+      const command = RunReportCommand(context);
+      const args = [
+        'https://example.com',
+        'performance',
+        'Test report',
+        undefined, // reportStartDate
+        undefined, // reportEndDate
+        '2024-12-01',
+        '2024-12-31',
+      ];
+
       await command.handleExecution(args, slackContext);
 
-      // This should work normally as the period objects are properly constructed
       expect(global.fetch).to.have.been.calledOnce;
+      const fetchCall = global.fetch.firstCall;
+      const requestBody = JSON.parse(fetchCall.args[1].body);
+
+      // Should have generated dates (one month back to current date)
+      expect(requestBody.reportPeriod.startDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
+      expect(requestBody.reportPeriod.endDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
+
+      // The end date should be today or very recent
+      const endDate = new Date(requestBody.reportPeriod.endDate);
+      const today = new Date();
+      const diffInDays = Math.abs(today - endDate) / (1000 * 60 * 60 * 24);
+      expect(diffInDays).to.be.lessThan(2); // Allow for 1 day difference due to timing
     });
 
-    it('should handle missing startDate in period', async () => {
-      const command = RunReportCommand(context);
-      const args = [
-        'https://example.com',
-        'performance',
-        'Test report',
-        '', // Empty start date
-        '2025-01-31',
-        '2024-12-01',
-        '2024-12-31',
-      ];
-
-      await command.handleExecution(args, slackContext);
-
-      expect(slackContext.say).to.have.been.calledTwice;
-      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Generating performance report "Test report" for site https://example.com...');
-      expect(slackContext.say.secondCall.args[0]).to.include(':warning: Report period start date is required');
-    });
-
-    it('should handle missing endDate in period', async () => {
-      const command = RunReportCommand(context);
-      const args = [
-        'https://example.com',
-        'performance',
-        'Test report',
-        '2025-01-01',
-        '', // Empty end date
-        '2024-12-01',
-        '2024-12-31',
-      ];
-
-      await command.handleExecution(args, slackContext);
-
-      expect(slackContext.say).to.have.been.calledTwice;
-      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Generating performance report "Test report" for site https://example.com...');
-      expect(slackContext.say.secondCall.args[0]).to.include(':warning: Report period end date is required');
-    });
-
-    it('should handle missing comparison period startDate', async () => {
-      const command = RunReportCommand(context);
-      const args = [
-        'https://example.com',
-        'performance',
-        'Test report',
-        '2025-01-01',
-        '2025-01-31',
-        '', // Empty comparison start date
-        '2024-12-31',
-      ];
-
-      await command.handleExecution(args, slackContext);
-
-      expect(slackContext.say).to.have.been.calledTwice;
-      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Generating performance report "Test report" for site https://example.com...');
-      expect(slackContext.say.secondCall.args[0]).to.include(':warning: Comparison period start date is required');
-    });
-
-    it('should handle missing comparison period endDate', async () => {
-      const command = RunReportCommand(context);
-      const args = [
-        'https://example.com',
-        'performance',
-        'Test report',
-        '2025-01-01',
-        '2025-01-31',
-        '2024-12-01',
-        '', // Empty comparison end date
-      ];
-
-      await command.handleExecution(args, slackContext);
-
-      expect(slackContext.say).to.have.been.calledTwice;
-      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Generating performance report "Test report" for site https://example.com...');
-      expect(slackContext.say.secondCall.args[0]).to.include(':warning: Comparison period end date is required');
-    });
-
-    it('should handle invalid comparison period startDate format', async () => {
-      const command = RunReportCommand(context);
-      const args = [
-        'https://example.com',
-        'performance',
-        'Test report',
-        '2025-01-01',
-        '2025-01-31',
-        '2024/12/01', // Invalid format
-        '2024-12-31',
-      ];
-
-      await command.handleExecution(args, slackContext);
-
-      expect(slackContext.say).to.have.been.calledTwice;
-      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Generating performance report "Test report" for site https://example.com...');
-      expect(slackContext.say.secondCall.args[0]).to.include(':warning: Comparison period start date must be in YYYY-MM-DD format');
-    });
-
-    it('should handle invalid comparison period endDate format', async () => {
-      const command = RunReportCommand(context);
-      const args = [
-        'https://example.com',
-        'performance',
-        'Test report',
-        '2025-01-01',
-        '2025-01-31',
-        '2024-12-01',
-        '2024/12/31', // Invalid format
-      ];
-
-      await command.handleExecution(args, slackContext);
-
-      expect(slackContext.say).to.have.been.calledTwice;
-      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Generating performance report "Test report" for site https://example.com...');
-      expect(slackContext.say.secondCall.args[0]).to.include(':warning: Comparison period end date must be in YYYY-MM-DD format');
-    });
-
-    it('should test period validation with valid arguments but invalid date format', async () => {
-      const command = RunReportCommand(context);
-      const args = [
-        'https://example.com',
-        'performance',
-        'Test report',
-        '2025-01-01',
-        '2025-01-31',
-        '2024-12-01',
-        '2024-12-31',
-      ];
-
-      // Mock successful API response
+    it('should generate default report period dates when both are null', async () => {
       const mockApiResponse = {
         reportId: 'report-123',
         status: 'processing',
@@ -426,89 +311,45 @@ describe('RunReportCommand', () => {
         json: sinon.stub().resolves(mockApiResponse),
       });
 
+      const command = RunReportCommand(context);
+      const args = [
+        'https://example.com',
+        'performance',
+        'Test report',
+        null, // reportStartDate
+        null, // reportEndDate
+        '2024-12-01',
+        '2024-12-31',
+      ];
+
       await command.handleExecution(args, slackContext);
 
-      // This should work normally as all arguments are valid
       expect(global.fetch).to.have.been.calledOnce;
+      const fetchCall = global.fetch.firstCall;
+      const requestBody = JSON.parse(fetchCall.args[1].body);
+
+      // Should have generated dates (one month back to current date)
+      expect(requestBody.reportPeriod.startDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
+      expect(requestBody.reportPeriod.endDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
+
+      // The end date should be today or very recent
+      const endDate = new Date(requestBody.reportPeriod.endDate);
+      const today = new Date();
+      const diffInDays = Math.abs(today - endDate) / (1000 * 60 * 60 * 24);
+      expect(diffInDays).to.be.lessThan(2); // Allow for 1 day difference due to timing
     });
 
-    it('should test period validation with invalid date that passes regex but fails Date constructor', async () => {
-      const command = RunReportCommand(context);
-      const args = [
-        'https://example.com',
-        'performance',
-        'Test report',
-        '2025-13-01', // Invalid date - passes regex but fails Date constructor (month 13)
-        '2025-01-31',
-        '2024-12-01',
-        '2024-12-31',
-      ];
+    it('should generate default comparison period dates when both are undefined', async () => {
+      const mockApiResponse = {
+        reportId: 'report-123',
+        status: 'processing',
+      };
 
-      await command.handleExecution(args, slackContext);
+      global.fetch.resolves({
+        ok: true,
+        json: sinon.stub().resolves(mockApiResponse),
+      });
 
-      expect(slackContext.say).to.have.been.calledTwice;
-      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Generating performance report "Test report" for site https://example.com...');
-      expect(slackContext.say.secondCall.args[0]).to.include(':warning: Report period start date must be in YYYY-MM-DD format');
-    });
-
-    it('should test period validation with invalid end date that passes regex but fails Date constructor', async () => {
-      const command = RunReportCommand(context);
-      const args = [
-        'https://example.com',
-        'performance',
-        'Test report',
-        '2025-01-01',
-        '2025-13-01', // Invalid date - passes regex but fails Date constructor (month 13)
-        '2024-12-01',
-        '2024-12-31',
-      ];
-
-      await command.handleExecution(args, slackContext);
-
-      expect(slackContext.say).to.have.been.calledTwice;
-      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Generating performance report "Test report" for site https://example.com...');
-      expect(slackContext.say.secondCall.args[0]).to.include(':warning: Report period end date must be in YYYY-MM-DD format');
-    });
-
-    it('should test period validation with whitespace-only startDate', async () => {
-      const command = RunReportCommand(context);
-      const args = [
-        'https://example.com',
-        'performance',
-        'Test report',
-        '   ', // Whitespace-only start date - should fail hasText check
-        '2025-01-31',
-        '2024-12-01',
-        '2024-12-31',
-      ];
-
-      await command.handleExecution(args, slackContext);
-
-      expect(slackContext.say).to.have.been.calledTwice;
-      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Generating performance report "Test report" for site https://example.com...');
-      expect(slackContext.say.secondCall.args[0]).to.include(':warning: Report period start date must be in YYYY-MM-DD format');
-    });
-
-    it('should test period validation with whitespace-only endDate', async () => {
-      const command = RunReportCommand(context);
-      const args = [
-        'https://example.com',
-        'performance',
-        'Test report',
-        '2025-01-01',
-        '   ', // Whitespace-only end date - should fail hasText check
-        '2024-12-01',
-        '2024-12-31',
-      ];
-
-      await command.handleExecution(args, slackContext);
-
-      expect(slackContext.say).to.have.been.calledTwice;
-      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Generating performance report "Test report" for site https://example.com...');
-      expect(slackContext.say.secondCall.args[0]).to.include(':warning: Report period end date must be in YYYY-MM-DD format');
-    });
-
-    it('should test period validation with whitespace-only comparison startDate', async () => {
       const command = RunReportCommand(context);
       const args = [
         'https://example.com',
@@ -516,18 +357,39 @@ describe('RunReportCommand', () => {
         'Test report',
         '2025-01-01',
         '2025-01-31',
-        '   ', // Whitespace-only comparison start date - should fail hasText check
-        '2024-12-31',
+        undefined, // comparisonStartDate
+        undefined, // comparisonEndDate
       ];
 
       await command.handleExecution(args, slackContext);
 
-      expect(slackContext.say).to.have.been.calledTwice;
-      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Generating performance report "Test report" for site https://example.com...');
-      expect(slackContext.say.secondCall.args[0]).to.include(':warning: Comparison period start date must be in YYYY-MM-DD format');
+      expect(global.fetch).to.have.been.calledOnce;
+      const fetchCall = global.fetch.firstCall;
+      const requestBody = JSON.parse(fetchCall.args[1].body);
+
+      // Should have generated comparison dates (two months back to one month back)
+      expect(requestBody.comparisonPeriod.startDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
+      expect(requestBody.comparisonPeriod.endDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
+
+      // The comparison end date should be approximately one month ago
+      const comparisonEndDate = new Date(requestBody.comparisonPeriod.endDate);
+      const oneMonthAgo = new Date();
+      oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+      const diffInDays = Math.abs(oneMonthAgo - comparisonEndDate) / (1000 * 60 * 60 * 24);
+      expect(diffInDays).to.be.lessThan(2); // Allow for 1 day difference due to timing
     });
 
-    it('should test period validation with whitespace-only comparison endDate', async () => {
+    it('should generate default comparison period dates when both are null', async () => {
+      const mockApiResponse = {
+        reportId: 'report-123',
+        status: 'processing',
+      };
+
+      global.fetch.resolves({
+        ok: true,
+        json: sinon.stub().resolves(mockApiResponse),
+      });
+
       const command = RunReportCommand(context);
       const args = [
         'https://example.com',
@@ -535,15 +397,186 @@ describe('RunReportCommand', () => {
         'Test report',
         '2025-01-01',
         '2025-01-31',
-        '2024-12-01',
-        '   ', // Whitespace-only comparison end date - should fail hasText check
+        null, // comparisonStartDate
+        null, // comparisonEndDate
       ];
 
       await command.handleExecution(args, slackContext);
 
+      expect(global.fetch).to.have.been.calledOnce;
+      const fetchCall = global.fetch.firstCall;
+      const requestBody = JSON.parse(fetchCall.args[1].body);
+
+      // Should have generated comparison dates (two months back to one month back)
+      expect(requestBody.comparisonPeriod.startDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
+      expect(requestBody.comparisonPeriod.endDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
+
+      // The comparison end date should be approximately one month ago
+      const comparisonEndDate = new Date(requestBody.comparisonPeriod.endDate);
+      const oneMonthAgo = new Date();
+      oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+      const diffInDays = Math.abs(oneMonthAgo - comparisonEndDate) / (1000 * 60 * 60 * 24);
+      expect(diffInDays).to.be.lessThan(2); // Allow for 1 day difference due to timing
+    });
+
+    it('should generate default dates for both report and comparison periods when all are undefined', async () => {
+      const mockApiResponse = {
+        reportId: 'report-123',
+        status: 'processing',
+      };
+
+      global.fetch.resolves({
+        ok: true,
+        json: sinon.stub().resolves(mockApiResponse),
+      });
+
+      const command = RunReportCommand(context);
+      const args = [
+        'https://example.com',
+        'performance',
+        'Test report',
+        undefined, // reportStartDate
+        undefined, // reportEndDate
+        undefined, // comparisonStartDate
+        undefined, // comparisonEndDate
+      ];
+
+      await command.handleExecution(args, slackContext);
+
+      expect(global.fetch).to.have.been.calledOnce;
+      const fetchCall = global.fetch.firstCall;
+      const requestBody = JSON.parse(fetchCall.args[1].body);
+
+      // Should have generated all dates
+      expect(requestBody.reportPeriod.startDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
+      expect(requestBody.reportPeriod.endDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
+      expect(requestBody.comparisonPeriod.startDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
+      expect(requestBody.comparisonPeriod.endDate).to.match(/^\d{4}-\d{2}-\d{2}$/);
+
+      // Verify the date relationships
+      const reportStart = new Date(requestBody.reportPeriod.startDate);
+      const reportEnd = new Date(requestBody.reportPeriod.endDate);
+      const comparisonStart = new Date(requestBody.comparisonPeriod.startDate);
+      const comparisonEnd = new Date(requestBody.comparisonPeriod.endDate);
+
+      // Report period should be one month (start should be before end)
+      expect(reportStart.getTime()).to.be.lessThan(reportEnd.getTime());
+
+      // Comparison period should be one month (start should be before end)
+      expect(comparisonStart.getTime()).to.be.lessThan(comparisonEnd.getTime());
+
+      // Comparison period should be before report period (allow for same time due to timing)
+      expect(comparisonEnd.getTime()).to.be.lessThanOrEqual(reportStart.getTime());
+    });
+
+    it('should not generate default dates when only one date in a period is undefined', async () => {
+      const command = RunReportCommand(context);
+      const args = [
+        'https://example.com',
+        'performance',
+        'Test report',
+        '2025-01-01', // reportStartDate provided
+        undefined, // reportEndDate not provided
+        '2024-12-01', // comparisonStartDate provided
+        undefined, // comparisonEndDate not provided
+      ];
+
+      await command.handleExecution(args, slackContext);
+
+      // Should not call the API because validation will fail
+      expect(global.fetch).to.not.have.been.called;
+
+      // Should show validation error messages
       expect(slackContext.say).to.have.been.calledTwice;
       expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Generating performance report "Test report" for site https://example.com...');
-      expect(slackContext.say.secondCall.args[0]).to.include(':warning: Comparison period end date must be in YYYY-MM-DD format');
+    });
+
+    it('should not generate default report period dates when reportStartDate is provided but reportEndDate is null', async () => {
+      const command = RunReportCommand(context);
+      const args = [
+        'https://example.com',
+        'performance',
+        'Test report',
+        '2025-01-01', // reportStartDate provided
+        null, // reportEndDate is null (covers line 183)
+        '2024-12-01',
+        '2024-12-31',
+      ];
+
+      await command.handleExecution(args, slackContext);
+
+      // Should not call the API because validation will fail
+      expect(global.fetch).to.not.have.been.called;
+
+      // Should show validation error messages
+      expect(slackContext.say).to.have.been.calledTwice;
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Generating performance report "Test report" for site https://example.com...');
+    });
+
+    it('should not generate default comparison period dates when comparisonStartDate is provided but comparisonEndDate is null', async () => {
+      const command = RunReportCommand(context);
+      const args = [
+        'https://example.com',
+        'performance',
+        'Test report',
+        '2025-01-01',
+        '2025-01-31',
+        '2024-12-01', // comparisonStartDate provided
+        null, // comparisonEndDate is null (covers line 193)
+      ];
+
+      await command.handleExecution(args, slackContext);
+
+      // Should not call the API because validation will fail
+      expect(global.fetch).to.not.have.been.called;
+
+      // Should show validation error messages
+      expect(slackContext.say).to.have.been.calledTwice;
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Generating performance report "Test report" for site https://example.com...');
+    });
+
+    it('should not generate default report period dates when reportStartDate is undefined but reportEndDate is provided', async () => {
+      const command = RunReportCommand(context);
+      const args = [
+        'https://example.com',
+        'performance',
+        'Test report',
+        undefined, // reportStartDate is undefined (covers line 183)
+        '2025-01-31', // reportEndDate provided
+        '2024-12-01',
+        '2024-12-31',
+      ];
+
+      await command.handleExecution(args, slackContext);
+
+      // Should not call the API because validation will fail
+      expect(global.fetch).to.not.have.been.called;
+
+      // Should show validation error messages
+      expect(slackContext.say).to.have.been.calledTwice;
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Generating performance report "Test report" for site https://example.com...');
+    });
+
+    it('should not generate default comparison period dates when comparisonStartDate is undefined but comparisonEndDate is provided', async () => {
+      const command = RunReportCommand(context);
+      const args = [
+        'https://example.com',
+        'performance',
+        'Test report',
+        '2025-01-01',
+        '2025-01-31',
+        undefined, // comparisonStartDate is undefined (covers line 193)
+        '2024-12-31', // comparisonEndDate provided
+      ];
+
+      await command.handleExecution(args, slackContext);
+
+      // Should not call the API because validation will fail
+      expect(global.fetch).to.not.have.been.called;
+
+      // Should show validation error messages
+      expect(slackContext.say).to.have.been.calledTwice;
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Generating performance report "Test report" for site https://example.com...');
     });
   });
 
@@ -631,12 +664,22 @@ describe('RunReportCommand', () => {
 
     it('should return error for missing required arguments', async () => {
       const command = RunReportCommand(context);
-      const args = ['https://example.com', 'performance']; // Missing required args
+      const testCases = [
+        ['https://example.com'], // Missing reportType
+        [undefined, 'performance'], // Missing site
+        [null, 'performance'], // Missing site
+      ];
 
-      await command.handleExecution(args, slackContext);
+      for (const args of testCases) {
+        // eslint-disable-next-line no-await-in-loop
+        await command.handleExecution(args, slackContext);
 
-      expect(slackContext.say).to.have.been.calledOnce;
-      expect(slackContext.say.firstCall.args[0]).to.include(':warning: Missing required arguments.');
+        expect(slackContext.say).to.have.been.calledOnce;
+        expect(slackContext.say.firstCall.args[0]).to.include(':warning: Missing required arguments.');
+
+        // Reset for next iteration
+        slackContext.say.resetHistory();
+      }
     });
 
     it('should return error for invalid site URL', async () => {
@@ -694,82 +737,6 @@ describe('RunReportCommand', () => {
       expect(slackContext.say).to.have.been.calledOnce;
       expect(slackContext.say.firstCall.args[0]).to.include(':warning: Invalid report type: invalid-type');
       expect(slackContext.say.firstCall.args[0]).to.include('Valid types are: `optimization`, `performance`');
-    });
-
-    it('should return error for invalid date format', async () => {
-      const command = RunReportCommand(context);
-      const args = [
-        'https://example.com',
-        'performance',
-        'Test report',
-        '2025/01/01', // Invalid date format
-        '2025-01-31',
-        '2024-12-01',
-        '2024-12-31',
-      ];
-
-      await command.handleExecution(args, slackContext);
-
-      expect(slackContext.say).to.have.been.calledTwice;
-      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Generating performance report "Test report" for site https://example.com...');
-      expect(slackContext.say.secondCall.args[0]).to.include(':warning: Report period start date must be in YYYY-MM-DD format');
-    });
-
-    it('should return error for start date after end date', async () => {
-      const command = RunReportCommand(context);
-      const args = [
-        'https://example.com',
-        'performance',
-        'Test report',
-        '2025-01-31', // Start date after end date
-        '2025-01-01',
-        '2024-12-01',
-        '2024-12-31',
-      ];
-
-      await command.handleExecution(args, slackContext);
-
-      expect(slackContext.say).to.have.been.calledTwice;
-      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Generating performance report "Test report" for site https://example.com...');
-      expect(slackContext.say.secondCall.args[0]).to.include(':warning: Report period start date must be less than or equal to end date');
-    });
-
-    it('should return error for invalid comparison period date format', async () => {
-      const command = RunReportCommand(context);
-      const args = [
-        'https://example.com',
-        'performance',
-        'Test report',
-        '2025-01-01',
-        '2025-01-31',
-        '2024/12/01', // Invalid date format
-        '2024-12-31',
-      ];
-
-      await command.handleExecution(args, slackContext);
-
-      expect(slackContext.say).to.have.been.calledTwice;
-      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Generating performance report "Test report" for site https://example.com...');
-      expect(slackContext.say.secondCall.args[0]).to.include(':warning: Comparison period start date must be in YYYY-MM-DD format');
-    });
-
-    it('should return error for comparison period start date after end date', async () => {
-      const command = RunReportCommand(context);
-      const args = [
-        'https://example.com',
-        'performance',
-        'Test report',
-        '2025-01-01',
-        '2025-01-31',
-        '2024-12-31', // Start date after end date
-        '2024-12-01',
-      ];
-
-      await command.handleExecution(args, slackContext);
-
-      expect(slackContext.say).to.have.been.calledTwice;
-      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Generating performance report "Test report" for site https://example.com...');
-      expect(slackContext.say.secondCall.args[0]).to.include(':warning: Comparison period start date must be less than or equal to end date');
     });
 
     it('should handle API request failure', async () => {
@@ -913,34 +880,6 @@ describe('RunReportCommand', () => {
   });
 
   describe('Edge Cases', () => {
-    it('should handle empty string arguments', async () => {
-      const mockApiResponse = {
-        reportId: 'report-123',
-        status: 'processing',
-      };
-
-      global.fetch.resolves({
-        ok: true,
-        json: sinon.stub().resolves(mockApiResponse),
-      });
-
-      const command = RunReportCommand(context);
-      const args = [
-        'https://example.com',
-        'performance',
-        'Test report', // Valid name
-        '2025-01-01',
-        '2025-01-31',
-        '2024-12-01',
-        '2024-12-31',
-      ];
-
-      await command.handleExecution(args, slackContext);
-
-      // Should proceed with valid arguments
-      expect(global.fetch).to.have.been.calledOnce;
-    });
-
     it('should handle leap year dates correctly', async () => {
       const mockApiResponse = {
         reportId: 'report-123',
@@ -995,6 +934,176 @@ describe('RunReportCommand', () => {
 
       expect(global.fetch).to.have.been.calledOnce;
       expect(slackContext.say).to.have.been.calledTwice;
+    });
+
+    it('should handle various URL formats', async () => {
+      const mockApiResponse = {
+        reportId: 'report-123',
+        status: 'processing',
+      };
+
+      global.fetch.resolves({
+        ok: true,
+        json: sinon.stub().resolves(mockApiResponse),
+      });
+
+      const command = RunReportCommand(context);
+      const urlFormats = [
+        'https://example.com',
+        'http://example.com',
+        'https://www.example.com',
+        'https://subdomain.example.com',
+        'https://example.com/path',
+        'https://example.com:8080',
+      ];
+
+      for (const url of urlFormats) {
+        const args = [
+          url,
+          'performance',
+          'Test report',
+          '2025-01-01',
+          '2025-01-31',
+          '2024-12-01',
+          '2024-12-31',
+        ];
+
+        // eslint-disable-next-line no-await-in-loop
+        await command.handleExecution(args, slackContext);
+
+        expect(global.fetch).to.have.been.calledOnce;
+        expect(dataAccessStub.Site.findByBaseURL).to.have.been.called;
+
+        // Reset for next iteration
+        global.fetch.resetHistory();
+        slackContext.say.resetHistory();
+        dataAccessStub.Site.findByBaseURL.resetHistory();
+      }
+    });
+
+    it('should handle database errors gracefully', async () => {
+      dataAccessStub.Site.findByBaseURL.rejects(new Error('Database connection failed'));
+
+      const command = RunReportCommand(context);
+      const args = [
+        'https://example.com',
+        'performance',
+        'Test report',
+        '2025-01-01',
+        '2025-01-31',
+        '2024-12-01',
+        '2024-12-31',
+      ];
+
+      await command.handleExecution(args, slackContext);
+
+      expect(slackContext.say).to.have.been.calledOnce;
+      expect(slackContext.say.firstCall.args[0]).to.include(':nuclear-warning: Oops! Something went wrong');
+    });
+
+    it('should handle JSON parsing errors in API response', async () => {
+      global.fetch.resolves({
+        ok: true,
+        json: sinon.stub().rejects(new Error('Invalid JSON')),
+      });
+
+      const command = RunReportCommand(context);
+      const args = [
+        'https://example.com',
+        'performance',
+        'Test report',
+        '2025-01-01',
+        '2025-01-31',
+        '2024-12-01',
+        '2024-12-31',
+      ];
+
+      await command.handleExecution(args, slackContext);
+
+      expect(slackContext.say).to.have.been.calledTwice;
+      expect(slackContext.say.secondCall.args[0]).to.include(':nuclear-warning: Oops! Something went wrong');
+    });
+  });
+
+  describe('URL Extraction and Validation', () => {
+    it('should handle various URL input formats', async () => {
+      const mockApiResponse = {
+        reportId: 'report-123',
+        status: 'processing',
+      };
+
+      global.fetch.resolves({
+        ok: true,
+        json: sinon.stub().resolves(mockApiResponse),
+      });
+
+      const command = RunReportCommand(context);
+      const urlInputs = [
+        'https://example.com',
+        'http://example.com',
+        'example.com', // Without protocol
+        'www.example.com', // Without protocol
+        'https://www.example.com/path/to/page',
+        'https://subdomain.example.com:8080/path',
+      ];
+
+      for (const urlInput of urlInputs) {
+        const args = [
+          urlInput,
+          'performance',
+          'Test report',
+          '2025-01-01',
+          '2025-01-31',
+          '2024-12-01',
+          '2024-12-31',
+        ];
+
+        // eslint-disable-next-line no-await-in-loop
+        await command.handleExecution(args, slackContext);
+
+        expect(global.fetch).to.have.been.calledOnce;
+
+        // Reset for next iteration
+        global.fetch.resetHistory();
+        slackContext.say.resetHistory();
+      }
+    });
+  });
+
+  describe('Success Message Formatting', () => {
+    it('should format success message with all details', async () => {
+      const mockApiResponse = {
+        reportId: 'report-123',
+        status: 'queued',
+      };
+
+      global.fetch.resolves({
+        ok: true,
+        json: sinon.stub().resolves(mockApiResponse),
+      });
+
+      const command = RunReportCommand(context);
+      const args = [
+        'https://example.com',
+        'performance',
+        'Monthly Report',
+        '2025-01-01',
+        '2025-01-31',
+        '2024-12-01',
+        '2024-12-31',
+      ];
+
+      await command.handleExecution(args, slackContext);
+
+      const successMessage = slackContext.say.secondCall.args[0];
+      expect(successMessage).to.include(':white_check_mark: Report generation job queued successfully!');
+      expect(successMessage).to.include('• Site: https://example.com');
+      expect(successMessage).to.include('• Report Type: performance');
+      expect(successMessage).to.include('• Report Name: Monthly report');
+      expect(successMessage).to.include('• Report Period: 2025-01-01 to 2025-01-31');
+      expect(successMessage).to.include('• Comparison Period: 2024-12-01 to 2024-12-31');
+      expect(successMessage).to.include('• Report ID: report-123');
+      expect(successMessage).to.include('• Status: queued');
     });
   });
 });

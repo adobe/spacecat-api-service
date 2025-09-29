@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { isNonEmptyObject, hasText, isValidUrl } from '@adobe/spacecat-shared-utils';
+import { isNonEmptyObject, isValidUrl } from '@adobe/spacecat-shared-utils';
 import BaseCommand from './base.js';
 import { postErrorMessage, extractURLFromSlackInput } from '../../../utils/slack/base.js';
 import { REPORT_TYPES } from '../../../utils/constants.js';
@@ -28,7 +28,12 @@ function validateAndCreateDate(dateString) {
     return null;
   }
   const date = new Date(dateString);
-  return Number.isNaN(date.getTime()) ? null : date;
+  // Check if the date is valid and if the parsed date matches the input string
+  // This prevents dates like '2025-02-30' from being considered valid
+  if (Number.isNaN(date.getTime()) || date.toISOString().split('T')[0] !== dateString) {
+    return null;
+  }
+  return date;
 }
 
 /**
@@ -51,14 +56,6 @@ function sanitizeReportName(name) {
  * @returns {string|null} Error message if validation fails, null if valid
  */
 function isValidPeriod(period, periodName) {
-  if (!hasText(period.startDate)) {
-    return `${periodName} start date is required`;
-  }
-
-  if (!hasText(period.endDate)) {
-    return `${periodName} end date is required`;
-  }
-
   // Validate and create Date objects once
   const startDate = validateAndCreateDate(period.startDate);
   if (!startDate) {
@@ -156,12 +153,7 @@ function RunReportCommand(context) {
 
       // Validate required arguments (allow empty strings to pass through to period validation)
       if (siteInput === undefined || siteInput === null
-          || reportType === undefined || reportType === null
-          || name === undefined || name === null
-          || reportStartDate === undefined || reportStartDate === null
-          || reportEndDate === undefined || reportEndDate === null
-          || comparisonStartDate === undefined || comparisonStartDate === null
-          || comparisonEndDate === undefined || comparisonEndDate === null) {
+          || reportType === undefined || reportType === null) {
         await say(`:warning: Missing required arguments. ${baseCommand.usage()}`);
         return;
       }
@@ -171,6 +163,33 @@ function RunReportCommand(context) {
       if (!isValidUrl(baseURL)) {
         await say(`:warning: Invalid site URL: ${siteInput}`);
         return;
+      }
+      // If name is not provided use a default one
+      let reportName = name;
+      if (reportName === undefined || reportName == null) {
+        const { hostname } = new URL(baseURL);
+        reportName = hostname.replace(/^www\./, '');
+        reportName = reportName.charAt(0).toUpperCase() + reportName.slice(1);
+      }
+      let finalReportStartDate = reportStartDate;
+      let finalReportEndDate = reportEndDate;
+      if ((finalReportStartDate === undefined || finalReportStartDate == null)
+        && (finalReportEndDate === undefined || finalReportEndDate == null)) {
+        const d = new Date();
+        d.setMonth(d.getMonth() - 1);
+        [finalReportStartDate] = d.toISOString().split('T');
+        [finalReportEndDate] = new Date().toISOString().split('T');
+      }
+
+      let finalComparisonStartDate = comparisonStartDate;
+      let finalComparisonEndDate = comparisonEndDate;
+      if ((finalComparisonStartDate === undefined || finalComparisonStartDate == null)
+        && (finalComparisonEndDate === undefined || finalComparisonEndDate == null)) {
+        const d = new Date();
+        d.setMonth(d.getMonth() - 1);
+        [finalComparisonEndDate] = d.toISOString().split('T');
+        d.setMonth(d.getMonth() - 1);
+        [finalComparisonStartDate] = d.toISOString().split('T');
       }
 
       // Find the site
@@ -190,19 +209,19 @@ function RunReportCommand(context) {
       }
 
       // Sanitize the report name for consistency
-      const sanitizedName = sanitizeReportName(name);
+      const sanitizedName = sanitizeReportName(reportName);
 
       // Build report data object
       const reportData = {
         reportType,
         name: sanitizedName,
         reportPeriod: {
-          startDate: reportStartDate,
-          endDate: reportEndDate,
+          startDate: finalReportStartDate,
+          endDate: finalReportEndDate,
         },
         comparisonPeriod: {
-          startDate: comparisonStartDate,
-          endDate: comparisonEndDate,
+          startDate: finalComparisonStartDate,
+          endDate: finalComparisonEndDate,
         },
       };
 
@@ -230,8 +249,8 @@ function RunReportCommand(context) {
         + `• Site: ${baseURL}\n`
         + `• Report Type: ${reportType}\n`
         + `• Report Name: ${sanitizedName}\n`
-        + `• Report Period: ${reportStartDate} to ${reportEndDate}\n`
-        + `• Comparison Period: ${comparisonStartDate} to ${comparisonEndDate}\n`
+        + `• Report Period: ${finalReportStartDate} to ${finalReportEndDate}\n`
+        + `• Comparison Period: ${finalComparisonStartDate} to ${finalComparisonEndDate}\n`
         + `• Report ID: ${apiResponse.reportId || 'N/A'}\n`
         + `• Status: ${apiResponse.status || 'processing'}`);
     } catch (error) {
