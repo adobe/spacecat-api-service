@@ -101,12 +101,12 @@ class ElastiCacheService {
       // Set a timeout to prevent infinite connection attempts
       this.connectionTimeout = setTimeout(() => {
         if (!this.isConnected) {
-          this.log.warn('ElastiCache connection failed: Connection timeout');
+          this.log.info('ElastiCache connection failed: Connection timeout');
           this.disconnect();
         }
       }, 15000); // 15 seconds timeout
     } catch (error) {
-      this.log.warn(`ElastiCache connection failed: ${error.message}`);
+      this.log.info(`ElastiCache connection failed: ${error.message}`);
       throw error;
     }
   }
