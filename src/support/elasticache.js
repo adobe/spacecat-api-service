@@ -78,6 +78,7 @@ class ElastiCacheService {
       this.client.on('error', (error) => {
         this.isConnected = false;
 
+        this.log.error(`ElastiCache connection failed: ${error.message}`);
         // Check for critical errors that should stop reconnection attempts
         if (error.message.includes('Failed to refresh slots cache')
           || error.message.includes('All nodes failed')
