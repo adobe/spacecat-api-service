@@ -239,7 +239,14 @@ llmo-config:
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/LlmoConfig'
+              type: object
+              properties:
+                version:
+                  type: string
+                  description: The S3 object version ID of the updated configuration
+                  example: "abc123def456"
+              required:
+                - version
       '400':
         $ref: './responses.yaml#/400'
       '401':

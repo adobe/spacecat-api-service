@@ -2378,7 +2378,7 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
-      expect(responseBody).to.deep.equal(mockContext.data);
+      expect(responseBody).to.deep.equal({ version: 'v1' });
     });
 
     it('should return bad request when payload is not an object', async () => {

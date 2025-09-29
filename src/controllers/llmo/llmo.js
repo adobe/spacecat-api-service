@@ -398,10 +398,15 @@ function LlmoController(ctx) {
       }
       const parsedConfig = result.data;
 
-      await writeConfig(siteId, parsedConfig, s3.s3Client, { s3Bucket: s3.s3Bucket });
+      const { version } = await writeConfig(
+        siteId,
+        parsedConfig,
+        s3.s3Client,
+        { s3Bucket: s3.s3Bucket },
+      );
 
-      log.info(`Updated LLMO config in S3 for siteId: ${siteId}`);
-      return ok(parsedConfig);
+      log.info(`Updated LLMO config in S3 for siteId: ${siteId}, version: ${version}`);
+      return ok({ version });
     } catch (error) {
       const msg = `${error?.message || /* c8 ignore next */ error}`;
       log.error(`Error updating llmo config for siteId: ${siteId}, error: ${msg}`);
