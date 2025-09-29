@@ -11,7 +11,7 @@
  */
 
 import {
-  ok, badRequest, forbidden, createResponse,
+  ok, badRequest, forbidden, createResponse, notFound,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   SPACECAT_USER_AGENT,
@@ -351,13 +351,23 @@ function LlmoController(ctx) {
   const getLlmoConfig = async (context) => {
     const { log, s3 } = context;
     const { siteId } = context.params;
+    const version = context.data?.version;
     try {
       if (!s3 || !s3.s3Client) {
         return badRequest('LLMO config storage is not configured for this environment');
       }
 
-      log.info(`Fetching LLMO config from S3 for siteId: ${siteId}`);
-      const { config: s3Config } = await readConfig(siteId, s3.s3Client, { s3Bucket: s3.s3Bucket });
+      log.info(`Fetching LLMO config from S3 for siteId: ${siteId}${version != null ? ` with version: ${version}` : ''}`);
+      const { config: s3Config, exists } = await readConfig(siteId, s3.s3Client, {
+        s3Bucket: s3.s3Bucket,
+        version,
+      });
+
+      // If a specific version was requested but doesn't exist, return 404
+      if (version != null && !exists) {
+        return notFound(`LLMO config version '${version}' not found for site '${siteId}'`);
+      }
+
       return ok(s3Config);
     } catch (error) {
       log.error(`Error getting llmo config for siteId: ${siteId}, error: ${error.message}`);

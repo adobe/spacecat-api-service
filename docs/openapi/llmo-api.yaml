@@ -185,6 +185,7 @@ llmo-global-sheet-data:
 llmo-config:
   parameters:
     - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/llmoConfigVersion'
   get:
     tags:
       - llmo
@@ -193,6 +194,11 @@ llmo-config:
       Retrieves the LLMO (Large Language Model Optimizer) configuration for a specific site.
       This endpoint retrieves the configuration directly from S3 storage. The configuration
       includes entities (categories, topics), brand aliases, and competitor information.
+
+      If a version parameter is provided, the specific version of the configuration will be
+      retrieved. If the version does not exist, a 404 error will be returned. If no version
+      is provided, the latest version will be returned, or a default configuration if none
+      exists.
     operationId: getLlmoConfig
     responses:
       '200':
@@ -205,6 +211,8 @@ llmo-config:
         $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-configuration-not-found-with-version'
       '500':
         $ref: './responses.yaml#/500'
     security:

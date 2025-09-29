@@ -2253,6 +2253,93 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('S3 connection failed');
     });
+
+    it('should return LLMO config with specific version successfully', async () => {
+      const config = llmoConfig.defaultConfig();
+      config.entities['123e4567-e89b-12d3-a456-426614174000'] = {
+        type: 'category',
+        name: 'test-category',
+      };
+
+      s3Client.send.resolves({
+        Body: {
+          transformToString: () => Promise.resolve(JSON.stringify(config)),
+        },
+      });
+
+      // Add version to context data
+      mockContext.data = { version: 'v123' };
+
+      const result = await controller.getLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(config);
+    });
+
+    it('should return 404 when specific version does not exist', async () => {
+      // Mock S3 to return NoSuchKey error for specific version
+      const noSuchKeyError = new Error('NoSuchKey');
+      noSuchKeyError.name = 'NoSuchKey';
+      s3Client.send.rejects(noSuchKeyError);
+
+      // Add version to context data
+      mockContext.data = { version: 'nonexistent-version' };
+
+      const result = await controller.getLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal("LLMO config version 'nonexistent-version' not found for site 'test-site-id'");
+    });
+
+    it('should return 404 when specific version returns NotFound error', async () => {
+      // Mock S3 to return NotFound error for specific version
+      const notFoundError = new Error('NotFound');
+      notFoundError.name = 'NotFound';
+      s3Client.send.rejects(notFoundError);
+
+      // Add version to context data
+      mockContext.data = { version: 'not-found-version' };
+
+      const result = await controller.getLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal("LLMO config version 'not-found-version' not found for site 'test-site-id'");
+    });
+
+    it('should return default config when no version specified and config does not exist', async () => {
+      // Mock S3 to return NoSuchKey error (no version specified)
+      const noSuchKeyError = new Error('NoSuchKey');
+      noSuchKeyError.name = 'NoSuchKey';
+      s3Client.send.rejects(noSuchKeyError);
+
+      // No version in context data
+      mockContext.data = {};
+
+      const result = await controller.getLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(llmoConfig.defaultConfig());
+    });
+
+    it('should handle empty string version parameter', async () => {
+      // Mock S3 to return NoSuchKey error for empty string version
+      const noSuchKeyError = new Error('NoSuchKey');
+      noSuchKeyError.name = 'NoSuchKey';
+      s3Client.send.rejects(noSuchKeyError);
+
+      // Add empty string version to context data
+      mockContext.data = { version: '' };
+
+      const result = await controller.getLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal("LLMO config version '' not found for site 'test-site-id'");
+    });
   });
 
   describe('postLlmoConfig', () => {
