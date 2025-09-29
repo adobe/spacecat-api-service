@@ -312,11 +312,6 @@ class ElastiCacheService {
  */
 export function createElastiCacheService(env, log) {
   // Only create service if host is explicitly configured
-  if (!env.ELASTICACHE_HOST) {
-    log.info('ElastiCache not configured (ELASTICACHE_HOST not set), LLMO caching will be disabled');
-    return null;
-  }
-
   const config = {
     host: env.ELASTICACHE_HOST || 'elmodata-u65bcl.serverless.use1.cache.amazonaws.com',
     port: env.ELASTICACHE_PORT || '6379',

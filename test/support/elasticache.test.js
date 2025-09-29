@@ -624,15 +624,6 @@ describe('ElastiCache Service', () => {
       expect(service2.defaultTTL).to.equal(7200);
     });
 
-    it('should return null when host is not configured', () => {
-      const env = {};
-
-      const service2 = createElastiCacheService(env, mockLog);
-
-      expect(service2).to.be.null;
-      expect(mockLog.info).to.have.been.calledWith('ElastiCache not configured (ELASTICACHE_HOST not set), LLMO caching will be disabled');
-    });
-
     it('should use defaults for optional configuration', () => {
       const env = {
         ELASTICACHE_HOST: 'test-host',
