@@ -311,7 +311,6 @@ class ElastiCacheService {
  * @returns {ElastiCacheService|null} ElastiCache service instance or null if not configured
  */
 export function createElastiCacheService(env, log) {
-  // Only create service if host is explicitly configured
   const config = {
     host: env.ELASTICACHE_HOST || 'elmodata-u65bcl.serverless.use1.cache.amazonaws.com',
     port: env.ELASTICACHE_PORT || '6379',

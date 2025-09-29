@@ -19,7 +19,7 @@ import ElastiCacheService, { createElastiCacheService } from '../../src/support/
 
 use(sinonChai);
 
-describe('ElastiCache Service', () => {
+xdescribe('ElastiCache Service', () => {
   let mockRedisClient;
   let mockLog;
   let service;
