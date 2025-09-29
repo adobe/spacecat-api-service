@@ -71,8 +71,6 @@ function isStaticRoute(routePattern) {
  * @param {Object} trafficController - The traffic controller.
  * @param {FixesController} fixesController - The fixes controller.
  * @param {Object} llmoController - The LLMO controller.
- * @param {Object} organizationIdentityProviderController - The organization identity
- * provider controller.
  * @param {Object} userActivityController - The user activity controller.
  * @param {Object} siteEnrollmentController - The site enrollment controller.
  * @param {Object} trialUserController - The trial user controller.
@@ -106,7 +104,6 @@ export default function getRouteHandlers(
   trafficController,
   fixesController,
   llmoController,
-  organizationIdentityProviderController,
   userActivityController,
   siteEnrollmentController,
   trialUserController,
@@ -262,7 +259,6 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/global-sheet-data/:configName': llmoController.getLlmoGlobalSheetData,
 
     // Tier Specific Routes
-    'GET /organizations/:organizationId/organization-identity-provider': organizationIdentityProviderController.getByOrganizationID,
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,
     'POST /sites/:siteId/user-activities': userActivityController.createTrialUserActivity,
     'GET /sites/:siteId/site-enrollments': siteEnrollmentController.getBySiteID,

@@ -254,10 +254,10 @@ trafficType:
     enum:
       - 'all'
       - 'owned'
-      - 'earned' 
+      - 'earned'
       - 'paid'
     example: 'paid'
- 
+
 # New parameters for entitlements API
 entitlementId:
   name: entitlementId
@@ -296,15 +296,6 @@ trialUserId:
   schema:
     $ref: './schemas.yaml#/Id'
 
-provider:
-  name: provider
-  description: The identity provider (IMS, Microsoft, Google, etc.)
-  in: path
-  required: true
-  schema:
-    type: string
-    example: 'IMS'
-
 externalUserId:
   name: externalUserId
   description: The external user ID from the identity provider
@@ -323,24 +314,22 @@ externalId:
     type: string
     example: 'user123@adobe.com'
 
-# New parameters for organization identity providers API
-organizationIdentityProviderId:
-  name: organizationIdentityProviderId
-  description: The organization identity provider ID in uuid format
-  in: path
-  required: true
-  schema:
-    $ref: './schemas.yaml#/Id'
-
 sandboxAuditType:
   name: auditType
-  description: Comma-separated list of audit types to run
+  description: |
+    Comma-separated list of audit types to run on sandbox sites. 
+    Use 'product-metatags' for specialized Product Detail Page (PDP) analysis of commerce sites.
   in: query
   required: false
   schema:
     type: string
-    description: Comma-separated list of audit types
-    example: "meta-tags,alt-text"
+    description: |
+      Comma-separated list of audit types:
+      - meta-tags: General meta tag analysis
+      - product-metatags: PDP-focused audit for e-commerce sites (scrapes SKU, thumbnail, catalog/store view codes)
+      - alt-text: Image alternative text analysis
+    example: "meta-tags,product-metatags,alt-text"
     enum:
       - 'meta-tags'
+      - 'product-metatags'
       - 'alt-text'

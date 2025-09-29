@@ -386,10 +386,13 @@ async function copyFilesToSharepoint(dataFolder, lambdaCtx, slackCtx) {
   const templateQueryIndex = sharepointClient.getDocument('/sites/elmo-ui-data/template/query-index.xlsx');
   const newQueryIndex = sharepointClient.getDocument(`/sites/elmo-ui-data/${dataFolder}/query-index.xlsx`);
 
-  // TODO: Instead of patching .exists, add this method https://github.com/adobe/spacecat-helix-content-sdk/issues/190
   const folderExists = await folder.exists();
   if (!folderExists) {
-    await folder.createFolder(dataFolder, '/');
+    /* c8 ignore start */
+    const base = dataFolder.startsWith('dev/') ? '/dev' : '/';
+    const folderName = dataFolder.startsWith('dev/') ? dataFolder.split('/')[1] : dataFolder;
+    /* c8 ignore end */
+    await folder.createFolder(folderName, base);
   } else {
     log.warn(`Warning: Folder ${dataFolder} already exists. Skipping creation.`);
     await say(`Folder ${dataFolder} already exists. Skipping creation.`);
@@ -409,7 +412,7 @@ async function copyFilesToSharepoint(dataFolder, lambdaCtx, slackCtx) {
 
 // update https://github.com/adobe/project-elmo-ui-data/blob/main/helix-query.yaml
 async function updateIndexConfig(dataFolder, lambdaCtx, slackCtx) {
-  const { log } = lambdaCtx;
+  const { log, env } = lambdaCtx;
   const { say } = slackCtx;
 
   log.debug('Starting Git modification of helix query config');
@@ -419,7 +422,8 @@ async function updateIndexConfig(dataFolder, lambdaCtx, slackCtx) {
 
   const owner = 'adobe';
   const repo = 'project-elmo-ui-data';
-  const ref = 'main';
+  /* c8 ignore next */
+  const ref = env.ENV === 'prod' ? 'main' : 'onboarding-bot-dev';
   const path = 'helix-query.yaml';
 
   const { data: file } = await octokit.repos.getContent({
@@ -445,7 +449,7 @@ async function updateIndexConfig(dataFolder, lambdaCtx, slackCtx) {
   await octokit.repos.createOrUpdateFileContents({
     owner,
     repo,
-    ref,
+    branch: ref,
     path,
     message: `Automation: Onboard ${dataFolder}`,
     content: Buffer.from(modifiedContent).toString('base64'),
@@ -495,13 +499,17 @@ async function createEntitlementAndEnrollment(site, lambdaCtx, slackCtx) {
 }
 
 export async function onboardSite(input, lambdaCtx, slackCtx) {
-  const { log, dataAccess, sqs } = lambdaCtx;
+  const {
+    log, dataAccess, sqs, env,
+  } = lambdaCtx;
   const { say } = slackCtx;
   const {
     baseURL, brandName, imsOrgId,
   } = input;
   const { hostname } = new URL(baseURL);
-  const dataFolder = hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+  const dataFolderName = hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+  /* c8 ignore next */
+  const dataFolder = env.ENV === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
 
   const {
     Site, Configuration,
