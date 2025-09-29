@@ -37,6 +37,7 @@ const ALL_AUDITS = [
   'llm-error-pages',
   'experimentation-opportunities',
   'meta-tags',
+  'product-metatags',
   'structured-data',
   'forms-opportunities',
   'alt-text',
@@ -56,10 +57,14 @@ const parseKeywordArguments = (args) => {
   const positionalArgs = [];
 
   args.forEach((arg) => {
-    // Check if this is a Slack-formatted URL (e.g., <http://example.com|example.com>)
-    const isSlackFormattedUrl = arg && arg.match(/^<https?:\/\/[^|>]+\|[^>]+>$/);
+    // Check if this is any type of URL (focused on HTTP/HTTPS only)
+    const isAnyUrl = arg && (
+      arg.startsWith('<http')
+      || arg.startsWith('http://')
+      || arg.startsWith('https://')
+    );
 
-    if (arg && arg.includes(':') && !isSlackFormattedUrl) {
+    if (arg && arg.includes(':') && !isAnyUrl) {
       const [key, ...valueParts] = arg.split(':');
       const value = valueParts.join(':').trim(); // Handle cases where value contains colons and trim whitespace
       keywords[key] = value;
@@ -82,7 +87,7 @@ function RunAuditCommand(context) {
   const baseCommand = BaseCommand({
     id: 'run-audit',
     name: 'Run Audit',
-    description: 'Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits.',
+    description: 'Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. Use `product-metatags` for Product Detail Page (PDP) analysis of commerce sites.',
     phrases: PHRASES,
     usageText: `${PHRASES[0]} {site} [auditType] [auditData] OR {site} audit:{auditType} [key:value ...]`,
   });
@@ -183,6 +188,8 @@ function RunAuditCommand(context) {
         // Old positional format: site auditType auditData
         [baseURLInputArg, auditTypeInputArg, auditDataInputArg] = positionalArgs;
       }
+
+      log.info(`run-audit: baseURL="${baseURLInputArg}", auditType="${auditTypeInputArg}", auditData="${auditDataInputArg}"`);
 
       const hasFiles = isNonEmptyArray(files);
       const baseURL = extractURLFromSlackInput(baseURLInputArg);
