@@ -119,6 +119,7 @@ function LlmoController(ctx) {
 
       // Try to get from cache first
       if (cacheService) {
+        log.info('LLMO attempting to connect to ElastiCache');
         await ensureCacheConnection();
         if (cacheService.isReady()) {
           cacheKey = ElastiCacheService

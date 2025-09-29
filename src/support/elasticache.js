@@ -34,6 +34,7 @@ class ElastiCacheService {
   async connect() {
     // Don't attempt connection if we've reached max attempts
     if (this.connectionAttempts >= this.maxConnectionAttempts) {
+      this.log.warn(`ElastiCache connection aborted: Maximum connection attempts (${this.maxConnectionAttempts}) reached`);
       return;
     }
 
@@ -44,6 +45,7 @@ class ElastiCacheService {
 
     try {
       this.connectionAttempts += 1;
+      this.log.info(`ElastiCache connection attempt ${this.connectionAttempts}/${this.maxConnectionAttempts} to ${this.config.host}:${this.config.port}`);
 
       // Initialize Redis cluster client
       const clusterNodes = [{
@@ -99,6 +101,12 @@ class ElastiCacheService {
       this.client.on('ready', () => {
         this.log.info('Connected to ElastiCache Redis cluster');
         this.isConnected = true;
+
+        // Clear connection timeout when ready
+        if (this.connectionTimeout) {
+          clearTimeout(this.connectionTimeout);
+          this.connectionTimeout = null;
+        }
       });
 
       // Set a timeout to prevent infinite connection attempts
@@ -108,14 +116,6 @@ class ElastiCacheService {
           this.disconnect();
         }
       }, 15000); // 15 seconds timeout
-
-      // Clear timeout on ready
-      this.client.on('ready', () => {
-        if (this.connectionTimeout) {
-          clearTimeout(this.connectionTimeout);
-          this.connectionTimeout = null;
-        }
-      });
     } catch (error) {
       this.log.warn(`ElastiCache connection failed: ${error.message}`);
       throw error;
