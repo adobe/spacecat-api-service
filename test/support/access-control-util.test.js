@@ -1168,8 +1168,7 @@ describe('Access Control Util', () => {
       // Mock site enrollment to return empty array (no site entitlement)
       mockSiteEnrollment.allBySiteId.resolves([]);
 
-      const result = await util.hasAccess(site, '', 'llmo');
-      expect(result).to.be.false;
+      await expect(util.hasAccess(site, '', 'llmo')).to.be.rejectedWith('Missing enrollment for site');
 
       expect(mockTierClient.checkValidEntitlement).to.have.been.called;
     });
@@ -1195,8 +1194,7 @@ describe('Access Control Util', () => {
 
       mockTierClient.checkValidEntitlement.resolves({});
 
-      const result = await util.hasAccess(site, '', 'llmo');
-      expect(result).to.be.false;
+      await expect(util.hasAccess(site, '', 'llmo')).to.be.rejectedWith('Missing entitlement for organization');
     });
 
     it('should validate site enrollment when hasAccess is called with site and product code', async () => {
@@ -1244,8 +1242,7 @@ describe('Access Control Util', () => {
 
       mockSiteEnrollment.allBySiteId.resolves(mockSiteEnrollments);
 
-      const result = await util.hasAccess(site, '', 'llmo');
-      expect(result).to.be.false;
+      await expect(util.hasAccess(site, '', 'llmo')).to.be.rejectedWith('Missing enrollment for site');
 
       expect(mockTierClient.checkValidEntitlement).to.have.been.called;
     });

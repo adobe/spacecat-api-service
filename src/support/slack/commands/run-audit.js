@@ -57,10 +57,14 @@ const parseKeywordArguments = (args) => {
   const positionalArgs = [];
 
   args.forEach((arg) => {
-    // Check if this is a Slack-formatted URL (e.g., <http://example.com|example.com>)
-    const isSlackFormattedUrl = arg && arg.match(/^<https?:\/\/[^|>]+\|[^>]+>$/);
+    // Check if this is any type of URL (focused on HTTP/HTTPS only)
+    const isAnyUrl = arg && (
+      arg.startsWith('<http')
+      || arg.startsWith('http://')
+      || arg.startsWith('https://')
+    );
 
-    if (arg && arg.includes(':') && !isSlackFormattedUrl) {
+    if (arg && arg.includes(':') && !isAnyUrl) {
       const [key, ...valueParts] = arg.split(':');
       const value = valueParts.join(':').trim(); // Handle cases where value contains colons and trim whitespace
       keywords[key] = value;
@@ -184,6 +188,8 @@ function RunAuditCommand(context) {
         // Old positional format: site auditType auditData
         [baseURLInputArg, auditTypeInputArg, auditDataInputArg] = positionalArgs;
       }
+
+      log.info(`run-audit: baseURL="${baseURLInputArg}", auditType="${auditTypeInputArg}", auditData="${auditDataInputArg}"`);
 
       const hasFiles = isNonEmptyArray(files);
       const baseURL = extractURLFromSlackInput(baseURLInputArg);

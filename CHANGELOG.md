@@ -1,3 +1,24 @@
+## [1.184.3](https://github.com/adobe/spacecat-api-service/compare/v1.184.2...v1.184.3) (2025-09-29)
+
+
+### Bug Fixes
+
+* exclude URLs from keyword parsing in run-audit command ([#1285](https://github.com/adobe/spacecat-api-service/issues/1285)) ([2e02219](https://github.com/adobe/spacecat-api-service/commit/2e022192733102a53c937bef9238fab5906a564e))
+
+## [1.184.2](https://github.com/adobe/spacecat-api-service/compare/v1.184.1...v1.184.2) (2025-09-29)
+
+
+### Bug Fixes
+
+* re-throw error within ELMO controller to not lose meaningful message ([#1295](https://github.com/adobe/spacecat-api-service/issues/1295)) ([32a295c](https://github.com/adobe/spacecat-api-service/commit/32a295c919d8637b2bd42da3b78da4cc522250ca))
+
+## [1.184.1](https://github.com/adobe/spacecat-api-service/compare/v1.184.0...v1.184.1) (2025-09-29)
+
+
+### Bug Fixes
+
+* write to safe environment from spacecat dev ([#1298](https://github.com/adobe/spacecat-api-service/issues/1298)) ([942cff6](https://github.com/adobe/spacecat-api-service/commit/942cff6e2fb3a8f67224119a58a0fbb2f21d318d))
+
 # [1.184.0](https://github.com/adobe/spacecat-api-service/compare/v1.183.5...v1.184.0) (2025-09-29)
 
 
