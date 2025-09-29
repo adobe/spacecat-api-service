@@ -1,3 +1,10 @@
+## [1.184.3](https://github.com/adobe/spacecat-api-service/compare/v1.184.2...v1.184.3) (2025-09-29)
+
+
+### Bug Fixes
+
+* exclude URLs from keyword parsing in run-audit command ([#1285](https://github.com/adobe/spacecat-api-service/issues/1285)) ([2e02219](https://github.com/adobe/spacecat-api-service/commit/2e022192733102a53c937bef9238fab5906a564e))
+
 ## [1.184.2](https://github.com/adobe/spacecat-api-service/compare/v1.184.1...v1.184.2) (2025-09-29)
 
 
