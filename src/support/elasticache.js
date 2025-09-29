@@ -47,34 +47,23 @@ class ElastiCacheService {
       this.connectionAttempts += 1;
       this.log.info(`ElastiCache connection attempt ${this.connectionAttempts}/${this.maxConnectionAttempts} to ${this.config.host}:${this.config.port}`);
 
-      // Initialize Redis cluster client
-      const clusterNodes = [{
+      // ElastiCache Serverless - use single Redis instance
+      const redisOptions = {
         host: this.config.host,
         port: this.config.port || 6379,
-      }];
-
-      const clusterOptions = {
-        dnsLookup: (address, callback) => callback(null, address),
-        enableAutoPipelining: true, // 35-50% performance improvement
-        redisOptions: {
-          connectTimeout: 10000, // 10 seconds
-          lazyConnect: true, // Don't connect immediately
-          maxRetriesPerRequest: 2, // Limit retries per request
-          retryDelayOnFailover: 100,
-        },
-        enableOfflineQueue: false, // Don't queue commands when disconnected
+        connectTimeout: 10000,
+        lazyConnect: true,
         maxRetriesPerRequest: 2,
         retryDelayOnFailover: 100,
-        slotsRefreshTimeout: 10000, // Timeout for slot refresh
-        slotsRefreshInterval: 30000, // Interval for slot refresh
+        enableOfflineQueue: false,
       };
 
       // Add TLS configuration for ElastiCache serverless
       if (this.config.tls) {
-        clusterOptions.redisOptions.tls = {};
+        redisOptions.tls = {};
       }
 
-      this.client = new Redis.Cluster(clusterNodes, clusterOptions);
+      this.client = new Redis(redisOptions);
 
       // Set up event handlers
       this.client.on('error', (error) => {
