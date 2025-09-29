@@ -318,7 +318,7 @@ export function createElastiCacheService(env, log) {
   }
 
   const config = {
-    host: env.ELASTICACHE_HOST,
+    host: env.ELASTICACHE_HOST || 'elmodata-u65bcl.serverless.use1.cache.amazonaws.com',
     port: env.ELASTICACHE_PORT || '6379',
     tls: env.ELASTICACHE_TLS === 'true',
     defaultTTL: parseInt(env.ELASTICACHE_DEFAULT_TTL || '3600', 10),
