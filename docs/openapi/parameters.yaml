@@ -316,15 +316,22 @@ externalId:
 
 sandboxAuditType:
   name: auditType
-  description: Comma-separated list of audit types to run
+  description: |
+    Comma-separated list of audit types to run on sandbox sites. 
+    Use 'product-metatags' for specialized Product Detail Page (PDP) analysis of commerce sites.
   in: query
   required: false
   schema:
     type: string
-    description: Comma-separated list of audit types
-    example: "meta-tags,alt-text"
+    description: |
+      Comma-separated list of audit types:
+      - meta-tags: General meta tag analysis
+      - product-metatags: PDP-focused audit for e-commerce sites (scrapes SKU, thumbnail, catalog/store view codes)
+      - alt-text: Image alternative text analysis
+    example: "meta-tags,product-metatags,alt-text"
     enum:
       - 'meta-tags'
+      - 'product-metatags'
       - 'alt-text'
 
 llmoConfigVersion:

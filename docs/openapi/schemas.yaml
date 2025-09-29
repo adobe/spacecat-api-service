@@ -55,6 +55,7 @@ AuditType:
     - 'structured-data'
     - 'costs'
     - 'meta-tags'
+    - 'product-metatags'
     - 'broken-internal-links'
     - 'experimentation-opportunities'
     - 'llm-error-pages'
@@ -703,6 +704,100 @@ AuditResult:
             finalUrl:
               description: |
                 The final URL for the audited page.
+              type: string
+    - type: object
+      description: |
+        The result of a product-metatags audit targeting Product Detail Pages (PDP) of commerce sites.
+        This audit specifically analyzes product pages for e-commerce optimization, scraping SKU, 
+        thumbnail images, and catalog/store view codes for later autofixing capabilities.
+      properties:
+        auditResult:
+          type: object
+          properties:
+            productDetailPages:
+              description: |
+                A mapping of product page URLs to their analysis results, including product metadata 
+                and meta tag recommendations for commerce optimization.
+              type: object
+              additionalProperties:
+                type: object
+                properties:
+                  productMetadata:
+                    type: object
+                    description: |
+                      Commerce-specific metadata scraped from the product page for autofixing.
+                    properties:
+                      sku:
+                        description: |
+                          Product SKU (Stock Keeping Unit) identifier.
+                        type: string
+                      thumbnail:
+                        description: |
+                          URL to the product thumbnail image.
+                        type: string
+                      catalogViewCode:
+                        description: |
+                          Catalog view code for multi-catalog e-commerce sites.
+                        type: string
+                      storeViewCode:
+                        description: |
+                          Store view code for multi-store e-commerce sites.
+                        type: string
+                  metaTagAnalysis:
+                    type: object
+                    description: |
+                      Analysis of product-specific meta tags and SEO elements.
+                    additionalProperties:
+                      type: object
+                      properties:
+                        current:
+                          description: |
+                            Current value of the meta tag or element.
+                          type: string
+                        seoRecommendation:
+                          description: |
+                            SEO recommendation for this product meta element.
+                          type: string
+                        issue:
+                          description: |
+                            The issue detected in the product meta element.
+                          type: string
+                        issueDetails:
+                          description: |
+                            Detailed explanation of the issue for product pages.
+                          type: string
+                        seoImpact:
+                          description: |
+                            The impact of the detected issue on product discoverability.
+                          type: string
+                        autofixSuggestion:
+                          description: |
+                            Suggested value for automated fixing of the meta element.
+                          type: string
+            pdpOptimizationSummary:
+              type: object
+              description: |
+                Summary of product detail page optimization findings.
+              properties:
+                totalPagesAnalyzed:
+                  description: |
+                    Total number of product pages analyzed.
+                  type: integer
+                criticalIssues:
+                  description: |
+                    Number of critical issues found across product pages.
+                  type: integer
+                mediumIssues:
+                  description: |
+                    Number of medium-priority issues found.
+                  type: integer
+                autofixableItems:
+                  description: |
+                    Number of issues that can be automatically fixed using scraped metadata.
+                  type: integer
+            finalUrl:
+              description: |
+                The final URL for the audited commerce site.
               type: string
     - type: object
       description: The result of LLM error pages audit.
@@ -3981,9 +4076,15 @@ OrganizationIdentityProvider:
 # Sandbox Audit API Schemas
 SandboxAuditType:
   type: string
-  description: Supported audit types for sandbox environments
+  description: |
+    Supported audit types for sandbox environments:
+    - meta-tags: General meta tag analysis for all page types
+    - product-metatags: Specialized audit for Product Detail Pages (PDP) of commerce sites, 
+      analyzing product-specific meta tags and scraping SKU, thumbnail, and catalog/store view codes for autofixing
+    - alt-text: Alternative text analysis for images
   enum:
     - 'meta-tags'
+    - 'product-metatags'
     - 'alt-text'
   example: 'meta-tags'
 

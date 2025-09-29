@@ -1,3 +1,10 @@
+# [1.184.0](https://github.com/adobe/spacecat-api-service/compare/v1.183.5...v1.184.0) (2025-09-29)
+
+
+### Features
+
+* **COMOPT-1189:** add product-metatags audit for e-commerce optimization ([#1297](https://github.com/adobe/spacecat-api-service/issues/1297)) ([9053c82](https://github.com/adobe/spacecat-api-service/commit/9053c826fed68b7ccc455ec96c4608966d003d3c))
+
 ## [1.183.5](https://github.com/adobe/spacecat-api-service/compare/v1.183.4...v1.183.5) (2025-09-25)
 
 
