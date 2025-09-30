@@ -1,3 +1,10 @@
+# [1.187.0](https://github.com/adobe/spacecat-api-service/compare/v1.186.0...v1.187.0) (2025-09-30)
+
+
+### Features
+
+* llmo config get/post ([#1299](https://github.com/adobe/spacecat-api-service/issues/1299)) ([a0f1456](https://github.com/adobe/spacecat-api-service/commit/a0f14569e8393c05fb2b3714d61301802ec530cf))
+
 # [1.186.0](https://github.com/adobe/spacecat-api-service/compare/v1.185.0...v1.186.0) (2025-09-29)
 
 
