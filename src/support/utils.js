@@ -786,7 +786,7 @@ export const onboardSingleSite = async (
     if (baseUrlPathName !== resolvedUrlPathName || baseUrlOrigin !== resolvedUrlOrigin) {
       // If the base URL has a subpath, preserve it in the override
       const overrideBaseURL = baseUrlPathName !== '/' ? `${resolvedUrlOrigin}${baseUrlPathName}` : resolvedUrlOrigin;
-      await say(`:information_source: Updating fetch configuration for site ${siteID} with override base URL: ${overrideBaseURL}`);
+      log.info(`Updating fetch configuration for site ${siteID} with override base URL: ${overrideBaseURL}`);
       siteConfig.updateFetchConfig({
         overrideBaseURL,
       });
