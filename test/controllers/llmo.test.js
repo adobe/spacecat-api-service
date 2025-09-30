@@ -15,6 +15,8 @@ import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
+import { S3Client } from '@aws-sdk/client-s3';
+import { llmoConfig } from '@adobe/spacecat-shared-utils';
 
 use(sinonChai);
 
@@ -27,6 +29,7 @@ describe('LlmoController', () => {
   let mockDataAccess;
   let mockLog;
   let mockEnv;
+  let s3Client;
   let tracingFetchStub;
 
   // Helper function to create mock objects
@@ -65,7 +68,9 @@ describe('LlmoController', () => {
       },
     };
 
-    // Create mock config
+    // Create S3Client stub
+    s3Client = sinon.createStubInstance(S3Client);
+
     mockConfig = {
       getLlmoConfig: sinon.stub().returns(mockLlmoConfig),
       updateLlmoConfig: sinon.stub(),
@@ -192,6 +197,10 @@ describe('LlmoController', () => {
       dataAccess: mockDataAccess,
       log: mockLog,
       env: mockEnv,
+      s3: {
+        s3Client,
+        s3Bucket: 'test-bucket',
+      },
       attributes: {
         authInfo: {
           getType: () => 'jwt',
@@ -2186,22 +2195,247 @@ describe('LlmoController', () => {
   });
 
   describe('getLlmoConfig', () => {
-    it('should return LLMO config successfully', async () => {
+    it('should return LLMO config from S3 successfully', async () => {
+      const config = llmoConfig.defaultConfig();
+      config.entities['123e4567-e89b-12d3-a456-426614174000'] = {
+        type: 'category',
+        name: 'test-category',
+      };
+
+      s3Client.send.resolves({
+        Body: {
+          transformToString: () => Promise.resolve(JSON.stringify(config)),
+        },
+        VersionId: 'v123',
+      });
+
       const result = await controller.getLlmoConfig(mockContext);
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
-      expect(responseBody).to.deep.equal(mockLlmoConfig);
+      expect(responseBody).to.deep.equal({ config, version: 'v123' });
     });
 
-    it('should throw error when LLMO is not enabled', async () => {
-      mockConfig.getLlmoConfig.returns(null);
+    it('should return bad request when s3 client is missing', async () => {
+      delete mockContext.s3;
 
       const result = await controller.getLlmoConfig(mockContext);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
-      expect(responseBody.message).to.include('LLM Optimizer is not enabled for this site');
+      expect(responseBody.message).to.equal('LLMO config storage is not configured for this environment');
+    });
+
+    it('should handle S3 errors when getting config', async () => {
+      s3Client.send.rejects(new Error('S3 connection failed'));
+
+      const result = await controller.getLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('S3 connection failed');
+    });
+
+    it('should return LLMO config with specific version successfully', async () => {
+      const config = llmoConfig.defaultConfig();
+      config.entities['123e4567-e89b-12d3-a456-426614174000'] = {
+        type: 'category',
+        name: 'test-category',
+      };
+
+      const version = 'v123';
+
+      s3Client.send
+        .withArgs(sinon.match({ input: { VersionId: version } }))
+        .resolves({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify(config)),
+          },
+          VersionId: version,
+        });
+
+      // Add version to context data
+      mockContext.data = { version };
+
+      const result = await controller.getLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).deep.equals({ config, version });
+    });
+
+    it('should return 404 when specific version does not exist', async () => {
+      // Mock S3 to return NoSuchKey error for specific version
+      const noSuchKeyError = new Error('NoSuchKey');
+      noSuchKeyError.name = 'NoSuchKey';
+      s3Client.send.rejects(noSuchKeyError);
+
+      // Add version to context data
+      mockContext.data = { version: 'nonexistent-version' };
+
+      const result = await controller.getLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal("LLMO config version 'nonexistent-version' not found for site 'test-site-id'");
+    });
+
+    it('should return 404 when specific version returns NotFound error', async () => {
+      // Mock S3 to return NotFound error for specific version
+      const notFoundError = new Error('NotFound');
+      notFoundError.name = 'NotFound';
+      s3Client.send.rejects(notFoundError);
+
+      // Add version to context data
+      mockContext.data = { version: 'not-found-version' };
+
+      const result = await controller.getLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal("LLMO config version 'not-found-version' not found for site 'test-site-id'");
+    });
+
+    it('should return default config when no version specified and config does not exist', async () => {
+      // Mock S3 to return NoSuchKey error (no version specified)
+      const noSuchKeyError = new Error('NoSuchKey');
+      noSuchKeyError.name = 'NoSuchKey';
+      s3Client.send.rejects(noSuchKeyError);
+
+      // No version in context data
+      mockContext.data = {};
+
+      const result = await controller.getLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ config: llmoConfig.defaultConfig(), version: null });
+    });
+
+    it('should handle empty string version parameter', async () => {
+      // Mock S3 to return NoSuchKey error for empty string version
+      const noSuchKeyError = new Error('NoSuchKey');
+      noSuchKeyError.name = 'NoSuchKey';
+      s3Client.send.rejects(noSuchKeyError);
+
+      // Add empty string version to context data
+      mockContext.data = { version: '' };
+
+      const result = await controller.getLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal("LLMO config version '' not found for site 'test-site-id'");
+    });
+  });
+
+  describe('postLlmoConfig', () => {
+    it('should write config to S3 successfully', async () => {
+      s3Client.send.resolves({
+        VersionId: 'v1',
+      });
+      const categoryId = '123e4567-e89b-12d3-a456-426614174000';
+      const topicId = '123e4567-e89b-12d3-a456-426614174001';
+
+      mockContext.data = {
+        entities: {
+          [categoryId]: { type: 'category', name: 'test-category' },
+          [topicId]: { type: 'topic', name: 'test-topic' },
+        },
+        brands: {
+          aliases: [{
+            aliases: ['test-brand'],
+            category: categoryId,
+            region: 'us',
+            topic: topicId,
+          }],
+        },
+        competitors: {
+          competitors: [{
+            name: 'test-competitor',
+            category: categoryId,
+            region: 'us',
+            aliases: ['competitor-alias'],
+            urls: [],
+          }],
+        },
+      };
+
+      const result = await controller.postLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ version: 'v1' });
+    });
+
+    it('should return bad request when payload is not an object', async () => {
+      mockContext.data = null;
+
+      const result = await controller.postLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('LLMO config update must be provided as an object');
+      expect(s3Client.send).to.not.have.been.called;
+    });
+
+    it('should return bad request when required fields are missing', async () => {
+      mockContext.data = { entities: {} }; // Missing required brands and competitors fields
+
+      const result = await controller.postLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Invalid LLMO config');
+      expect(s3Client.send).to.not.have.been.called;
+    });
+
+    it('should return bad request when s3 client is missing', async () => {
+      delete mockContext.s3;
+
+      const result = await controller.postLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('LLMO config storage is not configured for this environment');
+      expect(s3Client.send).to.not.have.been.called;
+    });
+
+    it('should handle S3 error when writing config', async () => {
+      s3Client.send.rejects(new Error('S3 write failed'));
+
+      const categoryId = '123e4567-e89b-12d3-a456-426614174000';
+      const topicId = '123e4567-e89b-12d3-a456-426614174001';
+
+      mockContext.data = {
+        entities: {
+          [categoryId]: { type: 'category', name: 'test-category' },
+          [topicId]: { type: 'topic', name: 'test-topic' },
+        },
+        brands: {
+          aliases: [{
+            aliases: ['test-brand'],
+            category: categoryId,
+            region: 'us',
+            topic: topicId,
+          }],
+        },
+        competitors: {
+          competitors: [{
+            name: 'test-competitor',
+            category: categoryId,
+            region: 'us',
+            aliases: ['competitor-alias'],
+            urls: [],
+          }],
+        },
+      };
+
+      const result = await controller.postLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('S3 write failed');
     });
   });
 
@@ -2428,6 +2662,33 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal([]);
     });
+
+    it('should return 403 when user does not have access to the site', async () => {
+      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo/llmo.js', {
+        '../../src/support/access-control-util.js': {
+          default: createMockAccessControlUtil(false),
+        },
+      });
+
+      const controllerWithAccessDenied = LlmoControllerWithAccessDenied(mockContext);
+
+      const result = await controllerWithAccessDenied.getLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
+    });
+
+    it('should return 400 for other errors from getSiteAndValidateLlmo', async () => {
+      // Mock Site.findById to throw a generic error
+      mockDataAccess.Site.findById.rejects(new Error('Database connection failed'));
+
+      const result = await controller.getLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Database connection failed');
+    });
   });
 
   describe('addLlmoCustomerIntent', () => {
@@ -2596,6 +2857,41 @@ describe('LlmoController', () => {
       expect(responseBody).to.deep.equal(mockLlmoConfig.customerIntent);
       expect(mockConfig.addLlmoCustomerIntent).to.have.been.calledWith(mockContext.data);
     });
+
+    it('should return 403 when user does not have access to the site', async () => {
+      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo/llmo.js', {
+        '../../src/support/access-control-util.js': {
+          default: createMockAccessControlUtil(false),
+        },
+      });
+
+      const controllerWithAccessDenied = LlmoControllerWithAccessDenied(mockContext);
+
+      mockContext.data = [
+        { key: 'new_target', value: 'enterprise customers' },
+      ];
+
+      const result = await controllerWithAccessDenied.addLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
+    });
+
+    it('should return 400 for other errors from getSiteAndValidateLlmo', async () => {
+      // Mock Site.findById to throw a generic error
+      mockDataAccess.Site.findById.rejects(new Error('Database connection failed'));
+
+      mockContext.data = [
+        { key: 'new_target', value: 'enterprise customers' },
+      ];
+
+      const result = await controller.addLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Database connection failed');
+    });
   });
 
   describe('removeLlmoCustomerIntent', () => {
@@ -2614,15 +2910,14 @@ describe('LlmoController', () => {
       expect(mockSite.save).to.have.been.calledOnce;
     });
 
-    it('should throw error for invalid customer intent key', async () => {
+    it('should return bad request for invalid customer intent key', async () => {
       mockConfig.getLlmoCustomerIntent.returns([]);
 
-      try {
-        await controller.removeLlmoCustomerIntent(mockContext);
-        expect.fail('Should have thrown an error');
-      } catch (error) {
-        expect(error.message).to.include('Invalid customer intent key');
-      }
+      const result = await controller.removeLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Invalid customer intent key');
     });
 
     it('should handle save errors gracefully', async () => {
@@ -2648,12 +2943,11 @@ describe('LlmoController', () => {
       // Use an invalid intent key so the validation will fail
       mockContext.params.intentKey = 'invalid-intent-key';
 
-      try {
-        await controller.removeLlmoCustomerIntent(mockContext);
-        expect.fail('Should have thrown an error');
-      } catch (error) {
-        expect(error.message).to.include('Invalid customer intent key');
-      }
+      const result = await controller.removeLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Invalid customer intent key');
     });
 
     it('should handle null customer intent in response after removal', async () => {
@@ -2670,6 +2964,33 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal([]);
       expect(mockConfig.removeLlmoCustomerIntent).to.have.been.calledWith('target_audience');
+    });
+
+    it('should return 403 when user does not have access to the site', async () => {
+      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo/llmo.js', {
+        '../../src/support/access-control-util.js': {
+          default: createMockAccessControlUtil(false),
+        },
+      });
+
+      const controllerWithAccessDenied = LlmoControllerWithAccessDenied(mockContext);
+
+      const result = await controllerWithAccessDenied.removeLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
+    });
+
+    it('should return 400 for other errors from getSiteAndValidateLlmo', async () => {
+      // Mock Site.findById to throw a generic error (not access control or validation error)
+      mockDataAccess.Site.findById.rejects(new Error('Database connection failed'));
+
+      const result = await controller.removeLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Database connection failed');
     });
   });
 
@@ -2707,15 +3028,14 @@ describe('LlmoController', () => {
       expect(mockSite.save).to.have.been.calledOnce;
     });
 
-    it('should throw error for invalid customer intent key', async () => {
+    it('should return bad request for invalid customer intent key', async () => {
       mockConfig.getLlmoCustomerIntent.returns([]);
 
-      try {
-        await controller.patchLlmoCustomerIntent(mockContext);
-        expect.fail('Should have thrown an error');
-      } catch (error) {
-        expect(error.message).to.include('Invalid customer intent key');
-      }
+      const result = await controller.patchLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Invalid customer intent key');
     });
 
     it('should return bad request when no update data provided', async () => {
@@ -2784,6 +3104,33 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal([]);
       expect(mockConfig.updateLlmoCustomerIntent).to.have.been.calledWith('target_audience', updateData);
+    });
+
+    it('should return 403 when user does not have access to the site', async () => {
+      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo/llmo.js', {
+        '../../src/support/access-control-util.js': {
+          default: createMockAccessControlUtil(false),
+        },
+      });
+
+      const controllerWithAccessDenied = LlmoControllerWithAccessDenied(mockContext);
+
+      const result = await controllerWithAccessDenied.patchLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
+    });
+
+    it('should return 400 for other errors from getSiteAndValidateLlmo', async () => {
+      // Mock Site.findById to throw a generic error (not access control or validation error)
+      mockDataAccess.Site.findById.rejects(new Error('Database connection failed'));
+
+      const result = await controller.patchLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Database connection failed');
     });
   });
 

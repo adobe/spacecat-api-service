@@ -14,10 +14,10 @@
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import {
-  Site, Organization,
+  Site,
+  Organization,
   Entitlement as EntitlementModel,
   TrialUser as TrialUserModel,
-  OrganizationIdentityProvider as OrganizationIdentityProviderModel,
 } from '@adobe/spacecat-shared-data-access';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 
@@ -578,12 +578,6 @@ describe('Access Control Util', () => {
 
       sandbox.stub(TrialUserModel, 'STATUSES').value({
         REGISTERED: 'registered',
-      });
-
-      sandbox.stub(OrganizationIdentityProviderModel, 'PROVIDER_TYPES').value({
-        IMS: 'IMS',
-        MICROSOFT: 'MICROSOFT',
-        GOOGLE: 'GOOGLE',
       });
 
       mockOrg = {
@@ -1174,8 +1168,7 @@ describe('Access Control Util', () => {
       // Mock site enrollment to return empty array (no site entitlement)
       mockSiteEnrollment.allBySiteId.resolves([]);
 
-      await expect(util.hasAccess(site, '', 'llmo'))
-        .to.be.rejectedWith('Missing enrollment for site');
+      await expect(util.hasAccess(site, '', 'llmo')).to.be.rejectedWith('Missing enrollment for site');
 
       expect(mockTierClient.checkValidEntitlement).to.have.been.called;
     });
@@ -1201,8 +1194,7 @@ describe('Access Control Util', () => {
 
       mockTierClient.checkValidEntitlement.resolves({});
 
-      await expect(util.hasAccess(site, '', 'llmo'))
-        .to.be.rejectedWith('Missing entitlement for organization');
+      await expect(util.hasAccess(site, '', 'llmo')).to.be.rejectedWith('Missing entitlement for organization');
     });
 
     it('should validate site enrollment when hasAccess is called with site and product code', async () => {
@@ -1250,8 +1242,7 @@ describe('Access Control Util', () => {
 
       mockSiteEnrollment.allBySiteId.resolves(mockSiteEnrollments);
 
-      await expect(util.hasAccess(site, '', 'llmo'))
-        .to.be.rejectedWith('Missing enrollment for site');
+      await expect(util.hasAccess(site, '', 'llmo')).to.be.rejectedWith('Missing enrollment for site');
 
       expect(mockTierClient.checkValidEntitlement).to.have.been.called;
     });

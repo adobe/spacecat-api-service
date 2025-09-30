@@ -194,10 +194,6 @@ describe('getRouteHandlers', () => {
     triggerAudit: sinon.stub(),
   };
 
-  const mockOrganizationIdentityProviderController = {
-    getByOrganizationID: () => null,
-  };
-
   const mockUserActivityController = {
     getBySiteID: () => null,
     createTrialUserActivity: () => null,
@@ -250,7 +246,6 @@ describe('getRouteHandlers', () => {
       mockTrafficController,
       mockFixesController,
       mockLlmoController,
-      mockOrganizationIdentityProviderController,
       mockUserActivityController,
       mockSiteEnrollmentController,
       mockTrialUserController,
@@ -307,7 +302,6 @@ describe('getRouteHandlers', () => {
       'GET /organizations/:organizationId',
       'GET /organizations/:organizationId/brands',
       'GET /organizations/:organizationId/sites',
-      'GET /organizations/:organizationId/organization-identity-provider',
       'GET /organizations/:organizationId/entitlements',
       'GET /organizations/:organizationId/trial-users',
       'POST /organizations/:organizationId/trial-user-invite',
@@ -415,6 +409,7 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/sheet-data/:dataSource',
       'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource',
       'GET /sites/:siteId/llmo/config',
+      'POST /sites/:siteId/llmo/config',
       'GET /sites/:siteId/llmo/questions',
       'POST /sites/:siteId/llmo/questions',
       'DELETE /sites/:siteId/llmo/questions/:questionKey',

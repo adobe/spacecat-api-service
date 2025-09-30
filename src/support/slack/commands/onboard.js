@@ -55,9 +55,10 @@ function OnboardCommand(context) {
 • Authoring type (optional)
 • Workflow wait time (optional)
 • Preview environment URL (optional)
+• Entitlement Tier (optional, defaults to FREE_TRIAL)
 
 *Batch Processing:* Upload a CSV file with ${PHRASES[1]} using the format:
-\`Site URL, IMS Org ID, [Reserved], Delivery Type, Authoring Type\`
+\`Site URL, IMS Org ID, [Reserved], Delivery Type, Authoring Type, Tier\`
 `,
   });
 
@@ -76,6 +77,7 @@ function OnboardCommand(context) {
       { id: 'existingSite', title: 'Already existing site?' },
       { id: 'deliveryType', title: 'Delivery Type' },
       { id: 'authoringType', title: 'Authoring Type' },
+      { id: 'tier', title: 'Entitlement Tier' },
       { id: 'audits', title: 'Audits' },
       { id: 'imports', title: 'Imports' },
       { id: 'errors', title: 'Errors' },
@@ -95,6 +97,7 @@ function OnboardCommand(context) {
    * @param {Object} additionalParams - Additional onboarding parameters.
    * @param {string} additionalParams.deliveryType - Forced delivery type.
    * @param {string} additionalParams.authoringType - Authoring type.
+   * @param {string} additionalParams.tier - Entitlement tier.
    * @returns {Promise<Object>} - A report line containing execution details.
    */
   const onboardSingleSite = async (
@@ -177,7 +180,7 @@ function OnboardCommand(context) {
         // Process batch onboarding
         for (const row of csvData) {
           /* eslint-disable no-await-in-loop */
-          const [baseURL, imsOrgID] = row;
+          const [baseURL, imsOrgID, tier] = row;
           const reportLine = await onboardSingleSite(
             baseURL,
             imsOrgID,
@@ -185,7 +188,7 @@ function OnboardCommand(context) {
             profileName,
             env.WORKFLOW_WAIT_TIME_IN_SECONDS, // Use environment default wait time in batch mode
             slackContext,
-            {},
+            { tier },
           );
 
           // Add individual site status reporting for CSV processing
@@ -221,7 +224,7 @@ function OnboardCommand(context) {
         });
       } else {
         // Handle backwards compatibility with command line arguments
-        const [site, imsOrgId, profile, workflowWaitTime] = args;
+        const [site, imsOrgId, profile, workflowWaitTime, tier] = args;
 
         // Show button to start onboarding with optional pre-populated values
         const initialValues = {};
@@ -234,6 +237,7 @@ function OnboardCommand(context) {
         if (imsOrgId) initialValues.imsOrgId = imsOrgId;
         if (profile) initialValues.profile = profile;
         if (workflowWaitTime) initialValues.workflowWaitTime = workflowWaitTime;
+        if (tier) initialValues.tier = tier;
 
         const buttonValue = Object.keys(initialValues).length > 0
           ? JSON.stringify(initialValues)
