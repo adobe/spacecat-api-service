@@ -1,3 +1,10 @@
+## [1.187.1](https://github.com/adobe/spacecat-api-service/compare/v1.187.0...v1.187.1) (2025-09-30)
+
+
+### Bug Fixes
+
+* adds debug log in loggerStub ([#1304](https://github.com/adobe/spacecat-api-service/issues/1304)) ([97411cf](https://github.com/adobe/spacecat-api-service/commit/97411cfdbdc54f8bc2319983f719f8291d0de54f))
+
 # [1.187.0](https://github.com/adobe/spacecat-api-service/compare/v1.186.0...v1.187.0) (2025-09-30)
 
 
