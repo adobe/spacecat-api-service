@@ -670,8 +670,7 @@ export function onboardLLMOModal(lambdaContext) {
         originalThreadTs,
       });
 
-      // eslint-disable-next-line max-statements-per-line
-      await new Promise((resolve) => { setTimeout(resolve, 500); });
+      // Acknowledge the modal immediately to avoid Slack's 3-second timeout
       await ack();
 
       // Create a slack context for the onboarding process
@@ -692,9 +691,14 @@ export function onboardLLMOModal(lambdaContext) {
         threadTs: responseThreadTs,
       };
 
-      await onboardSite({
+      // Fire-and-forget: Start the onboarding process without awaiting
+      // This allows the handler to return immediately after ack() while the
+      // onboarding continues in the background
+      onboardSite({
         brandName, baseURL: brandURL, imsOrgId, deliveryType,
-      }, lambdaContext, slackContext);
+      }, lambdaContext, slackContext).catch((error) => {
+        log.error(`Error in background onboarding for site ${brandURL}:`, error);
+      });
 
       log.debug(`Onboard LLMO modal processed for user ${user.id}, site ${brandURL}`);
     } catch (e) {
