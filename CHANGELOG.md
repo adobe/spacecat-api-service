@@ -1,3 +1,31 @@
+## [1.187.2](https://github.com/adobe/spacecat-api-service/compare/v1.187.1...v1.187.2) (2025-09-30)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1300](https://github.com/adobe/spacecat-api-service/issues/1300)) ([05c1eeb](https://github.com/adobe/spacecat-api-service/commit/05c1eeb81d044ef0f37e832b8ab6f2b08dc4a490))
+
+## [1.187.1](https://github.com/adobe/spacecat-api-service/compare/v1.187.0...v1.187.1) (2025-09-30)
+
+
+### Bug Fixes
+
+* adds debug log in loggerStub ([#1304](https://github.com/adobe/spacecat-api-service/issues/1304)) ([97411cf](https://github.com/adobe/spacecat-api-service/commit/97411cfdbdc54f8bc2319983f719f8291d0de54f))
+
+# [1.187.0](https://github.com/adobe/spacecat-api-service/compare/v1.186.0...v1.187.0) (2025-09-30)
+
+
+### Features
+
+* llmo config get/post ([#1299](https://github.com/adobe/spacecat-api-service/issues/1299)) ([a0f1456](https://github.com/adobe/spacecat-api-service/commit/a0f14569e8393c05fb2b3714d61301802ec530cf))
+
+# [1.186.0](https://github.com/adobe/spacecat-api-service/compare/v1.185.0...v1.186.0) (2025-09-29)
+
+
+### Features
+
+* add cwv suggestions task ([#1176](https://github.com/adobe/spacecat-api-service/issues/1176)) ([b0f5ddc](https://github.com/adobe/spacecat-api-service/commit/b0f5ddcbcbc8b41d51591cb6369b7e088eeb6d70))
+
 # [1.185.0](https://github.com/adobe/spacecat-api-service/compare/v1.184.3...v1.185.0) (2025-09-29)
 
 

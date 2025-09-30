@@ -10,12 +10,16 @@
  * governing permissions and limitations under the License.
  */
 
-import { ok, badRequest, forbidden } from '@adobe/spacecat-shared-http-utils';
+import {
+  ok, badRequest, forbidden, createResponse, notFound,
+} from '@adobe/spacecat-shared-http-utils';
 import {
   SPACECAT_USER_AGENT,
   tracingFetch as fetch,
   hasText,
   isObject,
+  llmoConfig as llmo,
+  schemas,
 } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
@@ -29,6 +33,9 @@ import {
   applyMappings,
 } from './llmo-utils.js';
 import { LLMO_SHEET_MAPPINGS } from './llmo-mappings.js';
+
+const { readConfig, writeConfig } = llmo;
+const { llmoConfig: llmoConfigSchema } = schemas;
 
 const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
 
@@ -343,16 +350,70 @@ function LlmoController(ctx) {
 
   // Handles requests to the LLMO config endpoint
   const getLlmoConfig = async (context) => {
-    const { log } = context;
+    const { log, s3 } = context;
     const { siteId } = context.params;
+    const version = context.data?.version;
     try {
-      const { llmoConfig } = await getSiteAndValidateLlmo(context);
-      return ok(llmoConfig);
+      if (!s3 || !s3.s3Client) {
+        return badRequest('LLMO config storage is not configured for this environment');
+      }
+
+      log.info(`Fetching LLMO config from S3 for siteId: ${siteId}${version != null ? ` with version: ${version}` : ''}`);
+      const { config, exists, version: configVersion } = await readConfig(siteId, s3.s3Client, {
+        s3Bucket: s3.s3Bucket,
+        version,
+      });
+
+      // If a specific version was requested but doesn't exist, return 404
+      if (version != null && !exists) {
+        return notFound(`LLMO config version '${version}' not found for site '${siteId}'`);
+      }
+
+      return ok({ config, version: configVersion || null });
     } catch (error) {
       log.error(`Error getting llmo config for siteId: ${siteId}, error: ${error.message}`);
       return badRequest(error.message);
     }
   };
+
+  async function postLlmoConfig(context) {
+    const { log, s3, data } = context;
+    const { siteId } = context.params;
+    try {
+      if (!isObject(data)) {
+        return badRequest('LLMO config update must be provided as an object');
+      }
+
+      if (!s3 || !s3.s3Client) {
+        return badRequest('LLMO config storage is not configured for this environment');
+      }
+
+      // Validate the config, return 400 if validation fails
+      const result = llmoConfigSchema.safeParse(data);
+      if (!result.success) {
+        const { issues, message } = result.error;
+        return createResponse({
+          message: `Invalid LLMO config: ${message}`,
+          details: issues,
+        }, 400);
+      }
+      const parsedConfig = result.data;
+
+      const { version } = await writeConfig(
+        siteId,
+        parsedConfig,
+        s3.s3Client,
+        { s3Bucket: s3.s3Bucket },
+      );
+
+      log.info(`Updated LLMO config in S3 for siteId: ${siteId}, version: ${version}`);
+      return ok({ version });
+    } catch (error) {
+      const msg = `${error?.message || /* c8 ignore next */ error}`;
+      log.error(`Error updating llmo config for siteId: ${siteId}, error: ${msg}`);
+      return badRequest(msg);
+    }
+  }
 
   // Handles requests to the LLMO questions endpoint, returns both human and ai questions
   const getLlmoQuestions = async (context) => {
@@ -623,6 +684,7 @@ function LlmoController(ctx) {
     patchLlmoCustomerIntent,
     patchLlmoCdnLogsFilter,
     patchLlmoCdnBucketConfig,
+    postLlmoConfig,
   };
 }
 
