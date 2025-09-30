@@ -35,6 +35,7 @@ describe('Brands Controller', () => {
     info: sandbox.stub(),
     error: sandbox.stub(),
     warn: sandbox.stub(),
+    debug: sandbox.stub(),
   };
 
   const ORGANIZATION_ID = '9033554c-de8a-44ac-a356-09b51af8cc28';
