@@ -1634,9 +1634,10 @@ example-com:
       };
 
       const mockAck = sandbox.stub();
+      const postMessageStub = sandbox.stub().resolves();
       const mockClient = {
         chat: {
-          postMessage: sandbox.stub(),
+          postMessage: postMessageStub,
           update: sandbox.stub().resolves(),
         },
         views: {
@@ -1655,6 +1656,7 @@ example-com:
 
       await handler({ ack: mockAck, body: mockBody, client: mockClient });
 
+      // Verify immediate synchronous behavior
       expect(mockAck).to.have.been.called;
 
       // Check that the original message was updated to prevent re-triggering
@@ -1665,8 +1667,8 @@ example-com:
         blocks: [],
       });
 
-      // Check that the function completed successfully by verifying the debug log
-      expect(lambdaCtx.log.debug).to.have.been.calledWith('Added entitlements for site site123 (https://example.com) for user user123');
+      // Verify site was looked up
+      expect(mockSiteModel.findById).to.have.been.calledWith('site123');
     });
 
     it('should handle errors during entitlement addition', async () => {
@@ -2090,13 +2092,11 @@ example-com:
 
       await handler({ ack: mockAck, body: mockBody, client: mockClient });
 
+      // Verify immediate synchronous behavior
       expect(mockAck).to.have.been.called;
-      expect(mockClient.chat.postMessage).to.have.been.calledWith({
-        channel: 'channel123',
-        text: ':white_check_mark: Successfully updated organization and applied LLMO entitlements for *https://example.com* (brand: *Test Brand*)',
-        thread_ts: 'thread123',
-      });
-      expect(lambdaCtx.log.debug).to.have.been.calledWith('Updated org and applied entitlements for site site123 (https://example.com) for user user123');
+
+      // Verify site was looked up
+      expect(mockSiteModel.findById).to.have.been.calledWith('site123');
     });
 
     it('should return validation error when IMS org ID is not provided', async () => {

@@ -670,7 +670,6 @@ export function onboardLLMOModal(lambdaContext) {
         originalThreadTs,
       });
 
-      // Acknowledge the modal immediately to avoid Slack's 3-second timeout
       await ack();
 
       // Create a slack context for the onboarding process
@@ -691,9 +690,7 @@ export function onboardLLMOModal(lambdaContext) {
         threadTs: responseThreadTs,
       };
 
-      // Fire-and-forget: Start the onboarding process without awaiting
-      // This allows the handler to return immediately after ack() while the
-      // onboarding continues in the background
+      // Return immediately after ack() to make sure the modal closes
       onboardSite({
         brandName, baseURL: brandURL, imsOrgId, deliveryType,
       }, lambdaContext, slackContext).catch((error) => {
@@ -763,14 +760,27 @@ export function addEntitlementsAction(lambdaContext) {
       };
       /* c8 ignore end */
 
-      await createEntitlementAndEnrollment(site, lambdaContext, slackContext);
-      await client.chat.postMessage({
-        channel: originalChannel,
-        text: `:white_check_mark: Successfully ensured LLMO entitlements and enrollments for *${brandURL}* (brand: *${existingBrand}*).`,
-        thread_ts: originalThreadTs,
-      });
-
-      log.debug(`Added entitlements for site ${siteId} (${brandURL}) for user ${user.id}`);
+      // Fire-and-forget: Start the entitlement process without awaiting
+      // This allows the handler to return immediately after ack() while the
+      // entitlement process continues in the background
+      (async () => {
+        try {
+          await createEntitlementAndEnrollment(site, lambdaContext, slackContext);
+          await client.chat.postMessage({
+            channel: originalChannel,
+            text: `:white_check_mark: Successfully ensured LLMO entitlements and enrollments for *${brandURL}* (brand: *${existingBrand}*).`,
+            thread_ts: originalThreadTs,
+          });
+          log.debug(`Added entitlements for site ${siteId} (${brandURL}) for user ${user.id}`);
+        } catch (error) {
+          log.error(`Error in background entitlement process for site ${brandURL}:`, error);
+          await client.chat.postMessage({
+            channel: originalChannel,
+            text: `:x: Failed to add LLMO entitlements: ${error.message}`,
+            thread_ts: originalThreadTs,
+          });
+        }
+      })();
     } catch (error) {
       log.error('Error adding entitlements:', error);
     }
@@ -929,16 +939,30 @@ export function updateIMSOrgModal(lambdaContext) {
       };
       /* c8 ignore end */
 
-      await checkOrg(newImsOrgId, site, lambdaContext, slackContext);
-      await createEntitlementAndEnrollment(site, lambdaContext, slackContext);
+      // Fire-and-forget: Start the org update process without awaiting
+      // This allows the handler to return immediately after ack() while the
+      // update process continues in the background
+      (async () => {
+        try {
+          await checkOrg(newImsOrgId, site, lambdaContext, slackContext);
+          await createEntitlementAndEnrollment(site, lambdaContext, slackContext);
 
-      await client.chat.postMessage({
-        channel: responseChannel,
-        text: `:white_check_mark: Successfully updated organization and applied LLMO entitlements for *${brandURL}* (brand: *${existingBrand}*)`,
-        thread_ts: responseThreadTs,
-      });
+          await client.chat.postMessage({
+            channel: responseChannel,
+            text: `:white_check_mark: Successfully updated organization and applied LLMO entitlements for *${brandURL}* (brand: *${existingBrand}*)`,
+            thread_ts: responseThreadTs,
+          });
 
-      log.debug(`Updated org and applied entitlements for site ${siteId} (${brandURL}) for user ${user.id}`);
+          log.debug(`Updated org and applied entitlements for site ${siteId} (${brandURL}) for user ${user.id}`);
+        } catch (error) {
+          log.error(`Error in background org update for site ${brandURL}:`, error);
+          await client.chat.postMessage({
+            channel: responseChannel,
+            text: `:x: Failed to update organization: ${error.message}`,
+            thread_ts: responseThreadTs,
+          });
+        }
+      })();
     } catch (error) {
       log.error('Error updating organization:', error);
     }
