@@ -185,13 +185,20 @@ llmo-global-sheet-data:
 llmo-config:
   parameters:
     - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/llmoConfigVersion'
   get:
     tags:
       - llmo
     summary: Get LLMO configuration
     description: |
       Retrieves the LLMO (Large Language Model Optimizer) configuration for a specific site.
-      This includes the data folder, brand information, and questions configuration.
+      This endpoint retrieves the configuration directly from S3 storage. The configuration
+      includes entities (categories, topics), brand aliases, and competitor information.
+
+      If a version parameter is provided, the specific version of the configuration will be
+      retrieved. If the version does not exist, a 404 error will be returned. If no version
+      is provided, the latest version will be returned, or a default configuration if none
+      exists.
     operationId: getLlmoConfig
     responses:
       '200':
@@ -199,7 +206,59 @@ llmo-config:
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/LlmoConfig'
+              type: object
+              properties:
+                config:
+                  $ref: './schemas.yaml#/LlmoConfig'
+                version:
+                  oneOf:
+                    - type: string
+                      example: "abc123def456"
+                    - type: "null"
+                  description: The S3 object version ID of the configuration, or null if default configuration is returned
+              required:
+                - config
+                - version
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-configuration-not-found-with-version'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+  post:
+    tags:
+      - llmo
+    summary: Update LLMO configuration
+    description: |
+      Updates the LLMO (Large Language Model Optimizer) configuration for a specific site.
+      This operation completely overwrites the existing configuration with the provided payload.
+      The payload is validated against the LLMO configuration schema before being stored in S3.
+      The configuration must include entities, brands, and competitors sections.
+    operationId: postLlmoConfig
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/LlmoConfig'
+    responses:
+      '200':
+        description: LLMO configuration updated successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version:
+                  type: string
+                  description: The S3 object version ID of the updated configuration
+                  example: "abc123def456"
+              required:
+                - version
       '400':
         $ref: './responses.yaml#/400'
       '401':
