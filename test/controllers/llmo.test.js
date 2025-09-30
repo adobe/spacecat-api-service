@@ -249,6 +249,45 @@ describe('LlmoController', () => {
     sinon.restore();
   });
 
+  describe('Controller Initialization', () => {
+    it('should handle ElastiCache connection error gracefully', async () => {
+      const connectionError = new Error('Connection failed');
+
+      // Create mock cache service that fails to connect
+      const mockCacheService = {
+        connect: sinon.stub().rejects(connectionError),
+      };
+
+      // Create controller with failing cache service
+      const LlmoControllerWithFailingCache = await esmock('../../src/controllers/llmo/llmo.js', {
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: 'test-user-agent',
+          tracingFetch: tracingFetchStub,
+          hasText: (str) => str && str.trim().length > 0,
+          isObject: (obj) => obj && typeof obj === 'object' && !Array.isArray(obj),
+        },
+        '../../src/support/access-control-util.js': {
+          default: createMockAccessControlUtil(true),
+        },
+        '../../src/support/elasticache.js': {
+          createElastiCacheService: sinon.stub().returns(mockCacheService),
+        },
+      });
+
+      // Initialize controller - this should trigger the connection attempt
+      const controllerWithFailingCache = LlmoControllerWithFailingCache(mockContext);
+
+      // Wait a bit for the async connection attempt to complete
+      await new Promise((resolve) => {
+        setTimeout(resolve, 10);
+      });
+
+      // Verify controller still works despite cache connection failure
+      expect(controllerWithFailingCache).to.be.an('object');
+      expect(controllerWithFailingCache.getLlmoConfig).to.be.a('function');
+    });
+  });
+
   describe('getLlmoSheetData', () => {
     it('should proxy data from external endpoint successfully', async () => {
       const mockResponse = {
@@ -669,6 +708,113 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
+    });
+
+    it('should return cached data when cache hit occurs in getLlmoSheetData', async () => {
+      const cachedData = { cached: true, data: [{ id: 1, name: 'cached' }] };
+
+      // Create mock cache service
+      const mockCacheService = {
+        isReady: sinon.stub().returns(true),
+        get: sinon.stub().resolves(cachedData), // Cache hit
+        set: sinon.stub().resolves(true),
+        connect: sinon.stub().resolves(),
+      };
+
+      // Mock ElastiCacheService
+      const mockElastiCacheService = {
+        generateCacheKey: sinon.stub().returns('test-sheet-cache-key'),
+      };
+
+      // Create controller with cache service
+      const LlmoControllerWithCache = await esmock('../../src/controllers/llmo/llmo.js', {
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: 'test-user-agent',
+          tracingFetch: tracingFetchStub,
+          hasText: (str) => str && str.trim().length > 0,
+          isObject: (obj) => obj && typeof obj === 'object' && !Array.isArray(obj),
+        },
+        '../../src/support/access-control-util.js': {
+          default: createMockAccessControlUtil(true),
+        },
+        '../../src/support/elasticache.js': {
+          default: mockElastiCacheService,
+          createElastiCacheService: sinon.stub().returns(mockCacheService),
+        },
+      });
+
+      const controllerWithCache = LlmoControllerWithCache(mockContext);
+
+      mockContext.data = {
+        limit: 10,
+        offset: 0,
+        sheet: 'test-sheet',
+      };
+
+      const result = await controllerWithCache.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(cachedData);
+      expect(mockCacheService.get).to.have.been.calledWith('test-sheet-cache-key');
+      // Should not call fetch since we got cache hit
+      expect(tracingFetchStub).not.to.have.been.called;
+    });
+
+    it('should cache data when cacheService is ready and cache miss occurs in getLlmoSheetData', async () => {
+      // Create mock cache service
+      const mockCacheService = {
+        isReady: sinon.stub().returns(true),
+        get: sinon.stub().resolves(null), // Cache miss
+        set: sinon.stub().resolves(true),
+        connect: sinon.stub().resolves(),
+      };
+
+      // Mock ElastiCacheService
+      const mockElastiCacheService = {
+        generateCacheKey: sinon.stub().returns('test-sheet-cache-key'),
+      };
+
+      // Create controller with cache service
+      const LlmoControllerWithCache = await esmock('../../src/controllers/llmo/llmo.js', {
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: 'test-user-agent',
+          tracingFetch: tracingFetchStub,
+          hasText: (str) => str && str.trim().length > 0,
+          isObject: (obj) => obj && typeof obj === 'object' && !Array.isArray(obj),
+        },
+        '../../src/support/access-control-util.js': {
+          default: createMockAccessControlUtil(true),
+        },
+        '../../src/support/elasticache.js': {
+          default: mockElastiCacheService,
+          createElastiCacheService: sinon.stub().returns(mockCacheService),
+        },
+      });
+
+      const controllerWithCache = LlmoControllerWithCache(mockContext);
+
+      const mockResponseData = { sheet: true, data: [{ id: 1, name: 'sheet-test' }] };
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+        headers: new Map([['content-type', 'application/json']]),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      mockContext.data = {
+        limit: 10,
+        offset: 0,
+        sheet: 'test-sheet',
+      };
+
+      const result = await controllerWithCache.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockResponseData);
+      expect(mockCacheService.get).to.have.been.calledWith('test-sheet-cache-key');
+      expect(mockCacheService.set).to.have.been.calledWith('test-sheet-cache-key', mockResponseData);
     });
   });
 
@@ -2182,6 +2328,235 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.include('LLM Optimizer is not enabled for this site');
+    });
+
+    it('should cache raw data when cacheService is ready in queryLlmoSheetData', async () => {
+      // Create mock cache service
+      const mockCacheService = {
+        isReady: sinon.stub().returns(true),
+        get: sinon.stub().resolves(null), // Cache miss
+        set: sinon.stub().resolves(true),
+        connect: sinon.stub().resolves(),
+      };
+
+      // Mock ElastiCacheService
+      const mockElastiCacheService = {
+        generateCacheKey: sinon.stub().returns('test-cache-key'),
+      };
+
+      // Create controller with cache service
+      const LlmoControllerWithCache = await esmock('../../src/controllers/llmo/llmo.js', {
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: 'test-user-agent',
+          tracingFetch: tracingFetchStub,
+          hasText: (str) => str && str.trim().length > 0,
+          isObject: (obj) => obj && typeof obj === 'object' && !Array.isArray(obj),
+        },
+        '../../src/support/access-control-util.js': {
+          default: createMockAccessControlUtil(true),
+        },
+        '../../src/support/elasticache.js': {
+          default: mockElastiCacheService,
+          createElastiCacheService: sinon.stub().returns(mockCacheService),
+        },
+        '../../src/controllers/llmo/llmo-utils.js': {
+          applyFilters: sinon.stub().returnsArg(0),
+          applyInclusions: sinon.stub().returnsArg(0),
+          applyExclusions: sinon.stub().returnsArg(0),
+          applyGroups: sinon.stub().returnsArg(0),
+          applyMappings: sinon.stub().returnsArg(0),
+        },
+        '../../src/controllers/llmo/llmo-mappings.js': {
+          LLMO_SHEET_MAPPINGS: [],
+        },
+      });
+
+      const controllerWithCache = LlmoControllerWithCache(mockContext);
+
+      const mockResponseData = { data: [{ id: 1, name: 'test' }] };
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+        headers: new Map([['content-type', 'application/json']]),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      mockContext.data = {
+        filters: { status: 'active' },
+      };
+
+      const result = await controllerWithCache.queryLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockCacheService.set).to.have.been.calledWith('test-cache-key', mockResponseData);
+    });
+
+    it('should use cached raw data when cache hit occurs in queryLlmoSheetData', async () => {
+      const cachedRawData = { cached: true, data: [{ id: 1, name: 'cached-raw' }] };
+
+      // Create mock cache service
+      const mockCacheService = {
+        isReady: sinon.stub().returns(true),
+        get: sinon.stub().resolves(cachedRawData), // Cache hit for raw data
+        set: sinon.stub().resolves(true),
+        connect: sinon.stub().resolves(),
+      };
+
+      // Mock ElastiCacheService
+      const mockElastiCacheService = {
+        generateCacheKey: sinon.stub().returns('test-raw-cache-key'),
+      };
+
+      // Create controller with cache service
+      const LlmoControllerWithCache = await esmock('../../src/controllers/llmo/llmo.js', {
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: 'test-user-agent',
+          tracingFetch: tracingFetchStub,
+          hasText: (str) => str && str.trim().length > 0,
+          isObject: (obj) => obj && typeof obj === 'object' && !Array.isArray(obj),
+        },
+        '../../src/support/access-control-util.js': {
+          default: createMockAccessControlUtil(true),
+        },
+        '../../src/support/elasticache.js': {
+          default: mockElastiCacheService,
+          createElastiCacheService: sinon.stub().returns(mockCacheService),
+        },
+        '../../src/controllers/llmo/llmo-utils.js': {
+          applyFilters: sinon.stub().returnsArg(0),
+          applyInclusions: sinon.stub().returnsArg(0),
+          applyExclusions: sinon.stub().returnsArg(0),
+          applyGroups: sinon.stub().returnsArg(0),
+          applyMappings: sinon.stub().returnsArg(0),
+        },
+        '../../src/controllers/llmo/llmo-mappings.js': {
+          LLMO_SHEET_MAPPINGS: [],
+        },
+      });
+
+      const controllerWithCache = LlmoControllerWithCache(mockContext);
+
+      mockContext.data = {
+        filters: { status: 'active' },
+      };
+
+      const result = await controllerWithCache.queryLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(cachedRawData);
+      expect(mockCacheService.get).to.have.been.calledWith('test-raw-cache-key');
+      // Should not call fetch since we got cache hit for raw data
+      expect(tracingFetchStub).not.to.have.been.called;
+    });
+  });
+
+  describe('getLlmoGlobalSheetData - Cache Tests', () => {
+    it('should return cached data when cache hit occurs', async () => {
+      const cachedData = { cached: true, data: [{ id: 1, name: 'cached' }] };
+
+      // Create mock cache service
+      const mockCacheService = {
+        isReady: sinon.stub().returns(true),
+        get: sinon.stub().resolves(cachedData), // Cache hit
+        set: sinon.stub().resolves(true),
+        connect: sinon.stub().resolves(),
+      };
+
+      // Mock ElastiCacheService
+      const mockElastiCacheService = {
+        generateGlobalCacheKey: sinon.stub().returns('test-global-cache-key'),
+      };
+
+      // Create controller with cache service
+      const LlmoControllerWithCache = await esmock('../../src/controllers/llmo/llmo.js', {
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: 'test-user-agent',
+          tracingFetch: tracingFetchStub,
+          hasText: (str) => str && str.trim().length > 0,
+          isObject: (obj) => obj && typeof obj === 'object' && !Array.isArray(obj),
+        },
+        '../../src/support/access-control-util.js': {
+          default: createMockAccessControlUtil(true),
+        },
+        '../../src/support/elasticache.js': {
+          default: mockElastiCacheService,
+          createElastiCacheService: sinon.stub().returns(mockCacheService),
+        },
+      });
+
+      const controllerWithCache = LlmoControllerWithCache(mockContext);
+
+      mockContext.data = {
+        limit: 10,
+        offset: 0,
+        sheet: 'test-sheet',
+      };
+
+      const result = await controllerWithCache.getLlmoGlobalSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(cachedData);
+      expect(mockCacheService.get).to.have.been.calledWith('test-global-cache-key');
+      // Should not call fetch since we got cache hit
+      expect(tracingFetchStub).not.to.have.been.called;
+    });
+
+    it('should cache data when cacheService is ready and cache miss occurs', async () => {
+      // Create mock cache service
+      const mockCacheService = {
+        isReady: sinon.stub().returns(true),
+        get: sinon.stub().resolves(null), // Cache miss
+        set: sinon.stub().resolves(true),
+        connect: sinon.stub().resolves(),
+      };
+
+      // Mock ElastiCacheService
+      const mockElastiCacheService = {
+        generateGlobalCacheKey: sinon.stub().returns('test-global-cache-key'),
+      };
+
+      // Create controller with cache service
+      const LlmoControllerWithCache = await esmock('../../src/controllers/llmo/llmo.js', {
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: 'test-user-agent',
+          tracingFetch: tracingFetchStub,
+          hasText: (str) => str && str.trim().length > 0,
+          isObject: (obj) => obj && typeof obj === 'object' && !Array.isArray(obj),
+        },
+        '../../src/support/access-control-util.js': {
+          default: createMockAccessControlUtil(true),
+        },
+        '../../src/support/elasticache.js': {
+          default: mockElastiCacheService,
+          createElastiCacheService: sinon.stub().returns(mockCacheService),
+        },
+      });
+
+      const controllerWithCache = LlmoControllerWithCache(mockContext);
+
+      const mockResponseData = { global: true, data: [{ id: 1, name: 'global-test' }] };
+      const mockResponse = {
+        ok: true,
+        json: sinon.stub().resolves(mockResponseData),
+        headers: new Map([['content-type', 'application/json']]),
+      };
+      tracingFetchStub.resolves(mockResponse);
+
+      mockContext.data = {
+        limit: 10,
+        offset: 0,
+        sheet: 'test-sheet',
+      };
+
+      const result = await controllerWithCache.getLlmoGlobalSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockResponseData);
+      expect(mockCacheService.get).to.have.been.calledWith('test-global-cache-key');
+      expect(mockCacheService.set).to.have.been.calledWith('test-global-cache-key', mockResponseData);
     });
   });
 

@@ -128,3 +128,15 @@ The `multipartFormData` wrapper uses the following optional env variables:
 MULTIPART_FORM_FILE_COUNT_LIMIT=Maximum number of files which can be included in a multipart/form-data request (defaults to 5)
 MULTIPART_FORM_MAX_FILE_SIZE_MB=Maximum file size in MB for a single file in a multipart/form-data request (defaults to 20)
 ```
+
+LLMO ElastiCache configuration (optional):
+
+```plaintext
+ELASTICACHE_HOST=ElastiCache Redis cluster endpoint hostname
+ELASTICACHE_PORT=ElastiCache Redis cluster port (defaults to 6379)
+ELASTICACHE_PASSWORD=ElastiCache Redis cluster password (if auth is enabled)
+ELASTICACHE_TLS=Enable TLS for ElastiCache connection (set to 'true' for in-transit encryption)
+ELASTICACHE_DEFAULT_TTL=Default cache TTL in seconds (defaults to 3600 - 1 hour)
+```
+
+If `ELASTICACHE_HOST` is not configured, LLMO will operate without caching and fetch data directly from the external API on each request.
