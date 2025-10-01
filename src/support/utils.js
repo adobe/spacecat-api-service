@@ -668,7 +668,6 @@ export const onboardSingleSite = async (
 
   const tier = additionalParams.tier || EntitlementModel.TIERS.FREE_TRIAL;
 
-  await say(`:key: imsOrganizationID sent to onboardSingleSite: ${imsOrganizationID}`); // DEBUG
   await say(`:gear: Starting ${profileName} environment setup for site ${baseURL} with imsOrgID: ${imsOrgID} and tier: ${tier}`);
   await say(':key: Please make sure you have access to the AEM Shared Production Demo environment. Request access here: https://demo.adobe.com/demos/internal/AemSharedProdEnv.html');
 
@@ -692,14 +691,16 @@ export const onboardSingleSite = async (
     if (!isValidUrl(baseURL)) {
       reportLine.errors = 'Invalid site base URL';
       reportLine.status = 'Failed';
-      await say(`:x: Invalid site base URL: ${baseURL}`); // DEBUG
+      log.error(`Invalid site base URL: ${baseURL}`);
+      await say(`:x: Invalid site base URL: ${baseURL}`);
       return reportLine;
     }
 
     if (!isValidIMSOrgId(imsOrgID)) {
       reportLine.errors = 'Invalid IMS Org ID';
       reportLine.status = 'Failed';
-      await say(`:x: Invalid IMS Org ID: ${imsOrgID}`); // DEBUG
+      log.error(`Invalid IMS Org ID: ${imsOrgID}`);
+      await say(`:x: Invalid IMS Org ID: ${imsOrgID}`);
       return reportLine;
     }
 
@@ -719,7 +720,8 @@ export const onboardSingleSite = async (
     if (!Object.values(EntitlementModel.TIERS).includes(tier)) {
       reportLine.errors = `Invalid tier: ${tier}`;
       reportLine.status = 'Failed';
-      await say(`:x: Invalid tier: ${tier}`); // DEBUG
+      log.error(`Invalid tier: ${tier}`);
+      await say(`:x: Invalid tier: ${tier}`);
       return reportLine;
     }
 
@@ -741,7 +743,7 @@ export const onboardSingleSite = async (
       log.error(error);
       reportLine.errors = error;
       reportLine.status = 'Failed';
-      await say(`:x: Profile "${profileName}" not found or invalid.`); // DEBUG
+      await say(`:x: Profile "${profileName}" not found or invalid.`);
       return reportLine;
     }
 
@@ -750,7 +752,6 @@ export const onboardSingleSite = async (
       log.error(error);
       reportLine.errors = error;
       reportLine.status = 'Failed';
-      await say(`:x: Profile "${profileName}" does not have a valid audits section.`); // DEBUG
       return reportLine;
     }
 
@@ -759,7 +760,6 @@ export const onboardSingleSite = async (
       log.error(error);
       reportLine.errors = error;
       reportLine.status = 'Failed';
-      await say(`:x: Profile "${profileName}" does not have a valid imports section.`); // DEBUG
       return reportLine;
     }
 
@@ -783,7 +783,6 @@ export const onboardSingleSite = async (
     let resolvedUrl = await resolveCanonicalUrl(baseURL);
     if (resolvedUrl === null) {
       log.warn(`Unable to resolve canonical URL for site ${siteID}, using base URL: ${baseURL}`);
-      await say(`:x: Unable to resolve canonical URL for site ${siteID}, using base URL: ${baseURL}`); // DEBUG
       resolvedUrl = baseURL;
     }
     const { pathname: baseUrlPathName, origin: baseUrlOrigin } = new URL(baseURL);
@@ -803,7 +802,6 @@ export const onboardSingleSite = async (
     site.setConfig(Config.toDynamoItem(siteConfig));
     try {
       await site.save();
-      await say(`:white_check_mark: Successfully saved site config for site ${siteID}`); // DEBUG
     } catch (error) {
       log.error(error);
       reportLine.errors = error.message;
@@ -824,8 +822,6 @@ export const onboardSingleSite = async (
       );
     }
 
-    await say(`:white_check_mark: Successfully triggered imports for site ${siteID}`); // DEBUG
-
     const auditTypes = Object.keys(profile.audits);
 
     const latestConfiguration = await Configuration.findLatest();
@@ -840,16 +836,13 @@ export const onboardSingleSite = async (
         auditsEnabled.push(auditType);
       }
     }
-    await say(`:white_check_mark: Successfully enabled audits for site ${siteID}`); // DEBUG
 
     if (auditsEnabled.length > 0) {
       try {
         await latestConfiguration.save();
         log.debug(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`);
-        await say(`:white_check_mark: Successfully saved configuration for site ${siteID}`); // DEBUG
       } catch (error) {
         log.error(`Failed to save configuration for site ${siteID}:`, error);
-        await say(`:x: Failed to save configuration for site ${siteID}: ${error.message}`); // DEBUG
         throw error;
       }
     } else {
@@ -941,11 +934,6 @@ export const onboardSingleSite = async (
       },
     };
 
-    log.info(`Opportunity status job: ${JSON.stringify(opportunityStatusJob)}`);
-    log.info(`Disable import and audit job: ${JSON.stringify(disableImportAndAuditJob)}`);
-    log.info(`Demo URL job: ${JSON.stringify(demoURLJob)}`);
-    log.info(`CWV Demo Suggestions job: ${JSON.stringify(cwvDemoSuggestionsJob)}`);
-
     // Prepare and start step function workflow with the necessary parameters
     const workflowInput = {
       opportunityStatusJob,
@@ -963,9 +951,8 @@ export const onboardSingleSite = async (
       name: workflowName,
     });
     await sfnClient.send(startCommand);
-    await say(`:white_check_mark: Successfully started onboarding for site ${baseURL}`); // DEBUG
   } catch (error) {
-    await say(`:x: Failed to start onboarding for site ${baseURL}: ${error.message}`); // DEBUG
+    await say(`:x: Failed to start onboarding for site ${baseURL}: ${error.message}`);
     log.error(error);
     reportLine.errors = error.message;
     reportLine.status = 'Failed';
