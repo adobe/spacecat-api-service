@@ -39,11 +39,12 @@ export const FixDto = {
       opportunityId: fix.getOpportunityId(),
       type: fix.getType(),
       createdAt: fix.getCreatedAt(),
-      executedBy: fix.getExecutedAt(),
+      executedBy: fix.getExecutedBy(),
       executedAt: fix.getExecutedAt(),
       publishedAt: fix.getPublishedAt(),
       changeDetails: fix.getChangeDetails(),
       status: fix.getStatus(),
+      origin: fix.getOrigin(),
     };
   },
 };
