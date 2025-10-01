@@ -1,3 +1,24 @@
+## [1.187.4](https://github.com/adobe/spacecat-api-service/compare/v1.187.3...v1.187.4) (2025-10-01)
+
+
+### Bug Fixes
+
+* set right url to fetch config ([#1302](https://github.com/adobe/spacecat-api-service/issues/1302)) ([91018c6](https://github.com/adobe/spacecat-api-service/commit/91018c650e4391ad970999d238af7e18396f31bf))
+
+## [1.187.3](https://github.com/adobe/spacecat-api-service/compare/v1.187.2...v1.187.3) (2025-09-30)
+
+
+### Bug Fixes
+
+* rebuild docs ([#1305](https://github.com/adobe/spacecat-api-service/issues/1305)) ([bf8b172](https://github.com/adobe/spacecat-api-service/commit/bf8b172256841e2e4db204a0a651442253cdadd4))
+
+## [1.187.2](https://github.com/adobe/spacecat-api-service/compare/v1.187.1...v1.187.2) (2025-09-30)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1300](https://github.com/adobe/spacecat-api-service/issues/1300)) ([05c1eeb](https://github.com/adobe/spacecat-api-service/commit/05c1eeb81d044ef0f37e832b8ab6f2b08dc4a490))
+
 ## [1.187.1](https://github.com/adobe/spacecat-api-service/compare/v1.187.0...v1.187.1) (2025-09-30)
 
 
