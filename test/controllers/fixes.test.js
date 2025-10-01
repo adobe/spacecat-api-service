@@ -848,6 +848,27 @@ describe('Fixes Controller', () => {
       expect(new Set(await fix.getSuggestions())).deep.equals(new Set(suggestions));
     });
 
+    it('can patch a fix origin field', async () => {
+      const suggestions = await Promise.all([
+        createSuggestion({ type: 'CONTENT_UPDATE' }),
+        createSuggestion({ type: 'METADATA_UPDATE' }),
+      ]);
+
+      const newOrigin = FixEntity.ORIGINS.ASO;
+      requestContext.data = {
+        origin: newOrigin,
+        suggestionIds: suggestions.map((s) => s.getId()),
+      };
+
+      const response = await fixesController.patchFix(requestContext);
+      expect(response).includes({ status: 200 });
+      const responseData = await response.json();
+      expect(responseData).deep.equals(FixDto.toJSON(fix));
+      expect(responseData.origin).to.equal(FixEntity.ORIGINS.ASO);
+      expect(fix.getOrigin()).equals(newOrigin);
+      expect(new Set(await fix.getSuggestions())).deep.equals(new Set(suggestions));
+    });
+
     it('responds 404 if a suggestion does not exist', async () => {
       requestContext.data = {
         suggestionIds: ['15345195-62e6-494c-81b1-1d0da0b51d84'],
