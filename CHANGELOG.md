@@ -1,3 +1,10 @@
+## [1.187.4](https://github.com/adobe/spacecat-api-service/compare/v1.187.3...v1.187.4) (2025-10-01)
+
+
+### Bug Fixes
+
+* set right url to fetch config ([#1302](https://github.com/adobe/spacecat-api-service/issues/1302)) ([91018c6](https://github.com/adobe/spacecat-api-service/commit/91018c650e4391ad970999d238af7e18396f31bf))
+
 ## [1.187.3](https://github.com/adobe/spacecat-api-service/compare/v1.187.2...v1.187.3) (2025-09-30)
 
 
