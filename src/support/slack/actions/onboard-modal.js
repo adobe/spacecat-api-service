@@ -373,6 +373,39 @@ export function startOnboarding(lambdaContext) {
               optional: true,
             },
             {
+              type: 'input',
+              block_id: 'scheduled_run_input',
+              element: {
+                type: 'static_select',
+                action_id: 'scheduled_run',
+                placeholder: {
+                  type: 'plain_text',
+                  text: 'Select scheduled run preference',
+                },
+                options: [
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'False (Disable after onboarding)',
+                    },
+                    value: 'false',
+                  },
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'True (Keep enabled for scheduled runs)',
+                    },
+                    value: 'true',
+                  },
+                ],
+              },
+              label: {
+                type: 'plain_text',
+                text: 'Scheduled Run',
+              },
+              optional: true,
+            },
+            {
               type: 'divider',
             },
             {
@@ -446,6 +479,7 @@ export function onboardSiteModal(lambdaContext) {
       const previewUrl = values.preview_url_input.preview_url.value;
       const tier = values.tier_input.tier.selected_option?.value
         || EntitlementModel.TIERS.FREE_TRIAL;
+      const scheduledRun = values.scheduled_run_input?.scheduled_run?.selected_option?.value;
 
       // Validation
       if (!siteUrl) {
@@ -518,6 +552,10 @@ export function onboardSiteModal(lambdaContext) {
 
       if (tier) {
         additionalParams.tier = tier;
+      }
+
+      if (scheduledRun !== undefined) {
+        additionalParams.scheduledRun = scheduledRun === 'true';
       }
 
       const parsedWaitTime = waitTime ? parseInt(waitTime, 10) : undefined;

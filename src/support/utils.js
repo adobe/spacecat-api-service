@@ -895,6 +895,9 @@ export const onboardSingleSite = async (
       taskContext: {
         importTypes: importsEnabled || [],
         auditTypes: auditsEnabled || [],
+        scheduledRun: additionalParams.scheduledRun !== undefined
+          ? additionalParams.scheduledRun
+          : (profile.config?.scheduledRun || false),
         slackContext: {
           channelId: slackContext.channelId,
           threadTs: slackContext.threadTs,
