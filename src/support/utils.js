@@ -663,14 +663,13 @@ export const onboardSingleSite = async (
   const sfnClient = new SFNClient();
 
   const baseURL = options.urlProcessor ? options.urlProcessor(baseURLInput) : baseURLInput.trim();
-  await say(`imsOrganizationID: ${imsOrganizationID}`); // DEBUG
   const imsOrgID = imsOrganizationID || env.DEMO_IMS_ORG;
-  await say(`imsOrgID: ${imsOrgID}`); // DEBUG
   const profileName = options.profileName || 'unknown';
 
   const tier = additionalParams.tier || EntitlementModel.TIERS.FREE_TRIAL;
 
-  await say(`:gear: Starting ${profileName} environment setup for site ${baseURL}`);
+  await say(`:key: imsOrganizationID sent to onboardSingleSite: ${imsOrganizationID}`); // DEBUG
+  await say(`:gear: Starting ${profileName} environment setup for site ${baseURL} with imsOrgID: ${imsOrgID} and tier: ${tier}`);
   await say(':key: Please make sure you have access to the AEM Shared Production Demo environment. Request access here: https://demo.adobe.com/demos/internal/AemSharedProdEnv.html');
 
   const reportLine = {
@@ -693,12 +692,14 @@ export const onboardSingleSite = async (
     if (!isValidUrl(baseURL)) {
       reportLine.errors = 'Invalid site base URL';
       reportLine.status = 'Failed';
+      await say(`:x: Invalid site base URL: ${baseURL}`); // DEBUG
       return reportLine;
     }
 
     if (!isValidIMSOrgId(imsOrgID)) {
       reportLine.errors = 'Invalid IMS Org ID';
       reportLine.status = 'Failed';
+      await say(`:x: Invalid IMS Org ID: ${imsOrgID}`); // DEBUG
       return reportLine;
     }
 
@@ -718,6 +719,7 @@ export const onboardSingleSite = async (
     if (!Object.values(EntitlementModel.TIERS).includes(tier)) {
       reportLine.errors = `Invalid tier: ${tier}`;
       reportLine.status = 'Failed';
+      await say(`:x: Invalid tier: ${tier}`); // DEBUG
       return reportLine;
     }
 
@@ -739,6 +741,7 @@ export const onboardSingleSite = async (
       log.error(error);
       reportLine.errors = error;
       reportLine.status = 'Failed';
+      await say(`:x: Profile "${profileName}" not found or invalid.`); // DEBUG
       return reportLine;
     }
 
@@ -747,6 +750,7 @@ export const onboardSingleSite = async (
       log.error(error);
       reportLine.errors = error;
       reportLine.status = 'Failed';
+      await say(`:x: Profile "${profileName}" does not have a valid audits section.`); // DEBUG
       return reportLine;
     }
 
@@ -755,6 +759,7 @@ export const onboardSingleSite = async (
       log.error(error);
       reportLine.errors = error;
       reportLine.status = 'Failed';
+      await say(`:x: Profile "${profileName}" does not have a valid imports section.`); // DEBUG
       return reportLine;
     }
 
@@ -778,6 +783,7 @@ export const onboardSingleSite = async (
     let resolvedUrl = await resolveCanonicalUrl(baseURL);
     if (resolvedUrl === null) {
       log.warn(`Unable to resolve canonical URL for site ${siteID}, using base URL: ${baseURL}`);
+      await say(`:x: Unable to resolve canonical URL for site ${siteID}, using base URL: ${baseURL}`); // DEBUG
       resolvedUrl = baseURL;
     }
     const { pathname: baseUrlPathName, origin: baseUrlOrigin } = new URL(baseURL);
@@ -840,8 +846,10 @@ export const onboardSingleSite = async (
       try {
         await latestConfiguration.save();
         log.debug(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`);
+        await say(`:white_check_mark: Successfully saved configuration for site ${siteID}`); // DEBUG
       } catch (error) {
         log.error(`Failed to save configuration for site ${siteID}:`, error);
+        await say(`:x: Failed to save configuration for site ${siteID}: ${error.message}`); // DEBUG
         throw error;
       }
     } else {
@@ -955,7 +963,9 @@ export const onboardSingleSite = async (
       name: workflowName,
     });
     await sfnClient.send(startCommand);
+    await say(`:white_check_mark: Successfully started onboarding for site ${baseURL}`); // DEBUG
   } catch (error) {
+    await say(`:x: Failed to start onboarding for site ${baseURL}: ${error.message}`); // DEBUG
     log.error(error);
     reportLine.errors = error.message;
     reportLine.status = 'Failed';
