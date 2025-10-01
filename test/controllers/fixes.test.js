@@ -1001,12 +1001,67 @@ describe('Fixes Controller', () => {
       });
     });
   });
+
+  describe('FixDto', () => {
+    it('serializes fix entity with origin field', async () => {
+      const fixData = {
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        changeDetails: { arbitrary: 'test value' },
+        origin: FixEntity.ORIGINS.ASO,
+        status: FixEntity.STATUSES.DEPLOYED,
+        executedBy: 'test-user',
+        executedAt: '2025-05-19T01:23:45.678Z',
+        publishedAt: '2025-05-19T02:23:45.678Z',
+      };
+
+      const fix = await fixEntityCollection.create(fixData);
+      const serialized = FixDto.toJSON(fix);
+
+      expect(serialized).to.include.keys([
+        'id',
+        'opportunityId',
+        'type',
+        'createdAt',
+        'executedBy',
+        'executedAt',
+        'publishedAt',
+        'changeDetails',
+        'status',
+        'origin',
+      ]);
+
+      expect(serialized.origin).to.equal(FixEntity.ORIGINS.ASO);
+      expect(serialized.status).to.equal(FixEntity.STATUSES.DEPLOYED);
+      expect(serialized.type).to.equal(Suggestion.TYPES.CONTENT_UPDATE);
+      expect(serialized.opportunityId).to.equal(opportunityId);
+      expect(serialized.changeDetails).to.deep.equal({ arbitrary: 'test value' });
+      expect(serialized.executedBy).to.equal('test-user');
+      expect(serialized.executedAt).to.equal('2025-05-19T01:23:45.678Z');
+      expect(serialized.publishedAt).to.equal('2025-05-19T02:23:45.678Z');
+    });
+
+    it('serializes fix entity with default origin when not specified', async () => {
+      const fixData = {
+        type: Suggestion.TYPES.METADATA_UPDATE,
+        opportunityId,
+        changeDetails: { arbitrary: 'default test' },
+      };
+
+      const fix = await fixEntityCollection.create(fixData);
+      const serialized = FixDto.toJSON(fix);
+
+      expect(serialized.origin).to.equal(FixEntity.ORIGINS.SPACECAT);
+      expect(serialized.status).to.equal(FixEntity.STATUSES.PENDING);
+    });
+  });
 });
 
 const ISO_DATE = '2025-05-19T01:23:45.678Z';
 function fakeCreateFix(data) {
   data.fixEntityId ??= crypto.randomUUID();
   data.status ??= FixEntity.STATUSES.PENDING;
+  data.origin ??= FixEntity.ORIGINS.SPACECAT;
   data.changeDetails ??= { arbitrary: 'details' };
   data.createdAt ??= ISO_DATE;
   data.executedAt ??= ISO_DATE;
