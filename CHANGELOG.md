@@ -1,3 +1,10 @@
+## [1.187.5](https://github.com/adobe/spacecat-api-service/compare/v1.187.4...v1.187.5) (2025-10-01)
+
+
+### Bug Fixes
+
+* add log and slack messages to provide visibility on error conditions ([#1306](https://github.com/adobe/spacecat-api-service/issues/1306)) ([de0c480](https://github.com/adobe/spacecat-api-service/commit/de0c4805ef4ff2b73fd01a58533321b81077c743))
+
 ## [1.187.4](https://github.com/adobe/spacecat-api-service/compare/v1.187.3...v1.187.4) (2025-10-01)
 
 
