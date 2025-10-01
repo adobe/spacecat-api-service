@@ -663,8 +663,9 @@ export const onboardSingleSite = async (
   const sfnClient = new SFNClient();
 
   const baseURL = options.urlProcessor ? options.urlProcessor(baseURLInput) : baseURLInput.trim();
+  await say(`imsOrganizationID: ${imsOrganizationID}`); // DEBUG
   const imsOrgID = imsOrganizationID || env.DEMO_IMS_ORG;
-
+  await say(`imsOrgID: ${imsOrgID}`); // DEBUG
   const profileName = options.profileName || 'unknown';
 
   const tier = additionalParams.tier || EntitlementModel.TIERS.FREE_TRIAL;
@@ -771,6 +772,7 @@ export const onboardSingleSite = async (
         importsEnabled.push(importType);
       }
     }
+    await say(`importsEnabled: ${importsEnabled}`); // DEBUG
 
     // Resolve canonical URL for the site from the base URL
     let resolvedUrl = await resolveCanonicalUrl(baseURL);
@@ -795,6 +797,7 @@ export const onboardSingleSite = async (
     site.setConfig(Config.toDynamoItem(siteConfig));
     try {
       await site.save();
+      await say(`:white_check_mark: Successfully saved site config for site ${siteID}`); // DEBUG
     } catch (error) {
       log.error(error);
       reportLine.errors = error.message;
@@ -815,6 +818,8 @@ export const onboardSingleSite = async (
       );
     }
 
+    await say(`:white_check_mark: Successfully triggered imports for site ${siteID}`); // DEBUG
+
     const auditTypes = Object.keys(profile.audits);
 
     const latestConfiguration = await Configuration.findLatest();
@@ -829,6 +834,7 @@ export const onboardSingleSite = async (
         auditsEnabled.push(auditType);
       }
     }
+    await say(`:white_check_mark: Successfully enabled audits for site ${siteID}`); // DEBUG
 
     if (auditsEnabled.length > 0) {
       try {
