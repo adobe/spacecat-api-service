@@ -1188,7 +1188,62 @@ example-com:
       expect(mockAck).to.have.been.calledOnce;
     });
 
-    it('should print error message if onboarding throws an error', async () => {
+    it('should return immediately after ack without waiting for onboarding to complete', async () => {
+      const mockBody = {
+        view: {
+          state: {
+            values: {
+              brand_name_input: {
+                brand_name: { value: 'Test Brand' },
+              },
+              ims_org_input: {
+                ims_org_id: { value: 'ABC123@AdobeOrg' },
+              },
+              delivery_type_input: {
+                delivery_type: {
+                  selected_option: { value: 'aem_edge' },
+                },
+              },
+            },
+          },
+          private_metadata: JSON.stringify({
+            originalChannel: 'C1234567890',
+            originalThreadTs: '1234567890.123456',
+            brandURL: 'https://example.com',
+          }),
+        },
+        user: { id: 'U1234567890' },
+      };
+
+      const mockAck = sandbox.stub();
+      const mockClient = {
+        chat: {
+          postMessage: sandbox.stub().resolves(),
+        },
+      };
+
+      // Create a slow onboarding process to verify fire-and-forget behavior
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox);
+      const slowOnboardingPromise = new Promise((resolve) => {
+        setTimeout(resolve, 1000); // Simulate slow operation
+      });
+      lambdaCtx.dataAccess.Site.findByBaseURL = sandbox.stub().returns(slowOnboardingPromise);
+
+      const { onboardLLMOModal } = mockedModule;
+      const handler = onboardLLMOModal(lambdaCtx);
+
+      const startTime = Date.now();
+      await handler({ ack: mockAck, body: mockBody, client: mockClient });
+      const endTime = Date.now();
+
+      // Handler should return quickly (well under 1 second), not wait for the slow operation
+      expect(endTime - startTime).to.be.lessThan(500);
+      expect(mockAck).to.have.been.calledOnce;
+      expect(mockAck).to.have.been.calledWith(); // Called without errors
+      expect(lambdaCtx.log.debug).to.have.been.calledWith('Onboard LLMO modal processed for user U1234567890, site https://example.com');
+    });
+
+    it('should log error if onboarding throws an error in background', async () => {
       const mockBody = {
         view: {
           state: {
@@ -1224,13 +1279,20 @@ example-com:
 
       await handler({ ack: mockAck, body: mockBody, client: mockClient });
 
-      expect(lambdaCtx.log.error).to.have.been.calledWith('Error handling onboard site modal:', sinon.match.instanceOf(Error));
-      expect(mockAck).to.have.been.calledWith({
-        response_action: 'errors',
-        errors: {
-          brand_name_input: 'There was an error processing the onboarding request.',
-        },
+      // The handler should acknowledge successfully even if onboarding will fail
+      expect(mockAck).to.have.been.calledOnce;
+      expect(mockAck).to.have.been.calledWith();
+
+      // Wait a bit for the background promise to settle
+      await new Promise((resolve) => {
+        setTimeout(resolve, 100);
       });
+
+      // The error should be logged by the background error handler
+      expect(lambdaCtx.log.error).to.have.been.calledWith(
+        sinon.match(/Error in background onboarding for site/),
+        sinon.match.instanceOf(Error),
+      );
     });
 
     it('should return validation error when IMS org ID is not provided', async () => {
@@ -1572,9 +1634,10 @@ example-com:
       };
 
       const mockAck = sandbox.stub();
+      const postMessageStub = sandbox.stub().resolves();
       const mockClient = {
         chat: {
-          postMessage: sandbox.stub(),
+          postMessage: postMessageStub,
           update: sandbox.stub().resolves(),
         },
         views: {
@@ -1593,6 +1656,7 @@ example-com:
 
       await handler({ ack: mockAck, body: mockBody, client: mockClient });
 
+      // Verify immediate synchronous behavior
       expect(mockAck).to.have.been.called;
 
       // Check that the original message was updated to prevent re-triggering
@@ -1603,8 +1667,8 @@ example-com:
         blocks: [],
       });
 
-      // Check that the function completed successfully by verifying the debug log
-      expect(lambdaCtx.log.debug).to.have.been.calledWith('Added entitlements for site site123 (https://example.com) for user user123');
+      // Verify site was looked up
+      expect(mockSiteModel.findById).to.have.been.calledWith('site123');
     });
 
     it('should handle errors during entitlement addition', async () => {
@@ -2028,13 +2092,11 @@ example-com:
 
       await handler({ ack: mockAck, body: mockBody, client: mockClient });
 
+      // Verify immediate synchronous behavior
       expect(mockAck).to.have.been.called;
-      expect(mockClient.chat.postMessage).to.have.been.calledWith({
-        channel: 'channel123',
-        text: ':white_check_mark: Successfully updated organization and applied LLMO entitlements for *https://example.com* (brand: *Test Brand*)',
-        thread_ts: 'thread123',
-      });
-      expect(lambdaCtx.log.debug).to.have.been.calledWith('Updated org and applied entitlements for site site123 (https://example.com) for user user123');
+
+      // Verify site was looked up
+      expect(mockSiteModel.findById).to.have.been.calledWith('site123');
     });
 
     it('should return validation error when IMS org ID is not provided', async () => {
