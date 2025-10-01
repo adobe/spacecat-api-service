@@ -664,12 +664,11 @@ export const onboardSingleSite = async (
 
   const baseURL = options.urlProcessor ? options.urlProcessor(baseURLInput) : baseURLInput.trim();
   const imsOrgID = imsOrganizationID || env.DEMO_IMS_ORG;
-
   const profileName = options.profileName || 'unknown';
 
   const tier = additionalParams.tier || EntitlementModel.TIERS.FREE_TRIAL;
 
-  await say(`:gear: Starting ${profileName} environment setup for site ${baseURL}`);
+  await say(`:gear: Starting ${profileName} environment setup for site ${baseURL} with imsOrgID: ${imsOrgID} and tier: ${tier}`);
   await say(':key: Please make sure you have access to the AEM Shared Production Demo environment. Request access here: https://demo.adobe.com/demos/internal/AemSharedProdEnv.html');
 
   const reportLine = {
@@ -692,12 +691,16 @@ export const onboardSingleSite = async (
     if (!isValidUrl(baseURL)) {
       reportLine.errors = 'Invalid site base URL';
       reportLine.status = 'Failed';
+      log.error(`Invalid site base URL: ${baseURL}`);
+      await say(`:x: Invalid site base URL: ${baseURL}`);
       return reportLine;
     }
 
     if (!isValidIMSOrgId(imsOrgID)) {
       reportLine.errors = 'Invalid IMS Org ID';
       reportLine.status = 'Failed';
+      log.error(`Invalid IMS Org ID: ${imsOrgID}`);
+      await say(`:x: Invalid IMS Org ID: ${imsOrgID}`);
       return reportLine;
     }
 
@@ -717,6 +720,8 @@ export const onboardSingleSite = async (
     if (!Object.values(EntitlementModel.TIERS).includes(tier)) {
       reportLine.errors = `Invalid tier: ${tier}`;
       reportLine.status = 'Failed';
+      log.error(`Invalid tier: ${tier}`);
+      await say(`:x: Invalid tier: ${tier}`);
       return reportLine;
     }
 
@@ -738,6 +743,7 @@ export const onboardSingleSite = async (
       log.error(error);
       reportLine.errors = error;
       reportLine.status = 'Failed';
+      await say(`:x: Profile "${profileName}" not found or invalid.`);
       return reportLine;
     }
 
@@ -771,6 +777,7 @@ export const onboardSingleSite = async (
         importsEnabled.push(importType);
       }
     }
+    await say(`importsEnabled: ${importsEnabled}`); // DEBUG
 
     // Resolve canonical URL for the site from the base URL
     let resolvedUrl = await resolveCanonicalUrl(baseURL);
@@ -927,11 +934,6 @@ export const onboardSingleSite = async (
       },
     };
 
-    log.info(`Opportunity status job: ${JSON.stringify(opportunityStatusJob)}`);
-    log.info(`Disable import and audit job: ${JSON.stringify(disableImportAndAuditJob)}`);
-    log.info(`Demo URL job: ${JSON.stringify(demoURLJob)}`);
-    log.info(`CWV Demo Suggestions job: ${JSON.stringify(cwvDemoSuggestionsJob)}`);
-
     // Prepare and start step function workflow with the necessary parameters
     const workflowInput = {
       opportunityStatusJob,
@@ -950,6 +952,7 @@ export const onboardSingleSite = async (
     });
     await sfnClient.send(startCommand);
   } catch (error) {
+    await say(`:x: Failed to start onboarding for site ${baseURL}: ${error.message}`);
     log.error(error);
     reportLine.errors = error.message;
     reportLine.status = 'Failed';
