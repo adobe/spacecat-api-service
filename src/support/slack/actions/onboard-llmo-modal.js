@@ -23,6 +23,8 @@ const REFERRAL_TRAFFIC_AUDIT = 'llmo-referral-traffic';
 const REFERRAL_TRAFFIC_IMPORT = 'traffic-analysis';
 const AGENTIC_TRAFFIC_ANALYSIS_AUDIT = 'cdn-analysis';
 const AGENTIC_TRAFFIC_REPORT_AUDIT = 'cdn-logs-report';
+const GEO_BRAND_PRESENCE_WEEKLY = 'geo-brand-presence';
+const GEO_BRAND_PRESENCE_DAILY = 'geo-brand-presence-daily';
 
 const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
 const LLMO_TIER = EntitlementModel.TIERS.FREE_TRIAL;
@@ -149,13 +151,48 @@ async function fullOnboardingModal(body, client, respond, brandURL) {
             text: 'Delivery Type',
           },
         },
+        {
+          type: 'input',
+          block_id: 'brand_presence_cadence_input',
+          element: {
+            type: 'static_select',
+            action_id: 'brand_presence_cadence',
+            initial_option: {
+              text: {
+                type: 'plain_text',
+                text: 'Weekly',
+              },
+              value: 'weekly',
+            },
+            options: [
+              {
+                text: {
+                  type: 'plain_text',
+                  text: 'Weekly',
+                },
+                value: 'weekly',
+              },
+              {
+                text: {
+                  type: 'plain_text',
+                  text: 'Daily',
+                },
+                value: 'daily',
+              },
+            ],
+          },
+          label: {
+            type: 'plain_text',
+            text: 'Brand Presence Cadence',
+          },
+        },
       ],
     },
   });
 }
 
 // site is already on spacecat
-async function elmoOnboardingModal(body, client, respond, brandURL) {
+async function elmoOnboardingModal(body, client, respond, brandURL, currentCadence = 'weekly') {
   const { user } = body;
 
   // Update the original message to show user's choice
@@ -228,6 +265,41 @@ async function elmoOnboardingModal(body, client, respond, brandURL) {
           label: {
             type: 'plain_text',
             text: 'IMS Organization ID',
+          },
+        },
+        {
+          type: 'input',
+          block_id: 'brand_presence_cadence_input',
+          element: {
+            type: 'static_select',
+            action_id: 'brand_presence_cadence',
+            initial_option: {
+              text: {
+                type: 'plain_text',
+                text: currentCadence === 'daily' ? 'Daily' : 'Weekly',
+              },
+              value: currentCadence,
+            },
+            options: [
+              {
+                text: {
+                  type: 'plain_text',
+                  text: 'Weekly',
+                },
+                value: 'weekly',
+              },
+              {
+                text: {
+                  type: 'plain_text',
+                  text: 'Daily',
+                },
+                value: 'daily',
+              },
+            ],
+          },
+          label: {
+            type: 'plain_text',
+            text: 'Brand Presence Cadence',
           },
         },
       ],
@@ -315,7 +387,17 @@ export function startLLMOOnboarding(lambdaContext) {
         return;
       }
 
-      await elmoOnboardingModal(body, client, respond, brandURL);
+      // Detect current cadence for existing site
+      const { Configuration } = dataAccess;
+      const configuration = await Configuration.findLatest();
+      const isWeeklyEnabled = configuration.isHandlerEnabledForSite(GEO_BRAND_PRESENCE_WEEKLY, site);
+      const isDailyEnabled = configuration.isHandlerEnabledForSite(GEO_BRAND_PRESENCE_DAILY, site);
+      
+      // Prefer daily if both are enabled (edge case), otherwise use what's enabled
+      const currentCadence = isDailyEnabled ? 'daily' : 'weekly';
+      log.debug(`Site ${site.getId()} current brand presence config: weekly=${isWeeklyEnabled}, daily=${isDailyEnabled}, detected cadence=${currentCadence}`);
+
+      await elmoOnboardingModal(body, client, respond, brandURL, currentCadence);
       log.debug(`User ${user.id} started LLMO onboarding process for ${brandURL} with existing site ${site.getId()}.`);
     } catch (e) {
       log.error('Error handling start onboarding:', e);
@@ -504,7 +586,7 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
   } = lambdaCtx;
   const { say } = slackCtx;
   const {
-    baseURL, brandName, imsOrgId,
+    baseURL, brandName, imsOrgId, brandPresenceCadence = 'weekly',
   } = input;
   const { hostname } = new URL(baseURL);
   const dataFolderName = hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
@@ -563,7 +645,17 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
     // enable all necessary handlers
     const configuration = await Configuration.findLatest();
     configuration.enableHandlerForSite(REFERRAL_TRAFFIC_AUDIT, site);
-    configuration.enableHandlerForSite('geo-brand-presence', site);
+    
+    // Enable the selected cadence and disable the other
+    if (brandPresenceCadence === 'daily') {
+      log.info(`Enabling daily brand presence audit and disabling weekly for site ${siteId}`);
+      configuration.enableHandlerForSite(GEO_BRAND_PRESENCE_DAILY, site);
+      configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY, site);
+    } else {
+      log.info(`Enabling weekly brand presence audit and disabling daily for site ${siteId}`);
+      configuration.enableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY, site);
+      configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_DAILY, site);
+    }
 
     // enable the cdn-analysis only if no other site in this organization already has it enabled
     const orgId = site.getOrganizationId();
@@ -592,14 +684,15 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
       log.debug(`Successfully updated LLMO config for site ${siteId}`);
 
       // trigger the llmo-customer-analysis handler
-      const sqsTriggerMesasage = {
+      const sqsTriggerMessage = {
         type: 'llmo-customer-analysis',
         siteId,
         auditContext: {
           auditType: 'llmo-customer-analysis',
+          brandPresenceCadence,
         },
       };
-      await sqs.sendMessage(configuration.getQueues().audits, sqsTriggerMesasage);
+      await sqs.sendMessage(configuration.getQueues().audits, sqsTriggerMessage);
 
       const message = `:white_check_mark: *LLMO onboarding completed successfully!*
         
@@ -608,6 +701,7 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
 :file_folder: *Data Folder:* ${dataFolder}
 :label: *Brand:* ${brandName}
 :identification_card: *IMS Org ID:* ${imsOrgId}
+:calendar: *Brand Presence Cadence:* ${brandPresenceCadence}
 
 The LLMO Customer Analysis handler has been triggered. It will take a few minutes to complete.`;
 
@@ -649,6 +743,10 @@ export function onboardLLMOModal(lambdaContext) {
       const brandName = values.brand_name_input.brand_name.value;
       const imsOrgId = values.ims_org_input.ims_org_id.value;
       const deliveryType = values.delivery_type_input?.delivery_type?.selected_option?.value;
+      const brandPresenceCadenceRaw = values.brand_presence_cadence_input?.brand_presence_cadence?.selected_option?.value;
+      const brandPresenceCadence = (brandPresenceCadenceRaw === 'daily' || brandPresenceCadenceRaw === 'weekly')
+        ? brandPresenceCadenceRaw
+        : 'weekly';
 
       if (!brandName || !imsOrgId) {
         await ack({
@@ -665,6 +763,7 @@ export function onboardLLMOModal(lambdaContext) {
         brandName,
         imsOrgId,
         deliveryType: deliveryType ?? 'not set',
+        brandPresenceCadence,
         brandURL,
         originalChannel,
         originalThreadTs,
@@ -693,7 +792,7 @@ export function onboardLLMOModal(lambdaContext) {
       };
 
       await onboardSite({
-        brandName, baseURL: brandURL, imsOrgId, deliveryType,
+        brandName, baseURL: brandURL, imsOrgId, deliveryType, brandPresenceCadence,
       }, lambdaContext, slackContext);
 
       log.debug(`Onboard LLMO modal processed for user ${user.id}, site ${brandURL}`);
