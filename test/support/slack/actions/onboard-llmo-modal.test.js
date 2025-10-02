@@ -56,6 +56,7 @@ describe('onboard-llmo-modal', () => {
     findLatest: sinonSandbox.stub().resolves({
       save: sinonSandbox.stub().resolves(),
       enableHandlerForSite: sinonSandbox.stub(),
+      disableHandlerForSite: sinonSandbox.stub(),
       isHandlerEnabledForSite: sinonSandbox.stub().returns(false),
       getQueues: sinonSandbox.stub().returns({ audits: 'audit-queue' }),
     }),
@@ -288,6 +289,7 @@ describe('onboard-llmo-modal', () => {
         brandName: 'Test Brand',
         imsOrgId: 'ABC123@AdobeOrg',
         deliveryType: 'aem_edge',
+        brandPresenceCadence: 'weekly',
       };
 
       // Use default mocks
@@ -309,6 +311,7 @@ describe('onboard-llmo-modal', () => {
       expect(sayStub).to.have.been.calledWith(sinon.match(':file_folder: *Data Folder:* example-com'));
       expect(sayStub).to.have.been.calledWith(sinon.match(':label: *Brand:* Test Brand'));
       expect(sayStub).to.have.been.calledWith(sinon.match(':identification_card: *IMS Org ID:* ABC123@AdobeOrg'));
+      expect(sayStub).to.have.been.calledWith(sinon.match(':calendar: *Brand Presence Cadence:* weekly'));
       expect(lambdaCtx.dataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
       expect(lambdaCtx.dataAccess.Site.create).to.have.been.calledWith({
         baseURL: 'https://example.com',
@@ -323,7 +326,10 @@ describe('onboard-llmo-modal', () => {
       expect(lambdaCtx.sqs.sendMessage).to.have.been.calledWith('audit-queue', {
         type: 'llmo-customer-analysis',
         siteId: 'site123',
-        auditContext: { auditType: 'llmo-customer-analysis' },
+        auditContext: {
+          auditType: 'llmo-customer-analysis',
+          brandPresenceCadence: 'weekly',
+        },
       });
       const siteConfig = mockSite.getConfig();
       expect(siteConfig.updateLlmoBrand).to.have.been.calledWith('Test Brand');
@@ -333,6 +339,7 @@ describe('onboard-llmo-modal', () => {
       const config = await lambdaCtx.dataAccess.Configuration.findLatest();
       expect(config.enableHandlerForSite).to.have.been.calledWith('llmo-referral-traffic', mockSite);
       expect(config.enableHandlerForSite).to.have.been.calledWith('geo-brand-presence', mockSite);
+      expect(config.disableHandlerForSite).to.have.been.calledWith('geo-brand-presence-daily', mockSite);
       expect(config.enableHandlerForSite).to.have.been.calledWith('cdn-analysis', mockSite);
       expect(config.enableHandlerForSite).to.have.been.calledWith('cdn-logs-report', mockSite);
       expect(config.enableHandlerForSite).to.have.been.calledWith('llmo-customer-analysis', mockSite);
@@ -1150,6 +1157,11 @@ example-com:
                   selected_option: { value: 'aem_edge' },
                 },
               },
+              brand_presence_cadence_input: {
+                brand_presence_cadence: {
+                  selected_option: { value: 'weekly' },
+                },
+              },
             },
           },
           private_metadata: JSON.stringify({
@@ -1180,12 +1192,118 @@ example-com:
         brandName: 'Test Brand',
         imsOrgId: 'ABC123@AdobeOrg',
         deliveryType: 'aem_edge',
+        brandPresenceCadence: 'weekly',
         brandURL: 'https://example.com',
         originalChannel: 'C1234567890',
         originalThreadTs: '1234567890.123456',
       });
       expect(lambdaCtx.log.debug).to.have.been.calledWith('Onboard LLMO modal processed for user U1234567890, site https://example.com');
       expect(mockAck).to.have.been.calledOnce;
+    });
+
+    it('should handle modal submission with daily cadence and log expected messages', async () => {
+      const mockBody = {
+        view: {
+          state: {
+            values: {
+              brand_name_input: {
+                brand_name: { value: 'Test Brand' },
+              },
+              ims_org_input: {
+                ims_org_id: { value: 'ABC123@AdobeOrg' },
+              },
+              delivery_type_input: {
+                delivery_type: {
+                  selected_option: { value: 'aem_edge' },
+                },
+              },
+              brand_presence_cadence_input: {
+                brand_presence_cadence: {
+                  selected_option: { value: 'daily' },
+                },
+              },
+            },
+          },
+          private_metadata: JSON.stringify({
+            originalChannel: 'C1234567890',
+            originalThreadTs: '1234567890.123456',
+            brandURL: 'https://example.com',
+          }),
+        },
+        user: { id: 'U1234567890' },
+      };
+
+      const mockAck = sandbox.stub();
+      const mockClient = {
+        chat: {
+          postMessage: sandbox.stub().resolves(),
+        },
+      };
+
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox);
+
+      const { onboardLLMOModal } = mockedModule;
+      const handler = onboardLLMOModal(lambdaCtx);
+
+      await handler({ ack: mockAck, body: mockBody, client: mockClient });
+
+      expect(lambdaCtx.log.info).to.have.been.calledWith('Onboarding request with parameters:', {
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        deliveryType: 'aem_edge',
+        brandPresenceCadence: 'daily',
+        brandURL: 'https://example.com',
+        originalChannel: 'C1234567890',
+        originalThreadTs: '1234567890.123456',
+      });
+    });
+
+    it('should default to weekly when brand presence cadence is not provided', async () => {
+      const mockBody = {
+        view: {
+          state: {
+            values: {
+              brand_name_input: {
+                brand_name: { value: 'Test Brand' },
+              },
+              ims_org_input: {
+                ims_org_id: { value: 'ABC123@AdobeOrg' },
+              },
+              delivery_type_input: {
+                delivery_type: {
+                  selected_option: { value: 'aem_edge' },
+                },
+              },
+              // No brand_presence_cadence_input
+            },
+          },
+          private_metadata: JSON.stringify({
+            originalChannel: 'C1234567890',
+            originalThreadTs: '1234567890.123456',
+            brandURL: 'https://example.com',
+          }),
+        },
+        user: { id: 'U1234567890' },
+      };
+
+      const mockAck = sandbox.stub();
+      const mockClient = {
+        chat: {
+          postMessage: sandbox.stub().resolves(),
+        },
+      };
+
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox);
+
+      const { onboardLLMOModal } = mockedModule;
+      const handler = onboardLLMOModal(lambdaCtx);
+
+      await handler({ ack: mockAck, body: mockBody, client: mockClient });
+
+      // Should default to weekly
+      expect(lambdaCtx.log.info).to.have.been.calledWith('Onboarding request with parameters:', sinon.match({
+        brandPresenceCadence: 'weekly',
+      }));
     });
 
     it('should print error message if onboarding throws an error', async () => {
