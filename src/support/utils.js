@@ -885,7 +885,9 @@ export const onboardSingleSite = async (
       },
     };
 
-    await say(`:mag: Debug - Profile: ${JSON.stringify(profile.config || {})}`);
+    await say(`:mag: Debug - Profile Name: ${options.profileName || 'unknown'}`);
+    await say(`:mag: Debug - Full Profile: ${JSON.stringify(profile, null, 2).substring(0, 500)}...`);
+    await say(`:mag: Debug - Profile Config: ${JSON.stringify(profile.config || {})}`);
     await say(`:mag: Debug - additionalParams.scheduledRun: ${additionalParams.scheduledRun}`);
     await say(`:mag: Debug - profile.config?.scheduledRun: ${profile.config?.scheduledRun}`);
 
