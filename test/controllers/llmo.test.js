@@ -2200,6 +2200,7 @@ describe('LlmoController', () => {
       config.entities['123e4567-e89b-12d3-a456-426614174000'] = {
         type: 'category',
         name: 'test-category',
+        region: 'us',
       };
 
       s3Client.send.resolves({
@@ -2241,6 +2242,7 @@ describe('LlmoController', () => {
       config.entities['123e4567-e89b-12d3-a456-426614174000'] = {
         type: 'category',
         name: 'test-category',
+        region: 'us',
       };
 
       const version = 'v123';
@@ -2339,7 +2341,7 @@ describe('LlmoController', () => {
 
       mockContext.data = {
         entities: {
-          [categoryId]: { type: 'category', name: 'test-category' },
+          [categoryId]: { type: 'category', name: 'test-category', region: 'us' },
           [topicId]: { type: 'topic', name: 'test-topic' },
         },
         brands: {
@@ -2347,7 +2349,6 @@ describe('LlmoController', () => {
             aliases: ['test-brand'],
             category: categoryId,
             region: 'us',
-            topic: topicId,
           }],
         },
         competitors: {
@@ -2409,7 +2410,7 @@ describe('LlmoController', () => {
 
       mockContext.data = {
         entities: {
-          [categoryId]: { type: 'category', name: 'test-category' },
+          [categoryId]: { type: 'category', name: 'test-category', region: 'us' },
           [topicId]: { type: 'topic', name: 'test-topic' },
         },
         brands: {
@@ -2417,7 +2418,6 @@ describe('LlmoController', () => {
             aliases: ['test-brand'],
             category: categoryId,
             region: 'us',
-            topic: topicId,
           }],
         },
         competitors: {
