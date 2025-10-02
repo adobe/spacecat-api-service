@@ -885,11 +885,13 @@ export const onboardSingleSite = async (
       },
     };
 
+    await say(`:mag: Debug - Profile: ${JSON.stringify(profile.config || {})}`);
+    await say(`:mag: Debug - additionalParams.scheduledRun: ${additionalParams.scheduledRun}`);
+    await say(`:mag: Debug - profile.config?.scheduledRun: ${profile.config?.scheduledRun}`);
+
     const scheduledRun = additionalParams.scheduledRun !== undefined
       ? additionalParams.scheduledRun
       : (profile.config?.scheduledRun || false);
-
-    await say(`:key: scheduledRun: ${scheduledRun}`);
 
     // Disable imports and audits job - only disable what was enabled during onboarding
     const disableImportAndAuditJob = {
