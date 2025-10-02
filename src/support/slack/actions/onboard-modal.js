@@ -185,21 +185,26 @@ export function startOnboarding(lambdaContext) {
                 initial_option: (() => {
                   const profileOptions = [
                     { text: 'Demo', value: 'demo' },
-                    { text: 'Default', value: 'default' },
+                    { text: 'Paid', value: 'paid' },
                   ];
 
-                  const selectedProfile = initialValues.profile || 'demo';
-                  const option = profileOptions.find(
-                    (opt) => opt.value === selectedProfile,
-                  ) || profileOptions[0];
+                  if (initialValues.profile) {
+                    const option = profileOptions.find(
+                      (opt) => opt.value === initialValues.profile,
+                    );
+                    if (option) {
+                      return {
+                        text: {
+                          type: 'plain_text',
+                          text: option.text,
+                        },
+                        value: option.value,
+                      };
+                    }
+                  }
 
-                  return {
-                    text: {
-                      type: 'plain_text',
-                      text: option.text,
-                    },
-                    value: option.value,
-                  };
+                  // Return undefined to have no default selection
+                  return undefined;
                 })(),
                 options: [
                   {
@@ -212,9 +217,9 @@ export function startOnboarding(lambdaContext) {
                   {
                     text: {
                       type: 'plain_text',
-                      text: 'Default',
+                      text: 'Paid',
                     },
-                    value: 'default',
+                    value: 'paid',
                   },
                 ],
               },
@@ -472,7 +477,7 @@ export function onboardSiteModal(lambdaContext) {
 
       const siteUrl = values.site_url_input.site_url.value;
       const imsOrgId = values.ims_org_input.ims_org_id.value || env.DEMO_IMS_ORG;
-      const profile = values.profile_input.profile.selected_option?.value || 'default';
+      const profile = values.profile_input.profile.selected_option?.value || 'demo';
       const deliveryType = values.delivery_type_input.delivery_type.selected_option?.value;
       const authoringType = values.authoring_type_input.authoring_type.selected_option?.value;
       const waitTime = values.wait_time_input.wait_time.value;
