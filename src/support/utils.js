@@ -889,6 +889,8 @@ export const onboardSingleSite = async (
       ? additionalParams.scheduledRun
       : (profile.config?.scheduledRun || false);
 
+    await say(`:key: scheduledRun: ${scheduledRun}`);
+
     // Disable imports and audits job - only disable what was enabled during onboarding
     const disableImportAndAuditJob = {
       type: 'disable-import-audit-processor',
