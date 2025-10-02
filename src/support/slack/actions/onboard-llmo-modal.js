@@ -390,9 +390,15 @@ export function startLLMOOnboarding(lambdaContext) {
       // Detect current cadence for existing site
       const { Configuration } = dataAccess;
       const configuration = await Configuration.findLatest();
-      const isWeeklyEnabled = configuration.isHandlerEnabledForSite(GEO_BRAND_PRESENCE_WEEKLY, site);
-      const isDailyEnabled = configuration.isHandlerEnabledForSite(GEO_BRAND_PRESENCE_DAILY, site);
-      
+      const isWeeklyEnabled = configuration.isHandlerEnabledForSite(
+        GEO_BRAND_PRESENCE_WEEKLY,
+        site,
+      );
+      const isDailyEnabled = configuration.isHandlerEnabledForSite(
+        GEO_BRAND_PRESENCE_DAILY,
+        site,
+      );
+
       // Prefer daily if both are enabled (edge case), otherwise use what's enabled
       const currentCadence = isDailyEnabled ? 'daily' : 'weekly';
       log.debug(`Site ${site.getId()} current brand presence config: weekly=${isWeeklyEnabled}, daily=${isDailyEnabled}, detected cadence=${currentCadence}`);
@@ -645,7 +651,7 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
     // enable all necessary handlers
     const configuration = await Configuration.findLatest();
     configuration.enableHandlerForSite(REFERRAL_TRAFFIC_AUDIT, site);
-    
+
     // Enable the selected cadence and disable the other
     if (brandPresenceCadence === 'daily') {
       log.info(`Enabling daily brand presence audit and disabling weekly for site ${siteId}`);
@@ -743,7 +749,8 @@ export function onboardLLMOModal(lambdaContext) {
       const brandName = values.brand_name_input.brand_name.value;
       const imsOrgId = values.ims_org_input.ims_org_id.value;
       const deliveryType = values.delivery_type_input?.delivery_type?.selected_option?.value;
-      const brandPresenceCadenceRaw = values.brand_presence_cadence_input?.brand_presence_cadence?.selected_option?.value;
+      const brandPresenceCadenceRaw = values.brand_presence_cadence_input
+        ?.brand_presence_cadence?.selected_option?.value;
       const brandPresenceCadence = (brandPresenceCadenceRaw === 'daily' || brandPresenceCadenceRaw === 'weekly')
         ? brandPresenceCadenceRaw
         : 'weekly';
