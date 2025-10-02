@@ -386,14 +386,14 @@ export function startOnboarding(lambdaContext) {
                   {
                     text: {
                       type: 'plain_text',
-                      text: 'False (Disable after onboarding)',
+                      text: 'False (Disable imports and audits after onboarding)',
                     },
                     value: 'false',
                   },
                   {
                     text: {
                       type: 'plain_text',
-                      text: 'True (Keep enabled for scheduled runs)',
+                      text: 'True (Keep imports and audits enabled for scheduled runs)',
                     },
                     value: 'true',
                   },
