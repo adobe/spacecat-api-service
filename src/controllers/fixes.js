@@ -188,9 +188,13 @@ export class FixesController {
     const FixEntity = this.#FixEntity;
     const fixes = await Promise.all(context.data.map(async (fixData, index) => {
       try {
+        const fixEntity = await FixEntity.create({ ...fixData, opportunityId });
+        if (fixData.suggestionIds) {
+          await FixEntity.setSuggestionsByFixEntityId(fixEntity.getId(), fixData.suggestionIds);
+        }
         return {
           index,
-          fix: FixDto.toJSON(await FixEntity.create({ ...fixData, opportunityId })),
+          fix: FixDto.toJSON(fixEntity),
           statusCode: 201,
         };
       } catch (error) {
@@ -326,10 +330,8 @@ export class FixesController {
         if (suggestions.some((s) => !s || s.getOpportunityId() !== opportunityId)) {
           return badRequest('Invalid suggestion IDs');
         }
-        for (const suggestion of suggestions) {
-          suggestion.setFixEntityId(fixId);
-        }
-        await Promise.all(suggestions.map((s) => s.save()));
+        // Use many-to-many relationship via FixEntityCollection
+        await this.#FixEntity.setSuggestionsByFixEntityId(fixId, suggestionIds);
         hasUpdates = true;
       }
 
