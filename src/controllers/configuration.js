@@ -15,6 +15,8 @@ import {
   forbidden,
   notFound,
   ok,
+  created,
+  noContent,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   isInteger,
@@ -88,10 +90,46 @@ function ConfigurationController(ctx) {
     return ok(ConfigurationDto.toJSON(configuration));
   };
 
+  const registerAudit = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can register audits');
+    }
+
+    const { auditType, enabledByDefault, interval } = context.data;
+
+    try {
+      const configuration = await Configuration.findLatest();
+      configuration.registerAudit(auditType, enabledByDefault, interval);
+      await configuration.save();
+      return created(null);
+    } catch (error) {
+      return badRequest(error.message);
+    }
+  };
+
+  const unregisterAudit = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can unregister audits');
+    }
+
+    const auditType = context.params?.auditType;
+
+    try {
+      const configuration = await Configuration.findLatest();
+      configuration.unregisterAudit(auditType);
+      await configuration.save();
+      return noContent();
+    } catch (error) {
+      return badRequest(error.message);
+    }
+  };
+
   return {
     getAll,
     getByVersion,
     getLatest,
+    registerAudit,
+    unregisterAudit,
   };
 }
 
