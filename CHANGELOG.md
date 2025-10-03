@@ -1,3 +1,10 @@
+# [1.190.0](https://github.com/adobe/spacecat-api-service/compare/v1.189.0...v1.190.0) (2025-10-03)
+
+
+### Features
+
+* Add APIs for register audits ([#1317](https://github.com/adobe/spacecat-api-service/issues/1317)) ([9214300](https://github.com/adobe/spacecat-api-service/commit/92143006963caf8c5f2b198dc08388d098e977f7))
+
 # [1.189.0](https://github.com/adobe/spacecat-api-service/compare/v1.188.0...v1.189.0) (2025-10-03)
 
 
