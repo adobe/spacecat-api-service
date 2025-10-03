@@ -1,3 +1,10 @@
+# [1.189.0](https://github.com/adobe/spacecat-api-service/compare/v1.188.0...v1.189.0) (2025-10-03)
+
+
+### Features
+
+* Add topics with nested prompts + top level categories and topics | LLMO-547 ([#1315](https://github.com/adobe/spacecat-api-service/issues/1315)) ([5064978](https://github.com/adobe/spacecat-api-service/commit/50649780365dad3b9da0c08cf8a681f2582f10f0))
+
 # [1.188.0](https://github.com/adobe/spacecat-api-service/compare/v1.187.6...v1.188.0) (2025-10-02)
 
 
