@@ -33,6 +33,11 @@ import {
   applyMappings,
 } from './llmo-utils.js';
 import { LLMO_SHEET_MAPPINGS } from './llmo-mappings.js';
+import {
+  validateSiteNotOnboarded,
+  generateDataFolder,
+  performLlmoOnboarding,
+} from './llmo-onboarding.js';
 
 const { readConfig, writeConfig } = llmo;
 const { llmoConfig: llmoConfigSchema } = schemas;
@@ -669,6 +674,69 @@ function LlmoController(ctx) {
     }
   };
 
+  /* c8 ignore start */
+
+  /**
+   * Onboards a new customer to LLMO.
+   * This endpoint handles the complete onboarding process for net new customers
+   * including organization validation, site creation, and LLMO configuration.
+   * @param {object} context - The request context.
+   * @returns {Promise<Response>} The onboarding response.
+   */
+  const onboardCustomer = async (context) => {
+    const { log, env } = context;
+    const { data } = context;
+
+    try {
+      // Validate required fields
+      if (!data || typeof data !== 'object') {
+        return badRequest('Onboarding data is required');
+      }
+
+      const { domain, brandName, imsOrgId } = data;
+
+      if (!domain || !brandName || !imsOrgId) {
+        return badRequest('domain, brandName, and imsOrgId are required');
+      }
+
+      // Construct base URL and data folder name
+      const baseURL = domain.startsWith('http') ? domain : `https://${domain}`;
+      const dataFolder = generateDataFolder(domain, env.ENV);
+
+      log.info(`Starting LLMO onboarding for IMS org ${imsOrgId}, domain ${domain}, brand ${brandName}`);
+
+      // Validate that the site has not been onboarded yet
+      const validation = await validateSiteNotOnboarded(baseURL, dataFolder, context);
+      if (!validation.isValid) {
+        return badRequest(validation.error);
+      }
+
+      // Perform the complete onboarding process
+      const result = await performLlmoOnboarding(
+        { domain, brandName, imsOrgId },
+        context,
+      );
+
+      log.info(`LLMO onboarding completed successfully for domain ${domain}`);
+
+      return ok({
+        message: result.message,
+        domain,
+        brandName,
+        imsOrgId,
+        baseURL: result.baseURL,
+        dataFolder: result.dataFolder,
+        organizationId: result.organizationId,
+        siteId: result.siteId,
+        status: 'completed',
+        createdAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      log.error(`Error during LLMO onboarding: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+  /* c8 ignore end */
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -685,6 +753,7 @@ function LlmoController(ctx) {
     patchLlmoCdnLogsFilter,
     patchLlmoCdnBucketConfig,
     postLlmoConfig,
+    onboardCustomer,
   };
 }
 

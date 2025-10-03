@@ -188,6 +188,7 @@ describe('getRouteHandlers', () => {
     patchLlmoCustomerIntent: () => null,
     patchLlmoCdnLogsFilter: () => null,
     patchLlmoCdnBucketConfig: () => null,
+    onboardCustomer: () => null,
   };
 
   const mockSandboxAuditController = {
@@ -276,6 +277,7 @@ describe('getRouteHandlers', () => {
       'POST /tools/import/jobs',
       'POST /tools/scrape/jobs',
       'POST /consent-banner',
+      'POST /llmo/onboard',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
@@ -293,6 +295,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /tools/api-keys']).to.equal(mockApiKeyController.getApiKeys);
     expect(staticRoutes['POST /consent-banner']).to.equal(mockConsentBannerController.takeScreenshots);
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
+    expect(staticRoutes['POST /llmo/onboard']).to.equal(mockLlmoController.onboardCustomer);
 
     expect(dynamicRoutes).to.have.all.keys(
       'GET /audits/latest/:auditType',
