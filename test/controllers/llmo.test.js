@@ -176,6 +176,7 @@ describe('LlmoController', () => {
     // Create mock environment
     mockEnv = {
       LLMO_HLX_API_KEY: 'test-api-key',
+      AUDIT_JOBS_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/123456789012/audit-jobs-queue',
     };
 
     // Create mock context
@@ -200,6 +201,9 @@ describe('LlmoController', () => {
       s3: {
         s3Client,
         s3Bucket: 'test-bucket',
+      },
+      sqs: {
+        sendMessage: sinon.stub().resolves(),
       },
       attributes: {
         authInfo: {
@@ -2333,9 +2337,20 @@ describe('LlmoController', () => {
 
   describe('postLlmoConfig', () => {
     it('should write config to S3 successfully', async () => {
-      s3Client.send.resolves({
+      const prevConfig = llmoConfig.defaultConfig();
+      // First call to readConfig (GetObjectCommand)
+      s3Client.send.onFirstCall().resolves({
+        Body: {
+          transformToString: () => Promise.resolve(JSON.stringify(prevConfig)),
+        },
+        VersionId: 'v0',
+      });
+
+      // Second call to writeConfig (PutObjectCommand)
+      s3Client.send.onSecondCall().resolves({
         VersionId: 'v1',
       });
+
       const categoryId = '123e4567-e89b-12d3-a456-426614174000';
       const topicId = '123e4567-e89b-12d3-a456-426614174001';
 
@@ -2381,6 +2396,15 @@ describe('LlmoController', () => {
     });
 
     it('should return bad request when required fields are missing', async () => {
+      const prevConfig = llmoConfig.defaultConfig();
+      // Mock readConfig call
+      s3Client.send.resolves({
+        Body: {
+          transformToString: () => Promise.resolve(JSON.stringify(prevConfig)),
+        },
+        VersionId: 'v0',
+      });
+
       mockContext.data = { entities: {} }; // Missing required brands and competitors fields
 
       const result = await controller.postLlmoConfig(mockContext);
@@ -2388,7 +2412,67 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.include('Invalid LLMO config');
-      expect(s3Client.send).to.not.have.been.called;
+    });
+
+    it('should write config to S3 successfully when no previous config exists', async () => {
+      // Mock readConfig to simulate no existing config (NoSuchKey error)
+      // readConfig catches NoSuchKey and returns default config with exists: false
+      const noSuchKeyError = new Error('NoSuchKey');
+      noSuchKeyError.name = 'NoSuchKey';
+
+      // First call to readConfig (GetObjectCommand) - returns NoSuchKey
+      s3Client.send.onFirstCall().rejects(noSuchKeyError);
+
+      // Second call to writeConfig (PutObjectCommand)
+      s3Client.send.onSecondCall().resolves({
+        VersionId: 'v1',
+      });
+
+      const categoryId = '123e4567-e89b-12d3-a456-426614174000';
+      const topicId = '123e4567-e89b-12d3-a456-426614174001';
+
+      mockContext.data = {
+        entities: {
+          [categoryId]: { type: 'category', name: 'test-category', region: 'us' },
+          [topicId]: { type: 'topic', name: 'test-topic' },
+        },
+        brands: {
+          aliases: [{
+            aliases: ['test-brand'],
+            category: categoryId,
+            region: 'us',
+          }],
+        },
+        competitors: {
+          competitors: [{
+            name: 'test-competitor',
+            category: categoryId,
+            region: 'us',
+            aliases: ['competitor-alias'],
+            urls: [],
+          }],
+        },
+      };
+
+      const result = await controller.postLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ version: 'v1' });
+
+      // Verify that SQS message was sent with null previousConfigVersion
+      expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
+        mockContext.env.AUDIT_JOBS_QUEUE_URL,
+        sinon.match({
+          type: 'llmo-customer-analysis',
+          siteId: 'test-site-id',
+          auditContext: {},
+          data: {
+            configVersion: 'v1',
+            previousConfigVersion: null,
+          },
+        }),
+      );
     });
 
     it('should return bad request when s3 client is missing', async () => {
