@@ -88,6 +88,7 @@ configuration-audits:
         $ref: './responses.yaml#/403'
       '500':
         $ref: './responses.yaml#/500'
+configuration-audit:
   delete:
     tags:
       - configuration
@@ -95,19 +96,14 @@ configuration-audits:
     operationId: unregisterAudit
     security:
       - admin_key: [ ]
-    requestBody:
-      required: true
-      content:
-        application/json:
-          schema:
-            type: object
-            required:
-              - auditType
-            properties:
-              auditType:
-                type: string
-                description: The type of audit to unregister
-                example: "cwv"
+    parameters:
+      - name: auditType
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The type of audit to unregister
+        example: "cwv"
     responses:
       '204':
         description: Audit type unregistered successfully.

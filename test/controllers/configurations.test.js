@@ -269,7 +269,7 @@ describe('Configurations Controller', () => {
   });
 
   it('unregisters an audit', async () => {
-    const result = await configurationsController.unregisterAudit({ data: { auditType: 'cwv' } });
+    const result = await configurationsController.unregisterAudit({ params: { auditType: 'cwv' } });
     expect(result.status).to.equal(204);
   });
 
@@ -278,7 +278,7 @@ describe('Configurations Controller', () => {
       ...configurations[1],
       unregisterAudit: sandbox.stub().throws(new Error('Audit type missing')),
     });
-    const result = await configurationsController.unregisterAudit({ data: {} });
+    const result = await configurationsController.unregisterAudit({ params: {} });
     const error = await result.json();
     expect(result.status).to.equal(400);
     expect(error).to.have.property('message', 'Audit type missing');
@@ -286,7 +286,7 @@ describe('Configurations Controller', () => {
 
   it('unregister audit returns forbidden if user is not an admin', async () => {
     context.attributes.authInfo.withProfile({ is_admin: false });
-    const result = await configurationsController.unregisterAudit({ data: { auditType: 'cwv' } });
+    const result = await configurationsController.unregisterAudit({ params: { auditType: 'cwv' } });
     const error = await result.json();
     expect(result.status).to.equal(403);
     expect(error).to.have.property('message', 'Only admins can unregister audits');

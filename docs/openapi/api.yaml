@@ -83,6 +83,8 @@ paths:
     $ref: './configuration-api.yaml#/configuration'
   /configurations/audits:
     $ref: './configuration-api.yaml#/configuration-audits'
+  /configurations/audits/{auditType}:
+    $ref: './configuration-api.yaml#/configuration-audit'
   /configurations/sites/audits:
     $ref: './configurations-sites-audits-api.yaml#/configurations-sites-audits-toggle'
   /event/fulfillment:

@@ -121,7 +121,7 @@ export default function getRouteHandlers(
     'PUT /configurations/latest': configurationController.updateConfiguration,
     'GET /configurations/:version': configurationController.getByVersion,
     'POST /configurations/audits': configurationController.registerAudit,
-    'DELETE /configurations/audits': configurationController.unregisterAudit,
+    'DELETE /configurations/audits/:auditType': configurationController.unregisterAudit,
     'PATCH /configurations/sites/audits': sitesAuditsToggleController.execute,
     'POST /event/fulfillment': fulfillmentController.processFulfillmentEvents,
     'POST /event/fulfillment/:eventType': fulfillmentController.processFulfillmentEvents,

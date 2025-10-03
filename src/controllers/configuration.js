@@ -112,7 +112,7 @@ function ConfigurationController(ctx) {
       return forbidden('Only admins can unregister audits');
     }
 
-    const { auditType } = context.data;
+    const auditType = context.params?.auditType;
 
     try {
       const configuration = await Configuration.findLatest();
