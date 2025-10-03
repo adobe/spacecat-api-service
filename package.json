@@ -82,7 +82,7 @@
     "@adobe/spacecat-shared-scrape-client": "2.1.5",
     "@adobe/spacecat-shared-slack-client": "1.5.26",
     "@adobe/spacecat-shared-tier-client": "1.1.2",
-    "@adobe/spacecat-shared-utils": "https://gitpkg.now.sh/adobe/spacecat-shared/packages/spacecat-shared-utils?e45654fe049d21febaf3df8ed35051ce6a3c4130",
+    "@adobe/spacecat-shared-utils": "1.54.0",
     "@aws-sdk/client-s3": "3.893.0",
     "@aws-sdk/client-sfn": "3.893.0",
     "@aws-sdk/client-sqs": "3.893.0",
