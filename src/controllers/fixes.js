@@ -330,7 +330,6 @@ export class FixesController {
         if (suggestions.some((s) => !s || s.getOpportunityId() !== opportunityId)) {
           return badRequest('Invalid suggestion IDs');
         }
-        // Use many-to-many relationship via FixEntityCollection
         await this.#FixEntity.setSuggestionsByFixEntityId(fixId, suggestionIds);
         hasUpdates = true;
       }
