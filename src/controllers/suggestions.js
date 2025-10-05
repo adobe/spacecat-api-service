@@ -27,6 +27,7 @@ import {
 
 import { ValidationError, Suggestion as SuggestionModel, Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { SuggestionDto } from '../dto/suggestion.js';
+import { FixDto } from '../dto/fix.js';
 import { sendAutofixMessage, getCSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 
@@ -327,6 +328,45 @@ function SuggestionsController(ctx, sqs, env) {
       return createResponse({ message: 'Error updating suggestion' }, 500);
     }
     return badRequest('No updates provided');
+  };
+
+  /**
+   * Gets all fixes for a given suggestion
+   * @param {Object} context of the request
+   * @returns {Promise<Response>} Array of fixes response.
+   */
+  const getSuggestionFixes = async (context) => {
+    const siteId = context.params?.siteId;
+    const opportunityId = context.params?.opportunityId;
+    const suggestionId = context.params?.suggestionId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!isValidUUID(opportunityId)) {
+      return badRequest('Opportunity ID required');
+    }
+
+    if (!isValidUUID(suggestionId)) {
+      return badRequest('Suggestion ID required');
+    }
+
+    try {
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
+
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('User does not belong to the organization');
+      }
+
+      const fixes = await Suggestion.getFixEntitiesBySuggestionId(suggestionId);
+      return ok({ data: fixes.map((fix) => FixDto.toJSON(fix)) });
+    } catch (error) {
+      return createResponse({ message: 'Error retrieving fixes for suggestion' }, 500);
+    }
   };
 
   /**
@@ -663,6 +703,7 @@ function SuggestionsController(ctx, sqs, env) {
     getAllForOpportunity,
     getByID,
     getByStatus,
+    getSuggestionFixes,
     patchSuggestion,
     patchSuggestionsStatus,
     removeSuggestion,

@@ -145,6 +145,7 @@ describe('Suggestions Controller', () => {
     'getAllForOpportunity',
     'getByID',
     'getByStatus',
+    'getSuggestionFixes',
     'patchSuggestion',
     'patchSuggestionsStatus',
     'removeSuggestion',
@@ -706,6 +707,168 @@ describe('Suggestions Controller', () => {
     expect(response.status).to.equal(404);
     const error = await response.json();
     expect(error).to.have.property('message', 'not found');
+  });
+
+  describe('getSuggestionFixes', () => {
+    const FIX_IDS = [
+      'fix-id-1',
+      'fix-id-2',
+      'fix-id-3',
+    ];
+
+    const mockFixEntities = [
+      {
+        getId: () => FIX_IDS[0],
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getType: () => 'CODE_CHANGE',
+        getCreatedAt: () => '2025-01-01T00:00:00.000Z',
+        getExecutedAt: () => '2025-01-01T01:00:00.000Z',
+        getPublishedAt: () => '2025-01-01T02:00:00.000Z',
+        getChangeDetails: () => ({ file: 'index.js', changes: 'updated' }),
+        getStatus: () => 'COMPLETED',
+      },
+      {
+        getId: () => FIX_IDS[1],
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getType: () => 'CONTENT_UPDATE',
+        getCreatedAt: () => '2025-01-02T00:00:00.000Z',
+        getExecutedAt: () => '2025-01-02T01:00:00.000Z',
+        getPublishedAt: () => null,
+        getChangeDetails: () => ({ content: 'new content' }),
+        getStatus: () => 'IN_PROGRESS',
+      },
+    ];
+
+    beforeEach(() => {
+      mockSuggestion.getFixEntitiesBySuggestionId = sandbox.stub().resolves(mockFixEntities);
+    });
+
+    it('gets all fixes for a suggestion successfully', async () => {
+      const response = await suggestionsController.getSuggestionFixes({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+          suggestionId: SUGGESTION_IDS[0],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+      expect(result).to.have.property('data');
+      expect(result.data).to.be.an('array').with.lengthOf(2);
+      expect(result.data[0]).to.have.property('id', FIX_IDS[0]);
+      expect(result.data[0]).to.have.property('type', 'CODE_CHANGE');
+      expect(result.data[0]).to.have.property('status', 'COMPLETED');
+      expect(result.data[1]).to.have.property('id', FIX_IDS[1]);
+      expect(result.data[1]).to.have.property('type', 'CONTENT_UPDATE');
+      expect(mockSuggestion.getFixEntitiesBySuggestionId)
+        .to.have.been.calledOnceWith(SUGGESTION_IDS[0]);
+    });
+
+    it('returns empty array when suggestion has no fixes', async () => {
+      mockSuggestion.getFixEntitiesBySuggestionId.resolves([]);
+      const response = await suggestionsController.getSuggestionFixes({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+          suggestionId: SUGGESTION_IDS[0],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+      expect(result).to.have.property('data');
+      expect(result.data).to.be.an('array').with.lengthOf(0);
+    });
+
+    it('returns bad request if no site ID is passed', async () => {
+      const response = await suggestionsController.getSuggestionFixes({
+        params: {
+          opportunityId: OPPORTUNITY_ID,
+          suggestionId: SUGGESTION_IDS[0],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Site ID required');
+      expect(mockSuggestion.getFixEntitiesBySuggestionId).to.not.have.been.called;
+    });
+
+    it('returns bad request if no opportunity ID is passed', async () => {
+      const response = await suggestionsController.getSuggestionFixes({
+        params: {
+          siteId: SITE_ID,
+          suggestionId: SUGGESTION_IDS[0],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Opportunity ID required');
+      expect(mockSuggestion.getFixEntitiesBySuggestionId).to.not.have.been.called;
+    });
+
+    it('returns bad request if no suggestion ID is passed', async () => {
+      const response = await suggestionsController.getSuggestionFixes({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Suggestion ID required');
+      expect(mockSuggestion.getFixEntitiesBySuggestionId).to.not.have.been.called;
+    });
+
+    it('returns not found if site does not exist', async () => {
+      const response = await suggestionsController.getSuggestionFixes({
+        params: {
+          siteId: SITE_ID_NOT_FOUND,
+          opportunityId: OPPORTUNITY_ID,
+          suggestionId: SUGGESTION_IDS[0],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(404);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Site not found');
+      expect(mockSuggestion.getFixEntitiesBySuggestionId).to.not.have.been.called;
+    });
+
+    it('returns forbidden if user does not belong to the organization', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+      const response = await suggestionsController.getSuggestionFixes({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+          suggestionId: SUGGESTION_IDS[0],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(403);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'User does not belong to the organization');
+      expect(mockSuggestion.getFixEntitiesBySuggestionId).to.not.have.been.called;
+    });
+
+    it('returns 500 error if getFixEntitiesBySuggestionId throws an error', async () => {
+      mockSuggestion.getFixEntitiesBySuggestionId.rejects(new Error('Database error'));
+      const response = await suggestionsController.getSuggestionFixes({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+          suggestionId: SUGGESTION_IDS[0],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(500);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Error retrieving fixes for suggestion');
+    });
   });
 
   it('creates 2 suggestions success', async () => {
