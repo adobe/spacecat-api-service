@@ -707,11 +707,11 @@ function LlmoController(ctx) {
 
       const profile = authInfo.getProfile();
 
-      if (!profile || !profile.sub) {
-        return badRequest('User profile or organization ID (sub) not found in authentication token');
+      if (!profile || !profile.tenants?.[0]?.id) {
+        return badRequest('User profile or organization ID not found in authentication token');
       }
 
-      const imsOrgId = profile.sub;
+      const imsOrgId = `${profile.tenants[0].id}@AdobeOrg`;
 
       // Construct base URL and data folder name
       const baseURL = domain.startsWith('http') ? domain : `https://${domain}`;
@@ -720,7 +720,7 @@ function LlmoController(ctx) {
       log.info(`Starting LLMO onboarding for IMS org ${imsOrgId}, domain ${domain}, brand ${brandName}`);
 
       // Validate that the site has not been onboarded yet
-      const validation = await validateSiteNotOnboarded(baseURL, dataFolder, context);
+      const validation = await validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, context);
       if (!validation.isValid) {
         return badRequest(validation.error);
       }

@@ -29,7 +29,7 @@ const SHAREPOINT_URL = 'https://adobe.sharepoint.com/:x:/r/sites/HelixProjects/S
  * @param {string} env - The environment (prod, dev, etc.)
  * @returns {string} The data folder name
  */
-export function generateDataFolder(domain, env = 'prod') {
+export function generateDataFolder(domain, env = 'dev') {
   const baseURL = domain.startsWith('http') ? domain : `https://${domain}`;
   const { hostname } = new URL(baseURL);
   const dataFolderName = hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
@@ -59,21 +59,11 @@ export async function createSharePointClient(env) {
  * @param {object} context - The request context
  * @returns {Promise<{isValid: boolean, error?: string}>} Validation result
  */
-export async function validateSiteNotOnboarded(baseURL, dataFolder, context) {
+export async function validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, context) {
   const { log, dataAccess, env } = context;
-  const { Site } = dataAccess;
+  const { Site, Organization } = dataAccess;
 
   try {
-    // Check if site already exists in SpaceCat
-    const existingSite = await Site.findByBaseURL(baseURL);
-    // TODO we might want to support existing sites if they are not on LLMO but on spacecat.
-    if (existingSite) {
-      return {
-        isValid: false,
-        error: `Site ${baseURL} has already been onboarded to SpaceCat. Site ID: ${existingSite.getId()}`,
-      };
-    }
-
     // Check if SharePoint folder already exists
     const sharepointClient = await createSharePointClient(env);
     const folder = sharepointClient.getDocument(`/sites/elmo-ui-data/${dataFolder}/`);
@@ -82,7 +72,38 @@ export async function validateSiteNotOnboarded(baseURL, dataFolder, context) {
     if (folderExists) {
       return {
         isValid: false,
-        error: `SharePoint folder '${dataFolder}' already exists. This indicates the site may have been partially onboarded.`,
+        error: `Data folder for site ${baseURL} already exists. The site is already onboarded.`,
+      };
+    }
+
+    // Check if site already exists in SpaceCat
+    const existingSite = await Site.findByBaseURL(baseURL);
+
+    // Get the organization id from the imsOrgId
+    const organization = await Organization.findByImsOrgId(imsOrgId);
+
+    // if the site doesn't exist, it means it's not onboarded yet and we are safe to onboard
+    // to either an existing or a new organization
+    if (!existingSite) {
+      return { isValid: true };
+    }
+
+    if (organization) {
+      // if the organization exists, we need to check if the site is assigned to the same
+      // organization, or the default organization (= not yet claimed)
+      if (existingSite.getOrganizationId() !== organization.getId()
+        && existingSite.getOrganizationId() !== env.DEFAULT_ORGANIZATION_ID) {
+        return {
+          isValid: false,
+          error: `Site ${baseURL} has already been assigned to a different organization. Site ID: ${existingSite.getId()}`,
+        };
+      }
+    } else if (existingSite.getOrganizationId() !== env.DEFAULT_ORGANIZATION_ID) {
+      // if the organization doesn't exist, but the site does, check that the site isn't claimed yet
+      // by another organization
+      return {
+        isValid: false,
+        error: `Site ${baseURL} has already been assigned to a different organization. Site ID: ${existingSite.getId()}`,
       };
     }
 
@@ -103,15 +124,42 @@ export async function validateSiteNotOnboarded(baseURL, dataFolder, context) {
  * @param {string} outputLocation - The output location
  * @param {object} log - Logger instance
  */
-export async function publishToAdminHlx(filename, outputLocation, log) {
+async function publishToAdminHlx(filename, outputLocation, log) {
   try {
-    const response = await fetch(`https://admin.hlx.page/preview/adobe/project-elmo-ui-data/main/${outputLocation}/${filename}`, {
-      method: 'POST',
-    });
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+    const org = 'adobe';
+    const site = 'project-elmo-ui-data';
+    const ref = 'main';
+    const jsonFilename = `${filename.replace(/\.[^/.]+$/, '')}.json`;
+    const path = `${outputLocation}/${jsonFilename}`;
+    const headers = { Cookie: `auth_token=${process.env.HLX_ADMIN_TOKEN}` };
+
+    if (!process.env.HLX_ADMIN_TOKEN) {
+      log.warn('LLMO onboarding: HLX_ADMIN_TOKEN is not set');
     }
-    log.debug(`Successfully published ${filename} to admin.hlx.page`);
+
+    const baseUrl = 'https://admin.hlx.page';
+    const endpoints = [
+      { name: 'preview', url: `${baseUrl}/preview/${org}/${site}/${ref}/${path}` },
+      { name: 'live', url: `${baseUrl}/live/${org}/${site}/${ref}/${path}` },
+    ];
+
+    for (const [index, endpoint] of endpoints.entries()) {
+      log.debug(`Publishing Excel report via admin API (${endpoint.name}): ${endpoint.url}`);
+
+      // eslint-disable-next-line no-await-in-loop
+      const response = await fetch(endpoint.url, { method: 'POST', headers });
+
+      if (!response.ok) {
+        throw new Error(`${endpoint.name} failed: ${response.status} ${response.statusText}`);
+      }
+
+      log.debug(`Excel report successfully published to ${endpoint.name}`);
+
+      if (index === 0) {
+        // eslint-disable-next-line no-await-in-loop,max-statements-per-line
+        await new Promise((resolve) => { setTimeout(resolve, 2000); });
+      }
+    }
   } catch (publishError) {
     log.error(`Failed to publish via admin.hlx.page: ${publishError.message}`);
   }
