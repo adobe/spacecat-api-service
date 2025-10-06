@@ -97,7 +97,7 @@
 '401':
   description: Not authenticated.
 '403':
-  description: Forbidden.
+  description: Forbidden. Access denied.
   headers:
     X-Error:
       $ref: './headers.yaml#/xError'
