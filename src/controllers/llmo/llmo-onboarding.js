@@ -17,6 +17,7 @@ import { createFrom } from '@adobe/spacecat-helix-content-sdk';
 import { Octokit } from '@octokit/rest';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import TierClient from '@adobe/spacecat-shared-tier-client';
+import { composeBaseURL } from '@adobe/spacecat-shared-utils';
 
 // LLMO Constants
 const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
@@ -29,8 +30,7 @@ const SHAREPOINT_URL = 'https://adobe.sharepoint.com/:x:/r/sites/HelixProjects/S
  * @param {string} env - The environment (prod, dev, etc.)
  * @returns {string} The data folder name
  */
-export function generateDataFolder(domain, env = 'dev') {
-  const baseURL = domain.startsWith('http') ? domain : `https://${domain}`;
+export function generateDataFolder(baseURL, env = 'dev') {
   const { hostname } = new URL(baseURL);
   const dataFolderName = hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
   return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
@@ -95,7 +95,7 @@ export async function validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, co
         && existingSite.getOrganizationId() !== env.DEFAULT_ORGANIZATION_ID) {
         return {
           isValid: false,
-          error: `Site ${baseURL} has already been assigned to a different organization. Site ID: ${existingSite.getId()}`,
+          error: `Site ${baseURL} has already been assigned to a different organization.`,
         };
       }
     } else if (existingSite.getOrganizationId() !== env.DEFAULT_ORGANIZATION_ID) {
@@ -103,7 +103,7 @@ export async function validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, co
       // by another organization
       return {
         isValid: false,
-        error: `Site ${baseURL} has already been assigned to a different organization. Site ID: ${existingSite.getId()}`,
+        error: `Site ${baseURL} has already been assigned to a different organization.`,
       };
     }
 
@@ -325,8 +325,8 @@ export async function performLlmoOnboarding(params, context) {
   const { Site } = dataAccess;
 
   // Construct base URL and data folder name
-  const baseURL = domain.startsWith('http') ? domain : `https://${domain}`;
-  const dataFolder = generateDataFolder(domain, env.ENV);
+  const baseURL = composeBaseURL(domain);
+  const dataFolder = generateDataFolder(baseURL, env.ENV);
 
   log.info(`Starting LLMO onboarding for IMS org ${imsOrgId}, domain ${domain}, brand ${brandName}`);
 

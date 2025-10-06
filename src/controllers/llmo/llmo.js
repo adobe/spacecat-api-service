@@ -20,6 +20,7 @@ import {
   isObject,
   llmoConfig as llmo,
   schemas,
+  composeBaseURL,
 } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
@@ -714,8 +715,8 @@ function LlmoController(ctx) {
       const imsOrgId = `${profile.tenants[0].id}@AdobeOrg`;
 
       // Construct base URL and data folder name
-      const baseURL = domain.startsWith('http') ? domain : `https://${domain}`;
-      const dataFolder = generateDataFolder(domain, env.ENV);
+      const baseURL = composeBaseURL(domain);
+      const dataFolder = generateDataFolder(baseURL, env.ENV);
 
       log.info(`Starting LLMO onboarding for IMS org ${imsOrgId}, domain ${domain}, brand ${brandName}`);
 
