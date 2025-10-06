@@ -2403,6 +2403,12 @@ describe('LlmoController', () => {
   describe('postLlmoConfig', () => {
     it('should write config to S3 successfully', async () => {
       writeConfigStub.resolves({ version: 'v1' });
+      readConfigStub.resolves({
+        config: llmoConfig.defaultConfig(),
+        exists: false,
+        version: null,
+      });
+
       const categoryId = '123e4567-e89b-12d3-a456-426614174000';
       const topicId = '123e4567-e89b-12d3-a456-426614174001';
 
@@ -2460,6 +2466,80 @@ describe('LlmoController', () => {
         testData,
         s3Client,
         { s3Bucket: 'test-bucket' },
+      );
+    });
+
+    it('triggers the "llmo-customer-analysis" audit after writing the new config', async () => {
+      writeConfigStub.resolves({ version: 'v1' });
+      readConfigStub.resolves({
+        config: llmoConfig.defaultConfig(),
+        exists: true,
+        version: 'v0',
+      });
+
+      const categoryId = '123e4567-e89b-12d3-a456-426614174000';
+      const topicId = '123e4567-e89b-12d3-a456-426614174001';
+
+      const testData = {
+        entities: {
+          [categoryId]: { type: 'category', name: 'test-category' },
+          [topicId]: { type: 'topic', name: 'test-topic' },
+        },
+        categories: {
+          [categoryId]: { name: 'test-category', region: ['us'] },
+        },
+        topics: {
+          [topicId]: {
+            name: 'test-topic',
+            category: categoryId,
+            prompts: [{
+              prompt: 'What is the main topic?',
+              regions: ['us'],
+              origin: 'human',
+              source: 'config',
+            }],
+          },
+        },
+        brands: {
+          aliases: [{
+            aliases: ['test-brand'],
+            category: categoryId,
+            region: ['us'],
+          }],
+        },
+        competitors: {
+          competitors: [{
+            name: 'test-competitor',
+            category: categoryId,
+            region: ['us'],
+            aliases: ['competitor-alias'],
+            urls: [],
+          }],
+        },
+      };
+
+      mockContext.data = testData;
+
+      // Mock successful validation
+      llmoConfigSchemaStub.safeParse.returns({ success: true, data: testData });
+
+      const result = await controller.postLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+
+      // Verify SQS message was sent with correct audit configuration
+      expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
+      expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
+        'https://sqs.us-east-1.amazonaws.com/123456789012/audit-jobs-queue',
+        {
+          type: 'llmo-customer-analysis',
+          siteId: 'test-site-id',
+          auditContext: {},
+          data: {
+            configVersion: 'v1',
+            previousConfigVersion: 'v0',
+          },
+        },
       );
     });
 

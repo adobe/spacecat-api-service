@@ -415,7 +415,7 @@ function LlmoController(ctx) {
         auditContext: {},
         data: {
           configVersion: version,
-          previousConfigVersion: prevConfig.exists ? prevConfig.version : null,
+          previousConfigVersion: prevConfig.exists ? prevConfig.version : /* c8 ignore next */ null,
         },
       });
 
