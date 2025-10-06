@@ -15,6 +15,8 @@ import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
+import { S3Client } from '@aws-sdk/client-s3';
+import { llmoConfig } from '@adobe/spacecat-shared-utils';
 
 use(sinonChai);
 
@@ -27,7 +29,11 @@ describe('LlmoController', () => {
   let mockDataAccess;
   let mockLog;
   let mockEnv;
+  let s3Client;
   let tracingFetchStub;
+  let readConfigStub;
+  let writeConfigStub;
+  let llmoConfigSchemaStub;
 
   // Helper function to create mock objects
   const createMockAccessControlUtil = (accessResult) => ({
@@ -65,7 +71,9 @@ describe('LlmoController', () => {
       },
     };
 
-    // Create mock config
+    // Create S3Client stub
+    s3Client = sinon.createStubInstance(S3Client);
+
     mockConfig = {
       getLlmoConfig: sinon.stub().returns(mockLlmoConfig),
       updateLlmoConfig: sinon.stub(),
@@ -192,6 +200,10 @@ describe('LlmoController', () => {
       dataAccess: mockDataAccess,
       log: mockLog,
       env: mockEnv,
+      s3: {
+        s3Client,
+        s3Bucket: 'test-bucket',
+      },
       attributes: {
         authInfo: {
           getType: () => 'jwt',
@@ -217,11 +229,30 @@ describe('LlmoController', () => {
     // Create tracingFetch stub
     tracingFetchStub = sinon.stub();
 
-    // Mock the controller with the tracingFetch stub
+    // Create readConfig and writeConfig stubs
+    readConfigStub = sinon.stub();
+    writeConfigStub = sinon.stub();
+
+    // Create llmoConfigSchema stub
+    llmoConfigSchemaStub = {
+      safeParse: sinon.stub().returns({ success: true, data: {} }),
+    };
+
+    // Mock the controller with the tracingFetch stub and readConfig mock
     const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
       '@adobe/spacecat-shared-utils': {
         SPACECAT_USER_AGENT: 'test-user-agent',
         tracingFetch: tracingFetchStub,
+        llmoConfig: {
+          defaultConfig: llmoConfig.defaultConfig,
+          readConfig: readConfigStub,
+          writeConfig: writeConfigStub,
+        },
+        schemas: {
+          llmoConfig: llmoConfigSchemaStub,
+        },
+        hasText: (str) => typeof str === 'string' && str.trim().length > 0,
+        isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
       },
       '../../src/support/access-control-util.js': {
         default: class MockAccessControlUtil {
@@ -2186,22 +2217,350 @@ describe('LlmoController', () => {
   });
 
   describe('getLlmoConfig', () => {
-    it('should return LLMO config successfully', async () => {
+    it('should return LLMO config from S3 successfully', async () => {
+      const categoryId = '123e4567-e89b-12d3-a456-426614174000';
+      const topicId = '456e7890-e89b-12d3-a456-426614174001';
+
+      // Create the expected config with categories and topics
+      const expectedConfig = {
+        ...llmoConfig.defaultConfig(),
+        categories: {
+          [categoryId]: {
+            name: 'test-category',
+            region: ['us'],
+          },
+        },
+        topics: {
+          [topicId]: {
+            name: 'test-topic',
+            category: categoryId,
+            prompts: [{
+              prompt: 'What is the main topic?',
+              regions: ['us'],
+              origin: 'human',
+              source: 'config',
+            }],
+          },
+        },
+      };
+
+      // Mock readConfig to return our expected config
+      readConfigStub.resolves({
+        config: expectedConfig,
+        exists: true,
+        version: 'v123',
+      });
+
       const result = await controller.getLlmoConfig(mockContext);
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
-      expect(responseBody).to.deep.equal(mockLlmoConfig);
+      expect(responseBody).to.deep.equal({ config: expectedConfig, version: 'v123' });
     });
 
-    it('should throw error when LLMO is not enabled', async () => {
-      mockConfig.getLlmoConfig.returns(null);
+    it('should return bad request when s3 client is missing', async () => {
+      delete mockContext.s3;
 
       const result = await controller.getLlmoConfig(mockContext);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
-      expect(responseBody.message).to.include('LLM Optimizer is not enabled for this site');
+      expect(responseBody.message).to.equal('LLMO config storage is not configured for this environment');
+    });
+
+    it('should handle S3 errors when getting config', async () => {
+      readConfigStub.rejects(new Error('S3 connection failed'));
+
+      const result = await controller.getLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('S3 connection failed');
+    });
+
+    it('should return LLMO config with specific version successfully', async () => {
+      const categoryId = '123e4567-e89b-12d3-a456-426614174000';
+      const topicId = '456e7890-e89b-12d3-a456-426614174001';
+      const version = 'v123';
+
+      // Create the expected config with categories and topics
+      const expectedConfig = {
+        ...llmoConfig.defaultConfig(),
+        categories: {
+          [categoryId]: {
+            name: 'test-category',
+            region: ['us'],
+          },
+        },
+        topics: {
+          [topicId]: {
+            name: 'test-topic',
+            category: categoryId,
+            prompts: [{
+              prompt: 'What is the main topic?',
+              regions: ['us'],
+              origin: 'human',
+              source: 'config',
+            }],
+          },
+        },
+      };
+
+      // Mock readConfig to return our expected config
+      readConfigStub.resolves({
+        config: expectedConfig,
+        exists: true,
+        version,
+      });
+
+      // Add version to context data
+      mockContext.data = { version };
+
+      const result = await controller.getLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).deep.equals({ config: expectedConfig, version });
+    });
+
+    it('should return 404 when specific version does not exist', async () => {
+      // Mock readConfig to return exists: false for specific version
+      readConfigStub.resolves({
+        config: llmoConfig.defaultConfig(),
+        exists: false,
+        version: null,
+      });
+
+      // Add version to context data
+      mockContext.data = { version: 'nonexistent-version' };
+
+      const result = await controller.getLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal("LLMO config version 'nonexistent-version' not found for site 'test-site-id'");
+    });
+
+    it('should return 404 when specific version returns NotFound error', async () => {
+      // Mock readConfig to return exists: false for specific version
+      readConfigStub.resolves({
+        config: llmoConfig.defaultConfig(),
+        exists: false,
+        version: null,
+      });
+
+      // Add version to context data
+      mockContext.data = { version: 'not-found-version' };
+
+      const result = await controller.getLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal("LLMO config version 'not-found-version' not found for site 'test-site-id'");
+    });
+
+    it('should return default config when no version specified and config does not exist', async () => {
+      // Mock readConfig to return default config when no version specified
+      readConfigStub.resolves({
+        config: llmoConfig.defaultConfig(),
+        exists: false,
+        version: null,
+      });
+
+      // No version in context data
+      mockContext.data = {};
+
+      const result = await controller.getLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ config: llmoConfig.defaultConfig(), version: null });
+    });
+
+    it('should handle empty string version parameter', async () => {
+      // Mock readConfig to return exists: false for empty string version
+      readConfigStub.resolves({
+        config: llmoConfig.defaultConfig(),
+        exists: false,
+        version: null,
+      });
+
+      // Add empty string version to context data
+      mockContext.data = { version: '' };
+
+      const result = await controller.getLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal("LLMO config version '' not found for site 'test-site-id'");
+    });
+  });
+
+  describe('postLlmoConfig', () => {
+    it('should write config to S3 successfully', async () => {
+      writeConfigStub.resolves({ version: 'v1' });
+      const categoryId = '123e4567-e89b-12d3-a456-426614174000';
+      const topicId = '123e4567-e89b-12d3-a456-426614174001';
+
+      const testData = {
+        entities: {
+          [categoryId]: { type: 'category', name: 'test-category' },
+          [topicId]: { type: 'topic', name: 'test-topic' },
+        },
+        categories: {
+          [categoryId]: { name: 'test-category', region: ['us'] },
+        },
+        topics: {
+          [topicId]: {
+            name: 'test-topic',
+            category: categoryId,
+            prompts: [{
+              prompt: 'What is the main topic?',
+              regions: ['us'],
+              origin: 'human',
+              source: 'config',
+            }],
+          },
+        },
+        brands: {
+          aliases: [{
+            aliases: ['test-brand'],
+            category: categoryId,
+            region: ['us'],
+          }],
+        },
+        competitors: {
+          competitors: [{
+            name: 'test-competitor',
+            category: categoryId,
+            region: ['us'],
+            aliases: ['competitor-alias'],
+            urls: [],
+          }],
+        },
+      };
+
+      mockContext.data = testData;
+
+      // Mock successful validation
+      llmoConfigSchemaStub.safeParse.returns({ success: true, data: testData });
+
+      const result = await controller.postLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ version: 'v1' });
+      expect(llmoConfigSchemaStub.safeParse).to.have.been.calledWith(testData);
+      expect(writeConfigStub).to.have.been.calledWith(
+        'test-site-id',
+        testData,
+        s3Client,
+        { s3Bucket: 'test-bucket' },
+      );
+    });
+
+    it('should return bad request when payload is not an object', async () => {
+      mockContext.data = null;
+
+      const result = await controller.postLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('LLMO config update must be provided as an object');
+      expect(writeConfigStub).to.not.have.been.called;
+      expect(llmoConfigSchemaStub.safeParse).to.not.have.been.called;
+    });
+
+    it('should return bad request when required fields are missing', async () => {
+      // Missing required categories, topics, brands and competitors fields
+      const invalidData = { entities: {} };
+      mockContext.data = invalidData;
+
+      // Mock validation failure
+      llmoConfigSchemaStub.safeParse.returns({
+        success: false,
+        error: {
+          message: 'Required field missing',
+          issues: [{ path: ['categories'], message: 'Required' }],
+        },
+      });
+
+      const result = await controller.postLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Invalid LLMO config');
+      expect(writeConfigStub).to.not.have.been.called;
+      expect(llmoConfigSchemaStub.safeParse).to.have.been.calledWith(invalidData);
+    });
+
+    it('should return bad request when s3 client is missing', async () => {
+      delete mockContext.s3;
+
+      const result = await controller.postLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('LLMO config storage is not configured for this environment');
+      expect(writeConfigStub).to.not.have.been.called;
+      expect(llmoConfigSchemaStub.safeParse).to.not.have.been.called;
+    });
+
+    it('should handle S3 error when writing config', async () => {
+      writeConfigStub.rejects(new Error('S3 write failed'));
+
+      const categoryId = '123e4567-e89b-12d3-a456-426614174000';
+      const topicId = '123e4567-e89b-12d3-a456-426614174001';
+
+      const testData = {
+        entities: {
+          [categoryId]: { type: 'category', name: 'test-category' },
+          [topicId]: { type: 'topic', name: 'test-topic' },
+        },
+        categories: {
+          [categoryId]: { name: 'test-category', region: ['us'] },
+        },
+        topics: {
+          [topicId]: {
+            name: 'test-topic',
+            category: categoryId,
+            prompts: [{
+              prompt: 'What is the main topic?',
+              regions: ['us'],
+              origin: 'human',
+              source: 'config',
+            }],
+          },
+        },
+        brands: {
+          aliases: [{
+            aliases: ['test-brand'],
+            category: categoryId,
+            region: ['us'],
+          }],
+        },
+        competitors: {
+          competitors: [{
+            name: 'test-competitor',
+            category: categoryId,
+            region: ['us'],
+            aliases: ['competitor-alias'],
+            urls: [],
+          }],
+        },
+      };
+
+      mockContext.data = testData;
+
+      // Mock successful validation
+      llmoConfigSchemaStub.safeParse.returns({ success: true, data: testData });
+
+      const result = await controller.postLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('S3 write failed');
+      expect(llmoConfigSchemaStub.safeParse).to.have.been.calledWith(testData);
     });
   });
 

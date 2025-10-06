@@ -1,5 +1,4 @@
 /* eslint-disable */
-
 // /*
 //  * Copyright 2023 Adobe. All rights reserved.
 //  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
@@ -41,6 +40,7 @@
 //     info: sandbox.stub(),
 //     error: sandbox.stub(),
 //     warn: sandbox.stub(),
+//     debug: sandbox.stub(),
 //   };
 
 //   const SITE_IDS = ['0b4dcf79-fe5f-410b-b11f-641f0bf56da3', 'c4420c67-b4e8-443d-b7ab-0099cfd5da20'];

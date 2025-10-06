@@ -333,3 +333,13 @@ sandboxAuditType:
       - 'meta-tags'
       - 'product-metatags'
       - 'alt-text'
+
+llmoConfigVersion:
+  name: version
+  description: The version ID of the LLMO configuration to retrieve. If not provided, returns the latest version.
+  in: query
+  required: false
+  schema:
+    type: string
+    description: S3 object version ID
+    example: "abc123def456"

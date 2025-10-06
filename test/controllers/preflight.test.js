@@ -39,6 +39,7 @@ describe('Preflight Controller', () => {
     info: sandbox.stub(),
     error: sandbox.stub(),
     warn: sandbox.stub(),
+    debug: sandbox.stub(),
   };
 
   const mockJob = {

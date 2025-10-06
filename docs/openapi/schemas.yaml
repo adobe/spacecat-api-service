@@ -3642,30 +3642,261 @@ LlmoConfig:
   type: object
   description: LLMO (Large Language Model Optimizer) configuration for a site
   required:
-    - dataFolder
-    - brand
+    - entities
+    - categories
+    - topics
+    - brands
+    - competitors
   properties:
-    dataFolder:
-      description: The data folder identifier for the LLMO configuration
+    entities:
+      type: object
+      description: A record of entities keyed by UUID
+      additionalProperties:
+        $ref: '#/LlmoEntity'
+      example:
+        "123e4567-e89b-12d3-a456-426614174000":
+          type: "category"
+          name: "Technology"
+    categories:
+      type: object
+      description: A record of categories keyed by UUID
+      additionalProperties:
+        $ref: '#/LlmoCategory'
+      example:
+        "123e4567-e89b-12d3-a456-426614174000":
+          name: "Technology"
+          region: "us"
+    topics:
+      type: object
+      description: A record of topics with nested prompts keyed by UUID
+      additionalProperties:
+        $ref: '#/LlmoTopic'
+      example:
+        "456e7890-e89b-12d3-a456-426614174001":
+          name: "AI/ML"
+          category: "123e4567-e89b-12d3-a456-426614174000"
+          prompts:
+            - prompt: "What are the latest AI trends?"
+              regions: ["us"]
+              origin: "human"
+              source: "config"
+    brands:
+      type: object
+      description: Brand configuration with aliases
+      required:
+        - aliases
+      properties:
+        aliases:
+          type: array
+          description: Array of brand alias configurations
+          items:
+            $ref: '#/LlmoBrandAlias'
+    competitors:
+      type: object
+      description: Competitor configuration
+      required:
+        - competitors
+      properties:
+        competitors:
+          type: array
+          description: Array of competitor configurations
+          items:
+            $ref: '#/LlmoCompetitor'
+  additionalProperties: true
+
+LlmoEntity:
+  type: object
+  description: An entity in the LLMO configuration
+  required:
+    - type
+  properties:
+    type:
       type: string
-      example: 'adobe'
-    brand:
-      description: The brand identifier for the LLMO configuration
+      description: The type of entity (category, topic, or custom type)
+      example: "category"
+    name:
       type: string
-      example: 'adobe'
-    questions:
-      description: The questions configuration containing both human and AI questions
-      $ref: '#/LlmoQuestions'
-    customerIntent:
-      description: The customer intent configuration containing key-value pairs
-      $ref: '#/LlmoCustomerIntent'
-    cdnlogsFilter:
-      description: The CDN logs filter configuration for filtering log entries
-      $ref: '#/LlmoCdnLogsFilter'
-    cdnBucketConfig:
-      description: The CDN bucket configuration for log storage
-      $ref: '#/LlmoCdnBucketConfig'
-  additionalProperties: false
+      description: The name of the entity (required for category and topic types)
+      minLength: 1
+      example: "Technology"
+  additionalProperties: true
+
+LlmoCategory:
+  type: object
+  description: A category in the LLMO configuration
+  required:
+    - name
+    - region
+  properties:
+    name:
+      type: string
+      description: The name of the category
+      minLength: 1
+      example: "Technology"
+    region:
+      oneOf:
+        - type: string
+          pattern: '^[a-z][a-z]$'
+          description: Two-letter region code
+          example: "us"
+        - type: array
+          items:
+            type: string
+            pattern: '^[a-z][a-z]$'
+          description: Array of two-letter region codes
+          example: ["us", "eu"]
+  additionalProperties: true
+
+LlmoTopic:
+  type: object
+  description: A topic in the LLMO configuration with nested prompts
+  required:
+    - name
+    - prompts
+    - category
+  properties:
+    name:
+      type: string
+      description: The name of the topic
+      minLength: 1
+      example: "AI/ML"
+    prompts:
+      type: array
+      description: Array of prompts for this topic
+      minItems: 1
+      items:
+        $ref: '#/LlmoPrompt'
+    category:
+      oneOf:
+        - type: string
+          format: uuid
+          description: UUID reference to a category
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        - type: string
+          description: Category name as string
+          minLength: 1
+          example: "Technology"
+  additionalProperties: true
+
+LlmoPrompt:
+  type: object
+  description: A prompt configuration within a topic
+  required:
+    - prompt
+    - regions
+    - origin
+    - source
+  properties:
+    prompt:
+      type: string
+      description: The prompt text
+      minLength: 1
+      example: "What are the latest AI trends?"
+    regions:
+      type: array
+      description: Array of two-letter region codes
+      items:
+        type: string
+        pattern: '^[a-z][a-z]$'
+      example: ["us", "eu"]
+    origin:
+      oneOf:
+        - type: string
+          enum: ["human", "ai"]
+          description: Standard origin types
+        - type: string
+          description: Custom origin type
+          minLength: 1
+      example: "human"
+    source:
+      oneOf:
+        - type: string
+          enum: ["config", "api"]
+          description: Standard source types
+        - type: string
+          description: Custom source type
+          minLength: 1
+      example: "config"
+  additionalProperties: true
+
+LlmoBrandAlias:
+  type: object
+  description: A brand alias configuration
+  required:
+    - aliases
+    - category
+    - region
+  properties:
+    aliases:
+      type: array
+      description: Array of brand alias strings
+      items:
+        type: string
+        minLength: 1
+      example: ["Adobe", "Adobe Inc"]
+    category:
+      type: string
+      format: uuid
+      description: UUID reference to a category entity
+      example: "123e4567-e89b-12d3-a456-426614174000"
+    region:
+      oneOf:
+        - type: string
+          pattern: '^[a-z][a-z]$'
+          description: Two-letter region code
+          example: "us"
+        - type: array
+          items:
+            type: string
+            pattern: '^[a-z][a-z]$'
+          description: Array of two-letter region codes
+          example: ["us", "eu"]
+
+LlmoCompetitor:
+  type: object
+  description: A competitor configuration
+  required:
+    - category
+    - region
+    - name
+    - aliases
+  properties:
+    category:
+      type: string
+      format: uuid
+      description: UUID reference to a category entity
+      example: "123e4567-e89b-12d3-a456-426614174000"
+    region:
+      oneOf:
+        - type: string
+          pattern: '^[a-z][a-z]$'
+          description: Two-letter region code
+          example: "us"
+        - type: array
+          items:
+            type: string
+            pattern: '^[a-z][a-z]$'
+          description: Array of two-letter region codes
+          example: ["us", "eu"]
+    name:
+      type: string
+      description: The competitor name
+      minLength: 1
+      example: "Microsoft"
+    aliases:
+      type: array
+      description: Array of competitor alias strings
+      items:
+        type: string
+        minLength: 1
+      example: ["MS", "Microsoft Corp"]
+    urls:
+      type: array
+      description: Array of competitor URLs (optional)
+      items:
+        type: string
+        format: uri
+      example: ["https://microsoft.com", "https://office.com"]
 
 LlmoSheetDataQuery:
   type: object

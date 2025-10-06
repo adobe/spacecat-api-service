@@ -1,3 +1,80 @@
+# [1.190.0](https://github.com/adobe/spacecat-api-service/compare/v1.189.0...v1.190.0) (2025-10-03)
+
+
+### Features
+
+* Add APIs for register audits ([#1317](https://github.com/adobe/spacecat-api-service/issues/1317)) ([9214300](https://github.com/adobe/spacecat-api-service/commit/92143006963caf8c5f2b198dc08388d098e977f7))
+
+# [1.189.0](https://github.com/adobe/spacecat-api-service/compare/v1.188.0...v1.189.0) (2025-10-03)
+
+
+### Features
+
+* Add topics with nested prompts + top level categories and topics | LLMO-547 ([#1315](https://github.com/adobe/spacecat-api-service/issues/1315)) ([5064978](https://github.com/adobe/spacecat-api-service/commit/50649780365dad3b9da0c08cf8a681f2582f10f0))
+
+# [1.188.0](https://github.com/adobe/spacecat-api-service/compare/v1.187.6...v1.188.0) (2025-10-02)
+
+
+### Features
+
+* upgrade spacecat-shared version  ([#1312](https://github.com/adobe/spacecat-api-service/issues/1312)) ([eecdab8](https://github.com/adobe/spacecat-api-service/commit/eecdab82039f47aff095d3cebcd763406bf5a067)), closes [adobe/spacecat-shared#997](https://github.com/adobe/spacecat-shared/issues/997)
+
+## [1.187.6](https://github.com/adobe/spacecat-api-service/compare/v1.187.5...v1.187.6) (2025-10-01)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.65.2 ([#1309](https://github.com/adobe/spacecat-api-service/issues/1309)) ([664613f](https://github.com/adobe/spacecat-api-service/commit/664613f03b00d19ce8f2f4fc1b6195ee0ea76c14))
+
+## [1.187.5](https://github.com/adobe/spacecat-api-service/compare/v1.187.4...v1.187.5) (2025-10-01)
+
+
+### Bug Fixes
+
+* add log and slack messages to provide visibility on error conditions ([#1306](https://github.com/adobe/spacecat-api-service/issues/1306)) ([de0c480](https://github.com/adobe/spacecat-api-service/commit/de0c4805ef4ff2b73fd01a58533321b81077c743))
+
+## [1.187.4](https://github.com/adobe/spacecat-api-service/compare/v1.187.3...v1.187.4) (2025-10-01)
+
+
+### Bug Fixes
+
+* set right url to fetch config ([#1302](https://github.com/adobe/spacecat-api-service/issues/1302)) ([91018c6](https://github.com/adobe/spacecat-api-service/commit/91018c650e4391ad970999d238af7e18396f31bf))
+
+## [1.187.3](https://github.com/adobe/spacecat-api-service/compare/v1.187.2...v1.187.3) (2025-09-30)
+
+
+### Bug Fixes
+
+* rebuild docs ([#1305](https://github.com/adobe/spacecat-api-service/issues/1305)) ([bf8b172](https://github.com/adobe/spacecat-api-service/commit/bf8b172256841e2e4db204a0a651442253cdadd4))
+
+## [1.187.2](https://github.com/adobe/spacecat-api-service/compare/v1.187.1...v1.187.2) (2025-09-30)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1300](https://github.com/adobe/spacecat-api-service/issues/1300)) ([05c1eeb](https://github.com/adobe/spacecat-api-service/commit/05c1eeb81d044ef0f37e832b8ab6f2b08dc4a490))
+
+## [1.187.1](https://github.com/adobe/spacecat-api-service/compare/v1.187.0...v1.187.1) (2025-09-30)
+
+
+### Bug Fixes
+
+* adds debug log in loggerStub ([#1304](https://github.com/adobe/spacecat-api-service/issues/1304)) ([97411cf](https://github.com/adobe/spacecat-api-service/commit/97411cfdbdc54f8bc2319983f719f8291d0de54f))
+
+# [1.187.0](https://github.com/adobe/spacecat-api-service/compare/v1.186.0...v1.187.0) (2025-09-30)
+
+
+### Features
+
+* llmo config get/post ([#1299](https://github.com/adobe/spacecat-api-service/issues/1299)) ([a0f1456](https://github.com/adobe/spacecat-api-service/commit/a0f14569e8393c05fb2b3714d61301802ec530cf))
+
+# [1.186.0](https://github.com/adobe/spacecat-api-service/compare/v1.185.0...v1.186.0) (2025-09-29)
+
+
+### Features
+
+* add cwv suggestions task ([#1176](https://github.com/adobe/spacecat-api-service/issues/1176)) ([b0f5ddc](https://github.com/adobe/spacecat-api-service/commit/b0f5ddcbcbc8b41d51591cb6369b7e088eeb6d70))
+
 # [1.185.0](https://github.com/adobe/spacecat-api-service/compare/v1.184.3...v1.185.0) (2025-09-29)
 
 

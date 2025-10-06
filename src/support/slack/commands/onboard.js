@@ -188,6 +188,7 @@ function OnboardCommand(context) {
             profileName,
             env.WORKFLOW_WAIT_TIME_IN_SECONDS, // Use environment default wait time in batch mode
             slackContext,
+            context,
             { tier },
           );
 
