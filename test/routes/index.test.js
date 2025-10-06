@@ -258,6 +258,7 @@ describe('getRouteHandlers', () => {
       'GET /configurations',
       'GET /configurations/latest',
       'PUT /configurations/latest',
+      'POST /configurations/audits',
       'PATCH /configurations/sites/audits',
       'GET /organizations',
       'POST /organizations',
@@ -281,6 +282,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
     expect(staticRoutes['PUT /configurations/latest']).to.equal(mockConfigurationController.updateConfiguration);
+    expect(staticRoutes['POST /configurations/audits']).to.equal(mockConfigurationController.registerAudit);
     expect(staticRoutes['PATCH /configurations/sites/audits']).to.equal(mockSitesAuditsToggleController.execute);
     expect(staticRoutes['GET /organizations']).to.equal(mockOrganizationsController.getAll);
     expect(staticRoutes['POST /organizations']).to.equal(mockOrganizationsController.createOrganization);
@@ -297,6 +299,7 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes).to.have.all.keys(
       'GET /audits/latest/:auditType',
       'GET /configurations/:version',
+      'DELETE /configurations/audits/:auditType',
       'POST /hooks/site-detection/cdn/:hookSecret',
       'POST /hooks/site-detection/rum/:hookSecret',
       'GET /organizations/:organizationId',
@@ -429,6 +432,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /audits/latest/:auditType'].paramNames).to.deep.equal(['auditType']);
     expect(dynamicRoutes['GET /configurations/:version'].handler).to.equal(mockConfigurationController.getByVersion);
     expect(dynamicRoutes['GET /configurations/:version'].paramNames).to.deep.equal(['version']);
+    expect(dynamicRoutes['DELETE /configurations/audits/:auditType'].handler).to.equal(mockConfigurationController.unregisterAudit);
+    expect(dynamicRoutes['DELETE /configurations/audits/:auditType'].paramNames).to.deep.equal(['auditType']);
     expect(dynamicRoutes['GET /organizations/:organizationId'].handler).to.equal(mockOrganizationsController.getByID);
     expect(dynamicRoutes['GET /organizations/:organizationId'].paramNames).to.deep.equal(['organizationId']);
     expect(dynamicRoutes['GET /organizations/:organizationId/sites'].handler).to.equal(mockOrganizationsController.getSitesForOrganization);
