@@ -1,3 +1,24 @@
+# [1.190.0](https://github.com/adobe/spacecat-api-service/compare/v1.189.0...v1.190.0) (2025-10-03)
+
+
+### Features
+
+* Add APIs for register audits ([#1317](https://github.com/adobe/spacecat-api-service/issues/1317)) ([9214300](https://github.com/adobe/spacecat-api-service/commit/92143006963caf8c5f2b198dc08388d098e977f7))
+
+# [1.189.0](https://github.com/adobe/spacecat-api-service/compare/v1.188.0...v1.189.0) (2025-10-03)
+
+
+### Features
+
+* Add topics with nested prompts + top level categories and topics | LLMO-547 ([#1315](https://github.com/adobe/spacecat-api-service/issues/1315)) ([5064978](https://github.com/adobe/spacecat-api-service/commit/50649780365dad3b9da0c08cf8a681f2582f10f0))
+
+# [1.188.0](https://github.com/adobe/spacecat-api-service/compare/v1.187.6...v1.188.0) (2025-10-02)
+
+
+### Features
+
+* upgrade spacecat-shared version  ([#1312](https://github.com/adobe/spacecat-api-service/issues/1312)) ([eecdab8](https://github.com/adobe/spacecat-api-service/commit/eecdab82039f47aff095d3cebcd763406bf5a067)), closes [adobe/spacecat-shared#997](https://github.com/adobe/spacecat-shared/issues/997)
+
 ## [1.187.6](https://github.com/adobe/spacecat-api-service/compare/v1.187.5...v1.187.6) (2025-10-01)
 
 
