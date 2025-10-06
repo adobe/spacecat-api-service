@@ -21,14 +21,12 @@ export const LlmoOnboardDto = {
    * @param {object} requestData - The raw request data.
    * @returns {{
    *   domain: string,
-   *   brandName: string,
-   *   imsOrgId: string
+   *   brandName: string
    * }}
    */
   fromRequest: (requestData) => ({
     domain: requestData.domain,
     brandName: requestData.brandName,
-    imsOrgId: requestData.imsOrgId,
   }),
 
   /**

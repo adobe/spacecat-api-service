@@ -277,7 +277,7 @@ llmo-onboard:
       Onboards a net new customer to LLMO (Large Language Model Optimizer).
       This endpoint handles the complete onboarding process including organization validation,
       site creation/validation, LLMO configuration setup, and initial analysis trigger.
-      Requires authentication to ensure the user has access to the specified IMS organization.
+      The IMS Organization ID is automatically extracted from the user's JWT token (sub property).
     operationId: onboardCustomer
     requestBody:
       required: true
@@ -295,14 +295,9 @@ llmo-onboard:
                 type: string
                 description: The brand name for the site
                 example: "Example Brand"
-              imsOrgId:
-                type: string
-                description: The IMS Organization ID
-                example: "1234567890ABCDEF@AdobeOrg"
             required:
               - domain
               - brandName
-              - imsOrgId
     responses:
       '200':
         description: LLMO onboarding initiated successfully
@@ -362,8 +357,7 @@ llmo-onboard:
         $ref: './responses.yaml#/403'
       '500':
         $ref: './responses.yaml#/500'
-    security:
-      - api_key: [ ]
+    security: []
 
 llmo-questions:
   parameters:

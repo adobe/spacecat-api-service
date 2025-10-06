@@ -684,7 +684,7 @@ function LlmoController(ctx) {
    * @returns {Promise<Response>} The onboarding response.
    */
   const onboardCustomer = async (context) => {
-    const { log, env } = context;
+    const { log, env, attributes } = context;
     const { data } = context;
 
     try {
@@ -693,11 +693,25 @@ function LlmoController(ctx) {
         return badRequest('Onboarding data is required');
       }
 
-      const { domain, brandName, imsOrgId } = data;
+      const { domain, brandName } = data;
 
-      if (!domain || !brandName || !imsOrgId) {
-        return badRequest('domain, brandName, and imsOrgId are required');
+      if (!domain || !brandName) {
+        return badRequest('domain and brandName are required');
       }
+
+      const { authInfo } = attributes;
+
+      if (!authInfo) {
+        return badRequest('Authentication information is required');
+      }
+
+      const profile = authInfo.getProfile();
+
+      if (!profile || !profile.sub) {
+        return badRequest('User profile or organization ID (sub) not found in authentication token');
+      }
+
+      const imsOrgId = profile.sub;
 
       // Construct base URL and data folder name
       const baseURL = domain.startsWith('http') ? domain : `https://${domain}`;
