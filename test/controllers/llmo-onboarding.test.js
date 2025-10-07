@@ -520,6 +520,246 @@ describe('LLMO Onboarding Functions', () => {
     });
   });
 
+  describe('createEntitlementAndEnrollmentForOrg', () => {
+    it('should successfully create entitlement for organization when newly created', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+      };
+
+      const mockEntitlement = {
+        getId: sinon.stub().returns('entitlement123'),
+      };
+
+      const mockTierClient = {
+        checkValidEntitlement: sinon.stub().resolves({ entitlement: null }),
+        createEntitlement: sinon.stub().resolves({ entitlement: mockEntitlement }),
+      };
+
+      const mockTierClientConstructor = {
+        createForOrg: sinon.stub().returns(mockTierClient),
+      };
+
+      const { createEntitlementAndEnrollmentForOrg } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+          Entitlement: {
+            PRODUCT_CODES: { LLMO: 'LLMO' },
+            TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+          },
+        },
+        '@adobe/spacecat-shared-tier-client': {
+          default: mockTierClientConstructor,
+        },
+      });
+
+      const context = {
+        log: mockLog,
+      };
+
+      const mockSay = sinon.stub().resolves();
+
+      const result = await createEntitlementAndEnrollmentForOrg(mockOrganization, context, mockSay);
+
+      expect(result).to.deep.equal({
+        entitlement: mockEntitlement,
+      });
+
+      expect(mockTierClientConstructor.createForOrg).to.have.been.calledWith(context, mockOrganization, 'LLMO');
+      expect(mockTierClient.checkValidEntitlement).to.have.been.calledWith('FREE_TRIAL');
+      expect(mockTierClient.createEntitlement).to.have.been.calledWith('FREE_TRIAL');
+      expect(mockSay).to.have.been.calledWith('Successfully created LLMO entitlement entitlement123 for organization org123');
+      expect(mockLog.info).to.have.been.calledWith('Successfully ensured LLMO access for organization org123 via entitlement entitlement123');
+    });
+
+    it('should successfully find existing entitlement for organization', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+      };
+
+      const mockExistingEntitlement = {
+        getId: sinon.stub().returns('entitlement123'),
+      };
+
+      const mockTierClient = {
+        checkValidEntitlement: sinon.stub().resolves({ entitlement: mockExistingEntitlement }),
+        createEntitlement: sinon.stub().resolves({ entitlement: mockExistingEntitlement }),
+      };
+
+      const mockTierClientConstructor = {
+        createForOrg: sinon.stub().returns(mockTierClient),
+      };
+
+      const { createEntitlementAndEnrollmentForOrg } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+          Entitlement: {
+            PRODUCT_CODES: { LLMO: 'LLMO' },
+            TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+          },
+        },
+        '@adobe/spacecat-shared-tier-client': {
+          default: mockTierClientConstructor,
+        },
+      });
+
+      const context = {
+        log: mockLog,
+      };
+
+      const mockSay = sinon.stub().resolves();
+
+      const result = await createEntitlementAndEnrollmentForOrg(mockOrganization, context, mockSay);
+
+      expect(result).to.deep.equal({
+        entitlement: mockExistingEntitlement,
+      });
+
+      expect(mockSay).to.have.been.calledWith('Found existing LLMO entitlement entitlement123 for organization org123');
+      expect(mockLog.info).to.have.been.calledWith('Successfully ensured LLMO access for organization org123 via entitlement entitlement123');
+    });
+
+    it('should handle error when creating entitlement fails', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+      };
+
+      const error = new Error('Failed to create entitlement');
+
+      const mockTierClient = {
+        checkValidEntitlement: sinon.stub().resolves({ entitlement: null }),
+        createEntitlement: sinon.stub().rejects(error),
+      };
+
+      const mockTierClientConstructor = {
+        createForOrg: sinon.stub().returns(mockTierClient),
+      };
+
+      const { createEntitlementAndEnrollmentForOrg } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+          Entitlement: {
+            PRODUCT_CODES: { LLMO: 'LLMO' },
+            TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+          },
+        },
+        '@adobe/spacecat-shared-tier-client': {
+          default: mockTierClientConstructor,
+        },
+      });
+
+      const context = {
+        log: mockLog,
+      };
+
+      const mockSay = sinon.stub().resolves();
+
+      try {
+        await createEntitlementAndEnrollmentForOrg(mockOrganization, context, mockSay);
+        expect.fail('Should have thrown an error');
+      } catch (err) {
+        expect(err).to.equal(error);
+        expect(mockLog.info).to.have.been.calledWith('Ensuring LLMO entitlement failed: Failed to create entitlement');
+        expect(mockSay).to.have.been.calledWith('❌ Ensuring LLMO entitlement failed');
+      }
+    });
+  });
+
+  describe('performLlmoOrgOnboarding', () => {
+    it('should successfully perform LLMO organization onboarding', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+      };
+
+      const mockEntitlement = {
+        getId: sinon.stub().returns('entitlement123'),
+      };
+
+      const mockTierClient = {
+        checkValidEntitlement: sinon.stub().resolves({ entitlement: null }),
+        createEntitlement: sinon.stub().resolves({ entitlement: mockEntitlement }),
+      };
+
+      const mockTierClientConstructor = {
+        createForOrg: sinon.stub().returns(mockTierClient),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+
+      const { performLlmoOrgOnboarding } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+          Entitlement: {
+            PRODUCT_CODES: { LLMO: 'LLMO' },
+            TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+          },
+        },
+        '@adobe/spacecat-shared-tier-client': {
+          default: mockTierClientConstructor,
+        },
+      });
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+      };
+
+      const mockSay = sinon.stub().resolves();
+
+      const result = await performLlmoOrgOnboarding('ABC123@AdobeOrg', context, mockSay);
+
+      expect(result).to.deep.equal({
+        organization: mockOrganization,
+        message: 'LLMO organization onboarding completed successfully',
+        entitlement: mockEntitlement,
+      });
+
+      expect(mockLog.info).to.have.been.calledWith('Starting LLMO organization onboarding for IMS Org ID: ABC123@AdobeOrg');
+      expect(mockSay).to.have.been.calledWith(':gear: Starting LLMO IMS org onboarding for *ABC123@AdobeOrg*...');
+    });
+
+    it('should handle error when entitlement creation fails', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+      };
+
+      const error = new Error('Entitlement creation failed');
+
+      const mockTierClient = {
+        checkValidEntitlement: sinon.stub().resolves({ entitlement: null }),
+        createEntitlement: sinon.stub().rejects(error),
+      };
+
+      const mockTierClientConstructor = {
+        createForOrg: sinon.stub().returns(mockTierClient),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+
+      const { performLlmoOrgOnboarding } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+          Entitlement: {
+            PRODUCT_CODES: { LLMO: 'LLMO' },
+            TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+          },
+        },
+        '@adobe/spacecat-shared-tier-client': {
+          default: mockTierClientConstructor,
+        },
+      });
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+      };
+
+      const mockSay = sinon.stub().resolves();
+
+      try {
+        await performLlmoOrgOnboarding('ABC123@AdobeOrg', context, mockSay);
+        expect.fail('Should have thrown an error');
+      } catch (err) {
+        expect(err.message).to.equal('Failed to create LLMO entitlement for organization: Entitlement creation failed');
+        expect(mockLog.error).to.have.been.calledWith('Error creating entitlement for organization: Entitlement creation failed');
+      }
+    });
+  });
+
   describe('performLlmoOnboarding', () => {
     it('should successfully perform complete LLMO onboarding process', async () => {
       // Mock organization

@@ -30,9 +30,9 @@ function LlmoOnboardCommand(context) {
   const baseCommand = BaseCommand({
     id: 'onboard-llmo',
     name: 'Onboard LLMO',
-    description: 'Onboards a site for LLMO (Large Language Model Optimizer) through a modal interface.',
+    description: 'Onboards a site or IMS org for LLMO (Large Language Model Optimizer) through a modal interface.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} <site url>`,
+    usageText: `${PHRASES[0]} [site url]`,
   });
 
   const { log } = context;
@@ -50,6 +50,39 @@ function LlmoOnboardCommand(context) {
     const { dataAccess } = context;
 
     const [site] = args;
+
+    // If no site parameter provided, trigger IMS org onboarding flow
+    if (!site) {
+      const message = {
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: ':rocket: *LLMO IMS Org Onboarding*\n\nClick the button below to start the IMS organization onboarding process.',
+            },
+          },
+          {
+            type: 'actions',
+            elements: [
+              {
+                type: 'button',
+                text: {
+                  type: 'plain_text',
+                  text: 'Start Onboarding',
+                },
+                value: 'org_onboarding',
+                action_id: 'start_llmo_org_onboarding',
+                style: 'primary',
+              },
+            ],
+          },
+        ],
+        thread_ts: threadTs,
+      };
+      await say(message);
+      return;
+    }
 
     const normalizedSite = extractURLFromSlackInput(site);
 

@@ -75,19 +75,39 @@ describe('LlmoOnboardCommand', () => {
   });
 
   describe('Handle Execution Method', () => {
-    it('should show usage when no site URL provided', async () => {
+    it('should show IMS org onboarding button when no parameter provided', async () => {
       await command.handleExecution([], slackContext);
 
-      expect(slackContext.say).to.have.been.calledWith(
-        'Usage: _onboard-llmo <site url>_',
-      );
+      expect(slackContext.say).to.have.been.calledOnce;
+      const message = slackContext.say.getCall(0).args[0];
+
+      expect(message).to.have.property('blocks');
+      expect(message).to.have.property('thread_ts', '1234567890.123456');
+
+      // Check for the section block with org onboarding text
+      const sectionBlock = message.blocks.find((block) => block.type === 'section');
+      expect(sectionBlock).to.exist;
+      expect(sectionBlock.text.text).to.include('LLMO IMS Org Onboarding');
+      expect(sectionBlock.text.text).to.include('IMS organization onboarding process');
+
+      // Check for the actions block with the button
+      const actionsBlock = message.blocks.find((block) => block.type === 'actions');
+      expect(actionsBlock).to.exist;
+      expect(actionsBlock.elements).to.have.length(1);
+
+      const button = actionsBlock.elements[0];
+      expect(button.type).to.equal('button');
+      expect(button.text.text).to.equal('Start Onboarding');
+      expect(button.action_id).to.equal('start_llmo_org_onboarding');
+      expect(button.value).to.equal('org_onboarding');
+      expect(button.style).to.equal('primary');
     });
 
     it('should show usage when invalid URL provided', async () => {
       await command.handleExecution(['invalid-url'], slackContext);
 
       expect(slackContext.say).to.have.been.calledWith(
-        'Usage: _onboard-llmo <site url>_',
+        'Usage: _onboard-llmo [site url]_',
       );
     });
 

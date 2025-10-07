@@ -21,6 +21,8 @@ import {
   addEntitlementsAction,
   updateOrgAction,
   updateIMSOrgModal,
+  startLLMOOrgOnboarding,
+  onboardLLMOOrgModal,
 } from './onboard-llmo-modal.js';
 import { onboardSiteModal, startOnboarding } from './onboard-modal.js';
 import { preflightConfigModal } from './preflight-config-modal.js';
@@ -34,9 +36,11 @@ const actions = {
   rejectOrg,
   onboardSiteModal,
   onboardLLMOModal,
+  onboardLLMOOrgModal,
   updateIMSOrgModal,
   start_onboarding: startOnboarding,
   start_llmo_onboarding: startLLMOOnboarding,
+  start_llmo_org_onboarding: startLLMOOrgOnboarding,
   preflight_config_modal: preflightConfigModal,
   open_preflight_config: openPreflightConfig,
   add_entitlements_action: addEntitlementsAction,

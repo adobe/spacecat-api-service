@@ -11,6 +11,7 @@
  */
 
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import {
   postErrorMessage,
 } from '../../../utils/slack/base.js';
@@ -19,8 +20,10 @@ import {
   copyFilesToSharepoint,
   updateIndexConfig,
   enableAudits,
+  performLlmoOrgOnboarding,
 } from '../../../controllers/llmo/llmo-onboarding.js';
 
+const LLMO_TIER = EntitlementModel.TIERS.FREE_TRIAL;
 const REFERRAL_TRAFFIC_AUDIT = 'llmo-referral-traffic';
 const REFERRAL_TRAFFIC_IMPORT = 'traffic-analysis';
 const AGENTIC_TRAFFIC_ANALYSIS_AUDIT = 'cdn-analysis';
@@ -788,6 +791,153 @@ export function updateIMSOrgModal(lambdaContext) {
       log.debug(`Updated org and applied entitlements for site ${siteId} (${brandURL}) for user ${user.id}`);
     } catch (error) {
       log.error('Error updating organization:', error);
+    }
+  };
+}
+
+/* Handles "Start Onboarding" button click for IMS org onboarding */
+export function startLLMOOrgOnboarding(lambdaContext) {
+  const { log } = lambdaContext;
+
+  return async ({
+    ack, body, client, respond,
+  }) => {
+    try {
+      await ack();
+
+      const { user } = body;
+
+      await respond({
+        text: `:gear: ${user.name} started the IMS org onboarding process...`,
+        replace_original: true,
+      });
+
+      const originalChannel = body.channel?.id;
+      const originalThreadTs = body.message?.thread_ts || body.message?.ts;
+
+      await client.views.open({
+        trigger_id: body.trigger_id,
+        view: {
+          type: 'modal',
+          callback_id: 'onboard_llmo_org_modal',
+          private_metadata: JSON.stringify({
+            originalChannel,
+            originalThreadTs,
+          }),
+          title: {
+            type: 'plain_text',
+            text: 'Onboard IMS Org',
+          },
+          submit: {
+            type: 'plain_text',
+            text: 'Start Onboarding',
+          },
+          close: {
+            type: 'plain_text',
+            text: 'Cancel',
+          },
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: ':rocket: *LLMO IMS Org Onboarding*\n\nProvide the IMS Organization ID to onboard for LLMO.',
+              },
+            },
+            {
+              type: 'input',
+              block_id: 'ims_org_input',
+              element: {
+                type: 'plain_text_input',
+                action_id: 'ims_org_id',
+                placeholder: {
+                  type: 'plain_text',
+                  text: 'ABC123@AdobeOrg',
+                },
+              },
+              label: {
+                type: 'plain_text',
+                text: 'IMS Organization ID',
+              },
+            },
+          ],
+        },
+      });
+
+      log.debug(`User ${user.id} started IMS org onboarding process.`);
+    } catch (error) {
+      log.error('Error starting IMS org onboarding:', error);
+      await postErrorMessage(respond, error);
+    }
+  };
+}
+
+/* Handles IMS org onboarding modal submission */
+export function onboardLLMOOrgModal(lambdaContext) {
+  const { log } = lambdaContext;
+
+  return async ({ ack, body, client }) => {
+    try {
+      const { user, view } = body;
+      const { values } = view.state;
+
+      const imsOrgId = values.ims_org_input?.ims_org_id?.value?.trim();
+      const metadata = JSON.parse(view.private_metadata || '{}');
+      const { originalChannel, originalThreadTs } = metadata;
+
+      if (!imsOrgId) {
+        await ack({
+          response_action: 'errors',
+          errors: {
+            ims_org_input: 'IMS Organization ID is required',
+          },
+        });
+        return;
+      }
+
+      await ack();
+      const responseChannel = originalChannel || body.user.id;
+      const responseThreadTs = originalChannel ? originalThreadTs : undefined;
+
+      const slackContext = {
+        say: async (message) => {
+          await client.chat.postMessage({
+            channel: responseChannel,
+            text: message,
+            thread_ts: responseThreadTs,
+          });
+        },
+        client,
+        channelId: responseChannel,
+        threadTs: responseThreadTs,
+      };
+
+      try {
+        const result = await performLlmoOrgOnboarding(imsOrgId, lambdaContext, slackContext.say);
+        const { organization, message, entitlement } = result;
+        await slackContext.say(`:white_check_mark: *LLMO IMS org onboarding completed successfully!*
+
+*Organization:* ${organization.getName()}
+*IMS Org ID:* ${imsOrgId}
+*Entitlement ID:* ${entitlement.getId()}
+*Tier:* ${LLMO_TIER}
+*Status:* ${message}
+
+The organization has been onboarded for LLMO.`);
+
+        log.debug(`IMS org onboarding completed for ${imsOrgId} by user ${user.id}`);
+      } catch (error) {
+        log.error(`Error during IMS org onboarding: ${error.message}`);
+        await slackContext.say(`:x: ${error.message}`);
+      }
+    } catch (error) {
+      log.error('Error handling IMS org onboarding modal:', error);
+      await ack({
+        response_action: 'errors',
+        errors: {
+          ims_org_input: 'There was an error processing the onboarding request.',
+        },
+      });
     }
   };
 }
