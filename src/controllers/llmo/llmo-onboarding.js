@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* c8 ignore start */
-
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { createFrom } from '@adobe/spacecat-helix-content-sdk';
 import { Octokit } from '@octokit/rest';
@@ -117,6 +115,8 @@ export async function validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, co
     };
   }
 }
+
+/* c8 ignore start */
 
 /**
  * Publishes a file to admin.hlx.page.

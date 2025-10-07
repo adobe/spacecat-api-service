@@ -675,8 +675,6 @@ function LlmoController(ctx) {
     }
   };
 
-  /* c8 ignore start */
-
   /**
    * Onboards a new customer to LLMO.
    * This endpoint handles the complete onboarding process for net new customers
@@ -751,7 +749,7 @@ function LlmoController(ctx) {
       return badRequest(error.message);
     }
   };
-  /* c8 ignore end */
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
