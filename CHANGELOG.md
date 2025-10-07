@@ -1,3 +1,10 @@
+# [1.191.0](https://github.com/adobe/spacecat-api-service/compare/v1.190.2...v1.191.0) (2025-10-07)
+
+
+### Features
+
+* update the package version to the use new schema ([#1321](https://github.com/adobe/spacecat-api-service/issues/1321)) ([b33868a](https://github.com/adobe/spacecat-api-service/commit/b33868a457b987d8b05dddb7e15fe6556e0ac2c4))
+
 ## [1.190.2](https://github.com/adobe/spacecat-api-service/compare/v1.190.1...v1.190.2) (2025-10-07)
 
 
