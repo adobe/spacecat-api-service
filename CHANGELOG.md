@@ -1,3 +1,10 @@
+# [1.192.0](https://github.com/adobe/spacecat-api-service/compare/v1.191.1...v1.192.0) (2025-10-07)
+
+
+### Features
+
+* trigger audit from post llmo config ([#1314](https://github.com/adobe/spacecat-api-service/issues/1314)) ([8b7f80c](https://github.com/adobe/spacecat-api-service/commit/8b7f80cccba98e312230d2353ee174ed723129f1))
+
 ## [1.191.1](https://github.com/adobe/spacecat-api-service/compare/v1.191.0...v1.191.1) (2025-10-07)
 
 
