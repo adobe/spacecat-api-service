@@ -518,6 +518,7 @@ const createSiteAndOrganization = async (
   // Create a local copy to avoid modifying the parameter directly
   const localReportLine = { ...reportLine };
 
+  await say(`:mag: Debug - deliveryConfig set on site: ${JSON.stringify(deliveryConfig)}`);
   let site = await Site.findByBaseURL(baseURL);
   let organizationId;
 
@@ -559,7 +560,6 @@ const createSiteAndOrganization = async (
       });
 
       if (deliveryConfig && Object.keys(deliveryConfig).length > 0) {
-        await say(`:mag: Debug - deliveryConfig set on site: ${JSON.stringify(deliveryConfig)}`);
         site.setDeliveryConfig(deliveryConfig);
         // Also set authoring type if provided (needed when setting delivery config)
         if (authoringType) {

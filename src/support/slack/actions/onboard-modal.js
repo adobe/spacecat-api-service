@@ -516,6 +516,7 @@ export function onboardSiteModal(lambdaContext) {
       if (authoringType && authoringType !== 'default') {
         additionalParams.authoringType = authoringType;
       }
+      await slackContext.say(`:mag: Debug - deliveryConfigFromPreview: ${JSON.stringify(deliveryConfigFromPreview)}`);
       if (deliveryConfigFromPreview) {
         additionalParams.deliveryConfig = deliveryConfigFromPreview;
       }
