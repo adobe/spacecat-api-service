@@ -559,6 +559,7 @@ const createSiteAndOrganization = async (
       });
 
       if (deliveryConfig && Object.keys(deliveryConfig).length > 0) {
+        await say(`:mag: Debug - deliveryConfig set on site: ${JSON.stringify(deliveryConfig)}`);
         site.setDeliveryConfig(deliveryConfig);
         // Also set authoring type if provided (needed when setting delivery config)
         if (authoringType) {

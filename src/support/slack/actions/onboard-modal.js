@@ -20,9 +20,11 @@ export const AEM_CS_HOST = /^author-p(\d+)-e(\d+)/i;
 /**
  * Extracts program and environment ID from AEM Cloud Service preview URLs.
  * @param {string} previewUrl - The preview URL to parse
- * @returns {Object|null} Object with programId and environmentId, or null if not extractable
+ * @param {string} imsOrgId - The IMS Organization ID to include in the delivery config
+ * @returns {Object|null} Object with programId, environmentId, authorURL, preferContentApi,
+ *                        and imsOrgId, or null if not extractable
  */
-export function extractDeliveryConfigFromPreviewUrl(previewUrl) {
+export function extractDeliveryConfigFromPreviewUrl(previewUrl, imsOrgId) {
   try {
     if (!isValidUrl(previewUrl)) {
       return null;
@@ -36,6 +38,8 @@ export function extractDeliveryConfigFromPreviewUrl(previewUrl) {
       programId: `${programId}`,
       environmentId: `${envId}`,
       authorURL: previewUrl,
+      preferContentApi: true,
+      imsOrgId: imsOrgId || null,
     };
   } catch (error) {
     return null;
@@ -461,7 +465,7 @@ export function onboardSiteModal(lambdaContext) {
       // Validate preview URL if provided
       let deliveryConfigFromPreview = null;
       if (previewUrl) {
-        deliveryConfigFromPreview = extractDeliveryConfigFromPreviewUrl(previewUrl);
+        deliveryConfigFromPreview = extractDeliveryConfigFromPreviewUrl(previewUrl, imsOrgId);
         if (!deliveryConfigFromPreview) {
           await ack({
             response_action: 'errors',
