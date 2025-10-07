@@ -376,7 +376,7 @@ function LlmoController(ctx) {
     }
   };
 
-  async function postLlmoConfig(context) {
+  async function updateLlmoConfig(context) {
     const { log, s3, data } = context;
     const { siteId } = context.params;
     try {
@@ -401,9 +401,14 @@ function LlmoController(ctx) {
       }
       const parsedConfig = result.data;
 
+      const newConfig = {
+        ...(prevConfig?.exists && { ...prevConfig.config }),
+        ...parsedConfig,
+      };
+
       const { version } = await writeConfig(
         siteId,
-        parsedConfig,
+        newConfig,
         s3.s3Client,
         { s3Bucket: s3.s3Bucket },
       );
@@ -697,7 +702,7 @@ function LlmoController(ctx) {
     patchLlmoCustomerIntent,
     patchLlmoCdnLogsFilter,
     patchLlmoCdnBucketConfig,
-    postLlmoConfig,
+    updateLlmoConfig,
   };
 }
 

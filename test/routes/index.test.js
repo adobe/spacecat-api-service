@@ -412,7 +412,7 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/sheet-data/:dataSource',
       'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource',
       'GET /sites/:siteId/llmo/config',
-      'POST /sites/:siteId/llmo/config',
+      'PATCH /sites/:siteId/llmo/config',
       'GET /sites/:siteId/llmo/questions',
       'POST /sites/:siteId/llmo/questions',
       'DELETE /sites/:siteId/llmo/questions/:questionKey',

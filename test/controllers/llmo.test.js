@@ -2400,8 +2400,8 @@ describe('LlmoController', () => {
     });
   });
 
-  describe('postLlmoConfig', () => {
-    it('should write config to S3 successfully', async () => {
+  describe('updateLlmoConfig', () => {
+    it('should write config to S3 successfully when no prev config', async () => {
       writeConfigStub.resolves({ version: 'v1' });
       readConfigStub.resolves({
         config: llmoConfig.defaultConfig(),
@@ -2455,7 +2455,119 @@ describe('LlmoController', () => {
       // Mock successful validation
       llmoConfigSchemaStub.safeParse.returns({ success: true, data: testData });
 
-      const result = await controller.postLlmoConfig(mockContext);
+      const result = await controller.updateLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ version: 'v1' });
+      expect(llmoConfigSchemaStub.safeParse).to.have.been.calledWith(testData);
+      expect(writeConfigStub).to.have.been.calledWith(
+        'test-site-id',
+        testData,
+        s3Client,
+        { s3Bucket: 'test-bucket' },
+      );
+    });
+
+    it('should write config to S3 successfully overrides existing fields in prev config', async () => {
+      writeConfigStub.resolves({ version: 'v1' });
+      readConfigStub.resolves({
+        config: {
+          field1: [1, 2, 3],
+          field2: [2, 3],
+          field3: [3, 4],
+        },
+        exists: true,
+        version: 'some-old-version',
+      });
+
+      const testData = {
+        field1: [1, 2, 3],
+        field3: null,
+        field4: [3, 4],
+      };
+
+      const expectedConfig = {
+        field1: [1, 2, 3],
+        field2: [2, 3],
+        field3: null,
+        field4: [3, 4],
+      };
+
+      mockContext.data = testData;
+
+      // Mock successful validation
+      llmoConfigSchemaStub.safeParse.returns({ success: true, data: testData });
+
+      const result = await controller.updateLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ version: 'v1' });
+      expect(llmoConfigSchemaStub.safeParse).to.have.been.calledWith(testData);
+      expect(writeConfigStub).to.have.been.calledWith(
+        'test-site-id',
+        expectedConfig,
+        s3Client,
+        { s3Bucket: 'test-bucket' },
+      );
+    });
+
+    it('should write config to S3 successfully when no prev config', async () => {
+      writeConfigStub.resolves({ version: 'v1' });
+      readConfigStub.resolves({
+        config: llmoConfig.defaultConfig(),
+        exists: false,
+        version: null,
+      });
+
+      const categoryId = '123e4567-e89b-12d3-a456-426614174000';
+      const topicId = '123e4567-e89b-12d3-a456-426614174001';
+
+      const testData = {
+        entities: {
+          [categoryId]: { type: 'category', name: 'test-category' },
+          [topicId]: { type: 'topic', name: 'test-topic' },
+        },
+        categories: {
+          [categoryId]: { name: 'test-category', region: ['us'] },
+        },
+        topics: {
+          [topicId]: {
+            name: 'test-topic',
+            category: categoryId,
+            prompts: [{
+              prompt: 'What is the main topic?',
+              regions: ['us'],
+              origin: 'human',
+              source: 'config',
+            }],
+          },
+        },
+        brands: {
+          aliases: [{
+            aliases: ['test-brand'],
+            category: categoryId,
+            region: ['us'],
+          }],
+        },
+        competitors: {
+          competitors: [{
+            name: 'test-competitor',
+            category: categoryId,
+            region: ['us'],
+            aliases: ['competitor-alias'],
+            urls: [],
+          }],
+        },
+      };
+
+      mockContext.data = testData;
+
+      // Mock successful validation
+      llmoConfigSchemaStub.safeParse.returns({ success: true, data: testData });
+
+      const result = await controller.updateLlmoConfig(mockContext);
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
@@ -2523,7 +2635,7 @@ describe('LlmoController', () => {
       // Mock successful validation
       llmoConfigSchemaStub.safeParse.returns({ success: true, data: testData });
 
-      const result = await controller.postLlmoConfig(mockContext);
+      const result = await controller.updateLlmoConfig(mockContext);
 
       expect(result.status).to.equal(200);
 
@@ -2546,7 +2658,7 @@ describe('LlmoController', () => {
     it('should return bad request when payload is not an object', async () => {
       mockContext.data = null;
 
-      const result = await controller.postLlmoConfig(mockContext);
+      const result = await controller.updateLlmoConfig(mockContext);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
@@ -2569,7 +2681,7 @@ describe('LlmoController', () => {
         },
       });
 
-      const result = await controller.postLlmoConfig(mockContext);
+      const result = await controller.updateLlmoConfig(mockContext);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
@@ -2581,7 +2693,7 @@ describe('LlmoController', () => {
     it('should return bad request when s3 client is missing', async () => {
       delete mockContext.s3;
 
-      const result = await controller.postLlmoConfig(mockContext);
+      const result = await controller.updateLlmoConfig(mockContext);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
@@ -2591,6 +2703,11 @@ describe('LlmoController', () => {
     });
 
     it('should handle S3 error when writing config', async () => {
+      readConfigStub.resolves({
+        config: llmoConfig.defaultConfig(),
+        exists: true,
+        version: 'v0',
+      });
       writeConfigStub.rejects(new Error('S3 write failed'));
 
       const categoryId = '123e4567-e89b-12d3-a456-426614174000';
@@ -2639,7 +2756,7 @@ describe('LlmoController', () => {
       // Mock successful validation
       llmoConfigSchemaStub.safeParse.returns({ success: true, data: testData });
 
-      const result = await controller.postLlmoConfig(mockContext);
+      const result = await controller.updateLlmoConfig(mockContext);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
