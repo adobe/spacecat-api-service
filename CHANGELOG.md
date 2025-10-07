@@ -1,3 +1,10 @@
+## [1.191.1](https://github.com/adobe/spacecat-api-service/compare/v1.191.0...v1.191.1) (2025-10-07)
+
+
+### Bug Fixes
+
+* update data access to 2.68.1 ([#1326](https://github.com/adobe/spacecat-api-service/issues/1326)) ([35bfd25](https://github.com/adobe/spacecat-api-service/commit/35bfd2588610c98dddd6406ab232d052dfce595a))
+
 # [1.191.0](https://github.com/adobe/spacecat-api-service/compare/v1.190.2...v1.191.0) (2025-10-07)
 
 
