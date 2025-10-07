@@ -168,6 +168,9 @@ describe('LlmoController', () => {
           AZURE: 'AZURE',
         },
       },
+      Configuration: {
+        findLatest: sinon.stub(),
+      },
     };
 
     // Create mock log
@@ -3487,6 +3490,13 @@ describe('LlmoController', () => {
 
       mockDataAccess.Site.findByBaseURL = sinon.stub().resolves(null); // Site doesn't exist yet
       mockDataAccess.Site.create = sinon.stub().resolves(mockNewSite);
+
+      // Setup configuration mock for enableAudits
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
       // Setup environment for onboarding
       mockEnv.ENV = 'dev';

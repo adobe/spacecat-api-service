@@ -344,7 +344,7 @@ describe('onboard-llmo-modal', () => {
         organizationId: 'org123',
       });
       expect(mockSite.save).to.have.been.called;
-      expect(lambdaCtx.dataAccess.Configuration.findLatest).to.have.been.calledTwice;
+      expect(lambdaCtx.dataAccess.Configuration.findLatest).to.have.been.calledThrice;
 
       // Verify that TierClient was used for entitlement and enrollment
       expect(mockTierClient.createEntitlement).to.have.been.calledWith('FREE_TRIAL');
@@ -364,6 +364,7 @@ describe('onboard-llmo-modal', () => {
       expect(config.enableHandlerForSite).to.have.been.calledWith('cdn-analysis', mockSite);
       expect(config.enableHandlerForSite).to.have.been.calledWith('cdn-logs-report', mockSite);
       expect(config.enableHandlerForSite).to.have.been.calledWith('llmo-customer-analysis', mockSite);
+      expect(config.enableHandlerForSite).to.have.been.calledWith('heading', mockSite);
 
       // Verify that octokit was called to update the helix query config
       expect(octokitMock).to.have.been.called;

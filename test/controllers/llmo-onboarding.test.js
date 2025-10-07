@@ -35,6 +35,9 @@ describe('LLMO Onboarding Functions', () => {
       Organization: {
         findByImsOrgId: sinon.stub(),
       },
+      Configuration: {
+        findLatest: sinon.stub(),
+      },
     };
 
     // Create mock log
@@ -536,10 +539,17 @@ describe('LLMO Onboarding Functions', () => {
         save: sinon.stub().resolves(),
       };
 
+      // Mock configuration
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
       // Setup mocks
       mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
       mockDataAccess.Site.findByBaseURL.resolves(null); // No existing site
       mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
       // Mock Config.toDynamoItem
       const mockConfigToDynamoItem = sinon.stub().returns({ config: 'dynamo-item' });
@@ -638,6 +648,11 @@ describe('LLMO Onboarding Functions', () => {
       // Verify site was saved
       expect(mockSite.setConfig).to.have.been.calledWith({ config: 'dynamo-item' });
       expect(mockSite.save).to.have.been.called;
+
+      // Verify enableAudits was called
+      expect(mockDataAccess.Configuration.findLatest).to.have.been.called;
+      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('heading', mockSite);
+      expect(mockConfiguration.save).to.have.been.called;
 
       // Verify logging
       expect(mockLog.info).to.have.been.calledWith('Starting LLMO onboarding for IMS org ABC123@AdobeOrg, domain example.com, brand Test Brand');

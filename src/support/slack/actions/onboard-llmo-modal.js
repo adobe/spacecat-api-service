@@ -18,6 +18,7 @@ import {
   createEntitlementAndEnrollment,
   copyFilesToSharepoint,
   updateIndexConfig,
+  enableAudits,
 } from '../../../controllers/llmo/llmo-onboarding.js';
 
 const REFERRAL_TRAFFIC_AUDIT = 'llmo-referral-traffic';
@@ -410,8 +411,6 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
 
     // enable all necessary handlers
     const configuration = await Configuration.findLatest();
-    configuration.enableHandlerForSite(REFERRAL_TRAFFIC_AUDIT, site);
-    configuration.enableHandlerForSite('geo-brand-presence', site);
 
     // enable the cdn-analysis only if no other site in this organization already has it enabled
     const orgId = site.getOrganizationId();
@@ -428,14 +427,17 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
       log.debug(`Agentic traffic audits already enabled for organization ${orgId}, skipping`);
     }
 
-    // enable the cdn-logs-report audits for agentic traffic
-    configuration.enableHandlerForSite(AGENTIC_TRAFFIC_REPORT_AUDIT, site);
-
-    // enable llmo-customer-analysis handler - this generates LLMO excel sheets and triggers audits
-    configuration.enableHandlerForSite('llmo-customer-analysis', site);
-
     try {
       await configuration.save();
+
+      await enableAudits(site, lambdaCtx, [
+        AGENTIC_TRAFFIC_REPORT_AUDIT, // enable the cdn-logs-report audits for agentic traffic
+        'llmo-customer-analysis', // this generates LLMO excel sheets and triggers audits
+        REFERRAL_TRAFFIC_AUDIT,
+        'geo-brand-presence',
+        'heading',
+      ]);
+
       await site.save();
       log.debug(`Successfully updated LLMO config for site ${siteId}`);
 

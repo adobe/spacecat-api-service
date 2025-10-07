@@ -339,6 +339,17 @@ export async function createEntitlementAndEnrollment(site, context, say = () => 
   }
 }
 
+export async function enableAudits(site, context, audits = []) {
+  const { dataAccess } = context;
+  const { Configuration } = dataAccess;
+
+  const configuration = await Configuration.findLatest();
+  audits.forEach((audit) => {
+    configuration.enableHandlerForSite(audit, site);
+  });
+  await configuration.save();
+}
+
 /**
  * Complete LLMO onboarding process.
  * @param {object} params - Onboarding parameters
@@ -375,6 +386,11 @@ export async function performLlmoOnboarding(params, context) {
 
   // Update index config
   await updateIndexConfig(dataFolder, context);
+
+  // Enable audits
+  await enableAudits(site, context, [
+    'heading',
+  ]);
 
   // Get current site config
   const siteConfig = site.getConfig();
