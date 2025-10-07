@@ -286,6 +286,34 @@ export async function createOrFindOrganization(imsOrgId, context, slackContext =
 }
 
 /**
+ * Creates or finds a site based on baseURL.
+ * @param {string} baseURL - The base URL of the site
+ * @param {string} organizationId - The organization ID if we create a new site
+ * @param {object} context - The request context
+ * @returns {Promise<object>} The site object
+ */
+export async function createOrFindSite(baseURL, organizationId, context) {
+  const { dataAccess } = context;
+  const { Site } = dataAccess;
+
+  const site = await Site.findByBaseURL(baseURL);
+  if (site) {
+    if (site.getOrganizationId() !== organizationId) {
+      site.setOrganizationId(organizationId);
+      await site.save();
+    }
+
+    return site;
+  }
+
+  const newSite = await Site.create({
+    baseURL,
+    organizationId,
+  });
+  return newSite;
+}
+
+/**
  * Creates entitlement and enrollment for LLMO.
  * @param {object} site - The site object
  * @param {object} context - The request context
@@ -321,8 +349,7 @@ export async function createEntitlementAndEnrollment(site, context) {
  */
 export async function performLlmoOnboarding(params, context) {
   const { domain, brandName, imsOrgId } = params;
-  const { dataAccess, env, log } = context;
-  const { Site } = dataAccess;
+  const { env, log } = context;
 
   // Construct base URL and data folder name
   const baseURL = composeBaseURL(domain);
@@ -334,11 +361,7 @@ export async function performLlmoOnboarding(params, context) {
   const organization = await createOrFindOrganization(imsOrgId, context);
 
   // Create site
-  const site = await Site.create({
-    baseURL,
-    organizationId: organization.getId(),
-    isLive: true,
-  });
+  const site = await createOrFindSite(baseURL, organization.getId(), context);
 
   log.info(`Created site ${site.getId()} for ${baseURL}`);
 
