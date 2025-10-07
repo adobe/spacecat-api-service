@@ -268,6 +268,97 @@ llmo-config:
     security:
       - api_key: [ ]
 
+llmo-onboard:
+  post:
+    tags:
+      - llmo
+    summary: Onboard new customer to LLMO
+    description: |
+      Onboards a net new customer to LLMO (Large Language Model Optimizer).
+      This endpoint handles the complete onboarding process including organization validation,
+      site creation/validation, LLMO configuration setup, and initial analysis trigger.
+      The IMS Organization ID is automatically extracted from the user's JWT token (sub property).
+    operationId: onboardCustomer
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              domain:
+                type: string
+                format: hostname
+                description: The domain name to onboard (without protocol)
+                example: "example.com"
+              brandName:
+                type: string
+                description: The brand name for the site
+                example: "Example Brand"
+            required:
+              - domain
+              - brandName
+    responses:
+      '200':
+        description: LLMO onboarding initiated successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Success message
+                  example: "LLMO onboarding initiated successfully"
+                domain:
+                  type: string
+                  format: hostname
+                  description: The domain name
+                  example: "example.com"
+                brandName:
+                  type: string
+                  description: The brand name
+                  example: "Example Brand"
+                imsOrgId:
+                  type: string
+                  description: The IMS Organization ID
+                  example: "1234567890ABCDEF@AdobeOrg"
+                organizationId:
+                  type: string
+                  format: uuid
+                  description: The organization ID (created or existing)
+                  example: "123e4567-e89b-12d3-a456-426614174000"
+                siteId:
+                  type: string
+                  format: uuid
+                  description: The created or existing site ID
+                  example: "987fcdeb-51a2-43d1-9f12-345678901234"
+                status:
+                  type: string
+                  enum: ["initiated", "in_progress", "completed", "failed"]
+                  description: The onboarding status
+                  example: "initiated"
+                createdAt:
+                  type: string
+                  format: date-time
+                  description: The timestamp when onboarding was initiated
+                  example: "2025-01-15T10:30:00Z"
+              required:
+                - message
+                - domain
+                - brandName
+                - imsOrgId
+                - status
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '500':
+        $ref: './responses.yaml#/500'
+    security: []
+
 llmo-questions:
   parameters:
     - $ref: './parameters.yaml#/siteId'

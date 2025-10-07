@@ -274,6 +274,8 @@ paths:
     $ref: './sandbox-audit-api.yaml#/sandbox-audit'
   /sites/{siteId}/llmo/cdn-logs-bucket-config:
     $ref: './llmo-api.yaml#/llmo-cdn-logs-bucket-config'
+  /llmo/onboard:
+    $ref: './llmo-api.yaml#/llmo-onboard'
   /sites/{siteId}/reports:
     $ref: './site-api.yaml#/site-reports'
   /sites/{siteId}/reports/{reportId}:
