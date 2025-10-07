@@ -144,6 +144,7 @@ function PreflightController(ctx, log, env) {
       const url = new URL(data.urls[0]);
       const previewBaseURL = `${url.protocol}//${url.hostname}`;
       const site = await dataAccess.Site.findByPreviewURL(previewBaseURL);
+      log.info(`Site found for preview URL: ${previewBaseURL}`, { site });
       let enableAuthentication = false;
       // check head request for preview url
       const headResponse = await fetch(`${previewBaseURL}`, {
