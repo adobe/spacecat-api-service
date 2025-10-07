@@ -389,7 +389,8 @@ export async function performLlmoOnboarding(params, context) {
 
   // Enable audits
   await enableAudits(site, context, [
-    'heading',
+    'headings',
+    'llm-blocked',
   ]);
 
   // Get current site config

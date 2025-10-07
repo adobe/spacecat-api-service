@@ -364,7 +364,7 @@ describe('onboard-llmo-modal', () => {
       expect(config.enableHandlerForSite).to.have.been.calledWith('cdn-analysis', mockSite);
       expect(config.enableHandlerForSite).to.have.been.calledWith('cdn-logs-report', mockSite);
       expect(config.enableHandlerForSite).to.have.been.calledWith('llmo-customer-analysis', mockSite);
-      expect(config.enableHandlerForSite).to.have.been.calledWith('heading', mockSite);
+      expect(config.enableHandlerForSite).to.have.been.calledWith('headings', mockSite);
 
       // Verify that octokit was called to update the helix query config
       expect(octokitMock).to.have.been.called;

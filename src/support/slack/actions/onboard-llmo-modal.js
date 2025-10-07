@@ -435,7 +435,8 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
         'llmo-customer-analysis', // this generates LLMO excel sheets and triggers audits
         REFERRAL_TRAFFIC_AUDIT,
         'geo-brand-presence',
-        'heading',
+        'headings',
+        'llm-blocked',
       ]);
 
       await site.save();

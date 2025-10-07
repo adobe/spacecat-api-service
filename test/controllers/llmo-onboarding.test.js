@@ -651,7 +651,8 @@ describe('LLMO Onboarding Functions', () => {
 
       // Verify enableAudits was called
       expect(mockDataAccess.Configuration.findLatest).to.have.been.called;
-      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('heading', mockSite);
+      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('headings', mockSite);
+      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('llm-blocked', mockSite);
       expect(mockConfiguration.save).to.have.been.called;
 
       // Verify logging
