@@ -74,7 +74,7 @@
     "@adobe/spacecat-helix-content-sdk": "1.4.24",
     "@adobe/spacecat-shared-athena-client": "1.3.5",
     "@adobe/spacecat-shared-brand-client": "1.1.24",
-    "@adobe/spacecat-shared-data-access": "https://gitpkg.now.sh/adobe/spacecat-shared/packages/spacecat-shared-data-access?41911110a14b6a737a985d1dccb93688ee2367f4",
+    "@adobe/spacecat-shared-data-access": "https://gitpkg.now.sh/adobe/spacecat-shared/packages/spacecat-shared-data-access?137eb857b04e30e39f1124fe58327de6675d1c60",
     "@adobe/spacecat-shared-gpt-client": "1.6.5",
     "@adobe/spacecat-shared-http-utils": "1.17.6",
     "@adobe/spacecat-shared-ims-client": "1.8.13",
