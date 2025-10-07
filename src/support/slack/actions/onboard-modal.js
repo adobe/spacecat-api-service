@@ -462,8 +462,27 @@ export function onboardSiteModal(lambdaContext) {
         return;
       }
 
+      // Create a slack context for the onboarding process
+      // Use original channel/thread if available, otherwise fall back to DM
+      const responseChannel = originalChannel || body.user.id;
+      const responseThreadTs = originalChannel ? originalThreadTs : undefined;
+
+      const slackContext = {
+        say: async (message) => {
+          await client.chat.postMessage({
+            channel: responseChannel,
+            text: message,
+            thread_ts: responseThreadTs,
+          });
+        },
+        client,
+        channelId: responseChannel,
+        threadTs: responseThreadTs,
+      };
+
       // Validate preview URL if provided
       let deliveryConfigFromPreview = null;
+      await slackContext.say(`:mag: Debug - previewUrl: ${previewUrl}`);
       if (previewUrl) {
         deliveryConfigFromPreview = extractDeliveryConfigFromPreviewUrl(previewUrl, imsOrgId);
         if (!deliveryConfigFromPreview) {
@@ -489,24 +508,6 @@ export function onboardSiteModal(lambdaContext) {
       }
 
       await ack();
-
-      // Create a slack context for the onboarding process
-      // Use original channel/thread if available, otherwise fall back to DM
-      const responseChannel = originalChannel || body.user.id;
-      const responseThreadTs = originalChannel ? originalThreadTs : undefined;
-
-      const slackContext = {
-        say: async (message) => {
-          await client.chat.postMessage({
-            channel: responseChannel,
-            text: message,
-            thread_ts: responseThreadTs,
-          });
-        },
-        client,
-        channelId: responseChannel,
-        threadTs: responseThreadTs,
-      };
 
       const configuration = await Configuration.findLatest();
       const additionalParams = {};
