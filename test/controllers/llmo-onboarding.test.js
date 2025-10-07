@@ -40,6 +40,7 @@ describe('LLMO Onboarding Functions', () => {
     mockLog = {
       info: sinon.stub(),
       error: sinon.stub(),
+      debug: sinon.stub(),
     };
 
     // Create mock environment
@@ -408,6 +409,110 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockLog.error).to.have.been.calledWith(
         'Error validating site onboarding status: Database connection failed',
       );
+    });
+  });
+
+  describe('createOrFindOrganization', () => {
+    it('should return existing organization when found', async () => {
+      const { createOrFindOrganization } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+          Entitlement: {
+            PRODUCT_CODES: { LLMO: 'LLMO' },
+            TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+          },
+        },
+        '@adobe/spacecat-shared-tier-client': {
+          default: sinon.stub(),
+        },
+      });
+
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+      };
+
+      const result = await createOrFindOrganization('ABC123@AdobeOrg', context);
+
+      expect(result).to.equal(mockOrganization);
+      expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledWith('ABC123@AdobeOrg');
+      expect(mockLog.debug).to.have.been.calledWith('Found existing organization for IMS Org ID: ABC123@AdobeOrg');
+    });
+  });
+
+  describe('createOrFindSite', () => {
+    it('should update organization ID when existing site has different organization', async () => {
+      const { createOrFindSite } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+          Entitlement: {
+            PRODUCT_CODES: { LLMO: 'LLMO' },
+            TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+          },
+        },
+        '@adobe/spacecat-shared-tier-client': {
+          default: sinon.stub(),
+        },
+      });
+
+      const mockSite = {
+        getOrganizationId: sinon.stub().returns('old-org-123'),
+        setOrganizationId: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      mockDataAccess.Site.findByBaseURL.resolves(mockSite);
+
+      const context = {
+        dataAccess: mockDataAccess,
+      };
+
+      const result = await createOrFindSite('https://example.com', 'new-org-456', context);
+
+      expect(result).to.equal(mockSite);
+      expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
+      expect(mockSite.getOrganizationId).to.have.been.called;
+      expect(mockSite.setOrganizationId).to.have.been.calledWith('new-org-456');
+      expect(mockSite.save).to.have.been.called;
+    });
+
+    it('should not update organization ID when existing site has same organization', async () => {
+      const { createOrFindSite } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+          Entitlement: {
+            PRODUCT_CODES: { LLMO: 'LLMO' },
+            TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+          },
+        },
+        '@adobe/spacecat-shared-tier-client': {
+          default: sinon.stub(),
+        },
+      });
+
+      const mockSite = {
+        getOrganizationId: sinon.stub().returns('org-123'),
+        setOrganizationId: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      mockDataAccess.Site.findByBaseURL.resolves(mockSite);
+
+      const context = {
+        dataAccess: mockDataAccess,
+      };
+
+      const result = await createOrFindSite('https://example.com', 'org-123', context);
+
+      expect(result).to.equal(mockSite);
+      expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
+      expect(mockSite.getOrganizationId).to.have.been.called;
+      expect(mockSite.setOrganizationId).to.not.have.been.called;
+      expect(mockSite.save).to.not.have.been.called;
     });
   });
 });

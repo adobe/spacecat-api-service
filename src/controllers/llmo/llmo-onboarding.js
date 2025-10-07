@@ -116,8 +116,6 @@ export async function validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, co
   }
 }
 
-/* c8 ignore start */
-
 /**
  * Publishes a file to admin.hlx.page.
  * @param {string} filename - The filename to publish
@@ -340,6 +338,8 @@ export async function createEntitlementAndEnrollment(site, context, say = () => 
     throw error;
   }
 }
+
+/* c8 ignore start */
 
 /**
  * Complete LLMO onboarding process.
