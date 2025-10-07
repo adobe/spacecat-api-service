@@ -249,6 +249,7 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': llmoController.queryLlmoSheetData,
     'GET /sites/:siteId/llmo/config': llmoController.getLlmoConfig,
     'PATCH /sites/:siteId/llmo/config': llmoController.updateLlmoConfig,
+    'POST /sites/:siteId/llmo/config': llmoController.updateLlmoConfig,
     'GET /sites/:siteId/llmo/questions': llmoController.getLlmoQuestions,
     'POST /sites/:siteId/llmo/questions': llmoController.addLlmoQuestion,
     'DELETE /sites/:siteId/llmo/questions/:questionKey': llmoController.removeLlmoQuestion,
