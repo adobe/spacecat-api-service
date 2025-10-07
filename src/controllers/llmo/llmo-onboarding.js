@@ -339,8 +339,6 @@ export async function createEntitlementAndEnrollment(site, context, say = () => 
   }
 }
 
-/* c8 ignore start */
-
 /**
  * Complete LLMO onboarding process.
  * @param {object} params - Onboarding parameters
@@ -397,4 +395,3 @@ export async function performLlmoOnboarding(params, context) {
     message: 'LLMO onboarding completed successfully',
   };
 }
-/* c8 ignore end */
