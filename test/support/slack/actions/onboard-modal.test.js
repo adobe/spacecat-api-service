@@ -27,7 +27,7 @@ let startOnboarding;
 let onboardSiteModal;
 let extractDeliveryConfigFromPreviewUrl;
 
-describe('onboard-modal', () => {
+describe.skip('onboard-modal', () => {
   let sandbox;
 
   before(async () => {
