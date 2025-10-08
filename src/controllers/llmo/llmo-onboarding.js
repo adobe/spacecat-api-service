@@ -350,6 +350,91 @@ export async function enableAudits(site, context, audits = []) {
   await configuration.save();
 }
 
+export async function enableContentAI(site, context) {
+  const { env } = context;
+
+  const formParams = new URLSearchParams();
+  formParams.append('grant_type', env.CONTENTAI_GRANT_TYPE);
+  formParams.append('client_id', env.CONTENTAI_CLIENT_ID);
+  formParams.append('client_secret', env.CONTENTAI_CLIENT_SECRET);
+  formParams.append('scope', env.CONTENTAI_SCOPE);
+
+  const accessTokenRes = await fetch(env.CONTENTAI_TOKEN_ENDPOINT, {
+    method: 'POST',
+    body: formParams,
+  });
+  if (!accessTokenRes.ok) {
+    throw new Error(`Failed to get access token from ContentAI: ${accessTokenRes.status} ${accessTokenRes.statusText}`);
+  }
+  const accessTokenJson = await accessTokenRes.json();
+  const accessToken = accessTokenJson.access_token;
+  const tokenType = accessTokenJson.token_type;
+
+  const configurationsResponse = await fetch(`${env.CONTENTAI_ENDPOINT}/configurations`, {
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `${tokenType} ${accessToken}`,
+    },
+  });
+  if (!configurationsResponse.ok) {
+    throw new Error(`Failed to get configurations from ContentAI: ${configurationsResponse.status} ${configurationsResponse.statusText}`);
+  }
+  const configurationsJson = await configurationsResponse.json();
+  const { configurations } = configurationsJson;
+
+  const existingConf = configurations.find(
+    (conf) => conf.steps?.find((step) => step.baseUrl === site.getBaseURL()),
+  );
+
+  if (existingConf) {
+    return;
+  }
+
+  const contentAiData = {
+    steps: [
+      {
+        type: 'index',
+        name: `${site.getBaseURL().replace(/https?:\/\//, '')}-generative`,
+      },
+      {
+        type: 'discovery',
+        sourceId: `${site.getBaseURL().replace(/https?:\/\//, '')}-generative-<timestamp>`,
+        baseUrl: site.getBaseURL(),
+        discoveryProperties: {
+          type: 'website',
+          includePdfs: true,
+        },
+        schedule: {
+          cronSchedule: '0 0 * * *',
+          enabled: true,
+        },
+      },
+      {
+        type: 'generative',
+        name: 'Comprehensive Q&A assitant',
+        description: 'AI assistant for answering any user question about a topic in the indexed knowledge',
+        prompts: {
+          system: 'You are a helpful AI Assistant powering the search experience.\nYou will answer questions using the provided context.\nContext: {context}\n',
+          user: 'Please answer the following question: {question}\n',
+        },
+      },
+    ],
+  };
+
+  const contentAIResponse = await fetch(env.CONTENTAI_ENDPOINT, {
+    method: 'POST',
+    body: JSON.stringify(contentAiData),
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `${tokenType} ${accessToken}`,
+    },
+  });
+
+  if (!contentAIResponse.ok) {
+    throw new Error(`Failed to enable content AI for site ${site.getId()}: ${contentAIResponse.status} ${contentAIResponse.statusText}`);
+  }
+}
+
 /**
  * Complete LLMO onboarding process.
  * @param {object} params - Onboarding parameters
@@ -392,6 +477,9 @@ export async function performLlmoOnboarding(params, context) {
     'headings',
     'llm-blocked',
   ]);
+
+  // enable content AI
+  await enableContentAI(site, context);
 
   // Get current site config
   const siteConfig = site.getConfig();
