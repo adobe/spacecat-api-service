@@ -49,7 +49,7 @@ describe('RunAuditCommand', () => {
       const command = RunAuditCommand(context);
       expect(command.id).to.equal('run-audit');
       expect(command.name).to.equal('Run Audit');
-      expect(command.description).to.equal('Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits.');
+      expect(command.description).to.equal('Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. Use `product-metatags` for Product Detail Page (PDP) analysis of commerce sites.');
     });
   });
 

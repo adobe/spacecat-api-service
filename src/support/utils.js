@@ -664,12 +664,11 @@ export const onboardSingleSite = async (
 
   const baseURL = options.urlProcessor ? options.urlProcessor(baseURLInput) : baseURLInput.trim();
   const imsOrgID = imsOrganizationID || env.DEMO_IMS_ORG;
-
   const profileName = options.profileName || 'unknown';
 
   const tier = additionalParams.tier || EntitlementModel.TIERS.FREE_TRIAL;
 
-  await say(`:gear: Starting ${profileName} environment setup for site ${baseURL}`);
+  await say(`:gear: Starting ${profileName} environment setup for site ${baseURL} with imsOrgID: ${imsOrgID} and tier: ${tier}`);
   await say(':key: Please make sure you have access to the AEM Shared Production Demo environment. Request access here: https://demo.adobe.com/demos/internal/AemSharedProdEnv.html');
 
   const reportLine = {
@@ -692,12 +691,16 @@ export const onboardSingleSite = async (
     if (!isValidUrl(baseURL)) {
       reportLine.errors = 'Invalid site base URL';
       reportLine.status = 'Failed';
+      log.error(`Invalid site base URL: ${baseURL}`);
+      await say(`:x: Invalid site base URL: ${baseURL}`);
       return reportLine;
     }
 
     if (!isValidIMSOrgId(imsOrgID)) {
       reportLine.errors = 'Invalid IMS Org ID';
       reportLine.status = 'Failed';
+      log.error(`Invalid IMS Org ID: ${imsOrgID}`);
+      await say(`:x: Invalid IMS Org ID: ${imsOrgID}`);
       return reportLine;
     }
 
@@ -717,6 +720,8 @@ export const onboardSingleSite = async (
     if (!Object.values(EntitlementModel.TIERS).includes(tier)) {
       reportLine.errors = `Invalid tier: ${tier}`;
       reportLine.status = 'Failed';
+      log.error(`Invalid tier: ${tier}`);
+      await say(`:x: Invalid tier: ${tier}`);
       return reportLine;
     }
 
@@ -738,6 +743,7 @@ export const onboardSingleSite = async (
       log.error(error);
       reportLine.errors = error;
       reportLine.status = 'Failed';
+      await say(`:x: Profile "${profileName}" not found or invalid.`);
       return reportLine;
     }
 
@@ -771,6 +777,7 @@ export const onboardSingleSite = async (
         importsEnabled.push(importType);
       }
     }
+    await say(`importsEnabled: ${importsEnabled}`); // DEBUG
 
     // Resolve canonical URL for the site from the base URL
     let resolvedUrl = await resolveCanonicalUrl(baseURL);
@@ -784,8 +791,11 @@ export const onboardSingleSite = async (
 
     // Update the fetch configuration only if the pathname/origin is different from the resolved URL
     if (baseUrlPathName !== resolvedUrlPathName || baseUrlOrigin !== resolvedUrlOrigin) {
+      // If the base URL has a subpath, preserve it in the override
+      const overrideBaseURL = baseUrlPathName !== '/' ? `${resolvedUrlOrigin}${baseUrlPathName}` : resolvedUrlOrigin;
+      log.info(`Updating fetch configuration for site ${siteID} with override base URL: ${overrideBaseURL}`);
       siteConfig.updateFetchConfig({
-        overrideBaseURL: resolvedUrlOrigin,
+        overrideBaseURL,
       });
     }
 
@@ -908,11 +918,28 @@ export const onboardSingleSite = async (
       },
     };
 
+    // CWV Demo Suggestions job - add generic CWV suggestions to opportunities
+    const cwvDemoSuggestionsJob = {
+      type: 'cwv-demo-suggestions-processor',
+      siteId: siteID,
+      siteUrl: baseURL,
+      imsOrgId: imsOrgID,
+      organizationId,
+      taskContext: {
+        profile: profileName,
+        slackContext: {
+          channelId: slackContext.channelId,
+          threadTs: slackContext.threadTs,
+        },
+      },
+    };
+
     // Prepare and start step function workflow with the necessary parameters
     const workflowInput = {
       opportunityStatusJob,
       disableImportAndAuditJob,
       demoURLJob,
+      cwvDemoSuggestionsJob,
       workflowWaitTime: workflowWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS,
     };
 
@@ -925,6 +952,7 @@ export const onboardSingleSite = async (
     });
     await sfnClient.send(startCommand);
   } catch (error) {
+    await say(`:x: Failed to start onboarding for site ${baseURL}: ${error.message}`);
     log.error(error);
     reportLine.errors = error.message;
     reportLine.status = 'Failed';

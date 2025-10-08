@@ -10,12 +10,17 @@
  * governing permissions and limitations under the License.
  */
 
-import { ok, badRequest, forbidden } from '@adobe/spacecat-shared-http-utils';
+import {
+  ok, badRequest, forbidden, createResponse, notFound,
+} from '@adobe/spacecat-shared-http-utils';
 import {
   SPACECAT_USER_AGENT,
   tracingFetch as fetch,
   hasText,
   isObject,
+  llmoConfig as llmo,
+  schemas,
+  composeBaseURL,
 } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
@@ -29,6 +34,14 @@ import {
   applyMappings,
 } from './llmo-utils.js';
 import { LLMO_SHEET_MAPPINGS } from './llmo-mappings.js';
+import {
+  validateSiteNotOnboarded,
+  generateDataFolder,
+  performLlmoOnboarding,
+} from './llmo-onboarding.js';
+
+const { readConfig, writeConfig } = llmo;
+const { llmoConfig: llmoConfigSchema } = schemas;
 
 const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
 
@@ -47,7 +60,8 @@ function LlmoController(ctx) {
     if (!llmoConfig?.dataFolder) {
       throw new Error('LLM Optimizer is not enabled for this site, add llmo config to the site');
     }
-    if (!await accessControlUtil.hasAccess(site, '', EntitlementModel.PRODUCT_CODES.LLMO)) {
+    const hasAccessToElmo = await accessControlUtil.hasAccess(site, '', EntitlementModel.PRODUCT_CODES.LLMO);
+    if (!hasAccessToElmo) {
       throw new Error('Only users belonging to the organization can view its sites');
     }
     return { site, config, llmoConfig };
@@ -342,16 +356,88 @@ function LlmoController(ctx) {
 
   // Handles requests to the LLMO config endpoint
   const getLlmoConfig = async (context) => {
-    const { log } = context;
+    const { log, s3 } = context;
     const { siteId } = context.params;
+    const version = context.data?.version;
     try {
-      const { llmoConfig } = await getSiteAndValidateLlmo(context);
-      return ok(llmoConfig);
+      if (!s3 || !s3.s3Client) {
+        return badRequest('LLMO config storage is not configured for this environment');
+      }
+
+      log.info(`Fetching LLMO config from S3 for siteId: ${siteId}${version != null ? ` with version: ${version}` : ''}`);
+      const { config, exists, version: configVersion } = await readConfig(siteId, s3.s3Client, {
+        s3Bucket: s3.s3Bucket,
+        version,
+      });
+
+      // If a specific version was requested but doesn't exist, return 404
+      if (version != null && !exists) {
+        return notFound(`LLMO config version '${version}' not found for site '${siteId}'`);
+      }
+
+      return ok({ config, version: configVersion || null });
     } catch (error) {
       log.error(`Error getting llmo config for siteId: ${siteId}, error: ${error.message}`);
       return badRequest(error.message);
     }
   };
+
+  async function updateLlmoConfig(context) {
+    const { log, s3, data } = context;
+    const { siteId } = context.params;
+    try {
+      if (!isObject(data)) {
+        return badRequest('LLMO config update must be provided as an object');
+      }
+
+      if (!s3 || !s3.s3Client) {
+        return badRequest('LLMO config storage is not configured for this environment');
+      }
+
+      const prevConfig = await readConfig(siteId, s3.s3Client, { s3Bucket: s3.s3Bucket });
+
+      // Validate the config, return 400 if validation fails
+      const result = llmoConfigSchema.safeParse(data);
+      if (!result.success) {
+        const { issues, message } = result.error;
+        return createResponse({
+          message: `Invalid LLMO config: ${message}`,
+          details: issues,
+        }, 400);
+      }
+      const parsedConfig = result.data;
+
+      const newConfig = {
+        ...(prevConfig?.exists && { ...prevConfig.config }),
+        ...parsedConfig,
+      };
+
+      const { version } = await writeConfig(
+        siteId,
+        newConfig,
+        s3.s3Client,
+        { s3Bucket: s3.s3Bucket },
+      );
+
+      // Trigger llmo-customer-analysis after config is updated
+      await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
+        type: 'llmo-customer-analysis',
+        siteId,
+        auditContext: {},
+        data: {
+          configVersion: version,
+          previousConfigVersion: prevConfig.exists ? prevConfig.version : /* c8 ignore next */ null,
+        },
+      });
+
+      log.info(`Updated LLMO config in S3 for siteId: ${siteId}, version: ${version}`);
+      return ok({ version });
+    } catch (error) {
+      const msg = `${error?.message || /* c8 ignore next */ error}`;
+      log.error(`Error updating llmo config for siteId: ${siteId}, error: ${msg}`);
+      return badRequest(msg);
+    }
+  }
 
   // Handles requests to the LLMO questions endpoint, returns both human and ai questions
   const getLlmoQuestions = async (context) => {
@@ -607,6 +693,81 @@ function LlmoController(ctx) {
     }
   };
 
+  /**
+   * Onboards a new customer to LLMO.
+   * This endpoint handles the complete onboarding process for net new customers
+   * including organization validation, site creation, and LLMO configuration.
+   * @param {object} context - The request context.
+   * @returns {Promise<Response>} The onboarding response.
+   */
+  const onboardCustomer = async (context) => {
+    const { log, env, attributes } = context;
+    const { data } = context;
+
+    try {
+      // Validate required fields
+      if (!data || typeof data !== 'object') {
+        return badRequest('Onboarding data is required');
+      }
+
+      const { domain, brandName } = data;
+
+      if (!domain || !brandName) {
+        return badRequest('domain and brandName are required');
+      }
+
+      const { authInfo } = attributes;
+
+      if (!authInfo) {
+        return badRequest('Authentication information is required');
+      }
+
+      const profile = authInfo.getProfile();
+
+      if (!profile || !profile.tenants?.[0]?.id) {
+        return badRequest('User profile or organization ID not found in authentication token');
+      }
+
+      const imsOrgId = `${profile.tenants[0].id}@AdobeOrg`;
+
+      // Construct base URL and data folder name
+      const baseURL = composeBaseURL(domain);
+      const dataFolder = generateDataFolder(baseURL, env.ENV);
+
+      log.info(`Starting LLMO onboarding for IMS org ${imsOrgId}, domain ${domain}, brand ${brandName}`);
+
+      // Validate that the site has not been onboarded yet
+      const validation = await validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, context);
+      if (!validation.isValid) {
+        return badRequest(validation.error);
+      }
+
+      // Perform the complete onboarding process
+      const result = await performLlmoOnboarding(
+        { domain, brandName, imsOrgId },
+        context,
+      );
+
+      log.info(`LLMO onboarding completed successfully for domain ${domain}`);
+
+      return ok({
+        message: result.message,
+        domain,
+        brandName,
+        imsOrgId,
+        baseURL: result.baseURL,
+        dataFolder: result.dataFolder,
+        organizationId: result.organizationId,
+        siteId: result.siteId,
+        status: 'completed',
+        createdAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      log.error(`Error during LLMO onboarding: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -622,6 +783,8 @@ function LlmoController(ctx) {
     patchLlmoCustomerIntent,
     patchLlmoCdnLogsFilter,
     patchLlmoCdnBucketConfig,
+    updateLlmoConfig,
+    onboardCustomer,
   };
 }
 
