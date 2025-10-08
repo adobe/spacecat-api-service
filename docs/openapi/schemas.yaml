@@ -59,6 +59,7 @@ AuditType:
     - 'experimentation-opportunities'
     - 'llm-error-pages'
     - 'prerender'
+    - 'summarization'
   example: 'cwv'
 URL:
   type: string
@@ -783,6 +784,17 @@ AuditResult:
                 description: 'Array of performance metrics by device type'
                 items:
                   $ref: './schemas.yaml#/CWVMetric'
+    - type: object
+      description: The result of summarization audit.
+      properties:
+        success:
+          type: boolean
+          description: Whether the audit was successful
+        topPages:
+          type: array
+          description: A list of top pages
+          items:
+            type: string
 AuditList:
   type: array
   items:

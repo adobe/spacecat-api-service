@@ -41,6 +41,7 @@ const ALL_AUDITS = [
   'forms-opportunities',
   'alt-text',
   'prerender',
+  'summarization',
 ];
 
 /**
