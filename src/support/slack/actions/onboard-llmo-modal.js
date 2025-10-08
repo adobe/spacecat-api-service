@@ -19,6 +19,7 @@ import {
   copyFilesToSharepoint,
   updateIndexConfig,
   enableAudits,
+  removeEnrollment,
 } from '../../../controllers/llmo/llmo-onboarding.js';
 
 const REFERRAL_TRAFFIC_AUDIT = 'llmo-referral-traffic';
@@ -788,6 +789,211 @@ export function updateIMSOrgModal(lambdaContext) {
       log.debug(`Updated org and applied entitlements for site ${siteId} (${brandURL}) for user ${user.id}`);
     } catch (error) {
       log.error('Error updating organization:', error);
+    }
+  };
+}
+
+export function removeLlmoEnrollment(lambdaContext) {
+  const { log } = lambdaContext;
+
+  return async ({ ack, body, client }) => {
+    try {
+      await ack();
+
+      const metadata = JSON.parse(body.actions[0].value);
+      const {
+        brandURL,
+        siteId,
+        existingBrand,
+        originalThreadTs,
+      } = metadata;
+
+      const originalChannel = body.channel?.id;
+      const { user } = body;
+
+      log.info(`User ${user.id} initiated LLMO enrollment removal for site ${siteId} (${brandURL})`);
+
+      // Update the original message to show user's action
+      await client.chat.update({
+        channel: originalChannel,
+        ts: body.message.ts,
+        text: `:warning: ${user.name} is removing LLMO enrollment for ${brandURL}...`,
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `:warning: ${user.name} is removing LLMO enrollment for ${brandURL}...`,
+            },
+          },
+        ],
+      });
+
+      // Show confirmation modal
+      await client.views.open({
+        trigger_id: body.trigger_id,
+        view: {
+          type: 'modal',
+          callback_id: 'confirm_remove_llmo_enrollment',
+          private_metadata: JSON.stringify({
+            brandURL,
+            siteId,
+            existingBrand,
+            originalChannel,
+            originalThreadTs,
+            originalMessageTs: body.message.ts,
+          }),
+          title: {
+            type: 'plain_text',
+            text: 'Confirm Removal',
+          },
+          submit: {
+            type: 'plain_text',
+            text: 'Remove Enrollment',
+          },
+          close: {
+            type: 'plain_text',
+            text: 'Cancel',
+          },
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: `:warning: *Are you sure you want to remove LLMO enrollment?*\n\n*Site:* ${brandURL}\n*Brand:* ${existingBrand}\n\nThis action will:\n• Revoke the site's LLMO enrollment\n• Remove access to LLMO features for this site\n\n*This action cannot be undone.*`,
+              },
+            },
+          ],
+        },
+      });
+    } catch (error) {
+      log.error('Error handling remove LLMO enrollment action:', error);
+      const metadata = JSON.parse(body.actions[0].value);
+      await client.chat.postMessage({
+        channel: body.channel?.id,
+        text: `:x: Failed to initiate enrollment removal: ${error.message}`,
+        thread_ts: metadata.originalThreadTs,
+      });
+    }
+  };
+}
+
+export function confirmRemoveLlmoEnrollment(lambdaContext) {
+  const { log, dataAccess } = lambdaContext;
+
+  return async ({ ack, body, client }) => {
+    try {
+      log.debug('Processing LLMO enrollment removal confirmation...');
+
+      const { view, user } = body;
+      const metadata = JSON.parse(view.private_metadata);
+      const {
+        brandURL,
+        siteId,
+        existingBrand,
+        originalChannel,
+        originalThreadTs,
+        originalMessageTs,
+      } = metadata;
+
+      // Acknowledge the modal submission
+      await ack();
+
+      // Post initial message to the thread
+      const responseChannel = originalChannel || body.user.id;
+      const responseThreadTs = originalChannel ? originalThreadTs : undefined;
+
+      await client.chat.postMessage({
+        channel: responseChannel,
+        text: `:gear: Removing LLMO enrollment for ${brandURL}...`,
+        thread_ts: responseThreadTs,
+      });
+
+      try {
+        // Find the site
+        const { Site } = dataAccess;
+        const site = await Site.findById(siteId);
+
+        if (!site) {
+          throw new Error(`Site not found: ${siteId}`);
+        }
+
+        // Use the reusable removeEnrollment function from the LLMO controller
+        await removeEnrollment(site, lambdaContext);
+
+        log.info(`Successfully revoked LLMO enrollment for site ${siteId} (${brandURL})`);
+
+        // Update the original message to show completion
+        if (originalMessageTs) {
+          await client.chat.update({
+            channel: responseChannel,
+            ts: originalMessageTs,
+            text: `:white_check_mark: LLMO enrollment removed for ${brandURL}`,
+            blocks: [
+              {
+                type: 'section',
+                text: {
+                  type: 'mrkdwn',
+                  text: `:white_check_mark: *LLMO Enrollment Removed*\n\nThe LLMO enrollment for *${brandURL}* (brand: *${existingBrand}*) has been successfully removed by ${user.name}.`,
+                },
+              },
+            ],
+          });
+        }
+
+        // Post success message to the thread
+        const successMessage = `:white_check_mark: *LLMO enrollment removed successfully!*
+
+:link: *Site:* ${brandURL}
+:identification_card: *Site ID:* ${siteId}
+:label: *Brand:* ${existingBrand}
+:bust_in_silhouette: *Removed by:* ${user.name}
+
+The site enrollment has been revoked. The site can be re-onboarded at any time using the \`onboard-llmo\` command.`;
+
+        await client.chat.postMessage({
+          channel: responseChannel,
+          text: successMessage,
+          thread_ts: responseThreadTs,
+        });
+      } catch (error) {
+        log.error(`Error removing LLMO enrollment for site ${siteId}:`, error);
+
+        // Update the original message to show error
+        if (originalMessageTs) {
+          await client.chat.update({
+            channel: responseChannel,
+            ts: originalMessageTs,
+            text: `:x: Failed to remove LLMO enrollment for ${brandURL}`,
+            blocks: [
+              {
+                type: 'section',
+                text: {
+                  type: 'mrkdwn',
+                  text: `:x: *Failed to remove LLMO enrollment*\n\nThere was an error removing the enrollment for *${brandURL}*.`,
+                },
+              },
+            ],
+          });
+        }
+
+        // Post error message to the thread
+        await client.chat.postMessage({
+          channel: responseChannel,
+          text: `:x: Failed to remove LLMO enrollment: ${error.message}`,
+          thread_ts: responseThreadTs,
+        });
+      }
+
+      log.debug(`LLMO enrollment removal processed for user ${user.id}, site ${brandURL}`);
+    } catch (error) {
+      log.error('Error handling confirm remove LLMO enrollment modal:', error);
+      await ack({
+        response_action: 'errors',
+        errors: {
+          general: 'There was an error processing the removal request.',
+        },
+      });
     }
   };
 }

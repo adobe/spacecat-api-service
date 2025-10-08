@@ -15,8 +15,7 @@
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
-
-import LlmoOnboardCommand from '../../../../src/support/slack/commands/llmo-onboard.js';
+import esmock from 'esmock';
 
 use(sinonChai);
 
@@ -26,8 +25,9 @@ describe('LlmoOnboardCommand', () => {
   let mockLog;
   let mockDataAccess;
   let slackContext;
+  let LlmoOnboardCommand;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     // Create mock log
     mockLog = {
       info: sinon.stub(),
@@ -39,6 +39,15 @@ describe('LlmoOnboardCommand', () => {
       Site: {
         findByBaseURL: sinon.stub(),
       },
+      SiteEnrollment: {
+        allBySiteId: sinon.stub(),
+      },
+      Entitlement: {
+        findById: sinon.stub(),
+        PRODUCT_CODES: {
+          LLMO: 'LLMO',
+        },
+      },
     };
 
     // Create mock context
@@ -46,6 +55,10 @@ describe('LlmoOnboardCommand', () => {
       log: mockLog,
       dataAccess: mockDataAccess,
     };
+
+    // Import the command
+    const module = await import('../../../../src/support/slack/commands/llmo-onboard.js');
+    LlmoOnboardCommand = module.default;
 
     // Create slack context
     slackContext = {
@@ -121,8 +134,7 @@ describe('LlmoOnboardCommand', () => {
       expect(button.style).to.equal('primary');
     });
 
-    it('should show reonboarding options for existing site with LLMO brand', async () => {
-      // Mock existing site with LLMO brand
+    it('should show reonboarding options for existing site with LLMO brand and active enrollment', async () => {
       const mockSite = {
         getId: sinon.stub().returns('site123'),
         getOrganizationId: sinon.stub().returns('org123'),
@@ -132,7 +144,14 @@ describe('LlmoOnboardCommand', () => {
       };
       mockDataAccess.Site.findByBaseURL.resolves(mockSite);
 
-      await command.handleExecution(['https://example.com'], slackContext);
+      const LlmoOnboardCommandWithMock = await esmock('../../../../src/support/slack/commands/llmo-onboard.js', {
+        '../../../../src/controllers/llmo/llmo-onboarding.js': {
+          hasActiveLlmoEnrollment: sinon.stub().resolves(true),
+        },
+      });
+
+      const commandWithMock = LlmoOnboardCommandWithMock(mockContext);
+      await commandWithMock.handleExecution(['https://example.com'], slackContext);
 
       expect(slackContext.say).to.have.been.calledOnce;
       const message = slackContext.say.getCall(0).args[0];
@@ -146,10 +165,10 @@ describe('LlmoOnboardCommand', () => {
       expect(sectionBlock.text.text).to.include('Site Already Onboarded');
       expect(sectionBlock.text.text).to.include('Test Brand');
 
-      // Check for the actions block with two buttons
+      // Check for the actions block with three buttons
       const actionsBlock = message.blocks.find((block) => block.type === 'actions');
       expect(actionsBlock).to.exist;
-      expect(actionsBlock.elements).to.have.length(2);
+      expect(actionsBlock.elements).to.have.length(3);
 
       const addEntitlementsButton = actionsBlock.elements[0];
       expect(addEntitlementsButton.type).to.equal('button');
@@ -162,6 +181,12 @@ describe('LlmoOnboardCommand', () => {
       expect(updateOrgButton.text.text).to.equal('Update IMS Org');
       expect(updateOrgButton.action_id).to.equal('update_org_action');
 
+      const removeEnrollmentButton = actionsBlock.elements[2];
+      expect(removeEnrollmentButton.type).to.equal('button');
+      expect(removeEnrollmentButton.text.text).to.equal('Remove Enrollment');
+      expect(removeEnrollmentButton.action_id).to.equal('remove_llmo_enrollment');
+      expect(removeEnrollmentButton.style).to.equal('danger');
+
       // Check that button values contain the necessary metadata
       const addEntitlementsValue = JSON.parse(addEntitlementsButton.value);
       expect(addEntitlementsValue.brandURL).to.equal('https://example.com');
@@ -172,6 +197,57 @@ describe('LlmoOnboardCommand', () => {
       expect(updateOrgValue.brandURL).to.equal('https://example.com');
       expect(updateOrgValue.siteId).to.equal('site123');
       expect(updateOrgValue.currentOrgId).to.equal('org123');
+
+      const removeEnrollmentValue = JSON.parse(removeEnrollmentButton.value);
+      expect(removeEnrollmentValue.brandURL).to.equal('https://example.com');
+      expect(removeEnrollmentValue.siteId).to.equal('site123');
+      expect(removeEnrollmentValue.existingBrand).to.equal('Test Brand');
+    });
+
+    it('should hide remove enrollment button when site has no active enrollment', async () => {
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getOrganizationId: sinon.stub().returns('org123'),
+        getConfig: sinon.stub().returns({
+          getLlmoBrand: sinon.stub().returns('Test Brand'),
+        }),
+      };
+      mockDataAccess.Site.findByBaseURL.resolves(mockSite);
+
+      const LlmoOnboardCommandWithMock = await esmock('../../../../src/support/slack/commands/llmo-onboard.js', {
+        '../../../../src/controllers/llmo/llmo-onboarding.js': {
+          hasActiveLlmoEnrollment: sinon.stub().resolves(false),
+        },
+      });
+
+      const commandWithMock = LlmoOnboardCommandWithMock(mockContext);
+      await commandWithMock.handleExecution(['https://example.com'], slackContext);
+
+      expect(slackContext.say).to.have.been.calledOnce;
+      const message = slackContext.say.getCall(0).args[0];
+
+      expect(message).to.have.property('blocks');
+      expect(message).to.have.property('thread_ts', '1234567890.123456');
+
+      const sectionBlock = message.blocks.find((block) => block.type === 'section');
+      expect(sectionBlock).to.exist;
+      expect(sectionBlock.text.text).to.include('Site Already Onboarded');
+      expect(sectionBlock.text.text).to.include('Test Brand');
+
+      const actionsBlock = message.blocks.find((block) => block.type === 'actions');
+      expect(actionsBlock).to.exist;
+      expect(actionsBlock.elements).to.have.length(2);
+
+      const addEntitlementsButton = actionsBlock.elements[0];
+      expect(addEntitlementsButton.text.text).to.equal('Add Entitlements');
+
+      const updateOrgButton = actionsBlock.elements[1];
+      expect(updateOrgButton.text.text).to.equal('Update IMS Org');
+
+      const removeEnrollmentButton = actionsBlock.elements.find(
+        (el) => el.action_id === 'remove_llmo_enrollment',
+      );
+      expect(removeEnrollmentButton).to.be.undefined;
     });
 
     it('should show onboarding button for existing site without LLMO brand', async () => {
