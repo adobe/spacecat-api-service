@@ -116,8 +116,6 @@ export async function validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, co
   }
 }
 
-/* c8 ignore start */
-
 /**
  * Publishes a file to admin.hlx.page.
  * @param {string} filename - The filename to publish
@@ -169,10 +167,10 @@ async function publishToAdminHlx(filename, outputLocation, log) {
  * Copies template files to SharePoint for a new LLMO onboarding.
  * @param {string} dataFolder - The data folder name
  * @param {object} context - The request context
- * @param {object} slackContext - Slack context (optional, for Slack operations)
+ * @param {Function} say - Optional function to send messages (e.g., Slack say function)
  * @returns {Promise<void>}
  */
-export async function copyFilesToSharepoint(dataFolder, context) {
+export async function copyFilesToSharepoint(dataFolder, context, say = () => {}) {
   const { log, env } = context;
 
   const sharepointClient = await createSharePointClient(env);
@@ -189,6 +187,7 @@ export async function copyFilesToSharepoint(dataFolder, context) {
     await folder.createFolder(folderName, base);
   } else {
     log.warn(`Warning: Folder ${dataFolder} already exists. Skipping creation.`);
+    await say(`Folder ${dataFolder} already exists. Skipping creation.`);
   }
 
   const queryIndexExists = await newQueryIndex.exists();
@@ -196,6 +195,7 @@ export async function copyFilesToSharepoint(dataFolder, context) {
     await templateQueryIndex.copy(`/${dataFolder}/query-index.xlsx`);
   } else {
     log.warn(`Warning: Query index at ${dataFolder} already exists. Skipping creation.`);
+    await say(`Query index in ${dataFolder} already exists. Skipping creation.`);
   }
 
   log.debug('Publishing query-index to admin.hlx.page');
@@ -206,10 +206,10 @@ export async function copyFilesToSharepoint(dataFolder, context) {
  * Updates the helix-query.yaml configuration in GitHub.
  * @param {string} dataFolder - The data folder name
  * @param {object} context - The request context
- * @param {object} slackContext - Slack context (optional, for Slack operations)
+ * @param {Function} say - Optional function to send messages (e.g., Slack say function)
  * @returns {Promise<void>}
  */
-export async function updateIndexConfig(dataFolder, context) {
+export async function updateIndexConfig(dataFolder, context, say = () => {}) {
   const { log, env } = context;
 
   log.debug('Starting Git modification of helix query config');
@@ -229,6 +229,7 @@ export async function updateIndexConfig(dataFolder, context) {
 
   if (content.includes(dataFolder)) {
     log.warn(`Helix query yaml already contains string ${dataFolder}. Skipping update.`);
+    await say(`Helix query yaml already contains string ${dataFolder}. Skipping GitHub update.`);
     return;
   }
 
@@ -259,10 +260,9 @@ export async function updateIndexConfig(dataFolder, context) {
  * @param {object} slackContext - Slack context (optional, for Slack operations)
  * @returns {Promise<object>} The organization object
  */
-export async function createOrFindOrganization(imsOrgId, context, slackContext = null) {
+export async function createOrFindOrganization(imsOrgId, context, say = () => {}) {
   const { dataAccess, log } = context;
   const { Organization } = dataAccess;
-  const { say } = slackContext || { say: () => {} };
 
   // Check if organization already exists
   let organization = await Organization.findByImsOrgId(imsOrgId);
@@ -317,9 +317,10 @@ export async function createOrFindSite(baseURL, organizationId, context) {
  * Creates entitlement and enrollment for LLMO.
  * @param {object} site - The site object
  * @param {object} context - The request context
- * @returns {Promise<void>}
+ * @param {Function} say - Optional function to send messages (e.g., Slack say function)
+ * @returns {Promise<object>} The entitlement and enrollment objects
  */
-export async function createEntitlementAndEnrollment(site, context) {
+export async function createEntitlementAndEnrollment(site, context, say = () => {}) {
   const { log } = context;
 
   try {
@@ -333,8 +334,20 @@ export async function createEntitlementAndEnrollment(site, context) {
     };
   } catch (error) {
     log.info(`Ensuring LLMO entitlement and enrollment failed: ${error.message}`);
+    await say('❌ Ensuring LLMO entitlement and enrollment failed');
     throw error;
   }
+}
+
+export async function enableAudits(site, context, audits = []) {
+  const { dataAccess } = context;
+  const { Configuration } = dataAccess;
+
+  const configuration = await Configuration.findLatest();
+  audits.forEach((audit) => {
+    configuration.enableHandlerForSite(audit, site);
+  });
+  await configuration.save();
 }
 
 /**
@@ -374,6 +387,12 @@ export async function performLlmoOnboarding(params, context) {
   // Update index config
   await updateIndexConfig(dataFolder, context);
 
+  // Enable audits
+  await enableAudits(site, context, [
+    'headings',
+    'llm-blocked',
+  ]);
+
   // Get current site config
   const siteConfig = site.getConfig();
 
@@ -393,4 +412,3 @@ export async function performLlmoOnboarding(params, context) {
     message: 'LLMO onboarding completed successfully',
   };
 }
-/* c8 ignore end */

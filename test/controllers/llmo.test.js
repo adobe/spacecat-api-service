@@ -168,12 +168,17 @@ describe('LlmoController', () => {
           AZURE: 'AZURE',
         },
       },
+      Configuration: {
+        findLatest: sinon.stub(),
+      },
     };
 
     // Create mock log
     mockLog = {
       info: sinon.stub(),
       error: sinon.stub(),
+      debug: sinon.stub(),
+      warn: sinon.stub(),
     };
 
     // Create mock environment
@@ -3656,12 +3661,17 @@ describe('LlmoController', () => {
       mockOrganization = {
         getId: sinon.stub().returns('new-org-id'),
         getImsOrgId: sinon.stub().returns('test-ims-org-id@AdobeOrg'),
+        getConfig: sinon.stub().returns({
+          getSlackConfig: sinon.stub().returns(null),
+        }),
       };
 
       // Create mock site config
       mockSiteConfig = {
         updateLlmoBrand: sinon.stub(),
         updateLlmoDataFolder: sinon.stub(),
+        getSlackConfig: sinon.stub().returns(null),
+        getHandlers: sinon.stub().returns([]),
       };
 
       // Create mock new site
@@ -3681,6 +3691,13 @@ describe('LlmoController', () => {
 
       mockDataAccess.Site.findByBaseURL = sinon.stub().resolves(null); // Site doesn't exist yet
       mockDataAccess.Site.create = sinon.stub().resolves(mockNewSite);
+
+      // Setup configuration mock for enableAudits
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
       // Setup environment for onboarding
       mockEnv.ENV = 'dev';
@@ -3791,6 +3808,120 @@ describe('LlmoController', () => {
           },
           onboardingContext,
         );
+
+        // Verify logging
+        expect(mockLog.info).to.have.been.calledWith(
+          'Starting LLMO onboarding for IMS org test-tenant-id@AdobeOrg, domain example.com, brand Test Brand',
+        );
+        expect(mockLog.info).to.have.been.calledWith(
+          'LLMO onboarding completed successfully for domain example.com',
+        );
+      });
+
+      it('should successfully onboard a new customer calling real onboarding functions', async () => {
+        // Mock the llmo-onboarding module with its dependencies
+        const mockLlmoOnboarding = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+          '@adobe/spacecat-helix-content-sdk': {
+            createFrom: sinon.stub().resolves({
+              getDocument: sinon.stub().callsFake(() => ({
+                exists: sinon.stub().resolves(false), // Folder doesn't exist
+                createFolder: sinon.stub().resolves(),
+                copy: sinon.stub().resolves(),
+              })),
+            }),
+          },
+          '@octokit/rest': {
+            Octokit: sinon.stub().callsFake(() => ({
+              repos: {
+                getContent: sinon.stub().resolves({
+                  data: {
+                    content: Buffer.from('existing: content\n').toString('base64'),
+                    sha: 'test-sha',
+                  },
+                }),
+                createOrUpdateFileContents: sinon.stub().resolves(),
+              },
+            })),
+          },
+          '@adobe/spacecat-shared-tier-client': {
+            default: {
+              createForSite: sinon.stub().resolves({
+                createEntitlement: sinon.stub().resolves({
+                  entitlement: { getId: sinon.stub().returns('entitlement-id') },
+                  siteEnrollment: { getId: sinon.stub().returns('enrollment-id') },
+                }),
+              }),
+            },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: {
+              toDynamoItem: sinon.stub().returnsArg(0),
+            },
+          },
+        });
+
+        // Mock the main llmo controller with the mocked onboarding module
+        const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
+          '../../src/controllers/llmo/llmo-onboarding.js': mockLlmoOnboarding,
+          '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+          '@adobe/spacecat-shared-utils': {
+            SPACECAT_USER_AGENT: 'test-user-agent',
+            tracingFetch: tracingFetchStub,
+            hasText: (text) => text && text.trim().length > 0,
+            isObject: (obj) => obj !== null && typeof obj === 'object',
+            llmoConfig,
+            schemas: {},
+            composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+          },
+        });
+
+        const testController = LlmoController(mockContext);
+
+        const result = await testController.onboardCustomer(onboardingContext);
+
+        // Debug: Log the response if it's not 200
+        if (result.status !== 200) {
+          const errorBody = await result.json();
+          console.log('Error response:', errorBody);
+        }
+
+        // Verify response
+        expect(result.status).to.equal(200);
+        const responseBody = await result.json();
+        expect(responseBody).to.deep.include({
+          message: 'LLMO onboarding completed successfully',
+          domain: 'example.com',
+          brandName: 'Test Brand',
+          imsOrgId: 'test-tenant-id@AdobeOrg',
+          baseURL: 'https://example.com',
+          dataFolder: 'dev/example-com',
+          organizationId: 'new-org-id',
+          siteId: 'new-site-id',
+          status: 'completed',
+        });
+        expect(responseBody.createdAt).to.be.a('string');
+
+        // Verify that organization was created
+        expect(mockDataAccess.Organization.create).to.have.been.calledOnce;
+        expect(mockDataAccess.Organization.create).to.have.been.calledWith({
+          name: 'Organization test-tenant-id@AdobeOrg',
+          imsOrgId: 'test-tenant-id@AdobeOrg',
+        });
+
+        // Verify that site was created
+        expect(mockDataAccess.Site.create).to.have.been.calledOnce;
+        expect(mockDataAccess.Site.create).to.have.been.calledWith({
+          baseURL: 'https://example.com',
+          organizationId: 'new-org-id',
+        });
+
+        // Verify that site config was updated
+        expect(mockSiteConfig.updateLlmoBrand).to.have.been.calledWith('Test Brand');
+        expect(mockSiteConfig.updateLlmoDataFolder).to.have.been.calledWith('dev/example-com');
+
+        // Verify that site was saved
+        expect(mockNewSite.setConfig).to.have.been.calledOnce;
+        expect(mockNewSite.save).to.have.been.calledOnce;
 
         // Verify logging
         expect(mockLog.info).to.have.been.calledWith(
