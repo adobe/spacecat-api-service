@@ -15,7 +15,7 @@ import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-acc
 import { onboardSingleSite as sharedOnboardSingleSite } from '../../utils.js';
 import { loadProfileConfig } from '../../../utils/slack/base.js';
 
-export const AEM_CS_HOST = /^author-p(\d+)-e(\d+)/i;
+export const AEM_CS_HOST = /^author-p(\d+)-e(\d+)\.adobeaemcloud\.com$/i;
 
 /**
  * Extracts program and environment ID from AEM Cloud Service preview URLs.
