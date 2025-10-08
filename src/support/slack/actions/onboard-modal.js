@@ -15,7 +15,7 @@ import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-acc
 import { onboardSingleSite as sharedOnboardSingleSite } from '../../utils.js';
 import { loadProfileConfig } from '../../../utils/slack/base.js';
 
-export const AEM_CS_HOST = /^author-p(\d+)-e(\d+)\.adobeaemcloud\.com$/i;
+export const AEM_CS_HOST = /^author-p(\d+)-e(\d+)/i;
 
 /**
  * Extracts program and environment ID from AEM Cloud Service preview URLs.
@@ -283,6 +283,95 @@ export function startOnboarding(lambdaContext) {
             },
             {
               type: 'input',
+              block_id: 'wait_time_input',
+              element: {
+                type: 'number_input',
+                action_id: 'wait_time',
+                is_decimal_allowed: false,
+                min_value: '0',
+                max_value: '3600',
+                placeholder: {
+                  type: 'plain_text',
+                  text: '300 (default)',
+                },
+                ...(initialValues.workflowWaitTime
+                  && { initial_value: initialValues.workflowWaitTime.toString() }),
+              },
+              label: {
+                type: 'plain_text',
+                text: 'Workflow Wait Time (seconds)',
+              },
+              optional: true,
+            },
+            {
+              type: 'input',
+              block_id: 'tier_input',
+              element: {
+                type: 'static_select',
+                action_id: 'tier',
+                placeholder: {
+                  type: 'plain_text',
+                  text: 'Select entitlement tier',
+                },
+                initial_option: {
+                  text: {
+                    type: 'plain_text',
+                    text: 'Free Trial',
+                  },
+                  value: EntitlementModel.TIERS.FREE_TRIAL,
+                },
+                options: [
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'Free Trial',
+                    },
+                    value: EntitlementModel.TIERS.FREE_TRIAL,
+                  },
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'Paid',
+                    },
+                    value: EntitlementModel.TIERS.PAID,
+                  },
+                ],
+              },
+              label: {
+                type: 'plain_text',
+                text: 'Entitlement Tier',
+              },
+              optional: true,
+            },
+            {
+              type: 'divider',
+            },
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: '*Preview Environment Configuration* _(Optional)_\nConfigure preview environment for preflight and auto-optimize. Only needed for AEM Cloud Service URLs.\n\n⚠️ *Note:* When providing a preview URL, you must also select an Authoring Type below.',
+              },
+            },
+            {
+              type: 'input',
+              block_id: 'preview_url_input',
+              element: {
+                type: 'url_text_input',
+                action_id: 'preview_url',
+                placeholder: {
+                  type: 'plain_text',
+                  text: 'https://author-p12345-e67890.adobeaemcloud.com',
+                },
+              },
+              label: {
+                type: 'plain_text',
+                text: 'Preview URL (AEM Cloud Service)',
+              },
+              optional: true,
+            },
+            {
+              type: 'input',
               block_id: 'authoring_type_input',
               element: {
                 type: 'static_select',
@@ -317,89 +406,7 @@ export function startOnboarding(lambdaContext) {
               },
               label: {
                 type: 'plain_text',
-                text: 'Authoring Type',
-              },
-              optional: true,
-            },
-            {
-              type: 'input',
-              block_id: 'wait_time_input',
-              element: {
-                type: 'number_input',
-                action_id: 'wait_time',
-                is_decimal_allowed: false,
-                min_value: '0',
-                max_value: '3600',
-                placeholder: {
-                  type: 'plain_text',
-                  text: '300 (default)',
-                },
-                ...(initialValues.workflowWaitTime
-                  && { initial_value: initialValues.workflowWaitTime.toString() }),
-              },
-              label: {
-                type: 'plain_text',
-                text: 'Workflow Wait Time (seconds)',
-              },
-              optional: true,
-            },
-            {
-              type: 'input',
-              block_id: 'tier_input',
-              element: {
-                type: 'static_select',
-                action_id: 'tier',
-                placeholder: {
-                  type: 'plain_text',
-                  text: 'Select entitlement tier',
-                },
-                options: [
-                  {
-                    text: {
-                      type: 'plain_text',
-                      text: 'Free Trial',
-                    },
-                    value: EntitlementModel.TIERS.FREE_TRIAL,
-                  },
-                  {
-                    text: {
-                      type: 'plain_text',
-                      text: 'Paid',
-                    },
-                    value: EntitlementModel.TIERS.PAID,
-                  },
-                ],
-              },
-              label: {
-                type: 'plain_text',
-                text: 'Entitlement Tier',
-              },
-              optional: true,
-            },
-            {
-              type: 'divider',
-            },
-            {
-              type: 'section',
-              text: {
-                type: 'mrkdwn',
-                text: '*Preview Environment Configuration* _(Optional)_\nConfigure preview environment for preflight and auto-optimize. Only needed for AEM Cloud Service URLs.',
-              },
-            },
-            {
-              type: 'input',
-              block_id: 'preview_url_input',
-              element: {
-                type: 'url_text_input',
-                action_id: 'preview_url',
-                placeholder: {
-                  type: 'plain_text',
-                  text: 'https://author-p12345-e67890.adobeaemcloud.com',
-                },
-              },
-              label: {
-                type: 'plain_text',
-                text: 'Preview URL (AEM Cloud Service)',
+                text: 'Authoring Type (Required with Preview URL)',
               },
               optional: true,
             },
@@ -483,8 +490,10 @@ export function onboardSiteModal(lambdaContext) {
       // Validate preview URL if provided
       let deliveryConfigFromPreview = null;
       await slackContext.say(`:mag: Debug - previewUrl: ${previewUrl}`);
+      await slackContext.say(`:mag: Debug - authoringType: ${authoringType}`);
       if (previewUrl) {
         deliveryConfigFromPreview = extractDeliveryConfigFromPreviewUrl(previewUrl, imsOrgId);
+        await slackContext.say(`:mag: Debug - deliveryConfigFromPreview: ${JSON.stringify(deliveryConfigFromPreview)}`);
         if (!deliveryConfigFromPreview) {
           await ack({
             response_action: 'errors',
@@ -517,7 +526,6 @@ export function onboardSiteModal(lambdaContext) {
       if (authoringType && authoringType !== 'default') {
         additionalParams.authoringType = authoringType;
       }
-      await slackContext.say(`:mag: Debug - deliveryConfigFromPreview: ${JSON.stringify(deliveryConfigFromPreview)}`);
       if (deliveryConfigFromPreview) {
         additionalParams.deliveryConfig = deliveryConfigFromPreview;
       }
