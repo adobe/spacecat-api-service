@@ -1,3 +1,31 @@
+# [1.193.0](https://github.com/adobe/spacecat-api-service/compare/v1.192.1...v1.193.0) (2025-10-08)
+
+
+### Features
+
+* create entitlement API ([#1329](https://github.com/adobe/spacecat-api-service/issues/1329)) ([f019654](https://github.com/adobe/spacecat-api-service/commit/f019654c5112d88d6f7205172eb6ba4b4ceb00ae))
+
+## [1.192.1](https://github.com/adobe/spacecat-api-service/compare/v1.192.0...v1.192.1) (2025-10-08)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tier-client to v1.2.0 ([#1322](https://github.com/adobe/spacecat-api-service/issues/1322)) ([86c6127](https://github.com/adobe/spacecat-api-service/commit/86c6127f932b46c8001247d42e9660062f5063f3))
+
+# [1.192.0](https://github.com/adobe/spacecat-api-service/compare/v1.191.1...v1.192.0) (2025-10-07)
+
+
+### Features
+
+* trigger audit from post llmo config ([#1314](https://github.com/adobe/spacecat-api-service/issues/1314)) ([8b7f80c](https://github.com/adobe/spacecat-api-service/commit/8b7f80cccba98e312230d2353ee174ed723129f1))
+
+## [1.191.1](https://github.com/adobe/spacecat-api-service/compare/v1.191.0...v1.191.1) (2025-10-07)
+
+
+### Bug Fixes
+
+* update data access to 2.68.1 ([#1326](https://github.com/adobe/spacecat-api-service/issues/1326)) ([35bfd25](https://github.com/adobe/spacecat-api-service/commit/35bfd2588610c98dddd6406ab232d052dfce595a))
+
 # [1.191.0](https://github.com/adobe/spacecat-api-service/compare/v1.190.2...v1.191.0) (2025-10-07)
 
 

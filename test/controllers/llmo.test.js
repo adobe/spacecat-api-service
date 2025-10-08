@@ -168,17 +168,23 @@ describe('LlmoController', () => {
           AZURE: 'AZURE',
         },
       },
+      Configuration: {
+        findLatest: sinon.stub(),
+      },
     };
 
     // Create mock log
     mockLog = {
       info: sinon.stub(),
       error: sinon.stub(),
+      debug: sinon.stub(),
+      warn: sinon.stub(),
     };
 
     // Create mock environment
     mockEnv = {
       LLMO_HLX_API_KEY: 'test-api-key',
+      AUDIT_JOBS_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/123456789012/audit-jobs-queue',
     };
 
     // Create mock context
@@ -203,6 +209,9 @@ describe('LlmoController', () => {
       s3: {
         s3Client,
         s3Bucket: 'test-bucket',
+      },
+      sqs: {
+        sendMessage: sinon.stub().resolves(),
       },
       attributes: {
         authInfo: {
@@ -2396,9 +2405,15 @@ describe('LlmoController', () => {
     });
   });
 
-  describe('postLlmoConfig', () => {
-    it('should write config to S3 successfully', async () => {
+  describe('updateLlmoConfig', () => {
+    it('should write config to S3 successfully when no prev config', async () => {
       writeConfigStub.resolves({ version: 'v1' });
+      readConfigStub.resolves({
+        config: llmoConfig.defaultConfig(),
+        exists: false,
+        version: null,
+      });
+
       const categoryId = '123e4567-e89b-12d3-a456-426614174000';
       const topicId = '123e4567-e89b-12d3-a456-426614174001';
 
@@ -2445,7 +2460,7 @@ describe('LlmoController', () => {
       // Mock successful validation
       llmoConfigSchemaStub.safeParse.returns({ success: true, data: testData });
 
-      const result = await controller.postLlmoConfig(mockContext);
+      const result = await controller.updateLlmoConfig(mockContext);
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
@@ -2459,10 +2474,196 @@ describe('LlmoController', () => {
       );
     });
 
+    it('should write config to S3 successfully overrides existing fields in prev config', async () => {
+      writeConfigStub.resolves({ version: 'v1' });
+      readConfigStub.resolves({
+        config: {
+          field1: [1, 2, 3],
+          field2: [2, 3],
+          field3: [3, 4],
+        },
+        exists: true,
+        version: 'some-old-version',
+      });
+
+      const testData = {
+        field1: [1, 2, 3],
+        field3: null,
+        field4: [3, 4],
+      };
+
+      const expectedConfig = {
+        field1: [1, 2, 3],
+        field2: [2, 3],
+        field3: null,
+        field4: [3, 4],
+      };
+
+      mockContext.data = testData;
+
+      // Mock successful validation
+      llmoConfigSchemaStub.safeParse.returns({ success: true, data: testData });
+
+      const result = await controller.updateLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ version: 'v1' });
+      expect(llmoConfigSchemaStub.safeParse).to.have.been.calledWith(testData);
+      expect(writeConfigStub).to.have.been.calledWith(
+        'test-site-id',
+        expectedConfig,
+        s3Client,
+        { s3Bucket: 'test-bucket' },
+      );
+    });
+
+    it('should write config to S3 successfully when no prev config', async () => {
+      writeConfigStub.resolves({ version: 'v1' });
+      readConfigStub.resolves({
+        config: llmoConfig.defaultConfig(),
+        exists: false,
+        version: null,
+      });
+
+      const categoryId = '123e4567-e89b-12d3-a456-426614174000';
+      const topicId = '123e4567-e89b-12d3-a456-426614174001';
+
+      const testData = {
+        entities: {
+          [categoryId]: { type: 'category', name: 'test-category' },
+          [topicId]: { type: 'topic', name: 'test-topic' },
+        },
+        categories: {
+          [categoryId]: { name: 'test-category', region: ['us'] },
+        },
+        topics: {
+          [topicId]: {
+            name: 'test-topic',
+            category: categoryId,
+            prompts: [{
+              prompt: 'What is the main topic?',
+              regions: ['us'],
+              origin: 'human',
+              source: 'config',
+            }],
+          },
+        },
+        brands: {
+          aliases: [{
+            aliases: ['test-brand'],
+            category: categoryId,
+            region: ['us'],
+          }],
+        },
+        competitors: {
+          competitors: [{
+            name: 'test-competitor',
+            category: categoryId,
+            region: ['us'],
+            aliases: ['competitor-alias'],
+            urls: [],
+          }],
+        },
+      };
+
+      mockContext.data = testData;
+
+      // Mock successful validation
+      llmoConfigSchemaStub.safeParse.returns({ success: true, data: testData });
+
+      const result = await controller.updateLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ version: 'v1' });
+      expect(llmoConfigSchemaStub.safeParse).to.have.been.calledWith(testData);
+      expect(writeConfigStub).to.have.been.calledWith(
+        'test-site-id',
+        testData,
+        s3Client,
+        { s3Bucket: 'test-bucket' },
+      );
+    });
+
+    it('triggers the "llmo-customer-analysis" audit after writing the new config', async () => {
+      writeConfigStub.resolves({ version: 'v1' });
+      readConfigStub.resolves({
+        config: llmoConfig.defaultConfig(),
+        exists: true,
+        version: 'v0',
+      });
+
+      const categoryId = '123e4567-e89b-12d3-a456-426614174000';
+      const topicId = '123e4567-e89b-12d3-a456-426614174001';
+
+      const testData = {
+        entities: {
+          [categoryId]: { type: 'category', name: 'test-category' },
+          [topicId]: { type: 'topic', name: 'test-topic' },
+        },
+        categories: {
+          [categoryId]: { name: 'test-category', region: ['us'] },
+        },
+        topics: {
+          [topicId]: {
+            name: 'test-topic',
+            category: categoryId,
+            prompts: [{
+              prompt: 'What is the main topic?',
+              regions: ['us'],
+              origin: 'human',
+              source: 'config',
+            }],
+          },
+        },
+        brands: {
+          aliases: [{
+            aliases: ['test-brand'],
+            category: categoryId,
+            region: ['us'],
+          }],
+        },
+        competitors: {
+          competitors: [{
+            name: 'test-competitor',
+            category: categoryId,
+            region: ['us'],
+            aliases: ['competitor-alias'],
+            urls: [],
+          }],
+        },
+      };
+
+      mockContext.data = testData;
+
+      // Mock successful validation
+      llmoConfigSchemaStub.safeParse.returns({ success: true, data: testData });
+
+      const result = await controller.updateLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+
+      // Verify SQS message was sent with correct audit configuration
+      expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
+      expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
+        'https://sqs.us-east-1.amazonaws.com/123456789012/audit-jobs-queue',
+        {
+          type: 'llmo-customer-analysis',
+          siteId: 'test-site-id',
+          auditContext: {},
+          data: {
+            configVersion: 'v1',
+            previousConfigVersion: 'v0',
+          },
+        },
+      );
+    });
+
     it('should return bad request when payload is not an object', async () => {
       mockContext.data = null;
 
-      const result = await controller.postLlmoConfig(mockContext);
+      const result = await controller.updateLlmoConfig(mockContext);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
@@ -2485,7 +2686,7 @@ describe('LlmoController', () => {
         },
       });
 
-      const result = await controller.postLlmoConfig(mockContext);
+      const result = await controller.updateLlmoConfig(mockContext);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
@@ -2497,7 +2698,7 @@ describe('LlmoController', () => {
     it('should return bad request when s3 client is missing', async () => {
       delete mockContext.s3;
 
-      const result = await controller.postLlmoConfig(mockContext);
+      const result = await controller.updateLlmoConfig(mockContext);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
@@ -2507,6 +2708,11 @@ describe('LlmoController', () => {
     });
 
     it('should handle S3 error when writing config', async () => {
+      readConfigStub.resolves({
+        config: llmoConfig.defaultConfig(),
+        exists: true,
+        version: 'v0',
+      });
       writeConfigStub.rejects(new Error('S3 write failed'));
 
       const categoryId = '123e4567-e89b-12d3-a456-426614174000';
@@ -2555,7 +2761,7 @@ describe('LlmoController', () => {
       // Mock successful validation
       llmoConfigSchemaStub.safeParse.returns({ success: true, data: testData });
 
-      const result = await controller.postLlmoConfig(mockContext);
+      const result = await controller.updateLlmoConfig(mockContext);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
@@ -3455,12 +3661,17 @@ describe('LlmoController', () => {
       mockOrganization = {
         getId: sinon.stub().returns('new-org-id'),
         getImsOrgId: sinon.stub().returns('test-ims-org-id@AdobeOrg'),
+        getConfig: sinon.stub().returns({
+          getSlackConfig: sinon.stub().returns(null),
+        }),
       };
 
       // Create mock site config
       mockSiteConfig = {
         updateLlmoBrand: sinon.stub(),
         updateLlmoDataFolder: sinon.stub(),
+        getSlackConfig: sinon.stub().returns(null),
+        getHandlers: sinon.stub().returns([]),
       };
 
       // Create mock new site
@@ -3480,6 +3691,13 @@ describe('LlmoController', () => {
 
       mockDataAccess.Site.findByBaseURL = sinon.stub().resolves(null); // Site doesn't exist yet
       mockDataAccess.Site.create = sinon.stub().resolves(mockNewSite);
+
+      // Setup configuration mock for enableAudits
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
       // Setup environment for onboarding
       mockEnv.ENV = 'dev';
@@ -3590,6 +3808,120 @@ describe('LlmoController', () => {
           },
           onboardingContext,
         );
+
+        // Verify logging
+        expect(mockLog.info).to.have.been.calledWith(
+          'Starting LLMO onboarding for IMS org test-tenant-id@AdobeOrg, domain example.com, brand Test Brand',
+        );
+        expect(mockLog.info).to.have.been.calledWith(
+          'LLMO onboarding completed successfully for domain example.com',
+        );
+      });
+
+      it('should successfully onboard a new customer calling real onboarding functions', async () => {
+        // Mock the llmo-onboarding module with its dependencies
+        const mockLlmoOnboarding = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+          '@adobe/spacecat-helix-content-sdk': {
+            createFrom: sinon.stub().resolves({
+              getDocument: sinon.stub().callsFake(() => ({
+                exists: sinon.stub().resolves(false), // Folder doesn't exist
+                createFolder: sinon.stub().resolves(),
+                copy: sinon.stub().resolves(),
+              })),
+            }),
+          },
+          '@octokit/rest': {
+            Octokit: sinon.stub().callsFake(() => ({
+              repos: {
+                getContent: sinon.stub().resolves({
+                  data: {
+                    content: Buffer.from('existing: content\n').toString('base64'),
+                    sha: 'test-sha',
+                  },
+                }),
+                createOrUpdateFileContents: sinon.stub().resolves(),
+              },
+            })),
+          },
+          '@adobe/spacecat-shared-tier-client': {
+            default: {
+              createForSite: sinon.stub().resolves({
+                createEntitlement: sinon.stub().resolves({
+                  entitlement: { getId: sinon.stub().returns('entitlement-id') },
+                  siteEnrollment: { getId: sinon.stub().returns('enrollment-id') },
+                }),
+              }),
+            },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: {
+              toDynamoItem: sinon.stub().returnsArg(0),
+            },
+          },
+        });
+
+        // Mock the main llmo controller with the mocked onboarding module
+        const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
+          '../../src/controllers/llmo/llmo-onboarding.js': mockLlmoOnboarding,
+          '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+          '@adobe/spacecat-shared-utils': {
+            SPACECAT_USER_AGENT: 'test-user-agent',
+            tracingFetch: tracingFetchStub,
+            hasText: (text) => text && text.trim().length > 0,
+            isObject: (obj) => obj !== null && typeof obj === 'object',
+            llmoConfig,
+            schemas: {},
+            composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+          },
+        });
+
+        const testController = LlmoController(mockContext);
+
+        const result = await testController.onboardCustomer(onboardingContext);
+
+        // Debug: Log the response if it's not 200
+        if (result.status !== 200) {
+          const errorBody = await result.json();
+          console.log('Error response:', errorBody);
+        }
+
+        // Verify response
+        expect(result.status).to.equal(200);
+        const responseBody = await result.json();
+        expect(responseBody).to.deep.include({
+          message: 'LLMO onboarding completed successfully',
+          domain: 'example.com',
+          brandName: 'Test Brand',
+          imsOrgId: 'test-tenant-id@AdobeOrg',
+          baseURL: 'https://example.com',
+          dataFolder: 'dev/example-com',
+          organizationId: 'new-org-id',
+          siteId: 'new-site-id',
+          status: 'completed',
+        });
+        expect(responseBody.createdAt).to.be.a('string');
+
+        // Verify that organization was created
+        expect(mockDataAccess.Organization.create).to.have.been.calledOnce;
+        expect(mockDataAccess.Organization.create).to.have.been.calledWith({
+          name: 'Organization test-tenant-id@AdobeOrg',
+          imsOrgId: 'test-tenant-id@AdobeOrg',
+        });
+
+        // Verify that site was created
+        expect(mockDataAccess.Site.create).to.have.been.calledOnce;
+        expect(mockDataAccess.Site.create).to.have.been.calledWith({
+          baseURL: 'https://example.com',
+          organizationId: 'new-org-id',
+        });
+
+        // Verify that site config was updated
+        expect(mockSiteConfig.updateLlmoBrand).to.have.been.calledWith('Test Brand');
+        expect(mockSiteConfig.updateLlmoDataFolder).to.have.been.calledWith('dev/example-com');
+
+        // Verify that site was saved
+        expect(mockNewSite.setConfig).to.have.been.calledOnce;
+        expect(mockNewSite.save).to.have.been.calledOnce;
 
         // Verify logging
         expect(mockLog.info).to.have.been.calledWith(
