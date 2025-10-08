@@ -518,7 +518,7 @@ const createSiteAndOrganization = async (
   // Create a local copy to avoid modifying the parameter directly
   const localReportLine = { ...reportLine };
 
-  await say(`:mag: Debug - deliveryConfig set on site: ${JSON.stringify(deliveryConfig)}`);
+  await say(`:mag: DeliveryConfig: ${JSON.stringify(deliveryConfig)}`);
   let site = await Site.findByBaseURL(baseURL);
   let organizationId;
 

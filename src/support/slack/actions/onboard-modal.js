@@ -347,13 +347,6 @@ export function startOnboarding(lambdaContext) {
               type: 'divider',
             },
             {
-              type: 'section',
-              text: {
-                type: 'mrkdwn',
-                text: '*Preview Environment Configuration* _(Optional)_\nConfigure preview environment for preflight and auto-optimize. Only needed for AEM Cloud Service URLs.\n\n⚠️ *Note:* When providing a preview URL, you must also select an Authoring Type below.',
-              },
-            },
-            {
               type: 'input',
               block_id: 'preview_url_input',
               element: {
@@ -489,11 +482,8 @@ export function onboardSiteModal(lambdaContext) {
 
       // Validate preview URL if provided
       let deliveryConfigFromPreview = null;
-      await slackContext.say(`:mag: Debug - previewUrl: ${previewUrl}`);
-      await slackContext.say(`:mag: Debug - authoringType: ${authoringType}`);
       if (previewUrl) {
         deliveryConfigFromPreview = extractDeliveryConfigFromPreviewUrl(previewUrl, imsOrgId);
-        await slackContext.say(`:mag: Debug - deliveryConfigFromPreview: ${JSON.stringify(deliveryConfigFromPreview)}`);
         if (!deliveryConfigFromPreview) {
           await ack({
             response_action: 'errors',
