@@ -309,6 +309,7 @@ describe('getRouteHandlers', () => {
       'GET /organizations/:organizationId/brands',
       'GET /organizations/:organizationId/sites',
       'GET /organizations/:organizationId/entitlements',
+      'POST /organizations/:organizationId/entitlements',
       'GET /organizations/:organizationId/trial-users',
       'POST /organizations/:organizationId/trial-user-invite',
       'GET /organizations/by-ims-org-id/:imsOrgId',
