@@ -1,3 +1,10 @@
+# [1.193.0](https://github.com/adobe/spacecat-api-service/compare/v1.192.1...v1.193.0) (2025-10-08)
+
+
+### Features
+
+* create entitlement API ([#1329](https://github.com/adobe/spacecat-api-service/issues/1329)) ([f019654](https://github.com/adobe/spacecat-api-service/commit/f019654c5112d88d6f7205172eb6ba4b4ceb00ae))
+
 ## [1.192.1](https://github.com/adobe/spacecat-api-service/compare/v1.192.0...v1.192.1) (2025-10-08)
 
 
