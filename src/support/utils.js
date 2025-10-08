@@ -21,8 +21,11 @@ import {
   isObject,
   resolveCanonicalUrl, isValidIMSOrgId,
   detectAEMVersion,
+  detectLocale,
 } from '@adobe/spacecat-shared-utils';
 import TierClient from '@adobe/spacecat-shared-tier-client';
+import { iso6393 } from 'iso-639-3';
+import worldCountries from 'world-countries';
 
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import {
@@ -490,6 +493,61 @@ const isImportEnabled = (importType, imports) => {
 };
 
 /**
+ * Creates a new project if it does not exist yet.
+ *
+ * @param {Object} context - The Lambda context object.
+ * @param {Object} slackContext - The Slack context object.
+ * @param {string} baseURL - The base URL of the site.
+ * @param {string} projectId - The project ID.
+ * @returns {Promise<Object>} - The project object.
+ */
+export const createProject = async (context, slackContext, baseURL, organizationId, projectId) => {
+  const { dataAccess, log } = context;
+  const { say } = slackContext;
+  const { Project, Site } = dataAccess;
+
+  try {
+    // Find existing project
+    let existingProject;
+    if (projectId) {
+      const project = await Project.findById(projectId);
+      if (project) {
+        existingProject = project;
+      }
+    } else {
+      const site = await Site.findByBaseURL(baseURL);
+      if (site) {
+        const project = await site.getProject();
+        if (project) {
+          existingProject = project;
+        }
+      }
+    }
+
+    if (existingProject) {
+      const message = `:information_source: Added site ${baseURL} to existing project ${existingProject.getProjectName()}. Project ID: ${existingProject.getId()}`;
+      await say(message);
+      return existingProject;
+    }
+
+    // Otherwise create new project
+    const parsedBaseURL = new URL(baseURL);
+    const projectName = parsedBaseURL.hostname;
+
+    const newProject = await Project.create({ id: projectId, projectName, organizationId });
+
+    const message = `:information_source: Added site ${baseURL} to new project ${newProject.getProjectName()}. Project ID: ${newProject.getId()}`;
+    await say(message);
+
+    return newProject;
+  } catch (error) {
+    log.error(`Error creating project: ${error.message}`);
+    await say(`:x: Error creating project: ${error.message}`);
+    throw error;
+  }
+};
+
+/**
  * Creates or retrieves a site and its associated organization.
  *
  * @param {string} baseURL - The site base URL.
@@ -511,6 +569,9 @@ const createSiteAndOrganization = async (
   reportLine,
   context,
   deliveryConfig,
+  projectId,
+  language,
+  region,
 ) => {
   const { imsClient, dataAccess, log } = context;
   const { Site, Organization } = dataAccess;
@@ -548,14 +609,34 @@ const createSiteAndOrganization = async (
     organizationId = organization.getId();
     localReportLine.spacecatOrgId = organizationId;
 
+    // Create project
+    const project = await createProject(
+      context,
+      slackContext,
+      baseURL,
+      organizationId,
+      projectId,
+    );
+    localReportLine.projectId = project.getId();
+
     const deliveryType = customDeliveryType || await findDeliveryType(baseURL);
 
     localReportLine.deliveryType = deliveryType;
     const isLive = deliveryType === SiteModel.DELIVERY_TYPES.AEM_EDGE;
 
+    localReportLine.region = region;
+    localReportLine.language = language;
+
     try {
       site = await Site.create({
-        baseURL, deliveryType, isLive, organizationId, authoringType,
+        baseURL,
+        deliveryType,
+        isLive,
+        organizationId,
+        authoringType,
+        projectId: project.getId(),
+        language,
+        region,
       });
 
       if (deliveryConfig && Object.keys(deliveryConfig).length > 0) {
@@ -704,6 +785,30 @@ export const onboardSingleSite = async (
       return reportLine;
     }
 
+    let language = additionalParams.language?.toLowerCase();
+    let region = additionalParams.region?.toUpperCase();
+
+    const languageValid = language && !!iso6393.find((lang) => lang.iso6301 === language);
+    const regionValid = region && !!worldCountries.find(
+      (c) => c.cca2.toLowerCase() === region.toLowerCase(),
+    );
+
+    // Auto-detect locale if language and/or region is not provided
+    if (!languageValid || !regionValid) {
+      try {
+        const locale = await detectLocale({ baseURL });
+        if (!language && locale.language) {
+          language = locale.language;
+        }
+        if (!region && locale.region) {
+          region = locale;
+        }
+      } catch (error) {
+        log.error(`Error detecting locale for site ${baseURL}: ${error.message}`);
+        await say(`:x: Error detecting locale for site ${baseURL}: ${error.message}`);
+      }
+    }
+
     // Create or retrieve site and organization
     const { site, organizationId } = await createSiteAndOrganization(
       baseURL,
@@ -714,6 +819,9 @@ export const onboardSingleSite = async (
       reportLine,
       context,
       additionalParams.deliveryConfig,
+      additionalParams.projectId,
+      language,
+      region,
     );
 
     // Validate tier

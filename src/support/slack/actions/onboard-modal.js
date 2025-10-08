@@ -634,15 +634,15 @@ export function onboardSiteModal(lambdaContext) {
         const message = `:white_check_mark: *Onboarding completed successfully by ${user.name}!*
 
 :ims: *IMS Org ID:* ${reportLine.imsOrgId || 'n/a'}
-:project: *Project ID:* ${reportLine.projectId || 'n/a'}
+:groups: *Project ID:* ${reportLine.projectId || 'n/a'}
 :space-cat: *Spacecat Org ID:* ${reportLine.spacecatOrgId || 'n/a'}
 :identification_card: *Site ID:* ${reportLine.siteId || 'n/a'}
 :cat-egory-white: *Delivery Type:* ${reportLine.deliveryType || 'n/a'}
 ${reportLine.authoringType ? `:writing_hand: *Authoring Type:* ${reportLine.authoringType}` : ''}
 ${deliveryConfigInfo}${previewConfigInfo}
 :paid: *Entitlement Tier:* ${reportLine.tier || 'n/a'}
-:language: *Language Code:* ${reportLine.language || 'n/a'}
-:region: *Country Code:* ${reportLine.region || 'n/a'}
+:speaking_head_in_silhouette: *Language Code:* ${reportLine.language || 'n/a'}
+:globe_with_meridians: *Country Code:* ${reportLine.region || 'n/a'}
 :question: *Already existing:* ${reportLine.existingSite}
 :gear: *Profile:* ${reportLine.profile}
 :hourglass_flowing_sand: *Wait Time:* ${parsedWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS} seconds

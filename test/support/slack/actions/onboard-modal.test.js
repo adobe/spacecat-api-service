@@ -27,10 +27,12 @@ let startOnboarding;
 let onboardSiteModal;
 let extractDeliveryConfigFromPreviewUrl;
 
-describe.skip('onboard-modal', () => {
+describe('onboard-modal', () => {
   let sandbox;
 
   before(async () => {
+    // TODO: Mock language-detect module
+
     // Mock the network-dependent modules before importing
     const mockedModule = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
       '../../../../src/utils/slack/base.js': {
@@ -43,6 +45,7 @@ describe.skip('onboard-modal', () => {
       '../../../../src/support/utils.js': {
         onboardSingleSite: sinon.stub().resolves({
           siteId: 'site123',
+          projectId: 'project123',
           imsOrgId: '1234567894ABCDEF12345678@AdobeOrg',
           spacecatOrgId: 'org123',
           deliveryType: 'aem_edge',
@@ -53,6 +56,8 @@ describe.skip('onboard-modal', () => {
           imports: 'organic-traffic, top-pages, organic-keywords, all-traffic',
           errors: [],
           tier: 'free_trial',
+          language: 'en',
+          region: 'US',
         }),
       },
     });
@@ -443,6 +448,11 @@ describe.skip('onboard-modal', () => {
                   value: '',
                 },
               },
+              project_id_input: {
+                project_id: {
+                  value: 'project123',
+                },
+              },
               profile_input: {
                 profile: {
                   selected_option: {
@@ -479,6 +489,16 @@ describe.skip('onboard-modal', () => {
               preview_url_input: {
                 preview_url: {
                   value: '',
+                },
+              },
+              language_input: {
+                language: {
+                  value: 'en',
+                },
+              },
+              region_input: {
+                region: {
+                  value: 'us',
                 },
               },
             },
@@ -592,6 +612,7 @@ describe.skip('onboard-modal', () => {
         text: ':white_check_mark: *Onboarding completed successfully by test-user!*\n'
           + '\n'
           + ':ims: *IMS Org ID:* 1234567894ABCDEF12345678@AdobeOrg\n'
+          + ':groups: *Project ID:* project123\n'
           + ':space-cat: *Spacecat Org ID:* org123\n'
           + ':identification_card: *Site ID:* site123\n'
           + ':cat-egory-white: *Delivery Type:* aem_edge\n'
@@ -599,6 +620,8 @@ describe.skip('onboard-modal', () => {
           + ':gear: *Delivery Config:* Program 12345, Environment 67890\n'
           + ':globe_with_meridians: *Preview Environment:* Configured with Program 12345, Environment 67890\n'
           + ':paid: *Entitlement Tier:* free_trial\n'
+          + ':speaking_head_in_silhouette: *Language Code:* en\n'
+          + ':globe_with_meridians: *Country Code:* US\n'
           + ':question: *Already existing:* No\n'
           + ':gear: *Profile:* demo\n'
           + ':hourglass_flowing_sand: *Wait Time:* 30 seconds\n'
@@ -700,12 +723,15 @@ describe.skip('onboard-modal', () => {
         text: ':white_check_mark: *Onboarding completed successfully by test-user!*\n'
           + '\n'
           + ':ims: *IMS Org ID:* 1234567894ABCDEF12345678@AdobeOrg\n'
+          + ':groups: *Project ID:* project123\n'
           + ':space-cat: *Spacecat Org ID:* org123\n'
           + ':identification_card: *Site ID:* site123\n'
           + ':cat-egory-white: *Delivery Type:* aem_edge\n'
           + ':writing_hand: *Authoring Type:* documentauthoring\n'
           + '\n'
           + ':paid: *Entitlement Tier:* free_trial\n'
+          + ':speaking_head_in_silhouette: *Language Code:* en\n'
+          + ':globe_with_meridians: *Country Code:* US\n'
           + ':question: *Already existing:* No\n'
           + ':gear: *Profile:* demo\n'
           + ':hourglass_flowing_sand: *Wait Time:* 30 seconds\n'
