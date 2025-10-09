@@ -804,7 +804,7 @@ export const onboardSingleSite = async (
     // Auto-detect locale if language and/or region is not provided
     if (!languageValid || !regionValid) {
       try {
-        const locale = await detectLocale({ baseURL });
+        const locale = await detectLocale({ baseUrl: baseURL });
         if (!language && locale.language) {
           language = locale.language;
         }
