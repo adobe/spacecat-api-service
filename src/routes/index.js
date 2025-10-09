@@ -120,6 +120,8 @@ export default function getRouteHandlers(
     'GET /configurations/latest': configurationController.getLatest,
     'PUT /configurations/latest': configurationController.updateConfiguration,
     'GET /configurations/:version': configurationController.getByVersion,
+    'POST /configurations/audits': configurationController.registerAudit,
+    'DELETE /configurations/audits/:auditType': configurationController.unregisterAudit,
     'PATCH /configurations/sites/audits': sitesAuditsToggleController.execute,
     'POST /event/fulfillment': fulfillmentController.processFulfillmentEvents,
     'POST /event/fulfillment/:eventType': fulfillmentController.processFulfillmentEvents,
@@ -246,7 +248,8 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/llmo/sheet-data/:dataSource': llmoController.queryLlmoSheetData,
     'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': llmoController.queryLlmoSheetData,
     'GET /sites/:siteId/llmo/config': llmoController.getLlmoConfig,
-    'POST /sites/:siteId/llmo/config': llmoController.postLlmoConfig,
+    'PATCH /sites/:siteId/llmo/config': llmoController.updateLlmoConfig,
+    'POST /sites/:siteId/llmo/config': llmoController.updateLlmoConfig,
     'GET /sites/:siteId/llmo/questions': llmoController.getLlmoQuestions,
     'POST /sites/:siteId/llmo/questions': llmoController.addLlmoQuestion,
     'DELETE /sites/:siteId/llmo/questions/:questionKey': llmoController.removeLlmoQuestion,
@@ -258,6 +261,7 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/llmo/cdn-logs-filter': llmoController.patchLlmoCdnLogsFilter,
     'PATCH /sites/:siteId/llmo/cdn-logs-bucket-config': llmoController.patchLlmoCdnBucketConfig,
     'GET /sites/:siteId/llmo/global-sheet-data/:configName': llmoController.getLlmoGlobalSheetData,
+    'POST /llmo/onboard': llmoController.onboardCustomer,
 
     // Tier Specific Routes
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,
@@ -266,6 +270,7 @@ export default function getRouteHandlers(
     'GET /organizations/:organizationId/trial-users': trialUserController.getByOrganizationID,
     'POST /organizations/:organizationId/trial-user-invite': trialUserController.createTrialUserForEmailInvite,
     'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
+    'POST /organizations/:organizationId/entitlements': entitlementController.createEntitlement,
 
     // Sandbox audit route
     'POST /sites/:siteId/sandbox/audit': sandboxAuditController.triggerAudit,

@@ -31,6 +31,9 @@ describe('LlmoController', () => {
   let mockEnv;
   let s3Client;
   let tracingFetchStub;
+  let readConfigStub;
+  let writeConfigStub;
+  let llmoConfigSchemaStub;
 
   // Helper function to create mock objects
   const createMockAccessControlUtil = (accessResult) => ({
@@ -165,17 +168,23 @@ describe('LlmoController', () => {
           AZURE: 'AZURE',
         },
       },
+      Configuration: {
+        findLatest: sinon.stub(),
+      },
     };
 
     // Create mock log
     mockLog = {
       info: sinon.stub(),
       error: sinon.stub(),
+      debug: sinon.stub(),
+      warn: sinon.stub(),
     };
 
     // Create mock environment
     mockEnv = {
       LLMO_HLX_API_KEY: 'test-api-key',
+      AUDIT_JOBS_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/123456789012/audit-jobs-queue',
     };
 
     // Create mock context
@@ -200,6 +209,9 @@ describe('LlmoController', () => {
       s3: {
         s3Client,
         s3Bucket: 'test-bucket',
+      },
+      sqs: {
+        sendMessage: sinon.stub().resolves(),
       },
       attributes: {
         authInfo: {
@@ -226,11 +238,30 @@ describe('LlmoController', () => {
     // Create tracingFetch stub
     tracingFetchStub = sinon.stub();
 
-    // Mock the controller with the tracingFetch stub
+    // Create readConfig and writeConfig stubs
+    readConfigStub = sinon.stub();
+    writeConfigStub = sinon.stub();
+
+    // Create llmoConfigSchema stub
+    llmoConfigSchemaStub = {
+      safeParse: sinon.stub().returns({ success: true, data: {} }),
+    };
+
+    // Mock the controller with the tracingFetch stub and readConfig mock
     const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
       '@adobe/spacecat-shared-utils': {
         SPACECAT_USER_AGENT: 'test-user-agent',
         tracingFetch: tracingFetchStub,
+        llmoConfig: {
+          defaultConfig: llmoConfig.defaultConfig,
+          readConfig: readConfigStub,
+          writeConfig: writeConfigStub,
+        },
+        schemas: {
+          llmoConfig: llmoConfigSchemaStub,
+        },
+        hasText: (str) => typeof str === 'string' && str.trim().length > 0,
+        isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
       },
       '../../src/support/access-control-util.js': {
         default: class MockAccessControlUtil {
@@ -2196,25 +2227,44 @@ describe('LlmoController', () => {
 
   describe('getLlmoConfig', () => {
     it('should return LLMO config from S3 successfully', async () => {
-      const config = llmoConfig.defaultConfig();
-      config.entities['123e4567-e89b-12d3-a456-426614174000'] = {
-        type: 'category',
-        name: 'test-category',
-        region: 'us',
+      const categoryId = '123e4567-e89b-12d3-a456-426614174000';
+      const topicId = '456e7890-e89b-12d3-a456-426614174001';
+
+      // Create the expected config with categories and topics
+      const expectedConfig = {
+        ...llmoConfig.defaultConfig(),
+        categories: {
+          [categoryId]: {
+            name: 'test-category',
+            region: ['us'],
+          },
+        },
+        topics: {
+          [topicId]: {
+            name: 'test-topic',
+            category: categoryId,
+            prompts: [{
+              prompt: 'What is the main topic?',
+              regions: ['us'],
+              origin: 'human',
+              source: 'config',
+            }],
+          },
+        },
       };
 
-      s3Client.send.resolves({
-        Body: {
-          transformToString: () => Promise.resolve(JSON.stringify(config)),
-        },
-        VersionId: 'v123',
+      // Mock readConfig to return our expected config
+      readConfigStub.resolves({
+        config: expectedConfig,
+        exists: true,
+        version: 'v123',
       });
 
       const result = await controller.getLlmoConfig(mockContext);
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
-      expect(responseBody).to.deep.equal({ config, version: 'v123' });
+      expect(responseBody).to.deep.equal({ config: expectedConfig, version: 'v123' });
     });
 
     it('should return bad request when s3 client is missing', async () => {
@@ -2228,7 +2278,7 @@ describe('LlmoController', () => {
     });
 
     it('should handle S3 errors when getting config', async () => {
-      s3Client.send.rejects(new Error('S3 connection failed'));
+      readConfigStub.rejects(new Error('S3 connection failed'));
 
       const result = await controller.getLlmoConfig(mockContext);
 
@@ -2238,23 +2288,39 @@ describe('LlmoController', () => {
     });
 
     it('should return LLMO config with specific version successfully', async () => {
-      const config = llmoConfig.defaultConfig();
-      config.entities['123e4567-e89b-12d3-a456-426614174000'] = {
-        type: 'category',
-        name: 'test-category',
-        region: 'us',
-      };
-
+      const categoryId = '123e4567-e89b-12d3-a456-426614174000';
+      const topicId = '456e7890-e89b-12d3-a456-426614174001';
       const version = 'v123';
 
-      s3Client.send
-        .withArgs(sinon.match({ input: { VersionId: version } }))
-        .resolves({
-          Body: {
-            transformToString: () => Promise.resolve(JSON.stringify(config)),
+      // Create the expected config with categories and topics
+      const expectedConfig = {
+        ...llmoConfig.defaultConfig(),
+        categories: {
+          [categoryId]: {
+            name: 'test-category',
+            region: ['us'],
           },
-          VersionId: version,
-        });
+        },
+        topics: {
+          [topicId]: {
+            name: 'test-topic',
+            category: categoryId,
+            prompts: [{
+              prompt: 'What is the main topic?',
+              regions: ['us'],
+              origin: 'human',
+              source: 'config',
+            }],
+          },
+        },
+      };
+
+      // Mock readConfig to return our expected config
+      readConfigStub.resolves({
+        config: expectedConfig,
+        exists: true,
+        version,
+      });
 
       // Add version to context data
       mockContext.data = { version };
@@ -2263,14 +2329,16 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
-      expect(responseBody).deep.equals({ config, version });
+      expect(responseBody).deep.equals({ config: expectedConfig, version });
     });
 
     it('should return 404 when specific version does not exist', async () => {
-      // Mock S3 to return NoSuchKey error for specific version
-      const noSuchKeyError = new Error('NoSuchKey');
-      noSuchKeyError.name = 'NoSuchKey';
-      s3Client.send.rejects(noSuchKeyError);
+      // Mock readConfig to return exists: false for specific version
+      readConfigStub.resolves({
+        config: llmoConfig.defaultConfig(),
+        exists: false,
+        version: null,
+      });
 
       // Add version to context data
       mockContext.data = { version: 'nonexistent-version' };
@@ -2283,10 +2351,12 @@ describe('LlmoController', () => {
     });
 
     it('should return 404 when specific version returns NotFound error', async () => {
-      // Mock S3 to return NotFound error for specific version
-      const notFoundError = new Error('NotFound');
-      notFoundError.name = 'NotFound';
-      s3Client.send.rejects(notFoundError);
+      // Mock readConfig to return exists: false for specific version
+      readConfigStub.resolves({
+        config: llmoConfig.defaultConfig(),
+        exists: false,
+        version: null,
+      });
 
       // Add version to context data
       mockContext.data = { version: 'not-found-version' };
@@ -2299,10 +2369,12 @@ describe('LlmoController', () => {
     });
 
     it('should return default config when no version specified and config does not exist', async () => {
-      // Mock S3 to return NoSuchKey error (no version specified)
-      const noSuchKeyError = new Error('NoSuchKey');
-      noSuchKeyError.name = 'NoSuchKey';
-      s3Client.send.rejects(noSuchKeyError);
+      // Mock readConfig to return default config when no version specified
+      readConfigStub.resolves({
+        config: llmoConfig.defaultConfig(),
+        exists: false,
+        version: null,
+      });
 
       // No version in context data
       mockContext.data = {};
@@ -2315,10 +2387,12 @@ describe('LlmoController', () => {
     });
 
     it('should handle empty string version parameter', async () => {
-      // Mock S3 to return NoSuchKey error for empty string version
-      const noSuchKeyError = new Error('NoSuchKey');
-      noSuchKeyError.name = 'NoSuchKey';
-      s3Client.send.rejects(noSuchKeyError);
+      // Mock readConfig to return exists: false for empty string version
+      readConfigStub.resolves({
+        config: llmoConfig.defaultConfig(),
+        exists: false,
+        version: null,
+      });
 
       // Add empty string version to context data
       mockContext.data = { version: '' };
@@ -2331,111 +2405,367 @@ describe('LlmoController', () => {
     });
   });
 
-  describe('postLlmoConfig', () => {
-    it('should write config to S3 successfully', async () => {
-      s3Client.send.resolves({
-        VersionId: 'v1',
+  describe('updateLlmoConfig', () => {
+    it('should write config to S3 successfully when no prev config', async () => {
+      writeConfigStub.resolves({ version: 'v1' });
+      readConfigStub.resolves({
+        config: llmoConfig.defaultConfig(),
+        exists: false,
+        version: null,
       });
+
       const categoryId = '123e4567-e89b-12d3-a456-426614174000';
       const topicId = '123e4567-e89b-12d3-a456-426614174001';
 
-      mockContext.data = {
+      const testData = {
         entities: {
-          [categoryId]: { type: 'category', name: 'test-category', region: 'us' },
+          [categoryId]: { type: 'category', name: 'test-category' },
           [topicId]: { type: 'topic', name: 'test-topic' },
+        },
+        categories: {
+          [categoryId]: { name: 'test-category', region: ['us'] },
+        },
+        topics: {
+          [topicId]: {
+            name: 'test-topic',
+            category: categoryId,
+            prompts: [{
+              prompt: 'What is the main topic?',
+              regions: ['us'],
+              origin: 'human',
+              source: 'config',
+            }],
+          },
         },
         brands: {
           aliases: [{
             aliases: ['test-brand'],
             category: categoryId,
-            region: 'us',
+            region: ['us'],
           }],
         },
         competitors: {
           competitors: [{
             name: 'test-competitor',
             category: categoryId,
-            region: 'us',
+            region: ['us'],
             aliases: ['competitor-alias'],
             urls: [],
           }],
         },
       };
 
-      const result = await controller.postLlmoConfig(mockContext);
+      mockContext.data = testData;
+
+      // Mock successful validation
+      llmoConfigSchemaStub.safeParse.returns({ success: true, data: testData });
+
+      const result = await controller.updateLlmoConfig(mockContext);
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({ version: 'v1' });
+      expect(llmoConfigSchemaStub.safeParse).to.have.been.calledWith(testData);
+      expect(writeConfigStub).to.have.been.calledWith(
+        'test-site-id',
+        testData,
+        s3Client,
+        { s3Bucket: 'test-bucket' },
+      );
+    });
+
+    it('should write config to S3 successfully overrides existing fields in prev config', async () => {
+      writeConfigStub.resolves({ version: 'v1' });
+      readConfigStub.resolves({
+        config: {
+          field1: [1, 2, 3],
+          field2: [2, 3],
+          field3: [3, 4],
+        },
+        exists: true,
+        version: 'some-old-version',
+      });
+
+      const testData = {
+        field1: [1, 2, 3],
+        field3: null,
+        field4: [3, 4],
+      };
+
+      const expectedConfig = {
+        field1: [1, 2, 3],
+        field2: [2, 3],
+        field3: null,
+        field4: [3, 4],
+      };
+
+      mockContext.data = testData;
+
+      // Mock successful validation
+      llmoConfigSchemaStub.safeParse.returns({ success: true, data: testData });
+
+      const result = await controller.updateLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ version: 'v1' });
+      expect(llmoConfigSchemaStub.safeParse).to.have.been.calledWith(testData);
+      expect(writeConfigStub).to.have.been.calledWith(
+        'test-site-id',
+        expectedConfig,
+        s3Client,
+        { s3Bucket: 'test-bucket' },
+      );
+    });
+
+    it('should write config to S3 successfully when no prev config', async () => {
+      writeConfigStub.resolves({ version: 'v1' });
+      readConfigStub.resolves({
+        config: llmoConfig.defaultConfig(),
+        exists: false,
+        version: null,
+      });
+
+      const categoryId = '123e4567-e89b-12d3-a456-426614174000';
+      const topicId = '123e4567-e89b-12d3-a456-426614174001';
+
+      const testData = {
+        entities: {
+          [categoryId]: { type: 'category', name: 'test-category' },
+          [topicId]: { type: 'topic', name: 'test-topic' },
+        },
+        categories: {
+          [categoryId]: { name: 'test-category', region: ['us'] },
+        },
+        topics: {
+          [topicId]: {
+            name: 'test-topic',
+            category: categoryId,
+            prompts: [{
+              prompt: 'What is the main topic?',
+              regions: ['us'],
+              origin: 'human',
+              source: 'config',
+            }],
+          },
+        },
+        brands: {
+          aliases: [{
+            aliases: ['test-brand'],
+            category: categoryId,
+            region: ['us'],
+          }],
+        },
+        competitors: {
+          competitors: [{
+            name: 'test-competitor',
+            category: categoryId,
+            region: ['us'],
+            aliases: ['competitor-alias'],
+            urls: [],
+          }],
+        },
+      };
+
+      mockContext.data = testData;
+
+      // Mock successful validation
+      llmoConfigSchemaStub.safeParse.returns({ success: true, data: testData });
+
+      const result = await controller.updateLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ version: 'v1' });
+      expect(llmoConfigSchemaStub.safeParse).to.have.been.calledWith(testData);
+      expect(writeConfigStub).to.have.been.calledWith(
+        'test-site-id',
+        testData,
+        s3Client,
+        { s3Bucket: 'test-bucket' },
+      );
+    });
+
+    it('triggers the "llmo-customer-analysis" audit after writing the new config', async () => {
+      writeConfigStub.resolves({ version: 'v1' });
+      readConfigStub.resolves({
+        config: llmoConfig.defaultConfig(),
+        exists: true,
+        version: 'v0',
+      });
+
+      const categoryId = '123e4567-e89b-12d3-a456-426614174000';
+      const topicId = '123e4567-e89b-12d3-a456-426614174001';
+
+      const testData = {
+        entities: {
+          [categoryId]: { type: 'category', name: 'test-category' },
+          [topicId]: { type: 'topic', name: 'test-topic' },
+        },
+        categories: {
+          [categoryId]: { name: 'test-category', region: ['us'] },
+        },
+        topics: {
+          [topicId]: {
+            name: 'test-topic',
+            category: categoryId,
+            prompts: [{
+              prompt: 'What is the main topic?',
+              regions: ['us'],
+              origin: 'human',
+              source: 'config',
+            }],
+          },
+        },
+        brands: {
+          aliases: [{
+            aliases: ['test-brand'],
+            category: categoryId,
+            region: ['us'],
+          }],
+        },
+        competitors: {
+          competitors: [{
+            name: 'test-competitor',
+            category: categoryId,
+            region: ['us'],
+            aliases: ['competitor-alias'],
+            urls: [],
+          }],
+        },
+      };
+
+      mockContext.data = testData;
+
+      // Mock successful validation
+      llmoConfigSchemaStub.safeParse.returns({ success: true, data: testData });
+
+      const result = await controller.updateLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+
+      // Verify SQS message was sent with correct audit configuration
+      expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
+      expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
+        'https://sqs.us-east-1.amazonaws.com/123456789012/audit-jobs-queue',
+        {
+          type: 'llmo-customer-analysis',
+          siteId: 'test-site-id',
+          auditContext: {
+            configVersion: 'v1',
+            previousConfigVersion: 'v0',
+          },
+        },
+      );
     });
 
     it('should return bad request when payload is not an object', async () => {
       mockContext.data = null;
 
-      const result = await controller.postLlmoConfig(mockContext);
+      const result = await controller.updateLlmoConfig(mockContext);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('LLMO config update must be provided as an object');
-      expect(s3Client.send).to.not.have.been.called;
+      expect(writeConfigStub).to.not.have.been.called;
+      expect(llmoConfigSchemaStub.safeParse).to.not.have.been.called;
     });
 
     it('should return bad request when required fields are missing', async () => {
-      mockContext.data = { entities: {} }; // Missing required brands and competitors fields
+      // Missing required categories, topics, brands and competitors fields
+      const invalidData = { entities: {} };
+      mockContext.data = invalidData;
 
-      const result = await controller.postLlmoConfig(mockContext);
+      // Mock validation failure
+      llmoConfigSchemaStub.safeParse.returns({
+        success: false,
+        error: {
+          message: 'Required field missing',
+          issues: [{ path: ['categories'], message: 'Required' }],
+        },
+      });
+
+      const result = await controller.updateLlmoConfig(mockContext);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.include('Invalid LLMO config');
-      expect(s3Client.send).to.not.have.been.called;
+      expect(writeConfigStub).to.not.have.been.called;
+      expect(llmoConfigSchemaStub.safeParse).to.have.been.calledWith(invalidData);
     });
 
     it('should return bad request when s3 client is missing', async () => {
       delete mockContext.s3;
 
-      const result = await controller.postLlmoConfig(mockContext);
+      const result = await controller.updateLlmoConfig(mockContext);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('LLMO config storage is not configured for this environment');
-      expect(s3Client.send).to.not.have.been.called;
+      expect(writeConfigStub).to.not.have.been.called;
+      expect(llmoConfigSchemaStub.safeParse).to.not.have.been.called;
     });
 
     it('should handle S3 error when writing config', async () => {
-      s3Client.send.rejects(new Error('S3 write failed'));
+      readConfigStub.resolves({
+        config: llmoConfig.defaultConfig(),
+        exists: true,
+        version: 'v0',
+      });
+      writeConfigStub.rejects(new Error('S3 write failed'));
 
       const categoryId = '123e4567-e89b-12d3-a456-426614174000';
       const topicId = '123e4567-e89b-12d3-a456-426614174001';
 
-      mockContext.data = {
+      const testData = {
         entities: {
-          [categoryId]: { type: 'category', name: 'test-category', region: 'us' },
+          [categoryId]: { type: 'category', name: 'test-category' },
           [topicId]: { type: 'topic', name: 'test-topic' },
+        },
+        categories: {
+          [categoryId]: { name: 'test-category', region: ['us'] },
+        },
+        topics: {
+          [topicId]: {
+            name: 'test-topic',
+            category: categoryId,
+            prompts: [{
+              prompt: 'What is the main topic?',
+              regions: ['us'],
+              origin: 'human',
+              source: 'config',
+            }],
+          },
         },
         brands: {
           aliases: [{
             aliases: ['test-brand'],
             category: categoryId,
-            region: 'us',
+            region: ['us'],
           }],
         },
         competitors: {
           competitors: [{
             name: 'test-competitor',
             category: categoryId,
-            region: 'us',
+            region: ['us'],
             aliases: ['competitor-alias'],
             urls: [],
           }],
         },
       };
 
-      const result = await controller.postLlmoConfig(mockContext);
+      mockContext.data = testData;
+
+      // Mock successful validation
+      llmoConfigSchemaStub.safeParse.returns({ success: true, data: testData });
+
+      const result = await controller.updateLlmoConfig(mockContext);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('S3 write failed');
+      expect(llmoConfigSchemaStub.safeParse).to.have.been.calledWith(testData);
     });
   });
 
@@ -3314,6 +3644,1084 @@ describe('LlmoController', () => {
       expect(mockLog.error).to.have.been.calledWith(
         'Error updating CDN bucket config for siteId: test-site-id, error: Site not found',
       );
+    });
+  });
+
+  describe('onboardCustomer', () => {
+    let mockOrganization;
+    let mockNewSite;
+    let mockSiteConfig;
+    let onboardingContext;
+    let validateSiteNotOnboardedStub;
+    let performLlmoOnboardingStub;
+
+    beforeEach(() => {
+      // Create mock organization
+      mockOrganization = {
+        getId: sinon.stub().returns('new-org-id'),
+        getImsOrgId: sinon.stub().returns('test-ims-org-id@AdobeOrg'),
+        getConfig: sinon.stub().returns({
+          getSlackConfig: sinon.stub().returns(null),
+        }),
+      };
+
+      // Create mock site config
+      mockSiteConfig = {
+        updateLlmoBrand: sinon.stub(),
+        updateLlmoDataFolder: sinon.stub(),
+        getSlackConfig: sinon.stub().returns(null),
+        getHandlers: sinon.stub().returns([]),
+      };
+
+      // Create mock new site
+      mockNewSite = {
+        getId: sinon.stub().returns('new-site-id'),
+        getConfig: sinon.stub().returns(mockSiteConfig),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+        getOrganizationId: sinon.stub().returns('new-org-id'),
+      };
+
+      // Setup data access mocks for onboarding
+      mockDataAccess.Organization = {
+        findByImsOrgId: sinon.stub().resolves(null), // Organization doesn't exist yet
+        create: sinon.stub().resolves(mockOrganization),
+      };
+
+      mockDataAccess.Site.findByBaseURL = sinon.stub().resolves(null); // Site doesn't exist yet
+      mockDataAccess.Site.create = sinon.stub().resolves(mockNewSite);
+
+      // Setup configuration mock for enableAudits
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      // Setup environment for onboarding
+      mockEnv.ENV = 'dev';
+      mockEnv.SHAREPOINT_CLIENT_ID = 'test-client-id';
+      mockEnv.SHAREPOINT_CLIENT_SECRET = 'test-client-secret';
+      mockEnv.SHAREPOINT_AUTHORITY = 'test-authority';
+      mockEnv.SHAREPOINT_DOMAIN_ID = 'test-domain-id';
+      mockEnv.LLMO_ONBOARDING_GITHUB_TOKEN = 'test-github-token';
+      mockEnv.HLX_ADMIN_TOKEN = 'test-hlx-token';
+      mockEnv.DEFAULT_ORGANIZATION_ID = 'default-org-id';
+
+      // Setup onboarding context
+      onboardingContext = {
+        ...mockContext,
+        data: {
+          domain: 'example.com',
+          brandName: 'Test Brand',
+        },
+        attributes: {
+          authInfo: {
+            getProfile: sinon.stub().returns({
+              email: 'test@example.com',
+              tenants: [
+                { id: 'test-tenant-id' },
+              ],
+            }),
+          },
+        },
+      };
+
+      // Create stubs for onboarding functions
+      validateSiteNotOnboardedStub = sinon.stub().resolves({ isValid: true });
+      performLlmoOnboardingStub = sinon.stub().resolves({
+        siteId: 'new-site-id',
+        organizationId: 'new-org-id',
+        baseURL: 'https://example.com',
+        dataFolder: 'dev/example-com',
+        message: 'LLMO onboarding completed successfully',
+      });
+    });
+
+    describe('happy path - new site and organization', () => {
+      it('should successfully onboard a new customer with new site and organization', async () => {
+        // Mock the onboarding module functions
+        const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
+          '../../src/controllers/llmo/llmo-onboarding.js': {
+            validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+            performLlmoOnboarding: performLlmoOnboardingStub,
+            generateDataFolder: (baseURL, env) => {
+              const url = new URL(baseURL);
+              const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+              return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+            },
+          },
+          '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: {
+              toDynamoItem: sinon.stub().returnsArg(0),
+            },
+          },
+          '@adobe/spacecat-shared-utils': {
+            SPACECAT_USER_AGENT: 'test-user-agent',
+            tracingFetch: tracingFetchStub,
+            hasText: (text) => text && text.trim().length > 0,
+            isObject: (obj) => obj !== null && typeof obj === 'object',
+            llmoConfig,
+            schemas: {},
+            composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+          },
+        });
+
+        const testController = LlmoController(mockContext);
+
+        const result = await testController.onboardCustomer(onboardingContext);
+
+        // Verify response
+        expect(result.status).to.equal(200);
+        const responseBody = await result.json();
+        expect(responseBody).to.deep.include({
+          message: 'LLMO onboarding completed successfully',
+          domain: 'example.com',
+          brandName: 'Test Brand',
+          imsOrgId: 'test-tenant-id@AdobeOrg',
+          baseURL: 'https://example.com',
+          dataFolder: 'dev/example-com',
+          organizationId: 'new-org-id',
+          siteId: 'new-site-id',
+          status: 'completed',
+        });
+        expect(responseBody.createdAt).to.be.a('string');
+
+        // Verify validation was called
+        expect(validateSiteNotOnboardedStub).to.have.been.calledOnce;
+        expect(validateSiteNotOnboardedStub).to.have.been.calledWith(
+          'https://example.com',
+          'test-tenant-id@AdobeOrg',
+          'dev/example-com',
+          onboardingContext,
+        );
+
+        // Verify onboarding was performed
+        expect(performLlmoOnboardingStub).to.have.been.calledOnce;
+        expect(performLlmoOnboardingStub).to.have.been.calledWith(
+          {
+            domain: 'example.com',
+            brandName: 'Test Brand',
+            imsOrgId: 'test-tenant-id@AdobeOrg',
+          },
+          onboardingContext,
+        );
+
+        // Verify logging
+        expect(mockLog.info).to.have.been.calledWith(
+          'Starting LLMO onboarding for IMS org test-tenant-id@AdobeOrg, domain example.com, brand Test Brand',
+        );
+        expect(mockLog.info).to.have.been.calledWith(
+          'LLMO onboarding completed successfully for domain example.com',
+        );
+      });
+
+      it('should successfully onboard a new customer calling real onboarding functions', async () => {
+        // Mock the llmo-onboarding module with its dependencies
+        const mockLlmoOnboarding = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+          '@adobe/spacecat-helix-content-sdk': {
+            createFrom: sinon.stub().resolves({
+              getDocument: sinon.stub().callsFake(() => ({
+                exists: sinon.stub().resolves(false), // Folder doesn't exist
+                createFolder: sinon.stub().resolves(),
+                copy: sinon.stub().resolves(),
+              })),
+            }),
+          },
+          '@octokit/rest': {
+            Octokit: sinon.stub().callsFake(() => ({
+              repos: {
+                getContent: sinon.stub().resolves({
+                  data: {
+                    content: Buffer.from('existing: content\n').toString('base64'),
+                    sha: 'test-sha',
+                  },
+                }),
+                createOrUpdateFileContents: sinon.stub().resolves(),
+              },
+            })),
+          },
+          '@adobe/spacecat-shared-tier-client': {
+            default: {
+              createForSite: sinon.stub().resolves({
+                createEntitlement: sinon.stub().resolves({
+                  entitlement: { getId: sinon.stub().returns('entitlement-id') },
+                  siteEnrollment: { getId: sinon.stub().returns('enrollment-id') },
+                }),
+              }),
+            },
+          },
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: {
+              toDynamoItem: sinon.stub().returnsArg(0),
+            },
+          },
+        });
+
+        // Mock the main llmo controller with the mocked onboarding module
+        const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
+          '../../src/controllers/llmo/llmo-onboarding.js': mockLlmoOnboarding,
+          '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+          '@adobe/spacecat-shared-utils': {
+            SPACECAT_USER_AGENT: 'test-user-agent',
+            tracingFetch: tracingFetchStub,
+            hasText: (text) => text && text.trim().length > 0,
+            isObject: (obj) => obj !== null && typeof obj === 'object',
+            llmoConfig,
+            schemas: {},
+            composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+          },
+        });
+
+        const testController = LlmoController(mockContext);
+
+        const result = await testController.onboardCustomer(onboardingContext);
+
+        // Debug: Log the response if it's not 200
+        if (result.status !== 200) {
+          const errorBody = await result.json();
+          console.log('Error response:', errorBody);
+        }
+
+        // Verify response
+        expect(result.status).to.equal(200);
+        const responseBody = await result.json();
+        expect(responseBody).to.deep.include({
+          message: 'LLMO onboarding completed successfully',
+          domain: 'example.com',
+          brandName: 'Test Brand',
+          imsOrgId: 'test-tenant-id@AdobeOrg',
+          baseURL: 'https://example.com',
+          dataFolder: 'dev/example-com',
+          organizationId: 'new-org-id',
+          siteId: 'new-site-id',
+          status: 'completed',
+        });
+        expect(responseBody.createdAt).to.be.a('string');
+
+        // Verify that organization was created
+        expect(mockDataAccess.Organization.create).to.have.been.calledOnce;
+        expect(mockDataAccess.Organization.create).to.have.been.calledWith({
+          name: 'Organization test-tenant-id@AdobeOrg',
+          imsOrgId: 'test-tenant-id@AdobeOrg',
+        });
+
+        // Verify that site was created
+        expect(mockDataAccess.Site.create).to.have.been.calledOnce;
+        expect(mockDataAccess.Site.create).to.have.been.calledWith({
+          baseURL: 'https://example.com',
+          organizationId: 'new-org-id',
+        });
+
+        // Verify that site config was updated
+        expect(mockSiteConfig.updateLlmoBrand).to.have.been.calledWith('Test Brand');
+        expect(mockSiteConfig.updateLlmoDataFolder).to.have.been.calledWith('dev/example-com');
+
+        // Verify that site was saved
+        expect(mockNewSite.setConfig).to.have.been.calledOnce;
+        expect(mockNewSite.save).to.have.been.calledOnce;
+
+        // Verify logging
+        expect(mockLog.info).to.have.been.calledWith(
+          'Starting LLMO onboarding for IMS org test-tenant-id@AdobeOrg, domain example.com, brand Test Brand',
+        );
+        expect(mockLog.info).to.have.been.calledWith(
+          'LLMO onboarding completed successfully for domain example.com',
+        );
+      });
+    });
+
+    describe('input validation', () => {
+      it('should return bad request when data is not provided', async () => {
+        // Create context without data
+        const contextWithoutData = {
+          ...mockContext,
+          data: null,
+          attributes: {
+            authInfo: {
+              getProfile: sinon.stub().returns({
+                email: 'test@example.com',
+                tenants: [
+                  { id: 'test-tenant-id' },
+                ],
+              }),
+            },
+          },
+        };
+
+        // Mock the onboarding module functions
+        const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
+          '../../src/controllers/llmo/llmo-onboarding.js': {
+            validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+            performLlmoOnboarding: performLlmoOnboardingStub,
+            generateDataFolder: (baseURL, env) => {
+              const url = new URL(baseURL);
+              const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+              return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+            },
+          },
+          '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: {
+              toDynamoItem: sinon.stub().returnsArg(0),
+            },
+          },
+          '@adobe/spacecat-shared-utils': {
+            SPACECAT_USER_AGENT: 'test-user-agent',
+            tracingFetch: tracingFetchStub,
+            hasText: (text) => text && text.trim().length > 0,
+            isObject: (obj) => obj !== null && typeof obj === 'object',
+            llmoConfig,
+            schemas: {},
+            composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+          },
+        });
+
+        const testController = LlmoController(mockContext);
+
+        const result = await testController.onboardCustomer(contextWithoutData);
+
+        // Verify response
+        expect(result.status).to.equal(400);
+        const responseBody = await result.json();
+        expect(responseBody.message).to.equal('Onboarding data is required');
+
+        // Verify onboarding was NOT performed
+        expect(validateSiteNotOnboardedStub).to.not.have.been.called;
+        expect(performLlmoOnboardingStub).to.not.have.been.called;
+      });
+
+      it('should return bad request when domain is missing', async () => {
+        // Create context with missing domain
+        const contextWithoutDomain = {
+          ...mockContext,
+          data: {
+            brandName: 'Test Brand',
+          },
+          attributes: {
+            authInfo: {
+              getProfile: sinon.stub().returns({
+                email: 'test@example.com',
+                tenants: [
+                  { id: 'test-tenant-id' },
+                ],
+              }),
+            },
+          },
+        };
+
+        // Mock the onboarding module functions
+        const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
+          '../../src/controllers/llmo/llmo-onboarding.js': {
+            validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+            performLlmoOnboarding: performLlmoOnboardingStub,
+            generateDataFolder: (baseURL, env) => {
+              const url = new URL(baseURL);
+              const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+              return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+            },
+          },
+          '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: {
+              toDynamoItem: sinon.stub().returnsArg(0),
+            },
+          },
+          '@adobe/spacecat-shared-utils': {
+            SPACECAT_USER_AGENT: 'test-user-agent',
+            tracingFetch: tracingFetchStub,
+            hasText: (text) => text && text.trim().length > 0,
+            isObject: (obj) => obj !== null && typeof obj === 'object',
+            llmoConfig,
+            schemas: {},
+            composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+          },
+        });
+
+        const testController = LlmoController(mockContext);
+
+        const result = await testController.onboardCustomer(contextWithoutDomain);
+
+        // Verify response
+        expect(result.status).to.equal(400);
+        const responseBody = await result.json();
+        expect(responseBody.message).to.equal('domain and brandName are required');
+
+        // Verify onboarding was NOT performed
+        expect(validateSiteNotOnboardedStub).to.not.have.been.called;
+        expect(performLlmoOnboardingStub).to.not.have.been.called;
+      });
+
+      it('should return bad request when brandName is missing', async () => {
+        // Create context with missing brandName
+        const contextWithoutBrandName = {
+          ...mockContext,
+          data: {
+            domain: 'example.com',
+          },
+          attributes: {
+            authInfo: {
+              getProfile: sinon.stub().returns({
+                email: 'test@example.com',
+                tenants: [
+                  { id: 'test-tenant-id' },
+                ],
+              }),
+            },
+          },
+        };
+
+        // Mock the onboarding module functions
+        const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
+          '../../src/controllers/llmo/llmo-onboarding.js': {
+            validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+            performLlmoOnboarding: performLlmoOnboardingStub,
+            generateDataFolder: (baseURL, env) => {
+              const url = new URL(baseURL);
+              const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+              return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+            },
+          },
+          '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: {
+              toDynamoItem: sinon.stub().returnsArg(0),
+            },
+          },
+          '@adobe/spacecat-shared-utils': {
+            SPACECAT_USER_AGENT: 'test-user-agent',
+            tracingFetch: tracingFetchStub,
+            hasText: (text) => text && text.trim().length > 0,
+            isObject: (obj) => obj !== null && typeof obj === 'object',
+            llmoConfig,
+            schemas: {},
+            composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+          },
+        });
+
+        const testController = LlmoController(mockContext);
+
+        const result = await testController.onboardCustomer(contextWithoutBrandName);
+
+        // Verify response
+        expect(result.status).to.equal(400);
+        const responseBody = await result.json();
+        expect(responseBody.message).to.equal('domain and brandName are required');
+
+        // Verify onboarding was NOT performed
+        expect(validateSiteNotOnboardedStub).to.not.have.been.called;
+        expect(performLlmoOnboardingStub).to.not.have.been.called;
+      });
+
+      it('should return bad request when both domain and brandName are missing', async () => {
+        // Create context with empty data object
+        const contextWithEmptyData = {
+          ...mockContext,
+          data: {},
+          attributes: {
+            authInfo: {
+              getProfile: sinon.stub().returns({
+                email: 'test@example.com',
+                tenants: [
+                  { id: 'test-tenant-id' },
+                ],
+              }),
+            },
+          },
+        };
+
+        // Mock the onboarding module functions
+        const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
+          '../../src/controllers/llmo/llmo-onboarding.js': {
+            validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+            performLlmoOnboarding: performLlmoOnboardingStub,
+            generateDataFolder: (baseURL, env) => {
+              const url = new URL(baseURL);
+              const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+              return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+            },
+          },
+          '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: {
+              toDynamoItem: sinon.stub().returnsArg(0),
+            },
+          },
+          '@adobe/spacecat-shared-utils': {
+            SPACECAT_USER_AGENT: 'test-user-agent',
+            tracingFetch: tracingFetchStub,
+            hasText: (text) => text && text.trim().length > 0,
+            isObject: (obj) => obj !== null && typeof obj === 'object',
+            llmoConfig,
+            schemas: {},
+            composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+          },
+        });
+
+        const testController = LlmoController(mockContext);
+
+        const result = await testController.onboardCustomer(contextWithEmptyData);
+
+        // Verify response
+        expect(result.status).to.equal(400);
+        const responseBody = await result.json();
+        expect(responseBody.message).to.equal('domain and brandName are required');
+
+        // Verify onboarding was NOT performed
+        expect(validateSiteNotOnboardedStub).to.not.have.been.called;
+        expect(performLlmoOnboardingStub).to.not.have.been.called;
+      });
+    });
+
+    describe('authentication validation', () => {
+      it('should return bad request when authInfo is missing', async () => {
+        // Create context without authInfo
+        const contextWithoutAuthInfo = {
+          ...mockContext,
+          data: {
+            domain: 'example.com',
+            brandName: 'Test Brand',
+          },
+          attributes: {},
+        };
+
+        // Mock the onboarding module functions
+        const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
+          '../../src/controllers/llmo/llmo-onboarding.js': {
+            validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+            performLlmoOnboarding: performLlmoOnboardingStub,
+            generateDataFolder: (baseURL, env) => {
+              const url = new URL(baseURL);
+              const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+              return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+            },
+          },
+          '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: {
+              toDynamoItem: sinon.stub().returnsArg(0),
+            },
+          },
+          '@adobe/spacecat-shared-utils': {
+            SPACECAT_USER_AGENT: 'test-user-agent',
+            tracingFetch: tracingFetchStub,
+            hasText: (text) => text && text.trim().length > 0,
+            isObject: (obj) => obj !== null && typeof obj === 'object',
+            llmoConfig,
+            schemas: {},
+            composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+          },
+        });
+
+        const testController = LlmoController(mockContext);
+
+        const result = await testController.onboardCustomer(contextWithoutAuthInfo);
+
+        // Verify response
+        expect(result.status).to.equal(400);
+        const responseBody = await result.json();
+        expect(responseBody.message).to.equal('Authentication information is required');
+
+        // Verify onboarding was NOT performed
+        expect(validateSiteNotOnboardedStub).to.not.have.been.called;
+        expect(performLlmoOnboardingStub).to.not.have.been.called;
+      });
+
+      it('should return bad request when authInfo is null', async () => {
+        // Create context with null authInfo
+        const contextWithNullAuthInfo = {
+          ...mockContext,
+          data: {
+            domain: 'example.com',
+            brandName: 'Test Brand',
+          },
+          attributes: {
+            authInfo: null,
+          },
+        };
+
+        // Mock the onboarding module functions
+        const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
+          '../../src/controllers/llmo/llmo-onboarding.js': {
+            validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+            performLlmoOnboarding: performLlmoOnboardingStub,
+            generateDataFolder: (baseURL, env) => {
+              const url = new URL(baseURL);
+              const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+              return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+            },
+          },
+          '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: {
+              toDynamoItem: sinon.stub().returnsArg(0),
+            },
+          },
+          '@adobe/spacecat-shared-utils': {
+            SPACECAT_USER_AGENT: 'test-user-agent',
+            tracingFetch: tracingFetchStub,
+            hasText: (text) => text && text.trim().length > 0,
+            isObject: (obj) => obj !== null && typeof obj === 'object',
+            llmoConfig,
+            schemas: {},
+            composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+          },
+        });
+
+        const testController = LlmoController(mockContext);
+
+        const result = await testController.onboardCustomer(contextWithNullAuthInfo);
+
+        // Verify response
+        expect(result.status).to.equal(400);
+        const responseBody = await result.json();
+        expect(responseBody.message).to.equal('Authentication information is required');
+
+        // Verify onboarding was NOT performed
+        expect(validateSiteNotOnboardedStub).to.not.have.been.called;
+        expect(performLlmoOnboardingStub).to.not.have.been.called;
+      });
+
+      it('should return bad request when profile is null', async () => {
+        // Create context with null profile
+        const contextWithNullProfile = {
+          ...mockContext,
+          data: {
+            domain: 'example.com',
+            brandName: 'Test Brand',
+          },
+          attributes: {
+            authInfo: {
+              getProfile: sinon.stub().returns(null),
+            },
+          },
+        };
+
+        // Mock the onboarding module functions
+        const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
+          '../../src/controllers/llmo/llmo-onboarding.js': {
+            validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+            performLlmoOnboarding: performLlmoOnboardingStub,
+            generateDataFolder: (baseURL, env) => {
+              const url = new URL(baseURL);
+              const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+              return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+            },
+          },
+          '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: {
+              toDynamoItem: sinon.stub().returnsArg(0),
+            },
+          },
+          '@adobe/spacecat-shared-utils': {
+            SPACECAT_USER_AGENT: 'test-user-agent',
+            tracingFetch: tracingFetchStub,
+            hasText: (text) => text && text.trim().length > 0,
+            isObject: (obj) => obj !== null && typeof obj === 'object',
+            llmoConfig,
+            schemas: {},
+            composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+          },
+        });
+
+        const testController = LlmoController(mockContext);
+
+        const result = await testController.onboardCustomer(contextWithNullProfile);
+
+        // Verify response
+        expect(result.status).to.equal(400);
+        const responseBody = await result.json();
+        expect(responseBody.message).to.equal('User profile or organization ID not found in authentication token');
+
+        // Verify onboarding was NOT performed
+        expect(validateSiteNotOnboardedStub).to.not.have.been.called;
+        expect(performLlmoOnboardingStub).to.not.have.been.called;
+      });
+
+      it('should return bad request when tenants array is missing', async () => {
+        // Create context with profile but no tenants
+        const contextWithoutTenants = {
+          ...mockContext,
+          data: {
+            domain: 'example.com',
+            brandName: 'Test Brand',
+          },
+          attributes: {
+            authInfo: {
+              getProfile: sinon.stub().returns({
+                email: 'test@example.com',
+              }),
+            },
+          },
+        };
+
+        // Mock the onboarding module functions
+        const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
+          '../../src/controllers/llmo/llmo-onboarding.js': {
+            validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+            performLlmoOnboarding: performLlmoOnboardingStub,
+            generateDataFolder: (baseURL, env) => {
+              const url = new URL(baseURL);
+              const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+              return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+            },
+          },
+          '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: {
+              toDynamoItem: sinon.stub().returnsArg(0),
+            },
+          },
+          '@adobe/spacecat-shared-utils': {
+            SPACECAT_USER_AGENT: 'test-user-agent',
+            tracingFetch: tracingFetchStub,
+            hasText: (text) => text && text.trim().length > 0,
+            isObject: (obj) => obj !== null && typeof obj === 'object',
+            llmoConfig,
+            schemas: {},
+            composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+          },
+        });
+
+        const testController = LlmoController(mockContext);
+
+        const result = await testController.onboardCustomer(contextWithoutTenants);
+
+        // Verify response
+        expect(result.status).to.equal(400);
+        const responseBody = await result.json();
+        expect(responseBody.message).to.equal('User profile or organization ID not found in authentication token');
+
+        // Verify onboarding was NOT performed
+        expect(validateSiteNotOnboardedStub).to.not.have.been.called;
+        expect(performLlmoOnboardingStub).to.not.have.been.called;
+      });
+
+      it('should return bad request when tenants array is empty', async () => {
+        // Create context with empty tenants array
+        const contextWithEmptyTenants = {
+          ...mockContext,
+          data: {
+            domain: 'example.com',
+            brandName: 'Test Brand',
+          },
+          attributes: {
+            authInfo: {
+              getProfile: sinon.stub().returns({
+                email: 'test@example.com',
+                tenants: [],
+              }),
+            },
+          },
+        };
+
+        // Mock the onboarding module functions
+        const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
+          '../../src/controllers/llmo/llmo-onboarding.js': {
+            validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+            performLlmoOnboarding: performLlmoOnboardingStub,
+            generateDataFolder: (baseURL, env) => {
+              const url = new URL(baseURL);
+              const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+              return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+            },
+          },
+          '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: {
+              toDynamoItem: sinon.stub().returnsArg(0),
+            },
+          },
+          '@adobe/spacecat-shared-utils': {
+            SPACECAT_USER_AGENT: 'test-user-agent',
+            tracingFetch: tracingFetchStub,
+            hasText: (text) => text && text.trim().length > 0,
+            isObject: (obj) => obj !== null && typeof obj === 'object',
+            llmoConfig,
+            schemas: {},
+            composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+          },
+        });
+
+        const testController = LlmoController(mockContext);
+
+        const result = await testController.onboardCustomer(contextWithEmptyTenants);
+
+        // Verify response
+        expect(result.status).to.equal(400);
+        const responseBody = await result.json();
+        expect(responseBody.message).to.equal('User profile or organization ID not found in authentication token');
+
+        // Verify onboarding was NOT performed
+        expect(validateSiteNotOnboardedStub).to.not.have.been.called;
+        expect(performLlmoOnboardingStub).to.not.have.been.called;
+      });
+
+      it('should return bad request when tenant ID is missing', async () => {
+        // Create context with tenant but no ID
+        const contextWithoutTenantId = {
+          ...mockContext,
+          data: {
+            domain: 'example.com',
+            brandName: 'Test Brand',
+          },
+          attributes: {
+            authInfo: {
+              getProfile: sinon.stub().returns({
+                email: 'test@example.com',
+                tenants: [
+                  { name: 'test-tenant' },
+                ],
+              }),
+            },
+          },
+        };
+
+        // Mock the onboarding module functions
+        const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
+          '../../src/controllers/llmo/llmo-onboarding.js': {
+            validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+            performLlmoOnboarding: performLlmoOnboardingStub,
+            generateDataFolder: (baseURL, env) => {
+              const url = new URL(baseURL);
+              const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+              return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+            },
+          },
+          '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: {
+              toDynamoItem: sinon.stub().returnsArg(0),
+            },
+          },
+          '@adobe/spacecat-shared-utils': {
+            SPACECAT_USER_AGENT: 'test-user-agent',
+            tracingFetch: tracingFetchStub,
+            hasText: (text) => text && text.trim().length > 0,
+            isObject: (obj) => obj !== null && typeof obj === 'object',
+            llmoConfig,
+            schemas: {},
+            composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+          },
+        });
+
+        const testController = LlmoController(mockContext);
+
+        const result = await testController.onboardCustomer(contextWithoutTenantId);
+
+        // Verify response
+        expect(result.status).to.equal(400);
+        const responseBody = await result.json();
+        expect(responseBody.message).to.equal('User profile or organization ID not found in authentication token');
+
+        // Verify onboarding was NOT performed
+        expect(validateSiteNotOnboardedStub).to.not.have.been.called;
+        expect(performLlmoOnboardingStub).to.not.have.been.called;
+      });
+    });
+
+    describe('validation failures', () => {
+      it('should return bad request when site already exists and is assigned to a different organization', async () => {
+        // Reset and update the validation stub to return an error
+        validateSiteNotOnboardedStub.reset();
+        validateSiteNotOnboardedStub.resolves({
+          isValid: false,
+          error: 'Site https://example.com has already been assigned to a different organization.',
+        });
+
+        // Reset the log stubs
+        mockLog.info.resetHistory();
+        mockLog.error.resetHistory();
+
+        // Mock the onboarding module functions
+        const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
+          '../../src/controllers/llmo/llmo-onboarding.js': {
+            validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+            performLlmoOnboarding: performLlmoOnboardingStub,
+            generateDataFolder: (baseURL, env) => {
+              const url = new URL(baseURL);
+              const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+              return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+            },
+          },
+          '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: {
+              toDynamoItem: sinon.stub().returnsArg(0),
+            },
+          },
+          '@adobe/spacecat-shared-utils': {
+            SPACECAT_USER_AGENT: 'test-user-agent',
+            tracingFetch: tracingFetchStub,
+            hasText: (text) => text && text.trim().length > 0,
+            isObject: (obj) => obj !== null && typeof obj === 'object',
+            llmoConfig,
+            schemas: {},
+            composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+          },
+        });
+
+        const testController = LlmoController(mockContext);
+
+        const result = await testController.onboardCustomer(onboardingContext);
+
+        // Verify response
+        expect(result.status).to.equal(400);
+        const responseBody = await result.json();
+        expect(responseBody.message).to.equal('Site https://example.com has already been assigned to a different organization.');
+
+        // Verify validation was called
+        expect(validateSiteNotOnboardedStub).to.have.been.calledOnce;
+        expect(validateSiteNotOnboardedStub).to.have.been.calledWith(
+          'https://example.com',
+          'test-tenant-id@AdobeOrg',
+          'dev/example-com',
+          onboardingContext,
+        );
+
+        // Verify onboarding was NOT performed
+        expect(performLlmoOnboardingStub).to.not.have.been.called;
+
+        // Verify logging
+        expect(mockLog.info).to.have.been.calledWith(
+          'Starting LLMO onboarding for IMS org test-tenant-id@AdobeOrg, domain example.com, brand Test Brand',
+        );
+        // Note: error is not logged when validation fails, only when an exception is thrown
+        expect(mockLog.error).to.not.have.been.called;
+      });
+
+      it('should return bad request when SharePoint folder already exists', async () => {
+        // Reset and update the validation stub to return an error for existing folder
+        validateSiteNotOnboardedStub.reset();
+        validateSiteNotOnboardedStub.resolves({
+          isValid: false,
+          error: 'Data folder for site https://example.com already exists. The site is already onboarded.',
+        });
+
+        // Reset the log stubs
+        mockLog.info.resetHistory();
+        mockLog.error.resetHistory();
+
+        // Mock the onboarding module functions
+        const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
+          '../../src/controllers/llmo/llmo-onboarding.js': {
+            validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+            performLlmoOnboarding: performLlmoOnboardingStub,
+            generateDataFolder: (baseURL, env) => {
+              const url = new URL(baseURL);
+              const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+              return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+            },
+          },
+          '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: {
+              toDynamoItem: sinon.stub().returnsArg(0),
+            },
+          },
+          '@adobe/spacecat-shared-utils': {
+            SPACECAT_USER_AGENT: 'test-user-agent',
+            tracingFetch: tracingFetchStub,
+            hasText: (text) => text && text.trim().length > 0,
+            isObject: (obj) => obj !== null && typeof obj === 'object',
+            llmoConfig,
+            schemas: {},
+            composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+          },
+        });
+
+        const testController = LlmoController(mockContext);
+
+        const result = await testController.onboardCustomer(onboardingContext);
+
+        // Verify response
+        expect(result.status).to.equal(400);
+        const responseBody = await result.json();
+        expect(responseBody.message).to.equal('Data folder for site https://example.com already exists. The site is already onboarded.');
+
+        // Verify validation was called
+        expect(validateSiteNotOnboardedStub).to.have.been.calledOnce;
+
+        // Verify onboarding was NOT performed
+        expect(performLlmoOnboardingStub).to.not.have.been.called;
+
+        // Verify logging
+        // Note: error is not logged when validation fails, only when an exception is thrown
+        expect(mockLog.error).to.not.have.been.called;
+      });
+    });
+
+    describe('error handling', () => {
+      it('should return bad request when validateSiteNotOnboarded throws an error', async () => {
+        // Reset stubs
+        validateSiteNotOnboardedStub.reset();
+        performLlmoOnboardingStub.reset();
+        mockLog.info.resetHistory();
+        mockLog.error.resetHistory();
+
+        // Setup validation stub to throw an error
+        const validationError = new Error('SharePoint connection failed');
+        validateSiteNotOnboardedStub.rejects(validationError);
+
+        // Mock the onboarding module functions
+        const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
+          '../../src/controllers/llmo/llmo-onboarding.js': {
+            validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+            performLlmoOnboarding: performLlmoOnboardingStub,
+            generateDataFolder: (baseURL, env) => {
+              const url = new URL(baseURL);
+              const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+              return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+            },
+          },
+          '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+          '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+            Config: {
+              toDynamoItem: sinon.stub().returnsArg(0),
+            },
+          },
+          '@adobe/spacecat-shared-utils': {
+            SPACECAT_USER_AGENT: 'test-user-agent',
+            tracingFetch: tracingFetchStub,
+            hasText: (text) => text && text.trim().length > 0,
+            isObject: (obj) => obj !== null && typeof obj === 'object',
+            llmoConfig,
+            schemas: {},
+            composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+          },
+        });
+
+        const testController = LlmoController(mockContext);
+
+        const result = await testController.onboardCustomer(onboardingContext);
+
+        // Verify response
+        expect(result.status).to.equal(400);
+        const responseBody = await result.json();
+        expect(responseBody.message).to.equal('SharePoint connection failed');
+
+        // Verify validation was called
+        expect(validateSiteNotOnboardedStub).to.have.been.calledOnce;
+        expect(validateSiteNotOnboardedStub).to.have.been.calledWith(
+          'https://example.com',
+          'test-tenant-id@AdobeOrg',
+          'dev/example-com',
+          onboardingContext,
+        );
+
+        // Verify onboarding was NOT performed
+        expect(performLlmoOnboardingStub).to.not.have.been.called;
+
+        // Verify logging
+        expect(mockLog.info).to.have.been.calledWith(
+          'Starting LLMO onboarding for IMS org test-tenant-id@AdobeOrg, domain example.com, brand Test Brand',
+        );
+        expect(mockLog.error).to.have.been.calledWith(
+          'Error during LLMO onboarding: SharePoint connection failed',
+        );
+      });
     });
   });
 });
