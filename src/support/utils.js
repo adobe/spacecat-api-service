@@ -811,6 +811,8 @@ export const onboardSingleSite = async (
         if (!region && locale.region) {
           region = locale;
         }
+
+        log.info(`Detected locale for site ${baseURL}: language ${language}, region ${region}`);
       } catch (error) {
         log.error(`Error detecting locale for site ${baseURL}: ${error.message}`);
         await say(`:x: Error detecting locale for site ${baseURL}: ${error.message}`);
@@ -853,29 +855,32 @@ export const onboardSingleSite = async (
     );
 
     // Create new project or assign existing project
-    const hasProjectId = !!site.getProjectId();
-    if (!hasProjectId || additionalParams.projectId) {
-      const project = await createProject(
-        context,
-        slackContext,
-        baseURL,
-        organizationId,
-        additionalParams.projectId,
-      );
-      site.setProjectId(project.getId());
-      reportLine.projectId = project.getId();
-    }
+    const project = await createProject(
+      context,
+      slackContext,
+      baseURL,
+      organizationId,
+      site.getProjectId() || additionalParams.projectId,
+    );
+    site.setProjectId(project.getId());
+    reportLine.projectId = project.getId();
 
     // Assign language and region
     const hasLanguage = hasText(site.getLanguage());
     if (!hasLanguage) {
       site.setLanguage(language);
       reportLine.language = language;
+      log.info(`Setting language ${language} for site ${baseURL}`);
+    } else {
+      log.info(`Language ${language} already set for site ${baseURL}`);
     }
     const hasRegion = hasText(site.getRegion());
     if (!hasRegion) {
       site.setRegion(region);
       reportLine.region = region;
+      log.info(`Setting region ${region} for site ${baseURL}`);
+    } else {
+      log.info(`Region ${region} already set for site ${baseURL}`);
     }
 
     const siteID = site.getId();
