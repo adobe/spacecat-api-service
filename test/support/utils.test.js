@@ -58,7 +58,7 @@ describe('utils', () => {
         dataAccess: {
           Project: {
             findById: sandbox.stub(),
-            findByProjectName: sandbox.stub(),
+            allByOrganizationId: sandbox.stub().resolves([]),
             create: sandbox.stub(),
           },
         },
@@ -96,7 +96,6 @@ describe('utils', () => {
       };
       context.dataAccess.Project.create.resolves(expectedProject);
       context.dataAccess.Project.findById.resolves(null);
-      context.dataAccess.Project.findByProjectName.resolves(null);
 
       const project = await createProject(context, slackContext, 'https://example.com', 'org123', 'project123');
 
@@ -115,11 +114,11 @@ describe('utils', () => {
         getProjectName: sandbox.stub().returns('example.com'),
         getId: sandbox.stub().returns('project123'),
       };
-      context.dataAccess.Project.findByProjectName.resolves(existingProject);
+      context.dataAccess.Project.allByOrganizationId.resolves([existingProject]);
 
       const project = await createProject(context, slackContext, 'https://example.com/uk', 'org123', 'project123');
 
-      expect(context.dataAccess.Project.findByProjectName).to.have.been.calledWith('example.com');
+      expect(context.dataAccess.Project.allByOrganizationId).to.have.been.calledWith('org123');
       expect(context.dataAccess.Project.create).not.to.have.been.called;
       expect(project).to.equal(existingProject);
       expect(slackContext.say).to.have.been.calledWith(':information_source: Added site https://example.com/uk to existing project example.com. Project ID: project123');
@@ -134,7 +133,6 @@ describe('utils', () => {
       };
       context.dataAccess.Project.create.resolves(expectedProject);
       context.dataAccess.Project.findById.resolves(null);
-      context.dataAccess.Project.findByProjectName.resolves(null);
 
       const project = await createProject(context, slackContext, 'https://fr.example.com/', 'org123');
 
