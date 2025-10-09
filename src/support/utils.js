@@ -809,10 +809,8 @@ export const onboardSingleSite = async (
           language = locale.language;
         }
         if (!region && locale.region) {
-          region = locale;
+          region = locale.region;
         }
-
-        log.info(`Detected locale for site ${baseURL}: language ${language}, region ${region}`);
       } catch (error) {
         log.error(`Error detecting locale for site ${baseURL}: ${error.message}`);
         await say(`:x: Error detecting locale for site ${baseURL}: ${error.message}`);
@@ -870,17 +868,15 @@ export const onboardSingleSite = async (
     if (!hasLanguage) {
       site.setLanguage(language);
       reportLine.language = language;
-      log.info(`Setting language ${language} for site ${baseURL}`);
     } else {
-      log.info(`Language ${language} already set for site ${baseURL}`);
+      reportLine.language = site.getLanguage();
     }
     const hasRegion = hasText(site.getRegion());
     if (!hasRegion) {
       site.setRegion(region);
       reportLine.region = region;
-      log.info(`Setting region ${region} for site ${baseURL}`);
     } else {
-      log.info(`Region ${region} already set for site ${baseURL}`);
+      reportLine.region = site.getRegion();
     }
 
     const siteID = site.getId();
