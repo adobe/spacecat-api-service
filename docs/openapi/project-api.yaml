@@ -97,6 +97,45 @@ project:
       - ims_key: [ ]
       - scoped_api_key: [ ]
 
+project-sites:
+  get:
+    tags:
+      - project
+    summary: Retrieve all sites for a project
+    description: |
+      This endpoint retrieves all sites belonging to a specific project.
+    operationId: getSitesByProjectId
+    parameters:
+      - name: projectId
+        in: path
+        description: The ID of the project
+        required: true
+        schema:
+          $ref: './schemas.yaml#/Id'
+    responses:
+      '200':
+        description: A list of sites for the project
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/Site'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
 project-primary-locale-sites:
   get:
     tags:
@@ -118,9 +157,54 @@ project-primary-locale-sites:
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/SiteList'
+              type: array
+              items:
+                $ref: './schemas.yaml#/Site'
+      '400':
+        $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
+project-sites-by-name:
+  get:
+    tags:
+      - project
+    summary: Retrieve all sites for a project by project name
+    description: |
+      This endpoint retrieves all sites belonging to a specific project identified by its name.
+    operationId: getSitesByProjectName
+    parameters:
+      - name: projectName
+        in: path
+        description: The name of the project
+        required: true
+        schema:
+          type: string
+    responses:
+      '200':
+        description: A list of sites for the project
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/Site'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
       '404':
         $ref: './responses.yaml#/404'
       '500':

@@ -124,14 +124,59 @@ organization-project-by-id:
       - ims_key: [ ]
       - scoped_api_key: [ ]
 
-organization-project-by-name:
+organization-project-sites:
   get:
     tags:
       - organization
-    summary: Retrieve a specific project within an organization by name
+    summary: Retrieve all sites for a project within an organization
     description: |
-      This endpoint is useful for retrieving a specific project by its name within an organization.
-    operationId: getOrganizationProjectByName
+      This endpoint is useful for retrieving all sites belonging to a specific project within an organization.
+    operationId: getSitesByProjectIdAndOrganizationId
+    parameters:
+      - name: organizationId
+        in: path
+        description: The ID of the organization
+        required: true
+        schema:
+          $ref: './schemas.yaml#/Id'
+      - name: projectId
+        in: path
+        description: The ID of the project
+        required: true
+        schema:
+          $ref: './schemas.yaml#/Id'
+    responses:
+      '200':
+        description: A list of sites for the project within the organization
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/Site'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-organization-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+
+organization-project-sites-by-name:
+  get:
+    tags:
+      - organization
+    summary: Retrieve all sites for a project by project name within an organization
+    description: |
+      This endpoint is useful for retrieving all sites belonging to a specific project (identified by name) within an organization.
+    operationId: getSitesByProjectNameAndOrganizationId
     parameters:
       - name: organizationId
         in: path
@@ -147,11 +192,15 @@ organization-project-by-name:
           type: string
     responses:
       '200':
-        description: Project found
+        description: A list of sites for the project within the organization
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/Project'
+              type: array
+              items:
+                $ref: './schemas.yaml#/Site'
+      '400':
+        $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
       '403':

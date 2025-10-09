@@ -120,16 +120,20 @@ paths:
     $ref: './organization-api.yaml#/organization-slack-config-by-ims-org-id'
   /organizations/{organizationId}/projects:
     $ref: './organizations-api.yaml#/organization-projects'
-  /organizations/{organizationId}/projects/{projectName}:
-    $ref: './organizations-api.yaml#/organization-project-by-name'
-  /organizations/{organizationId}/project-names/{projectName}/sites:
-    $ref: './sites-api.yaml#/sites-by-organization-and-project-name'
+  /organizations/{organizationId}/projects/{projectId}/sites:
+    $ref: './organizations-api.yaml#/organization-project-sites'
+  /organizations/{organizationId}/by-project-name/{projectName}/sites:
+    $ref: './organizations-api.yaml#/organization-project-sites-by-name'
   /projects:
     $ref: './projects-api.yaml#/projects'
   /projects/{projectId}:
     $ref: './project-api.yaml#/project'
+  /projects/{projectId}/sites:
+    $ref: './project-api.yaml#/project-sites'
   /projects/{projectId}/sites/primary-locale:
     $ref: './project-api.yaml#/project-primary-locale-sites'
+  /projects/by-project-name/{projectName}/sites:
+    $ref: './project-api.yaml#/project-sites-by-name'
   /preflight/jobs:
     $ref: './preflight-api.yaml#/preflight-jobs'
   /preflight/jobs/{jobId}:
