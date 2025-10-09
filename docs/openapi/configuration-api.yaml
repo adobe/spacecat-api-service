@@ -82,7 +82,7 @@ configuration-audits:
                 type: array
                 items:
                   type: string
-                  description: The product code for the audit
+                  description: The product codes the audit should be executed for
                   example: "LLMO"
     responses:
       '201':
