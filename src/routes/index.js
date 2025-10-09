@@ -261,7 +261,8 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/llmo/sheet-data/:dataSource': llmoController.queryLlmoSheetData,
     'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': llmoController.queryLlmoSheetData,
     'GET /sites/:siteId/llmo/config': llmoController.getLlmoConfig,
-    'POST /sites/:siteId/llmo/config': llmoController.postLlmoConfig,
+    'PATCH /sites/:siteId/llmo/config': llmoController.updateLlmoConfig,
+    'POST /sites/:siteId/llmo/config': llmoController.updateLlmoConfig,
     'GET /sites/:siteId/llmo/questions': llmoController.getLlmoQuestions,
     'POST /sites/:siteId/llmo/questions': llmoController.addLlmoQuestion,
     'DELETE /sites/:siteId/llmo/questions/:questionKey': llmoController.removeLlmoQuestion,
@@ -282,6 +283,7 @@ export default function getRouteHandlers(
     'GET /organizations/:organizationId/trial-users': trialUserController.getByOrganizationID,
     'POST /organizations/:organizationId/trial-user-invite': trialUserController.createTrialUserForEmailInvite,
     'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
+    'POST /organizations/:organizationId/entitlements': entitlementController.createEntitlement,
 
     // Sandbox audit route
     'POST /sites/:siteId/sandbox/audit': sandboxAuditController.triggerAudit,
