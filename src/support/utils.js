@@ -528,10 +528,16 @@ export const deriveProjectName = (baseURL) => {
  * @param {string} projectId - The project ID.
  * @returns {Promise<Object>} - The project object.
  */
-export const createProject = async (context, slackContext, baseURL, organizationId, projectId) => {
+export const createProject = async (
+  context,
+  slackContext,
+  baseURL,
+  organizationId,
+  projectId,
+) => {
   const { dataAccess, log } = context;
   const { say } = slackContext;
-  const { Project, Site } = dataAccess;
+  const { Project } = dataAccess;
 
   try {
     const projectName = deriveProjectName(baseURL);
@@ -542,20 +548,6 @@ export const createProject = async (context, slackContext, baseURL, organization
       const project = await Project.findById(projectId);
       if (project) {
         existingProject = project;
-      }
-    }
-
-    // TODO: Refactor as this case cannot happen, if site exists we go into a different branch
-    // Instead pass siteId, check if the site has a project, if not, create it
-
-    // Check if the site already exists and already has a project
-    if (!existingProject) {
-      const site = await Site.findByBaseURL(baseURL);
-      if (site) {
-        const project = await site.getProject();
-        if (project) {
-          existingProject = project;
-        }
       }
     }
 
@@ -608,9 +600,6 @@ const createSiteAndOrganization = async (
   reportLine,
   context,
   deliveryConfig,
-  projectId,
-  language,
-  region,
 ) => {
   const { imsClient, dataAccess, log } = context;
   const { Site, Organization } = dataAccess;
@@ -620,9 +609,6 @@ const createSiteAndOrganization = async (
 
   let site = await Site.findByBaseURL(baseURL);
   let organizationId;
-
-  // TODO: Check if existing site has a project, if not, create it
-  // TODO: Check if existing site has language and region assigned, if not, assign them
 
   if (site) {
     const siteOrgId = site.getOrganizationId();
@@ -651,23 +637,10 @@ const createSiteAndOrganization = async (
     organizationId = organization.getId();
     localReportLine.spacecatOrgId = organizationId;
 
-    // Create project
-    const project = await createProject(
-      context,
-      slackContext,
-      baseURL,
-      organizationId,
-      projectId,
-    );
-    localReportLine.projectId = project.getId();
-
     const deliveryType = customDeliveryType || await findDeliveryType(baseURL);
 
     localReportLine.deliveryType = deliveryType;
     const isLive = deliveryType === SiteModel.DELIVERY_TYPES.AEM_EDGE;
-
-    localReportLine.region = region;
-    localReportLine.language = language;
 
     try {
       site = await Site.create({
@@ -676,9 +649,6 @@ const createSiteAndOrganization = async (
         isLive,
         organizationId,
         authoringType,
-        projectId: project.getId(),
-        language,
-        region,
       });
 
       if (deliveryConfig && Object.keys(deliveryConfig).length > 0) {
@@ -861,9 +831,6 @@ export const onboardSingleSite = async (
       reportLine,
       context,
       additionalParams.deliveryConfig,
-      additionalParams.projectId,
-      language,
-      region,
     );
 
     // Validate tier
@@ -884,6 +851,32 @@ export const onboardSingleSite = async (
       EntitlementModel.PRODUCT_CODES.ASO,
       tier,
     );
+
+    // Create new project or assign existing project
+    const hasProjectId = !!site.getProjectId();
+    if (!hasProjectId || additionalParams.projectId) {
+      const project = await createProject(
+        context,
+        slackContext,
+        baseURL,
+        organizationId,
+        additionalParams.projectId,
+      );
+      site.setProjectId(project.getId());
+      reportLine.projectId = project.getId();
+    }
+
+    // Assign language and region
+    const hasLanguage = hasText(site.getLanguage());
+    if (!hasLanguage) {
+      site.setLanguage(language);
+      reportLine.language = language;
+    }
+    const hasRegion = hasText(site.getRegion());
+    if (!hasRegion) {
+      site.setRegion(region);
+      reportLine.region = region;
+    }
 
     const siteID = site.getId();
     reportLine.siteId = siteID;
