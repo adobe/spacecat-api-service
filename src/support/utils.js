@@ -511,7 +511,7 @@ export const deriveProjectName = (baseURL) => {
   // Remove parts of the subdomain which are 2 or 3 letters long, max first two elements
   for (let i = 0; i < Math.min(parts.length, 2); i += 1) {
     const part = parts[i];
-    if (part.length <= 2 || part.length >= 4) {
+    if (part.length === 2 || part.length === 3) {
       parts[i] = null;
     }
   }
@@ -566,7 +566,7 @@ export const createProject = async (
     }
 
     // Otherwise create new project
-    const newProject = await Project.create({ id: projectId, projectName, organizationId });
+    const newProject = await Project.create({ projectName, organizationId });
     const message = `:information_source: Added site ${baseURL} to new project ${newProject.getProjectName()}. Project ID: ${newProject.getId()}`;
     await say(message);
 
@@ -644,11 +644,7 @@ const createSiteAndOrganization = async (
 
     try {
       site = await Site.create({
-        baseURL,
-        deliveryType,
-        isLive,
-        organizationId,
-        authoringType,
+        baseURL, deliveryType, isLive, organizationId, authoringType,
       });
 
       if (deliveryConfig && Object.keys(deliveryConfig).length > 0) {
@@ -818,6 +814,10 @@ export const onboardSingleSite = async (
       } catch (error) {
         log.error(`Error detecting locale for site ${baseURL}: ${error.message}`);
         await say(`:x: Error detecting locale for site ${baseURL}: ${error.message}`);
+
+        // Fallback to default language and region
+        language = 'en';
+        region = 'US';
       }
     }
 

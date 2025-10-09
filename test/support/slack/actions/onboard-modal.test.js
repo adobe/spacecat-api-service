@@ -31,8 +31,6 @@ describe('onboard-modal', () => {
   let sandbox;
 
   before(async () => {
-    // TODO: Mock language-detect module
-
     // Mock the network-dependent modules before importing
     const mockedModule = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
       '../../../../src/utils/slack/base.js': {
@@ -189,6 +187,9 @@ describe('onboard-modal', () => {
         imsOrgId: 'ABC123@AdobeOrg',
         profile: 'demo',
         workflowWaitTime: '300',
+        projectId: 'project123',
+        language: 'fr',
+        region: 'CH',
       };
 
       body.actions[0].value = JSON.stringify(initialValues);
@@ -217,6 +218,18 @@ describe('onboard-modal', () => {
       // Check that wait time is pre-populated
       const waitTimeBlock = blocks.find((block) => block.block_id === 'wait_time_input');
       expect(waitTimeBlock.element.initial_value).to.equal('300');
+
+      // Check that project ID is pre-populated
+      const projectIdBlock = blocks.find((block) => block.block_id === 'project_id_input');
+      expect(projectIdBlock.element.initial_value).to.equal('project123');
+
+      // Check that language is pre-populated
+      const languageBlock = blocks.find((block) => block.block_id === 'language_input');
+      expect(languageBlock.element.initial_value).to.equal('fr');
+
+      // Check that region is pre-populated
+      const regionBlock = blocks.find((block) => block.block_id === 'region_input');
+      expect(regionBlock.element.initial_value).to.equal('CH');
     });
 
     it('should handle invalid JSON in button value gracefully', async () => {
