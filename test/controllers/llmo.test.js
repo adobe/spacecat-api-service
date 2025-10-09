@@ -2651,8 +2651,7 @@ describe('LlmoController', () => {
         {
           type: 'llmo-customer-analysis',
           siteId: 'test-site-id',
-          auditContext: {},
-          data: {
+          auditContext: {
             configVersion: 'v1',
             previousConfigVersion: 'v0',
           },
