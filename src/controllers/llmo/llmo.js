@@ -423,8 +423,7 @@ function LlmoController(ctx) {
       await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
         type: 'llmo-customer-analysis',
         siteId,
-        auditContext: {},
-        data: {
+        auditContext: {
           configVersion: version,
           previousConfigVersion: prevConfig.exists ? prevConfig.version : /* c8 ignore next */ null,
         },

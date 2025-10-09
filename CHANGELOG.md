@@ -1,3 +1,36 @@
+# [1.196.0](https://github.com/adobe/spacecat-api-service/compare/v1.195.0...v1.196.0) (2025-10-09)
+
+
+### Features
+
+* add brand presence cadence selector (weekly/daily) to LLMO onboarding ([#1313](https://github.com/adobe/spacecat-api-service/issues/1313)) ([d72326d](https://github.com/adobe/spacecat-api-service/commit/d72326d4679e4d140c10ac719cda7deddb003235))
+
+# [1.195.0](https://github.com/adobe/spacecat-api-service/compare/v1.194.0...v1.195.0) (2025-10-09)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1335](https://github.com/adobe/spacecat-api-service/issues/1335)) ([a78023a](https://github.com/adobe/spacecat-api-service/commit/a78023a6b12fd83278b5ce4463636d7d5482dd4a))
+
+
+### Features
+
+* Add project and locale to onboarding modal ([#1336](https://github.com/adobe/spacecat-api-service/issues/1336)) ([853ba2f](https://github.com/adobe/spacecat-api-service/commit/853ba2fa12e0e1777651d92ff9e1959d1d604782))
+
+# [1.194.0](https://github.com/adobe/spacecat-api-service/compare/v1.193.2...v1.194.0) (2025-10-09)
+
+
+### Features
+
+* add summarization audit ([#1331](https://github.com/adobe/spacecat-api-service/issues/1331)) ([e2082ac](https://github.com/adobe/spacecat-api-service/commit/e2082aca146eb7dcc21baac171a097f5c8b13305))
+
+## [1.193.2](https://github.com/adobe/spacecat-api-service/compare/v1.193.1...v1.193.2) (2025-10-09)
+
+
+### Bug Fixes
+
+* **llmo:** trigger llmo-customer-analysis with auditContext ([#1334](https://github.com/adobe/spacecat-api-service/issues/1334)) ([238b2ba](https://github.com/adobe/spacecat-api-service/commit/238b2baf0085be8588e0b453ca1ba183d551333c))
+
 ## [1.193.1](https://github.com/adobe/spacecat-api-service/compare/v1.193.0...v1.193.1) (2025-10-08)
 
 
