@@ -320,6 +320,61 @@ OrganizationUpdate:
               - '@user6'
       contentAiConfig:
         index: 'example-index-name'
+Project:
+  type: object
+  properties:
+    id:
+      description: The project ID in uuid format
+      $ref: '#/Id'
+    name:
+      description: The name of the project
+      type: string
+    organizationId:
+      description: The ID of the organization this project belongs to
+      $ref: '#/Id'
+    createdAt:
+      description: The date and time when the project was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: The date and time when the project was last updated
+      $ref: '#/DateTime'
+  example:
+    id: 'p1r2o3j4-e5c6-t7i8-d9a0-b11c12d13e14'
+    name: 'Example Project'
+    organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
+    createdAt: '2023-12-15T09:30:00Z'
+    updatedAt: '2024-01-19T11:20:00Z'
+ProjectList:
+  type: array
+  items:
+    $ref: './schemas.yaml#/Project'
+ProjectCreate:
+  type: object
+  required:
+    - name
+    - organizationId
+  properties:
+    name:
+      description: The name of the project
+      type: string
+    organizationId:
+      description: The ID of the organization this project belongs to
+      $ref: '#/Id'
+  example:
+    name: 'New Project'
+    organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
+ProjectUpdate:
+  type: object
+  properties:
+    name:
+      description: The name of the project
+      type: string
+    organizationId:
+      description: The ID of the organization this project belongs to
+      $ref: '#/Id'
+  example:
+    name: 'Updated Project Name'
+    organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
 Site:
   type: object
   properties:
@@ -329,6 +384,22 @@ Site:
     organizationId:
       description: The optional ID of the organization this site belongs to
       $ref: '#/Id'
+    projectId:
+      description: The optional ID of the project this site belongs to
+      $ref: '#/Id'
+    isPrimaryLocale:
+      description: Whether this site is the primary locale for the project
+      type: boolean
+    language:
+      description: The language code in ISO 639-1 format (2 lowercase letters)
+      type: string
+      pattern: '^[a-z]{2}$'
+      example: 'en'
+    region:
+      description: The region code in ISO 3166-1 alpha-2 format (2 uppercase letters)
+      type: string
+      pattern: '^[A-Z]{2}$'
+      example: 'US'
     baseURL:
       description: The base URL of the site
       $ref: '#/URL'
@@ -461,6 +532,22 @@ SiteCreate:
       description: The optional ID of the organization this site belongs to
       default: null
       $ref: '#/Id'
+    projectId:
+      description: The optional ID of the project this site belongs to
+      $ref: '#/Id'
+    isPrimaryLocale:
+      description: Whether this site is the primary locale for the project
+      type: boolean
+    language:
+      description: The language code in ISO 639-1 format (2 lowercase letters)
+      type: string
+      pattern: '^[a-z]{2}$'
+      example: 'en'
+    region:
+      description: The region code in ISO 3166-1 alpha-2 format (2 uppercase letters)
+      type: string
+      pattern: '^[A-Z]{2}$'
+      example: 'US'
     name:
       description: The name of the site
       type: string
@@ -488,6 +575,22 @@ SiteUpdate:
     organizationId:
       description: The optional ID of the organization this site belongs to
       $ref: '#/Id'
+    projectId:
+      description: The optional ID of the project this site belongs to
+      $ref: '#/Id'
+    isPrimaryLocale:
+      description: Whether this site is the primary locale for the project
+      type: boolean
+    language:
+      description: The language code in ISO 639-1 format (2 lowercase letters)
+      type: string
+      pattern: '^[a-z]{2}$'
+      example: 'en'
+    region:
+      description: The region code in ISO 3166-1 alpha-2 format (2 uppercase letters)
+      type: string
+      pattern: '^[A-Z]{2}$'
+      example: 'US'
     name:
       description: The name of the site
       type: string

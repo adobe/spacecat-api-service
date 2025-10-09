@@ -65,6 +65,8 @@ tags:
     description: Sandbox audit operations
   - name: reports
     description: Report generation and management operations
+  - name: project
+    description: Project management operations
 
 paths:
   /audits/latest/{auditType}:
@@ -116,6 +118,18 @@ paths:
     $ref: './organization-api.yaml#/organization-by-ims-org-id'
   /organizations/by-ims-org-id/{imsOrgId}/slack-config:
     $ref: './organization-api.yaml#/organization-slack-config-by-ims-org-id'
+  /organizations/{organizationId}/projects:
+    $ref: './organizations-api.yaml#/organization-projects'
+  /organizations/{organizationId}/projects/{projectName}:
+    $ref: './organizations-api.yaml#/organization-project-by-name'
+  /organizations/{organizationId}/project-names/{projectName}/sites:
+    $ref: './sites-api.yaml#/sites-by-organization-and-project-name'
+  /projects:
+    $ref: './projects-api.yaml#/projects'
+  /projects/{projectId}:
+    $ref: './project-api.yaml#/project'
+  /projects/{projectId}/sites/primary-locale:
+    $ref: './project-api.yaml#/project-primary-locale-sites'
   /preflight/jobs:
     $ref: './preflight-api.yaml#/preflight-jobs'
   /preflight/jobs/{jobId}:

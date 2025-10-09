@@ -26,7 +26,7 @@
     "docs": "npm run docs:lint && npm run docs:build",
     "docs:build": "npx @redocly/cli build-docs -o ./docs/index.html --config docs/openapi/redocly-config.yaml",
     "docs:lint": "npx @redocly/cli lint --config docs/openapi/redocly-config.yaml",
-    "docs:serve": "npx @redocly/cli preview-docs --config docs/openapi/redocly-config.yaml",
+    "docs:serve": "npx @redocly/cli preview --project-dir docs/openapi --product redoc",
     "prepare": "husky"
   },
   "wsk": {

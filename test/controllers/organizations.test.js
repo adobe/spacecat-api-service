@@ -133,6 +133,9 @@ describe('Organizations Controller', () => {
     'getAll',
     'getByID',
     'getSitesForOrganization',
+    'getProjectsByOrganizationId',
+    'getSitesByProjectIdAndOrganizationId',
+    'getSitesByProjectNameAndOrganizationId',
     'getByImsOrgID',
     'getSlackConfigByImsOrgID',
     'removeOrganization',
@@ -153,6 +156,11 @@ describe('Organizations Controller', () => {
         findByImsOrgId: sinon.stub(),
       },
       Site: {
+        allByOrganizationId: sinon.stub(),
+        allByOrganizationIdAndProjectId: sinon.stub(),
+        allByOrganizationIdAndProjectName: sinon.stub(),
+      },
+      Project: {
         allByOrganizationId: sinon.stub(),
       },
     };
@@ -603,5 +611,115 @@ describe('Organizations Controller', () => {
 
     expect(result.status).to.equal(404);
     expect(error).to.have.property('message', 'Slack config not found for IMS org ID: 9876567890ABCDEF12345678@AdobeOrg');
+  });
+
+  describe('getProjectsByOrganizationId', () => {
+    it('gets all projects for an organization', async () => {
+      const mockProjects = [
+        { toJSON: () => ({ id: 'project1', name: 'Project 1' }) },
+        { toJSON: () => ({ id: 'project2', name: 'Project 2' }) },
+      ];
+
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+      mockDataAccess.Project.allByOrganizationId.resolves(mockProjects);
+
+      const result = await organizationsController.getProjectsByOrganizationId({
+        params: { organizationId: organizations[0].getId() },
+        ...context,
+      });
+      const response = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(response).to.have.length(2);
+      expect(response[0]).to.have.property('id', 'project1');
+    });
+  });
+
+  describe('getSitesByProjectIdAndOrganizationId', () => {
+    it('gets all sites for an organization by project ID', async () => {
+      const mockSites = [
+        { toJSON: () => ({ id: 'site1', baseURL: 'https://site1.com' }) },
+        { toJSON: () => ({ id: 'site2', baseURL: 'https://site2.com' }) },
+      ];
+
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+      mockDataAccess.Site.allByOrganizationIdAndProjectId.resolves(mockSites);
+
+      const result = await organizationsController.getSitesByProjectIdAndOrganizationId({
+        params: { organizationId: organizations[0].getId(), projectId: 'project-id-123' },
+        ...context,
+      });
+      const response = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(response).to.have.length(2);
+      expect(response[0]).to.have.property('id', 'site1');
+    });
+
+    it('returns bad request when organization ID is invalid', async () => {
+      const result = await organizationsController.getSitesByProjectIdAndOrganizationId({
+        params: { organizationId: 'invalid', projectId: 'project-id-123' },
+        ...context,
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Organization ID required');
+    });
+
+    it('returns bad request when project ID is invalid', async () => {
+      const result = await organizationsController.getSitesByProjectIdAndOrganizationId({
+        params: { organizationId: organizations[0].getId(), projectId: 'invalid' },
+        ...context,
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Project ID required');
+    });
+  });
+
+  describe('getSitesByProjectNameAndOrganizationId', () => {
+    it('gets all sites for an organization by project name', async () => {
+      const mockSites = [
+        { toJSON: () => ({ id: 'site1', baseURL: 'https://site1.com' }) },
+        { toJSON: () => ({ id: 'site2', baseURL: 'https://site2.com' }) },
+      ];
+
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+      mockDataAccess.Site.allByOrganizationIdAndProjectName.resolves(mockSites);
+
+      const result = await organizationsController.getSitesByProjectNameAndOrganizationId({
+        params: { organizationId: organizations[0].getId(), projectName: 'test-project' },
+        ...context,
+      });
+      const response = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(response).to.have.length(2);
+      expect(response[0]).to.have.property('id', 'site1');
+    });
+
+    it('returns bad request when organization ID is invalid', async () => {
+      const result = await organizationsController.getSitesByProjectNameAndOrganizationId({
+        params: { organizationId: 'invalid', projectName: 'test-project' },
+        ...context,
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Organization ID required');
+    });
+
+    it('returns bad request when project name is missing', async () => {
+      const result = await organizationsController.getSitesByProjectNameAndOrganizationId({
+        params: { organizationId: organizations[0].getId(), projectName: '' },
+        ...context,
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Project name required');
+    });
   });
 });
