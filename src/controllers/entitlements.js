@@ -16,14 +16,21 @@ import {
   ok,
   forbidden,
   internalServerError,
+  created,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   isNonEmptyObject,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
+import TierClient from '@adobe/spacecat-shared-tier-client';
+
 import { EntitlementDto } from '../dto/entitlement.js';
 import AccessControlUtil from '../support/access-control-util.js';
+
+const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
+const LLMO_TIER = EntitlementModel.TIERS.FREE_TRIAL;
 
 /**
  * Entitlements controller. Provides methods to read entitlements by organization.
@@ -79,8 +86,40 @@ function EntitlementsController(ctx) {
     }
   };
 
+  /**
+   * Creates an entitlement for an organization.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Array of entitlements response.
+   */
+  const createEntitlement = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can create entitlements');
+    }
+    const { organizationId } = context.params;
+    if (!isValidUUID(organizationId)) {
+      return badRequest('Organization ID required');
+    }
+    try {
+      const organization = await Organization.findById(organizationId);
+      if (!organization) {
+        return notFound('Organization not found');
+      }
+      const tierClient = await TierClient.createForOrg(
+        context,
+        organization,
+        LLMO_PRODUCT_CODE,
+      );
+      const { entitlement } = await tierClient.createEntitlement(LLMO_TIER);
+      return created(EntitlementDto.toJSON(entitlement));
+    } catch (e) {
+      context.log.error(`Error creating entitlement for organization ${organizationId}: ${e.message}`);
+      return internalServerError(e.message);
+    }
+  };
+
   return {
     getByOrganizationID,
+    createEntitlement,
   };
 }
 

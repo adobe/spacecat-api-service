@@ -28,6 +28,10 @@ describe('onboard-llmo-modal', () => {
   let octokitMock;
   let mockTierClient;
   let tierClientMock;
+  let mockedLLMOOnboarding;
+  let sharedConfigMock;
+  let sharedSharepointMock;
+  let sharedSlackMock;
 
   // Default mocks that can be reused across tests
   const createDefaultMockSite = (sinonSandbox) => {
@@ -58,6 +62,10 @@ describe('onboard-llmo-modal', () => {
       enableHandlerForSite: sinonSandbox.stub(),
       isHandlerEnabledForSite: sinonSandbox.stub().returns(false),
       getQueues: sinonSandbox.stub().returns({ audits: 'audit-queue' }),
+      getSlackConfig: sinonSandbox.stub().returns({
+        channel: 'test-channel',
+        token: 'test-token',
+      }),
     }),
   });
 
@@ -202,31 +210,51 @@ describe('onboard-llmo-modal', () => {
     // Store the mock instance for easier access in tests
     mockTierClient = mockClientInstance;
 
-    // Mock the ES modules that can't be stubbed directly
-    mockedModule = await esmock('../../../../src/support/slack/actions/onboard-llmo-modal.js', {
-      '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
-        Config: {
-          toDynamoItem: sinon.stub().returns({}),
-        },
+    // Create shared mock instances that will be used by both modules
+    sharedConfigMock = {
+      Config: {
+        toDynamoItem: sinon.stub().returns({}),
       },
-      '@adobe/spacecat-helix-content-sdk': {
-        createFrom: sinon.stub().resolves({
-          getDocument: sinon.stub().returns({
-            exists: sinon.stub().resolves(false),
-            createFolder: sinon.stub().resolves(),
-            copy: sinon.stub().resolves(),
-          }),
+    };
+
+    sharedSharepointMock = {
+      createFrom: sinon.stub().resolves({
+        getDocument: sinon.stub().returns({
+          exists: sinon.stub().resolves(false),
+          createFolder: sinon.stub().resolves(),
+          copy: sinon.stub().resolves(),
         }),
-      },
+      }),
+    };
+
+    sharedSlackMock = {
+      postErrorMessage: sinon.stub(),
+    };
+
+    mockedLLMOOnboarding = await esmock('../../../../src/controllers/llmo/llmo-onboarding.js', {
+      '@adobe/spacecat-shared-data-access/src/models/site/config.js': sharedConfigMock,
+      '@adobe/spacecat-helix-content-sdk': sharedSharepointMock,
       '@octokit/rest': {
         Octokit: octokitMock,
       },
       '@adobe/spacecat-shared-tier-client': {
         default: tierClientMock,
       },
-      '../../../../src/utils/slack/base.js': {
-        postErrorMessage: sinon.stub(),
+      '../../../../src/utils/slack/base.js': sharedSlackMock,
+    });
+
+    // Mock the ES modules that can't be stubbed directly
+    mockedModule = await esmock('../../../../src/support/slack/actions/onboard-llmo-modal.js', {
+      '@adobe/spacecat-shared-data-access/src/models/site/config.js': sharedConfigMock,
+      '@adobe/spacecat-helix-content-sdk': sharedSharepointMock,
+      '@octokit/rest': {
+        Octokit: octokitMock,
       },
+      '@adobe/spacecat-shared-tier-client': {
+        default: tierClientMock,
+      },
+      '../../../../src/utils/slack/base.js': sharedSlackMock,
+      '../../../../src/controllers/llmo/llmo-onboarding.js': mockedLLMOOnboarding,
     });
 
     onboardSite = mockedModule.onboardSite;
@@ -316,7 +344,7 @@ describe('onboard-llmo-modal', () => {
         organizationId: 'org123',
       });
       expect(mockSite.save).to.have.been.called;
-      expect(lambdaCtx.dataAccess.Configuration.findLatest).to.have.been.calledTwice;
+      expect(lambdaCtx.dataAccess.Configuration.findLatest).to.have.been.calledThrice;
 
       // Verify that TierClient was used for entitlement and enrollment
       expect(mockTierClient.createEntitlement).to.have.been.calledWith('FREE_TRIAL');
@@ -336,6 +364,7 @@ describe('onboard-llmo-modal', () => {
       expect(config.enableHandlerForSite).to.have.been.calledWith('cdn-analysis', mockSite);
       expect(config.enableHandlerForSite).to.have.been.calledWith('cdn-logs-report', mockSite);
       expect(config.enableHandlerForSite).to.have.been.calledWith('llmo-customer-analysis', mockSite);
+      expect(config.enableHandlerForSite).to.have.been.calledWith('headings', mockSite);
 
       // Verify that octokit was called to update the helix query config
       expect(octokitMock).to.have.been.called;
@@ -391,31 +420,31 @@ describe('onboard-llmo-modal', () => {
       const originalOctokitMock = octokitMock;
       octokitMock = testOctokitMock;
 
-      // Re-mock the module with the new octokit mock
-      mockedModule = await esmock('../../../../src/support/slack/actions/onboard-llmo-modal.js', {
-        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
-          Config: {
-            toDynamoItem: sinon.stub().returns({}),
-          },
-        },
-        '@adobe/spacecat-helix-content-sdk': {
-          createFrom: sinon.stub().resolves({
-            getDocument: sinon.stub().returns({
-              exists: sinon.stub().resolves(false),
-              createFolder: sinon.stub().resolves(),
-              copy: sinon.stub().resolves(),
-            }),
-          }),
-        },
+      // Re-mock the llmo-onboarding module with the new octokit mock
+      const updatedMockedLLMOOnboarding = await esmock('../../../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': sharedConfigMock,
+        '@adobe/spacecat-helix-content-sdk': sharedSharepointMock,
         '@octokit/rest': {
           Octokit: testOctokitMock,
         },
         '@adobe/spacecat-shared-tier-client': {
           default: tierClientMock,
         },
-        '../../../../src/utils/slack/base.js': {
-          postErrorMessage: sinon.stub(),
+        '../../../../src/utils/slack/base.js': sharedSlackMock,
+      });
+
+      // Re-mock the module with the new octokit mock
+      mockedModule = await esmock('../../../../src/support/slack/actions/onboard-llmo-modal.js', {
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': sharedConfigMock,
+        '@adobe/spacecat-helix-content-sdk': sharedSharepointMock,
+        '@octokit/rest': {
+          Octokit: testOctokitMock,
         },
+        '@adobe/spacecat-shared-tier-client': {
+          default: tierClientMock,
+        },
+        '../../../../src/utils/slack/base.js': sharedSlackMock,
+        '../../../../src/controllers/llmo/llmo-onboarding.js': updatedMockedLLMOOnboarding,
       });
 
       onboardSite = mockedModule.onboardSite;
@@ -1004,13 +1033,9 @@ describe('onboard-llmo-modal', () => {
         }),
       };
 
-      // Re-mock the module with the new octokit mock and SharePoint mocks
-      mockedModule = await esmock('../../../../src/support/slack/actions/onboard-llmo-modal.js', {
-        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
-          Config: {
-            toDynamoItem: sinon.stub().returns({}),
-          },
-        },
+      // Re-mock the llmo-onboarding module with the new octokit mock
+      const updatedMockedLLMOOnboarding = await esmock('../../../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': sharedConfigMock,
         '@adobe/spacecat-helix-content-sdk': {
           createFrom: sinon.stub().resolves(mockSharepointClient),
         },
@@ -1020,9 +1045,23 @@ describe('onboard-llmo-modal', () => {
         '@adobe/spacecat-shared-tier-client': {
           default: tierClientMock,
         },
-        '../../../../src/utils/slack/base.js': {
-          postErrorMessage: sinon.stub(),
+        '../../../../src/utils/slack/base.js': sharedSlackMock,
+      });
+
+      // Re-mock the module with the new octokit mock and SharePoint mocks
+      mockedModule = await esmock('../../../../src/support/slack/actions/onboard-llmo-modal.js', {
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': sharedConfigMock,
+        '@adobe/spacecat-helix-content-sdk': {
+          createFrom: sinon.stub().resolves(mockSharepointClient),
         },
+        '@octokit/rest': {
+          Octokit: testOctokitMock,
+        },
+        '@adobe/spacecat-shared-tier-client': {
+          default: tierClientMock,
+        },
+        '../../../../src/utils/slack/base.js': sharedSlackMock,
+        '../../../../src/controllers/llmo/llmo-onboarding.js': updatedMockedLLMOOnboarding,
       });
 
       onboardSite = mockedModule.onboardSite;
@@ -1086,31 +1125,31 @@ example-com:
       const originalOctokitMock = octokitMock;
       octokitMock = testOctokitMock;
 
-      // Re-mock the module with the new octokit mock
-      mockedModule = await esmock('../../../../src/support/slack/actions/onboard-llmo-modal.js', {
-        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
-          Config: {
-            toDynamoItem: sinon.stub().returns({}),
-          },
-        },
-        '@adobe/spacecat-helix-content-sdk': {
-          createFrom: sinon.stub().resolves({
-            getDocument: sinon.stub().returns({
-              exists: sinon.stub().resolves(false),
-              createFolder: sinon.stub().resolves(),
-              copy: sinon.stub().resolves(),
-            }),
-          }),
-        },
+      // Re-mock the llmo-onboarding module with the new octokit mock
+      const updatedMockedLLMOOnboarding = await esmock('../../../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': sharedConfigMock,
+        '@adobe/spacecat-helix-content-sdk': sharedSharepointMock,
         '@octokit/rest': {
           Octokit: testOctokitMock,
         },
         '@adobe/spacecat-shared-tier-client': {
           default: tierClientMock,
         },
-        '../../../../src/utils/slack/base.js': {
-          postErrorMessage: sinon.stub(),
+        '../../../../src/utils/slack/base.js': sharedSlackMock,
+      });
+
+      // Re-mock the module with the new octokit mock
+      mockedModule = await esmock('../../../../src/support/slack/actions/onboard-llmo-modal.js', {
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': sharedConfigMock,
+        '@adobe/spacecat-helix-content-sdk': sharedSharepointMock,
+        '@octokit/rest': {
+          Octokit: testOctokitMock,
         },
+        '@adobe/spacecat-shared-tier-client': {
+          default: tierClientMock,
+        },
+        '../../../../src/utils/slack/base.js': sharedSlackMock,
+        '../../../../src/controllers/llmo/llmo-onboarding.js': updatedMockedLLMOOnboarding,
       });
 
       onboardSite = mockedModule.onboardSite;
@@ -1603,6 +1642,9 @@ example-com:
         blocks: [],
       });
 
+      // Check that TierClient was used for entitlement and enrollment
+      expect(mockTierClient.createEntitlement).to.have.been.calledWith('FREE_TRIAL');
+
       // Check that the function completed successfully by verifying the debug log
       expect(lambdaCtx.log.debug).to.have.been.calledWith('Added entitlements for site site123 (https://example.com) for user user123');
     });
@@ -2029,6 +2071,10 @@ example-com:
       await handler({ ack: mockAck, body: mockBody, client: mockClient });
 
       expect(mockAck).to.have.been.called;
+
+      // Check that TierClient was used for entitlement and enrollment
+      expect(mockTierClient.createEntitlement).to.have.been.calledWith('FREE_TRIAL');
+
       expect(mockClient.chat.postMessage).to.have.been.calledWith({
         channel: 'channel123',
         text: ':white_check_mark: Successfully updated organization and applied LLMO entitlements for *https://example.com* (brand: *Test Brand*)',
