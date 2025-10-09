@@ -1,3 +1,10 @@
+# [1.194.0](https://github.com/adobe/spacecat-api-service/compare/v1.193.2...v1.194.0) (2025-10-09)
+
+
+### Features
+
+* add summarization audit ([#1331](https://github.com/adobe/spacecat-api-service/issues/1331)) ([e2082ac](https://github.com/adobe/spacecat-api-service/commit/e2082aca146eb7dcc21baac171a097f5c8b13305))
+
 ## [1.193.2](https://github.com/adobe/spacecat-api-service/compare/v1.193.1...v1.193.2) (2025-10-09)
 
 
