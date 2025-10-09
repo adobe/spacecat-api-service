@@ -347,6 +347,13 @@ export function startOnboarding(lambdaContext) {
               type: 'divider',
             },
             {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: '*Preview Environment Configuration (Optional)*\nConfigure preview environment for preflight and auto-optimize. Only needed for AEM Cloud Service URLs.',
+              },
+            },
+            {
               type: 'input',
               block_id: 'preview_url_input',
               element: {
