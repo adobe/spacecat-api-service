@@ -1,3 +1,10 @@
+## [1.193.2](https://github.com/adobe/spacecat-api-service/compare/v1.193.1...v1.193.2) (2025-10-09)
+
+
+### Bug Fixes
+
+* **llmo:** trigger llmo-customer-analysis with auditContext ([#1334](https://github.com/adobe/spacecat-api-service/issues/1334)) ([238b2ba](https://github.com/adobe/spacecat-api-service/commit/238b2baf0085be8588e0b453ca1ba183d551333c))
+
 ## [1.193.1](https://github.com/adobe/spacecat-api-service/compare/v1.193.0...v1.193.1) (2025-10-08)
 
 
