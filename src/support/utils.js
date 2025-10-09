@@ -493,6 +493,33 @@ const isImportEnabled = (importType, imports) => {
 };
 
 /**
+ * Derives a project name from a base URL.
+ *
+ * @param {string} baseURL - The base URL
+ * @returns {string} The derived project name.
+ */
+export const deriveProjectName = (baseURL) => {
+  const parsedBaseURL = new URL(baseURL);
+  const { hostname } = parsedBaseURL;
+
+  // Split hostname by dots, if it has 3 or more parts, we assume it has a subdomain.
+  const parts = hostname.split('.');
+  if (parts.length <= 2) {
+    return hostname;
+  }
+
+  // Remove parts of the subdomain which are 2 or 3 letters long, max first two elements
+  for (let i = 0; i < Math.min(parts.length, 2); i += 1) {
+    const part = parts[i];
+    if (part.length <= 2 || part.length >= 4) {
+      parts[i] = null;
+    }
+  }
+
+  return parts.filter(Boolean).join('.');
+};
+
+/**
  * Creates a new project if it does not exist yet.
  *
  * @param {Object} context - The Lambda context object.
@@ -507,20 +534,36 @@ export const createProject = async (context, slackContext, baseURL, organization
   const { Project, Site } = dataAccess;
 
   try {
-    // Find existing project
+    const projectName = deriveProjectName(baseURL);
+
+    // Find existing project if project id is provided
     let existingProject;
     if (projectId) {
       const project = await Project.findById(projectId);
       if (project) {
         existingProject = project;
       }
-    } else {
+    }
+
+    // TODO: Refactor as this case cannot happen, if site exists we go into a different branch
+    // Instead pass siteId, check if the site has a project, if not, create it
+
+    // Check if the site already exists and already has a project
+    if (!existingProject) {
       const site = await Site.findByBaseURL(baseURL);
       if (site) {
         const project = await site.getProject();
         if (project) {
           existingProject = project;
         }
+      }
+    }
+
+    // Find existing project in the same org with the same name
+    if (!existingProject) {
+      const foundProject = await Project.findByOrganizationIdAndName(organizationId, projectName);
+      if (foundProject) {
+        existingProject = foundProject;
       }
     }
 
@@ -531,11 +574,7 @@ export const createProject = async (context, slackContext, baseURL, organization
     }
 
     // Otherwise create new project
-    const parsedBaseURL = new URL(baseURL);
-    const projectName = parsedBaseURL.hostname;
-
     const newProject = await Project.create({ id: projectId, projectName, organizationId });
-
     const message = `:information_source: Added site ${baseURL} to new project ${newProject.getProjectName()}. Project ID: ${newProject.getId()}`;
     await say(message);
 
@@ -581,6 +620,9 @@ const createSiteAndOrganization = async (
 
   let site = await Site.findByBaseURL(baseURL);
   let organizationId;
+
+  // TODO: Check if existing site has a project, if not, create it
+  // TODO: Check if existing site has language and region assigned, if not, assign them
 
   if (site) {
     const siteOrgId = site.getOrganizationId();
