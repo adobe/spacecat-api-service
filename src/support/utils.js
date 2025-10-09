@@ -553,7 +553,7 @@ export const createProject = async (
 
     // Find existing project in the same org with the same name
     if (!existingProject) {
-      const foundProject = await Project.findByOrganizationIdAndName(organizationId, projectName);
+      const foundProject = await Project.findByProjectName(projectName);
       if (foundProject) {
         existingProject = foundProject;
       }
