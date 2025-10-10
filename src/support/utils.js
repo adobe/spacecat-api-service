@@ -669,7 +669,16 @@ const createSiteAndOrganization = async (
     // Ensure config is properly serialized before saving
     const siteConfig = site.getConfig();
     site.setConfig(Config.toDynamoItem(siteConfig));
-    await site.save();
+    try {
+      await site.save();
+      await say(':white_check_mark: DeliveryConfig updated successfully');
+    } catch (error) {
+      log.error(`Error saving site with deliveryConfig: ${error.message}`, error);
+      localReportLine.errors = `Failed to save deliveryConfig: ${error.message}`;
+      localReportLine.status = 'Failed';
+      await say(`:x: *Error saving deliveryConfig:* ${error.message}`);
+      throw error;
+    }
   }
 
   Object.assign(reportLine, localReportLine);
