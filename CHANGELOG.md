@@ -1,3 +1,10 @@
+## [1.196.1](https://github.com/adobe/spacecat-api-service/compare/v1.196.0...v1.196.1) (2025-10-10)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.70.0 ([#1339](https://github.com/adobe/spacecat-api-service/issues/1339)) ([e58c50e](https://github.com/adobe/spacecat-api-service/commit/e58c50e9ae34c43d198776290a10d8bea18702a8))
+
 # [1.196.0](https://github.com/adobe/spacecat-api-service/compare/v1.195.0...v1.196.0) (2025-10-09)
 
 
