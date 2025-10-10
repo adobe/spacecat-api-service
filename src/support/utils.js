@@ -657,25 +657,11 @@ const createSiteAndOrganization = async (
     }
   }
 
+  // Set deliveryConfig and authoringType if provided (will be saved later with other site data)
   if (deliveryConfig && Object.keys(deliveryConfig).length > 0) {
     site.setDeliveryConfig(deliveryConfig);
     if (authoringType) {
       site.setAuthoringType(authoringType);
-    }
-    // Ensure config is properly serialized before saving
-    const siteConfig = site.getConfig();
-    site.setConfig(Config.toDynamoItem(siteConfig));
-    try {
-      await site.save();
-      await say(':white_check_mark: DeliveryConfig updated successfully');
-      // Refetch the site to ensure we have the latest state
-      site = await Site.findById(site.getId());
-    } catch (error) {
-      log.error(`Error saving site with deliveryConfig: ${error.message}`, error);
-      localReportLine.errors = `Failed to save deliveryConfig: ${error.message}`;
-      localReportLine.status = 'Failed';
-      await say(`:x: *Error saving deliveryConfig:* ${error.message}`);
-      throw error;
     }
   }
 
