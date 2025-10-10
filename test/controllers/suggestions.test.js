@@ -341,6 +341,7 @@ describe('Suggestions Controller', () => {
         }
         return Promise.resolve(mockSuggestionEntity(suggData));
       }),
+      getFixEntitiesBySuggestionId: sandbox.stub(),
     };
 
     mockSuggestionDataAccess = {
@@ -722,6 +723,8 @@ describe('Suggestions Controller', () => {
         getOpportunityId: () => OPPORTUNITY_ID,
         getType: () => 'CODE_CHANGE',
         getCreatedAt: () => '2025-01-01T00:00:00.000Z',
+        getUpdatedAt: () => '2025-01-01T00:00:00.000Z',
+        getExecutedBy: () => 'test@test.com',
         getExecutedAt: () => '2025-01-01T01:00:00.000Z',
         getPublishedAt: () => '2025-01-01T02:00:00.000Z',
         getChangeDetails: () => ({ file: 'index.js', changes: 'updated' }),
@@ -732,6 +735,8 @@ describe('Suggestions Controller', () => {
         getOpportunityId: () => OPPORTUNITY_ID,
         getType: () => 'CONTENT_UPDATE',
         getCreatedAt: () => '2025-01-02T00:00:00.000Z',
+        getUpdatedAt: () => '2025-01-02T00:00:00.000Z',
+        getExecutedBy: () => 'test@test.com',
         getExecutedAt: () => '2025-01-02T01:00:00.000Z',
         getPublishedAt: () => null,
         getChangeDetails: () => ({ content: 'new content' }),
@@ -740,7 +745,7 @@ describe('Suggestions Controller', () => {
     ];
 
     beforeEach(() => {
-      mockSuggestion.getFixEntitiesBySuggestionId = sandbox.stub().resolves(mockFixEntities);
+      mockSuggestion.getFixEntitiesBySuggestionId.resolves(mockFixEntities);
     });
 
     it('gets all fixes for a suggestion successfully', async () => {

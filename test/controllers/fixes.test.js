@@ -85,7 +85,8 @@ describe('Fixes Controller', () => {
     sandbox.stub(fixEntityCollection, 'allByOpportunityId');
     sandbox.stub(fixEntityCollection, 'allByOpportunityIdAndStatus');
     sandbox.stub(fixEntityCollection, 'findById');
-    sandbox.stub(fixEntityCollection, 'setSuggestionsByFixEntityId');
+    sandbox.stub(fixEntityCollection, 'setSuggestionsForFixEntity');
+    sandbox.stub(fixEntityCollection, 'getAllFixesWithSuggestionByCreatedAt');
     sandbox.stub(suggestionCollection, 'allByIndexKeys');
     sandbox.stub(suggestionCollection, 'findById');
     sandbox.stub(fixEntitySuggestionCollection, 'createMany');
@@ -184,6 +185,209 @@ describe('Fixes Controller', () => {
       requestContext.params.opportunityId = 'not-a-uuid';
       const response = await fixesController.getAllForOpportunity(requestContext);
       expect(response).includes({ status: 400 });
+    });
+
+    describe('with fixEntityCreatedDate parameter', () => {
+      const fixEntityCreatedDate = '2025-05-19T01:23:45.678Z';
+
+      beforeEach(() => {
+        requestContext.params.fixEntityCreatedDate = fixEntityCreatedDate;
+      });
+
+      it('can get all fixes with suggestions by created date', async () => {
+        const suggestion1 = await suggestionCollection.create({
+          opportunityId,
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+        });
+        const suggestion2 = await suggestionCollection.create({
+          opportunityId,
+          type: Suggestion.TYPES.REDIRECT_UPDATE,
+        });
+
+        const fixEntity = await fixEntityCollection.create({
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+          opportunityId,
+          changeDetails: { arbitrary: 'value 1' },
+          createdAt: fixEntityCreatedDate,
+        });
+
+        fixEntityCollection.getAllFixesWithSuggestionByCreatedAt
+          .withArgs(opportunityId, fixEntityCreatedDate)
+          .resolves([
+            {
+              fixEntity,
+              suggestions: [suggestion1, suggestion2],
+            },
+          ]);
+
+        const response = await fixesController.getAllForOpportunity(requestContext);
+
+        expect(response).includes({ status: 200 });
+        const result = await response.json();
+        expect(result).to.have.lengthOf(1);
+        expect(result[0]).to.include({
+          id: fixEntity.getId(),
+          opportunityId,
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+        });
+        expect(result[0].suggestions).to.have.lengthOf(2);
+        expect(result[0].suggestions[0].id).to.equal(suggestion1.getId());
+        expect(result[0].suggestions[1].id).to.equal(suggestion2.getId());
+      });
+
+      it('returns empty array when no fixes found for the given created date', async () => {
+        fixEntityCollection.getAllFixesWithSuggestionByCreatedAt
+          .withArgs(opportunityId, fixEntityCreatedDate)
+          .resolves([]);
+
+        const response = await fixesController.getAllForOpportunity(requestContext);
+
+        expect(response).includes({ status: 200 });
+        const result = await response.json();
+        expect(result).to.deep.equal([]);
+      });
+
+      it('responds 404 if the fix does not belong to the given opportunity', async () => {
+        const fixEntity = await fixEntityCollection.create({
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+          opportunityId: 'wrong-opportunity-id',
+          createdAt: fixEntityCreatedDate,
+        });
+
+        fixEntityCollection.getAllFixesWithSuggestionByCreatedAt
+          .withArgs(opportunityId, fixEntityCreatedDate)
+          .resolves([
+            {
+              fixEntity,
+              suggestions: [],
+            },
+          ]);
+
+        const response = await fixesController.getAllForOpportunity(requestContext);
+        expect(response).includes({ status: 404 });
+        expect(await response.json()).deep.equals({
+          message: 'Opportunity not found',
+        });
+      });
+
+      it('responds 404 if the opportunity does not belong to the given site', async () => {
+        const fixEntity = await fixEntityCollection.create({
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+          opportunityId,
+          createdAt: fixEntityCreatedDate,
+        });
+
+        fixEntityCollection.getAllFixesWithSuggestionByCreatedAt
+          .withArgs(opportunityId, fixEntityCreatedDate)
+          .resolves([
+            {
+              fixEntity,
+              suggestions: [],
+            },
+          ]);
+
+        opportunityGetStub.callsFake((data) => ({
+          go: async () => ({ data: { ...data, siteId: 'wrong-site-id' } }),
+        }));
+
+        const response = await fixesController.getAllForOpportunity(requestContext);
+        expect(response).includes({ status: 404 });
+        expect(await response.json()).deep.equals({
+          message: 'Opportunity not found',
+        });
+      });
+
+      it('can get multiple fixes with their suggestions by created date', async () => {
+        const suggestion1 = await suggestionCollection.create({
+          opportunityId,
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+        });
+        const suggestion2 = await suggestionCollection.create({
+          opportunityId,
+          type: Suggestion.TYPES.REDIRECT_UPDATE,
+        });
+        const suggestion3 = await suggestionCollection.create({
+          opportunityId,
+          type: Suggestion.TYPES.METADATA_UPDATE,
+        });
+
+        const fixEntity1 = await fixEntityCollection.create({
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+          opportunityId,
+          changeDetails: { arbitrary: 'value 1' },
+          createdAt: fixEntityCreatedDate,
+        });
+
+        const fixEntity2 = await fixEntityCollection.create({
+          type: Suggestion.TYPES.REDIRECT_UPDATE,
+          opportunityId,
+          changeDetails: { arbitrary: 'value 2' },
+          createdAt: fixEntityCreatedDate,
+        });
+
+        fixEntityCollection.getAllFixesWithSuggestionByCreatedAt
+          .withArgs(opportunityId, fixEntityCreatedDate)
+          .resolves([
+            {
+              fixEntity: fixEntity1,
+              suggestions: [suggestion1, suggestion2],
+            },
+            {
+              fixEntity: fixEntity2,
+              suggestions: [suggestion3],
+            },
+          ]);
+
+        const response = await fixesController.getAllForOpportunity(requestContext);
+
+        expect(response).includes({ status: 200 });
+        const result = await response.json();
+        expect(result).to.have.lengthOf(2);
+
+        expect(result[0]).to.include({
+          id: fixEntity1.getId(),
+          opportunityId,
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+        });
+        expect(result[0].suggestions).to.have.lengthOf(2);
+
+        expect(result[1]).to.include({
+          id: fixEntity2.getId(),
+          opportunityId,
+          type: Suggestion.TYPES.REDIRECT_UPDATE,
+        });
+        expect(result[1].suggestions).to.have.lengthOf(1);
+      });
+
+      it('handles fixes with no suggestions when querying by created date', async () => {
+        const fixEntity = await fixEntityCollection.create({
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+          opportunityId,
+          changeDetails: { arbitrary: 'value 1' },
+          createdAt: fixEntityCreatedDate,
+        });
+
+        fixEntityCollection.getAllFixesWithSuggestionByCreatedAt
+          .withArgs(opportunityId, fixEntityCreatedDate)
+          .resolves([
+            {
+              fixEntity,
+              suggestions: [],
+            },
+          ]);
+
+        const response = await fixesController.getAllForOpportunity(requestContext);
+
+        expect(response).includes({ status: 200 });
+        const result = await response.json();
+        expect(result).to.have.lengthOf(1);
+        expect(result[0]).to.include({
+          id: fixEntity.getId(),
+          opportunityId,
+          type: Suggestion.TYPES.CONTENT_UPDATE,
+        });
+        expect(result[0].suggestions).to.have.lengthOf(0);
+      });
     });
   });
 
@@ -448,8 +652,8 @@ describe('Fixes Controller', () => {
     beforeEach(() => {
       requestContext.data = null;
 
-      // Configure the setSuggestionsByFixEntityId mock for create fixes tests
-      fixEntityCollection.setSuggestionsByFixEntityId.resolves({
+      // Configure the setSuggestionsForFixEntity mock for create fixes tests
+      fixEntityCollection.setSuggestionsForFixEntity.resolves({
         createdItems: [],
         errorItems: [],
         removedCount: 0,
@@ -595,8 +799,8 @@ describe('Fixes Controller', () => {
       };
       requestContext.data = [fixData];
 
-      // Configure the setSuggestionsByFixEntityId method for this test
-      fixEntityCollection.setSuggestionsByFixEntityId.resolves({
+      // Configure the setSuggestionsForFixEntity method for this test
+      fixEntityCollection.setSuggestionsForFixEntity.resolves({
         createdItems: suggestions.map((s) => ({
           getSuggestionId: () => s.getId(),
           getFixEntityId: () => 'mock-fix-id',
@@ -614,8 +818,8 @@ describe('Fixes Controller', () => {
       expect(fixes[0]).includes({ index: 0, statusCode: 201 });
       expect(fixes[0].fix).includes({ type: 'CONTENT_UPDATE', opportunityId });
 
-      // Verify that setSuggestionsByFixEntityId was called
-      expect(fixEntityCollection.setSuggestionsByFixEntityId).to.have.been.calledOnce;
+      // Verify that setSuggestionsForFixEntity was called
+      expect(fixEntityCollection.setSuggestionsForFixEntity).to.have.been.calledOnce;
     });
 
     it('can create multiple fixes with different suggestion IDs', async () => {
@@ -647,8 +851,8 @@ describe('Fixes Controller', () => {
       ];
       requestContext.data = fixData;
 
-      // Configure the setSuggestionsByFixEntityId method for this test
-      fixEntityCollection.setSuggestionsByFixEntityId.resolves({
+      // Configure the setSuggestionsForFixEntity method for this test
+      fixEntityCollection.setSuggestionsForFixEntity.resolves({
         createdItems: [],
         errorItems: [],
         removedCount: 0,
@@ -661,7 +865,7 @@ describe('Fixes Controller', () => {
       expect(metadata).deep.equals({ total: 3, success: 3, failed: 0 });
       expect(fixes).have.lengthOf(3);
 
-      expect(fixEntityCollection.setSuggestionsByFixEntityId).to.have.been.calledTwice;
+      expect(fixEntityCollection.setSuggestionsForFixEntity).to.have.been.calledTwice;
     });
 
     it('handles invalid suggestion IDs during fix creation', async () => {
@@ -675,9 +879,9 @@ describe('Fixes Controller', () => {
       };
       requestContext.data = [fixData];
 
-      // Configure validation failure in setSuggestionsByFixEntityId
+      // Configure validation failure in setSuggestionsForFixEntity
       suggestionCollection.findById.withArgs(invalidSuggestionId).resolves(null);
-      fixEntityCollection.setSuggestionsByFixEntityId.rejects(new Error('Invalid suggestion IDs'));
+      fixEntityCollection.setSuggestionsForFixEntity.rejects(new Error('Invalid suggestion IDs'));
 
       const response = await fixesController.createFixes(requestContext);
       expect(response).includes({ status: 207 });
@@ -941,8 +1145,11 @@ describe('Fixes Controller', () => {
       );
 
       // Configure the many-to-many relationship method mock
-      fixEntityCollection.setSuggestionsByFixEntityId.callsFake(
-        async (fixId, suggestionIds) => {
+      fixEntityCollection.setSuggestionsForFixEntity.callsFake(
+        async (opportunityIdParam, fixEntity, suggestions) => {
+          const fixId = fixEntity.getId();
+          const suggestionIds = suggestions.map((s) => s.getId());
+
           // Clear existing relationships for this fix
           suggestionsByFix.set(fixId, new Set());
 
@@ -994,6 +1201,15 @@ describe('Fixes Controller', () => {
         getSuggestionId: () => s.getId(),
         getFixEntityId: () => fix.getId(),
       })));
+
+      fixEntityCollection.setSuggestionsForFixEntity.resolves({
+        createdItems: suggestions.map((s) => ({
+          getSuggestionId: () => s.getId(),
+          getFixEntityId: () => fix.getId(),
+        })),
+        errorItems: [],
+        removedCount: 0,
+      });
 
       suggestionCollection.batchGetByKeys.resolves({
         data: suggestions,
@@ -1101,12 +1317,18 @@ describe('Fixes Controller', () => {
         changeDetails: { arbitrary: 'Changes' },
       };
 
+      fixEntityCollection.setSuggestionsForFixEntity.resolves({
+        createdItems: [],
+        errorItems: [],
+        removedCount: 0,
+      });
+
       const response = await fixesController.patchFix(requestContext);
       expect(response).includes({ status: 200 });
 
-      // Verify that setSuggestionsByFixEntityId was called with empty array
-      expect(fixEntityCollection.setSuggestionsByFixEntityId)
-        .to.have.been.calledWith(fixEntityId, []);
+      // Verify that setSuggestionsForFixEntity was called with empty array
+      expect(fixEntityCollection.setSuggestionsForFixEntity)
+        .to.have.been.calledWith(opportunityId, fix, []);
     });
 
     it('can patch a fix with only suggestion IDs (no other updates)', async () => {
@@ -1121,20 +1343,21 @@ describe('Fixes Controller', () => {
       const response = await fixesController.patchFix(requestContext);
       expect(response).includes({ status: 200 });
 
-      // Verify that setSuggestionsByFixEntityId was called
-      expect(fixEntityCollection.setSuggestionsByFixEntityId).to.have.been.calledWith(
-        fixEntityId,
-        suggestions.map((s) => s.getId()),
+      // Verify that setSuggestionsForFixEntity was called
+      expect(fixEntityCollection.setSuggestionsForFixEntity).to.have.been.calledWith(
+        opportunityId,
+        fix,
+        suggestions,
       );
     });
 
-    it('handles setSuggestionsByFixEntityId failure gracefully', async () => {
+    it('handles setSuggestionsForFixEntity failure gracefully', async () => {
       const suggestions = await Promise.all([
         createSuggestion({ type: 'CONTENT_UPDATE' }),
       ]);
 
-      // Configure setSuggestionsByFixEntityId to throw an error
-      fixEntityCollection.setSuggestionsByFixEntityId.rejects(new Error('Database error'));
+      // Configure setSuggestionsForFixEntity to throw an error
+      fixEntityCollection.setSuggestionsForFixEntity.rejects(new Error('Database error'));
       sandbox.stub(log, 'error'); // silence error logging
 
       requestContext.data = {
@@ -1173,10 +1396,11 @@ describe('Fixes Controller', () => {
       expect(fix.getExecutedAt()).equals(executedAt);
       expect(fix.getChangeDetails()).deep.equals(changeDetails);
 
-      // Verify that setSuggestionsByFixEntityId was called
-      expect(fixEntityCollection.setSuggestionsByFixEntityId).to.have.been.calledWith(
-        fixEntityId,
-        suggestions.map((s) => s.getId()),
+      // Verify that setSuggestionsForFixEntity was called
+      expect(fixEntityCollection.setSuggestionsForFixEntity).to.have.been.calledWith(
+        opportunityId,
+        fix,
+        suggestions,
       );
     });
   });
@@ -1270,6 +1494,7 @@ function fakeCreateFix(data) {
   data.executedAt ??= ISO_DATE;
   data.executedBy ??= 'test user';
   data.publishedAt ??= ISO_DATE;
+  data.updatedAt ??= ISO_DATE;
 
   return { go: async () => ({ data }) };
 }
