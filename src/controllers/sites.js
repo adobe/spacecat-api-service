@@ -420,6 +420,36 @@ function SitesController(ctx, log, env) {
       updates = true;
     }
 
+    // Handle localization fields
+    if (requestBody.projectId !== site.getProjectId() && isValidUUID(requestBody.projectId)) {
+      site.setProjectId(requestBody.projectId);
+      updates = true;
+    }
+
+    if (isBoolean(requestBody.isPrimaryLocale)
+        && requestBody.isPrimaryLocale !== site.getIsPrimaryLocale()) {
+      site.setIsPrimaryLocale(requestBody.isPrimaryLocale);
+      updates = true;
+    }
+
+    if (hasText(requestBody.language) && requestBody.language !== site.getLanguage()) {
+      // Validate ISO 639-1 format
+      if (!/^[a-z]{2}$/.test(requestBody.language)) {
+        return badRequest('Language must be in ISO 639-1 format (2 lowercase letters)');
+      }
+      site.setLanguage(requestBody.language);
+      updates = true;
+    }
+
+    if (hasText(requestBody.region) && requestBody.region !== site.getRegion()) {
+      // Validate ISO 3166-1 alpha-2 format
+      if (!/^[A-Z]{2}$/.test(requestBody.region)) {
+        return badRequest('Region must be in ISO 3166-1 alpha-2 format (2 uppercase letters)');
+      }
+      site.setRegion(requestBody.region);
+      updates = true;
+    }
+
     if (updates) {
       site.setUpdatedBy(profile.email || 'system');
       const updatedSite = await site.save();
