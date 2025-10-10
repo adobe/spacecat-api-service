@@ -1,3 +1,10 @@
+# [1.196.0](https://github.com/adobe/spacecat-api-service/compare/v1.195.0...v1.196.0) (2025-10-09)
+
+
+### Features
+
+* add brand presence cadence selector (weekly/daily) to LLMO onboarding ([#1313](https://github.com/adobe/spacecat-api-service/issues/1313)) ([d72326d](https://github.com/adobe/spacecat-api-service/commit/d72326d4679e4d140c10ac719cda7deddb003235))
+
 # [1.195.0](https://github.com/adobe/spacecat-api-service/compare/v1.194.0...v1.195.0) (2025-10-09)
 
 
