@@ -191,8 +191,8 @@ function ProjectsController(ctx, env) {
     }
 
     let updates = false;
-    if (isString(requestBody.name) && requestBody.name !== project.getName()) {
-      project.setName(requestBody.name);
+    if (isString(requestBody.projectName) && requestBody.projectName !== project.getProjectName()) {
+      project.setProjectName(requestBody.projectName);
       updates = true;
     }
 

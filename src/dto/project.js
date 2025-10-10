@@ -27,7 +27,7 @@ export const ProjectDto = {
    */
   toJSON: (project) => ({
     id: project.getId(),
-    name: project.getName(),
+    projectName: project.getProjectName(),
     organizationId: project.getOrganizationId(),
     createdAt: project.getCreatedAt(),
     updatedAt: project.getUpdatedAt(),

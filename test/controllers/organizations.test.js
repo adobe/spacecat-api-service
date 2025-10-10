@@ -130,13 +130,13 @@ describe('Organizations Controller', () => {
 
   const projects = [
     {
-      id: '550e8400-e29b-41d4-a716-446655440000',
-      name: 'Project 1',
+      projectId: '550e8400-e29b-41d4-a716-446655440000',
+      projectName: 'Project 1',
       organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28',
     },
     {
-      id: '850e8400-e29b-41d4-a716-446655440000',
-      name: 'Project 2',
+      projectId: '850e8400-e29b-41d4-a716-446655440000',
+      projectName: 'Project 2',
       organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28',
     },
   ].map((project) => new Project(
@@ -148,10 +148,8 @@ describe('Organizations Controller', () => {
               indexes: {},
               attributes: {
                 id: { type: 'string', get: (value) => value },
-                name: { type: 'string', get: (value) => value },
+                projectName: { type: 'string', get: (value) => value },
                 organizationId: { type: 'string', get: (value) => value },
-                createdAt: { type: 'string', get: (value) => value },
-                updatedAt: { type: 'string', get: (value) => value },
               },
             },
           },

@@ -101,9 +101,17 @@ const project = new Project(
         model: {
           schema: {
             indexes: {},
-            attributes: { name: { type: 'string', get: (value) => value } },
+            attributes: {
+              id: { type: 'string', get: (value) => value },
+              projectName: { type: 'string', get: (value) => value },
+              organizationId: { type: 'string', get: (value) => value },
+            },
           },
         },
+        patch: sinon.stub().returns({
+          composite: () => ({ go: () => {} }),
+          set: () => {},
+        }),
       },
     },
   },
@@ -116,8 +124,8 @@ const project = new Project(
   },
   ProjectSchema,
   {
-    id: '550e8400-e29b-41d4-a716-446655440000',
-    name: 'Project 1',
+    projectId: '550e8400-e29b-41d4-a716-446655440000',
+    projectName: 'Project 1',
     organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28',
   },
   console,
@@ -221,7 +229,7 @@ describe('Projects Controller', () => {
   describe('createProject', () => {
     it('should create a project successfully for admin users', async () => {
       const response = await projectsController.createProject({
-        data: { name: 'New Project', organizationId: '550e8400-e29b-41d4-a716-446655440001' },
+        data: { projectName: 'Project 1', organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' },
         ...context,
       });
 
@@ -229,12 +237,10 @@ describe('Projects Controller', () => {
       const responseBody = await response.json();
       expect(responseBody).to.deep.equal({
         id: '550e8400-e29b-41d4-a716-446655440000',
-        name: 'Test Project',
-        organizationId: '550e8400-e29b-41d4-a716-446655440001',
-        createdAt: '2024-01-15T10:00:00Z',
-        updatedAt: '2024-01-15T10:00:00Z',
+        projectName: 'Project 1',
+        organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28',
       });
-      expect(mockDataAccess.Project.create).to.have.been.calledWith({ name: 'New Project', organizationId: '550e8400-e29b-41d4-a716-446655440001' });
+      expect(mockDataAccess.Project.create).to.have.been.calledWith({ projectName: 'Project 1', organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' });
     });
 
     it('should return forbidden for non-admin users', async () => {
@@ -271,10 +277,8 @@ describe('Projects Controller', () => {
       expect(responseBody).to.have.length(1);
       expect(responseBody[0]).to.deep.equal({
         id: '550e8400-e29b-41d4-a716-446655440000',
-        name: 'Test Project',
-        organizationId: '550e8400-e29b-41d4-a716-446655440001',
-        createdAt: '2024-01-15T10:00:00Z',
-        updatedAt: '2024-01-15T10:00:00Z',
+        projectName: 'Project 1',
+        organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28',
       });
       expect(mockDataAccess.Project.all).to.have.been.called;
     });
@@ -300,10 +304,8 @@ describe('Projects Controller', () => {
       const responseBody = await response.json();
       expect(responseBody).to.deep.equal({
         id: '550e8400-e29b-41d4-a716-446655440000',
-        name: 'Test Project',
-        organizationId: '550e8400-e29b-41d4-a716-446655440001',
-        createdAt: '2024-01-15T10:00:00Z',
-        updatedAt: '2024-01-15T10:00:00Z',
+        projectName: 'Project 1',
+        organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28',
       });
       expect(mockDataAccess.Project.findById).to.have.been.calledWith('550e8400-e29b-41d4-a716-446655440000');
     });
@@ -404,12 +406,12 @@ describe('Projects Controller', () => {
     it('should update project name successfully', async () => {
       const response = await projectsController.updateProject({
         params: { projectId: '550e8400-e29b-41d4-a716-446655440000' },
-        data: { name: 'Updated Project Name' },
+        data: { projectName: 'Updated Project Name' },
         ...context,
       });
 
       expect(response.status).to.equal(200);
-      expect(project.setName).to.have.been.calledWith('Updated Project Name');
+      expect(project.setProjectName).to.have.been.calledWith('Updated Project Name');
       expect(project.save).to.have.been.called;
     });
 
