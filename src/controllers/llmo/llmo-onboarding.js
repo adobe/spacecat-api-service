@@ -170,7 +170,7 @@ async function publishToAdminHlx(filename, outputLocation, log) {
  * @param {Function} say - Optional function to send messages (e.g., Slack say function)
  * @returns {Promise<void>}
  */
-export async function copyFilesToSharepoint(dataFolder, context, say = () => {}) {
+export async function copyFilesToSharepoint(dataFolder, context, say = () => { }) {
   const { log, env } = context;
 
   const sharepointClient = await createSharePointClient(env);
@@ -209,7 +209,7 @@ export async function copyFilesToSharepoint(dataFolder, context, say = () => {})
  * @param {Function} say - Optional function to send messages (e.g., Slack say function)
  * @returns {Promise<void>}
  */
-export async function updateIndexConfig(dataFolder, context, say = () => {}) {
+export async function updateIndexConfig(dataFolder, context, say = () => { }) {
   const { log, env } = context;
 
   log.debug('Starting Git modification of helix query config');
@@ -260,7 +260,7 @@ export async function updateIndexConfig(dataFolder, context, say = () => {}) {
  * @param {object} slackContext - Slack context (optional, for Slack operations)
  * @returns {Promise<object>} The organization object
  */
-export async function createOrFindOrganization(imsOrgId, context, say = () => {}) {
+export async function createOrFindOrganization(imsOrgId, context, say = () => { }) {
   const { dataAccess, log } = context;
   const { Organization } = dataAccess;
 
@@ -320,7 +320,7 @@ export async function createOrFindSite(baseURL, organizationId, context) {
  * @param {Function} say - Optional function to send messages (e.g., Slack say function)
  * @returns {Promise<object>} The entitlement and enrollment objects
  */
-export async function createEntitlementAndEnrollment(site, context, say = () => {}) {
+export async function createEntitlementAndEnrollment(site, context, say = () => { }) {
   const { log } = context;
 
   try {
@@ -335,6 +335,31 @@ export async function createEntitlementAndEnrollment(site, context, say = () => 
   } catch (error) {
     log.info(`Ensuring LLMO entitlement and enrollment failed: ${error.message}`);
     await say('❌ Ensuring LLMO entitlement and enrollment failed');
+    throw error;
+  }
+}
+
+export async function hasActiveLlmoEnrollment(site, context) {
+  try {
+    const tierClient = await TierClient.createForSite(context, site, LLMO_PRODUCT_CODE);
+    const { siteEnrollment } = await tierClient.checkValidEntitlement();
+    return !!siteEnrollment;
+  } catch (error) {
+    return false;
+  }
+}
+
+export async function removeEnrollment(site, context, say = () => { }) {
+  const { log } = context;
+
+  try {
+    const tierClient = await TierClient.createForSite(context, site, LLMO_PRODUCT_CODE);
+    await tierClient.revokeSiteEnrollment();
+    log.info(`Successfully revoked LLMO enrollment for site ${site.getId()}`);
+    await say(`✅ Successfully revoked LLMO enrollment for site ${site.getId()}`);
+  } catch (error) {
+    log.error(`Removing LLMO enrollment failed: ${error.message}`);
+    await say('❌ Removing LLMO enrollment failed');
     throw error;
   }
 }

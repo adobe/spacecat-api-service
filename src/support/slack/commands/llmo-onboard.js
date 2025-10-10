@@ -14,6 +14,7 @@ import {
   extractURLFromSlackInput,
   postErrorMessage,
 } from '../../../utils/slack/base.js';
+import { hasActiveLlmoEnrollment } from '../../../controllers/llmo/llmo-onboarding.js';
 
 import BaseCommand from './base.js';
 
@@ -30,7 +31,7 @@ function LlmoOnboardCommand(context) {
   const baseCommand = BaseCommand({
     id: 'onboard-llmo',
     name: 'Onboard LLMO',
-    description: 'Onboards a site for LLMO (Large Language Model Optimizer) through a modal interface.',
+    description: 'Onboards a site for LLMO (Large Language Model Optimizer) through a modal interface. For already-onboarded sites, provides options to add entitlements, update IMS org, or remove enrollment.',
     phrases: PHRASES,
     usageText: `${PHRASES[0]} <site url>`,
   });
@@ -68,6 +69,62 @@ function LlmoOnboardCommand(context) {
       let message;
 
       if (brand) {
+        const hasEnrollment = await hasActiveLlmoEnrollment(existingSite, context);
+
+        const actionButtons = [
+          {
+            type: 'button',
+            text: {
+              type: 'plain_text',
+              text: 'Add Entitlements',
+            },
+            value: JSON.stringify({
+              brandURL: normalizedSite,
+              siteId: existingSite.getId(),
+              existingBrand: brand,
+              originalChannel: 'current',
+              originalThreadTs: threadTs,
+            }),
+            action_id: 'add_entitlements_action',
+            style: 'primary',
+          },
+          {
+            type: 'button',
+            text: {
+              type: 'plain_text',
+              text: 'Update IMS Org',
+            },
+            value: JSON.stringify({
+              brandURL: normalizedSite,
+              siteId: existingSite.getId(),
+              existingBrand: brand,
+              currentOrgId: existingSite.getOrganizationId(),
+              originalChannel: 'current',
+              originalThreadTs: threadTs,
+            }),
+            action_id: 'update_org_action',
+          },
+        ];
+
+        if (hasEnrollment) {
+          actionButtons.push({
+            type: 'button',
+            text: {
+              type: 'plain_text',
+              text: 'Remove Enrollment',
+            },
+            value: JSON.stringify({
+              brandURL: normalizedSite,
+              siteId: existingSite.getId(),
+              existingBrand: brand,
+              originalChannel: 'current',
+              originalThreadTs: threadTs,
+            }),
+            action_id: 'remove_llmo_enrollment',
+            style: 'danger',
+          });
+        }
+
         message = {
           blocks: [
             {
@@ -79,40 +136,7 @@ function LlmoOnboardCommand(context) {
             },
             {
               type: 'actions',
-              elements: [
-                {
-                  type: 'button',
-                  text: {
-                    type: 'plain_text',
-                    text: 'Add Entitlements',
-                  },
-                  value: JSON.stringify({
-                    brandURL: normalizedSite,
-                    siteId: existingSite.getId(),
-                    existingBrand: brand,
-                    originalChannel: 'current',
-                    originalThreadTs: threadTs,
-                  }),
-                  action_id: 'add_entitlements_action',
-                  style: 'primary',
-                },
-                {
-                  type: 'button',
-                  text: {
-                    type: 'plain_text',
-                    text: 'Update IMS Org',
-                  },
-                  value: JSON.stringify({
-                    brandURL: normalizedSite,
-                    siteId: existingSite.getId(),
-                    existingBrand: brand,
-                    currentOrgId: existingSite.getOrganizationId(),
-                    originalChannel: 'current',
-                    originalThreadTs: threadTs,
-                  }),
-                  action_id: 'update_org_action',
-                },
-              ],
+              elements: actionButtons,
             },
           ],
           thread_ts: threadTs,

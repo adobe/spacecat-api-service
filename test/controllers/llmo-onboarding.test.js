@@ -660,4 +660,178 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockLog.info).to.have.been.calledWith('Created site site123 for https://example.com');
     });
   });
+
+  describe('hasActiveLlmoEnrollment', () => {
+    it('should return true when site has an active LLMO enrollment', async () => {
+      const mockTierClient = {
+        checkValidEntitlement: sinon.stub().resolves({
+          entitlement: { getId: () => 'ent-123' },
+          siteEnrollment: { getId: () => 'enrollment-123' },
+        }),
+      };
+
+      const { hasActiveLlmoEnrollment } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-tier-client': {
+          default: {
+            createForSite: sinon.stub().resolves(mockTierClient),
+          },
+        },
+      });
+
+      const mockSite = {
+        getId: sinon.stub().returns('site-123'),
+      };
+
+      const context = {
+        log: mockLog,
+      };
+
+      const result = await hasActiveLlmoEnrollment(mockSite, context);
+
+      expect(result).to.be.true;
+    });
+
+    it('should return false when site has no enrollment', async () => {
+      const mockTierClient = {
+        checkValidEntitlement: sinon.stub().resolves({
+          entitlement: { getId: () => 'ent-123' },
+          siteEnrollment: null,
+        }),
+      };
+
+      const { hasActiveLlmoEnrollment } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-tier-client': {
+          default: {
+            createForSite: sinon.stub().resolves(mockTierClient),
+          },
+        },
+      });
+
+      const mockSite = {
+        getId: sinon.stub().returns('site-123'),
+      };
+
+      const context = {
+        log: mockLog,
+      };
+
+      const result = await hasActiveLlmoEnrollment(mockSite, context);
+
+      expect(result).to.be.false;
+    });
+
+    it('should return false when TierClient throws an error', async () => {
+      const { hasActiveLlmoEnrollment } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-tier-client': {
+          default: {
+            createForSite: sinon.stub().rejects(new Error('TierClient error')),
+          },
+        },
+      });
+
+      const mockSite = {
+        getId: sinon.stub().returns('site-123'),
+      };
+
+      const context = {
+        log: mockLog,
+      };
+
+      const result = await hasActiveLlmoEnrollment(mockSite, context);
+
+      expect(result).to.be.false;
+    });
+
+    it('should return false when checkValidEntitlement throws an error', async () => {
+      const mockTierClient = {
+        checkValidEntitlement: sinon.stub().rejects(new Error('Check failed')),
+      };
+
+      const { hasActiveLlmoEnrollment } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-tier-client': {
+          default: {
+            createForSite: sinon.stub().resolves(mockTierClient),
+          },
+        },
+      });
+
+      const mockSite = {
+        getId: sinon.stub().returns('site-123'),
+      };
+
+      const context = {
+        log: mockLog,
+      };
+
+      const result = await hasActiveLlmoEnrollment(mockSite, context);
+
+      expect(result).to.be.false;
+    });
+  });
+
+  describe('removeEnrollment', () => {
+    it('should successfully revoke LLMO enrollment', async () => {
+      const mockTierClient = {
+        revokeSiteEnrollment: sinon.stub().resolves(),
+      };
+
+      const { removeEnrollment } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-tier-client': {
+          default: {
+            createForSite: sinon.stub().resolves(mockTierClient),
+          },
+        },
+      });
+
+      const mockSite = {
+        getId: sinon.stub().returns('site-123'),
+      };
+
+      const context = {
+        log: mockLog,
+      };
+
+      const say = sinon.stub().resolves();
+
+      await removeEnrollment(mockSite, context, say);
+
+      expect(mockTierClient.revokeSiteEnrollment).to.have.been.calledOnce;
+      expect(mockLog.info).to.have.been.calledWith('Successfully revoked LLMO enrollment for site site-123');
+      expect(say).to.have.been.calledWith('✅ Successfully revoked LLMO enrollment for site site-123');
+    });
+
+    it('should handle errors when revoking LLMO enrollment', async () => {
+      const mockError = new Error('Revoke failed');
+      const mockTierClient = {
+        revokeSiteEnrollment: sinon.stub().rejects(mockError),
+      };
+
+      const { removeEnrollment } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-tier-client': {
+          default: {
+            createForSite: sinon.stub().resolves(mockTierClient),
+          },
+        },
+      });
+
+      const mockSite = {
+        getId: sinon.stub().returns('site-123'),
+      };
+
+      const context = {
+        log: mockLog,
+      };
+
+      const say = sinon.stub().resolves();
+
+      try {
+        await removeEnrollment(mockSite, context, say);
+        expect.fail('Should have thrown an error');
+      } catch (error) {
+        expect(error).to.equal(mockError);
+        expect(mockLog.error).to.have.been.calledWith('Removing LLMO enrollment failed: Revoke failed');
+        expect(say).to.have.been.calledWith('❌ Removing LLMO enrollment failed');
+      }
+    });
+  });
 });
