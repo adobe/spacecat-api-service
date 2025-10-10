@@ -1,3 +1,10 @@
+# [1.198.0](https://github.com/adobe/spacecat-api-service/compare/v1.197.0...v1.198.0) (2025-10-10)
+
+
+### Features
+
+* create delivery config with required attributes in site config ([#1327](https://github.com/adobe/spacecat-api-service/issues/1327)) ([7df4204](https://github.com/adobe/spacecat-api-service/commit/7df4204201960f3ec3a22e44f6adb6c4670d9418))
+
 # [1.197.0](https://github.com/adobe/spacecat-api-service/compare/v1.196.3...v1.197.0) (2025-10-10)
 
 
