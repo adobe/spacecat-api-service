@@ -21,8 +21,11 @@ import {
   isObject,
   resolveCanonicalUrl, isValidIMSOrgId,
   detectAEMVersion,
+  detectLocale,
 } from '@adobe/spacecat-shared-utils';
 import TierClient from '@adobe/spacecat-shared-tier-client';
+import { iso6393 } from 'iso-639-3';
+import worldCountries from 'world-countries';
 
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import {
@@ -490,6 +493,93 @@ const isImportEnabled = (importType, imports) => {
 };
 
 /**
+ * Derives a project name from a base URL.
+ *
+ * @param {string} baseURL - The base URL
+ * @returns {string} The derived project name.
+ */
+export const deriveProjectName = (baseURL) => {
+  const parsedBaseURL = new URL(baseURL);
+  const { hostname } = parsedBaseURL;
+
+  // Split hostname by dots, if it has 3 or more parts, we assume it has a subdomain.
+  const parts = hostname.split('.');
+  if (parts.length <= 2) {
+    return hostname;
+  }
+
+  // Remove parts of the subdomain which are 2 or 3 letters long, max first two elements
+  for (let i = 0; i < Math.min(parts.length, 2); i += 1) {
+    const part = parts[i];
+    if (part.length === 2 || part.length === 3) {
+      parts[i] = null;
+    }
+  }
+
+  return parts.filter(Boolean).join('.');
+};
+
+/**
+ * Creates a new project if it does not exist yet.
+ *
+ * @param {Object} context - The Lambda context object.
+ * @param {Object} slackContext - The Slack context object.
+ * @param {string} baseURL - The base URL of the site.
+ * @param {string} projectId - The project ID.
+ * @returns {Promise<Object>} - The project object.
+ */
+export const createProject = async (
+  context,
+  slackContext,
+  baseURL,
+  organizationId,
+  projectId,
+) => {
+  const { dataAccess, log } = context;
+  const { say } = slackContext;
+  const { Project } = dataAccess;
+
+  try {
+    const projectName = deriveProjectName(baseURL);
+
+    // Find existing project if project id is provided
+    let existingProject;
+    if (projectId) {
+      const project = await Project.findById(projectId);
+      if (project) {
+        existingProject = project;
+      }
+    }
+
+    // Find existing project in the same org with the same name
+    if (!existingProject) {
+      const foundProject = (await Project.allByOrganizationId(organizationId))
+        .find((p) => p.getProjectName() === projectName);
+      if (foundProject) {
+        existingProject = foundProject;
+      }
+    }
+
+    if (existingProject) {
+      const message = `:information_source: Added site ${baseURL} to existing project ${existingProject.getProjectName()}. Project ID: ${existingProject.getId()}`;
+      await say(message);
+      return existingProject;
+    }
+
+    // Otherwise create new project
+    const newProject = await Project.create({ projectName, organizationId });
+    const message = `:information_source: Added site ${baseURL} to new project ${newProject.getProjectName()}. Project ID: ${newProject.getId()}`;
+    await say(message);
+
+    return newProject;
+  } catch (error) {
+    log.error(`Error creating project: ${error.message}`);
+    await say(`:x: Error creating project: ${error.message}`);
+    throw error;
+  }
+};
+
+/**
  * Creates or retrieves a site and its associated organization.
  *
  * @param {string} baseURL - The site base URL.
@@ -704,6 +794,34 @@ export const onboardSingleSite = async (
       return reportLine;
     }
 
+    let language = additionalParams.language?.toLowerCase();
+    let region = additionalParams.region?.toUpperCase();
+
+    const languageValid = language && !!iso6393.find((lang) => lang.iso6301 === language);
+    const regionValid = region && !!worldCountries.find(
+      (c) => c.cca2.toLowerCase() === region.toLowerCase(),
+    );
+
+    // Auto-detect locale if language and/or region is not provided
+    if (!languageValid || !regionValid) {
+      try {
+        const locale = await detectLocale({ baseUrl: baseURL });
+        if (!language && locale.language) {
+          language = locale.language;
+        }
+        if (!region && locale.region) {
+          region = locale.region;
+        }
+      } catch (error) {
+        log.error(`Error detecting locale for site ${baseURL}: ${error.message}`);
+        await say(`:x: Error detecting locale for site ${baseURL}: ${error.message}`);
+
+        // Fallback to default language and region
+        language = 'en';
+        region = 'US';
+      }
+    }
+
     // Create or retrieve site and organization
     const { site, organizationId } = await createSiteAndOrganization(
       baseURL,
@@ -734,6 +852,33 @@ export const onboardSingleSite = async (
       EntitlementModel.PRODUCT_CODES.ASO,
       tier,
     );
+
+    // Create new project or assign existing project
+    const project = await createProject(
+      context,
+      slackContext,
+      baseURL,
+      organizationId,
+      site.getProjectId() || additionalParams.projectId,
+    );
+    site.setProjectId(project.getId());
+    reportLine.projectId = project.getId();
+
+    // Assign language and region
+    const hasLanguage = hasText(site.getLanguage());
+    if (!hasLanguage) {
+      site.setLanguage(language);
+      reportLine.language = language;
+    } else {
+      reportLine.language = site.getLanguage();
+    }
+    const hasRegion = hasText(site.getRegion());
+    if (!hasRegion) {
+      site.setRegion(region);
+      reportLine.region = region;
+    } else {
+      reportLine.region = site.getRegion();
+    }
 
     const siteID = site.getId();
     reportLine.siteId = siteID;

@@ -188,6 +188,7 @@ describe('getRouteHandlers', () => {
     patchLlmoCustomerIntent: () => null,
     patchLlmoCdnLogsFilter: () => null,
     patchLlmoCdnBucketConfig: () => null,
+    onboardCustomer: () => null,
   };
 
   const mockSandboxAuditController = {
@@ -277,6 +278,7 @@ describe('getRouteHandlers', () => {
       'POST /tools/import/jobs',
       'POST /tools/scrape/jobs',
       'POST /consent-banner',
+      'POST /llmo/onboard',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
@@ -295,6 +297,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /tools/api-keys']).to.equal(mockApiKeyController.getApiKeys);
     expect(staticRoutes['POST /consent-banner']).to.equal(mockConsentBannerController.takeScreenshots);
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
+    expect(staticRoutes['POST /llmo/onboard']).to.equal(mockLlmoController.onboardCustomer);
 
     expect(dynamicRoutes).to.have.all.keys(
       'GET /audits/latest/:auditType',
@@ -306,6 +309,7 @@ describe('getRouteHandlers', () => {
       'GET /organizations/:organizationId/brands',
       'GET /organizations/:organizationId/sites',
       'GET /organizations/:organizationId/entitlements',
+      'POST /organizations/:organizationId/entitlements',
       'GET /organizations/:organizationId/trial-users',
       'POST /organizations/:organizationId/trial-user-invite',
       'GET /organizations/by-ims-org-id/:imsOrgId',
@@ -412,6 +416,7 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/sheet-data/:dataSource',
       'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource',
       'GET /sites/:siteId/llmo/config',
+      'PATCH /sites/:siteId/llmo/config',
       'POST /sites/:siteId/llmo/config',
       'GET /sites/:siteId/llmo/questions',
       'POST /sites/:siteId/llmo/questions',

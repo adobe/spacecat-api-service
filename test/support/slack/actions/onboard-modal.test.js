@@ -43,6 +43,7 @@ describe('onboard-modal', () => {
       '../../../../src/support/utils.js': {
         onboardSingleSite: sinon.stub().resolves({
           siteId: 'site123',
+          projectId: 'project123',
           imsOrgId: '1234567894ABCDEF12345678@AdobeOrg',
           spacecatOrgId: 'org123',
           deliveryType: 'aem_edge',
@@ -53,6 +54,8 @@ describe('onboard-modal', () => {
           imports: 'organic-traffic, top-pages, organic-keywords, all-traffic',
           errors: [],
           tier: 'free_trial',
+          language: 'en',
+          region: 'US',
         }),
       },
     });
@@ -184,6 +187,9 @@ describe('onboard-modal', () => {
         imsOrgId: 'ABC123@AdobeOrg',
         profile: 'demo',
         workflowWaitTime: '300',
+        projectId: 'project123',
+        language: 'fr',
+        region: 'CH',
       };
 
       body.actions[0].value = JSON.stringify(initialValues);
@@ -212,6 +218,18 @@ describe('onboard-modal', () => {
       // Check that wait time is pre-populated
       const waitTimeBlock = blocks.find((block) => block.block_id === 'wait_time_input');
       expect(waitTimeBlock.element.initial_value).to.equal('300');
+
+      // Check that project ID is pre-populated
+      const projectIdBlock = blocks.find((block) => block.block_id === 'project_id_input');
+      expect(projectIdBlock.element.initial_value).to.equal('project123');
+
+      // Check that language is pre-populated
+      const languageBlock = blocks.find((block) => block.block_id === 'language_input');
+      expect(languageBlock.element.initial_value).to.equal('fr');
+
+      // Check that region is pre-populated
+      const regionBlock = blocks.find((block) => block.block_id === 'region_input');
+      expect(regionBlock.element.initial_value).to.equal('CH');
     });
 
     it('should handle invalid JSON in button value gracefully', async () => {
@@ -443,6 +461,11 @@ describe('onboard-modal', () => {
                   value: '',
                 },
               },
+              project_id_input: {
+                project_id: {
+                  value: 'project123',
+                },
+              },
               profile_input: {
                 profile: {
                   selected_option: {
@@ -486,6 +509,16 @@ describe('onboard-modal', () => {
                   selected_option: {
                     value: 'false',
                   },
+                },
+              },
+              language_input: {
+                language: {
+                  value: 'en',
+                },
+              },
+              region_input: {
+                region: {
+                  value: 'us',
                 },
               },
             },
@@ -599,6 +632,7 @@ describe('onboard-modal', () => {
         text: ':white_check_mark: *Onboarding completed successfully by test-user!*\n'
           + '\n'
           + ':ims: *IMS Org ID:* 1234567894ABCDEF12345678@AdobeOrg\n'
+          + ':groups: *Project ID:* project123\n'
           + ':space-cat: *Spacecat Org ID:* org123\n'
           + ':identification_card: *Site ID:* site123\n'
           + ':cat-egory-white: *Delivery Type:* aem_edge\n'
@@ -606,6 +640,8 @@ describe('onboard-modal', () => {
           + ':gear: *Delivery Config:* Program 12345, Environment 67890\n'
           + ':globe_with_meridians: *Preview Environment:* Configured with Program 12345, Environment 67890\n'
           + ':paid: *Entitlement Tier:* free_trial\n'
+          + ':speaking_head_in_silhouette: *Language Code:* en\n'
+          + ':globe_with_meridians: *Country Code:* US\n'
           + ':question: *Already existing:* No\n'
           + ':gear: *Profile:* demo\n'
           + ':hourglass_flowing_sand: *Wait Time:* 30 seconds\n'
@@ -707,12 +743,15 @@ describe('onboard-modal', () => {
         text: ':white_check_mark: *Onboarding completed successfully by test-user!*\n'
           + '\n'
           + ':ims: *IMS Org ID:* 1234567894ABCDEF12345678@AdobeOrg\n'
+          + ':groups: *Project ID:* project123\n'
           + ':space-cat: *Spacecat Org ID:* org123\n'
           + ':identification_card: *Site ID:* site123\n'
           + ':cat-egory-white: *Delivery Type:* aem_edge\n'
           + ':writing_hand: *Authoring Type:* documentauthoring\n'
           + '\n'
           + ':paid: *Entitlement Tier:* free_trial\n'
+          + ':speaking_head_in_silhouette: *Language Code:* en\n'
+          + ':globe_with_meridians: *Country Code:* US\n'
           + ':question: *Already existing:* No\n'
           + ':gear: *Profile:* demo\n'
           + ':hourglass_flowing_sand: *Wait Time:* 30 seconds\n'

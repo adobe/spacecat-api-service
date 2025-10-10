@@ -49,10 +49,12 @@ function OnboardCommand(context) {
 
 *Interactive Onboarding:* This command opens a modal form where you can configure:
 • Site URL (required)
+• Project (required)
 • IMS Organization ID (optional)
 • Configuration profile (demo/production)
 • Delivery type (auto-detect/manual)
 • Authoring type (optional)
+• Language & Region (optional)
 • Workflow wait time (optional)
 • Preview environment URL (optional)
 • Entitlement Tier (optional, defaults to FREE_TRIAL)
@@ -70,6 +72,7 @@ function OnboardCommand(context) {
   const csvStringifier = createObjectCsvStringifier({
     header: [
       { id: 'site', title: 'Site URL' },
+      { id: 'projectId', title: 'Project ID' },
       { id: 'imsOrgId', title: 'IMS Org ID' },
       { id: 'spacecatOrgId', title: 'Spacecat Org ID' },
       { id: 'siteId', title: 'Site ID' },
@@ -78,6 +81,8 @@ function OnboardCommand(context) {
       { id: 'deliveryType', title: 'Delivery Type' },
       { id: 'authoringType', title: 'Authoring Type' },
       { id: 'tier', title: 'Entitlement Tier' },
+      { id: 'language', title: 'Language Code' },
+      { id: 'region', title: 'Country Code' },
       { id: 'audits', title: 'Audits' },
       { id: 'imports', title: 'Imports' },
       { id: 'errors', title: 'Errors' },
@@ -98,6 +103,9 @@ function OnboardCommand(context) {
    * @param {string} additionalParams.deliveryType - Forced delivery type.
    * @param {string} additionalParams.authoringType - Authoring type.
    * @param {string} additionalParams.tier - Entitlement tier.
+   * @param {string} additionalParams.projectId - Project ID.
+   * @param {string} additionalParams.language - Language code.
+   * @param {string} additionalParams.region - Country code.
    * @returns {Promise<Object>} - A report line containing execution details.
    */
   const onboardSingleSite = async (
@@ -180,7 +188,7 @@ function OnboardCommand(context) {
         // Process batch onboarding
         for (const row of csvData) {
           /* eslint-disable no-await-in-loop */
-          const [baseURL, imsOrgID, tier] = row;
+          const [baseURL, imsOrgID, tier, projectId, language, region] = row;
           const reportLine = await onboardSingleSite(
             baseURL,
             imsOrgID,
@@ -189,7 +197,12 @@ function OnboardCommand(context) {
             env.WORKFLOW_WAIT_TIME_IN_SECONDS, // Use environment default wait time in batch mode
             slackContext,
             context,
-            { tier },
+            {
+              tier,
+              projectId,
+              language,
+              region,
+            },
           );
 
           // Add individual site status reporting for CSV processing
@@ -225,7 +238,7 @@ function OnboardCommand(context) {
         });
       } else {
         // Handle backwards compatibility with command line arguments
-        const [site, imsOrgId, profile, workflowWaitTime, tier] = args;
+        const [site, imsOrgId, profile, workflowWaitTime, tier, projectId, language, region] = args;
 
         // Show button to start onboarding with optional pre-populated values
         const initialValues = {};
@@ -239,6 +252,9 @@ function OnboardCommand(context) {
         if (profile) initialValues.profile = profile;
         if (workflowWaitTime) initialValues.workflowWaitTime = workflowWaitTime;
         if (tier) initialValues.tier = tier;
+        if (projectId) initialValues.projectId = projectId;
+        if (language) initialValues.language = language;
+        if (region) initialValues.region = region;
 
         const buttonValue = Object.keys(initialValues).length > 0
           ? JSON.stringify(initialValues)
