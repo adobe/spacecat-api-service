@@ -1,3 +1,11 @@
+## [1.196.3](https://github.com/adobe/spacecat-api-service/compare/v1.196.2...v1.196.3) (2025-10-10)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.71.0 ([#1341](https://github.com/adobe/spacecat-api-service/issues/1341)) ([57d57c6](https://github.com/adobe/spacecat-api-service/commit/57d57c64188894425e31353fe3d0c77f4888e602))
+* **llmo-config:** bump llmo schema version ([#1342](https://github.com/adobe/spacecat-api-service/issues/1342)) ([90c793c](https://github.com/adobe/spacecat-api-service/commit/90c793c5e0c056fda7c491270b1ff2552a190ae9))
+
 ## [1.196.2](https://github.com/adobe/spacecat-api-service/compare/v1.196.1...v1.196.2) (2025-10-10)
 
 
