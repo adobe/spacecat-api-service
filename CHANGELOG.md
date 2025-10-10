@@ -1,3 +1,10 @@
+# [1.199.0](https://github.com/adobe/spacecat-api-service/compare/v1.198.0...v1.199.0) (2025-10-10)
+
+
+### Features
+
+* remove unused profiles - default, summit, summit-lower-quality ([#1333](https://github.com/adobe/spacecat-api-service/issues/1333)) ([96d662e](https://github.com/adobe/spacecat-api-service/commit/96d662ec651268916386c22c1bfa661fe57dc4ee))
+
 # [1.198.0](https://github.com/adobe/spacecat-api-service/compare/v1.197.0...v1.198.0) (2025-10-10)
 
 
