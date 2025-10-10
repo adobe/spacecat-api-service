@@ -97,7 +97,8 @@
 			"broken-internal-links-auto-fix": {},
 			"forms-opportunities": {},
 			"accessibility": {},
-			"hreflang": {}
+			"hreflang": {},
+			"canonical": {}
 		},
 		"imports": {
 			"organic-traffic" : {},
@@ -130,7 +131,8 @@
 			"broken-internal-links-auto-fix": {},
 			"forms-opportunities": {},
 			"accessibility": {},
-			"hreflang": {}
+			"hreflang": {},
+			"canonical": {}
 		},
 		"imports": {
 			"organic-traffic" : {},
