@@ -382,7 +382,7 @@ function LlmoController(ctx) {
     }
   };
 
-  async function postLlmoConfig(context) {
+  async function updateLlmoConfig(context) {
     const { log, s3, data } = context;
     const { siteId } = context.params;
     try {
@@ -393,6 +393,8 @@ function LlmoController(ctx) {
       if (!s3 || !s3.s3Client) {
         return badRequest('LLMO config storage is not configured for this environment');
       }
+
+      const prevConfig = await readConfig(siteId, s3.s3Client, { s3Bucket: s3.s3Bucket });
 
       // Validate the config, return 400 if validation fails
       const result = llmoConfigSchema.safeParse(data);
@@ -405,12 +407,27 @@ function LlmoController(ctx) {
       }
       const parsedConfig = result.data;
 
+      const newConfig = {
+        ...(prevConfig?.exists && { ...prevConfig.config }),
+        ...parsedConfig,
+      };
+
       const { version } = await writeConfig(
         siteId,
-        parsedConfig,
+        newConfig,
         s3.s3Client,
         { s3Bucket: s3.s3Bucket },
       );
+
+      // Trigger llmo-customer-analysis after config is updated
+      await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
+        type: 'llmo-customer-analysis',
+        siteId,
+        auditContext: {
+          configVersion: version,
+          previousConfigVersion: prevConfig.exists ? prevConfig.version : /* c8 ignore next */ null,
+        },
+      });
 
       log.info(`Updated LLMO config in S3 for siteId: ${siteId}, version: ${version}`);
       return ok({ version });
@@ -765,7 +782,7 @@ function LlmoController(ctx) {
     patchLlmoCustomerIntent,
     patchLlmoCdnLogsFilter,
     patchLlmoCdnBucketConfig,
-    postLlmoConfig,
+    updateLlmoConfig,
     onboardCustomer,
   };
 }
