@@ -206,6 +206,7 @@ describe('onboard-llmo-modal', () => {
 
     tierClientMock = {
       createForSite: sinon.stub().returns(mockClientInstance),
+      createForOrg: sinon.stub().returns(mockClientInstance),
     };
 
     // Store the mock instance for easier access in tests
