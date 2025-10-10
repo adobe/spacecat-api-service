@@ -663,6 +663,7 @@ const createSiteAndOrganization = async (
     if (authoringType) {
       site.setAuthoringType(authoringType);
     }
+    await say(':white_check_mark: DeliveryConfig is added to site configuration');
   }
 
   Object.assign(reportLine, localReportLine);
