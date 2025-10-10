@@ -1030,6 +1030,12 @@ export const onboardSingleSite = async (
       },
     };
 
+    const scheduledRun = additionalParams.scheduledRun !== undefined
+      ? additionalParams.scheduledRun
+      : (profile.config?.scheduledRun || false);
+
+    await say(`:information_source: Scheduled run: ${scheduledRun}`);
+
     // Disable imports and audits job - only disable what was enabled during onboarding
     const disableImportAndAuditJob = {
       type: 'disable-import-audit-processor',
@@ -1040,6 +1046,7 @@ export const onboardSingleSite = async (
       taskContext: {
         importTypes: importsEnabled || [],
         auditTypes: auditsEnabled || [],
+        scheduledRun,
         slackContext: {
           channelId: slackContext.channelId,
           threadTs: slackContext.threadTs,
