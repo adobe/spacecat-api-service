@@ -40,7 +40,6 @@ export const TrialUserDto = {
     firstName: trialUser.getFirstName(),
     lastName: trialUser.getLastName(),
     externalUserId: trialUser.getExternalUserId(),
-    provider: trialUser.getProvider(),
     status: trialUser.getStatus(),
     lastSeenAt: trialUser.getLastSeenAt(),
     metadata: trialUser.getMetadata(),
