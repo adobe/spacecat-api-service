@@ -672,6 +672,8 @@ const createSiteAndOrganization = async (
     try {
       await site.save();
       await say(':white_check_mark: DeliveryConfig updated successfully');
+      // Refetch the site to ensure we have the latest state
+      site = await Site.findById(site.getId());
     } catch (error) {
       log.error(`Error saving site with deliveryConfig: ${error.message}`, error);
       localReportLine.errors = `Failed to save deliveryConfig: ${error.message}`;
@@ -926,6 +928,7 @@ export const onboardSingleSite = async (
     const importTypes = Object.keys(profile.imports);
     reportLine.imports = importTypes.join(', ');
     const siteConfig = site.getConfig();
+    log.info(`Got site config for site ${siteID}, config type: ${typeof siteConfig}, has state: ${!!siteConfig.state}`);
 
     // Enabled imports only if there are not already enabled
     const imports = siteConfig.getImports();
@@ -959,13 +962,17 @@ export const onboardSingleSite = async (
       });
     }
 
-    site.setConfig(Config.toDynamoItem(siteConfig));
+    const serializedConfig = Config.toDynamoItem(siteConfig);
+    log.info(`Serialized config for site ${siteID}, type: ${typeof serializedConfig}, keys: ${Object.keys(serializedConfig).join(', ')}`);
+    site.setConfig(serializedConfig);
     try {
       await site.save();
+      log.info(`Successfully saved site ${siteID} with updated config`);
     } catch (error) {
-      log.error(error);
+      log.error(`Failed to save site ${siteID} with updated config:`, error);
       reportLine.errors = error.message;
       reportLine.status = 'Failed';
+      await say(`:x: *Error saving site configuration:* ${error.message}`);
       return reportLine;
     }
 
