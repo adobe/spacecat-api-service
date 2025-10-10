@@ -608,7 +608,10 @@ const createSiteAndOrganization = async (
   // Create a local copy to avoid modifying the parameter directly
   const localReportLine = { ...reportLine };
 
-  await say(':information_source: DeliveryConfig is provided with author url and other related information');
+  if (deliveryConfig && Object.keys(deliveryConfig).length > 0) {
+    await say(':information_source: DeliveryConfig is provided with author url and other related information');
+    log.info(`DeliveryConfig provided with author url and other related information for ${baseURL}:`);
+  }
   let site = await Site.findByBaseURL(baseURL);
   let organizationId;
 
@@ -648,15 +651,6 @@ const createSiteAndOrganization = async (
       site = await Site.create({
         baseURL, deliveryType, isLive, organizationId, authoringType,
       });
-
-      if (deliveryConfig && Object.keys(deliveryConfig).length > 0) {
-        site.setDeliveryConfig(deliveryConfig);
-        // Also set authoring type if provided (needed when setting delivery config)
-        if (authoringType) {
-          site.setAuthoringType(authoringType);
-        }
-        await site.save();
-      }
     } catch (error) {
       log.error(`Error creating site: ${error.message}`);
       localReportLine.errors = error.message;
@@ -665,6 +659,14 @@ const createSiteAndOrganization = async (
 
       throw error;
     }
+  }
+
+  if (deliveryConfig && Object.keys(deliveryConfig).length > 0) {
+    site.setDeliveryConfig(deliveryConfig);
+    if (authoringType) {
+      site.setAuthoringType(authoringType);
+    }
+    await site.save();
   }
 
   Object.assign(reportLine, localReportLine);
