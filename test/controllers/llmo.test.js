@@ -2502,14 +2502,14 @@ describe('LlmoController', () => {
       mockContext.data = testData;
 
       // Mock successful validation
-      llmoConfigSchemaStub.safeParse.returns({ success: true, data: testData });
+      llmoConfigSchemaStub.safeParse.returns({ success: true, data: expectedConfig });
 
       const result = await controller.updateLlmoConfig(mockContext);
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({ version: 'v1' });
-      expect(llmoConfigSchemaStub.safeParse).to.have.been.calledWith(testData);
+      expect(llmoConfigSchemaStub.safeParse).to.have.been.calledWith(expectedConfig);
       expect(writeConfigStub).to.have.been.calledWith(
         'test-site-id',
         expectedConfig,
@@ -2651,8 +2651,7 @@ describe('LlmoController', () => {
         {
           type: 'llmo-customer-analysis',
           siteId: 'test-site-id',
-          auditContext: {},
-          data: {
+          auditContext: {
             configVersion: 'v1',
             previousConfigVersion: 'v0',
           },
@@ -2766,7 +2765,10 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('S3 write failed');
-      expect(llmoConfigSchemaStub.safeParse).to.have.been.calledWith(testData);
+      expect(llmoConfigSchemaStub.safeParse).to.have.been.calledWith({
+        ...llmoConfig.defaultConfig(),
+        ...testData,
+      });
     });
   });
 

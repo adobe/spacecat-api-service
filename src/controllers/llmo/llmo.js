@@ -396,8 +396,13 @@ function LlmoController(ctx) {
 
       const prevConfig = await readConfig(siteId, s3.s3Client, { s3Bucket: s3.s3Bucket });
 
+      const newConfig = {
+        ...(prevConfig?.exists && { ...prevConfig.config }),
+        ...data,
+      };
+
       // Validate the config, return 400 if validation fails
-      const result = llmoConfigSchema.safeParse(data);
+      const result = llmoConfigSchema.safeParse(newConfig);
       if (!result.success) {
         const { issues, message } = result.error;
         return createResponse({
@@ -407,14 +412,9 @@ function LlmoController(ctx) {
       }
       const parsedConfig = result.data;
 
-      const newConfig = {
-        ...(prevConfig?.exists && { ...prevConfig.config }),
-        ...parsedConfig,
-      };
-
       const { version } = await writeConfig(
         siteId,
-        newConfig,
+        parsedConfig,
         s3.s3Client,
         { s3Bucket: s3.s3Bucket },
       );
@@ -423,8 +423,7 @@ function LlmoController(ctx) {
       await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
         type: 'llmo-customer-analysis',
         siteId,
-        auditContext: {},
-        data: {
+        auditContext: {
           configVersion: version,
           previousConfigVersion: prevConfig.exists ? prevConfig.version : /* c8 ignore next */ null,
         },

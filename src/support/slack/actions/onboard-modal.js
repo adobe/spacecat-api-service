@@ -160,6 +160,24 @@ export function startOnboarding(lambdaContext) {
             },
             {
               type: 'input',
+              block_id: 'project_id_input',
+              element: {
+                type: 'plain_text_input',
+                action_id: 'project_id',
+                placeholder: {
+                  type: 'plain_text',
+                  text: 'Project ID (leave empty to create a new project)',
+                },
+                ...(initialValues.projectId && { initial_value: initialValues.projectId }),
+              },
+              label: {
+                type: 'plain_text',
+                text: 'Project ID',
+              },
+              optional: true,
+            },
+            {
+              type: 'input',
               block_id: 'ims_org_input',
               element: {
                 type: 'plain_text_input',
@@ -189,21 +207,26 @@ export function startOnboarding(lambdaContext) {
                 initial_option: (() => {
                   const profileOptions = [
                     { text: 'Demo', value: 'demo' },
-                    { text: 'Default', value: 'default' },
+                    { text: 'Paid', value: 'paid' },
                   ];
 
-                  const selectedProfile = initialValues.profile || 'demo';
-                  const option = profileOptions.find(
-                    (opt) => opt.value === selectedProfile,
-                  ) || profileOptions[0];
+                  if (initialValues.profile) {
+                    const option = profileOptions.find(
+                      (opt) => opt.value === initialValues.profile,
+                    );
+                    if (option) {
+                      return {
+                        text: {
+                          type: 'plain_text',
+                          text: option.text,
+                        },
+                        value: option.value,
+                      };
+                    }
+                  }
 
-                  return {
-                    text: {
-                      type: 'plain_text',
-                      text: option.text,
-                    },
-                    value: option.value,
-                  };
+                  // Return undefined to have no default selection
+                  return undefined;
                 })(),
                 options: [
                   {
@@ -216,9 +239,9 @@ export function startOnboarding(lambdaContext) {
                   {
                     text: {
                       type: 'plain_text',
-                      text: 'Default',
+                      text: 'Paid',
                     },
-                    value: 'default',
+                    value: 'paid',
                   },
                 ],
               },
@@ -344,6 +367,79 @@ export function startOnboarding(lambdaContext) {
               optional: true,
             },
             {
+              type: 'input',
+              block_id: 'scheduled_run_input',
+              element: {
+                type: 'static_select',
+                action_id: 'scheduled_run',
+                placeholder: {
+                  type: 'plain_text',
+                  text: 'Select scheduled run preference',
+                },
+                options: [
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'False (Disable imports and audits after onboarding)',
+                    },
+                    value: 'false',
+                  },
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'True (Keep imports and audits enabled for scheduled runs)',
+                    },
+                    value: 'true',
+                  },
+                ],
+              },
+              label: {
+                type: 'plain_text',
+                text: 'Scheduled Run',
+              },
+              optional: true,
+            },
+            {
+              type: 'input',
+              block_id: 'language_input',
+              element: {
+                type: 'plain_text_input',
+                action_id: 'language',
+                max_length: 2,
+                min_length: 2,
+                placeholder: {
+                  type: 'plain_text',
+                  text: 'Language Code (leave empty for auto detection)',
+                },
+                ...(initialValues.language && { initial_value: initialValues.language }),
+              },
+              label: {
+                type: 'plain_text',
+                text: 'Language Code (ISO 639-1)',
+              },
+              optional: true,
+            },
+            {
+              type: 'input',
+              block_id: 'region_input',
+              element: {
+                type: 'plain_text_input',
+                action_id: 'region',
+                max_length: 2,
+                min_length: 2,
+                placeholder: {
+                  type: 'plain_text',
+                  text: 'Country Code (leave empty for auto detection)',
+                },
+                ...(initialValues.region && { initial_value: initialValues.region }),
+              },
+              label: {
+                type: 'plain_text',
+                text: 'Country Code (ISO 3166-1 alpha-2)',
+              },
+              optional: true,
+            },
+            {
               type: 'divider',
             },
             {
@@ -450,13 +546,17 @@ export function onboardSiteModal(lambdaContext) {
 
       const siteUrl = values.site_url_input.site_url.value;
       const imsOrgId = values.ims_org_input.ims_org_id.value || env.DEMO_IMS_ORG;
-      const profile = values.profile_input.profile.selected_option?.value || 'default';
+      const profile = values.profile_input.profile.selected_option?.value || 'demo';
       const deliveryType = values.delivery_type_input.delivery_type.selected_option?.value;
       const authoringType = values.authoring_type_input.authoring_type.selected_option?.value;
       const waitTime = values.wait_time_input.wait_time.value;
       const previewUrl = values.preview_url_input.preview_url.value;
       const tier = values.tier_input.tier.selected_option?.value
         || EntitlementModel.TIERS.FREE_TRIAL;
+      const scheduledRun = values.scheduled_run_input?.scheduled_run?.selected_option?.value;
+      const projectId = values.project_id_input.project_id.value;
+      const language = values.language_input.language.value;
+      const region = values.region_input.region.value;
 
       // Validation
       if (!siteUrl) {
@@ -531,6 +631,19 @@ export function onboardSiteModal(lambdaContext) {
         additionalParams.tier = tier;
       }
 
+      if (scheduledRun !== undefined) {
+        additionalParams.scheduledRun = scheduledRun === 'true';
+      }
+      if (projectId) {
+        additionalParams.projectId = projectId;
+      }
+      if (language) {
+        additionalParams.language = language;
+      }
+      if (region) {
+        additionalParams.region = region;
+      }
+
       const parsedWaitTime = waitTime ? parseInt(waitTime, 10) : undefined;
 
       await client.chat.postMessage({
@@ -574,12 +687,15 @@ export function onboardSiteModal(lambdaContext) {
         const message = `:white_check_mark: *Onboarding completed successfully by ${user.name}!*
 
 :ims: *IMS Org ID:* ${reportLine.imsOrgId || 'n/a'}
+:groups: *Project ID:* ${reportLine.projectId || 'n/a'}
 :space-cat: *Spacecat Org ID:* ${reportLine.spacecatOrgId || 'n/a'}
 :identification_card: *Site ID:* ${reportLine.siteId || 'n/a'}
 :cat-egory-white: *Delivery Type:* ${reportLine.deliveryType || 'n/a'}
 ${reportLine.authoringType ? `:writing_hand: *Authoring Type:* ${reportLine.authoringType}` : ''}
 ${deliveryConfigInfo}${previewConfigInfo}
 :paid: *Entitlement Tier:* ${reportLine.tier || 'n/a'}
+:speaking_head_in_silhouette: *Language Code:* ${reportLine.language || 'n/a'}
+:globe_with_meridians: *Country Code:* ${reportLine.region || 'n/a'}
 :question: *Already existing:* ${reportLine.existingSite}
 :gear: *Profile:* ${reportLine.profile}
 :hourglass_flowing_sand: *Wait Time:* ${parsedWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS} seconds
