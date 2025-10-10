@@ -302,46 +302,6 @@ export function startOnboarding(lambdaContext) {
             },
             {
               type: 'input',
-              block_id: 'authoring_type_input',
-              element: {
-                type: 'static_select',
-                action_id: 'authoring_type',
-                placeholder: {
-                  type: 'plain_text',
-                  text: 'Select authoring type (required if preview URL is provided)',
-                },
-                options: [
-                  {
-                    text: {
-                      type: 'plain_text',
-                      text: 'Document Authoring (EDS or DA)',
-                    },
-                    value: 'documentauthoring',
-                  },
-                  {
-                    text: {
-                      type: 'plain_text',
-                      text: 'AEM Cloud Service',
-                    },
-                    value: 'cs',
-                  },
-                  {
-                    text: {
-                      type: 'plain_text',
-                      text: 'Crosswalk (Universal Editor & EDS)',
-                    },
-                    value: 'cs/crosswalk',
-                  },
-                ],
-              },
-              label: {
-                type: 'plain_text',
-                text: 'Authoring Type',
-              },
-              optional: true,
-            },
-            {
-              type: 'input',
               block_id: 'wait_time_input',
               element: {
                 type: 'number_input',
@@ -492,6 +452,46 @@ export function startOnboarding(lambdaContext) {
               label: {
                 type: 'plain_text',
                 text: 'Preview URL (AEM Cloud Service)',
+              },
+              optional: true,
+            },
+            {
+              type: 'input',
+              block_id: 'authoring_type_input',
+              element: {
+                type: 'static_select',
+                action_id: 'authoring_type',
+                placeholder: {
+                  type: 'plain_text',
+                  text: 'Select authoring type (required if preview URL is provided)',
+                },
+                options: [
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'Document Authoring (EDS or DA)',
+                    },
+                    value: 'documentauthoring',
+                  },
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'AEM Cloud Service',
+                    },
+                    value: 'cs',
+                  },
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'Crosswalk (Universal Editor & EDS)',
+                    },
+                    value: 'cs/crosswalk',
+                  },
+                ],
+              },
+              label: {
+                type: 'plain_text',
+                text: 'Authoring Type',
               },
               optional: true,
             },
