@@ -191,7 +191,7 @@ describe('Fixes Controller', () => {
       const fixEntityCreatedDate = '2025-05-19T01:23:45.678Z';
 
       beforeEach(() => {
-        requestContext.params.fixEntityCreatedDate = fixEntityCreatedDate;
+        requestContext.data = { fixCreatedDate: fixEntityCreatedDate };
       });
 
       it('can get all fixes with suggestions by created date', async () => {

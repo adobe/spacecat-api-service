@@ -87,7 +87,8 @@ export class FixesController {
    * @returns {Promise<Response>} Array of suggestions response.
    */
   async getAllForOpportunity(context) {
-    const { siteId, opportunityId, fixEntityCreatedDate } = context.params;
+    const { siteId, opportunityId } = context.params;
+    const { fixCreatedDate } = context.data || {};
 
     let res = checkRequestParams(siteId, opportunityId) ?? await this.#checkAccess(siteId);
     if (res) return res;
@@ -95,9 +96,9 @@ export class FixesController {
     let fixEntities = [];
     let fixes = [];
 
-    if (hasText(fixEntityCreatedDate)) {
+    if (hasText(fixCreatedDate)) {
       const fixEntitiesWithSuggestions = await this.#FixEntity
-        .getAllFixesWithSuggestionByCreatedAt(opportunityId, fixEntityCreatedDate);
+        .getAllFixesWithSuggestionByCreatedAt(opportunityId, fixCreatedDate);
 
       if (fixEntitiesWithSuggestions.length === 0) {
         return ok([]);
