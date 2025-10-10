@@ -1,3 +1,10 @@
+## [1.196.2](https://github.com/adobe/spacecat-api-service/compare/v1.196.1...v1.196.2) (2025-10-10)
+
+
+### Bug Fixes
+
+* **llmo-config:** parse the patched full config on update ([#1340](https://github.com/adobe/spacecat-api-service/issues/1340)) ([85996da](https://github.com/adobe/spacecat-api-service/commit/85996daff814bb18f83dea5d46dafddaf4ce6888))
+
 ## [1.196.1](https://github.com/adobe/spacecat-api-service/compare/v1.196.0...v1.196.1) (2025-10-10)
 
 
