@@ -12,7 +12,7 @@
 
 /* eslint-env mocha */
 
-import { Organization, Site } from '@adobe/spacecat-shared-data-access';
+import { Organization, Site, Project } from '@adobe/spacecat-shared-data-access';
 import { SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
 
 import { use, expect } from 'chai';
@@ -23,6 +23,7 @@ import sinon, { stub } from 'sinon';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/models/organization/organization.schema.js';
 import SiteSchema from '@adobe/spacecat-shared-data-access/src/models/site/site.schema.js';
+import ProjectSchema from '@adobe/spacecat-shared-data-access/src/models/project/project.schema.js';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
 import OrganizationsController from '../../src/controllers/organizations.js';
@@ -34,10 +35,12 @@ use(sinonChai);
 describe('Organizations Controller', () => {
   const sandbox = sinon.createSandbox();
   const orgId = '9033554c-de8a-44ac-a356-09b51af8cc28';
+  const projectId = '550e8400-e29b-41d4-a716-446655440000';
   const sites = [
     {
       siteId: 'site1',
       organizationId: orgId,
+      projectId,
       baseURL: 'https://site1.com',
       deliveryType: 'aem_edge',
       config: Config({}),
@@ -45,6 +48,7 @@ describe('Organizations Controller', () => {
     {
       siteId: 'site2',
       organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f',
+      projectId,
       baseURL: 'https://site2.com',
       deliveryType: 'aem_edge',
       config: Config({}),
@@ -121,6 +125,48 @@ describe('Organizations Controller', () => {
     },
     OrganizationSchema,
     org,
+    console,
+  ));
+
+  const projects = [
+    {
+      id: '550e8400-e29b-41d4-a716-446655440000',
+      name: 'Project 1',
+      organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28',
+    },
+    {
+      id: '850e8400-e29b-41d4-a716-446655440000',
+      name: 'Project 2',
+      organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28',
+    },
+  ].map((project) => new Project(
+    {
+      entities: {
+        project: {
+          model: {
+            schema: {
+              indexes: {},
+              attributes: {
+                id: { type: 'string', get: (value) => value },
+                name: { type: 'string', get: (value) => value },
+                organizationId: { type: 'string', get: (value) => value },
+                createdAt: { type: 'string', get: (value) => value },
+                updatedAt: { type: 'string', get: (value) => value },
+              },
+            },
+          },
+        },
+      },
+    },
+    {
+      log: console,
+      getCollection: stub().returns({
+        schema: ProjectSchema,
+        findById: stub(),
+      }),
+    },
+    ProjectSchema,
+    project,
     console,
   ));
 
@@ -615,13 +661,8 @@ describe('Organizations Controller', () => {
 
   describe('getProjectsByOrganizationId', () => {
     it('gets all projects for an organization', async () => {
-      const mockProjects = [
-        { toJSON: () => ({ id: 'project1', name: 'Project 1' }) },
-        { toJSON: () => ({ id: 'project2', name: 'Project 2' }) },
-      ];
-
       mockDataAccess.Organization.findById.resolves(organizations[0]);
-      mockDataAccess.Project.allByOrganizationId.resolves(mockProjects);
+      mockDataAccess.Project.allByOrganizationId.resolves(projects);
 
       const result = await organizationsController.getProjectsByOrganizationId({
         params: { organizationId: organizations[0].getId() },
@@ -631,22 +672,45 @@ describe('Organizations Controller', () => {
 
       expect(result.status).to.equal(200);
       expect(response).to.have.length(2);
-      expect(response[0]).to.have.property('id', 'project1');
+      expect(response[0]).to.have.property('id', '550e8400-e29b-41d4-a716-446655440000');
+    });
+
+    it('returns not found when organization does not exist', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+
+      const result = await organizationsController.getProjectsByOrganizationId({
+        params: { organizationId: '550e8400-e29b-41d4-a716-446655440000' },
+        ...context,
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(404);
+      expect(error).to.have.property('message', 'Organization not found');
+    });
+
+    it('returns forbidden when user has no access to organization', async () => {
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+
+      const result = await organizationsController.getProjectsByOrganizationId({
+        params: { organizationId: organizations[0].getId() },
+        ...context,
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Only users belonging to the organization can view its projects');
     });
   });
 
   describe('getSitesByProjectIdAndOrganizationId', () => {
     it('gets all sites for an organization by project ID', async () => {
-      const mockSites = [
-        { toJSON: () => ({ id: 'site1', baseURL: 'https://site1.com' }) },
-        { toJSON: () => ({ id: 'site2', baseURL: 'https://site2.com' }) },
-      ];
-
       mockDataAccess.Organization.findById.resolves(organizations[0]);
-      mockDataAccess.Site.allByOrganizationIdAndProjectId.resolves(mockSites);
+      mockDataAccess.Site.allByOrganizationIdAndProjectId.resolves(sites);
 
       const result = await organizationsController.getSitesByProjectIdAndOrganizationId({
-        params: { organizationId: organizations[0].getId(), projectId: 'project-id-123' },
+        params: { organizationId: organizations[0].getId(), projectId: '550e8400-e29b-41d4-a716-446655440000' },
         ...context,
       });
       const response = await result.json();
@@ -677,17 +741,40 @@ describe('Organizations Controller', () => {
       expect(result.status).to.equal(400);
       expect(error).to.have.property('message', 'Project ID required');
     });
+
+    it('returns not found when organization does not exist', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+
+      const result = await organizationsController.getSitesByProjectIdAndOrganizationId({
+        params: { organizationId: '550e8400-e29b-41d4-a716-446655440000', projectId: '550e8400-e29b-41d4-a716-446655440001' },
+        ...context,
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(404);
+      expect(error).to.have.property('message', 'Organization not found');
+    });
+
+    it('returns forbidden when user has no access to organization', async () => {
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+
+      const result = await organizationsController.getSitesByProjectIdAndOrganizationId({
+        params: { organizationId: organizations[0].getId(), projectId: '550e8400-e29b-41d4-a716-446655440001' },
+        ...context,
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Only users belonging to the organization can view its sites');
+    });
   });
 
   describe('getSitesByProjectNameAndOrganizationId', () => {
     it('gets all sites for an organization by project name', async () => {
-      const mockSites = [
-        { toJSON: () => ({ id: 'site1', baseURL: 'https://site1.com' }) },
-        { toJSON: () => ({ id: 'site2', baseURL: 'https://site2.com' }) },
-      ];
-
       mockDataAccess.Organization.findById.resolves(organizations[0]);
-      mockDataAccess.Site.allByOrganizationIdAndProjectName.resolves(mockSites);
+      mockDataAccess.Site.allByOrganizationIdAndProjectName.resolves(sites);
 
       const result = await organizationsController.getSitesByProjectNameAndOrganizationId({
         params: { organizationId: organizations[0].getId(), projectName: 'test-project' },
@@ -720,6 +807,34 @@ describe('Organizations Controller', () => {
 
       expect(result.status).to.equal(400);
       expect(error).to.have.property('message', 'Project name required');
+    });
+
+    it('returns not found when organization does not exist', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+
+      const result = await organizationsController.getSitesByProjectNameAndOrganizationId({
+        params: { organizationId: '550e8400-e29b-41d4-a716-446655440000', projectName: 'test-project' },
+        ...context,
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(404);
+      expect(error).to.have.property('message', 'Organization not found');
+    });
+
+    it('returns forbidden when user has no access to organization', async () => {
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+
+      const result = await organizationsController.getSitesByProjectNameAndOrganizationId({
+        params: { organizationId: organizations[0].getId(), projectName: 'test-project' },
+        ...context,
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Only users belonging to the organization can view its sites');
     });
   });
 });

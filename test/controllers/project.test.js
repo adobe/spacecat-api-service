@@ -20,8 +20,12 @@ import sinon, { stub } from 'sinon';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
-import ProjectsController from '../../src/controllers/project.js';
+import { Organization, Project, Site } from '@adobe/spacecat-shared-data-access';
+import SiteSchema from '@adobe/spacecat-shared-data-access/src/models/site/site.schema.js';
+import ProjectSchema from '@adobe/spacecat-shared-data-access/src/models/project/project.schema.js';
+import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/models/organization/organization.schema.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
+import ProjectsController from '../../src/controllers/project.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -31,47 +35,93 @@ const sampleConfig = Config({
   handlers: {},
   imports: [],
 });
+const projectId = '550e8400-e29b-41d4-a716-446655440000';
+const orgId = '9033554c-de8a-44ac-a356-09b51af8cc28';
 
-const mockProject = {
-  getId: stub().returns('550e8400-e29b-41d4-a716-446655440000'),
-  getName: stub().returns('Test Project'),
-  getOrganizationId: stub().returns('550e8400-e29b-41d4-a716-446655440001'),
-  getCreatedAt: stub().returns('2024-01-15T10:00:00Z'),
-  getUpdatedAt: stub().returns('2024-01-15T10:00:00Z'),
-  setName: stub(),
-  setOrganizationId: stub(),
-  save: stub().resolves(),
-  remove: stub().resolves(),
-};
+const sites = [
+  {
+    siteId: 'site1',
+    organizationId: orgId,
+    projectId,
+    baseURL: 'https://site1.com',
+    deliveryType: 'aem_edge',
+    config: Config(sampleConfig),
+  },
+  {
+    siteId: 'site2',
+    organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f',
+    projectId,
+    baseURL: 'https://site2.com',
+    deliveryType: 'aem_edge',
+    config: Config(sampleConfig),
+  },
+].map((site) => new Site(
+  { entities: { site: { model: {} } } },
+  {
+    log: console,
+    getCollection: stub().returns({
+      schema: SiteSchema,
+      findById: stub(),
+    }),
+  },
+  SiteSchema,
+  site,
+  console,
+));
 
-const mockSite = {
-  getId: stub().returns('550e8400-e29b-41d4-a716-446655440002'),
-  getBaseURL: stub().returns('https://example.com'),
-  getName: stub().returns('Test Site'),
-  getProjectId: stub().returns('550e8400-e29b-41d4-a716-446655440000'),
-  getIsPrimaryLocale: stub().returns(true),
-  getLanguage: stub().returns('en'),
-  getRegion: stub().returns('US'),
-  getOrganizationId: stub().returns('550e8400-e29b-41d4-a716-446655440001'),
-  getIsLive: stub().returns(true),
-  getIsSandbox: stub().returns(false),
-  getIsLiveToggledAt: stub().returns('2024-01-15T10:00:00Z'),
-  getCreatedAt: stub().returns('2024-01-15T10:00:00Z'),
-  getUpdatedAt: stub().returns('2024-01-15T10:00:00Z'),
-  getConfig: stub().returns(sampleConfig),
-  getPageTypes: stub().returns([]),
-  getUpdatedBy: stub().returns('user@example.com'),
-  getHlxConfig: stub().returns({}),
-  getDeliveryType: stub().returns('aem_edge'),
-  getAuthoringType: stub().returns('edge'),
-  getDeliveryConfig: stub().returns({}),
-  getGitHubURL: stub().returns('https://github.com/example/repo'),
-};
+const organization = new Organization(
+  {
+    entities: {
+      organization: {
+        model: {
+        },
+        patch: sinon.stub().returns({
+          composite: () => ({ go: () => {} }),
+          set: () => {},
+        }),
+      },
+    },
+  },
+  {
+    log: console,
+    getCollection: stub().returns({
+      schema: OrganizationSchema,
+      findById: stub(),
+    }),
+  },
+  OrganizationSchema,
+  { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28', name: 'Org 1' },
+  console,
+);
 
-const mockOrganization = {
-  getId: stub().returns('550e8400-e29b-41d4-a716-446655440001'),
-  getName: stub().returns('Test Organization'),
-};
+const project = new Project(
+  {
+    entities: {
+      project: {
+        model: {
+          schema: {
+            indexes: {},
+            attributes: { name: { type: 'string', get: (value) => value } },
+          },
+        },
+      },
+    },
+  },
+  {
+    log: console,
+    getCollection: stub().returns({
+      schema: ProjectSchema,
+      findById: stub(),
+    }),
+  },
+  ProjectSchema,
+  {
+    id: '550e8400-e29b-41d4-a716-446655440000',
+    name: 'Project 1',
+    organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28',
+  },
+  console,
+);
 
 describe('Projects Controller', () => {
   const sandbox = sinon.createSandbox();
@@ -81,30 +131,21 @@ describe('Projects Controller', () => {
   let projectsController;
 
   beforeEach(() => {
-    // Reset stubs
-    mockProject.getId.returns('550e8400-e29b-41d4-a716-446655440000');
-    mockProject.getName.returns('Test Project');
-    mockProject.getOrganizationId.returns('550e8400-e29b-41d4-a716-446655440001');
-    mockProject.setName.resetHistory();
-    mockProject.setOrganizationId.resetHistory();
-    mockProject.save.resetHistory().resolves(mockProject);
-    mockProject.remove.resetHistory().resolves();
-
     mockDataAccess = {
       Project: {
-        create: stub().resolves(mockProject),
-        all: stub().resolves([mockProject]),
-        findById: stub().resolves(mockProject),
-        findByProjectName: stub().resolves(mockProject),
+        create: stub().resolves(project),
+        all: stub().resolves([project]),
+        findById: stub().resolves(project),
+        findByProjectName: stub().resolves(project),
       },
       Site: {
-        allByProjectId: stub().resolves([mockSite]),
-        allByProjectIdAndPrimaryLocale: stub().resolves([mockSite]),
-        allByOrganizationIdAndProjectName: stub().resolves([mockSite]),
-        allByProjectName: stub().resolves([mockSite]),
+        allByProjectId: stub().resolves(sites),
+        allByProjectIdAndPrimaryLocale: stub().resolves(sites),
+        allByOrganizationIdAndProjectName: stub().resolves(sites),
+        allByProjectName: stub().resolves(sites),
       },
       Organization: {
-        findById: stub().resolves(mockOrganization),
+        findById: stub().resolves(organization),
       },
     };
 
@@ -320,7 +361,7 @@ describe('Projects Controller', () => {
 
       expect(response.status).to.equal(204);
       expect(mockDataAccess.Project.findById).to.have.been.calledWith('550e8400-e29b-41d4-a716-446655440000');
-      expect(mockProject.remove).to.have.been.called;
+      expect(project.remove).to.have.been.called;
     });
 
     it('should return forbidden for non-admin users', async () => {
@@ -368,8 +409,8 @@ describe('Projects Controller', () => {
       });
 
       expect(response.status).to.equal(200);
-      expect(mockProject.setName).to.have.been.calledWith('Updated Project Name');
-      expect(mockProject.save).to.have.been.called;
+      expect(project.setName).to.have.been.calledWith('Updated Project Name');
+      expect(project.save).to.have.been.called;
     });
 
     it('should return bad request when no updates provided', async () => {
@@ -429,8 +470,8 @@ describe('Projects Controller', () => {
       });
 
       expect(response.status).to.equal(200);
-      expect(mockProject.setOrganizationId).to.have.been.calledWith('550e8400-e29b-41d4-a716-446655440003');
-      expect(mockProject.save).to.have.been.called;
+      expect(project.setOrganizationId).to.have.been.calledWith('550e8400-e29b-41d4-a716-446655440003');
+      expect(project.save).to.have.been.called;
     });
 
     it('should return forbidden when user lacks access during update', async () => {
@@ -595,11 +636,49 @@ describe('Projects Controller', () => {
   describe('getSitesByProjectName', () => {
     it('gets all sites for a project by project name', async () => {
       const mockSites = [
-        { toJSON: () => ({ id: 'site1', baseURL: 'https://site1.com' }) },
-        { toJSON: () => ({ id: 'site2', baseURL: 'https://site2.com' }) },
+        {
+          getId: () => 'site1',
+          getBaseURL: () => 'https://site1.com',
+          getName: () => 'Site 1',
+          getHlxConfig: () => ({}),
+          getDeliveryType: () => 'aem_edge',
+          getAuthoringType: () => 'cs',
+          getDeliveryConfig: () => ({}),
+          getGitHubURL: () => 'https://github.com/site1',
+          getOrganizationId: () => 'org-123',
+          getIsLive: () => true,
+          getIsSandbox: () => false,
+          getIsLiveToggledAt: () => '2024-01-01T00:00:00Z',
+          getCreatedAt: () => '2024-01-01T00:00:00Z',
+          getUpdatedAt: () => '2024-01-01T00:00:00Z',
+          getConfig: () => Config({ slack: {}, handlers: {}, imports: [] }),
+          getPageTypes: () => [],
+          getUpdatedBy: () => 'system',
+          toJSON: () => ({ id: 'site1', baseURL: 'https://site1.com' }),
+        },
+        {
+          getId: () => 'site2',
+          getBaseURL: () => 'https://site2.com',
+          getName: () => 'Site 2',
+          getHlxConfig: () => ({}),
+          getDeliveryType: () => 'aem_edge',
+          getAuthoringType: () => 'cs',
+          getDeliveryConfig: () => ({}),
+          getGitHubURL: () => 'https://github.com/site2',
+          getOrganizationId: () => 'org-123',
+          getIsLive: () => true,
+          getIsSandbox: () => false,
+          getIsLiveToggledAt: () => '2024-01-01T00:00:00Z',
+          getCreatedAt: () => '2024-01-01T00:00:00Z',
+          getUpdatedAt: () => '2024-01-01T00:00:00Z',
+          getConfig: () => Config({ slack: {}, handlers: {}, imports: [] }),
+          getPageTypes: () => [],
+          getUpdatedBy: () => 'system',
+          toJSON: () => ({ id: 'site2', baseURL: 'https://site2.com' }),
+        },
       ];
 
-      mockDataAccess.Project.findByProjectName.resolves(mockProject);
+      mockDataAccess.Project.findByProjectName.resolves(project);
       mockDataAccess.Site.allByProjectName.resolves(mockSites);
 
       const result = await projectsController.getSitesByProjectName({
@@ -635,6 +714,28 @@ describe('Projects Controller', () => {
 
       expect(result.status).to.equal(404);
       expect(error).to.have.property('message', 'Project not found');
+    });
+
+    it('returns forbidden when user has no access to project', async () => {
+      const mockProject = {
+        getId: () => 'project-123',
+        toJSON: () => ({ id: 'project-123', name: 'Test Project' }),
+      };
+      const mockAccessControlUtil = {
+        hasAccess: sandbox.stub().resolves(false),
+      };
+      sandbox.stub(AccessControlUtil, 'fromContext').returns(mockAccessControlUtil);
+
+      mockDataAccess.Project.findByProjectName.resolves(mockProject);
+
+      const result = await projectsController.getSitesByProjectName({
+        params: { projectName: 'test-project' },
+        ...context,
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Only users belonging to the organization can view its project sites');
     });
   });
 });
