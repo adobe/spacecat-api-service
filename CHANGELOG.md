@@ -1,3 +1,10 @@
+# [1.197.0](https://github.com/adobe/spacecat-api-service/compare/v1.196.3...v1.197.0) (2025-10-10)
+
+
+### Features
+
+* ScheduleRun flag to determine if imports and audits shall be disbled ([#1310](https://github.com/adobe/spacecat-api-service/issues/1310)) ([7b9ffde](https://github.com/adobe/spacecat-api-service/commit/7b9ffdefd41ae432b9884117fdd14171ac85d048))
+
 ## [1.196.3](https://github.com/adobe/spacecat-api-service/compare/v1.196.2...v1.196.3) (2025-10-10)
 
 
