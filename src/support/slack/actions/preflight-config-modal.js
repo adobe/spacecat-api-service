@@ -91,7 +91,7 @@ export function preflightConfigModal(lambdaContext) {
 
       if (authoringType === 'cs' || authoringType === 'cs/crosswalk') {
         // For AEM CS authoring types, expect AEM CS preview URL
-        deliveryConfigFromPreview = extractDeliveryConfigFromPreviewUrl(previewUrl);
+        deliveryConfigFromPreview = extractDeliveryConfigFromPreviewUrl(previewUrl, null);
         if (!deliveryConfigFromPreview) {
           await ack({
             response_action: 'errors',

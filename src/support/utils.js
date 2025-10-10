@@ -608,6 +608,7 @@ const createSiteAndOrganization = async (
   // Create a local copy to avoid modifying the parameter directly
   const localReportLine = { ...reportLine };
 
+  await say(':information_source: DeliveryConfig is provided with author url and other related information');
   let site = await Site.findByBaseURL(baseURL);
   let organizationId;
 
@@ -1030,6 +1031,12 @@ export const onboardSingleSite = async (
       },
     };
 
+    const scheduledRun = additionalParams.scheduledRun !== undefined
+      ? additionalParams.scheduledRun
+      : (profile.config?.scheduledRun || false);
+
+    await say(`:information_source: Scheduled run: ${scheduledRun}`);
+
     // Disable imports and audits job - only disable what was enabled during onboarding
     const disableImportAndAuditJob = {
       type: 'disable-import-audit-processor',
@@ -1040,6 +1047,7 @@ export const onboardSingleSite = async (
       taskContext: {
         importTypes: importsEnabled || [],
         auditTypes: auditsEnabled || [],
+        scheduledRun,
         slackContext: {
           channelId: slackContext.channelId,
           threadTs: slackContext.threadTs,

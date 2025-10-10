@@ -20,9 +20,11 @@ export const AEM_CS_HOST = /^author-p(\d+)-e(\d+)/i;
 /**
  * Extracts program and environment ID from AEM Cloud Service preview URLs.
  * @param {string} previewUrl - The preview URL to parse
- * @returns {Object|null} Object with programId and environmentId, or null if not extractable
+ * @param {string} imsOrgId - The IMS Organization ID to include in the delivery config
+ * @returns {Object|null} Object with programId, environmentId, authorURL, preferContentApi,
+ *                        and imsOrgId, or null if not extractable
  */
-export function extractDeliveryConfigFromPreviewUrl(previewUrl) {
+export function extractDeliveryConfigFromPreviewUrl(previewUrl, imsOrgId) {
   try {
     if (!isValidUrl(previewUrl)) {
       return null;
@@ -36,6 +38,8 @@ export function extractDeliveryConfigFromPreviewUrl(previewUrl) {
       programId: `${programId}`,
       environmentId: `${envId}`,
       authorURL: previewUrl,
+      preferContentApi: true,
+      imsOrgId: imsOrgId || null,
     };
   } catch (error) {
     return null;
@@ -203,21 +207,26 @@ export function startOnboarding(lambdaContext) {
                 initial_option: (() => {
                   const profileOptions = [
                     { text: 'Demo', value: 'demo' },
-                    { text: 'Default', value: 'default' },
+                    { text: 'Paid', value: 'paid' },
                   ];
 
-                  const selectedProfile = initialValues.profile || 'demo';
-                  const option = profileOptions.find(
-                    (opt) => opt.value === selectedProfile,
-                  ) || profileOptions[0];
+                  if (initialValues.profile) {
+                    const option = profileOptions.find(
+                      (opt) => opt.value === initialValues.profile,
+                    );
+                    if (option) {
+                      return {
+                        text: {
+                          type: 'plain_text',
+                          text: option.text,
+                        },
+                        value: option.value,
+                      };
+                    }
+                  }
 
-                  return {
-                    text: {
-                      type: 'plain_text',
-                      text: option.text,
-                    },
-                    value: option.value,
-                  };
+                  // Return undefined to have no default selection
+                  return undefined;
                 })(),
                 options: [
                   {
@@ -230,9 +239,9 @@ export function startOnboarding(lambdaContext) {
                   {
                     text: {
                       type: 'plain_text',
-                      text: 'Default',
+                      text: 'Paid',
                     },
-                    value: 'default',
+                    value: 'paid',
                   },
                 ],
               },
@@ -297,46 +306,6 @@ export function startOnboarding(lambdaContext) {
             },
             {
               type: 'input',
-              block_id: 'authoring_type_input',
-              element: {
-                type: 'static_select',
-                action_id: 'authoring_type',
-                placeholder: {
-                  type: 'plain_text',
-                  text: 'Select authoring type (required if preview URL is provided)',
-                },
-                options: [
-                  {
-                    text: {
-                      type: 'plain_text',
-                      text: 'Document Authoring (EDS or DA)',
-                    },
-                    value: 'documentauthoring',
-                  },
-                  {
-                    text: {
-                      type: 'plain_text',
-                      text: 'AEM Cloud Service',
-                    },
-                    value: 'cs',
-                  },
-                  {
-                    text: {
-                      type: 'plain_text',
-                      text: 'Crosswalk (Universal Editor & EDS)',
-                    },
-                    value: 'cs/crosswalk',
-                  },
-                ],
-              },
-              label: {
-                type: 'plain_text',
-                text: 'Authoring Type',
-              },
-              optional: true,
-            },
-            {
-              type: 'input',
               block_id: 'wait_time_input',
               element: {
                 type: 'number_input',
@@ -367,6 +336,13 @@ export function startOnboarding(lambdaContext) {
                   type: 'plain_text',
                   text: 'Select entitlement tier',
                 },
+                initial_option: {
+                  text: {
+                    type: 'plain_text',
+                    text: 'Free Trial',
+                  },
+                  value: EntitlementModel.TIERS.FREE_TRIAL,
+                },
                 options: [
                   {
                     text: {
@@ -387,6 +363,39 @@ export function startOnboarding(lambdaContext) {
               label: {
                 type: 'plain_text',
                 text: 'Entitlement Tier',
+              },
+              optional: true,
+            },
+            {
+              type: 'input',
+              block_id: 'scheduled_run_input',
+              element: {
+                type: 'static_select',
+                action_id: 'scheduled_run',
+                placeholder: {
+                  type: 'plain_text',
+                  text: 'Select scheduled run preference',
+                },
+                options: [
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'False (Disable imports and audits after onboarding)',
+                    },
+                    value: 'false',
+                  },
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'True (Keep imports and audits enabled for scheduled runs)',
+                    },
+                    value: 'true',
+                  },
+                ],
+              },
+              label: {
+                type: 'plain_text',
+                text: 'Scheduled Run',
               },
               optional: true,
             },
@@ -437,7 +446,7 @@ export function startOnboarding(lambdaContext) {
               type: 'section',
               text: {
                 type: 'mrkdwn',
-                text: '*Preview Environment Configuration* _(Optional)_\nConfigure preview environment for preflight and auto-optimize. Only needed for AEM Cloud Service URLs.',
+                text: '*Preview Environment Configuration (Optional)*\nConfigure preview environment for preflight and auto-optimize. Only needed for AEM Cloud Service URLs.',
               },
             },
             {
@@ -454,6 +463,46 @@ export function startOnboarding(lambdaContext) {
               label: {
                 type: 'plain_text',
                 text: 'Preview URL (AEM Cloud Service)',
+              },
+              optional: true,
+            },
+            {
+              type: 'input',
+              block_id: 'authoring_type_input',
+              element: {
+                type: 'static_select',
+                action_id: 'authoring_type',
+                placeholder: {
+                  type: 'plain_text',
+                  text: 'Select authoring type (required if preview URL is provided)',
+                },
+                options: [
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'Document Authoring (EDS or DA)',
+                    },
+                    value: 'documentauthoring',
+                  },
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'AEM Cloud Service',
+                    },
+                    value: 'cs',
+                  },
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'Crosswalk (Universal Editor & EDS)',
+                    },
+                    value: 'cs/crosswalk',
+                  },
+                ],
+              },
+              label: {
+                type: 'plain_text',
+                text: 'Authoring Type (Required with Preview URL)',
               },
               optional: true,
             },
@@ -497,13 +546,14 @@ export function onboardSiteModal(lambdaContext) {
 
       const siteUrl = values.site_url_input.site_url.value;
       const imsOrgId = values.ims_org_input.ims_org_id.value || env.DEMO_IMS_ORG;
-      const profile = values.profile_input.profile.selected_option?.value || 'default';
+      const profile = values.profile_input.profile.selected_option?.value || 'demo';
       const deliveryType = values.delivery_type_input.delivery_type.selected_option?.value;
       const authoringType = values.authoring_type_input.authoring_type.selected_option?.value;
       const waitTime = values.wait_time_input.wait_time.value;
       const previewUrl = values.preview_url_input.preview_url.value;
       const tier = values.tier_input.tier.selected_option?.value
         || EntitlementModel.TIERS.FREE_TRIAL;
+      const scheduledRun = values.scheduled_run_input?.scheduled_run?.selected_option?.value;
       const projectId = values.project_id_input.project_id.value;
       const language = values.language_input.language.value;
       const region = values.region_input.region.value;
@@ -519,10 +569,28 @@ export function onboardSiteModal(lambdaContext) {
         return;
       }
 
+      // Create a slack context for the onboarding process
+      // Use original channel/thread if available, otherwise fall back to DM
+      const responseChannel = originalChannel || body.user.id;
+      const responseThreadTs = originalChannel ? originalThreadTs : undefined;
+
+      const slackContext = {
+        say: async (message) => {
+          await client.chat.postMessage({
+            channel: responseChannel,
+            text: message,
+            thread_ts: responseThreadTs,
+          });
+        },
+        client,
+        channelId: responseChannel,
+        threadTs: responseThreadTs,
+      };
+
       // Validate preview URL if provided
       let deliveryConfigFromPreview = null;
       if (previewUrl) {
-        deliveryConfigFromPreview = extractDeliveryConfigFromPreviewUrl(previewUrl);
+        deliveryConfigFromPreview = extractDeliveryConfigFromPreviewUrl(previewUrl, imsOrgId);
         if (!deliveryConfigFromPreview) {
           await ack({
             response_action: 'errors',
@@ -547,24 +615,6 @@ export function onboardSiteModal(lambdaContext) {
 
       await ack();
 
-      // Create a slack context for the onboarding process
-      // Use original channel/thread if available, otherwise fall back to DM
-      const responseChannel = originalChannel || body.user.id;
-      const responseThreadTs = originalChannel ? originalThreadTs : undefined;
-
-      const slackContext = {
-        say: async (message) => {
-          await client.chat.postMessage({
-            channel: responseChannel,
-            text: message,
-            thread_ts: responseThreadTs,
-          });
-        },
-        client,
-        channelId: responseChannel,
-        threadTs: responseThreadTs,
-      };
-
       const configuration = await Configuration.findLatest();
       const additionalParams = {};
       if (deliveryType && deliveryType !== 'auto') {
@@ -581,6 +631,9 @@ export function onboardSiteModal(lambdaContext) {
         additionalParams.tier = tier;
       }
 
+      if (scheduledRun !== undefined) {
+        additionalParams.scheduledRun = scheduledRun === 'true';
+      }
       if (projectId) {
         additionalParams.projectId = projectId;
       }

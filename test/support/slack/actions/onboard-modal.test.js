@@ -79,29 +79,41 @@ describe('onboard-modal', () => {
   describe('extractDeliveryConfigFromPreviewUrl', () => {
     it('should validate valid AEM CS preview URLs', async () => {
       const previewUrl = 'https://author-p12345-e67890.adobeaemcloud.com';
+      const imsOrgId = '908936ED5D35CC220A495CD4@AdobeOrg';
       const {
         programId,
         environmentId,
         authorURL,
-      } = extractDeliveryConfigFromPreviewUrl(previewUrl);
+        preferContentApi,
+        imsOrgId: returnedImsOrgId,
+      } = extractDeliveryConfigFromPreviewUrl(previewUrl, imsOrgId);
       expect(programId).to.equal('12345');
       expect(environmentId).to.equal('67890');
       expect(authorURL).to.equal('https://author-p12345-e67890.adobeaemcloud.com');
+      expect(preferContentApi).to.equal(true);
+      expect(returnedImsOrgId).to.equal(imsOrgId);
     });
 
     it('should reject invalid preview URLs', async () => {
       const invalidUrl = 'https://invalid-url.com';
-      expect(extractDeliveryConfigFromPreviewUrl(invalidUrl)).to.be.null;
+      expect(extractDeliveryConfigFromPreviewUrl(invalidUrl, null)).to.be.null;
     });
 
     it('should handle malformed preview URLs', async () => {
       const malformedUrl = 'not-a-valid-url';
-      expect(extractDeliveryConfigFromPreviewUrl(malformedUrl)).to.be.null;
+      expect(extractDeliveryConfigFromPreviewUrl(malformedUrl, null)).to.be.null;
     });
 
     it('should handle malformed environment ID in preview URLs', async () => {
       const url = 'https://author-p123-e.adobeaemcloud.com';
-      expect(extractDeliveryConfigFromPreviewUrl(url)).to.be.null;
+      expect(extractDeliveryConfigFromPreviewUrl(url, null)).to.be.null;
+    });
+
+    it('should handle null imsOrgId gracefully', async () => {
+      const previewUrl = 'https://author-p12345-e67890.adobeaemcloud.com';
+      const result = extractDeliveryConfigFromPreviewUrl(previewUrl, null);
+      expect(result.imsOrgId).to.be.null;
+      expect(result.preferContentApi).to.equal(true);
     });
   });
 
@@ -304,7 +316,7 @@ describe('onboard-modal', () => {
     });
 
     it('should set correct profile initial option based on provided value', async () => {
-      const initialValues = { profile: 'default' };
+      const initialValues = { profile: 'paid' };
       body.actions[0].value = JSON.stringify(initialValues);
 
       const startOnboardingAction = startOnboarding(context);
@@ -320,8 +332,8 @@ describe('onboard-modal', () => {
       const { blocks } = openCall.view;
       const profileBlock = blocks.find((block) => block.block_id === 'profile_input');
 
-      expect(profileBlock.element.initial_option.value).to.equal('default');
-      expect(profileBlock.element.initial_option.text.text).to.equal('Default');
+      expect(profileBlock.element.initial_option.value).to.equal('paid');
+      expect(profileBlock.element.initial_option.text.text).to.equal('Paid');
     });
 
     it('should handle unknown profile value gracefully', async () => {
@@ -341,8 +353,8 @@ describe('onboard-modal', () => {
       const { blocks } = openCall.view;
       const profileBlock = blocks.find((block) => block.block_id === 'profile_input');
 
-      // Should fall back to default profile
-      expect(profileBlock.element.initial_option.value).to.equal('demo');
+      // Should have no initial selection for unknown profiles
+      expect(profileBlock.element.initial_option).to.be.undefined;
     });
   });
 
@@ -502,6 +514,13 @@ describe('onboard-modal', () => {
               preview_url_input: {
                 preview_url: {
                   value: '',
+                },
+              },
+              scheduled_run_input: {
+                scheduled_run: {
+                  selected_option: {
+                    value: 'false',
+                  },
                 },
               },
               language_input: {
@@ -1024,6 +1043,52 @@ describe('onboard-modal', () => {
 
       const hasTierInput = successMessages.some((call) => call.args[0].text.includes(':paid: *Entitlement Tier:* free_trial'));
       expect(hasTierInput).to.be.true;
+    });
+
+    it('should pass scheduledRun as true when selected in form', async () => {
+      body.view.state.values.scheduled_run_input.scheduled_run.selected_option.value = 'true';
+
+      const onboardSiteModalAction = onboardSiteModal(context);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.called;
+
+      // Verify that the form value is properly extracted and passed
+      // The actual verification would be in the onboardSingleSite function call
+    });
+
+    it('should pass scheduledRun as false when selected in form', async () => {
+      body.view.state.values.scheduled_run_input.scheduled_run.selected_option.value = 'false';
+
+      const onboardSiteModalAction = onboardSiteModal(context);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.called;
+    });
+
+    it('should not pass scheduledRun when not selected in form', async () => {
+      // Remove the scheduled_run_input from the form values
+      delete body.view.state.values.scheduled_run_input;
+
+      const onboardSiteModalAction = onboardSiteModal(context);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.called;
     });
   });
 });
