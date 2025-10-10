@@ -666,6 +666,9 @@ const createSiteAndOrganization = async (
     if (authoringType) {
       site.setAuthoringType(authoringType);
     }
+    // Ensure config is properly serialized before saving
+    const siteConfig = site.getConfig();
+    site.setConfig(Config.toDynamoItem(siteConfig));
     await site.save();
   }
 
