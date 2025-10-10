@@ -211,3 +211,5 @@ export const main = wrap(run)
   .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
   .with(secrets, { name: resolveSecretsName })
   .with(helixStatus);
+
+// DEPLOY ME
