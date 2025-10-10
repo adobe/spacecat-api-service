@@ -608,10 +608,6 @@ const createSiteAndOrganization = async (
   // Create a local copy to avoid modifying the parameter directly
   const localReportLine = { ...reportLine };
 
-  if (deliveryConfig && Object.keys(deliveryConfig).length > 0) {
-    await say(':information_source: DeliveryConfig is provided with author url and other related information');
-    log.info(`DeliveryConfig provided with author url and other related information for ${baseURL}:`);
-  }
   let site = await Site.findByBaseURL(baseURL);
   let organizationId;
 
@@ -928,7 +924,6 @@ export const onboardSingleSite = async (
     const importTypes = Object.keys(profile.imports);
     reportLine.imports = importTypes.join(', ');
     const siteConfig = site.getConfig();
-    log.info(`Got site config for site ${siteID}, config type: ${typeof siteConfig}, has state: ${!!siteConfig.state}`);
 
     // Enabled imports only if there are not already enabled
     const imports = siteConfig.getImports();
@@ -940,7 +935,6 @@ export const onboardSingleSite = async (
         importsEnabled.push(importType);
       }
     }
-    await say(`importsEnabled: ${importsEnabled}`); // DEBUG
 
     // Resolve canonical URL for the site from the base URL
     let resolvedUrl = await resolveCanonicalUrl(baseURL);
@@ -962,12 +956,9 @@ export const onboardSingleSite = async (
       });
     }
 
-    const serializedConfig = Config.toDynamoItem(siteConfig);
-    log.info(`Serialized config for site ${siteID}, type: ${typeof serializedConfig}, keys: ${Object.keys(serializedConfig).join(', ')}`);
-    site.setConfig(serializedConfig);
+    site.setConfig(Config.toDynamoItem(siteConfig));
     try {
       await site.save();
-      log.info(`Successfully saved site ${siteID} with updated config`);
     } catch (error) {
       log.error(`Failed to save site ${siteID} with updated config:`, error);
       reportLine.errors = error.message;
