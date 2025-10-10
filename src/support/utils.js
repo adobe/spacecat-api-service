@@ -608,6 +608,7 @@ const createSiteAndOrganization = async (
   // Create a local copy to avoid modifying the parameter directly
   const localReportLine = { ...reportLine };
 
+  await say(':information_source: DeliveryConfig is provided with author url and other related information');
   let site = await Site.findByBaseURL(baseURL);
   let organizationId;
 

@@ -20,9 +20,11 @@ export const AEM_CS_HOST = /^author-p(\d+)-e(\d+)/i;
 /**
  * Extracts program and environment ID from AEM Cloud Service preview URLs.
  * @param {string} previewUrl - The preview URL to parse
- * @returns {Object|null} Object with programId and environmentId, or null if not extractable
+ * @param {string} imsOrgId - The IMS Organization ID to include in the delivery config
+ * @returns {Object|null} Object with programId, environmentId, authorURL, preferContentApi,
+ *                        and imsOrgId, or null if not extractable
  */
-export function extractDeliveryConfigFromPreviewUrl(previewUrl) {
+export function extractDeliveryConfigFromPreviewUrl(previewUrl, imsOrgId) {
   try {
     if (!isValidUrl(previewUrl)) {
       return null;
@@ -36,6 +38,8 @@ export function extractDeliveryConfigFromPreviewUrl(previewUrl) {
       programId: `${programId}`,
       environmentId: `${envId}`,
       authorURL: previewUrl,
+      preferContentApi: true,
+      imsOrgId: imsOrgId || null,
     };
   } catch (error) {
     return null;
@@ -332,6 +336,13 @@ export function startOnboarding(lambdaContext) {
                   type: 'plain_text',
                   text: 'Select entitlement tier',
                 },
+                initial_option: {
+                  text: {
+                    type: 'plain_text',
+                    text: 'Free Trial',
+                  },
+                  value: EntitlementModel.TIERS.FREE_TRIAL,
+                },
                 options: [
                   {
                     text: {
@@ -435,7 +446,7 @@ export function startOnboarding(lambdaContext) {
               type: 'section',
               text: {
                 type: 'mrkdwn',
-                text: '*Preview Environment Configuration* _(Optional)_\nConfigure preview environment for preflight and auto-optimize. Only needed for AEM Cloud Service URLs.',
+                text: '*Preview Environment Configuration (Optional)*\nConfigure preview environment for preflight and auto-optimize. Only needed for AEM Cloud Service URLs.',
               },
             },
             {
@@ -491,7 +502,7 @@ export function startOnboarding(lambdaContext) {
               },
               label: {
                 type: 'plain_text',
-                text: 'Authoring Type',
+                text: 'Authoring Type (Required with Preview URL)',
               },
               optional: true,
             },
@@ -558,10 +569,28 @@ export function onboardSiteModal(lambdaContext) {
         return;
       }
 
+      // Create a slack context for the onboarding process
+      // Use original channel/thread if available, otherwise fall back to DM
+      const responseChannel = originalChannel || body.user.id;
+      const responseThreadTs = originalChannel ? originalThreadTs : undefined;
+
+      const slackContext = {
+        say: async (message) => {
+          await client.chat.postMessage({
+            channel: responseChannel,
+            text: message,
+            thread_ts: responseThreadTs,
+          });
+        },
+        client,
+        channelId: responseChannel,
+        threadTs: responseThreadTs,
+      };
+
       // Validate preview URL if provided
       let deliveryConfigFromPreview = null;
       if (previewUrl) {
-        deliveryConfigFromPreview = extractDeliveryConfigFromPreviewUrl(previewUrl);
+        deliveryConfigFromPreview = extractDeliveryConfigFromPreviewUrl(previewUrl, imsOrgId);
         if (!deliveryConfigFromPreview) {
           await ack({
             response_action: 'errors',
@@ -585,24 +614,6 @@ export function onboardSiteModal(lambdaContext) {
       }
 
       await ack();
-
-      // Create a slack context for the onboarding process
-      // Use original channel/thread if available, otherwise fall back to DM
-      const responseChannel = originalChannel || body.user.id;
-      const responseThreadTs = originalChannel ? originalThreadTs : undefined;
-
-      const slackContext = {
-        say: async (message) => {
-          await client.chat.postMessage({
-            channel: responseChannel,
-            text: message,
-            thread_ts: responseThreadTs,
-          });
-        },
-        client,
-        channelId: responseChannel,
-        threadTs: responseThreadTs,
-      };
 
       const configuration = await Configuration.findLatest();
       const additionalParams = {};

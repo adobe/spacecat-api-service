@@ -79,29 +79,41 @@ describe('onboard-modal', () => {
   describe('extractDeliveryConfigFromPreviewUrl', () => {
     it('should validate valid AEM CS preview URLs', async () => {
       const previewUrl = 'https://author-p12345-e67890.adobeaemcloud.com';
+      const imsOrgId = '908936ED5D35CC220A495CD4@AdobeOrg';
       const {
         programId,
         environmentId,
         authorURL,
-      } = extractDeliveryConfigFromPreviewUrl(previewUrl);
+        preferContentApi,
+        imsOrgId: returnedImsOrgId,
+      } = extractDeliveryConfigFromPreviewUrl(previewUrl, imsOrgId);
       expect(programId).to.equal('12345');
       expect(environmentId).to.equal('67890');
       expect(authorURL).to.equal('https://author-p12345-e67890.adobeaemcloud.com');
+      expect(preferContentApi).to.equal(true);
+      expect(returnedImsOrgId).to.equal(imsOrgId);
     });
 
     it('should reject invalid preview URLs', async () => {
       const invalidUrl = 'https://invalid-url.com';
-      expect(extractDeliveryConfigFromPreviewUrl(invalidUrl)).to.be.null;
+      expect(extractDeliveryConfigFromPreviewUrl(invalidUrl, null)).to.be.null;
     });
 
     it('should handle malformed preview URLs', async () => {
       const malformedUrl = 'not-a-valid-url';
-      expect(extractDeliveryConfigFromPreviewUrl(malformedUrl)).to.be.null;
+      expect(extractDeliveryConfigFromPreviewUrl(malformedUrl, null)).to.be.null;
     });
 
     it('should handle malformed environment ID in preview URLs', async () => {
       const url = 'https://author-p123-e.adobeaemcloud.com';
-      expect(extractDeliveryConfigFromPreviewUrl(url)).to.be.null;
+      expect(extractDeliveryConfigFromPreviewUrl(url, null)).to.be.null;
+    });
+
+    it('should handle null imsOrgId gracefully', async () => {
+      const previewUrl = 'https://author-p12345-e67890.adobeaemcloud.com';
+      const result = extractDeliveryConfigFromPreviewUrl(previewUrl, null);
+      expect(result.imsOrgId).to.be.null;
+      expect(result.preferContentApi).to.equal(true);
     });
   });
 

@@ -96,6 +96,7 @@ const workflowInput = {
   opportunityStatusJob,
   disableImportAndAuditJob,
   demoURLJob,
+  cwvDemoSuggestionsJob,
   workflowWaitTime: workflowWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS,
 };
 ```
