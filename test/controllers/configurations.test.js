@@ -245,7 +245,14 @@ describe('Configurations Controller', () => {
   });
 
   it('registers an audit', async () => {
-    const result = await configurationsController.registerAudit({ data: { auditType: 'cwv', enabledByDefault: true, interval: 'weekly' } });
+    const result = await configurationsController.registerAudit({
+      data: {
+        auditType: 'cwv',
+        enabledByDefault: true,
+        interval: 'weekly',
+        productCodes: ['LLMO'],
+      },
+    });
     expect(result.status).to.equal(201);
   });
 
@@ -262,7 +269,14 @@ describe('Configurations Controller', () => {
 
   it('register audit returns forbidden if user is not an admin', async () => {
     context.attributes.authInfo.withProfile({ is_admin: false });
-    const result = await configurationsController.registerAudit({ data: { auditType: 'cwv', enabledByDefault: true, interval: 'weekly' } });
+    const result = await configurationsController.registerAudit({
+      data: {
+        auditType: 'cwv',
+        enabledByDefault: true,
+        interval: 'weekly',
+        productCodes: ['LLMO'],
+      },
+    });
     const error = await result.json();
     expect(result.status).to.equal(403);
     expect(error).to.have.property('message', 'Only admins can register audits');
