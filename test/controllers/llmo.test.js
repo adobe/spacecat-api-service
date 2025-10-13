@@ -51,6 +51,8 @@ const createMockAccessControlUtil = (accessResult) => ({
 
 describe('LlmoController', () => {
   let controller;
+  let controllerWithAccessDenied;
+  let LlmoController;
   let mockContext;
   let mockSite;
   let mockConfig;
@@ -63,6 +65,54 @@ describe('LlmoController', () => {
   let readConfigStub;
   let writeConfigStub;
   let llmoConfigSchemaStub;
+
+  before(async () => {
+    // Set up esmock once for all tests
+    LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
+      '@adobe/spacecat-shared-utils': {
+        SPACECAT_USER_AGENT: TEST_USER_AGENT,
+        tracingFetch: (...args) => tracingFetchStub(...args),
+        llmoConfig: {
+          defaultConfig: llmoConfig.defaultConfig,
+          readConfig: (...args) => readConfigStub(...args),
+          writeConfig: (...args) => writeConfigStub(...args),
+        },
+        schemas: {
+          llmoConfig: { safeParse: (...args) => llmoConfigSchemaStub.safeParse(...args) },
+        },
+        hasText: (str) => typeof str === 'string' && str.trim().length > 0,
+        isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
+        composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+      },
+      '../../src/support/access-control-util.js': {
+        default: class MockAccessControlUtil {
+          static fromContext(context) {
+            return new MockAccessControlUtil(context);
+          }
+
+          constructor(context) {
+            this.log = context.log;
+          }
+
+          // eslint-disable-next-line class-methods-use-this
+          async hasAccess() {
+            return true;
+          }
+        },
+      },
+      '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+        Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+      },
+    });
+
+    // Create controller with access denied for access control tests
+    const LlmoControllerDenied = await esmock('../../src/controllers/llmo/llmo.js', {
+      '../../src/support/access-control-util.js': {
+        default: createMockAccessControlUtil(false),
+      },
+    });
+    controllerWithAccessDenied = LlmoControllerDenied;
+  });
 
   beforeEach(async () => {
     mockLlmoConfig = {
@@ -224,37 +274,7 @@ describe('LlmoController', () => {
       safeParse: sinon.stub().returns({ success: true, data: {} }),
     };
 
-    const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
-      '@adobe/spacecat-shared-utils': {
-        SPACECAT_USER_AGENT: TEST_USER_AGENT,
-        tracingFetch: tracingFetchStub,
-        llmoConfig: {
-          defaultConfig: llmoConfig.defaultConfig,
-          readConfig: readConfigStub,
-          writeConfig: writeConfigStub,
-        },
-        schemas: { llmoConfig: llmoConfigSchemaStub },
-        hasText: (str) => typeof str === 'string' && str.trim().length > 0,
-        isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
-      },
-      '../../src/support/access-control-util.js': {
-        default: class MockAccessControlUtil {
-          static fromContext(context) {
-            return new MockAccessControlUtil(context);
-          }
-
-          constructor(context) {
-            this.log = context.log;
-          }
-
-          // eslint-disable-next-line class-methods-use-this
-          async hasAccess() {
-            return true;
-          }
-        },
-      },
-    });
-
+    // Use the global LlmoController from before hook
     controller = LlmoController(mockContext);
   });
 
@@ -382,18 +402,9 @@ describe('LlmoController', () => {
     });
 
     it('should throw error when access is denied', async () => {
-      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo/llmo.js', {
-        '@adobe/spacecat-shared-utils': {
-          SPACECAT_USER_AGENT: TEST_USER_AGENT,
-          tracingFetch: tracingFetchStub,
-        },
-        '../../src/support/access-control-util.js': {
-          default: createMockAccessControlUtil(false),
-        },
-      });
-      const controllerWithAccessDenied = LlmoControllerWithAccessDenied(mockContext);
+      const deniedController = controllerWithAccessDenied(mockContext);
 
-      const result = await controllerWithAccessDenied.getLlmoSheetData(mockContext);
+      const result = await deniedController.getLlmoSheetData(mockContext);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
@@ -1272,14 +1283,9 @@ describe('LlmoController', () => {
     });
 
     it('should return 403 when user does not have access', async () => {
-      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo/llmo.js', {
-        '../../src/support/access-control-util.js': {
-          default: createMockAccessControlUtil(false),
-        },
-      });
-      const controllerWithAccessDenied = LlmoControllerWithAccessDenied(mockContext);
+      const deniedController = controllerWithAccessDenied(mockContext);
 
-      const result = await controllerWithAccessDenied.getLlmoCustomerIntent(mockContext);
+      const result = await deniedController.getLlmoCustomerIntent(mockContext);
 
       expect(result.status).to.equal(403);
     });
@@ -1375,15 +1381,10 @@ describe('LlmoController', () => {
     );
 
     it('should return 403 when user does not have access', async () => {
-      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo/llmo.js', {
-        '../../src/support/access-control-util.js': {
-          default: createMockAccessControlUtil(false),
-        },
-      });
-      const controllerWithAccessDenied = LlmoControllerWithAccessDenied(mockContext);
+      const deniedController = controllerWithAccessDenied(mockContext);
       mockContext.data = [{ key: 'new_target', value: 'enterprise customers' }];
 
-      const result = await controllerWithAccessDenied.addLlmoCustomerIntent(mockContext);
+      const result = await deniedController.addLlmoCustomerIntent(mockContext);
 
       expect(result.status).to.equal(403);
     });
@@ -1446,14 +1447,9 @@ describe('LlmoController', () => {
     );
 
     it('should return 403 when user does not have access', async () => {
-      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo/llmo.js', {
-        '../../src/support/access-control-util.js': {
-          default: createMockAccessControlUtil(false),
-        },
-      });
-      const controllerWithAccessDenied = LlmoControllerWithAccessDenied(mockContext);
+      const deniedController = controllerWithAccessDenied(mockContext);
 
-      const result = await controllerWithAccessDenied.removeLlmoCustomerIntent(mockContext);
+      const result = await deniedController.removeLlmoCustomerIntent(mockContext);
 
       expect(result.status).to.equal(403);
     });
@@ -1513,14 +1509,9 @@ describe('LlmoController', () => {
     });
 
     it('should return 403 when user does not have access', async () => {
-      const LlmoControllerWithAccessDenied = await esmock('../../src/controllers/llmo/llmo.js', {
-        '../../src/support/access-control-util.js': {
-          default: createMockAccessControlUtil(false),
-        },
-      });
-      const controllerWithAccessDenied = LlmoControllerWithAccessDenied(mockContext);
+      const deniedController = controllerWithAccessDenied(mockContext);
 
-      const result = await controllerWithAccessDenied.patchLlmoCustomerIntent(mockContext);
+      const result = await deniedController.patchLlmoCustomerIntent(mockContext);
 
       expect(result.status).to.equal(403);
     });
@@ -1740,7 +1731,7 @@ describe('LlmoController', () => {
     });
 
     it('should successfully onboard a new customer', async () => {
-      const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
+      const LlmoControllerOnboard = await esmock('../../src/controllers/llmo/llmo.js', {
         '../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: validateSiteNotOnboardedStub,
           performLlmoOnboarding: performLlmoOnboardingStub,
@@ -1764,7 +1755,7 @@ describe('LlmoController', () => {
           composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
         },
       });
-      const testController = LlmoController(mockContext);
+      const testController = LlmoControllerOnboard(mockContext);
 
       const result = await testController.onboardCustomer(onboardingContext);
 
@@ -1797,7 +1788,7 @@ describe('LlmoController', () => {
           });
         }
 
-        const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
+        const LlmoControllerOnboard = await esmock('../../src/controllers/llmo/llmo.js', {
           '../../src/controllers/llmo/llmo-onboarding.js': {
             validateSiteNotOnboarded: validateSiteNotOnboardedStub,
             performLlmoOnboarding: performLlmoOnboardingStub,
@@ -1817,7 +1808,7 @@ describe('LlmoController', () => {
             composeBaseURL: (domain) => `https://${domain}`,
           },
         });
-        const testController = LlmoController(mockContext);
+        const testController = LlmoControllerOnboard(mockContext);
 
         const result = await testController.onboardCustomer(contextCopy);
 
@@ -1831,7 +1822,7 @@ describe('LlmoController', () => {
         isValid: false,
         error: 'Site already assigned to different organization',
       });
-      const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
+      const LlmoControllerOnboard = await esmock('../../src/controllers/llmo/llmo.js', {
         '../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: validateSiteNotOnboardedStub,
           performLlmoOnboarding: performLlmoOnboardingStub,
@@ -1851,7 +1842,7 @@ describe('LlmoController', () => {
           composeBaseURL: (domain) => `https://${domain}`,
         },
       });
-      const testController = LlmoController(mockContext);
+      const testController = LlmoControllerOnboard(mockContext);
 
       const result = await testController.onboardCustomer(onboardingContext);
 
@@ -1862,7 +1853,7 @@ describe('LlmoController', () => {
     it('should handle errors and log them', async () => {
       validateSiteNotOnboardedStub.reset();
       validateSiteNotOnboardedStub.rejects(new Error('Validation error'));
-      const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
+      const LlmoControllerOnboard = await esmock('../../src/controllers/llmo/llmo.js', {
         '../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: validateSiteNotOnboardedStub,
           performLlmoOnboarding: performLlmoOnboardingStub,
@@ -1882,7 +1873,7 @@ describe('LlmoController', () => {
           composeBaseURL: (domain) => `https://${domain}`,
         },
       });
-      const testController = LlmoController(mockContext);
+      const testController = LlmoControllerOnboard(mockContext);
 
       const result = await testController.onboardCustomer(onboardingContext);
 
