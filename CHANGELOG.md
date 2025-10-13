@@ -1,3 +1,10 @@
+# [1.202.0](https://github.com/adobe/spacecat-api-service/compare/v1.201.0...v1.202.0) (2025-10-13)
+
+
+### Features
+
+* Add delivery config when PreviewUrl is provided ([#1344](https://github.com/adobe/spacecat-api-service/issues/1344)) ([dc901cf](https://github.com/adobe/spacecat-api-service/commit/dc901cf3b2bd2694f1e4dfe53abaad017550343d))
+
 # [1.201.0](https://github.com/adobe/spacecat-api-service/compare/v1.200.1...v1.201.0) (2025-10-13)
 
 
