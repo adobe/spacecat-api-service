@@ -46,6 +46,7 @@ describe('AddRepoCommand', () => {
         }),
       }),
       setGitHubURL: sinon.stub(),
+      setCode: sinon.stub(),
       save: sinon.stub(),
     };
 
@@ -86,7 +87,12 @@ describe('AddRepoCommand', () => {
     it('handles valid input and updates the site', async () => {
       nock('https://api.github.com')
         .get('/repos/valid/repo')
-        .reply(200, { archived: false });
+        .reply(200, {
+          archived: false,
+          name: 'repo',
+          owner: { login: 'valid' },
+          default_branch: 'main',
+        });
 
       const args = ['validSite.com', 'https://github.com/valid/repo'];
       const command = AddRepoCommand(context);
@@ -94,6 +100,15 @@ describe('AddRepoCommand', () => {
       await command.handleExecution(args, slackContext);
 
       expect(slackContext.say.called).to.be.true;
+      expect(siteStub.setGitHubURL).to.have.been.calledWith('https://github.com/valid/repo');
+      expect(siteStub.setCode).to.have.been.calledWith({
+        type: 'github',
+        owner: 'valid',
+        repo: 'repo',
+        ref: 'main',
+        url: 'https://github.com/valid/repo',
+      });
+      expect(siteStub.save).to.have.been.called;
     });
 
     it('handles archived repository', async () => {
@@ -112,7 +127,12 @@ describe('AddRepoCommand', () => {
     it('handles repo URL without scheme', async () => {
       nock('https://api.github.com')
         .get('/repos/valid/repo')
-        .reply(200, { archived: false });
+        .reply(200, {
+          archived: false,
+          name: 'repo',
+          owner: { login: 'valid' },
+          default_branch: 'main',
+        });
 
       const args = ['validSite.com', 'github.com/valid/repo'];
       const command = AddRepoCommand(context);
@@ -121,7 +141,7 @@ describe('AddRepoCommand', () => {
 
       expect(slackContext.say).calledWith('\n'
         + '      :white_check_mark: *GitHub repo added for <undefined|undefined>*\n'
-        + '      \n'
+        + '\n'
         + '\n'
         + '      :identification_card: some-id\n'
         + '      :cat-egory-white: aem_edge\n'
@@ -129,9 +149,18 @@ describe('AddRepoCommand', () => {
         + '      :submarine: Is not live\n'
         + '      :lighthouse: <https://psi.experiencecloud.live?url=undefined&strategy=mobile|Run PSI Check>\n'
         + '    \n'
-        + '      \n'
+        + '\n'
         + '      First PSI check with new repo is triggered! :adobe-run:\n'
         + '      ');
+      expect(siteStub.setGitHubURL).to.have.been.calledWith('https://github.com/valid/repo');
+      expect(siteStub.setCode).to.have.been.calledWith({
+        type: 'github',
+        owner: 'valid',
+        repo: 'repo',
+        ref: 'main',
+        url: 'https://github.com/valid/repo',
+      });
+      expect(siteStub.save).to.have.been.called;
     });
 
     it('handles missing site URL', async () => {
@@ -185,12 +214,24 @@ describe('AddRepoCommand', () => {
     it('fetches repository information successfully', async () => {
       nock('https://api.github.com')
         .get('/repos/valid/repo')
-        .reply(200, { name: 'repoName', archived: false });
+        .reply(200, {
+          name: 'repo',
+          archived: false,
+          owner: { login: 'valid' },
+          default_branch: 'main',
+        });
 
       await command.handleExecution(args, slackContext);
 
       // Assertions to confirm repo info was fetched and handled correctly
       expect(slackContext.say).calledWithMatch(/GitHub repo added/);
+      expect(siteStub.setCode).to.have.been.calledWith({
+        type: 'github',
+        owner: 'valid',
+        repo: 'repo',
+        ref: 'main',
+        url: 'https://github.com/valid/repo',
+      });
     });
 
     it('handles non-existent repository (404 error)', async () => {

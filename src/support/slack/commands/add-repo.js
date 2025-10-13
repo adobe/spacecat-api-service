@@ -117,6 +117,14 @@ function AddRepoCommand(context) {
       }
 
       site.setGitHubURL(repoUrl);
+      const codeConfig = {
+        type: 'github',
+        owner: repoInfo.owner.login,
+        repo: repoInfo.name,
+        ref: repoInfo.default_branch,
+        url: repoUrl,
+      };
+      site.setCode(codeConfig);
 
       await site.save();
 
@@ -130,9 +138,9 @@ function AddRepoCommand(context) {
 
       await say(`
       :white_check_mark: *GitHub repo added for <${site.getBaseURL()}|${site.getBaseURL()}>*
-      
+
 ${printSiteDetails(site, isAuditEnabled)}
-      
+
       First PSI check with new repo is triggered! :adobe-run:
       `);
     } catch (error) {

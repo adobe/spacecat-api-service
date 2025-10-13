@@ -66,10 +66,10 @@ describe('Sites Controller', () => {
 
   const sites = [
     {
-      siteId: SITE_IDS[0], baseURL: 'https://site1.com', deliveryType: 'aem_edge', authoringType: 'cs/crosswalk', deliveryConfig: {}, config: Config({}), hlxConfig: {}, isSandbox: false,
+      siteId: SITE_IDS[0], baseURL: 'https://site1.com', deliveryType: 'aem_edge', authoringType: 'cs/crosswalk', deliveryConfig: {}, config: Config({}), hlxConfig: {}, isSandbox: false, code: null,
     },
     {
-      siteId: SITE_IDS[1], baseURL: 'https://site2.com', deliveryType: 'aem_edge', authoringType: 'cs/crosswalk', config: Config({}), hlxConfig: {}, isSandbox: false,
+      siteId: SITE_IDS[1], baseURL: 'https://site2.com', deliveryType: 'aem_edge', authoringType: 'cs/crosswalk', config: Config({}), hlxConfig: {}, isSandbox: false, code: null,
     },
   ].map((site) => new Site(
     {
@@ -90,6 +90,7 @@ describe('Sites Controller', () => {
                 hlxConfig: { type: 'any', name: 'hlxConfig', get: (value) => value },
                 deliveryConfig: { type: 'any', name: 'deliveryConfig', get: (value) => value },
                 updatedBy: { type: 'string', name: 'updatedBy', get: (value) => value },
+                code: { type: 'any', name: 'code', get: (value) => value },
               },
             },
           },
@@ -1470,6 +1471,34 @@ describe('Sites Controller', () => {
     expect(updatedSite).to.have.property('isSandbox', true);
     expect(updatedSite).to.have.property('name', 'updated-name');
     expect(updatedSite).to.have.property('isLive', true);
+  });
+
+  it('updates a site with code config', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    const codeConfig = {
+      type: 'github',
+      owner: 'test-owner',
+      repo: 'test-repo',
+      ref: 'main',
+      url: 'https://github.com/test-owner/test-repo',
+    };
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        code: codeConfig,
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+
+    const updatedSite = await response.json();
+    expect(updatedSite).to.have.property('id', SITE_IDS[0]);
+    expect(updatedSite).to.have.property('code');
+    expect(updatedSite.code).to.deep.equal(codeConfig);
   });
 
   describe('pageTypes validation', () => {
