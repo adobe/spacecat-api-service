@@ -52,7 +52,6 @@ import { App as SlackApp } from './utils/slack/bolt.cjs';
 import ConfigurationController from './controllers/configuration.js';
 import FulfillmentController from './controllers/event/fulfillment.js';
 import { FixesController } from './controllers/fixes.js';
-import { ApplyFixesController } from './controllers/apply-fixes.js';
 import ImportController from './controllers/import.js';
 import { s3ClientWrapper } from './support/s3.js';
 import { multipartFormData } from './support/multipart-form-data.js';
@@ -127,7 +126,6 @@ async function run(request, context) {
     const scrapeJobController = ScrapeJobController(context);
     const llmoController = LlmoController(context);
     const fixesController = new FixesController(context);
-    const applyFixesController = new ApplyFixesController(context);
     const sandboxAuditController = SandboxAuditController(context);
 
     /* ---------- build MCP registry & controller ---------- */
@@ -164,7 +162,6 @@ async function run(request, context) {
       paidController,
       trafficController,
       fixesController,
-      applyFixesController,
       llmoController,
       sandboxAuditController,
     );

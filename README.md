@@ -99,13 +99,7 @@ IMS_CLIENT_CODE=client code for the IMS API
 IMS_CLIENT_SECRET=client secret for the IMS API
 
 SLACK_TOKEN_WORKSPACE_EXTERNAL_ELEVATED=Slack token for the external workspace, elevated permissions
-```
-
-Accessibility fix controller requires the following env variables:
-
-```plaintext
-ASO_APP_URL=URL of the ASO app handler
-S3_MYSTIQUE_BUCKET_NAME=Mystique S3 bucket to retrieve fixes
+SLACK_OPS_CHANNEL_WORKSPACE_EXTERNAL=channel ID to use for operations messages in the external workspace
 ```
 
 Sandbox audit rate-limit (optional):

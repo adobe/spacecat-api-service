@@ -14,9 +14,6 @@
 /* eslint-disable no-param-reassign */
 /* eslint-disable no-use-before-define */
 
-// Add global fetch polyfill for tests
-import { fetch } from '@adobe/fetch';
-
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
@@ -26,16 +23,11 @@ import EntityRegistry from '@adobe/spacecat-shared-data-access/src/models/base/e
 import * as electrodb from 'electrodb';
 import * as crypto from 'crypto';
 
-import {
-  FixEntity, Suggestion,
-} from '@adobe/spacecat-shared-data-access';
+import { FixEntity, Suggestion } from '@adobe/spacecat-shared-data-access';
 import AccessControlUtil from '../../src/support/access-control-util.js';
 import { FixesController } from '../../src/controllers/fixes.js';
 import { FixDto } from '../../src/dto/fix.js';
 import { SuggestionDto } from '../../src/dto/suggestion.js';
-
-// Make fetch available globally
-global.fetch = fetch;
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -67,7 +59,6 @@ describe('Fixes Controller', () => {
   /** @type {RequestContext} */
   let requestContext;
   let opportunityGetStub;
-  let dataAccess;
 
   const siteId = '86ef4aae-7296-417d-9658-8cd4c7edc374';
   const opportunityId = 'a3d2f1e9-5f4c-4e6b-8c7d-0c7b5a2f1a2f';
@@ -85,7 +76,7 @@ describe('Fixes Controller', () => {
       .callsFake((data) => ({ go: async () => ({ data: { ...data, siteId } }) }));
 
     const entityRegistry = new EntityRegistry(electroService, log);
-    dataAccess = entityRegistry.getCollections();
+    const dataAccess = entityRegistry.getCollections();
     fixEntityCollection = dataAccess.FixEntity;
     suggestionCollection = dataAccess.Suggestion;
     sandbox.stub(fixEntityCollection, 'allByOpportunityId');
@@ -102,11 +93,6 @@ describe('Fixes Controller', () => {
     fixesController = new FixesController({ dataAccess }, accessControlUtil);
     requestContext = {
       params: { siteId, opportunityId },
-      log,
-      env: {},
-      imsClient: {
-        getServiceAccessToken: sandbox.stub().resolves('test-service-token'),
-      },
     };
   });
 
