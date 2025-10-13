@@ -608,7 +608,6 @@ const createSiteAndOrganization = async (
   // Create a local copy to avoid modifying the parameter directly
   const localReportLine = { ...reportLine };
 
-  await say(':information_source: DeliveryConfig is provided with author url and other related information');
   let site = await Site.findByBaseURL(baseURL);
   let organizationId;
 
@@ -648,15 +647,6 @@ const createSiteAndOrganization = async (
       site = await Site.create({
         baseURL, deliveryType, isLive, organizationId, authoringType,
       });
-
-      if (deliveryConfig && Object.keys(deliveryConfig).length > 0) {
-        site.setDeliveryConfig(deliveryConfig);
-        // Also set authoring type if provided (needed when setting delivery config)
-        if (authoringType) {
-          site.setAuthoringType(authoringType);
-        }
-        await site.save();
-      }
     } catch (error) {
       log.error(`Error creating site: ${error.message}`);
       localReportLine.errors = error.message;
@@ -665,6 +655,15 @@ const createSiteAndOrganization = async (
 
       throw error;
     }
+  }
+
+  // Set deliveryConfig and authoringType if provided (will be saved later with other site data)
+  if (deliveryConfig && Object.keys(deliveryConfig).length > 0) {
+    site.setDeliveryConfig(deliveryConfig);
+    if (authoringType) {
+      site.setAuthoringType(authoringType);
+    }
+    await say(':white_check_mark: DeliveryConfig is added/updated to site configuration');
   }
 
   Object.assign(reportLine, localReportLine);
@@ -923,7 +922,6 @@ export const onboardSingleSite = async (
         importsEnabled.push(importType);
       }
     }
-    await say(`importsEnabled: ${importsEnabled}`); // DEBUG
 
     // Resolve canonical URL for the site from the base URL
     let resolvedUrl = await resolveCanonicalUrl(baseURL);
@@ -949,9 +947,10 @@ export const onboardSingleSite = async (
     try {
       await site.save();
     } catch (error) {
-      log.error(error);
+      log.error(`Failed to save site ${siteID} with updated config:`, error);
       reportLine.errors = error.message;
       reportLine.status = 'Failed';
+      await say(`:x: *Error saving site configuration:* ${error.message}`);
       return reportLine;
     }
 
