@@ -101,7 +101,10 @@ const project = new Project(
         model: {
           schema: {
             indexes: {},
-            attributes: { projectName: { type: 'string', get: (value) => value } },
+            attributes: {
+              projectName: { type: 'string', get: (value) => value },
+              organizationId: { type: 'string', get: (value) => value },
+            },
           },
         },
         patch: sinon.stub().returns({
@@ -236,7 +239,7 @@ describe('Projects Controller', () => {
         projectName: 'New Project',
         organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28',
       });
-      expect(mockDataAccess.Project.create).to.have.been.calledWith({ name: 'New Project', organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' });
+      expect(mockDataAccess.Project.create).to.have.been.calledWith({ projectName: 'New Project', organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' });
     });
 
     it('should return forbidden for non-admin users', async () => {
@@ -352,6 +355,8 @@ describe('Projects Controller', () => {
 
   describe('removeProject', () => {
     it('should remove project successfully for admin users', async () => {
+      project.remove = sinon.stub().resolves();
+
       const response = await projectsController.removeProject({
         params: { projectId: '550e8400-e29b-41d4-a716-446655440000' },
         ...context,
@@ -400,6 +405,9 @@ describe('Projects Controller', () => {
 
   describe('updateProject', () => {
     it('should update project name successfully', async () => {
+      project.setProjectName = sinon.stub();
+      project.save = sinon.stub().resolves(project);
+
       const response = await projectsController.updateProject({
         params: { projectId: '550e8400-e29b-41d4-a716-446655440000' },
         data: { projectName: 'Updated Project Name' },
@@ -407,7 +415,7 @@ describe('Projects Controller', () => {
       });
 
       expect(response.status).to.equal(200);
-      expect(project.setName).to.have.been.calledWith('Updated Project Name');
+      expect(project.setProjectName).to.have.been.calledWith('Updated Project Name');
       expect(project.save).to.have.been.called;
     });
 
@@ -461,6 +469,10 @@ describe('Projects Controller', () => {
     });
 
     it('should update project organization ID successfully', async () => {
+      project.getOrganizationId = sinon.stub().returns('9033554c-de8a-44ac-a356-09b51af8cc28');
+      project.setOrganizationId = sinon.stub();
+      project.save = sinon.stub().resolves(project);
+
       const response = await projectsController.updateProject({
         params: { projectId: '550e8400-e29b-41d4-a716-446655440000' },
         data: { organizationId: '550e8400-e29b-41d4-a716-446655440003' },

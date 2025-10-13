@@ -673,6 +673,17 @@ describe('Organizations Controller', () => {
       expect(response[0]).to.have.property('id', '550e8400-e29b-41d4-a716-446655440000');
     });
 
+    it('returns bad request when organization ID is invalid', async () => {
+      const result = await organizationsController.getProjectsByOrganizationId({
+        params: { organizationId: 'invalid-id' },
+        ...context,
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Organization ID required');
+    });
+
     it('returns not found when organization does not exist', async () => {
       mockDataAccess.Organization.findById.resolves(null);
 

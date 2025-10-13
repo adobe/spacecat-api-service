@@ -1651,6 +1651,25 @@ describe('Sites Controller', () => {
   });
 
   describe('isPrimaryLocale, language, and region updates', () => {
+    it('updates site with projectId', async () => {
+      const site = sites[0];
+      const currentProjectId = '550e8400-e29b-41d4-a716-446655440000';
+      const newProjectId = '650e8400-e29b-41d4-a716-446655440000';
+      site.getProjectId = sandbox.stub().returns(currentProjectId);
+      site.setProjectId = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { projectId: newProjectId },
+        ...defaultAuthAttributes,
+      });
+
+      expect(site.setProjectId).to.have.been.calledWith(newProjectId);
+      expect(site.save).to.have.been.calledOnce;
+      expect(response.status).to.equal(200);
+    });
+
     it('updates site with isPrimaryLocale', async () => {
       const site = sites[0];
       site.getIsPrimaryLocale = sandbox.stub().returns(false);
