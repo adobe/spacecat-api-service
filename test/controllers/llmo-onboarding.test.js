@@ -653,6 +653,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockDataAccess.Configuration.findLatest).to.have.been.called;
       expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('headings', mockSite);
       expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('llm-blocked', mockSite);
+      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('llmo-customer-analysis', mockSite);
       expect(mockConfiguration.save).to.have.been.called;
 
       // Verify logging
