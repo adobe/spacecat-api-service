@@ -288,7 +288,7 @@ describe('UpdateSitesAuditsCommand', () => {
 
   describe('CSV bulk operations', () => {
     it('should process CSV file to enable with profile', async () => {
-      const args = ['enable', 'default'];
+      const args = ['enable', 'demo'];
       const command = ToggleSiteAuditCommand(contextMock);
 
       slackContextMock.files = [{
@@ -301,13 +301,13 @@ describe('UpdateSitesAuditsCommand', () => {
       await command.handleExecution(args, slackContextMock);
 
       expect(configurationMock.enableHandlerForSite.callCount)
-        .to.equal(24);
+        .to.equal(40); // 20 audits in demo profile × 2 sites
       expect(configurationMock.save.calledOnce).to.be.true;
       expect(slackContextMock.say.calledWith(sinon.match('Successfully'))).to.be.true;
     });
 
     it('should process CSV file to disable with profile', async () => {
-      const args = ['disable', 'default'];
+      const args = ['disable', 'demo'];
       const command = ToggleSiteAuditCommand(contextMock);
 
       slackContextMock.files = [{
@@ -320,7 +320,7 @@ describe('UpdateSitesAuditsCommand', () => {
       await command.handleExecution(args, slackContextMock);
 
       expect(configurationMock.disableHandlerForSite.callCount)
-        .to.equal(24);
+        .to.equal(40); // 20 audits in demo profile × 2 sites
       expect(configurationMock.save.calledOnce).to.be.true;
       expect(slackContextMock.say.calledWith(sinon.match('Successfully'))).to.be.true;
     });
