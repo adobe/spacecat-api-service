@@ -1,3 +1,10 @@
+# [1.200.0](https://github.com/adobe/spacecat-api-service/compare/v1.199.0...v1.200.0) (2025-10-13)
+
+
+### Features
+
+* Add productCodes to registerAudit API ([#1337](https://github.com/adobe/spacecat-api-service/issues/1337)) ([913ca68](https://github.com/adobe/spacecat-api-service/commit/913ca68a01b62d8d310b23bb870f240abe00dfa8))
+
 # [1.199.0](https://github.com/adobe/spacecat-api-service/compare/v1.198.0...v1.199.0) (2025-10-10)
 
 
