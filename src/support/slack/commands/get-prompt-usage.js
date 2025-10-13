@@ -49,11 +49,10 @@ function GetPromptUsageCommand(context) {
 
     const { config, exists } = await readConfig(siteId, s3.s3Client, {
       s3Bucket: s3.s3Bucket,
-      version: undefined,
     });
 
     if (!exists) {
-      throw new Error(`LLMO config not found for site '${siteId}'`);
+      return null;
     }
 
     return config;
@@ -103,12 +102,14 @@ function GetPromptUsageCommand(context) {
     let totalPrompts = 0;
 
     for (const cfg of configs) {
-      const topics = cfg.topics || {};
-      const topicPromptCount = Object.values(topics).reduce(
-        (sum, topic) => sum + (topic.prompts?.length || 0),
-        0,
-      );
-      totalPrompts += topicPromptCount;
+      if (cfg) {
+        const topics = cfg.topics || {};
+        const topicPromptCount = Object.values(topics).reduce(
+          (sum, topic) => sum + (topic.prompts?.length || 0),
+          0,
+        );
+        totalPrompts += topicPromptCount;
+      }
     }
 
     return {
