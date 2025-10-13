@@ -76,7 +76,7 @@ function GetPromptUsageCommand(context) {
     const organizationName = organization.getName();
     const orgId = organization.getId();
 
-    const entitlements = await Entitlement.getByOrganizationID(organization.getId());
+    const entitlements = await Entitlement.allByOrganizationId(organization.getId());
     if (!entitlements || entitlements.length === 0) {
       throw new Error(
         'Could not find any entitlements for the provided IMS org ID',

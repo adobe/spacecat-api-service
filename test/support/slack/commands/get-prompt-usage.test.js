@@ -43,7 +43,7 @@ describe('GetPromptUsageCommand', () => {
         getName: sinon.stub(),
       },
       Entitlement: {
-        getByOrganizationID: sinon.stub(),
+        allByOrganizationId: sinon.stub(),
         getTier: sinon.stub(),
         getProductCode: sinon.stub(),
       },
@@ -120,8 +120,15 @@ describe('GetPromptUsageCommand', () => {
       const mockSite2 = { getId: sinon.stub().returns('test-site-id2') };
 
       const mockEntitlement = {
-        getTier: sinon.stub().returns('FREE_TRIAL'),
-        getProductCode: sinon.stub().returns('LLMO'),
+        getId: () => 'ent',
+        getOrganizationId: () => 'test-org-id',
+        getProductCode: () => 'LLMO',
+        getTier: () => 'FREE_TRIAL',
+        getStatus: () => 'ACTIVE',
+        getQuotas: () => ({}),
+        getCreatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedBy: () => 'user@example.com',
       };
 
       const categoryIdSite1 = '123e4567-e89b-12d3-a456-426614174000';
@@ -201,9 +208,7 @@ describe('GetPromptUsageCommand', () => {
         + '• *Total number of prompts:* 3';
 
       dataAccessStub.Organization.findByImsOrgId.resolves(mockOrganization);
-      dataAccessStub.Entitlement.getByOrganizationID.resolves([
-        mockEntitlement,
-      ]);
+      dataAccessStub.Entitlement.allByOrganizationId.resolves([mockEntitlement]);
       dataAccessStub.Site.allByOrganizationId.resolves([mockSite1, mockSite2]);
 
       const args = [imsOrgID];
@@ -217,7 +222,7 @@ describe('GetPromptUsageCommand', () => {
         dataAccessStub.Organization.findByImsOrgId,
       ).to.have.been.calledWith('test@AdobeOrg');
       expect(
-        dataAccessStub.Entitlement.getByOrganizationID,
+        dataAccessStub.Entitlement.allByOrganizationId,
       ).to.have.been.calledWith('test-org-id');
     });
 
@@ -246,14 +251,22 @@ describe('GetPromptUsageCommand', () => {
         getName: sinon.stub().returns('Test Org'),
       };
 
-      const mockEntitlement = { getProductCode: sinon.stub().returns('ASO') };
+      const mockEntitlement = {
+        getId: () => 'ent',
+        getOrganizationId: () => 'test-org-id',
+        getProductCode: () => 'ASO',
+        getTier: () => 'PAID',
+        getStatus: () => 'ACTIVE',
+        getQuotas: () => ({}),
+        getCreatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedBy: () => 'user@example.com',
+      };
 
       const expectedMessage = ':nuclear-warning: Oops! Something went wrong: No entitlement with product code LLMO found for the provided IMS org ID';
 
       dataAccessStub.Organization.findByImsOrgId.resolves(mockOrganization);
-      dataAccessStub.Entitlement.getByOrganizationID.resolves([
-        mockEntitlement,
-      ]);
+      dataAccessStub.Entitlement.allByOrganizationId.resolves([mockEntitlement]);
 
       const args = [imsOrgID];
       const command = GetPromptUsageCommand(context);
@@ -266,7 +279,7 @@ describe('GetPromptUsageCommand', () => {
         dataAccessStub.Organization.findByImsOrgId,
       ).to.have.been.calledWith(imsOrgID);
       expect(
-        dataAccessStub.Entitlement.getByOrganizationID,
+        dataAccessStub.Entitlement.allByOrganizationId,
       ).to.have.been.calledWith('test-org-id');
     });
 
@@ -298,17 +311,39 @@ describe('GetPromptUsageCommand', () => {
       };
 
       const mockEntitlement1 = {
-        getTier: sinon.stub().returns('FREE_TRIAL'),
-        getProductCode: sinon.stub().returns('LLMO'),
+        getId: () => 'ent1',
+        getOrganizationId: () => 'test-org-id1',
+        getProductCode: () => 'LLMO',
+        getTier: () => 'FREE_TRIAL',
+        getStatus: () => 'ACTIVE',
+        getQuotas: () => ({}),
+        getCreatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedBy: () => 'user1@example.com',
       };
 
       const mockEntitlement2 = {
-        getProductCode: sinon.stub().returns('ASO'),
+        getId: () => 'ent2',
+        getOrganizationId: () => 'test-org-id2',
+        getProductCode: () => 'ASO',
+        getTier: () => 'PAID',
+        getStatus: () => 'ACTIVE',
+        getQuotas: () => ({}),
+        getCreatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedBy: () => 'user2@example.com',
       };
 
       const mockEntitlement3 = {
-        getTier: sinon.stub().returns('PAID'),
-        getProductCode: sinon.stub().returns('LLMO'),
+        getId: () => 'ent3',
+        getOrganizationId: () => 'test-org-id3',
+        getProductCode: () => 'LLMO',
+        getTier: () => 'PAID',
+        getStatus: () => 'ACTIVE',
+        getQuotas: () => ({}),
+        getCreatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedBy: () => 'user1@example.com',
       };
 
       const mockSite1 = { getId: sinon.stub().returns('test-site-id1') };
@@ -377,21 +412,21 @@ describe('GetPromptUsageCommand', () => {
       dataAccessStub.Organization.findByImsOrgId
         .withArgs('test-org-1@AdobeOrg')
         .resolves(mockOrganization1);
-      dataAccessStub.Entitlement.getByOrganizationID
+      dataAccessStub.Entitlement.allByOrganizationId
         .withArgs('test-org-id1')
         .resolves([mockEntitlement1]);
 
       dataAccessStub.Organization.findByImsOrgId
         .withArgs('test-org-2@AdobeOrg')
         .resolves(mockOrganization2);
-      dataAccessStub.Entitlement.getByOrganizationID
+      dataAccessStub.Entitlement.allByOrganizationId
         .withArgs('test-org-id2')
         .resolves([mockEntitlement2]);
 
       dataAccessStub.Organization.findByImsOrgId
         .withArgs('test-org-3@AdobeOrg')
         .resolves(mockOrganization3);
-      dataAccessStub.Entitlement.getByOrganizationID
+      dataAccessStub.Entitlement.allByOrganizationId
         .withArgs('test-org-id3')
         .resolves([mockEntitlement3]);
 
