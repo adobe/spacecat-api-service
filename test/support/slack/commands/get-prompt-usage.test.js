@@ -43,7 +43,7 @@ describe('GetPromptUsageCommand', () => {
         getName: sinon.stub(),
       },
       Entitlement: {
-        getByOrganizationId: sinon.stub(),
+        getByOrganizationID: sinon.stub(),
         getTier: sinon.stub(),
         getProductCode: sinon.stub(),
       },
@@ -201,7 +201,7 @@ describe('GetPromptUsageCommand', () => {
         + '• *Total number of prompts:* 3';
 
       dataAccessStub.Organization.findByImsOrgId.resolves(mockOrganization);
-      dataAccessStub.Entitlement.getByOrganizationId.resolves([
+      dataAccessStub.Entitlement.getByOrganizationID.resolves([
         mockEntitlement,
       ]);
       dataAccessStub.Site.allByOrganizationId.resolves([mockSite1, mockSite2]);
@@ -217,7 +217,7 @@ describe('GetPromptUsageCommand', () => {
         dataAccessStub.Organization.findByImsOrgId,
       ).to.have.been.calledWith('test@AdobeOrg');
       expect(
-        dataAccessStub.Entitlement.getByOrganizationId,
+        dataAccessStub.Entitlement.getByOrganizationID,
       ).to.have.been.calledWith('test-org-id');
     });
 
@@ -251,7 +251,7 @@ describe('GetPromptUsageCommand', () => {
       const expectedMessage = ':nuclear-warning: Oops! Something went wrong: No entitlement with product code LLMO found for the provided IMS org ID';
 
       dataAccessStub.Organization.findByImsOrgId.resolves(mockOrganization);
-      dataAccessStub.Entitlement.getByOrganizationId.resolves([
+      dataAccessStub.Entitlement.getByOrganizationID.resolves([
         mockEntitlement,
       ]);
 
@@ -266,7 +266,7 @@ describe('GetPromptUsageCommand', () => {
         dataAccessStub.Organization.findByImsOrgId,
       ).to.have.been.calledWith(imsOrgID);
       expect(
-        dataAccessStub.Entitlement.getByOrganizationId,
+        dataAccessStub.Entitlement.getByOrganizationID,
       ).to.have.been.calledWith('test-org-id');
     });
 
@@ -377,21 +377,21 @@ describe('GetPromptUsageCommand', () => {
       dataAccessStub.Organization.findByImsOrgId
         .withArgs('test-org-1@AdobeOrg')
         .resolves(mockOrganization1);
-      dataAccessStub.Entitlement.getByOrganizationId
+      dataAccessStub.Entitlement.getByOrganizationID
         .withArgs('test-org-id1')
         .resolves([mockEntitlement1]);
 
       dataAccessStub.Organization.findByImsOrgId
         .withArgs('test-org-2@AdobeOrg')
         .resolves(mockOrganization2);
-      dataAccessStub.Entitlement.getByOrganizationId
+      dataAccessStub.Entitlement.getByOrganizationID
         .withArgs('test-org-id2')
         .resolves([mockEntitlement2]);
 
       dataAccessStub.Organization.findByImsOrgId
         .withArgs('test-org-3@AdobeOrg')
         .resolves(mockOrganization3);
-      dataAccessStub.Entitlement.getByOrganizationId
+      dataAccessStub.Entitlement.getByOrganizationID
         .withArgs('test-org-id3')
         .resolves([mockEntitlement3]);
 
