@@ -95,11 +95,16 @@ function ConfigurationController(ctx) {
       return forbidden('Only admins can register audits');
     }
 
-    const { auditType, enabledByDefault, interval } = context.data;
+    const {
+      auditType,
+      enabledByDefault,
+      interval,
+      productCodes,
+    } = context.data;
 
     try {
       const configuration = await Configuration.findLatest();
-      configuration.registerAudit(auditType, enabledByDefault, interval);
+      configuration.registerAudit(auditType, enabledByDefault, interval, productCodes);
       await configuration.save();
       return created(null);
     } catch (error) {

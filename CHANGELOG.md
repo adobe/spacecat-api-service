@@ -1,3 +1,67 @@
+# [1.201.0](https://github.com/adobe/spacecat-api-service/compare/v1.200.1...v1.201.0) (2025-10-13)
+
+
+### Features
+
+* code config in /sites endpoint and slack command ([#1289](https://github.com/adobe/spacecat-api-service/issues/1289)) ([26bc50f](https://github.com/adobe/spacecat-api-service/commit/26bc50fcda0ecf27ca49cac639168ad8ac326b67))
+
+## [1.200.1](https://github.com/adobe/spacecat-api-service/compare/v1.200.0...v1.200.1) (2025-10-13)
+
+
+### Bug Fixes
+
+* backfill per day instead of hours ([#1346](https://github.com/adobe/spacecat-api-service/issues/1346)) ([67676a6](https://github.com/adobe/spacecat-api-service/commit/67676a6282af4a46f764c3c0b852d1aeb738a4af))
+
+# [1.200.0](https://github.com/adobe/spacecat-api-service/compare/v1.199.0...v1.200.0) (2025-10-13)
+
+
+### Features
+
+* Add productCodes to registerAudit API ([#1337](https://github.com/adobe/spacecat-api-service/issues/1337)) ([913ca68](https://github.com/adobe/spacecat-api-service/commit/913ca68a01b62d8d310b23bb870f240abe00dfa8))
+
+# [1.199.0](https://github.com/adobe/spacecat-api-service/compare/v1.198.0...v1.199.0) (2025-10-10)
+
+
+### Features
+
+* remove unused profiles - default, summit, summit-lower-quality ([#1333](https://github.com/adobe/spacecat-api-service/issues/1333)) ([96d662e](https://github.com/adobe/spacecat-api-service/commit/96d662ec651268916386c22c1bfa661fe57dc4ee))
+
+# [1.198.0](https://github.com/adobe/spacecat-api-service/compare/v1.197.0...v1.198.0) (2025-10-10)
+
+
+### Features
+
+* create delivery config with required attributes in site config ([#1327](https://github.com/adobe/spacecat-api-service/issues/1327)) ([7df4204](https://github.com/adobe/spacecat-api-service/commit/7df4204201960f3ec3a22e44f6adb6c4670d9418))
+
+# [1.197.0](https://github.com/adobe/spacecat-api-service/compare/v1.196.3...v1.197.0) (2025-10-10)
+
+
+### Features
+
+* ScheduleRun flag to determine if imports and audits shall be disbled ([#1310](https://github.com/adobe/spacecat-api-service/issues/1310)) ([7b9ffde](https://github.com/adobe/spacecat-api-service/commit/7b9ffdefd41ae432b9884117fdd14171ac85d048))
+
+## [1.196.3](https://github.com/adobe/spacecat-api-service/compare/v1.196.2...v1.196.3) (2025-10-10)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.71.0 ([#1341](https://github.com/adobe/spacecat-api-service/issues/1341)) ([57d57c6](https://github.com/adobe/spacecat-api-service/commit/57d57c64188894425e31353fe3d0c77f4888e602))
+* **llmo-config:** bump llmo schema version ([#1342](https://github.com/adobe/spacecat-api-service/issues/1342)) ([90c793c](https://github.com/adobe/spacecat-api-service/commit/90c793c5e0c056fda7c491270b1ff2552a190ae9))
+
+## [1.196.2](https://github.com/adobe/spacecat-api-service/compare/v1.196.1...v1.196.2) (2025-10-10)
+
+
+### Bug Fixes
+
+* **llmo-config:** parse the patched full config on update ([#1340](https://github.com/adobe/spacecat-api-service/issues/1340)) ([85996da](https://github.com/adobe/spacecat-api-service/commit/85996daff814bb18f83dea5d46dafddaf4ce6888))
+
+## [1.196.1](https://github.com/adobe/spacecat-api-service/compare/v1.196.0...v1.196.1) (2025-10-10)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.70.0 ([#1339](https://github.com/adobe/spacecat-api-service/issues/1339)) ([e58c50e](https://github.com/adobe/spacecat-api-service/commit/e58c50e9ae34c43d198776290a10d8bea18702a8))
+
 # [1.196.0](https://github.com/adobe/spacecat-api-service/compare/v1.195.0...v1.196.0) (2025-10-09)
 
 
