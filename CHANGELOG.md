@@ -1,3 +1,10 @@
+# [1.201.0](https://github.com/adobe/spacecat-api-service/compare/v1.200.1...v1.201.0) (2025-10-13)
+
+
+### Features
+
+* code config in /sites endpoint and slack command ([#1289](https://github.com/adobe/spacecat-api-service/issues/1289)) ([26bc50f](https://github.com/adobe/spacecat-api-service/commit/26bc50fcda0ecf27ca49cac639168ad8ac326b67))
+
 ## [1.200.1](https://github.com/adobe/spacecat-api-service/compare/v1.200.0...v1.200.1) (2025-10-13)
 
 
