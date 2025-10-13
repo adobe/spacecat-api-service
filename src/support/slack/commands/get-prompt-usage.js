@@ -188,13 +188,14 @@ function GetPromptUsageCommand(context) {
         ],
       });
 
-      const csv = csvStringifier.getHeaderString()
-        + csvStringifier.stringifyRecords(rows);
+      const csv = csvStringifier.getHeaderString() + csvStringifier.stringifyRecords(rows);
+
+      const csvBuffer = Buffer.from(csv, 'utf8');
 
       try {
         await sendFile(
           slackContext,
-          csv,
+          csvBuffer,
           `prompt-usage-${Date.now()}.csv`,
           'Prompt usage report',
           'Here you can find the prompt usage report.',

@@ -463,7 +463,7 @@ describe('GetPromptUsageCommand', () => {
       expect(sendFileStub.calledOnce).to.be.true;
       const [
         providedSlackContext,
-        csvContent,
+        csvBuffer,
         filename,
         title,
         initialComment,
@@ -476,11 +476,10 @@ describe('GetPromptUsageCommand', () => {
       expect(channelId).to.equal('test-channel');
       expect(filename).to.match(/^prompt-usage-\d+\.csv$/);
 
-      const lines = csvContent.trim().split('\n');
+      const csvString = Buffer.isBuffer(csvBuffer) ? csvBuffer.toString('utf8') : String(csvBuffer);
+      const lines = csvString.trim().split(/\r?\n/);
 
-      expect(lines[0]).to.equal(
-        'IMS Org Name,IMS Org ID,Tier,Total number of prompts,Error',
-      );
+      expect(lines[0]).to.equal('IMS Org Name,IMS Org ID,Tier,Total number of prompts,Error');
 
       expect(lines[1]).to.equal('Test Org 1,test-org-1@AdobeOrg,FREE_TRIAL,2,');
 
