@@ -101,11 +101,7 @@ const project = new Project(
         model: {
           schema: {
             indexes: {},
-            attributes: {
-              id: { type: 'string', get: (value) => value },
-              projectName: { type: 'string', get: (value) => value },
-              organizationId: { type: 'string', get: (value) => value },
-            },
+            attributes: { projectName: { type: 'string', get: (value) => value } },
           },
         },
         patch: sinon.stub().returns({
@@ -125,7 +121,7 @@ const project = new Project(
   ProjectSchema,
   {
     projectId: '550e8400-e29b-41d4-a716-446655440000',
-    projectName: 'Project 1',
+    projectName: 'New Project',
     organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28',
   },
   console,
@@ -229,7 +225,7 @@ describe('Projects Controller', () => {
   describe('createProject', () => {
     it('should create a project successfully for admin users', async () => {
       const response = await projectsController.createProject({
-        data: { projectName: 'Project 1', organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' },
+        data: { projectName: 'New Project', organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' },
         ...context,
       });
 
@@ -237,16 +233,16 @@ describe('Projects Controller', () => {
       const responseBody = await response.json();
       expect(responseBody).to.deep.equal({
         id: '550e8400-e29b-41d4-a716-446655440000',
-        projectName: 'Project 1',
+        projectName: 'New Project',
         organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28',
       });
-      expect(mockDataAccess.Project.create).to.have.been.calledWith({ projectName: 'Project 1', organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' });
+      expect(mockDataAccess.Project.create).to.have.been.calledWith({ name: 'New Project', organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' });
     });
 
     it('should return forbidden for non-admin users', async () => {
       context.attributes.authInfo.withProfile({ is_admin: false });
       const response = await projectsController.createProject({
-        data: { name: 'New Project', organizationId: '550e8400-e29b-41d4-a716-446655440001' },
+        data: { projectName: 'New Project', organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' },
         ...context,
       });
 
@@ -258,7 +254,7 @@ describe('Projects Controller', () => {
     it('should return bad request when creation fails', async () => {
       mockDataAccess.Project.create.rejects(new Error('Validation failed'));
       const response = await projectsController.createProject({
-        data: { name: 'New Project', organizationId: '550e8400-e29b-41d4-a716-446655440001' },
+        data: { projectName: 'New Project', organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' },
         ...context,
       });
 
@@ -277,7 +273,7 @@ describe('Projects Controller', () => {
       expect(responseBody).to.have.length(1);
       expect(responseBody[0]).to.deep.equal({
         id: '550e8400-e29b-41d4-a716-446655440000',
-        projectName: 'Project 1',
+        projectName: 'New Project',
         organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28',
       });
       expect(mockDataAccess.Project.all).to.have.been.called;
@@ -304,7 +300,7 @@ describe('Projects Controller', () => {
       const responseBody = await response.json();
       expect(responseBody).to.deep.equal({
         id: '550e8400-e29b-41d4-a716-446655440000',
-        projectName: 'Project 1',
+        projectName: 'New Project',
         organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28',
       });
       expect(mockDataAccess.Project.findById).to.have.been.calledWith('550e8400-e29b-41d4-a716-446655440000');
@@ -411,14 +407,14 @@ describe('Projects Controller', () => {
       });
 
       expect(response.status).to.equal(200);
-      expect(project.setProjectName).to.have.been.calledWith('Updated Project Name');
+      expect(project.setName).to.have.been.calledWith('Updated Project Name');
       expect(project.save).to.have.been.called;
     });
 
     it('should return bad request when no updates provided', async () => {
       const response = await projectsController.updateProject({
         params: { projectId: '550e8400-e29b-41d4-a716-446655440000' },
-        data: { name: 'Test Project', organizationId: '550e8400-e29b-41d4-a716-446655440001' }, // Same values
+        data: { projectName: 'New Project', organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, // Same values
         ...context,
       });
 
@@ -442,8 +438,8 @@ describe('Projects Controller', () => {
     it('should return not found when project does not exist', async () => {
       mockDataAccess.Project.findById.resolves(null);
       const response = await projectsController.updateProject({
-        params: { projectId: '550e8400-e29b-41d4-a716-446655440000' },
-        data: { name: 'Updated Project Name' },
+        params: { projectId: '550e8400-e29b-41d4-a716-446655440001' },
+        data: { projectNAme: 'Updated Project Name' },
         ...context,
       });
 
@@ -508,8 +504,8 @@ describe('Projects Controller', () => {
 
       expect(response.status).to.equal(200);
       const responseBody = await response.json();
-      expect(responseBody).to.have.length(1);
-      expect(responseBody[0].id).to.equal('550e8400-e29b-41d4-a716-446655440002');
+      expect(responseBody).to.have.length(2);
+      expect(responseBody[0].id).to.equal('site1');
       expect(mockDataAccess.Site.allByProjectIdAndPrimaryLocale).to.have.been.calledWith('550e8400-e29b-41d4-a716-446655440000', true);
     });
 
@@ -537,13 +533,7 @@ describe('Projects Controller', () => {
     });
 
     it('should return forbidden when user lacks access to view primary locale sites', async () => {
-      // Mock access control to return false for hasAccess
-      const mockAccessControlUtil = {
-        hasAdminAccess: stub().returns(true),
-        hasAccess: stub().resolves(false), // This will cause the forbidden response
-      };
-      sandbox.stub(AccessControlUtil, 'fromContext').returns(mockAccessControlUtil);
-
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
       const testController = ProjectsController(context, { TEST_ENV: 'true' });
 
       const response = await testController.getPrimaryLocaleSites({
@@ -566,8 +556,8 @@ describe('Projects Controller', () => {
 
       expect(response.status).to.equal(200);
       const responseBody = await response.json();
-      expect(responseBody).to.have.length(1);
-      expect(responseBody[0].id).to.equal('550e8400-e29b-41d4-a716-446655440002');
+      expect(responseBody).to.have.length(2);
+      expect(responseBody[0].id).to.equal('site1');
       expect(mockDataAccess.Site.allByProjectId).to.have.been.calledWith('550e8400-e29b-41d4-a716-446655440000');
     });
 
@@ -595,12 +585,7 @@ describe('Projects Controller', () => {
     });
 
     it('should return forbidden when user lacks access to project sites', async () => {
-      // Mock access control to return false for hasAccess
-      const mockAccessControlUtil = {
-        hasAdminAccess: stub().returns(true),
-        hasAccess: stub().resolves(false), // This will cause the forbidden response
-      };
-      sandbox.stub(AccessControlUtil, 'fromContext').returns(mockAccessControlUtil);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
 
       const testController = ProjectsController(context, { TEST_ENV: 'true' });
 
@@ -637,51 +622,8 @@ describe('Projects Controller', () => {
 
   describe('getSitesByProjectName', () => {
     it('gets all sites for a project by project name', async () => {
-      const mockSites = [
-        {
-          getId: () => 'site1',
-          getBaseURL: () => 'https://site1.com',
-          getName: () => 'Site 1',
-          getHlxConfig: () => ({}),
-          getDeliveryType: () => 'aem_edge',
-          getAuthoringType: () => 'cs',
-          getDeliveryConfig: () => ({}),
-          getGitHubURL: () => 'https://github.com/site1',
-          getOrganizationId: () => 'org-123',
-          getIsLive: () => true,
-          getIsSandbox: () => false,
-          getIsLiveToggledAt: () => '2024-01-01T00:00:00Z',
-          getCreatedAt: () => '2024-01-01T00:00:00Z',
-          getUpdatedAt: () => '2024-01-01T00:00:00Z',
-          getConfig: () => Config({ slack: {}, handlers: {}, imports: [] }),
-          getPageTypes: () => [],
-          getUpdatedBy: () => 'system',
-          toJSON: () => ({ id: 'site1', baseURL: 'https://site1.com' }),
-        },
-        {
-          getId: () => 'site2',
-          getBaseURL: () => 'https://site2.com',
-          getName: () => 'Site 2',
-          getHlxConfig: () => ({}),
-          getDeliveryType: () => 'aem_edge',
-          getAuthoringType: () => 'cs',
-          getDeliveryConfig: () => ({}),
-          getGitHubURL: () => 'https://github.com/site2',
-          getOrganizationId: () => 'org-123',
-          getIsLive: () => true,
-          getIsSandbox: () => false,
-          getIsLiveToggledAt: () => '2024-01-01T00:00:00Z',
-          getCreatedAt: () => '2024-01-01T00:00:00Z',
-          getUpdatedAt: () => '2024-01-01T00:00:00Z',
-          getConfig: () => Config({ slack: {}, handlers: {}, imports: [] }),
-          getPageTypes: () => [],
-          getUpdatedBy: () => 'system',
-          toJSON: () => ({ id: 'site2', baseURL: 'https://site2.com' }),
-        },
-      ];
-
       mockDataAccess.Project.findByProjectName.resolves(project);
-      mockDataAccess.Site.allByProjectName.resolves(mockSites);
+      mockDataAccess.Site.allByProjectName.resolves(sites);
 
       const result = await projectsController.getSitesByProjectName({
         params: { projectName: 'test-project' },
@@ -723,10 +665,7 @@ describe('Projects Controller', () => {
         getId: () => 'project-123',
         toJSON: () => ({ id: 'project-123', name: 'Test Project' }),
       };
-      const mockAccessControlUtil = {
-        hasAccess: sandbox.stub().resolves(false),
-      };
-      sandbox.stub(AccessControlUtil, 'fromContext').returns(mockAccessControlUtil);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
 
       mockDataAccess.Project.findByProjectName.resolves(mockProject);
 
