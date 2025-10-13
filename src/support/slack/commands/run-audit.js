@@ -145,16 +145,9 @@ function RunAuditCommand(context) {
           return;
         }
         const handler = configuration.getHandlers()?.[auditType];
-        // Exit early with error if handler has empty product codes
-        // (explicitly configured but empty)
-        if (handler?.productCodes !== undefined && !isNonEmptyArray(handler.productCodes)) {
+        // Exit early with error if handler has no product codes configured
+        if (!handler?.productCodes || !isNonEmptyArray(handler.productCodes)) {
           await say(`:x: Will not audit site '${baseURL}' because no product codes are configured for audit type '${auditType}'.`);
-          return;
-        }
-
-        // Skip entitlement checks if product codes are not defined (backwards compatibility)
-        if (!handler?.productCodes) {
-          await triggerAuditForSite(site, auditType, auditData, slackContext, context);
           return;
         }
 
