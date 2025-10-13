@@ -660,5 +660,119 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockLog.info).to.have.been.calledWith('Starting LLMO onboarding for IMS org ABC123@AdobeOrg, domain example.com, brand Test Brand');
       expect(mockLog.info).to.have.been.calledWith('Created site site123 for https://example.com');
     });
+
+    it('should create new organization when organization does not exist', async () => {
+      // Mock new organization
+      const mockOrganization = {
+        getId: sinon.stub().returns('new-org-123'),
+        getImsOrgId: sinon.stub().returns('NEW123@AdobeOrg'),
+      };
+
+      // Mock site
+      const mockSite = {
+        getId: sinon.stub().returns('site456'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      // Mock configuration
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      // Setup mocks - organization does not exist
+      mockDataAccess.Organization.findByImsOrgId.resolves(null);
+      mockDataAccess.Organization.create = sinon.stub().resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      // Mock Config.toDynamoItem
+      const mockConfig = {
+        toDynamoItem: sinon.stub().returns({ config: 'dynamo-item' }),
+      };
+
+      // Mock TierClient
+      const mockTierClient = {
+        createForSite: sinon.stub().returns({
+          createEntitlement: sinon.stub().resolves({
+            entitlement: { getId: sinon.stub().returns('entitlement456') },
+            siteEnrollment: { getId: sinon.stub().returns('enrollment456') },
+          }),
+        }),
+      };
+
+      // Mock the module
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+          Entitlement: {
+            PRODUCT_CODES: { LLMO: 'LLMO' },
+            TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+          },
+        },
+        '@adobe/spacecat-shared-tier-client': {
+          default: mockTierClient,
+        },
+        '@adobe/spacecat-helix-content-sdk': {
+          createFrom: sinon.stub().resolves({
+            getDocument: sinon.stub().returns({
+              exists: sinon.stub().resolves(false),
+              createFolder: sinon.stub().resolves(),
+              copy: sinon.stub().resolves(),
+            }),
+          }),
+        },
+        '@octokit/rest': {
+          Octokit: sinon.stub().returns({
+            repos: {
+              getContent: sinon.stub().resolves({
+                data: {
+                  content: Buffer.from('test content').toString('base64'),
+                  sha: 'test-sha-456',
+                },
+              }),
+              createOrUpdateFileContents: sinon.stub().resolves(),
+            },
+          }),
+        },
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: mockConfig,
+        },
+      });
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+      };
+
+      const params = {
+        domain: 'newdomain.com',
+        brandName: 'New Brand',
+        imsOrgId: 'NEW123@AdobeOrg',
+      };
+
+      const result = await performLlmoOnboardingWithMocks(params, context);
+
+      // Verify organization was created
+      expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledWith('NEW123@AdobeOrg');
+      expect(mockDataAccess.Organization.create).to.have.been.calledWith({
+        name: 'Organization NEW123@AdobeOrg',
+        imsOrgId: 'NEW123@AdobeOrg',
+      });
+
+      // Verify logging for organization creation
+      expect(mockLog.info).to.have.been.calledWith('Creating new organization for IMS Org ID: NEW123@AdobeOrg');
+      expect(mockLog.info).to.have.been.calledWith('Created organization new-org-123 for IMS Org ID: NEW123@AdobeOrg');
+
+      // Verify result
+      expect(result.organizationId).to.equal('new-org-123');
+      expect(result.siteId).to.equal('site456');
+    });
   });
 });
