@@ -1,3 +1,10 @@
+## [1.200.1](https://github.com/adobe/spacecat-api-service/compare/v1.200.0...v1.200.1) (2025-10-13)
+
+
+### Bug Fixes
+
+* backfill per day instead of hours ([#1346](https://github.com/adobe/spacecat-api-service/issues/1346)) ([67676a6](https://github.com/adobe/spacecat-api-service/commit/67676a6282af4a46f764c3c0b852d1aeb738a4af))
+
 # [1.200.0](https://github.com/adobe/spacecat-api-service/compare/v1.199.0...v1.200.0) (2025-10-13)
 
 
