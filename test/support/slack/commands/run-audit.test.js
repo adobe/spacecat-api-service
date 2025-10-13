@@ -27,6 +27,23 @@ describe('RunAuditCommand', () => {
   let dataAccessStub;
   let sqsStub;
 
+  // Helper function to create default configuration mock
+  const createDefaultConfigurationMock = (auditTypes = ['lhs-mobile'], productCodes = null, overrides = {}) => {
+    const types = Array.isArray(auditTypes) ? auditTypes : [auditTypes];
+    const handlers = {};
+    types.forEach((type) => {
+      // If productCodes is explicitly null, don't include it (for backwards compatibility)
+      // If productCodes is provided, use it; otherwise default to empty array for new behavior
+      handlers[type] = productCodes === null
+        ? { ...overrides }
+        : { productCodes: productCodes || [], ...overrides };
+    });
+    return {
+      isHandlerEnabledForSite: () => true,
+      getHandlers: () => handlers,
+    };
+  };
+
   beforeEach(() => {
     dataAccessStub = {
       Configuration: { findLatest: sinon.stub() },
@@ -37,7 +54,11 @@ describe('RunAuditCommand', () => {
     };
     context = {
       dataAccess: dataAccessStub,
-      log: console,
+      log: {
+        info: sinon.spy(),
+        error: sinon.spy(),
+        warn: sinon.spy(),
+      },
       sqs: sqsStub,
       env: { AUDIT_JOBS_QUEUE_URL: 'testQueueUrl' },
     };
@@ -58,9 +79,7 @@ describe('RunAuditCommand', () => {
       dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
       });
-      dataAccessStub.Configuration.findLatest.resolves({
-        isHandlerEnabledForSite: () => true,
-      });
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('lhs-mobile', null));
       const command = RunAuditCommand(context);
 
       await command.handleExecution(['validsite.com'], slackContext);
@@ -282,9 +301,7 @@ describe('RunAuditCommand', () => {
   describe('Keyword Arguments Support', () => {
     beforeEach(() => {
       dataAccessStub.Site.findByBaseURL.resolves({ getId: () => 'siteId' });
-      dataAccessStub.Configuration.findLatest.resolves({
-        isHandlerEnabledForSite: () => true,
-      });
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('geo-brand-presence', null));
     });
 
     it('handles keyword format with audit type', async () => {
@@ -457,6 +474,244 @@ describe('RunAuditCommand', () => {
         'date-start': '2025-09-07',
         source: 'test-source',
       });
+    });
+  });
+
+  describe('Entitlement Checks', () => {
+    let TierClient;
+
+    it('should block audit when handler has no product codes configured', async () => {
+      const site = { getId: () => '123' };
+
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: () => true,
+        getHandlers: () => ({ 'lhs-mobile': { productCodes: [] } }),
+      });
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['validsite.com'], slackContext);
+
+      expect(sqsStub.sendMessage).to.not.have.been.called;
+      expect(slackContext.say).to.have.been.calledWith(':x: Will not audit site \'https://validsite.com\' because no product codes are configured for audit type \'lhs-mobile\'.');
+    });
+
+    it('should allow audit when handler has undefined product codes (backwards compatibility)', async () => {
+      const site = { getId: () => '123' };
+
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: () => true,
+        getHandlers: () => ({ 'lhs-mobile': {} }),
+      });
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['validsite.com'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.called;
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering lhs-mobile audit');
+    });
+
+    beforeEach(async () => {
+      // Import and mock TierClient
+      const esmock = (await import('esmock')).default;
+      const mockTierClient = {
+        createForSite: sinon.stub(),
+      };
+
+      TierClient = mockTierClient;
+
+      // Mock the RunAuditCommand with TierClient mocked
+      const MockedRunAuditCommand = await esmock('../../../../src/support/slack/commands/run-audit.js', {
+        '@adobe/spacecat-shared-tier-client': { default: mockTierClient },
+      });
+
+      // Update context with mocked command
+      context.RunAuditCommand = MockedRunAuditCommand;
+    });
+
+    it('should allow audit when site has valid entitlement', async () => {
+      const site = { getId: () => '123' };
+      const handler = {
+        productCodes: ['LLMO'],
+      };
+
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: () => true,
+        getHandlers: () => ({ 'lhs-mobile': handler }),
+      });
+
+      // Mock TierClient to return valid entitlement
+      const mockTierClientInstance = {
+        checkValidEntitlement: sinon.stub().resolves({
+          entitlement: { id: 'ent-123' },
+        }),
+      };
+      TierClient.createForSite.resolves(mockTierClientInstance);
+
+      const command = context.RunAuditCommand(context);
+      await command.handleExecution(['validsite.com'], slackContext);
+
+      expect(TierClient.createForSite).to.have.been.calledWith(context, site, 'LLMO');
+      expect(mockTierClientInstance.checkValidEntitlement).to.have.been.called;
+      expect(sqsStub.sendMessage).to.have.been.called;
+      expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering lhs-mobile audit');
+    });
+
+    it('should block audit when site has no entitlement', async () => {
+      const site = { getId: () => '123' };
+      const handler = {
+        productCodes: ['LLMO'],
+      };
+
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: () => true,
+        getHandlers: () => ({ 'lhs-mobile': handler }),
+      });
+
+      // Mock TierClient to return no entitlement
+      const mockTierClientInstance = {
+        checkValidEntitlement: sinon.stub().resolves({
+          entitlement: null,
+        }),
+      };
+      TierClient.createForSite.resolves(mockTierClientInstance);
+
+      const command = context.RunAuditCommand(context);
+      await command.handleExecution(['validsite.com'], slackContext);
+
+      expect(TierClient.createForSite).to.have.been.calledWith(context, site, 'LLMO');
+      expect(mockTierClientInstance.checkValidEntitlement).to.have.been.called;
+      expect(sqsStub.sendMessage).to.not.have.been.called;
+      expect(slackContext.say).to.have.been.calledWith(':x: Will not audit site \'https://validsite.com\' because site is not entitled for this audit.');
+    });
+
+    it('should allow audit when site has entitlement for any product code', async () => {
+      const site = { getId: () => '123' };
+      const handler = {
+        productCodes: ['LLMO', 'ASO'],
+      };
+
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: () => true,
+        getHandlers: () => ({ 'lhs-mobile': handler }),
+      });
+
+      // Mock TierClient - first product code fails, second succeeds
+      const mockTierClientInstance1 = {
+        checkValidEntitlement: sinon.stub().resolves({ entitlement: null }),
+      };
+      const mockTierClientInstance2 = {
+        checkValidEntitlement: sinon.stub().resolves({ entitlement: { id: 'ent-456' } }),
+      };
+
+      TierClient.createForSite
+        .onFirstCall().resolves(mockTierClientInstance1)
+        .onSecondCall().resolves(mockTierClientInstance2);
+
+      const command = context.RunAuditCommand(context);
+      await command.handleExecution(['validsite.com'], slackContext);
+
+      expect(TierClient.createForSite).to.have.been.calledTwice;
+      expect(TierClient.createForSite.firstCall).to.have.been.calledWith(context, site, 'LLMO');
+      expect(TierClient.createForSite.secondCall).to.have.been.calledWith(context, site, 'ASO');
+      expect(sqsStub.sendMessage).to.have.been.called;
+    });
+
+    it('should handle TierClient errors gracefully and continue checking other product codes', async () => {
+      const site = { getId: () => '123' };
+      const handler = {
+        productCodes: ['LLMO', 'ASO'],
+      };
+
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: () => true,
+        getHandlers: () => ({ 'lhs-mobile': handler }),
+      });
+
+      // Mock TierClient - first product code throws error, second succeeds
+      const mockTierClientInstance2 = {
+        checkValidEntitlement: sinon.stub().resolves({ entitlement: { id: 'ent-456' } }),
+      };
+
+      TierClient.createForSite
+        .onFirstCall().rejects(new Error('TierClient error'))
+        .onSecondCall().resolves(mockTierClientInstance2);
+
+      const command = context.RunAuditCommand(context);
+      await command.handleExecution(['validsite.com'], slackContext);
+
+      expect(TierClient.createForSite).to.have.been.calledTwice;
+      expect(sqsStub.sendMessage).to.have.been.called;
+      expect(context.log.error).to.have.been.calledWith(
+        sinon.match(/Failed to check entitlement for product code LLMO/),
+        sinon.match.instanceOf(Error),
+      );
+    });
+
+    it('should block audit when all entitlement checks fail', async () => {
+      const site = { getId: () => '123' };
+      const handler = {
+        productCodes: ['LLMO', 'ASO'],
+      };
+
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: () => true,
+        getHandlers: () => ({ 'lhs-mobile': handler }),
+      });
+
+      // Mock TierClient - both product codes return no entitlement
+      const mockTierClientInstance1 = {
+        checkValidEntitlement: sinon.stub().resolves({ entitlement: null }),
+      };
+      const mockTierClientInstance2 = {
+        checkValidEntitlement: sinon.stub().resolves({ entitlement: false }),
+      };
+
+      TierClient.createForSite
+        .onFirstCall().resolves(mockTierClientInstance1)
+        .onSecondCall().resolves(mockTierClientInstance2);
+
+      const command = context.RunAuditCommand(context);
+      await command.handleExecution(['validsite.com'], slackContext);
+
+      expect(TierClient.createForSite).to.have.been.calledTwice;
+      expect(sqsStub.sendMessage).to.not.have.been.called;
+      expect(slackContext.say).to.have.been.calledWith(':x: Will not audit site \'https://validsite.com\' because site is not entitled for this audit.');
+    });
+
+    it('should handle checkValidEntitlement errors gracefully', async () => {
+      const site = { getId: () => '123' };
+      const handler = {
+        productCodes: ['LLMO'],
+      };
+
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: () => true,
+        getHandlers: () => ({ 'lhs-mobile': handler }),
+      });
+
+      // Mock TierClient to throw error on checkValidEntitlement
+      const mockTierClientInstance = {
+        checkValidEntitlement: sinon.stub().rejects(new Error('Entitlement check failed')),
+      };
+      TierClient.createForSite.resolves(mockTierClientInstance);
+
+      const command = context.RunAuditCommand(context);
+      await command.handleExecution(['validsite.com'], slackContext);
+
+      expect(mockTierClientInstance.checkValidEntitlement).to.have.been.called;
+      expect(sqsStub.sendMessage).to.not.have.been.called;
+      expect(context.log.error).to.have.been.calledWith(
+        sinon.match(/Failed to check entitlement for product code LLMO/),
+        sinon.match.instanceOf(Error),
+      );
     });
   });
 });

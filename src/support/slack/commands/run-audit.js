@@ -11,6 +11,8 @@
  */
 
 import { isNonEmptyArray, isNonEmptyObject, isValidUrl } from '@adobe/spacecat-shared-utils';
+import TierClient from '@adobe/spacecat-shared-tier-client';
+
 import BaseCommand from './base.js';
 
 import {
@@ -142,6 +144,40 @@ function RunAuditCommand(context) {
           await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
           return;
         }
+        const handler = configuration.getHandlers()?.[auditType];
+        // Exit early with error if handler has empty product codes
+        // (explicitly configured but empty)
+        if (handler?.productCodes !== undefined && !isNonEmptyArray(handler.productCodes)) {
+          await say(`:x: Will not audit site '${baseURL}' because no product codes are configured for audit type '${auditType}'.`);
+          return;
+        }
+
+        // Skip entitlement checks if product codes are not defined (backwards compatibility)
+        if (!handler?.productCodes) {
+          await triggerAuditForSite(site, auditType, auditData, slackContext, context);
+          return;
+        }
+
+        // Check entitlements for all product codes
+        const entitlementChecks = await Promise.all(
+          handler.productCodes.map(async (productCode) => {
+            try {
+              const tierClient = await TierClient.createForSite(context, site, productCode);
+              const tierResult = await tierClient.checkValidEntitlement();
+              return tierResult.entitlement || false;
+            } catch (error) {
+              context.log.error(`Failed to check entitlement for product code ${productCode}:`, error);
+              return false;
+            }
+          }),
+        );
+
+        // Block audit if site has no entitlement for any of the product codes
+        if (!entitlementChecks.some((hasEntitlement) => hasEntitlement)) {
+          await say(`:x: Will not audit site '${baseURL}' because site is not entitled for this audit.`);
+          return;
+        }
+
         await triggerAuditForSite(site, auditType, auditData, slackContext, context);
       }
     } catch (error) {
