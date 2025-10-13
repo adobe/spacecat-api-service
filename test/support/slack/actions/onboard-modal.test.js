@@ -353,8 +353,9 @@ describe('onboard-modal', () => {
       const { blocks } = openCall.view;
       const profileBlock = blocks.find((block) => block.block_id === 'profile_input');
 
-      // Should have no initial selection for unknown profiles
-      expect(profileBlock.element.initial_option).to.be.undefined;
+      // Should default to 'demo' for unknown profiles
+      expect(profileBlock.element.initial_option.value).to.equal('demo');
+      expect(profileBlock.element.initial_option.text.text).to.equal('Demo');
     });
   });
 
