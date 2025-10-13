@@ -142,6 +142,7 @@ describe('AddRepoCommand', () => {
       expect(slackContext.say).calledWith('\n'
         + '      :white_check_mark: *GitHub repo added for <undefined|undefined>*\n'
         + '\n'
+        + '\n'
         + '      :identification_card: some-id\n'
         + '      :cat-egory-white: aem_edge\n'
         + '      :github-4173: _not set_\n'
