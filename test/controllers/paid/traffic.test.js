@@ -304,11 +304,13 @@ describe('Paid TrafficController', async () => {
       const controller = TrafficController(mockContext, mockLog, mockEnv);
       const res = await controller.getPaidTrafficByTypeChannel();
       expect(res.status).to.equal(200);
-      // Validate the object put to S3
-      expect(lastPutObject).to.exist;
-      const decompressed = await gunzipAsync(lastPutObject.input.Body);
-      const putBody = JSON.parse(decompressed.toString());
-      expect(putBody).to.deep.equal([]);
+      // Empty results should not be cached
+      expect(lastPutObject).to.not.exist;
+      // Validate the compressed response body directly
+      const gzippedBuffer = Buffer.from(await res.arrayBuffer());
+      const decompressed = await gunzipAsync(gzippedBuffer);
+      const body = JSON.parse(decompressed.toString());
+      expect(body).to.deep.equal([]);
     });
 
     it('getPaidTrafficByCampaignUrlDevice uses custom threshold config if provided', async () => {
@@ -578,7 +580,7 @@ describe('Paid TrafficController', async () => {
       // Should return 302 (redirect) because cache verification succeeded
       expect(res.status).to.equal(302);
       expect(res.headers.get('location')).to.equal(TEST_PRESIGNED_URL);
-      expect(mockLog.info).to.have.been.calledWithMatch('Succesfully verified file existance');
+      expect(mockLog.debug).to.have.been.calledWithMatch('Successfully verified file existence');
     });
 
     // Systematic test for all endpoint functions to ensure coverage

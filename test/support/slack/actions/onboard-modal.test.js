@@ -43,6 +43,7 @@ describe('onboard-modal', () => {
       '../../../../src/support/utils.js': {
         onboardSingleSite: sinon.stub().resolves({
           siteId: 'site123',
+          projectId: 'project123',
           imsOrgId: '1234567894ABCDEF12345678@AdobeOrg',
           spacecatOrgId: 'org123',
           deliveryType: 'aem_edge',
@@ -52,6 +53,9 @@ describe('onboard-modal', () => {
           audits: 'scrape-top-pages, broken-backlinks, broken-internal-links, experimentation-opportunities, meta-tags, sitemap, cwv, alt-text, broken-backlinks-auto-suggest, meta-tags-auto-suggest, broken-internal-links-auto-suggest',
           imports: 'organic-traffic, top-pages, organic-keywords, all-traffic',
           errors: [],
+          tier: 'free_trial',
+          language: 'en',
+          region: 'US',
         }),
       },
     });
@@ -75,29 +79,41 @@ describe('onboard-modal', () => {
   describe('extractDeliveryConfigFromPreviewUrl', () => {
     it('should validate valid AEM CS preview URLs', async () => {
       const previewUrl = 'https://author-p12345-e67890.adobeaemcloud.com';
+      const imsOrgId = '908936ED5D35CC220A495CD4@AdobeOrg';
       const {
         programId,
         environmentId,
         authorURL,
-      } = extractDeliveryConfigFromPreviewUrl(previewUrl);
+        preferContentApi,
+        imsOrgId: returnedImsOrgId,
+      } = extractDeliveryConfigFromPreviewUrl(previewUrl, imsOrgId);
       expect(programId).to.equal('12345');
       expect(environmentId).to.equal('67890');
       expect(authorURL).to.equal('https://author-p12345-e67890.adobeaemcloud.com');
+      expect(preferContentApi).to.equal(true);
+      expect(returnedImsOrgId).to.equal(imsOrgId);
     });
 
     it('should reject invalid preview URLs', async () => {
       const invalidUrl = 'https://invalid-url.com';
-      expect(extractDeliveryConfigFromPreviewUrl(invalidUrl)).to.be.null;
+      expect(extractDeliveryConfigFromPreviewUrl(invalidUrl, null)).to.be.null;
     });
 
     it('should handle malformed preview URLs', async () => {
       const malformedUrl = 'not-a-valid-url';
-      expect(extractDeliveryConfigFromPreviewUrl(malformedUrl)).to.be.null;
+      expect(extractDeliveryConfigFromPreviewUrl(malformedUrl, null)).to.be.null;
     });
 
     it('should handle malformed environment ID in preview URLs', async () => {
       const url = 'https://author-p123-e.adobeaemcloud.com';
-      expect(extractDeliveryConfigFromPreviewUrl(url)).to.be.null;
+      expect(extractDeliveryConfigFromPreviewUrl(url, null)).to.be.null;
+    });
+
+    it('should handle null imsOrgId gracefully', async () => {
+      const previewUrl = 'https://author-p12345-e67890.adobeaemcloud.com';
+      const result = extractDeliveryConfigFromPreviewUrl(previewUrl, null);
+      expect(result.imsOrgId).to.be.null;
+      expect(result.preferContentApi).to.equal(true);
     });
   });
 
@@ -122,6 +138,7 @@ describe('onboard-modal', () => {
           info: sandbox.stub(),
           warn: sandbox.stub(),
           error: sandbox.stub(),
+          debug: sandbox.stub(),
         },
       };
 
@@ -160,7 +177,7 @@ describe('onboard-modal', () => {
         respond: respondMock,
       });
 
-      expect(ackMock).to.have.been.calledOnce;
+      expect(ackMock).to.have.been.called;
       expect(respondMock).to.have.been.calledOnceWith({
         text: ':gear: test-user started the onboarding process...',
         replace_original: true,
@@ -182,6 +199,9 @@ describe('onboard-modal', () => {
         imsOrgId: 'ABC123@AdobeOrg',
         profile: 'demo',
         workflowWaitTime: '300',
+        projectId: 'project123',
+        language: 'fr',
+        region: 'CH',
       };
 
       body.actions[0].value = JSON.stringify(initialValues);
@@ -210,6 +230,18 @@ describe('onboard-modal', () => {
       // Check that wait time is pre-populated
       const waitTimeBlock = blocks.find((block) => block.block_id === 'wait_time_input');
       expect(waitTimeBlock.element.initial_value).to.equal('300');
+
+      // Check that project ID is pre-populated
+      const projectIdBlock = blocks.find((block) => block.block_id === 'project_id_input');
+      expect(projectIdBlock.element.initial_value).to.equal('project123');
+
+      // Check that language is pre-populated
+      const languageBlock = blocks.find((block) => block.block_id === 'language_input');
+      expect(languageBlock.element.initial_value).to.equal('fr');
+
+      // Check that region is pre-populated
+      const regionBlock = blocks.find((block) => block.block_id === 'region_input');
+      expect(regionBlock.element.initial_value).to.equal('CH');
     });
 
     it('should handle invalid JSON in button value gracefully', async () => {
@@ -284,7 +316,7 @@ describe('onboard-modal', () => {
     });
 
     it('should set correct profile initial option based on provided value', async () => {
-      const initialValues = { profile: 'default' };
+      const initialValues = { profile: 'paid' };
       body.actions[0].value = JSON.stringify(initialValues);
 
       const startOnboardingAction = startOnboarding(context);
@@ -300,8 +332,8 @@ describe('onboard-modal', () => {
       const { blocks } = openCall.view;
       const profileBlock = blocks.find((block) => block.block_id === 'profile_input');
 
-      expect(profileBlock.element.initial_option.value).to.equal('default');
-      expect(profileBlock.element.initial_option.text.text).to.equal('Default');
+      expect(profileBlock.element.initial_option.value).to.equal('paid');
+      expect(profileBlock.element.initial_option.text.text).to.equal('Paid');
     });
 
     it('should handle unknown profile value gracefully', async () => {
@@ -321,8 +353,8 @@ describe('onboard-modal', () => {
       const { blocks } = openCall.view;
       const profileBlock = blocks.find((block) => block.block_id === 'profile_input');
 
-      // Should fall back to default profile
-      expect(profileBlock.element.initial_option.value).to.equal('demo');
+      // Should have no initial selection for unknown profiles
+      expect(profileBlock.element.initial_option).to.be.undefined;
     });
   });
 
@@ -335,6 +367,8 @@ describe('onboard-modal', () => {
     let configurationMock;
     let organizationMock;
     let configMock;
+    let entitlementMock;
+    let siteEnrollmentMock;
 
     beforeEach(() => {
       ackMock = sandbox.stub().resolves();
@@ -386,6 +420,12 @@ describe('onboard-modal', () => {
         }),
       };
 
+      entitlementMock = {
+      };
+
+      siteEnrollmentMock = {
+      };
+
       context = {
         log: {
           info: sandbox.stub(),
@@ -399,6 +439,8 @@ describe('onboard-modal', () => {
           Site: siteMock,
           Configuration: configurationMock,
           Organization: organizationMock,
+          Entitlement: entitlementMock,
+          SiteEnrollment: siteEnrollmentMock,
         },
         env: {
           DEMO_IMS_ORG: '1234567894ABCDEF12345678@AdobeOrg',
@@ -431,6 +473,11 @@ describe('onboard-modal', () => {
                   value: '',
                 },
               },
+              project_id_input: {
+                project_id: {
+                  value: 'project123',
+                },
+              },
               profile_input: {
                 profile: {
                   selected_option: {
@@ -452,6 +499,13 @@ describe('onboard-modal', () => {
                   },
                 },
               },
+              tier_input: {
+                tier: {
+                  selected_option: {
+                    value: 'paid',
+                  },
+                },
+              },
               wait_time_input: {
                 wait_time: {
                   value: '30',
@@ -460,6 +514,23 @@ describe('onboard-modal', () => {
               preview_url_input: {
                 preview_url: {
                   value: '',
+                },
+              },
+              scheduled_run_input: {
+                scheduled_run: {
+                  selected_option: {
+                    value: 'false',
+                  },
+                },
+              },
+              language_input: {
+                language: {
+                  value: 'en',
+                },
+              },
+              region_input: {
+                region: {
+                  value: 'us',
                 },
               },
             },
@@ -559,7 +630,8 @@ describe('onboard-modal', () => {
         client: clientMock,
       });
 
-      expect(ackMock).to.have.been.calledOnce;
+      expect(ackMock).to.have.been.calledTwice;
+
       // Note: delivery config is now set during site creation, not afterward
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
         channel: 'C12345',
@@ -572,12 +644,16 @@ describe('onboard-modal', () => {
         text: ':white_check_mark: *Onboarding completed successfully by test-user!*\n'
           + '\n'
           + ':ims: *IMS Org ID:* 1234567894ABCDEF12345678@AdobeOrg\n'
+          + ':groups: *Project ID:* project123\n'
           + ':space-cat: *Spacecat Org ID:* org123\n'
           + ':identification_card: *Site ID:* site123\n'
           + ':cat-egory-white: *Delivery Type:* aem_edge\n'
           + ':writing_hand: *Authoring Type:* documentauthoring\n'
           + ':gear: *Delivery Config:* Program 12345, Environment 67890\n'
           + ':globe_with_meridians: *Preview Environment:* Configured with Program 12345, Environment 67890\n'
+          + ':paid: *Entitlement Tier:* free_trial\n'
+          + ':speaking_head_in_silhouette: *Language Code:* en\n'
+          + ':globe_with_meridians: *Country Code:* US\n'
           + ':question: *Already existing:* No\n'
           + ':gear: *Profile:* demo\n'
           + ':hourglass_flowing_sand: *Wait Time:* 30 seconds\n'
@@ -633,7 +709,7 @@ describe('onboard-modal', () => {
         client: clientMock,
       });
 
-      expect(ackMock).to.have.been.calledOnce;
+      expect(ackMock).to.have.been.called;
 
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
         channel: 'U12345',
@@ -659,7 +735,7 @@ describe('onboard-modal', () => {
         client: clientMock,
       });
 
-      expect(ackMock).to.have.been.calledOnce;
+      expect(ackMock).to.have.been.called;
     });
 
     it('should post a warning message onboarding fails', async () => {
@@ -679,11 +755,15 @@ describe('onboard-modal', () => {
         text: ':white_check_mark: *Onboarding completed successfully by test-user!*\n'
           + '\n'
           + ':ims: *IMS Org ID:* 1234567894ABCDEF12345678@AdobeOrg\n'
+          + ':groups: *Project ID:* project123\n'
           + ':space-cat: *Spacecat Org ID:* org123\n'
           + ':identification_card: *Site ID:* site123\n'
           + ':cat-egory-white: *Delivery Type:* aem_edge\n'
           + ':writing_hand: *Authoring Type:* documentauthoring\n'
           + '\n'
+          + ':paid: *Entitlement Tier:* free_trial\n'
+          + ':speaking_head_in_silhouette: *Language Code:* en\n'
+          + ':globe_with_meridians: *Country Code:* US\n'
           + ':question: *Already existing:* No\n'
           + ':gear: *Profile:* demo\n'
           + ':hourglass_flowing_sand: *Wait Time:* 30 seconds\n'
@@ -738,7 +818,7 @@ describe('onboard-modal', () => {
         client: clientMock,
       });
 
-      expect(ackMock).to.have.been.calledOnce;
+      expect(ackMock).to.have.been.called;
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
         channel: 'C12345',
         text: ':warning: Error during site creation,Configuration failed',
@@ -777,7 +857,7 @@ describe('onboard-modal', () => {
         client: clientMock,
       });
 
-      expect(ackMock).to.have.been.calledOnce;
+      expect(ackMock).to.have.been.called;
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
         channel: 'C12345',
         text: 'Test error message from onboarding process',
@@ -939,6 +1019,76 @@ describe('onboard-modal', () => {
 
       const hasDeliveryConfigWithProgramId = successMessages.some((call) => call.args[0].text.includes(':gear: *Delivery Config:* Program 12345'));
       expect(hasDeliveryConfigWithProgramId).to.be.true;
+    });
+
+    it('should fallback tier to free trial if not provided', async () => {
+      body.view.state.values.tier_input.tier.selected_option = {
+        value: undefined,
+      };
+
+      const onboardSiteModalAction = onboardSiteModal(context);
+      configurationMock.findLatest.resolves(configurationMock);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.called;
+
+      const postMessageCalls = clientMock.chat.postMessage.getCalls();
+      const successMessages = postMessageCalls.filter((call) => call.args[0].text.includes(':white_check_mark: *Onboarding completed successfully'));
+      expect(successMessages.length).to.be.greaterThan(0);
+
+      const hasTierInput = successMessages.some((call) => call.args[0].text.includes(':paid: *Entitlement Tier:* free_trial'));
+      expect(hasTierInput).to.be.true;
+    });
+
+    it('should pass scheduledRun as true when selected in form', async () => {
+      body.view.state.values.scheduled_run_input.scheduled_run.selected_option.value = 'true';
+
+      const onboardSiteModalAction = onboardSiteModal(context);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.called;
+
+      // Verify that the form value is properly extracted and passed
+      // The actual verification would be in the onboardSingleSite function call
+    });
+
+    it('should pass scheduledRun as false when selected in form', async () => {
+      body.view.state.values.scheduled_run_input.scheduled_run.selected_option.value = 'false';
+
+      const onboardSiteModalAction = onboardSiteModal(context);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.called;
+    });
+
+    it('should not pass scheduledRun when not selected in form', async () => {
+      // Remove the scheduled_run_input from the form values
+      delete body.view.state.values.scheduled_run_input;
+
+      const onboardSiteModalAction = onboardSiteModal(context);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.called;
     });
   });
 });

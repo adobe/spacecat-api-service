@@ -1,0 +1,79 @@
+paths:
+  /sites/{siteId}/user-activities:
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    get:
+      tags:
+        - user-activities
+      summary: List all user activities for a specific site
+      description: This endpoint retrieves all user activities associated with a specific site.
+      operationId: getUserActivitiesBySite
+      responses:
+        '200':
+          description: List of user activities for site retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: './schemas.yaml#/TrialUserActivity'
+        '400':
+          $ref: './responses.yaml#/400-no-site-id'
+        '401':
+          $ref: './responses.yaml#/401'
+        '404':
+          $ref: './responses.yaml#/404-site-not-found-with-id'
+        '500':
+          $ref: './responses.yaml#/500'
+      security:
+        - ims_key: [ ]
+    post:
+      tags:
+        - user-activities
+      summary: Create a new user activity
+      description: This endpoint creates a new user activity record for the logged-in user.
+      operationId: createUserActivity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - type
+                - productCode
+              properties:
+                type:
+                  type: string
+                  description: The type of activity
+                  enum: [SIGN_UP, SIGN_IN, CREATE_SITE, RUN_AUDIT, PROMPT_RUN, DOWNLOAD]
+                  example: 'SIGN_IN'
+                details:
+                  type: object
+                  description: Additional details about the activity
+                  additionalProperties: true
+                  example:
+                    browser: 'Chrome'
+                    ip: '192.168.1.1'
+                productCode:
+                  type: string
+                  description: The product code associated with the activity
+                  enum: [LLMO, ASO]
+                  example: 'LLMO'
+      responses:
+        '201':
+          description: User activity created successfully
+          content:
+            application/json:
+              schema:
+                $ref: './schemas.yaml#/TrialUserActivity'
+        '400':
+          $ref: './responses.yaml#/400-empty-request-body-validation-failure'
+        '401':
+          $ref: './responses.yaml#/401'
+        '404':
+          $ref: './responses.yaml#/404-site-not-found-with-id'
+        '500':
+          $ref: './responses.yaml#/500'
+      security:
+        - ims_key: [ ]

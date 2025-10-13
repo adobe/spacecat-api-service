@@ -471,7 +471,7 @@ function SuggestionsController(ctx, sqs, env) {
     if (!isNonEmptyObject(context.data)) {
       return badRequest('No updates provided');
     }
-    const { suggestionIds } = context.data;
+    const { suggestionIds, variationName: variation } = context.data;
     if (!isArray(suggestionIds)) {
       return badRequest('Request body must be an array of suggestionIds');
     }
@@ -514,11 +514,13 @@ function SuggestionsController(ctx, sqs, env) {
 
     let suggestionGroups;
     if (opportunity.getType() !== 'broken-backlinks') {
+      const opportunityData = opportunity.getData();
       const suggestionsByUrl = validSuggestions.reduce((acc, suggestion) => {
         const data = suggestion.getData();
         const url = data?.url || data?.recommendations?.[0]?.pageUrl
             || data?.url_from
-            || data?.urlFrom;
+            || data?.urlFrom
+            || opportunityData?.page; // for high-organic-low-ctr
         if (!url) return acc;
 
         if (!acc[url]) {
@@ -592,6 +594,7 @@ function SuggestionsController(ctx, sqs, env) {
           opportunityId,
           groupedSuggestions.map((s) => s.getId()),
           promiseTokenResponse,
+          variation,
           { url },
         )),
       );

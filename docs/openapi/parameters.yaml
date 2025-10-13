@@ -254,18 +254,92 @@ trafficType:
     enum:
       - 'all'
       - 'owned'
-      - 'earned' 
+      - 'earned'
       - 'paid'
     example: 'paid'
+
+# New parameters for entitlements API
+entitlementId:
+  name: entitlementId
+  description: The entitlement ID in uuid format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/Id'
+
+productCode:
+  name: productCode
+  description: The product code (LLMO or ASO)
+  in: path
+  required: true
+  schema:
+    type: string
+    enum:
+      - 'LLMO'
+      - 'ASO'
+
+# New parameters for site enrollments API
+siteEnrollmentId:
+  name: siteEnrollmentId
+  description: The site enrollment ID in uuid format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/Id'
+
+# New parameters for trial users API
+trialUserId:
+  name: trialUserId
+  description: The trial user ID in uuid format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/Id'
+
+externalUserId:
+  name: externalUserId
+  description: The external user ID from the identity provider
+  in: path
+  required: true
+  schema:
+    type: string
+    example: 'user123@adobe.com'
+
+externalId:
+  name: externalId
+  description: The external ID from the identity provider
+  in: path
+  required: true
+  schema:
+    type: string
+    example: 'user123@adobe.com'
+
 sandboxAuditType:
   name: auditType
-  description: Comma-separated list of audit types to run
+  description: |
+    Comma-separated list of audit types to run on sandbox sites. 
+    Use 'product-metatags' for specialized Product Detail Page (PDP) analysis of commerce sites.
   in: query
   required: false
   schema:
     type: string
-    description: Comma-separated list of audit types
-    example: "meta-tags,alt-text"
+    description: |
+      Comma-separated list of audit types:
+      - meta-tags: General meta tag analysis
+      - product-metatags: PDP-focused audit for e-commerce sites (scrapes SKU, thumbnail, catalog/store view codes)
+      - alt-text: Image alternative text analysis
+    example: "meta-tags,product-metatags,alt-text"
     enum:
       - 'meta-tags'
+      - 'product-metatags'
       - 'alt-text'
+
+llmoConfigVersion:
+  name: version
+  description: The version ID of the LLMO configuration to retrieve. If not provided, returns the latest version.
+  in: query
+  required: false
+  schema:
+    type: string
+    description: S3 object version ID
+    example: "abc123def456"

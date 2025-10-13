@@ -55,8 +55,12 @@ AuditType:
     - 'structured-data'
     - 'costs'
     - 'meta-tags'
+    - 'product-metatags'
     - 'broken-internal-links'
     - 'experimentation-opportunities'
+    - 'llm-error-pages'
+    - 'prerender'
+    - 'summarization'
   example: 'cwv'
 URL:
   type: string
@@ -703,6 +707,142 @@ AuditResult:
                 The final URL for the audited page.
               type: string
     - type: object
+      description: |
+        The result of a product-metatags audit targeting Product Detail Pages (PDP) of commerce sites.
+        This audit specifically analyzes product pages for e-commerce optimization, scraping SKU, 
+        thumbnail images, and catalog/store view codes for later autofixing capabilities.
+      properties:
+        auditResult:
+          type: object
+          properties:
+            productDetailPages:
+              description: |
+                A mapping of product page URLs to their analysis results, including product metadata 
+                and meta tag recommendations for commerce optimization.
+              type: object
+              additionalProperties:
+                type: object
+                properties:
+                  productMetadata:
+                    type: object
+                    description: |
+                      Commerce-specific metadata scraped from the product page for autofixing.
+                    properties:
+                      sku:
+                        description: |
+                          Product SKU (Stock Keeping Unit) identifier.
+                        type: string
+                      thumbnail:
+                        description: |
+                          URL to the product thumbnail image.
+                        type: string
+                      catalogViewCode:
+                        description: |
+                          Catalog view code for multi-catalog e-commerce sites.
+                        type: string
+                      storeViewCode:
+                        description: |
+                          Store view code for multi-store e-commerce sites.
+                        type: string
+                  metaTagAnalysis:
+                    type: object
+                    description: |
+                      Analysis of product-specific meta tags and SEO elements.
+                    additionalProperties:
+                      type: object
+                      properties:
+                        current:
+                          description: |
+                            Current value of the meta tag or element.
+                          type: string
+                        seoRecommendation:
+                          description: |
+                            SEO recommendation for this product meta element.
+                          type: string
+                        issue:
+                          description: |
+                            The issue detected in the product meta element.
+                          type: string
+                        issueDetails:
+                          description: |
+                            Detailed explanation of the issue for product pages.
+                          type: string
+                        seoImpact:
+                          description: |
+                            The impact of the detected issue on product discoverability.
+                          type: string
+                        autofixSuggestion:
+                          description: |
+                            Suggested value for automated fixing of the meta element.
+                          type: string
+            pdpOptimizationSummary:
+              type: object
+              description: |
+                Summary of product detail page optimization findings.
+              properties:
+                totalPagesAnalyzed:
+                  description: |
+                    Total number of product pages analyzed.
+                  type: integer
+                criticalIssues:
+                  description: |
+                    Number of critical issues found across product pages.
+                  type: integer
+                mediumIssues:
+                  description: |
+                    Number of medium-priority issues found.
+                  type: integer
+                autofixableItems:
+                  description: |
+                    Number of issues that can be automatically fixed using scraped metadata.
+                  type: integer
+            finalUrl:
+              description: |
+                The final URL for the audited commerce site.
+              type: string
+    - type: object
+      description: The result of LLM error pages audit.
+      properties:
+        success:
+          type: boolean
+          description: Whether the audit was successful
+        totalErrors:
+          type: integer
+          description: Total number of LLM error requests found
+        periodIdentifier:
+          type: string
+          description: The reporting period identifier
+          example: 'w01-2025'
+        summary:
+          type: object
+          description: Summary statistics of the audit
+          properties:
+            uniqueUrls:
+              type: integer
+              description: Number of unique URLs with errors
+            uniqueUserAgents:
+              type: integer
+              description: Number of unique LLM user agents
+        errorPages:
+          type: array
+          description: List of LLM error page details
+          items:
+            type: object
+            properties:
+              user_agent:
+                type: string
+                description: The LLM user agent string
+              url:
+                type: string
+                description: The URL that returned an error
+              status:
+                type: integer
+                description: HTTP status code
+              total_requests:
+                type: integer
+                description: Number of requests for this URL/user agent combination
+      additionalProperties: true
+    - type: object
       description: The result of CWV audit
       properties:
         cwv:
@@ -739,6 +879,17 @@ AuditResult:
                 description: 'Array of performance metrics by device type'
                 items:
                   $ref: './schemas.yaml#/CWVMetric'
+    - type: object
+      description: The result of summarization audit.
+      properties:
+        success:
+          type: boolean
+          description: Whether the audit was successful
+        topPages:
+          type: array
+          description: A list of top pages
+          items:
+            type: string
 AuditList:
   type: array
   items:
@@ -3481,38 +3632,585 @@ LlmoCdnLogsFilter:
       value: ['404', '500']
       type: 'exclude'
 
+LlmoCdnBucketConfig:
+  type: object
+  description: CDN bucket configuration for LLMO
+  properties:
+    bucketName:
+      description: The name of the S3 bucket for CDN logs
+      type: string
+      example: 'my-cdn-logs-bucket'
+    orgId:
+      description: The ID associated with the bucket, for adobe orgs this is the imsOrgId ID and for non-adobe orgs this is the org ID
+      type: string
+      example: 'org-12345'
+    cdnProvider:
+      description: The CDN provider (e.g., aem-cs-fastly, byocdn-fastly, etc.)
+      type: string
+      example: 'aem-cs-fastly'
+  additionalProperties: false
+
 LlmoConfig:
   type: object
   description: LLMO (Large Language Model Optimizer) configuration for a site
   required:
-    - dataFolder
-    - brand
+    - entities
+    - categories
+    - topics
+    - brands
+    - competitors
   properties:
-    dataFolder:
-      description: The data folder identifier for the LLMO configuration
+    entities:
+      type: object
+      description: A record of entities keyed by UUID
+      additionalProperties:
+        $ref: '#/LlmoEntity'
+      example:
+        "123e4567-e89b-12d3-a456-426614174000":
+          type: "category"
+          name: "Technology"
+    categories:
+      type: object
+      description: A record of categories keyed by UUID
+      additionalProperties:
+        $ref: '#/LlmoCategory'
+      example:
+        "123e4567-e89b-12d3-a456-426614174000":
+          name: "Technology"
+          region: "us"
+    topics:
+      type: object
+      description: A record of topics with nested prompts keyed by UUID
+      additionalProperties:
+        $ref: '#/LlmoTopic'
+      example:
+        "456e7890-e89b-12d3-a456-426614174001":
+          name: "AI/ML"
+          category: "123e4567-e89b-12d3-a456-426614174000"
+          prompts:
+            - prompt: "What are the latest AI trends?"
+              regions: ["us"]
+              origin: "human"
+              source: "config"
+    brands:
+      type: object
+      description: Brand configuration with aliases
+      required:
+        - aliases
+      properties:
+        aliases:
+          type: array
+          description: Array of brand alias configurations
+          items:
+            $ref: '#/LlmoBrandAlias'
+    competitors:
+      type: object
+      description: Competitor configuration
+      required:
+        - competitors
+      properties:
+        competitors:
+          type: array
+          description: Array of competitor configurations
+          items:
+            $ref: '#/LlmoCompetitor'
+  additionalProperties: true
+
+LlmoEntity:
+  type: object
+  description: An entity in the LLMO configuration
+  required:
+    - type
+  properties:
+    type:
       type: string
-      example: 'adobe'
-    brand:
-      description: The brand identifier for the LLMO configuration
+      description: The type of entity (category, topic, or custom type)
+      example: "category"
+    name:
       type: string
-      example: 'adobe'
-    questions:
-      description: The questions configuration containing both human and AI questions
-      $ref: '#/LlmoQuestions'
-    customerIntent:
-      description: The customer intent configuration containing key-value pairs
-      $ref: '#/LlmoCustomerIntent'
-    cdnlogsFilter:
-      description: The CDN logs filter configuration for filtering log entries
-      $ref: '#/LlmoCdnLogsFilter'
+      description: The name of the entity (required for category and topic types)
+      minLength: 1
+      example: "Technology"
+  additionalProperties: true
+
+LlmoCategory:
+  type: object
+  description: A category in the LLMO configuration
+  required:
+    - name
+    - region
+  properties:
+    name:
+      type: string
+      description: The name of the category
+      minLength: 1
+      example: "Technology"
+    region:
+      oneOf:
+        - type: string
+          pattern: '^[a-z][a-z]$'
+          description: Two-letter region code
+          example: "us"
+        - type: array
+          items:
+            type: string
+            pattern: '^[a-z][a-z]$'
+          description: Array of two-letter region codes
+          example: ["us", "eu"]
+  additionalProperties: true
+
+LlmoTopic:
+  type: object
+  description: A topic in the LLMO configuration with nested prompts
+  required:
+    - name
+    - prompts
+    - category
+  properties:
+    name:
+      type: string
+      description: The name of the topic
+      minLength: 1
+      example: "AI/ML"
+    prompts:
+      type: array
+      description: Array of prompts for this topic
+      minItems: 1
+      items:
+        $ref: '#/LlmoPrompt'
+    category:
+      oneOf:
+        - type: string
+          format: uuid
+          description: UUID reference to a category
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        - type: string
+          description: Category name as string
+          minLength: 1
+          example: "Technology"
+  additionalProperties: true
+
+LlmoPrompt:
+  type: object
+  description: A prompt configuration within a topic
+  required:
+    - prompt
+    - regions
+    - origin
+    - source
+  properties:
+    prompt:
+      type: string
+      description: The prompt text
+      minLength: 1
+      example: "What are the latest AI trends?"
+    regions:
+      type: array
+      description: Array of two-letter region codes
+      items:
+        type: string
+        pattern: '^[a-z][a-z]$'
+      example: ["us", "eu"]
+    origin:
+      oneOf:
+        - type: string
+          enum: ["human", "ai"]
+          description: Standard origin types
+        - type: string
+          description: Custom origin type
+          minLength: 1
+      example: "human"
+    source:
+      oneOf:
+        - type: string
+          enum: ["config", "api"]
+          description: Standard source types
+        - type: string
+          description: Custom source type
+          minLength: 1
+      example: "config"
+  additionalProperties: true
+
+LlmoBrandAlias:
+  type: object
+  description: A brand alias configuration
+  required:
+    - aliases
+    - category
+    - region
+  properties:
+    aliases:
+      type: array
+      description: Array of brand alias strings
+      items:
+        type: string
+        minLength: 1
+      example: ["Adobe", "Adobe Inc"]
+    category:
+      type: string
+      format: uuid
+      description: UUID reference to a category entity
+      example: "123e4567-e89b-12d3-a456-426614174000"
+    region:
+      oneOf:
+        - type: string
+          pattern: '^[a-z][a-z]$'
+          description: Two-letter region code
+          example: "us"
+        - type: array
+          items:
+            type: string
+            pattern: '^[a-z][a-z]$'
+          description: Array of two-letter region codes
+          example: ["us", "eu"]
+
+LlmoCompetitor:
+  type: object
+  description: A competitor configuration
+  required:
+    - category
+    - region
+    - name
+    - aliases
+  properties:
+    category:
+      type: string
+      format: uuid
+      description: UUID reference to a category entity
+      example: "123e4567-e89b-12d3-a456-426614174000"
+    region:
+      oneOf:
+        - type: string
+          pattern: '^[a-z][a-z]$'
+          description: Two-letter region code
+          example: "us"
+        - type: array
+          items:
+            type: string
+            pattern: '^[a-z][a-z]$'
+          description: Array of two-letter region codes
+          example: ["us", "eu"]
+    name:
+      type: string
+      description: The competitor name
+      minLength: 1
+      example: "Microsoft"
+    aliases:
+      type: array
+      description: Array of competitor alias strings
+      items:
+        type: string
+        minLength: 1
+      example: ["MS", "Microsoft Corp"]
+    urls:
+      type: array
+      description: Array of competitor URLs (optional)
+      items:
+        type: string
+        format: uri
+      example: ["https://microsoft.com", "https://office.com"]
+
+LlmoSheetDataQuery:
+  type: object
+  description: Query parameters for LLMO sheet data
+  properties:
+    sheets:
+      description: Sheets to include from the data
+      type: object
+      additionalProperties: true
+    filters:
+      description: Filters to apply to the data
+      type: object
+    include:
+      description: Fields to include from the data
+      type: array
+      additionalProperties: true
+    exclude:
+      description: Fields to exclude from the data
+      type: array
+      items:
+        type: string
+    groupBy:
+      description: Fields to group the data by
+      type: array
+      items:
+        type: string
   additionalProperties: false
+
+# New schemas for entitlements, trial users, and site enrollments APIs
+Entitlement:
+  type: object
+  description: An entitlement represents product access and quotas for an organization
+
+  properties:
+    id:
+      description: Unique identifier for the entitlement
+      $ref: '#/Id'
+    organizationId:
+      description: Reference to the organization this entitlement belongs to
+      $ref: '#/Id'
+    productCode:
+      description: The product code this entitlement provides access to
+      type: string
+      enum: [LLMO, ASO]
+    tier:
+      description: The tier level of the entitlement
+      type: string
+      enum: [FREE_TRIAL, PAID]
+    quotas:
+      description: Usage quotas and limits for the entitlement
+      type: object
+      properties:
+        llmo_trial_prompts:
+          type: number
+          description: Number of LLMO trial prompts available
+    createdAt:
+      description: When the entitlement was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: When the entitlement was last updated
+      $ref: '#/DateTime'
+    updatedBy:
+      description: Who last updated the entitlement
+      $ref: '#/Id'
+
+  example:
+    id: "123e4567-e89b-12d3-a456-426614174000"
+    organizationId: "987fcdeb-51a2-43d7-9876-543210987654"
+    productCode: "LLMO"
+    tier: "FREE_TRIAL"
+    quotas:
+      llmo_trial_prompts: 100
+    createdAt: "2024-01-15T10:30:00Z"
+    updatedAt: "2024-01-15T10:30:00Z"
+    updatedBy: "system"
+
+SiteEnrollment:
+  type: object
+  description: A site enrollment represents a site's participation in a product or service
+
+  properties:
+    id:
+      description: Unique identifier for the site enrollment
+      $ref: '#/Id'
+    siteId:
+      description: Reference to the site this enrollment belongs to
+      $ref: '#/Id'
+    entitlementId:
+      description: Reference to the entitlement this enrollment is based on
+      $ref: '#/Id'
+    createdAt:
+      description: When the site enrollment was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: When the site enrollment was last updated
+      $ref: '#/DateTime'
+    updatedBy:
+      description: Who last updated the site enrollment
+      $ref: '#/Id'
+  example:
+    id: "123e4567-e89b-12d3-a456-426614174000"
+    siteId: "987fcdeb-51a2-43d7-9876-543210987654"
+    entitlementId: "456e4567-e89b-12d3-a456-426614174000"
+    createdAt: "2024-01-15T10:30:00Z"
+    updatedAt: "2024-01-15T10:30:00Z"
+    updatedBy: "system"
+
+TrialUser:
+  type: object
+  description: A trial user represents a user participating in a trial program
+
+  properties:
+    id:
+      description: Unique identifier for the trial user
+      $ref: '#/Id'
+    organizationId:
+      description: Reference to the organization this trial user belongs to
+      $ref: '#/Id'
+    emailId:
+      description: Email ID of the trial user
+      type: string
+      format: email
+      example: 'user123@adobe.com'
+    firstName:
+      description: First name of the trial user
+      type: string
+      example: 'John'
+    lastName:
+      description: Last name of the trial user
+      type: string
+      example: 'Doe'
+    externalUserId:
+      description: External user ID from the identity provider
+      type: string
+      example: '1234567890'
+    provider:
+      description: The identity provider (IMS, Microsoft, Google, etc.)
+      type: string
+      example: 'IMS'
+    status:
+      description: Current status of the trial user
+      type: string
+      enum: [INVITED, REGISTERED, BLOCKED, DELETED]
+    lastSeenAt:
+      description: When the trial user was last seen/active
+      $ref: '#/DateTime'
+    metadata:
+      description: Additional metadata for the trial user
+      type: object
+      properties:
+        origin:
+          description: Origin information for the trial user (e.g., "INVITED", "SELF_SIGNUP", "PARTNER")
+          type: string
+          example: "INVITED"
+      additionalProperties: true
+    createdAt:
+      description: When the trial user was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: When the trial user was last updated
+      $ref: '#/DateTime'
+    updatedBy:
+      description: Who last updated the trial user
+      $ref: '#/Id'
+  example:
+    id: "123e4567-e89b-12d3-a456-426614174000"
+    organizationId: "987fcdeb-51a2-43d7-9876-543210987654"
+    emailId: "user123@adobe.com"
+    firstName: "John"
+    lastName: "Doe"
+    externalUserId: "1234567890"
+    provider: "IMS"
+    status: "INVITED"
+    lastSeenAt: "2024-01-15T10:30:00Z"
+    metadata:
+      origin: "INVITED"
+    createdAt: "2024-01-15T10:30:00Z"
+    updatedAt: "2024-01-15T10:30:00Z"
+    updatedBy: "system"
+
+TrialUserActivity:
+  type: object
+  description: A trial user activity represents an action performed by a trial user
+
+  properties:
+    id:
+      description: Unique identifier for the trial user activity
+      $ref: '#/Id'
+    siteId:
+      description: Reference to the site where the activity occurred
+      $ref: '#/Id'
+    trialUserId:
+      description: Reference to the trial user who performed the activity
+      $ref: '#/Id'
+    entitlementId:
+      description: Reference to the entitlement associated with this activity
+      $ref: '#/Id'
+    type:
+      description: The type of activity performed
+      type: string
+      enum: [SIGN_UP, SIGN_IN, CREATE_SITE, RUN_AUDIT, PROMPT_RUN, DOWNLOAD]
+      example: 'SIGN_IN'
+    details:
+      description: Additional details about the activity
+      type: object
+      additionalProperties: true
+      example:
+        browser: 'Chrome'
+        ip: '192.168.1.1'
+    productCode:
+      description: The product code associated with the activity
+      type: string
+      enum: [LLMO, ASO]
+      example: 'LLMO'
+    createdAt:
+      description: When the activity was recorded
+      $ref: '#/DateTime'
+    updatedAt:
+      description: When the activity was last updated
+      $ref: '#/DateTime'
+    updatedBy:
+      description: Who last updated the activity
+      $ref: '#/Id'
+  example:
+    id: "123e4567-e89b-12d3-a456-426614174000"
+    siteId: "987fcdeb-51a2-43d7-9876-543210987654"
+    trialUserId: "456e4567-e89b-12d3-a456-426614174000"
+    entitlementId: "789e4567-e89b-12d3-a456-426614174000"
+    type: "SIGN_IN"
+    details:
+      browser: "Chrome"
+      ip: "192.168.1.1"
+    productCode: "LLMO"
+    createdAt: "2024-01-15T10:30:00Z"
+    updatedAt: "2024-01-15T10:30:00Z"
+    updatedBy: "system"
+
+OrganizationIdentityProvider:
+  type: object
+  description: An organization identity provider represents the mapping between an organization and an identity provider
+
+  properties:
+    id:
+      description: Unique identifier for the organization identity provider
+      $ref: '#/Id'
+    organizationId:
+      description: Reference to the organization this mapping belongs to
+      $ref: '#/Id'
+    provider:
+      description: The identity provider (IMS, Microsoft, Google, etc.)
+      type: string
+      example: 'IMS'
+    externalId:
+      description: External ID from the identity provider
+      type: string
+      example: 'org123@adobe.com'
+    metadata:
+      description: Additional metadata for the organization identity provider
+      type: object
+      properties:
+        domain:
+          description: Domain associated with the identity provider
+          type: string
+          example: "adobe.com"
+        ssoEnabled:
+          description: Whether SSO is enabled for this provider
+          type: boolean
+          example: true
+      additionalProperties: true
+    createdAt:
+      description: When the identity provider mapping was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: When the identity provider mapping was last updated
+      $ref: '#/DateTime'
+    updatedBy:
+      description: Who last updated the identity provider mapping
+      $ref: '#/Id'
+  example:
+    id: "123e4567-e89b-12d3-a456-426614174000"
+    organizationId: "987fcdeb-51a2-43d7-9876-543210987654"
+    provider: "IMS"
+    externalId: "org123@adobe.com"
+    metadata:
+      domain: "adobe.com"
+      ssoEnabled: true
+    createdAt: "2024-01-15T10:30:00Z"
+    updatedAt: "2024-01-15T10:30:00Z"
+    updatedBy: "system"
 
 # Sandbox Audit API Schemas
 SandboxAuditType:
   type: string
-  description: Supported audit types for sandbox environments
+  description: |
+    Supported audit types for sandbox environments:
+    - meta-tags: General meta tag analysis for all page types
+    - product-metatags: Specialized audit for Product Detail Pages (PDP) of commerce sites, 
+      analyzing product-specific meta tags and scraping SKU, thumbnail, and catalog/store view codes for autofixing
+    - alt-text: Alternative text analysis for images
   enum:
     - 'meta-tags'
+    - 'product-metatags'
     - 'alt-text'
   example: 'meta-tags'
 
@@ -3575,3 +4273,257 @@ SandboxAuditResponse:
       description: Array of audit results
       items:
         $ref: '#/SandboxAuditResult'
+
+Report:
+  type: object
+  properties:
+    id:
+      $ref: '#/Id'
+      description: Unique identifier for the report
+    siteId:
+      $ref: '#/Id'
+      description: The site ID this report belongs to
+    reportType:
+      type: string
+      enum: [performance, accessibility, seo, security, conversion, cwv, optimization]
+      description: The type of report generated
+      example: 'performance'
+    status:
+      type: string
+      enum: [processing, success, failed]
+      description: Current status of the report
+      example: 'success'
+    reportPeriod:
+      type: object
+      properties:
+        startDate:
+          type: string
+          format: date
+          description: Start date for the report period
+          example: '2024-01-01'
+        endDate:
+          type: string
+          format: date
+          description: End date for the report period
+          example: '2024-01-31'
+      required: [startDate, endDate]
+    comparisonPeriod:
+      type: object
+      properties:
+        startDate:
+          type: string
+          format: date
+          description: Start date for comparison period
+          example: '2023-12-01'
+        endDate:
+          type: string
+          format: date
+          description: End date for comparison period
+          example: '2023-12-31'
+      required: [startDate, endDate]
+    storagePath:
+      type: string
+      description: Storage path for the report files
+      example: 'reports/550e8400-e29b-41d4-a716-446655440000/performance/550e8400-e29b-41d4-a716-446655440001/'
+    createdAt:
+      $ref: '#/DateTime'
+      description: When the report was initially created
+    updatedAt:
+      $ref: '#/DateTime'
+      description: When the report was last updated
+    updatedBy:
+      type: string
+      description: User or system that last updated the report
+      example: 'user@adobe.com'
+    data:
+      type: object
+      description: Optional data containing presigned URLs for downloading reports (only present for successful reports)
+      properties:
+        rawPresignedUrl:
+          type: string
+          format: uri
+          description: Presigned URL for downloading the raw report data
+          example: 'https://s3.amazonaws.com/bucket/reports/raw/report.json?signature=...'
+        rawPresignedUrlExpiresAt:
+          type: string
+          format: date-time
+          description: Expiration time for the raw report presigned URL
+          example: '2024-01-22T10:30:00Z'
+        mystiquePresignedUrl:
+          type: string
+          format: uri
+          description: Presigned URL for downloading the enhanced report with AI insights
+          example: 'https://s3.amazonaws.com/bucket/reports/mystique/report.json?signature=...'
+        mystiquePresignedUrlExpiresAt:
+          type: string
+          format: date-time
+          description: Expiration time for the enhanced report presigned URL
+          example: '2024-01-22T10:30:00Z'
+      additionalProperties: false
+  required: [id, siteId, reportType, status, reportPeriod, createdAt, updatedAt]
+  additionalProperties: false
+
+CreatePreflightJobResponse:
+  type: object
+  properties:
+    createdAt:
+      type: string
+      format: date-time
+    jobId:
+      type: string
+      format: uuid
+      description: The ID of the newly created preflight job.
+    pollUrl:
+      type: string
+      format: uri
+      description: The URL to poll for the status of the preflight job
+    status:
+      type: string
+      enum: [IN_PROGRESS, COMPLETED, FAILED, CANCELLED]
+    error:
+      type: object
+      description: The error of the preflight job if it failed
+
+PreflightJobResponse:
+  type: object
+  properties:
+    createdAt:
+      type: string
+      format: date-time
+    jobId:
+      type: string
+      format: uuid
+      description: The ID of the preflight job.
+    metadata:
+      type: object
+      description: The metadata of the preflight job
+      properties:
+        jobType:
+          type: string
+          enum: [preflight]
+        payload:
+          type: object
+          description: The payload of the preflight job
+          properties:
+            checks:
+              type: array
+              items:
+                type: string
+            siteId:
+              type: string
+              format: uuid
+            step:
+              type: string
+              enum: [identify, suggest]
+            urls:
+              type: array
+              items:
+                type: string
+                format: uri
+            enableAuthentication:
+              type: boolean
+        tags:
+          type: array
+          items:
+            type: string
+    recordExpiresAt:
+      type: integer
+      format: int64
+      description: Unix epoch seconds for TTL in the database
+    startedAt:
+      type: string
+      format: date-time
+    status:
+      type: string
+      enum: [IN_PROGRESS, COMPLETED, FAILED, CANCELLED]
+    updatedAt:
+      type: string
+      format: date-time
+    result:
+      type: array
+      description: The result of the preflight job if it completed successfully
+      items:
+        $ref: '#/PreflightResultItem'
+    error:
+      type: object
+      description: The error of the preflight job if it failed
+
+PreflightResultItem:
+  type: object
+  properties:
+    audits:
+      type: array
+      items:
+        type: object
+        properties:
+          name:
+            type: string
+            description: The name of the audit
+          opportunities:
+            type: array
+            items:
+              type: object
+              properties:
+                check:
+                  type: string
+                  description: The title of the opportunity
+                issue:
+                  type: string
+                  description: The description of the opportunity
+                seoImpact:
+                  type: string
+                  description: The SEO impact of the opportunity
+                seoRecommendation:
+                  type: string
+                  description: The SEO recommendation of the opportunity
+                aiSuggestion:
+                  type: string
+                  description: The AI suggestion of the opportunity
+                aiRationale:
+                  type: string
+                  description: The AI rationale of the opportunity
+          type:
+            type: string
+            description: The type of the audit
+    pageUrl:
+      type: string
+      format: uri
+      description: The URL of the page that was audited
+    profiling:
+      type: object
+      description: The profiling information of the audit
+      properties:
+        startTime:
+          type: string
+          format: date-time
+          description: The start time of the audit
+        endTime:
+          type: string
+          format: date-time
+          description: The end time of the audit
+        total:
+          type: string
+          description: The total time taken for the audit in seconds
+        breakdown:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                description: The name of the check
+              startTime:
+                type: string
+                format: date-time
+                description: The start time of the check
+              endTime:
+                type: string
+                format: date-time
+                description: The end time of the check
+              duration:
+                type: string
+                description: The duration of the check in seconds
+    step:
+      type: string
+      enum: [identify, suggest]
+      description: The step of the preflight job when this result was generated

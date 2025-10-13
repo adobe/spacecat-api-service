@@ -33,6 +33,39 @@ llmo-sheet-data:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+  post:
+    tags:
+      - llmo
+    summary: Query LLMO sheet data with filters, exclusions, and grouping
+    description: |
+      Retrieves and processes data from the external LLMO data endpoint for a specific site with advanced querying capabilities.
+      This endpoint allows filtering data with case-insensitive exact matching, excluding specific fields from the response,
+      and grouping data by specified attributes. The endpoint fetches all available data (up to 1M records) to apply
+      the query operations effectively.
+    operationId: queryLlmoSheetData
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/LlmoSheetDataQuery'
+    responses:
+      '200':
+        description: LLMO sheet data queried and processed successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              description: The processed data returned from the external LLMO endpoint after applying filters, exclusions, and grouping
+              additionalProperties: true
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
 
 llmo-sheet-data-with-type:
   parameters:
@@ -77,25 +110,32 @@ llmo-sheet-data-with-type:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
-
-llmo-config:
-  parameters:
-    - $ref: './parameters.yaml#/siteId'
-  get:
+  post:
     tags:
       - llmo
-    summary: Get LLMO configuration
+    summary: Query LLMO sheet data with sheet type using filters, exclusions, and grouping
     description: |
-      Retrieves the LLMO (Large Language Model Optimizer) configuration for a specific site.
-      This includes the data folder, brand information, and questions configuration.
-    operationId: getLlmoConfig
+      Retrieves and processes data from the external LLMO data endpoint for a specific site with a specified sheet type
+      and advanced querying capabilities. This endpoint allows filtering data with case-insensitive exact matching,
+      excluding specific fields from the response, and grouping data by specified attributes.
+      The data is fetched from the path: {dataFolder}/{sheetType}/{dataSource}.json
+      The endpoint fetches all available data (up to 1M records) to apply the query operations effectively.
+    operationId: queryLlmoSheetDataWithType
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/LlmoSheetDataQuery'
     responses:
       '200':
-        description: LLMO configuration retrieved successfully
+        description: LLMO sheet data queried and processed successfully
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/LlmoConfig'
+              type: object
+              description: The processed data returned from the external LLMO endpoint after applying filters, exclusions, and grouping
+              additionalProperties: true
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -104,6 +144,220 @@ llmo-config:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+
+llmo-global-sheet-data:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: configName
+      in: path
+      required: true
+      description: The data source identifier to fetch from the external endpoint
+      schema:
+        type: string
+        example: 'questions'
+  get:
+    tags:
+      - llmo
+    summary: Get LLMO global sheet data
+    description: |
+      Retrieves data from the external LLMO global data endpoint for a specific site.
+      This endpoint proxies data from the external HLX API using the global 'llmo-global' folder,
+      independent of the site's LLMO configuration dataFolder.
+    operationId: getLlmoGlobalSheetData
+    responses:
+      '200':
+        description: LLMO global sheet data retrieved successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              description: The data returned from the external LLMO endpoint
+              additionalProperties: true
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+llmo-config:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/llmoConfigVersion'
+  get:
+    tags:
+      - llmo
+    summary: Get LLMO configuration
+    description: |
+      Retrieves the LLMO (Large Language Model Optimizer) configuration for a specific site.
+      This endpoint retrieves the configuration directly from S3 storage. The configuration
+      includes entities (categories, topics), brand aliases, and competitor information.
+
+      If a version parameter is provided, the specific version of the configuration will be
+      retrieved. If the version does not exist, a 404 error will be returned. If no version
+      is provided, the latest version will be returned, or a default configuration if none
+      exists.
+    operationId: getLlmoConfig
+    responses:
+      '200':
+        description: LLMO configuration retrieved successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                config:
+                  $ref: './schemas.yaml#/LlmoConfig'
+                version:
+                  oneOf:
+                    - type: string
+                      example: "abc123def456"
+                    - type: "null"
+                  description: The S3 object version ID of the configuration, or null if default configuration is returned
+              required:
+                - config
+                - version
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404-configuration-not-found-with-version'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+  post:
+    tags:
+      - llmo
+    summary: Update LLMO configuration
+    description: |
+      Updates the LLMO (Large Language Model Optimizer) configuration for a specific site.
+      This operation completely overwrites the existing configuration with the provided payload.
+      The payload is validated against the LLMO configuration schema before being stored in S3.
+      The configuration must include entities, brands, and competitors sections.
+    operationId: postLlmoConfig
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/LlmoConfig'
+    responses:
+      '200':
+        description: LLMO configuration updated successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version:
+                  type: string
+                  description: The S3 object version ID of the updated configuration
+                  example: "abc123def456"
+              required:
+                - version
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+llmo-onboard:
+  post:
+    tags:
+      - llmo
+    summary: Onboard new customer to LLMO
+    description: |
+      Onboards a net new customer to LLMO (Large Language Model Optimizer).
+      This endpoint handles the complete onboarding process including organization validation,
+      site creation/validation, LLMO configuration setup, and initial analysis trigger.
+      The IMS Organization ID is automatically extracted from the user's JWT token (sub property).
+    operationId: onboardCustomer
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              domain:
+                type: string
+                format: hostname
+                description: The domain name to onboard (without protocol)
+                example: "example.com"
+              brandName:
+                type: string
+                description: The brand name for the site
+                example: "Example Brand"
+            required:
+              - domain
+              - brandName
+    responses:
+      '200':
+        description: LLMO onboarding initiated successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Success message
+                  example: "LLMO onboarding initiated successfully"
+                domain:
+                  type: string
+                  format: hostname
+                  description: The domain name
+                  example: "example.com"
+                brandName:
+                  type: string
+                  description: The brand name
+                  example: "Example Brand"
+                imsOrgId:
+                  type: string
+                  description: The IMS Organization ID
+                  example: "1234567890ABCDEF@AdobeOrg"
+                organizationId:
+                  type: string
+                  format: uuid
+                  description: The organization ID (created or existing)
+                  example: "123e4567-e89b-12d3-a456-426614174000"
+                siteId:
+                  type: string
+                  format: uuid
+                  description: The created or existing site ID
+                  example: "987fcdeb-51a2-43d1-9f12-345678901234"
+                status:
+                  type: string
+                  enum: ["initiated", "in_progress", "completed", "failed"]
+                  description: The onboarding status
+                  example: "initiated"
+                createdAt:
+                  type: string
+                  format: date-time
+                  description: The timestamp when onboarding was initiated
+                  example: "2025-01-15T10:30:00Z"
+              required:
+                - message
+                - domain
+                - brandName
+                - imsOrgId
+                - status
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '500':
+        $ref: './responses.yaml#/500'
+    security: []
 
 llmo-questions:
   parameters:
@@ -370,6 +624,41 @@ llmo-cdn-logs-filter:
           application/json:
             schema:
               $ref: './schemas.yaml#/LlmoCdnLogsFilter'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+llmo-cdn-logs-bucket-config:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  patch:
+    tags:
+      - llmo
+    summary: Update LLMO CDN bucket config configuration
+    description: |
+      Updates the CDN bucket config configuration for a specific site.
+    operationId: patchLlmoCdnBucketConfig
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              cdnBucketConfig:
+                $ref: './schemas.yaml#/LlmoCdnBucketConfig'
+    responses:
+      '200':
+        description: LLMO CDN bucket config updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/LlmoCdnBucketConfig'
       '400':
         $ref: './responses.yaml#/400'
       '401':

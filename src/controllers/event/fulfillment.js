@@ -110,8 +110,6 @@ function FulfillmentController(context) {
       const eventType = requestContext.params?.eventType
         || FULFILLMENT_EVENT_TYPES.EDGE_DELIVERY_SERVICES;
 
-      log.info(`Processing fulfillment events for event type: ${eventType}`);
-
       // Validate eventType
       if (!Object.values(FULFILLMENT_EVENT_TYPES).includes(eventType)) {
         log.error(`Invalid event type: ${eventType}`);

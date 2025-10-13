@@ -22,6 +22,11 @@ import { getCSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
 export const AUDIT_STEP_IDENTIFY = 'identify';
 export const AUDIT_STEP_SUGGEST = 'suggest';
 
+/**
+ * List of available checks.
+ * Should not be changed as it would break existing clients.
+ * @type {string}
+ */
 export const AUDIT_CANONICAL = 'canonical';
 export const AUDIT_LINKS = 'links';
 export const AUDIT_METATAGS = 'metatags';
@@ -136,8 +141,6 @@ function PreflightController(ctx, log, env) {
       const isDev = env.AWS_ENV === 'dev';
       const step = data.step.toLowerCase();
 
-      log.info(`Creating preflight job for ${data.urls.length} URLs with step: ${step}`);
-
       const url = new URL(data.urls[0]);
       const previewBaseURL = `${url.protocol}//${url.hostname}`;
       const site = await dataAccess.Site.findByPreviewURL(previewBaseURL);
@@ -161,7 +164,6 @@ function PreflightController(ctx, log, env) {
       if (CS_TYPES.includes(site.getAuthoringType())) {
         try {
           promiseTokenResponse = await getCSPromiseToken(context);
-          log.info('Successfully got promise token');
         } catch (e) {
           log.error(`Failed to get promise token: ${e.message}`);
           if (e instanceof ErrorWithStatusCode) {
@@ -226,8 +228,6 @@ function PreflightController(ctx, log, env) {
    */
   const getPreflightJobStatusAndResult = async (context) => {
     const jobId = context.params?.jobId;
-
-    log.info(`Getting preflight job status for jobId: ${jobId}`);
 
     if (!isValidUUID(jobId)) {
       log.error(`Invalid jobId: ${jobId}`);

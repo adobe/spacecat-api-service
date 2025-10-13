@@ -126,11 +126,6 @@ describe('getRouteHandlers', () => {
     getScreenshots: sinon.stub(),
   };
 
-  const mockMcpController = {
-    handleRpc: sinon.stub(),
-    handleSseRequest: sinon.stub(),
-  };
-
   const mockScrapeController = {
     getFileByKey: sinon.stub(),
     listScrapedContentFiles: sinon.stub(),
@@ -182,6 +177,7 @@ describe('getRouteHandlers', () => {
 
   const mockLlmoController = {
     getLlmoSheetData: () => null,
+    getLlmoGlobalSheetData: () => null,
     getLlmoConfig: () => null,
     getLlmoQuestions: () => null,
     addLlmoQuestion: () => null,
@@ -192,10 +188,38 @@ describe('getRouteHandlers', () => {
     removeLlmoCustomerIntent: () => null,
     patchLlmoCustomerIntent: () => null,
     patchLlmoCdnLogsFilter: () => null,
+    patchLlmoCdnBucketConfig: () => null,
+    onboardCustomer: () => null,
   };
 
   const mockSandboxAuditController = {
     triggerAudit: sinon.stub(),
+  };
+
+  const mockUserActivityController = {
+    getBySiteID: () => null,
+    createTrialUserActivity: () => null,
+  };
+
+  const mockSiteEnrollmentController = {
+    getBySiteID: () => null,
+  };
+
+  const mockTrialUserController = {
+    getByOrganizationID: () => null,
+    createTrialUserForEmailInvite: () => null,
+  };
+
+  const mockEntitlementController = {
+    getByOrganizationID: () => null,
+  };
+
+  const mockReportsController = {
+    createReport: sinon.stub(),
+    getAllReportsBySiteId: sinon.stub(),
+    getReport: sinon.stub(),
+    patchReport: sinon.stub(),
+    deleteReport: sinon.stub(),
   };
 
   it('segregates static and dynamic routes', () => {
@@ -220,18 +244,23 @@ describe('getRouteHandlers', () => {
       mockConsentBannerController,
       mockScrapeController,
       mockScrapeJobController,
-      mockMcpController,
       mockPaidController,
       mockTrafficController,
       mockFixesController,
       mockLlmoController,
+      mockUserActivityController,
+      mockSiteEnrollmentController,
+      mockTrialUserController,
+      mockEntitlementController,
       mockSandboxAuditController,
+      mockReportsController,
     );
 
     expect(staticRoutes).to.have.all.keys(
       'GET /configurations',
       'GET /configurations/latest',
       'PUT /configurations/latest',
+      'POST /configurations/audits',
       'PATCH /configurations/sites/audits',
       'GET /organizations',
       'POST /organizations',
@@ -250,13 +279,13 @@ describe('getRouteHandlers', () => {
       'POST /tools/import/jobs',
       'POST /tools/scrape/jobs',
       'POST /consent-banner',
-      'GET /mcp',
-      'POST /mcp',
+      'POST /llmo/onboard',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
     expect(staticRoutes['PUT /configurations/latest']).to.equal(mockConfigurationController.updateConfiguration);
+    expect(staticRoutes['POST /configurations/audits']).to.equal(mockConfigurationController.registerAudit);
     expect(staticRoutes['PATCH /configurations/sites/audits']).to.equal(mockSitesAuditsToggleController.execute);
     expect(staticRoutes['GET /organizations']).to.equal(mockOrganizationsController.getAll);
     expect(staticRoutes['POST /organizations']).to.equal(mockOrganizationsController.createOrganization);
@@ -268,18 +297,22 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['POST /tools/api-keys']).to.equal(mockApiKeyController.createApiKey);
     expect(staticRoutes['GET /tools/api-keys']).to.equal(mockApiKeyController.getApiKeys);
     expect(staticRoutes['POST /consent-banner']).to.equal(mockConsentBannerController.takeScreenshots);
-    expect(staticRoutes['GET /mcp']).to.equal(mockMcpController.handleSseRequest);
-    expect(staticRoutes['POST /mcp']).to.equal(mockMcpController.handleRpc);
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
+    expect(staticRoutes['POST /llmo/onboard']).to.equal(mockLlmoController.onboardCustomer);
 
     expect(dynamicRoutes).to.have.all.keys(
       'GET /audits/latest/:auditType',
       'GET /configurations/:version',
+      'DELETE /configurations/audits/:auditType',
       'POST /hooks/site-detection/cdn/:hookSecret',
       'POST /hooks/site-detection/rum/:hookSecret',
       'GET /organizations/:organizationId',
       'GET /organizations/:organizationId/brands',
       'GET /organizations/:organizationId/sites',
+      'GET /organizations/:organizationId/entitlements',
+      'POST /organizations/:organizationId/entitlements',
+      'GET /organizations/:organizationId/trial-users',
+      'POST /organizations/:organizationId/trial-user-invite',
       'GET /organizations/by-ims-org-id/:imsOrgId',
       'GET /organizations/by-ims-org-id/:imsOrgId/slack-config',
       'PATCH /organizations/:organizationId',
@@ -304,6 +337,9 @@ describe('getRouteHandlers', () => {
       'DELETE /sites/:siteId/key-events/:keyEventId',
       'GET /sites/:siteId/metrics/:metric/:source',
       'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl',
+      'GET /sites/:siteId/site-enrollments',
+      'GET /sites/:siteId/user-activities',
+      'POST /sites/:siteId/user-activities',
       'DELETE /tools/api-keys/:id',
       'GET /tools/import/jobs/:jobId',
       'PATCH /tools/import/jobs/:jobId',
@@ -357,6 +393,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/traffic/paid/page-type-campaign',
       'GET /sites/:siteId/traffic/paid/page-type-platform',
       'GET /sites/:siteId/traffic/paid/page-type-platform-device',
+      'GET /sites/:siteId/traffic/paid/url-page-type',
       'GET /sites/:siteId/traffic/paid/url-page-type-platform-campaign-device',
       'GET /sites/:siteId/traffic/paid/page-type-platform-campaign-device',
       'GET /sites/:siteId/traffic/paid/url-page-type-campaign-device',
@@ -368,12 +405,21 @@ describe('getRouteHandlers', () => {
       'GET /tools/scrape/jobs/:jobId',
       'GET /tools/scrape/jobs/:jobId/results',
       'GET /tools/scrape/jobs/by-date-range/:startDate/:endDate/all-jobs',
+      'POST /sites/:siteId/reports',
+      'GET /sites/:siteId/reports',
+      'GET /sites/:siteId/reports/:reportId',
+      'PATCH /sites/:siteId/reports/:reportId',
+      'DELETE /sites/:siteId/reports/:reportId',
       'GET /tools/scrape/jobs/by-base-url/:baseURL',
       'GET /tools/scrape/jobs/by-base-url/:baseURL/by-processingtype/:processingType',
       'PATCH /sites/:siteId/config/cdn-logs',
       'GET /sites/:siteId/llmo/sheet-data/:dataSource',
       'GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource',
+      'POST /sites/:siteId/llmo/sheet-data/:dataSource',
+      'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource',
       'GET /sites/:siteId/llmo/config',
+      'PATCH /sites/:siteId/llmo/config',
+      'POST /sites/:siteId/llmo/config',
       'GET /sites/:siteId/llmo/questions',
       'POST /sites/:siteId/llmo/questions',
       'DELETE /sites/:siteId/llmo/questions/:questionKey',
@@ -385,12 +431,16 @@ describe('getRouteHandlers', () => {
       'GET /consent-banner/:jobId',
       'PATCH /sites/:siteId/llmo/cdn-logs-filter',
       'POST /sites/:siteId/sandbox/audit',
+      'PATCH /sites/:siteId/llmo/cdn-logs-bucket-config',
+      'GET /sites/:siteId/llmo/global-sheet-data/:configName',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
     expect(dynamicRoutes['GET /audits/latest/:auditType'].paramNames).to.deep.equal(['auditType']);
     expect(dynamicRoutes['GET /configurations/:version'].handler).to.equal(mockConfigurationController.getByVersion);
     expect(dynamicRoutes['GET /configurations/:version'].paramNames).to.deep.equal(['version']);
+    expect(dynamicRoutes['DELETE /configurations/audits/:auditType'].handler).to.equal(mockConfigurationController.unregisterAudit);
+    expect(dynamicRoutes['DELETE /configurations/audits/:auditType'].paramNames).to.deep.equal(['auditType']);
     expect(dynamicRoutes['GET /organizations/:organizationId'].handler).to.equal(mockOrganizationsController.getByID);
     expect(dynamicRoutes['GET /organizations/:organizationId'].paramNames).to.deep.equal(['organizationId']);
     expect(dynamicRoutes['GET /organizations/:organizationId/sites'].handler).to.equal(mockOrganizationsController.getSitesForOrganization);
@@ -477,6 +527,16 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /tools/scrape/jobs/by-base-url/:baseURL/by-processingtype/:processingType'].paramNames).to.deep.equal(['baseURL', 'processingType']);
     expect(dynamicRoutes['PATCH /sites/:siteId/config/cdn-logs'].handler).to.equal(mockSitesController.updateCdnLogsConfig);
     expect(dynamicRoutes['PATCH /sites/:siteId/config/cdn-logs'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['POST /sites/:siteId/reports'].handler).to.equal(mockReportsController.createReport);
+    expect(dynamicRoutes['POST /sites/:siteId/reports'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/reports'].handler).to.equal(mockReportsController.getAllReportsBySiteId);
+    expect(dynamicRoutes['GET /sites/:siteId/reports'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/reports/:reportId'].handler).to.equal(mockReportsController.getReport);
+    expect(dynamicRoutes['GET /sites/:siteId/reports/:reportId'].paramNames).to.deep.equal(['siteId', 'reportId']);
+    expect(dynamicRoutes['PATCH /sites/:siteId/reports/:reportId'].handler).to.equal(mockReportsController.patchReport);
+    expect(dynamicRoutes['PATCH /sites/:siteId/reports/:reportId'].paramNames).to.deep.equal(['siteId', 'reportId']);
+    expect(dynamicRoutes['DELETE /sites/:siteId/reports/:reportId'].handler).to.equal(mockReportsController.deleteReport);
+    expect(dynamicRoutes['DELETE /sites/:siteId/reports/:reportId'].paramNames).to.deep.equal(['siteId', 'reportId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/sheet-data/:dataSource'].handler).to.equal(mockLlmoController.getLlmoSheetData);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/sheet-data/:dataSource'].paramNames).to.deep.equal(['siteId', 'dataSource']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource'].handler).to.equal(mockLlmoController.getLlmoSheetData);
@@ -505,5 +565,15 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/cdn-logs-filter'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['POST /sites/:siteId/sandbox/audit'].handler).to.equal(mockSandboxAuditController.triggerAudit);
     expect(dynamicRoutes['POST /sites/:siteId/sandbox/audit'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/url-page-type'].handler).to.equal(mockTrafficController.getPaidTrafficByUrlPageType);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/url-page-type'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['PATCH /sites/:siteId/llmo/cdn-logs-bucket-config'].handler).to.equal(mockLlmoController.patchLlmoCdnBucketConfig);
+    expect(dynamicRoutes['PATCH /sites/:siteId/llmo/cdn-logs-bucket-config'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/global-sheet-data/:configName'].handler).to.equal(mockLlmoController.getLlmoGlobalSheetData);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/global-sheet-data/:configName'].paramNames).to.deep.equal(['siteId', 'configName']);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:dataSource'].handler).to.equal(mockLlmoController.queryLlmoSheetData);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:dataSource'].paramNames).to.deep.equal(['siteId', 'dataSource']);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource'].handler).to.equal(mockLlmoController.queryLlmoSheetData);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'dataSource']);
   });
 });

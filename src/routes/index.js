@@ -71,7 +71,12 @@ function isStaticRoute(routePattern) {
  * @param {Object} trafficController - The traffic controller.
  * @param {FixesController} fixesController - The fixes controller.
  * @param {Object} llmoController - The LLMO controller.
+ * @param {Object} userActivityController - The user activity controller.
+ * @param {Object} siteEnrollmentController - The site enrollment controller.
+ * @param {Object} trialUserController - The trial user controller.
+ * @param {Object} entitlementController - The entitlement controller.
  * @param {Object} sandboxAuditController - The sandbox audit controller.
+ * @param {Object} reportsController - The reports controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -95,12 +100,16 @@ export default function getRouteHandlers(
   consentBannerController,
   scrapeController,
   scrapeJobController,
-  mcpController,
   paidController,
   trafficController,
   fixesController,
   llmoController,
+  userActivityController,
+  siteEnrollmentController,
+  trialUserController,
+  entitlementController,
   sandboxAuditController,
+  reportsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -111,6 +120,8 @@ export default function getRouteHandlers(
     'GET /configurations/latest': configurationController.getLatest,
     'PUT /configurations/latest': configurationController.updateConfiguration,
     'GET /configurations/:version': configurationController.getByVersion,
+    'POST /configurations/audits': configurationController.registerAudit,
+    'DELETE /configurations/audits/:auditType': configurationController.unregisterAudit,
     'PATCH /configurations/sites/audits': sitesAuditsToggleController.execute,
     'POST /event/fulfillment': fulfillmentController.processFulfillmentEvents,
     'POST /event/fulfillment/:eventType': fulfillmentController.processFulfillmentEvents,
@@ -168,6 +179,7 @@ export default function getRouteHandlers(
     'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.removeSuggestion,
     'GET /sites/:siteId/traffic/paid': paidController.getTopPaidPages,
     'GET /sites/:siteId/traffic/paid/page-type-platform-campaign': trafficController.getPaidTrafficByPageTypePlatformCampaign,
+    'GET /sites/:siteId/traffic/paid/url-page-type': trafficController.getPaidTrafficByUrlPageType,
     'GET /sites/:siteId/traffic/paid/url-page-type-platform-campaign-device': trafficController.getPaidTrafficByUrlPageTypePlatformCampaignDevice,
     'GET /sites/:siteId/traffic/paid/page-type-platform-campaign-device': trafficController.getPaidTrafficByPageTypePlatformCampaignDevice,
     'GET /sites/:siteId/traffic/paid/url-page-type-campaign-device': trafficController.getPaidTrafficByUrlPageTypeCampaignDevice,
@@ -212,8 +224,6 @@ export default function getRouteHandlers(
     'GET /consent-banner/:jobId': consentBannerController.getScreenshots,
     'GET /sites/:siteId/scraped-content/:type': scrapeController.listScrapedContentFiles,
     'GET /sites/:siteId/files': scrapeController.getFileByKey,
-    'GET /mcp': mcpController.handleSseRequest,
-    'POST /mcp': mcpController.handleRpc,
 
     // Scrape Jobs
     'POST /tools/scrape/jobs': scrapeJobController.createScrapeJob,
@@ -236,7 +246,11 @@ export default function getRouteHandlers(
     // LLMO Specific Routes
     'GET /sites/:siteId/llmo/sheet-data/:dataSource': llmoController.getLlmoSheetData,
     'GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': llmoController.getLlmoSheetData,
+    'POST /sites/:siteId/llmo/sheet-data/:dataSource': llmoController.queryLlmoSheetData,
+    'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': llmoController.queryLlmoSheetData,
     'GET /sites/:siteId/llmo/config': llmoController.getLlmoConfig,
+    'PATCH /sites/:siteId/llmo/config': llmoController.updateLlmoConfig,
+    'POST /sites/:siteId/llmo/config': llmoController.updateLlmoConfig,
     'GET /sites/:siteId/llmo/questions': llmoController.getLlmoQuestions,
     'POST /sites/:siteId/llmo/questions': llmoController.addLlmoQuestion,
     'DELETE /sites/:siteId/llmo/questions/:questionKey': llmoController.removeLlmoQuestion,
@@ -246,9 +260,28 @@ export default function getRouteHandlers(
     'DELETE /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.removeLlmoCustomerIntent,
     'PATCH /sites/:siteId/llmo/customer-intent/:intentKey': llmoController.patchLlmoCustomerIntent,
     'PATCH /sites/:siteId/llmo/cdn-logs-filter': llmoController.patchLlmoCdnLogsFilter,
+    'PATCH /sites/:siteId/llmo/cdn-logs-bucket-config': llmoController.patchLlmoCdnBucketConfig,
+    'GET /sites/:siteId/llmo/global-sheet-data/:configName': llmoController.getLlmoGlobalSheetData,
+    'POST /llmo/onboard': llmoController.onboardCustomer,
+
+    // Tier Specific Routes
+    'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,
+    'POST /sites/:siteId/user-activities': userActivityController.createTrialUserActivity,
+    'GET /sites/:siteId/site-enrollments': siteEnrollmentController.getBySiteID,
+    'GET /organizations/:organizationId/trial-users': trialUserController.getByOrganizationID,
+    'POST /organizations/:organizationId/trial-user-invite': trialUserController.createTrialUserForEmailInvite,
+    'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
+    'POST /organizations/:organizationId/entitlements': entitlementController.createEntitlement,
 
     // Sandbox audit route
     'POST /sites/:siteId/sandbox/audit': sandboxAuditController.triggerAudit,
+
+    // Reports
+    'POST /sites/:siteId/reports': reportsController.createReport,
+    'GET /sites/:siteId/reports': reportsController.getAllReportsBySiteId,
+    'GET /sites/:siteId/reports/:reportId': reportsController.getReport,
+    'PATCH /sites/:siteId/reports/:reportId': reportsController.patchReport,
+    'DELETE /sites/:siteId/reports/:reportId': reportsController.deleteReport,
   };
 
   // Initialization of static and dynamic routes
