@@ -22,6 +22,16 @@ const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
 const LLMO_TIER = EntitlementModel.TIERS.FREE_TRIAL;
 const SHAREPOINT_URL = 'https://adobe.sharepoint.com/:x:/r/sites/HelixProjects/Shared%20Documents/sites/elmo-ui-data';
 
+// These audits don't depend on any additonal data being configured
+export const BASIC_AUDITS = [
+  'headings',
+  'llm-blocked',
+  'canonical',
+  'hreflang',
+  'summarization',
+  'prerender',
+];
+
 /**
  * Generates the data folder name from a domain.
  * @param {string} domain - The domain name
@@ -350,6 +360,36 @@ export async function enableAudits(site, context, audits = []) {
   await configuration.save();
 }
 
+export async function enableImports(site, imports = []) {
+  const siteConfig = site.getConfig();
+
+  imports.forEach(({ type, options }) => {
+    if (!siteConfig.isImportEnabled(type, options)) {
+      siteConfig.enableImport(type, options);
+    }
+  });
+
+  site.setConfig(Config.toDynamoItem(siteConfig));
+
+  await site.save();
+}
+
+export async function triggerAudits(audits, context, site) {
+  const { sqs, dataAccess, log } = context;
+  const { Configuration } = dataAccess;
+  const configuration = await Configuration.findLatest();
+
+  await Promise.allSettled(
+    audits.map(async (audit) => {
+      log.info(`Triggering ${audit} audit for site: ${site.getId()}`);
+      await sqs.sendMessage(configuration.getQueues().audits, {
+        type: audit,
+        siteId: site.getId(),
+      });
+    }),
+  );
+}
+
 /**
  * Complete LLMO onboarding process.
  * @param {object} params - Onboarding parameters
@@ -387,12 +427,16 @@ export async function performLlmoOnboarding(params, context) {
   // Update index config
   await updateIndexConfig(dataFolder, context);
 
-  // Enable audits
-  await enableAudits(site, context, [
-    'headings',
-    'llm-blocked',
-    'llmo-customer-analysis',
+  // Enable imports
+  await enableImports(site, [
+    { type: 'top-pages' },
   ]);
+
+  // Enable audits
+  await enableAudits([...BASIC_AUDITS, 'llm-error-pages', 'llmo-customer-analysis'], context, site);
+
+  // Trigger audits
+  await triggerAudits([...BASIC_AUDITS], context, site);
 
   // Get current site config
   const siteConfig = site.getConfig();
