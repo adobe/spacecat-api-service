@@ -144,10 +144,10 @@ describe('Projects Controller', () => {
         all: stub().resolves([project]),
         findById: stub().resolves(project),
         findByProjectName: stub().resolves(project),
+        getPrimaryLocaleSites: stub().resolves(sites),
       },
       Site: {
         allByProjectId: stub().resolves(sites),
-        allByProjectIdAndPrimaryLocale: stub().resolves(sites),
         allByOrganizationIdAndProjectName: stub().resolves(sites),
         allByProjectName: stub().resolves(sites),
       },
@@ -518,7 +518,7 @@ describe('Projects Controller', () => {
       const responseBody = await response.json();
       expect(responseBody).to.have.length(2);
       expect(responseBody[0].id).to.equal('site1');
-      expect(mockDataAccess.Site.allByProjectIdAndPrimaryLocale).to.have.been.calledWith('550e8400-e29b-41d4-a716-446655440000', true);
+      expect(mockDataAccess.Project.getPrimaryLocaleSites).to.have.been.calledWith('550e8400-e29b-41d4-a716-446655440000');
     });
 
     it('should return bad request for invalid project ID', async () => {
