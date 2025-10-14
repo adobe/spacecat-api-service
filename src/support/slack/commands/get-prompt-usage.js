@@ -138,7 +138,7 @@ function GetPromptUsageCommand(context) {
       if (imsOrgIds.length === 1 && imsOrgIds[0] !== '--all') {
         const data = await getPromptUsageForSingleIMSOrg(imsOrgIds[0]);
         await say(
-          `*Prompt usage for IMS Org ID* \`${data.imsOrgID}\`:\n :ims: *IMS Org Name:* ${data.organizationName}\n :paid: *Tier:* ${data.tier}\n :elmo: *Total number of prompts in use:* ${data.totalPrompts}`,
+          `*Prompt usage for IMS Org ID* \`${data.imsOrgID}\`:\n   :ims: *IMS Org Name:* ${data.organizationName}\n   :paid: *Tier:* ${data.tier}\n   :elmo: *Total number of prompts in use:* ${data.totalPrompts}`,
         );
         return;
       }

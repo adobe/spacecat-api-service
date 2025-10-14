@@ -207,9 +207,9 @@ describe('GetPromptUsageCommand', () => {
       });
 
       const expectedMessage = '*Prompt usage for IMS Org ID* `test@AdobeOrg`:\n'
-        + ' :ims: *IMS Org Name:* Test Org\n'
-        + ' :paid: *Tier:* FREE_TRIAL\n'
-        + ' :elmo: *Total number of prompts in use:* 3';
+        + '   :ims: *IMS Org Name:* Test Org\n'
+        + '   :paid: *Tier:* FREE_TRIAL\n'
+        + '   :elmo: *Total number of prompts in use:* 3';
 
       dataAccessStub.Organization.findByImsOrgId.resolves(mockOrganization);
       dataAccessStub.Entitlement.allByOrganizationId.resolves([mockEntitlement]);
