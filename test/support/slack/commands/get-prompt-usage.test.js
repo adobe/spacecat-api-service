@@ -105,7 +105,9 @@ describe('GetPromptUsageCommand', () => {
         'Retrieves the total number of prompts for a given IMS org ID (or multiple IMS org IDs)',
       );
       expect(command.phrases).to.deep.equal(['get-prompt-usage']);
-      expect(command.usage()).to.equal('Usage: _get-prompt-usage {imsOrgID}_');
+      expect(command.usage()).to.equal(
+        'Usage: _get-prompt-usage <imsOrgID(s) or --all> – multiple IMS Org IDs can be comma or space separated_',
+      );
     });
   });
 
@@ -205,7 +207,7 @@ describe('GetPromptUsageCommand', () => {
       const expectedMessage = '*Prompt usage for IMS Org ID* `test@AdobeOrg`:\n'
         + ' :ims: *IMS Org Name:* Test Org\n'
         + ' :paid: *Tier:* FREE_TRIAL\n'
-        + ' :chat_gpt: *Total number of prompts:* 3';
+        + ' :chat-gpt: *Total number of prompts:* 3';
 
       dataAccessStub.Organization.findByImsOrgId.resolves(mockOrganization);
       dataAccessStub.Entitlement.allByOrganizationId.resolves([mockEntitlement]);

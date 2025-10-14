@@ -34,7 +34,7 @@ function GetPromptUsageCommand(context) {
     description:
       'Retrieves the total number of prompts for a given IMS org ID (or multiple IMS org IDs)',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {imsOrgID}`,
+    usageText: `${PHRASES[0]} <imsOrgID(s) or --all> – multiple IMS Org IDs can be comma or space separated`,
   });
 
   const { dataAccess, log, s3 } = context;
@@ -147,7 +147,7 @@ function GetPromptUsageCommand(context) {
       if (imsOrgIds.length === 1) {
         const data = await getPromptUsageForSingleIMSOrg(imsOrgIds[0]);
         await say(
-          `*Prompt usage for IMS Org ID* \`${data.imsOrgID}\`:\n :ims: *IMS Org Name:* ${data.organizationName}\n :paid: *Tier:* ${data.tier}\n :chat_gpt: *Total number of prompts:* ${data.totalPrompts}`,
+          `*Prompt usage for IMS Org ID* \`${data.imsOrgID}\`:\n :ims: *IMS Org Name:* ${data.organizationName}\n :paid: *Tier:* ${data.tier}\n :chat-gpt: *Total number of prompts:* ${data.totalPrompts}`,
         );
         return;
       }
