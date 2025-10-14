@@ -15,6 +15,7 @@ import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
+import { ASO_CRITICAL_SITES, ASO_DEMO_ORG } from '../../src/controllers/llmo/llmo-onboarding.js';
 
 use(sinonChai);
 
@@ -236,6 +237,7 @@ describe('LLMO Onboarding Functions', () => {
       // Create mock existing site assigned to different organization
       const existingSite = {
         getOrganizationId: sinon.stub().returns('different-org-id'),
+        getId: sinon.stub().returns('some-site-id'),
       };
 
       // Create mock organization
@@ -279,14 +281,65 @@ describe('LLMO Onboarding Functions', () => {
       // Verify all checks were performed
       expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith(baseURL);
       expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledWith(imsOrgId);
-      expect(existingSite.getOrganizationId).to.have.been.calledTwice;
+      expect(existingSite.getOrganizationId).to.have.been.calledThrice;
       expect(organization.getId).to.have.been.calledOnce;
+    });
+
+    it('should return isValid false when the site is mission critical for ASO', async () => {
+      // Create mock existing site assigned to different organization
+      const existingSite = {
+        getOrganizationId: sinon.stub().returns('different-org-id'),
+        getId: sinon.stub().returns(ASO_CRITICAL_SITES[0]),
+      };
+
+      // Create mock organization
+      const organization = {
+        getId: sinon.stub().returns('test-org-id'),
+      };
+
+      // Setup mocks
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+      mockDataAccess.Organization.findByImsOrgId.resolves(organization);
+      mockSharePointFolder.exists.resolves(false);
+
+      // Create context
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+      };
+
+      // Import the function with mocked dependencies
+      const { validateSiteNotOnboarded } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-helix-content-sdk': {
+          createFrom: sinon.stub().resolves(mockSharePointClient),
+        },
+      });
+
+      // Test parameters
+      const baseURL = 'https://example.com';
+      const imsOrgId = 'test-tenant-id@AdobeOrg';
+      const dataFolder = 'dev/example-com';
+
+      // Call the function
+      const result = await validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, context);
+
+      // Verify result
+      expect(result).to.deep.equal({
+        isValid: false,
+        error: 'Site https://example.com is mission critical for ASO.',
+      });
+
+      // Verify all checks were performed
+      expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith(baseURL);
+      expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledWith(imsOrgId);
     });
 
     it('should return isValid true when site exists but is assigned to default organization', async () => {
       // Create mock existing site assigned to default organization
       const existingSite = {
         getOrganizationId: sinon.stub().returns('default-org-id'),
+        getId: sinon.stub().returns('some-site-id'),
       };
 
       // Create mock organization
@@ -331,10 +384,54 @@ describe('LLMO Onboarding Functions', () => {
       expect(organization.getId).to.have.been.calledOnce;
     });
 
+    it('should return isValid true when site exists but is assigned to ASO_DEMO_ORG', async () => {
+      // Create mock existing site assigned to default organization
+      const existingSite = {
+        getOrganizationId: sinon.stub().returns(ASO_DEMO_ORG),
+        getId: sinon.stub().returns('some-site-id'),
+      };
+
+      // Setup mocks
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+      mockDataAccess.Organization.findByImsOrgId.resolves(null);
+      mockSharePointFolder.exists.resolves(false);
+
+      // Create context
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+      };
+
+      // Import the function with mocked dependencies
+      const { validateSiteNotOnboarded } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-helix-content-sdk': {
+          createFrom: sinon.stub().resolves(mockSharePointClient),
+        },
+      });
+
+      // Test parameters
+      const baseURL = 'https://example.com';
+      const imsOrgId = 'test-tenant-id@AdobeOrg';
+      const dataFolder = 'dev/example-com';
+
+      // Call the function
+      const result = await validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, context);
+
+      // Verify result
+      expect(result).to.deep.equal({ isValid: true });
+
+      // Verify all checks were performed
+      expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith(baseURL);
+      expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledWith(imsOrgId);
+      expect(existingSite.getOrganizationId).to.have.been.calledTwice;
+    });
+
     it('should return isValid false when site exists but organization does not exist and site is not assigned to default organization', async () => {
       // Create mock existing site assigned to a non-default organization
       const existingSite = {
         getOrganizationId: sinon.stub().returns('some-other-org-id'),
+        getId: sinon.stub().returns('some-site-id'),
       };
 
       // Setup mocks - site exists but organization does not exist
@@ -373,7 +470,7 @@ describe('LLMO Onboarding Functions', () => {
       // Verify all checks were performed
       expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith(baseURL);
       expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledWith(imsOrgId);
-      expect(existingSite.getOrganizationId).to.have.been.calledOnce;
+      expect(existingSite.getOrganizationId).to.have.been.calledTwice;
     });
 
     it('should return isValid false when error occurs during validation', async () => {
