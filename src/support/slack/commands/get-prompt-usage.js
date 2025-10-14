@@ -42,9 +42,7 @@ function GetPromptUsageCommand(context) {
 
   const getLlmoConfig = async (siteId) => {
     if (!s3 || !s3.s3Client) {
-      throw new Error(
-        'LLMO config storage is not configured for this environment',
-      );
+      throw new Error('LLMO config storage is not configured for this environment');
     }
 
     const { config, exists } = await readConfig(siteId, s3.s3Client, {
@@ -67,9 +65,7 @@ function GetPromptUsageCommand(context) {
   const getPromptUsageForSingleIMSOrg = async (imsOrgID) => {
     const organization = await Organization.findByImsOrgId(imsOrgID);
     if (!organization) {
-      throw new Error(
-        'Could not find a Spacecat Organization for the provided IMS org ID',
-      );
+      throw new Error('Could not find a Spacecat Organization for the provided IMS org ID');
     }
 
     const organizationName = organization.getName();
@@ -77,18 +73,14 @@ function GetPromptUsageCommand(context) {
 
     const entitlements = await Entitlement.allByOrganizationId(organization.getId());
     if (!entitlements || entitlements.length === 0) {
-      throw new Error(
-        'Could not find any entitlements for the provided IMS org ID',
-      );
+      throw new Error('Could not find any entitlements for the provided IMS org ID');
     }
 
     const llmoEntitlement = entitlements.find((e) => e.getProductCode() === 'LLMO');
     let tier;
 
     if (!llmoEntitlement) {
-      throw new Error(
-        'No entitlement with product code LLMO found for the provided IMS org ID',
-      );
+      throw new Error('No entitlement with product code LLMO found for the provided IMS org ID');
     } else {
       tier = llmoEntitlement.getTier();
     }
@@ -120,7 +112,6 @@ function GetPromptUsageCommand(context) {
     };
   };
 
-  // TODO: add support for --all flag
   /**
    * Handles site onboarding (single site or batch of sites).
    *
@@ -133,23 +124,29 @@ function GetPromptUsageCommand(context) {
     const { say, channelId } = slackContext;
 
     try {
-      const imsOrgIds = args
+      let imsOrgIds = args
         .flatMap((s) => s.split(/[,\s]+/))
         .map((s) => s.trim())
         .filter(Boolean);
 
       if (imsOrgIds.length === 0) {
         await say(
-          `Please provide one or more IMS org IDs.\n${baseCommand.usage()}`,
+          `Please provide one or more IMS org IDs, or use --all\n${baseCommand.usage()}`,
         );
         return;
       }
-      if (imsOrgIds.length === 1) {
+      if (imsOrgIds.length === 1 && imsOrgIds[0] !== '--all') {
         const data = await getPromptUsageForSingleIMSOrg(imsOrgIds[0]);
         await say(
-          `*Prompt usage for IMS Org ID* \`${data.imsOrgID}\`:\n :ims: *IMS Org Name:* ${data.organizationName}\n :paid: *Tier:* ${data.tier}\n :chat-gpt: *Total number of prompts:* ${data.totalPrompts}`,
+          `*Prompt usage for IMS Org ID* \`${data.imsOrgID}\`:\n :ims: *IMS Org Name:* ${data.organizationName}\n :paid: *Tier:* ${data.tier}\n :elmo: *Total number of prompts in use:* ${data.totalPrompts}`,
         );
         return;
+      }
+
+      if (imsOrgIds.length === 1 && imsOrgIds[0] === '--all') {
+        const allOrgs = await Organization.all();
+        imsOrgIds = allOrgs.map((org) => org.getImsOrgId());
+        await say(':progress-loader: Retriving total number of prompts in use for *all* organizations...');
       }
 
       const results = await Promise.allSettled(
@@ -183,7 +180,7 @@ function GetPromptUsageCommand(context) {
           { id: 'organizationName', title: 'IMS Org Name' },
           { id: 'imsOrgID', title: 'IMS Org ID' },
           { id: 'tier', title: 'Tier' },
-          { id: 'totalPrompts', title: 'Total number of prompts' },
+          { id: 'totalPrompts', title: 'Total number of prompts in use' },
           { id: 'error', title: 'Error' },
         ],
       });
@@ -202,9 +199,7 @@ function GetPromptUsageCommand(context) {
           channelId,
         );
       } catch (error) {
-        await say(
-          `:warning: Failed to upload the report to Slack: ${error.message}`,
-        );
+        await say(`:warning: Failed to upload the report to Slack: ${error.message}`);
       }
     } catch (error) {
       log.error(error);
