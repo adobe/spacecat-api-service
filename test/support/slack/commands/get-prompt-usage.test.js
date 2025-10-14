@@ -202,10 +202,10 @@ describe('GetPromptUsageCommand', () => {
         version: 'v123',
       });
 
-      const expectedMessage = '*Prompt usage for* `test@AdobeOrg`:\n'
-        + '• *IMS Org Name:* Test Org\n'
-        + '• *Tier:* FREE_TRIAL\n'
-        + '• *Total number of prompts:* 3';
+      const expectedMessage = '*Prompt usage for IMS Org ID* `test@AdobeOrg`:\n'
+        + ' :ims: *IMS Org Name:* Test Org\n'
+        + ' :paid: *Tier:* FREE_TRIAL\n'
+        + ' :chat_gpt: *Total number of prompts:* 3';
 
       dataAccessStub.Organization.findByImsOrgId.resolves(mockOrganization);
       dataAccessStub.Entitlement.allByOrganizationId.resolves([mockEntitlement]);
@@ -471,8 +471,8 @@ describe('GetPromptUsageCommand', () => {
       ] = sendFileStub.firstCall.args;
 
       expect(providedSlackContext).to.equal(slackContext);
-      expect(title).to.equal('Prompt usage report');
-      expect(initialComment).to.equal('Here you can find the prompt usage report.');
+      expect(title).to.equal('Prompt Usage Report');
+      expect(initialComment).to.equal('Here you can find the prompt usage report :memo:');
       expect(channelId).to.equal('test-channel');
       expect(filename).to.match(/^prompt-usage-\d+\.csv$/);
 

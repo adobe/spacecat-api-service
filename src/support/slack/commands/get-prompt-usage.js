@@ -134,7 +134,7 @@ function GetPromptUsageCommand(context) {
 
     try {
       const imsOrgIds = args
-        .flatMap((s) => s.split(/[,\s]+/)) // split each string by commas/spaces
+        .flatMap((s) => s.split(/[,\s]+/))
         .map((s) => s.trim())
         .filter(Boolean);
 
@@ -147,7 +147,7 @@ function GetPromptUsageCommand(context) {
       if (imsOrgIds.length === 1) {
         const data = await getPromptUsageForSingleIMSOrg(imsOrgIds[0]);
         await say(
-          `*Prompt usage for* \`${data.imsOrgID}\`:\n• *IMS Org Name:* ${data.organizationName}\n• *Tier:* ${data.tier}\n• *Total number of prompts:* ${data.totalPrompts}`,
+          `*Prompt usage for IMS Org ID* \`${data.imsOrgID}\`:\n :ims: *IMS Org Name:* ${data.organizationName}\n :paid: *Tier:* ${data.tier}\n :chat_gpt: *Total number of prompts:* ${data.totalPrompts}`,
         );
         return;
       }
@@ -197,8 +197,8 @@ function GetPromptUsageCommand(context) {
           slackContext,
           csvBuffer,
           `prompt-usage-${Date.now()}.csv`,
-          'Prompt usage report',
-          'Here you can find the prompt usage report.',
+          'Prompt Usage Report',
+          'Here you can find the prompt usage report :memo:',
           channelId,
         );
       } catch (error) {
