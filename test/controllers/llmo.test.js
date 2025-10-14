@@ -3674,6 +3674,8 @@ describe('LlmoController', () => {
         updateLlmoDataFolder: sinon.stub(),
         getSlackConfig: sinon.stub().returns(null),
         getHandlers: sinon.stub().returns([]),
+        isImportEnabled: sinon.stub().returns(false),
+        enableImport: sinon.stub(),
       };
 
       // Create mock new site
@@ -3698,6 +3700,7 @@ describe('LlmoController', () => {
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
         save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
@@ -3920,10 +3923,12 @@ describe('LlmoController', () => {
         // Verify that site config was updated
         expect(mockSiteConfig.updateLlmoBrand).to.have.been.calledWith('Test Brand');
         expect(mockSiteConfig.updateLlmoDataFolder).to.have.been.calledWith('dev/example-com');
+        expect(mockSiteConfig.isImportEnabled).to.have.been.calledWith('top-pages', undefined);
+        expect(mockSiteConfig.enableImport).to.have.been.calledWith('top-pages', undefined);
 
-        // Verify that site was saved
-        expect(mockNewSite.setConfig).to.have.been.calledOnce;
-        expect(mockNewSite.save).to.have.been.calledOnce;
+        // Verify that site was saved (twice: once for imports, once for brand/data folder)
+        expect(mockNewSite.setConfig).to.have.been.calledTwice;
+        expect(mockNewSite.save).to.have.been.calledTwice;
 
         // Verify logging
         expect(mockLog.info).to.have.been.calledWith(

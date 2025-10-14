@@ -529,12 +529,16 @@ describe('LLMO Onboarding Functions', () => {
       };
 
       // Mock site
+      const mockSiteConfig = {
+        updateLlmoBrand: sinon.stub(),
+        updateLlmoDataFolder: sinon.stub(),
+        isImportEnabled: sinon.stub().returns(false),
+        enableImport: sinon.stub(),
+      };
+
       const mockSite = {
         getId: sinon.stub().returns('site123'),
-        getConfig: sinon.stub().returns({
-          updateLlmoBrand: sinon.stub(),
-          updateLlmoDataFolder: sinon.stub(),
-        }),
+        getConfig: sinon.stub().returns(mockSiteConfig),
         setConfig: sinon.stub(),
         save: sinon.stub().resolves(),
       };
@@ -543,6 +547,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
         save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
 
       // Setup mocks
@@ -613,6 +618,9 @@ describe('LLMO Onboarding Functions', () => {
         dataAccess: mockDataAccess,
         log: mockLog,
         env: mockEnv,
+        sqs: {
+          sendMessage: sinon.stub().resolves(),
+        },
       };
 
       const params = {
@@ -642,12 +650,15 @@ describe('LLMO Onboarding Functions', () => {
       });
 
       // Verify site config was updated
-      expect(mockSite.getConfig().updateLlmoBrand).to.have.been.calledWith('Test Brand');
-      expect(mockSite.getConfig().updateLlmoDataFolder).to.have.been.calledWith('dev/example-com');
+      expect(mockSiteConfig.updateLlmoBrand).to.have.been.calledWith('Test Brand');
+      expect(mockSiteConfig.updateLlmoDataFolder).to.have.been.calledWith('dev/example-com');
+      expect(mockSiteConfig.isImportEnabled).to.have.been.calledWith('top-pages', undefined);
+      expect(mockSiteConfig.enableImport).to.have.been.calledWith('top-pages', undefined);
 
-      // Verify site was saved
+      // Verify site was saved (twice: once for imports, once for brand/data folder)
       expect(mockSite.setConfig).to.have.been.calledWith({ config: 'dynamo-item' });
-      expect(mockSite.save).to.have.been.called;
+      expect(mockSite.setConfig).to.have.been.calledTwice;
+      expect(mockSite.save).to.have.been.calledTwice;
 
       // Verify enableAudits was called
       expect(mockDataAccess.Configuration.findLatest).to.have.been.called;

@@ -433,7 +433,7 @@ export async function performLlmoOnboarding(params, context) {
   ]);
 
   // Enable audits
-  await enableAudits([...BASIC_AUDITS, 'llm-error-pages', 'llmo-customer-analysis'], context, site);
+  await enableAudits(site, context, [...BASIC_AUDITS, 'llm-error-pages', 'llmo-customer-analysis']);
 
   // Trigger audits
   await triggerAudits([...BASIC_AUDITS], context, site);
