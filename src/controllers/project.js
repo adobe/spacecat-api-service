@@ -132,7 +132,7 @@ function ProjectsController(ctx, env) {
       return forbidden('Only users belonging to the organization can view its project sites');
     }
 
-    const sites = await Project.getPrimaryLocaleSites(projectId);
+    const sites = await project.getPrimaryLocaleSites();
 
     return ok(sites.map((site) => SiteDto.toJSON(site)));
   };
