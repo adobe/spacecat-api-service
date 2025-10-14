@@ -146,7 +146,7 @@ function GetPromptUsageCommand(context) {
       if (imsOrgIds.length === 1 && imsOrgIds[0] === '--all') {
         const allOrgs = await Organization.all();
         imsOrgIds = allOrgs.map((org) => org.getImsOrgId());
-        await say(':progress-loader: Retriving total number of prompts in use for *all* organizations...');
+        await say(':progress-loader: Retrieving total number of prompts in use for *all* organizations...');
       }
 
       const results = await Promise.allSettled(
