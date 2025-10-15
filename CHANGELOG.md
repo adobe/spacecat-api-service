@@ -1,3 +1,10 @@
+# [1.204.0](https://github.com/adobe/spacecat-api-service/compare/v1.203.1...v1.204.0) (2025-10-15)
+
+
+### Features
+
+* add slack command to get prompt usage for IMS org ID ([#1351](https://github.com/adobe/spacecat-api-service/issues/1351)) ([8f95467](https://github.com/adobe/spacecat-api-service/commit/8f954673d7a9686d849ee6d29f1977dc2b983d8b))
+
 ## [1.203.1](https://github.com/adobe/spacecat-api-service/compare/v1.203.0...v1.203.1) (2025-10-15)
 
 
