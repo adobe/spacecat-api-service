@@ -18,7 +18,6 @@ import { createObjectCsvStringifier } from '../../../utils/slack/csvHelper.cjs';
 
 const { readConfig } = llmo;
 const PHRASES = ['get-prompt-usage'];
-const BATCH_SIZE = 300;
 
 /**
  * Factory function to create the GetPromptUsage object.
@@ -39,6 +38,7 @@ function GetPromptUsageCommand(context) {
 
   const { dataAccess, log, s3 } = context;
   const { Organization, Entitlement, Site } = dataAccess;
+  const batchSize = Number(context?.env?.PROMPT_USAGE_BATCH_SIZE) || 300;
 
   const getLlmoConfig = async (siteId) => {
     if (!s3 || !s3.s3Client) {
@@ -158,11 +158,11 @@ function GetPromptUsageCommand(context) {
       });
 
       const totalImsOrgs = imsOrgIds.length;
-      const pages = Math.ceil(totalImsOrgs / BATCH_SIZE);
+      const pages = Math.ceil(totalImsOrgs / batchSize);
 
       for (let page = 0; page < pages; page += 1) {
-        const start = page * BATCH_SIZE;
-        const end = Math.min(start + BATCH_SIZE, totalImsOrgs);
+        const start = page * batchSize;
+        const end = Math.min(start + batchSize, totalImsOrgs);
         const imsOrgBatch = imsOrgIds.slice(start, end);
 
         // eslint-disable-next-line no-await-in-loop
