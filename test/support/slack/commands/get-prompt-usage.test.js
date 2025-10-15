@@ -619,15 +619,11 @@ describe('GetPromptUsageCommand', () => {
       const csvString = Buffer.isBuffer(csvBuffer) ? csvBuffer.toString('utf8') : String(csvBuffer);
       const lines = csvString.trim().split(/\r?\n/);
 
-      expect(lines[0]).to.equal('IMS Org Name,IMS Org ID,Tier,Total number of prompts in use,Error');
+      expect(lines[0]).to.equal('IMS Org Name,IMS Org ID,Tier,Total number of prompts in use');
 
-      expect(lines[1]).to.equal('Test Org 1,test-org-1@AdobeOrg,FREE_TRIAL,2,');
+      expect(lines[1]).to.equal('Test Org 1,test-org-1@AdobeOrg,FREE_TRIAL,2');
 
-      expect(lines[2]).to.equal(
-        ',test-org-2@AdobeOrg,,,No entitlement with product code LLMO found for the provided IMS org ID',
-      );
-
-      expect(lines[3]).to.equal('Test Org 3,test-org-3@AdobeOrg,PAID,1,');
+      expect(lines[2]).to.equal('Test Org 3,test-org-3@AdobeOrg,PAID,1');
 
       expect(dataAccessStub.Organization.findByImsOrgId).to.have.been.calledWith('test-org-1@AdobeOrg');
       expect(dataAccessStub.Organization.findByImsOrgId).to.have.been.calledWith('test-org-2@AdobeOrg');
@@ -693,10 +689,10 @@ describe('GetPromptUsageCommand', () => {
 
       const categoryIdSite1 = '123e4567-e89b-12d3-a456-426614174000';
       const topicIdSite1 = '456e7890-e89b-12d3-a456-426614174001';
-      const secondTopicIdSite1 = '456e7890-e89b-12d3-a456-426614174002';
-      const categoryIdSite2 = '123e4567-e89b-12d3-a456-426614174003';
-      const categoryIdSite3 = '123e4567-e89b-12d3-a456-426614174004';
-      const topicIdSite3 = '456e7890-e89b-12d3-a456-426614174005';
+      const categoryIdSite2 = '123e4567-e89b-12d3-a456-426614174002';
+      const categoryIdSite3 = '123e4567-e89b-12d3-a456-426614174003';
+      const topicIdSite3 = '456e7890-e89b-12d3-a456-426614174004';
+      const secondTopicIdSite3 = '456e7890-e89b-12d3-a456-426614174005';
 
       const expectedConfigSite1 = {
         ...llmoConfig.defaultConfig(),
@@ -713,22 +709,11 @@ describe('GetPromptUsageCommand', () => {
             prompts: [
               {
                 prompt: 'What is the main topic?',
-                regions: ['us'],
-                origin: 'human',
-                source: 'config',
-              },
-              {
-                prompt: 'What is the test topic?',
-                regions: ['in'],
+                regions: ['ro'],
                 origin: 'human',
                 source: 'config',
               },
             ],
-          },
-          [secondTopicIdSite1]: {
-            name: 'test-topic2',
-            category: categoryIdSite1,
-            prompts: [],
           },
         },
       };
@@ -755,15 +740,26 @@ describe('GetPromptUsageCommand', () => {
         topics: {
           [topicIdSite3]: {
             name: 'test-topic',
-            category: categoryIdSite3,
+            category: categoryIdSite1,
             prompts: [
               {
                 prompt: 'What is the main topic?',
-                regions: ['ro'],
+                regions: ['us'],
+                origin: 'human',
+                source: 'config',
+              },
+              {
+                prompt: 'What is the test topic?',
+                regions: ['in'],
                 origin: 'human',
                 source: 'config',
               },
             ],
+          },
+          [secondTopicIdSite3]: {
+            name: 'test-topic2',
+            category: categoryIdSite1,
+            prompts: [],
           },
         },
       };
@@ -853,10 +849,9 @@ describe('GetPromptUsageCommand', () => {
         : String(csvBuffer);
       const lines = csvString.trim().split(/\r?\n/);
 
-      expect(lines[0]).to.equal('IMS Org Name,IMS Org ID,Tier,Total number of prompts in use,Error');
-      expect(lines[1]).to.equal('Test Org 1,test-org-1@AdobeOrg,FREE_TRIAL,2,');
-      expect(lines[2]).to.equal('Test Org 2,test-org-2@AdobeOrg,PAID,0,');
-      expect(lines[3]).to.equal('Test Org 3,test-org-3@AdobeOrg,PAID,1,');
+      expect(lines[0]).to.equal('IMS Org Name,IMS Org ID,Tier,Total number of prompts in use');
+      expect(lines[1]).to.equal('Test Org 3,test-org-3@AdobeOrg,PAID,2');
+      expect(lines[2]).to.equal('Test Org 1,test-org-1@AdobeOrg,FREE_TRIAL,1');
 
       expect(
         dataAccessStub.Organization.findByImsOrgId,
@@ -1074,6 +1069,178 @@ describe('GetPromptUsageCommand', () => {
       await command.handleExecution(args, slackContext);
 
       expect(sendFileStub.calledOnce).to.be.true;
+      expect(slackContext.say.firstCall.args[0]).to.equal(
+        ':progress-loader: Retrieving total number of prompts in use for *all* organizations...',
+      );
+      expect(slackContext.say.secondCall.args[0]).to.equal(expectedMessage);
+
+      expect(
+        dataAccessStub.Organization.findByImsOrgId,
+      ).to.have.been.calledWith('test-org-1@AdobeOrg');
+      expect(
+        dataAccessStub.Organization.findByImsOrgId,
+      ).to.have.been.calledWith('test-org-2@AdobeOrg');
+      expect(
+        dataAccessStub.Organization.findByImsOrgId,
+      ).to.have.been.calledWith('test-org-3@AdobeOrg');
+    });
+
+    it('does not upload a report when there are no orgnizations with prompts in use ', async () => {
+      const mockOrganization1 = {
+        getId: sinon.stub().returns('test-org-id1'),
+        getName: sinon.stub().returns('Test Org 1'),
+        getImsOrgId: sinon.stub().returns('test-org-1@AdobeOrg'),
+      };
+      const mockOrganization2 = {
+        getId: sinon.stub().returns('test-org-id2'),
+        getName: sinon.stub().returns('Test Org 2'),
+        getImsOrgId: sinon.stub().returns('test-org-2@AdobeOrg'),
+      };
+      const mockOrganization3 = {
+        getId: sinon.stub().returns('test-org-id3'),
+        getName: sinon.stub().returns('Test Org 3'),
+        getImsOrgId: sinon.stub().returns('test-org-3@AdobeOrg'),
+      };
+
+      const mockEntitlement1 = {
+        getId: () => 'ent1',
+        getOrganizationId: () => 'test-org-id1',
+        getProductCode: () => 'LLMO',
+        getTier: () => 'FREE_TRIAL',
+        getStatus: () => 'ACTIVE',
+        getQuotas: () => ({}),
+        getCreatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedBy: () => 'user1@example.com',
+      };
+
+      const mockEntitlement2 = {
+        getId: () => 'ent1',
+        getOrganizationId: () => 'test-org-id2',
+        getProductCode: () => 'LLMO',
+        getTier: () => 'PAID',
+        getStatus: () => 'ACTIVE',
+        getQuotas: () => ({}),
+        getCreatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedBy: () => 'user2@example.com',
+      };
+
+      const mockEntitlement3 = {
+        getId: () => 'ent3',
+        getOrganizationId: () => 'test-org-id3',
+        getProductCode: () => 'LLMO',
+        getTier: () => 'PAID',
+        getStatus: () => 'ACTIVE',
+        getQuotas: () => ({}),
+        getCreatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedBy: () => 'user3@example.com',
+      };
+
+      const mockSite1 = { getId: sinon.stub().returns('test-site-id1') };
+      const mockSite2 = { getId: sinon.stub().returns('test-site-id2') };
+      const mockSite3 = { getId: sinon.stub().returns('test-site-id3') };
+
+      const categoryIdSite1 = '123e4567-e89b-12d3-a456-426614174000';
+      const categoryIdSite2 = '123e4567-e89b-12d3-a456-426614174002';
+      const categoryIdSite3 = '123e4567-e89b-12d3-a456-426614174004';
+
+      const expectedConfigSite1 = {
+        ...llmoConfig.defaultConfig(),
+        categories: {
+          [categoryIdSite1]: {
+            name: 'test-category',
+            region: ['us'],
+          },
+        },
+        topics: {},
+      };
+
+      const expectedConfigSite2 = {
+        ...llmoConfig.defaultConfig(),
+        categories: {
+          [categoryIdSite2]: {
+            name: 'test-category',
+            region: ['us'],
+          },
+        },
+        topics: {},
+      };
+
+      const expectedConfigSite3 = {
+        ...llmoConfig.defaultConfig(),
+        categories: {
+          [categoryIdSite3]: {
+            name: 'test-category',
+            region: ['us'],
+          },
+        },
+        topics: {},
+      };
+
+      dataAccessStub.Organization.findByImsOrgId
+        .withArgs('test-org-1@AdobeOrg')
+        .resolves(mockOrganization1);
+      dataAccessStub.Entitlement.allByOrganizationId
+        .withArgs('test-org-id1')
+        .resolves([mockEntitlement1]);
+
+      dataAccessStub.Organization.findByImsOrgId
+        .withArgs('test-org-2@AdobeOrg')
+        .resolves(mockOrganization2);
+      dataAccessStub.Entitlement.allByOrganizationId
+        .withArgs('test-org-id2')
+        .resolves([mockEntitlement2]);
+
+      dataAccessStub.Organization.findByImsOrgId
+        .withArgs('test-org-3@AdobeOrg')
+        .resolves(mockOrganization3);
+      dataAccessStub.Entitlement.allByOrganizationId
+        .withArgs('test-org-id3')
+        .resolves([mockEntitlement3]);
+
+      dataAccessStub.Site.allByOrganizationId
+        .withArgs('test-org-id1')
+        .resolves([mockSite1]);
+      dataAccessStub.Site.allByOrganizationId
+        .withArgs('test-org-id2')
+        .resolves([mockSite2]);
+      dataAccessStub.Site.allByOrganizationId
+        .withArgs('test-org-id3')
+        .resolves([mockSite3]);
+
+      dataAccessStub.Organization.all.resolves([
+        mockOrganization1,
+        mockOrganization2,
+        mockOrganization3,
+      ]);
+
+      readConfigStub.withArgs(mockSite1.getId(), s3Client).resolves({
+        config: expectedConfigSite1,
+        exists: true,
+        version: 'v123',
+      });
+
+      readConfigStub.withArgs(mockSite2.getId(), s3Client).resolves({
+        config: expectedConfigSite2,
+        exists: true,
+        version: 'v123',
+      });
+
+      readConfigStub.withArgs(mockSite3.getId(), s3Client).resolves({
+        config: expectedConfigSite3,
+        exists: true,
+        version: 'v123',
+      });
+
+      sendFileStub.rejects(new Error('Something went wrong'));
+      const expectedMessage = ':information_source: No organizations with prompts in use.';
+
+      const args = ['--all'];
+      const command = GetPromptUsageCommand(context);
+      await command.handleExecution(args, slackContext);
+
       expect(slackContext.say.firstCall.args[0]).to.equal(
         ':progress-loader: Retrieving total number of prompts in use for *all* organizations...',
       );
@@ -1319,10 +1486,10 @@ describe('GetPromptUsageCommand', () => {
       const linesBatch1 = csvStringBatch1.trim().split(/\r?\n/);
 
       expect(linesBatch1[0]).to.equal(
-        'IMS Org Name,IMS Org ID,Tier,Total number of prompts in use,Error',
+        'IMS Org Name,IMS Org ID,Tier,Total number of prompts in use',
       );
-      expect(linesBatch1[1]).to.equal('Test Org 1,test-org-1@AdobeOrg,FREE_TRIAL,2,');
-      expect(linesBatch1[2]).to.equal('Test Org 2,test-org-2@AdobeOrg,PAID,1,');
+      expect(linesBatch1[1]).to.equal('Test Org 1,test-org-1@AdobeOrg,FREE_TRIAL,2');
+      expect(linesBatch1[2]).to.equal('Test Org 2,test-org-2@AdobeOrg,PAID,1');
 
       const [
         providedSlackContextBatch2,
@@ -1350,9 +1517,9 @@ describe('GetPromptUsageCommand', () => {
       const linesBatch2 = csvStringBatch2.trim().split(/\r?\n/);
 
       expect(linesBatch2[0]).to.equal(
-        'IMS Org Name,IMS Org ID,Tier,Total number of prompts in use,Error',
+        'IMS Org Name,IMS Org ID,Tier,Total number of prompts in use',
       );
-      expect(linesBatch2[1]).to.equal('Test Org 3,test-org-3@AdobeOrg,PAID,1,');
+      expect(linesBatch2[1]).to.equal('Test Org 3,test-org-3@AdobeOrg,PAID,1');
 
       expect(
         dataAccessStub.Organization.findByImsOrgId,
