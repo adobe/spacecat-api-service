@@ -332,7 +332,6 @@ export async function createOrFindSite(baseURL, organizationId, context) {
   if (site) {
     if (site.getOrganizationId() !== organizationId) {
       site.setOrganizationId(organizationId);
-      await site.save();
     }
 
     return site;

@@ -579,7 +579,6 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
       expect(mockSite.getOrganizationId).to.have.been.called;
       expect(mockSite.setOrganizationId).to.have.been.calledWith('new-org-456');
-      expect(mockSite.save).to.have.been.called;
     });
 
     it('should not update organization ID when existing site has same organization', async () => {
