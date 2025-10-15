@@ -1,3 +1,10 @@
+# [1.203.0](https://github.com/adobe/spacecat-api-service/compare/v1.202.1...v1.203.0) (2025-10-15)
+
+
+### Features
+
+* project api region and language support ([#1338](https://github.com/adobe/spacecat-api-service/issues/1338)) ([ec84fbd](https://github.com/adobe/spacecat-api-service/commit/ec84fbd9a267f6facfdf2450389814e38505c611))
+
 ## [1.202.1](https://github.com/adobe/spacecat-api-service/compare/v1.202.0...v1.202.1) (2025-10-14)
 
 
