@@ -1,3 +1,10 @@
+## [1.204.1](https://github.com/adobe/spacecat-api-service/compare/v1.204.0...v1.204.1) (2025-10-15)
+
+
+### Bug Fixes
+
+* Add batch csv uploads to get-prompt-usage command to avoid timeouts ([#1358](https://github.com/adobe/spacecat-api-service/issues/1358)) ([f3b6b83](https://github.com/adobe/spacecat-api-service/commit/f3b6b83d052e720a4518f9f9159dbd4c03f11e40))
+
 # [1.204.0](https://github.com/adobe/spacecat-api-service/compare/v1.203.1...v1.204.0) (2025-10-15)
 
 
