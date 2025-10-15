@@ -777,8 +777,8 @@ describe('Access Control Util', () => {
     it('should create trial user when tier is free_trial and trial user does not exist', async () => {
       const entitlement = {
         getId: () => 'entitlement-123',
-        getProductCode: () => 'llmo',
-        getTier: () => 'free_trial',
+        getProductCode: () => EntitlementModel.PRODUCT_CODES.LLMO,
+        getTier: () => EntitlementModel.TIERS.FREE_TRIAL,
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -810,8 +810,8 @@ describe('Access Control Util', () => {
     it('should create trial user with fallback values when profile has null first_name and last_name', async () => {
       const entitlement = {
         getId: () => 'entitlement-123',
-        getProductCode: () => 'llmo',
-        getTier: () => 'free_trial',
+        getProductCode: () => EntitlementModel.PRODUCT_CODES.LLMO,
+        getTier: () => EntitlementModel.TIERS.FREE_TRIAL,
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -847,8 +847,8 @@ describe('Access Control Util', () => {
     it('should create trial user with fallback values when profile has undefined first_name and last_name', async () => {
       const entitlement = {
         getId: () => 'entitlement-123',
-        getProductCode: () => 'llmo',
-        getTier: () => 'free_trial',
+        getProductCode: () => EntitlementModel.PRODUCT_CODES.LLMO,
+        getTier: () => EntitlementModel.TIERS.FREE_TRIAL,
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -884,8 +884,8 @@ describe('Access Control Util', () => {
     it('should create trial user with fallback values when profile has empty string first_name and last_name', async () => {
       const entitlement = {
         getId: () => 'entitlement-123',
-        getProductCode: () => 'llmo',
-        getTier: () => 'free_trial',
+        getProductCode: () => EntitlementModel.PRODUCT_CODES.LLMO,
+        getTier: () => EntitlementModel.TIERS.FREE_TRIAL,
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
@@ -921,8 +921,8 @@ describe('Access Control Util', () => {
     it('should create trial user with mixed fallback values when profile has partial data', async () => {
       const entitlement = {
         getId: () => 'entitlement-123',
-        getProductCode: () => 'llmo',
-        getTier: () => 'free_trial',
+        getProductCode: () => EntitlementModel.PRODUCT_CODES.LLMO,
+        getTier: () => EntitlementModel.TIERS.FREE_TRIAL,
       };
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 

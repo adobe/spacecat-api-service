@@ -112,7 +112,8 @@ export default class AccessControlUtil {
       throw new Error('Missing enrollment for site');
     }
 
-    if (entitlement.getTier() === EntitlementModel.TIERS.FREE_TRIAL) {
+    if (entitlement.getTier() === EntitlementModel.TIERS.FREE_TRIAL
+      && entitlement.getProductCode() === EntitlementModel.PRODUCT_CODES.LLMO) {
       const profile = this.authInfo.getProfile();
       const trialUser = await this.TrialUser.findByEmailId(profile.trial_email);
 
