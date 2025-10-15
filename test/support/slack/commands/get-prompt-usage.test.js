@@ -611,10 +611,10 @@ describe('GetPromptUsageCommand', () => {
       ] = sendFileStub.firstCall.args;
 
       expect(providedSlackContext).to.equal(slackContext);
-      expect(title).to.equal('Prompt Usage Report');
-      expect(initialComment).to.equal('Here you can find the prompt usage report :memo:');
+      expect(title).to.equal('Prompt Usage Report (part 1/1)');
+      expect(initialComment).to.equal('Here you can find the prompt usage report (part 1/1) :memo:');
       expect(channelId).to.equal('test-channel');
-      expect(filename).to.match(/^prompt-usage-\d+\.csv$/);
+      expect(filename).to.match(/^prompt-usage-\d+-part1\.csv$/);
 
       const csvString = Buffer.isBuffer(csvBuffer) ? csvBuffer.toString('utf8') : String(csvBuffer);
       const lines = csvString.trim().split(/\r?\n/);
@@ -838,12 +838,12 @@ describe('GetPromptUsageCommand', () => {
       ] = sendFileStub.firstCall.args;
 
       expect(providedSlackContext).to.equal(slackContext);
-      expect(title).to.equal('Prompt Usage Report');
+      expect(title).to.equal('Prompt Usage Report (part 1/1)');
       expect(initialComment).to.equal(
-        'Here you can find the prompt usage report :memo:',
+        'Here you can find the prompt usage report (part 1/1) :memo:',
       );
       expect(channelId).to.equal('test-channel');
-      expect(filename).to.match(/^prompt-usage-\d+\.csv$/);
+      expect(filename).to.match(/^prompt-usage-\d+-part1\.csv$/);
       expect(slackContext.say.firstCall.args[0]).to.equal(
         ':progress-loader: Retrieving total number of prompts in use for *all* organizations...',
       );
@@ -1067,7 +1067,7 @@ describe('GetPromptUsageCommand', () => {
       });
 
       sendFileStub.rejects(new Error('Something went wrong'));
-      const expectedMessage = ':warning: Failed to upload the report to Slack: Something went wrong';
+      const expectedMessage = ':warning: Failed to upload the report to Slack (part 1/1): Something went wrong';
 
       const args = ['--all'];
       const command = GetPromptUsageCommand(context);

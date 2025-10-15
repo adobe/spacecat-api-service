@@ -18,6 +18,7 @@ import { createObjectCsvStringifier } from '../../../utils/slack/csvHelper.cjs';
 
 const { readConfig } = llmo;
 const PHRASES = ['get-prompt-usage'];
+const BATCH_SIZE = 300;
 
 /**
  * Factory function to create the GetPromptUsage object.
@@ -146,32 +147,6 @@ function GetPromptUsageCommand(context) {
         await say(':progress-loader: Retrieving total number of prompts in use for *all* organizations...');
       }
 
-      const results = await Promise.allSettled(
-        imsOrgIds.map((id) => getPromptUsageForSingleIMSOrg(id)),
-      );
-
-      const rows = results.map((res, i) => {
-        const imsOrgID = imsOrgIds[i];
-        if (res.status === 'fulfilled') {
-          const { organizationName, tier, totalPrompts } = res.value;
-          return {
-            organizationName,
-            imsOrgID,
-            tier,
-            totalPrompts,
-            error: '',
-          };
-        } else {
-          return {
-            organizationName: '',
-            imsOrgID,
-            tier: '',
-            totalPrompts: '',
-            error: res.reason?.message,
-          };
-        }
-      });
-
       const csvStringifier = createObjectCsvStringifier({
         header: [
           { id: 'organizationName', title: 'IMS Org Name' },
@@ -182,28 +157,77 @@ function GetPromptUsageCommand(context) {
         ],
       });
 
-      const csv = csvStringifier.getHeaderString() + csvStringifier.stringifyRecords(rows);
+      const totalImsOrgs = imsOrgIds.length;
+      const pages = Math.ceil(totalImsOrgs / BATCH_SIZE);
 
-      const csvBuffer = Buffer.from(csv, 'utf8');
+      for (let page = 0; page < pages; page += 1) {
+        const start = page * BATCH_SIZE;
+        const end = Math.min(start + BATCH_SIZE, totalImsOrgs);
+        const imsOrgBatch = imsOrgIds.slice(start, end);
 
-      try {
-        await sendFile(
-          slackContext,
-          csvBuffer,
-          `prompt-usage-${Date.now()}.csv`,
-          'Prompt Usage Report',
-          'Here you can find the prompt usage report :memo:',
-          channelId,
+        // eslint-disable-next-line no-await-in-loop
+        const results = await Promise.allSettled(
+          imsOrgBatch.map((id) => getPromptUsageForSingleIMSOrg(id)),
         );
-      } catch (error) {
-        await say(`:warning: Failed to upload the report to Slack: ${error.message}`);
+
+        const rows = results.map((res, i) => {
+          const imsOrgID = imsOrgBatch[i];
+          if (res.status === 'fulfilled') {
+            const { organizationName, tier, totalPrompts } = res.value;
+            return {
+              organizationName,
+              imsOrgID,
+              tier,
+              totalPrompts,
+              error: '',
+            };
+          }
+          return {
+            organizationName: '',
+            imsOrgID,
+            tier: '',
+            totalPrompts: '',
+            error: res.reason?.message,
+          };
+        });
+
+        const sanitizedRows = rows.map((row) => Object.fromEntries(
+          Object.entries(row).map(([key, val]) => [
+            key,
+            typeof val === 'string'
+              ? val.replace(/[\r\n]+/g, ' ').trim()
+              : val,
+          ]),
+        ));
+
+        const csv = csvStringifier.getHeaderString()
+          + csvStringifier.stringifyRecords(sanitizedRows);
+        const csvBuffer = Buffer.from(csv, 'utf8');
+
+        const part = page + 1;
+        const filename = `prompt-usage-${Date.now()}-part${part}.csv`;
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await sendFile(
+            slackContext,
+            csvBuffer,
+            filename,
+            `Prompt Usage Report (part ${part}/${pages})`,
+            `Here you can find the prompt usage report (part ${part}/${pages}) :memo:`,
+            channelId,
+          );
+        } catch (error) {
+          // eslint-disable-next-line no-await-in-loop
+          await say(
+            `:warning: Failed to upload the report to Slack (part ${part}/${pages}): ${error.message}`,
+          );
+        }
       }
     } catch (error) {
       log.error(error);
       await postErrorMessage(say, error);
     }
   };
-
   baseCommand.init(context);
   return { ...baseCommand, handleExecution };
 }
