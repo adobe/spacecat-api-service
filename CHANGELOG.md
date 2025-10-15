@@ -1,3 +1,10 @@
+## [1.204.3](https://github.com/adobe/spacecat-api-service/compare/v1.204.2...v1.204.3) (2025-10-15)
+
+
+### Bug Fixes
+
+* **llmo-onboard:** do NOT save site object twice ([#1361](https://github.com/adobe/spacecat-api-service/issues/1361)) ([96cc79a](https://github.com/adobe/spacecat-api-service/commit/96cc79a5978b6cf6d4916166ec658d9b4e48c1e5))
+
 ## [1.204.2](https://github.com/adobe/spacecat-api-service/compare/v1.204.1...v1.204.2) (2025-10-15)
 
 
