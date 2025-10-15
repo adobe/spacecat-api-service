@@ -9,7 +9,6 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-/* c8 ignore start */
 import { llmoConfig as llmo } from '@adobe/spacecat-shared-utils';
 import { postErrorMessage, sendFile } from '../../../utils/slack/base.js';
 
@@ -95,8 +94,7 @@ function GetPromptUsageCommand(context) {
 
     for (const cfg of configs) {
       if (cfg) {
-        const topics = cfg.topics || {};
-        const topicPromptCount = Object.values(topics).reduce(
+        const topicPromptCount = Object.values(cfg.topics).reduce(
           (sum, topic) => sum + (topic.prompts?.length || 0),
           0,
         );
@@ -125,8 +123,7 @@ function GetPromptUsageCommand(context) {
 
     try {
       let imsOrgIds = args
-        .flatMap((s) => s.split(/[,\s]+/))
-        .map((s) => s.trim())
+        .flatMap((s) => s.trim().split(/[,\s]+/))
         .filter(Boolean);
 
       if (imsOrgIds.length === 0) {
