@@ -1,3 +1,10 @@
+## [1.204.2](https://github.com/adobe/spacecat-api-service/compare/v1.204.1...v1.204.2) (2025-10-15)
+
+
+### Bug Fixes
+
+* **llmo-onboard:** exception for aso demo org sites ([#1356](https://github.com/adobe/spacecat-api-service/issues/1356)) ([12c1f7a](https://github.com/adobe/spacecat-api-service/commit/12c1f7ac75ea7ef2bbefb0ed5c305afeffc05259))
+
 ## [1.204.1](https://github.com/adobe/spacecat-api-service/compare/v1.204.0...v1.204.1) (2025-10-15)
 
 
