@@ -314,6 +314,77 @@ export async function createOrFindSite(baseURL, organizationId, context) {
 }
 
 /**
+ * Deletes the SharePoint folder for a site.
+ * @param {string} dataFolder - The data folder path
+ * @param {object} context - The request context
+ * @returns {Promise<void>}
+ */
+export async function deleteSharePointFolder(dataFolder, context) {
+  const { log, env } = context;
+
+  try {
+    const sharepointClient = await createSharePointClient(env);
+    const folder = sharepointClient.getDocument(`/sites/elmo-ui-data/${dataFolder}/`);
+    const folderExists = await folder.exists();
+
+    if (folderExists) {
+      log.info(`Deleting SharePoint folder: /sites/elmo-ui-data/${dataFolder}/`);
+      await folder.delete();
+      log.info(`Successfully deleted SharePoint folder: ${dataFolder}`);
+    } else {
+      log.debug(`SharePoint folder does not exist: /sites/elmo-ui-data/${dataFolder}/`);
+    }
+  } catch (error) {
+    log.error(`Error deleting SharePoint folder ${dataFolder}: ${error.message}`);
+    // Don't throw - allow offboarding to continue
+  }
+}
+
+/**
+ * Revokes the LLMO enrollment for a site.
+ * @param {object} site - The site object
+ * @param {object} context - The request context
+ * @returns {Promise<void>}
+ */
+export async function revokeEnrollment(site, context) {
+  const { log } = context;
+  const siteId = site.getId();
+
+  try {
+    log.info(`Revoking LLMO enrollment for site ${siteId}`);
+    const tierClient = await TierClient.createForSite(context, site, LLMO_PRODUCT_CODE);
+    await tierClient.revokeSiteEnrollment();
+    log.info(`Successfully revoked LLMO enrollment for site ${siteId}`);
+  } catch (error) {
+    log.error(`Error revoking LLMO enrollment for site ${siteId}: ${error.message}`);
+    // Don't throw - allow offboarding to continue
+  }
+}
+
+/**
+ * Removes LLMO configuration from the site config.
+ * @param {object} site - The site object
+ * @param {object} config - The site config object
+ * @param {object} context - The request context
+ * @returns {Promise<void>}
+ */
+export async function removeLlmoConfig(site, config, context) {
+  const { log } = context;
+  const siteId = site.getId();
+
+  log.info(`Removing LLMO configuration from site ${siteId}`);
+
+  config.updateLlmoBrand(null);
+  config.updateLlmoDataFolder(null);
+
+  // Save the updated site config
+  site.setConfig(Config.toDynamoItem(config));
+  await site.save();
+
+  log.info(`Successfully removed LLMO configuration for site ${siteId}`);
+}
+
+/**
  * Creates entitlement and enrollment for LLMO.
  * @param {object} site - The site object
  * @param {object} context - The request context
@@ -368,50 +439,63 @@ export async function performLlmoOnboarding(params, context) {
   const baseURL = composeBaseURL(domain);
   const dataFolder = generateDataFolder(baseURL, env.ENV);
 
-  log.info(`Starting LLMO onboarding for IMS org ${imsOrgId}, domain ${domain}, brand ${brandName}`);
+  let site;
+  try {
+    log.info(`Starting LLMO onboarding for IMS org ${imsOrgId}, domain ${domain}, brand ${brandName}`);
 
-  // Create or find organization
-  const organization = await createOrFindOrganization(imsOrgId, context);
+    // Create or find organization
+    const organization = await createOrFindOrganization(imsOrgId, context);
 
-  // Create site
-  const site = await createOrFindSite(baseURL, organization.getId(), context);
+    // Create site
+    site = await createOrFindSite(baseURL, organization.getId(), context);
 
-  log.info(`Created site ${site.getId()} for ${baseURL}`);
+    log.info(`Created site ${site.getId()} for ${baseURL}`);
 
-  // Create entitlement and enrollment
-  await createEntitlementAndEnrollment(site, context);
+    // Create entitlement and enrollment
+    await createEntitlementAndEnrollment(site, context);
 
-  // Copy files to SharePoint
-  await copyFilesToSharepoint(dataFolder, context);
+    // Copy files to SharePoint
+    await copyFilesToSharepoint(dataFolder, context);
 
-  // Update index config
-  await updateIndexConfig(dataFolder, context);
+    // Update index config
+    await updateIndexConfig(dataFolder, context);
 
-  // Enable audits
-  await enableAudits(site, context, [
-    'headings',
-    'llm-blocked',
-    'llmo-customer-analysis',
-  ]);
+    // Enable audits
+    await enableAudits(site, context, [
+      'headings',
+      'llm-blocked',
+      'llmo-customer-analysis',
+    ]);
 
-  // Get current site config
-  const siteConfig = site.getConfig();
+    // Get current site config
+    const siteConfig = site.getConfig();
 
-  // Update brand and data directory
-  siteConfig.updateLlmoBrand(brandName.trim());
-  siteConfig.updateLlmoDataFolder(dataFolder.trim());
+    // Update brand and data directory
+    siteConfig.updateLlmoBrand(brandName.trim());
+    siteConfig.updateLlmoDataFolder(dataFolder.trim());
 
-  // update the site config object
-  site.setConfig(Config.toDynamoItem(siteConfig));
-  await site.save();
+    // update the site config object
+    site.setConfig(Config.toDynamoItem(siteConfig));
+    await site.save();
 
-  return {
-    siteId: site.getId(),
-    organizationId: organization.getId(),
-    baseURL,
-    dataFolder,
-    message: 'LLMO onboarding completed successfully',
-  };
+    return {
+      siteId: site.getId(),
+      organizationId: organization.getId(),
+      baseURL,
+      dataFolder,
+      message: 'LLMO onboarding completed successfully',
+    };
+  } catch (error) {
+    log.error(`Error during LLMO onboarding: ${error.message}. Attempting cleanup.`);
+
+    // Attempt cleanup
+    await deleteSharePointFolder(dataFolder, context);
+    if (site) {
+      await revokeEnrollment(site, context);
+    }
+    // Rolling back llmo config is not required, as it's the last step and won't have been saved
+    throw error;
+  }
 }
 
 /**
@@ -439,44 +523,14 @@ export async function performLlmoOffboarding(site, config, context) {
 
   log.info(`Offboarding site ${siteId} with domain ${baseURL} and data folder ${dataFolder}`);
 
-  // Check if SharePoint folder exists and delete it
-  try {
-    const sharepointClient = await createSharePointClient(env);
-    const folder = sharepointClient.getDocument(`/sites/elmo-ui-data/${dataFolder}/`);
-    const folderExists = await folder.exists();
+  // Delete SharePoint folder
+  await deleteSharePointFolder(dataFolder, context);
 
-    if (folderExists) {
-      log.info(`Deleting SharePoint folder: /sites/elmo-ui-data/${dataFolder}/`);
-      await folder.delete();
-      log.info(`Successfully deleted SharePoint folder for site ${siteId}`);
-    } else {
-      log.debug(`SharePoint folder does not exist: /sites/elmo-ui-data/${dataFolder}/`);
-    }
-  } catch (error) {
-    log.error(`Error deleting SharePoint folder for site ${siteId}: ${error.message}`);
-    // Continue with offboarding even if folder deletion fails
-  }
+  // Revoke site enrollment
+  await revokeEnrollment(site, context);
 
-  // Revoke site enrollment using tier client
-  try {
-    log.info(`Revoking LLMO enrollment for site ${siteId}`);
-    const tierClient = await TierClient.createForSite(context, site, LLMO_PRODUCT_CODE);
-    await tierClient.revokeSiteEnrollment();
-    log.info(`Successfully revoked LLMO enrollment for site ${siteId}`);
-  } catch (error) {
-    log.error(`Error revoking LLMO enrollment for site ${siteId}: ${error.message}`);
-    // Continue with offboarding even if enrollment revocation fails
-  }
-
-  // Remove LLMO configuration from site config
-  log.info(`Removing LLMO configuration from site ${siteId}`);
-  config.updateLlmoBrand(null);
-  config.updateLlmoDataFolder(null);
-
-  // Save the updated site config
-  site.setConfig(Config.toDynamoItem(config));
-  await site.save();
-  log.info(`Successfully removed LLMO configuration for site ${siteId}`);
+  // Remove LLMO configuration
+  await removeLlmoConfig(site, config, context);
 
   log.info(`LLMO offboarding process completed for site ${siteId}`);
 
