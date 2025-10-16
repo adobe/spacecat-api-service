@@ -1,3 +1,10 @@
+## [1.205.3](https://github.com/adobe/spacecat-api-service/compare/v1.205.2...v1.205.3) (2025-10-16)
+
+
+### Bug Fixes
+
+* demo shall be default value in the onboarding form ([#1352](https://github.com/adobe/spacecat-api-service/issues/1352)) ([edad5aa](https://github.com/adobe/spacecat-api-service/commit/edad5aadac91076d8b28b55a051836736d03f1c3))
+
 ## [1.205.2](https://github.com/adobe/spacecat-api-service/compare/v1.205.1...v1.205.2) (2025-10-16)
 
 
