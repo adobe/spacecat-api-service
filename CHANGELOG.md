@@ -1,3 +1,73 @@
+## [1.205.1](https://github.com/adobe/spacecat-api-service/compare/v1.205.0...v1.205.1) (2025-10-16)
+
+
+### Bug Fixes
+
+* audit should comply with tier ([#1348](https://github.com/adobe/spacecat-api-service/issues/1348)) ([856bd2b](https://github.com/adobe/spacecat-api-service/commit/856bd2b0052531a28f62ee768d91bc5334a98b47))
+
+# [1.205.0](https://github.com/adobe/spacecat-api-service/compare/v1.204.4...v1.205.0) (2025-10-16)
+
+
+### Features
+
+* only include orgs with non-zero prompt usage in the report ([#1360](https://github.com/adobe/spacecat-api-service/issues/1360)) ([67bc0ac](https://github.com/adobe/spacecat-api-service/commit/67bc0ac81c998502dac7c40f5e887b5d39c6e8f5))
+
+## [1.204.4](https://github.com/adobe/spacecat-api-service/compare/v1.204.3...v1.204.4) (2025-10-15)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1359](https://github.com/adobe/spacecat-api-service/issues/1359)) ([132515d](https://github.com/adobe/spacecat-api-service/commit/132515d22cea968a1e867c60cb9dcee2b0e20527))
+
+## [1.204.3](https://github.com/adobe/spacecat-api-service/compare/v1.204.2...v1.204.3) (2025-10-15)
+
+
+### Bug Fixes
+
+* **llmo-onboard:** do NOT save site object twice ([#1361](https://github.com/adobe/spacecat-api-service/issues/1361)) ([96cc79a](https://github.com/adobe/spacecat-api-service/commit/96cc79a5978b6cf6d4916166ec658d9b4e48c1e5))
+
+## [1.204.2](https://github.com/adobe/spacecat-api-service/compare/v1.204.1...v1.204.2) (2025-10-15)
+
+
+### Bug Fixes
+
+* **llmo-onboard:** exception for aso demo org sites ([#1356](https://github.com/adobe/spacecat-api-service/issues/1356)) ([12c1f7a](https://github.com/adobe/spacecat-api-service/commit/12c1f7ac75ea7ef2bbefb0ed5c305afeffc05259))
+
+## [1.204.1](https://github.com/adobe/spacecat-api-service/compare/v1.204.0...v1.204.1) (2025-10-15)
+
+
+### Bug Fixes
+
+* Add batch csv uploads to get-prompt-usage command to avoid timeouts ([#1358](https://github.com/adobe/spacecat-api-service/issues/1358)) ([f3b6b83](https://github.com/adobe/spacecat-api-service/commit/f3b6b83d052e720a4518f9f9159dbd4c03f11e40))
+
+# [1.204.0](https://github.com/adobe/spacecat-api-service/compare/v1.203.1...v1.204.0) (2025-10-15)
+
+
+### Features
+
+* add slack command to get prompt usage for IMS org ID ([#1351](https://github.com/adobe/spacecat-api-service/issues/1351)) ([8f95467](https://github.com/adobe/spacecat-api-service/commit/8f954673d7a9686d849ee6d29f1977dc2b983d8b))
+
+## [1.203.1](https://github.com/adobe/spacecat-api-service/compare/v1.203.0...v1.203.1) (2025-10-15)
+
+
+### Bug Fixes
+
+* Llmo test reduce ([#1350](https://github.com/adobe/spacecat-api-service/issues/1350)) ([826d78d](https://github.com/adobe/spacecat-api-service/commit/826d78d11e5313fbc9c70d6d848ff8671f080ad0))
+
+# [1.203.0](https://github.com/adobe/spacecat-api-service/compare/v1.202.1...v1.203.0) (2025-10-15)
+
+
+### Features
+
+* project api region and language support ([#1338](https://github.com/adobe/spacecat-api-service/issues/1338)) ([ec84fbd](https://github.com/adobe/spacecat-api-service/commit/ec84fbd9a267f6facfdf2450389814e38505c611))
+
+## [1.202.1](https://github.com/adobe/spacecat-api-service/compare/v1.202.0...v1.202.1) (2025-10-14)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.71.1 ([#1353](https://github.com/adobe/spacecat-api-service/issues/1353)) ([6f8f695](https://github.com/adobe/spacecat-api-service/commit/6f8f69581ac646273453d27b2767125cbc97299d))
+
 # [1.202.0](https://github.com/adobe/spacecat-api-service/compare/v1.201.0...v1.202.0) (2025-10-13)
 
 
