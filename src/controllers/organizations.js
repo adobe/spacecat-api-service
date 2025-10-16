@@ -25,6 +25,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 
 import { OrganizationDto } from '../dto/organization.js';
+import { ProjectDto } from '../dto/project.js';
 import { SiteDto } from '../dto/site.js';
 import AccessControlUtil from '../support/access-control-util.js';
 
@@ -49,7 +50,7 @@ function OrganizationsController(ctx, env) {
     throw new Error('Environment object required');
   }
   const { SLACK_URL_WORKSPACE_EXTERNAL: slackExternalWorkspaceUrl } = env;
-  const { Organization, Site } = dataAccess;
+  const { Organization, Project, Site } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
@@ -267,6 +268,92 @@ function OrganizationsController(ctx, env) {
     return badRequest('No updates provided');
   };
 
+  /**
+   * Gets all projects for an organization.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Projects for the organization.
+   */
+  const getProjectsByOrganizationId = async (context) => {
+    const organizationId = context.params?.organizationId;
+
+    if (!isValidUUID(organizationId)) {
+      return badRequest('Organization ID required');
+    }
+
+    const organization = await Organization.findById(organizationId);
+    if (!organization) {
+      return notFound('Organization not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(organization)) {
+      return forbidden('Only users belonging to the organization can view its projects');
+    }
+
+    const projects = await Project.allByOrganizationId(organizationId);
+
+    return ok(projects.map((project) => ProjectDto.toJSON(project)));
+  };
+
+  /**
+   * Gets all sites for an organization by project ID.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Sites for the organization and project.
+   */
+  const getSitesByProjectIdAndOrganizationId = async (context) => {
+    const { organizationId, projectId } = context.params;
+
+    if (!isValidUUID(organizationId)) {
+      return badRequest('Organization ID required');
+    }
+
+    if (!isValidUUID(projectId)) {
+      return badRequest('Project ID required');
+    }
+
+    const organization = await Organization.findById(organizationId);
+    if (!organization) {
+      return notFound('Organization not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(organization)) {
+      return forbidden('Only users belonging to the organization can view its sites');
+    }
+
+    const sites = await Site.allByOrganizationIdAndProjectId(organizationId, projectId);
+
+    return ok(sites.map((site) => SiteDto.toJSON(site)));
+  };
+
+  /**
+   * Gets all sites for an organization by project name.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Sites for the organization and project.
+   */
+  const getSitesByProjectNameAndOrganizationId = async (context) => {
+    const { organizationId, projectName } = context.params;
+
+    if (!isValidUUID(organizationId)) {
+      return badRequest('Organization ID required');
+    }
+
+    if (!hasText(projectName)) {
+      return badRequest('Project name required');
+    }
+
+    const organization = await Organization.findById(organizationId);
+    if (!organization) {
+      return notFound('Organization not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(organization)) {
+      return forbidden('Only users belonging to the organization can view its sites');
+    }
+
+    const sites = await Site.allByOrganizationIdAndProjectName(organizationId, projectName);
+
+    return ok(sites.map((site) => SiteDto.toJSON(site)));
+  };
+
   return {
     createOrganization,
     getAll,
@@ -274,6 +361,9 @@ function OrganizationsController(ctx, env) {
     getByImsOrgID,
     getSlackConfigByImsOrgID,
     getSitesForOrganization,
+    getProjectsByOrganizationId,
+    getSitesByProjectIdAndOrganizationId,
+    getSitesByProjectNameAndOrganizationId,
     removeOrganization,
     updateOrganization,
   };
