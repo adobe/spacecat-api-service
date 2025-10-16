@@ -663,7 +663,7 @@ function SuggestionsController(ctx, sqs, env) {
    * @param {Object} context of the request
    * @returns {Promise<Response>} Deployment response
    */
-  const autoFixWithTokowaka = async (context) => {
+  const deploySuggestionToEdge = async (context) => {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
 
@@ -705,7 +705,7 @@ function SuggestionsController(ctx, sqs, env) {
     const validSuggestions = [];
     const failedSuggestions = [];
 
-    // Check each requested suggestion
+    // Check each requested suggestion (basic validation only)
     suggestionIds.forEach((suggestionId, index) => {
       const suggestion = allSuggestions.find((s) => s.getId() === suggestionId);
 
@@ -734,7 +734,6 @@ function SuggestionsController(ctx, sqs, env) {
     // Only attempt deployment if we have valid suggestions
     if (isNonEmptyArray(validSuggestions)) {
       try {
-        // Create Tokowaka client and deploy
         const tokowakaClient = TokowakaClient.createFrom(context);
         deploymentResult = await tokowakaClient.deploySuggestions(
           site,
@@ -742,13 +741,39 @@ function SuggestionsController(ctx, sqs, env) {
           validSuggestions,
         );
 
-        // Update suggestions status to deployed
-        succeededSuggestions = await Suggestion.bulkUpdateStatus(
-          validSuggestions,
-          SuggestionModel.STATUSES.FIXED,
+        // Process deployment results
+        const {
+          succeededSuggestions: deployedSuggestions,
+          failedSuggestions: ineligibleSuggestions,
+        } = deploymentResult;
+
+        // Update successfully deployed suggestions with deployment timestamp
+        const deploymentTimestamp = Date.now();
+        succeededSuggestions = await Promise.all(
+          deployedSuggestions.map(async (suggestion) => {
+            const currentData = suggestion.getData();
+            suggestion.setData({
+              ...currentData,
+              tokowakaDeployed: deploymentTimestamp,
+            });
+            suggestion.setUpdatedBy('tokowaka-deployment');
+            return suggestion.save();
+          }),
         );
 
-        context.log.info(`Successfully updated Tokowaka site config at ${deploymentResult.s3Key} for ${succeededSuggestions.length} suggestions`);
+        // Add ineligible suggestions to failed list
+        ineligibleSuggestions.forEach((item) => {
+          failedSuggestions.push({
+            uuid: item.suggestion.getId(),
+            index: suggestionIds.indexOf(item.suggestion.getId()),
+            message: item.reason,
+            statusCode: 400,
+          });
+        });
+
+        if (deploymentResult.s3Key) {
+          context.log.info(`Successfully updated Tokowaka site config at ${deploymentResult.s3Key} for ${succeededSuggestions.length} suggestions`);
+        }
       } catch (error) {
         context.log.error(`Error deploying to Tokowaka: ${error.message}`, error);
         // If deployment fails, mark all valid suggestions as failed
@@ -756,14 +781,13 @@ function SuggestionsController(ctx, sqs, env) {
           failedSuggestions.push({
             uuid: suggestion.getId(),
             index: suggestionIds.indexOf(suggestion.getId()),
-            message: `Deployment failed: ${error.message}`,
+            message: 'Deployment failed: Internal server error',
             statusCode: error.status || 500,
           });
         });
       }
     }
 
-    // Build response in auto-fix format
     const response = {
       suggestions: [
         ...succeededSuggestions.map((suggestion) => ({
@@ -780,8 +804,6 @@ function SuggestionsController(ctx, sqs, env) {
         failed: failedSuggestions.length,
       },
     };
-
-    // Sort by original index
     response.suggestions.sort((a, b) => a.index - b.index);
 
     return createResponse(response, 207);
@@ -790,7 +812,7 @@ function SuggestionsController(ctx, sqs, env) {
   return {
     autofixSuggestions,
     createSuggestions,
-    autoFixWithTokowaka,
+    deploySuggestionToEdge,
     getAllForOpportunity,
     getByID,
     getByStatus,

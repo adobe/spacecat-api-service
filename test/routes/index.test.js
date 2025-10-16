@@ -355,6 +355,7 @@ describe('getRouteHandlers', () => {
       'DELETE /sites/:siteId/opportunities/:opportunityId',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix',
+      'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions',
