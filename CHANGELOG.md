@@ -1,3 +1,10 @@
+## [1.205.1](https://github.com/adobe/spacecat-api-service/compare/v1.205.0...v1.205.1) (2025-10-16)
+
+
+### Bug Fixes
+
+* audit should comply with tier ([#1348](https://github.com/adobe/spacecat-api-service/issues/1348)) ([856bd2b](https://github.com/adobe/spacecat-api-service/commit/856bd2b0052531a28f62ee768d91bc5334a98b47))
+
 # [1.205.0](https://github.com/adobe/spacecat-api-service/compare/v1.204.4...v1.205.0) (2025-10-16)
 
 
