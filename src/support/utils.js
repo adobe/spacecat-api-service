@@ -1023,7 +1023,7 @@ export const onboardSingleSite = async (
       organizationId,
       taskContext: {
         auditTypes,
-        onboardStartTime: Date.now(), // Track when onboarding started for log search
+        onboardStartTime: Date.now(), // Track exact onboarding start time for log search
         slackContext: {
           channelId: slackContext.channelId,
           threadTs: slackContext.threadTs,
