@@ -201,6 +201,7 @@ describe('getRouteHandlers', () => {
     patchLlmoCdnLogsFilter: () => null,
     patchLlmoCdnBucketConfig: () => null,
     onboardCustomer: () => null,
+    offboardCustomer: () => null,
   };
 
   const mockSandboxAuditController = {
@@ -450,6 +451,7 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/customer-intent',
       'DELETE /sites/:siteId/llmo/customer-intent/:intentKey',
       'PATCH /sites/:siteId/llmo/customer-intent/:intentKey',
+      'POST /sites/:siteId/llmo/offboard',
       'GET /consent-banner/:jobId',
       'PATCH /sites/:siteId/llmo/cdn-logs-filter',
       'POST /sites/:siteId/sandbox/audit',
@@ -579,6 +581,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['DELETE /sites/:siteId/llmo/customer-intent/:intentKey'].paramNames).to.deep.equal(['siteId', 'intentKey']);
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/customer-intent/:intentKey'].handler).to.equal(mockLlmoController.patchLlmoCustomerIntent);
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/customer-intent/:intentKey'].paramNames).to.deep.equal(['siteId', 'intentKey']);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/offboard'].handler).to.equal(mockLlmoController.offboardCustomer);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/offboard'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /consent-banner/:jobId'].handler).to.equal(mockConsentBannerController.getScreenshots);
     expect(dynamicRoutes['GET /consent-banner/:jobId'].paramNames).to.deep.equal(['jobId']);
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/cdn-logs-filter'].handler).to.equal(mockLlmoController.patchLlmoCdnLogsFilter);
