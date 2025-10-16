@@ -1,3 +1,10 @@
+# [1.205.0](https://github.com/adobe/spacecat-api-service/compare/v1.204.4...v1.205.0) (2025-10-16)
+
+
+### Features
+
+* only include orgs with non-zero prompt usage in the report ([#1360](https://github.com/adobe/spacecat-api-service/issues/1360)) ([67bc0ac](https://github.com/adobe/spacecat-api-service/commit/67bc0ac81c998502dac7c40f5e887b5d39c6e8f5))
+
 ## [1.204.4](https://github.com/adobe/spacecat-api-service/compare/v1.204.3...v1.204.4) (2025-10-15)
 
 
