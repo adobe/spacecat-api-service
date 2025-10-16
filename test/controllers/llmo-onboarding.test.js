@@ -45,6 +45,7 @@ describe('LLMO Onboarding Functions', () => {
       info: sinon.stub(),
       error: sinon.stub(),
       debug: sinon.stub(),
+      warn: sinon.stub(),
     };
 
     // Create mock environment
@@ -773,6 +774,209 @@ describe('LLMO Onboarding Functions', () => {
       // Verify result
       expect(result.organizationId).to.equal('new-org-123');
       expect(result.siteId).to.equal('site456');
+    });
+  });
+
+  describe('createEntitlementAndEnrollment', () => {
+    it('should re-throw error when tierClient throws', async () => {
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+      };
+
+      const tierError = new Error('Tier service unavailable');
+      const mockTierClient = {
+        createForSite: sinon.stub().rejects(tierError),
+      };
+
+      const {
+        createEntitlementAndEnrollment: createEntitlementAndEnrollmentWithMocks,
+      } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-tier-client': {
+          default: mockTierClient,
+        },
+      });
+
+      try {
+        await createEntitlementAndEnrollmentWithMocks(mockSite, { log: mockLog });
+        expect.fail('Should have thrown an error');
+      } catch (error) {
+        expect(error.message).to.equal('Tier service unavailable');
+      }
+    });
+  });
+
+  describe('deleteSharePointFolder', () => {
+    async function setupDeleteSharePointFolderTest(folderExists, deleteResult) {
+      const mockFolder = {
+        exists: sinon.stub().resolves(folderExists),
+        delete: deleteResult instanceof Error
+          ? sinon.stub().rejects(deleteResult)
+          : sinon.stub().resolves(deleteResult),
+      };
+
+      const spClient = {
+        getDocument: sinon.stub().returns(mockFolder),
+      };
+
+      const {
+        deleteSharePointFolder: deleteSharePointFolderWithMocks,
+      } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-helix-content-sdk': {
+          createFrom: sinon.stub().resolves(spClient),
+        },
+      });
+
+      return { deleteSharePointFolderWithMocks, mockFolder, spClient };
+    }
+
+    it('should successfully delete a folder when it exists', async () => {
+      const dataFolder = 'dev/test-com';
+      const {
+        deleteSharePointFolderWithMocks,
+        mockFolder,
+        spClient,
+      } = await setupDeleteSharePointFolderTest(true);
+
+      await deleteSharePointFolderWithMocks(dataFolder, { log: mockLog, env: mockEnv });
+
+      expect(spClient.getDocument)
+        .to.have.been.calledWith('/sites/elmo-ui-data/dev/test-com/');
+      expect(mockFolder.exists).to.have.been.called;
+      expect(mockFolder.delete).to.have.been.called;
+    });
+
+    it('should handle case when folder does not exist', async () => {
+      const dataFolder = 'dev/nonexistent-com';
+      const {
+        deleteSharePointFolderWithMocks,
+        mockFolder,
+      } = await setupDeleteSharePointFolderTest(false);
+
+      await deleteSharePointFolderWithMocks(dataFolder, { log: mockLog, env: mockEnv });
+
+      expect(mockFolder.exists).to.have.been.called;
+      expect(mockFolder.delete).to.not.have.been.called;
+    });
+
+    it('should handle errors when folder delete fails', async () => {
+      const dataFolder = 'dev/error-com';
+      const deleteError = new Error('Permission denied');
+      const {
+        deleteSharePointFolderWithMocks,
+        mockFolder,
+      } = await setupDeleteSharePointFolderTest(true, deleteError);
+
+      await deleteSharePointFolderWithMocks(dataFolder, { log: mockLog, env: mockEnv });
+
+      expect(mockFolder.exists).to.have.been.called;
+      expect(mockLog.error).to.have.been.calledWith(
+        'Error deleting SharePoint folder dev/error-com: Permission denied',
+      );
+    });
+  });
+
+  describe('performLlmoOffboarding', () => {
+    it('should successfully offboard a site (happy path)', async () => {
+      // Mock site
+      const mockSite = {
+        getId: sinon.stub().returns('site789'),
+        getBaseURL: sinon.stub().returns('https://offboard.com'),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      // Mock config with LLMO config
+      const mockConfig = {
+        getLlmoConfig: sinon.stub().returns({
+          dataFolder: 'dev/offboard-com',
+          brand: 'Test Brand',
+        }),
+        updateLlmoBrand: sinon.stub(),
+        updateLlmoDataFolder: sinon.stub(),
+      };
+
+      // Mock TierClient for revoke enrollment
+      const mockTierClient = {
+        createForSite: sinon.stub().resolves({
+          revokeSiteEnrollment: sinon.stub().resolves(),
+        }),
+      };
+
+      // Mock Config.toDynamoItem
+      const mockConfigClass = {
+        toDynamoItem: sinon.stub().returns({ config: 'dynamo-item' }),
+      };
+
+      // Mock tracingFetch for unpublishFromAdminHlx
+      const mockTracingFetch = sinon.stub().resolves({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+      });
+
+      // Mock composeBaseURL
+      const mockComposeBaseURL = sinon.stub().callsFake((url) => url);
+
+      // Mock the module with all dependencies
+      const { performLlmoOffboarding: performLlmoOffboardingWithMocks } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-tier-client': {
+          default: mockTierClient,
+        },
+        '@adobe/spacecat-helix-content-sdk': {
+          createFrom: sinon.stub().resolves({
+            getDocument: sinon.stub().returns({
+              exists: sinon.stub().resolves(true),
+              delete: sinon.stub().resolves(),
+            }),
+          }),
+        },
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: mockConfigClass,
+        },
+        '@adobe/spacecat-shared-utils': {
+          composeBaseURL: mockComposeBaseURL,
+          tracingFetch: mockTracingFetch,
+        },
+      });
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+      };
+
+      const result = await performLlmoOffboardingWithMocks(mockSite, mockConfig, context);
+
+      // Verify the result
+      expect(result).to.deep.equal({
+        siteId: 'site789',
+        baseURL: 'https://offboard.com',
+        dataFolder: 'dev/offboard-com',
+        message: 'LLMO offboarding completed successfully',
+      });
+
+      // Verify LLMO config was retrieved
+      expect(mockConfig.getLlmoConfig).to.have.been.called;
+
+      // Verify LLMO config was removed
+      expect(mockConfig.updateLlmoBrand).to.have.been.calledWith(null);
+      expect(mockConfig.updateLlmoDataFolder).to.have.been.calledWith(null);
+      expect(mockSite.setConfig).to.have.been.calledWith({ config: 'dynamo-item' });
+      expect(mockSite.save).to.have.been.called;
+
+      // Verify TierClient was called to revoke enrollment
+      expect(mockTierClient.createForSite).to.have.been.called;
+
+      // Verify tracingFetch was called to unpublish from admin.hlx.page (2 times: live and preview)
+      expect(mockTracingFetch).to.have.been.calledTwice;
+
+      // Verify logging
+      expect(mockLog.info).to.have.been.calledWith('Starting LLMO offboarding process for site: site789');
+      expect(mockLog.info).to.have.been.calledWith('Offboarding site site789 with domain https://offboard.com and data folder dev/offboard-com');
+      expect(mockLog.info).to.have.been.calledWith('LLMO offboarding process completed for site site789');
+
+      // Verify no errors were logged (fetch should have succeeded)
+      expect(mockLog.error.called).to.be.false;
     });
   });
 });
