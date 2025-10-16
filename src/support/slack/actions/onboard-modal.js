@@ -210,23 +210,30 @@ export function startOnboarding(lambdaContext) {
                     { text: 'Paid', value: 'paid' },
                   ];
 
-                  if (initialValues.profile) {
-                    const option = profileOptions.find(
-                      (opt) => opt.value === initialValues.profile,
-                    );
-                    if (option) {
-                      return {
-                        text: {
-                          type: 'plain_text',
-                          text: option.text,
-                        },
-                        value: option.value,
-                      };
-                    }
+                  // Use provided profile or default to 'demo'
+                  const selectedProfile = initialValues.profile || 'demo';
+                  const option = profileOptions.find(
+                    (opt) => opt.value === selectedProfile,
+                  );
+
+                  if (option) {
+                    return {
+                      text: {
+                        type: 'plain_text',
+                        text: option.text,
+                      },
+                      value: option.value,
+                    };
                   }
 
-                  // Return undefined to have no default selection
-                  return undefined;
+                  // Fallback to demo if somehow not found
+                  return {
+                    text: {
+                      type: 'plain_text',
+                      text: 'Demo',
+                    },
+                    value: 'demo',
+                  };
                 })(),
                 options: [
                   {
