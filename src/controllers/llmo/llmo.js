@@ -724,7 +724,9 @@ function LlmoController(ctx) {
       const profile = authInfo.getProfile();
 
       if (!profile || !profile.tenants?.[0]?.id) {
-        return badRequest('User profile or organization ID not found in authentication token');
+        const message = 'User profile or organization ID not found in authentication token';
+        log.warn(`LLMO onboarding validation failed for domain ${domain}, brand ${brandName}. Validation Error: ${message}`);
+        return badRequest(message);
       }
 
       const imsOrgId = `${profile.tenants[0].id}@AdobeOrg`;
@@ -738,6 +740,7 @@ function LlmoController(ctx) {
       // Validate that the site has not been onboarded yet
       const validation = await validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, context);
       if (!validation.isValid) {
+        log.warn(`LLMO onboarding validation failed for IMS org ${imsOrgId}, domain ${domain}, brand ${brandName}. Validation Error: ${validation.error}`);
         return badRequest(validation.error);
       }
 

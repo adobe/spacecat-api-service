@@ -12,7 +12,7 @@
 
 /* eslint-env mocha */
 
-import { Organization, Site } from '@adobe/spacecat-shared-data-access';
+import { Organization, Site, Project } from '@adobe/spacecat-shared-data-access';
 import { SLACK_TARGETS } from '@adobe/spacecat-shared-slack-client';
 
 import { use, expect } from 'chai';
@@ -23,6 +23,7 @@ import sinon, { stub } from 'sinon';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/models/organization/organization.schema.js';
 import SiteSchema from '@adobe/spacecat-shared-data-access/src/models/site/site.schema.js';
+import ProjectSchema from '@adobe/spacecat-shared-data-access/src/models/project/project.schema.js';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
 import OrganizationsController from '../../src/controllers/organizations.js';
@@ -34,10 +35,12 @@ use(sinonChai);
 describe('Organizations Controller', () => {
   const sandbox = sinon.createSandbox();
   const orgId = '9033554c-de8a-44ac-a356-09b51af8cc28';
+  const projectId = '550e8400-e29b-41d4-a716-446655440000';
   const sites = [
     {
       siteId: 'site1',
       organizationId: orgId,
+      projectId,
       baseURL: 'https://site1.com',
       deliveryType: 'aem_edge',
       config: Config({}),
@@ -45,6 +48,7 @@ describe('Organizations Controller', () => {
     {
       siteId: 'site2',
       organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f',
+      projectId,
       baseURL: 'https://site2.com',
       deliveryType: 'aem_edge',
       config: Config({}),
@@ -124,6 +128,46 @@ describe('Organizations Controller', () => {
     console,
   ));
 
+  const projects = [
+    {
+      projectId: '550e8400-e29b-41d4-a716-446655440000',
+      projectName: 'Project 1',
+      organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28',
+    },
+    {
+      projectId: '850e8400-e29b-41d4-a716-446655440000',
+      projectName: 'Project 2',
+      organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28',
+    },
+  ].map((project) => new Project(
+    {
+      entities: {
+        project: {
+          model: {
+            schema: {
+              indexes: {},
+              attributes: {
+                id: { type: 'string', get: (value) => value },
+                projectName: { type: 'string', get: (value) => value },
+                organizationId: { type: 'string', get: (value) => value },
+              },
+            },
+          },
+        },
+      },
+    },
+    {
+      log: console,
+      getCollection: stub().returns({
+        schema: ProjectSchema,
+        findById: stub(),
+      }),
+    },
+    ProjectSchema,
+    project,
+    console,
+  ));
+
   organizations[0].getConfig = sinon.stub().returns(sampleConfig1);
   organizations[1].getConfig = sinon.stub().returns(sampleConfig1);
   organizations[2].getConfig = sinon.stub().returns(sampleConfig2);
@@ -133,6 +177,9 @@ describe('Organizations Controller', () => {
     'getAll',
     'getByID',
     'getSitesForOrganization',
+    'getProjectsByOrganizationId',
+    'getSitesByProjectIdAndOrganizationId',
+    'getSitesByProjectNameAndOrganizationId',
     'getByImsOrgID',
     'getSlackConfigByImsOrgID',
     'removeOrganization',
@@ -153,6 +200,11 @@ describe('Organizations Controller', () => {
         findByImsOrgId: sinon.stub(),
       },
       Site: {
+        allByOrganizationId: sinon.stub(),
+        allByOrganizationIdAndProjectId: sinon.stub(),
+        allByOrganizationIdAndProjectName: sinon.stub(),
+      },
+      Project: {
         allByOrganizationId: sinon.stub(),
       },
     };
@@ -603,5 +655,195 @@ describe('Organizations Controller', () => {
 
     expect(result.status).to.equal(404);
     expect(error).to.have.property('message', 'Slack config not found for IMS org ID: 9876567890ABCDEF12345678@AdobeOrg');
+  });
+
+  describe('getProjectsByOrganizationId', () => {
+    it('gets all projects for an organization', async () => {
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+      mockDataAccess.Project.allByOrganizationId.resolves(projects);
+
+      const result = await organizationsController.getProjectsByOrganizationId({
+        params: { organizationId: organizations[0].getId() },
+        ...context,
+      });
+      const response = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(response).to.have.length(2);
+      expect(response[0]).to.have.property('id', '550e8400-e29b-41d4-a716-446655440000');
+    });
+
+    it('returns bad request when organization ID is invalid', async () => {
+      const result = await organizationsController.getProjectsByOrganizationId({
+        params: { organizationId: 'invalid-id' },
+        ...context,
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Organization ID required');
+    });
+
+    it('returns not found when organization does not exist', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+
+      const result = await organizationsController.getProjectsByOrganizationId({
+        params: { organizationId: '550e8400-e29b-41d4-a716-446655440000' },
+        ...context,
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(404);
+      expect(error).to.have.property('message', 'Organization not found');
+    });
+
+    it('returns forbidden when user has no access to organization', async () => {
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+
+      const result = await organizationsController.getProjectsByOrganizationId({
+        params: { organizationId: organizations[0].getId() },
+        ...context,
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Only users belonging to the organization can view its projects');
+    });
+  });
+
+  describe('getSitesByProjectIdAndOrganizationId', () => {
+    it('gets all sites for an organization by project ID', async () => {
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+      mockDataAccess.Site.allByOrganizationIdAndProjectId.resolves(sites);
+
+      const result = await organizationsController.getSitesByProjectIdAndOrganizationId({
+        params: { organizationId: organizations[0].getId(), projectId: '550e8400-e29b-41d4-a716-446655440000' },
+        ...context,
+      });
+      const response = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(response).to.have.length(2);
+      expect(response[0]).to.have.property('id', 'site1');
+    });
+
+    it('returns bad request when organization ID is invalid', async () => {
+      const result = await organizationsController.getSitesByProjectIdAndOrganizationId({
+        params: { organizationId: 'invalid', projectId: 'project-id-123' },
+        ...context,
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Organization ID required');
+    });
+
+    it('returns bad request when project ID is invalid', async () => {
+      const result = await organizationsController.getSitesByProjectIdAndOrganizationId({
+        params: { organizationId: organizations[0].getId(), projectId: 'invalid' },
+        ...context,
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Project ID required');
+    });
+
+    it('returns not found when organization does not exist', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+
+      const result = await organizationsController.getSitesByProjectIdAndOrganizationId({
+        params: { organizationId: '550e8400-e29b-41d4-a716-446655440000', projectId: '550e8400-e29b-41d4-a716-446655440001' },
+        ...context,
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(404);
+      expect(error).to.have.property('message', 'Organization not found');
+    });
+
+    it('returns forbidden when user has no access to organization', async () => {
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+
+      const result = await organizationsController.getSitesByProjectIdAndOrganizationId({
+        params: { organizationId: organizations[0].getId(), projectId: '550e8400-e29b-41d4-a716-446655440001' },
+        ...context,
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Only users belonging to the organization can view its sites');
+    });
+  });
+
+  describe('getSitesByProjectNameAndOrganizationId', () => {
+    it('gets all sites for an organization by project name', async () => {
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+      mockDataAccess.Site.allByOrganizationIdAndProjectName.resolves(sites);
+
+      const result = await organizationsController.getSitesByProjectNameAndOrganizationId({
+        params: { organizationId: organizations[0].getId(), projectName: 'test-project' },
+        ...context,
+      });
+      const response = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(response).to.have.length(2);
+      expect(response[0]).to.have.property('id', 'site1');
+    });
+
+    it('returns bad request when organization ID is invalid', async () => {
+      const result = await organizationsController.getSitesByProjectNameAndOrganizationId({
+        params: { organizationId: 'invalid', projectName: 'test-project' },
+        ...context,
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Organization ID required');
+    });
+
+    it('returns bad request when project name is missing', async () => {
+      const result = await organizationsController.getSitesByProjectNameAndOrganizationId({
+        params: { organizationId: organizations[0].getId(), projectName: '' },
+        ...context,
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Project name required');
+    });
+
+    it('returns not found when organization does not exist', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+
+      const result = await organizationsController.getSitesByProjectNameAndOrganizationId({
+        params: { organizationId: '550e8400-e29b-41d4-a716-446655440000', projectName: 'test-project' },
+        ...context,
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(404);
+      expect(error).to.have.property('message', 'Organization not found');
+    });
+
+    it('returns forbidden when user has no access to organization', async () => {
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+
+      const result = await organizationsController.getSitesByProjectNameAndOrganizationId({
+        params: { organizationId: organizations[0].getId(), projectName: 'test-project' },
+        ...context,
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Only users belonging to the organization can view its sites');
+    });
   });
 });
