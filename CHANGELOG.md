@@ -1,3 +1,10 @@
+## [1.205.2](https://github.com/adobe/spacecat-api-service/compare/v1.205.1...v1.205.2) (2025-10-16)
+
+
+### Bug Fixes
+
+* remove check property from preflight API ([#1347](https://github.com/adobe/spacecat-api-service/issues/1347)) ([7dece51](https://github.com/adobe/spacecat-api-service/commit/7dece51849121b7dbaae1f1092606abf34ec7d41))
+
 ## [1.205.1](https://github.com/adobe/spacecat-api-service/compare/v1.205.0...v1.205.1) (2025-10-16)
 
 
