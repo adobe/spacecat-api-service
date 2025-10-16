@@ -50,20 +50,19 @@ async function triggerBackfill(context, configuration, siteId, auditType, timeVa
         const targetDate = new Date(now);
         targetDate.setDate(now.getDate() - dayOffset);
 
-        for (let hour = 0; hour < 24; hour += 1) {
-          const message = {
-            type: auditType,
-            siteId,
-            auditContext: {
-              year: targetDate.getFullYear(),
-              month: targetDate.getMonth() + 1,
-              day: targetDate.getDate(),
-              hour,
-            },
-          };
-          // eslint-disable-next-line no-await-in-loop
-          await sqs.sendMessage(configuration.getQueues().audits, message);
-        }
+        const message = {
+          type: auditType,
+          siteId,
+          auditContext: {
+            year: targetDate.getUTCFullYear(),
+            month: targetDate.getUTCMonth() + 1,
+            day: targetDate.getUTCDate(),
+            hour: 23,
+            processFullDay: true,
+          },
+        };
+        // eslint-disable-next-line no-await-in-loop
+        await sqs.sendMessage(configuration.getQueues().audits, message);
       }
       break;
     }
@@ -135,7 +134,7 @@ function BackfillLlmoCommand(context) {
       switch (auditType) {
         case AUDIT_TYPES.CDN_ANALYSIS:
           timeValue = parseInt(parsed.days, 10) || 1;
-          timeDesc = `${timeValue} days (${timeValue * 24} hours)`;
+          timeDesc = `${timeValue} days`;
           break;
 
         case AUDIT_TYPES.CDN_LOGS_REPORT:
@@ -173,7 +172,7 @@ function BackfillLlmoCommand(context) {
       let totalMessages;
       switch (auditType) {
         case AUDIT_TYPES.CDN_ANALYSIS:
-          totalMessages = timeValue * 24;
+          totalMessages = timeValue;
           break;
         case AUDIT_TYPES.CDN_LOGS_REPORT:
           totalMessages = timeValue === 0 ? 1 : timeValue;

@@ -79,9 +79,9 @@ describe('BackfillLlmoCommand', () => {
       await command.handleExecution(['baseurl=https://example.com', `audit=${AUDIT_TYPES.CDN_ANALYSIS}`], slackContext);
 
       expect(slackContext.say.called).to.be.true;
-      expect(slackContext.say.firstCall.args[0]).to.include(`:gear: Starting ${AUDIT_TYPES.CDN_ANALYSIS} backfill for https://example.com (1 days (24 hours))...`);
+      expect(slackContext.say.firstCall.args[0]).to.include(`:gear: Starting ${AUDIT_TYPES.CDN_ANALYSIS} backfill for https://example.com (1 days)...`);
       expect(sqsStub.sendMessage.called).to.be.true;
-      expect(sqsStub.sendMessage.callCount).to.equal(24);
+      expect(sqsStub.sendMessage.callCount).to.equal(1);
     });
 
     it('triggers cdn-logs-report backfill with default weeks', async () => {
@@ -115,9 +115,9 @@ describe('BackfillLlmoCommand', () => {
       await command.handleExecution(['baseurl=https://example.com', `audit=${AUDIT_TYPES.CDN_ANALYSIS}`, 'days=2'], slackContext);
 
       expect(slackContext.say.called).to.be.true;
-      expect(slackContext.say.firstCall.args[0]).to.include(`:gear: Starting ${AUDIT_TYPES.CDN_ANALYSIS} backfill for https://example.com (2 days (48 hours))...`);
+      expect(slackContext.say.firstCall.args[0]).to.include(`:gear: Starting ${AUDIT_TYPES.CDN_ANALYSIS} backfill for https://example.com (2 days)...`);
       expect(sqsStub.sendMessage.called).to.be.true;
-      expect(sqsStub.sendMessage.callCount).to.equal(48);
+      expect(sqsStub.sendMessage.callCount).to.equal(2);
     });
 
     it('sends correct SQS message structure for cdn-logs-report', async () => {
@@ -162,7 +162,9 @@ describe('BackfillLlmoCommand', () => {
       expect(message).to.have.property('type', AUDIT_TYPES.CDN_ANALYSIS);
       expect(message).to.have.property('siteId', 'test-site-id');
       expect(message).to.have.property('auditContext');
-      expect(message.auditContext).to.have.all.keys('year', 'month', 'day', 'hour');
+      expect(message.auditContext).to.have.all.keys('year', 'month', 'day', 'hour', 'processFullDay');
+      expect(message.auditContext.hour).to.equal(23);
+      expect(message.auditContext.processFullDay).to.be.true;
     });
 
     it('responds with usage when no arguments provided', async () => {
