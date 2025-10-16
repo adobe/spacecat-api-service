@@ -1,0 +1,53 @@
+projects:
+  post:
+    tags:
+      - project
+    summary: Create a new project
+    description: |
+      This endpoint is useful for creating a new project.
+    operationId: createProject
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/ProjectCreate'
+    responses:
+      '201':
+        description: Project created successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Project'
+      '400':
+        $ref: './responses.yaml#/400-empty-request-body-validation-failure'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - admin_key: [ ]
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+  get:
+    tags:
+      - project
+    summary: Retrieve all projects
+    description: |
+      This endpoint is useful for retrieving all projects.
+    operationId: getProjects
+    responses:
+      '200':
+        description: A list of projects
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ProjectList'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - admin_key: [ ]
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
