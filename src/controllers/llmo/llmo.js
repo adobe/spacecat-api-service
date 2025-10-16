@@ -38,6 +38,7 @@ import {
   validateSiteNotOnboarded,
   generateDataFolder,
   performLlmoOnboarding,
+  performLlmoOffboarding,
 } from './llmo-onboarding.js';
 
 const { readConfig, writeConfig } = llmo;
@@ -767,6 +768,42 @@ function LlmoController(ctx) {
     }
   };
 
+  /**
+   * Offboards a customer from LLMO.
+   * This endpoint handles the complete offboarding process including
+   * disabling audits and cleaning up LLMO configuration.
+   * @param {object} context - The request context.
+   * @returns {Promise<Response>} The offboarding response.
+   */
+  const offboardCustomer = async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+
+    try {
+      log.info(`Starting LLMO offboarding for site ${siteId}`);
+
+      // Validate site and LLMO access
+      const { site, config } = await getSiteAndValidateLlmo(context);
+
+      // Perform the complete offboarding process
+      const result = await performLlmoOffboarding(site, config, context);
+
+      log.info(`LLMO offboarding completed successfully for site ${siteId}`);
+
+      return ok({
+        message: result.message,
+        siteId: result.siteId,
+        baseURL: result.baseURL,
+        dataFolder: result.dataFolder,
+        status: 'completed',
+        completedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      log.error(`Error during LLMO offboarding for site ${siteId}: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -784,6 +821,7 @@ function LlmoController(ctx) {
     patchLlmoCdnBucketConfig,
     updateLlmoConfig,
     onboardCustomer,
+    offboardCustomer,
   };
 }
 

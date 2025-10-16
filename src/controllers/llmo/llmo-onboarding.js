@@ -413,3 +413,77 @@ export async function performLlmoOnboarding(params, context) {
     message: 'LLMO onboarding completed successfully',
   };
 }
+
+/**
+ * Complete LLMO offboarding process.
+ * @param {object} site - The validated site object
+ * @param {object} config - The site config object
+ * @param {object} context - The request context
+ * @returns {Promise<object>} Offboarding result
+ */
+export async function performLlmoOffboarding(site, config, context) {
+  const { log, env } = context;
+  const siteId = site.getId();
+
+  log.info(`Starting LLMO offboarding process for site: ${siteId}`);
+
+  const baseURL = site.getBaseURL();
+  const llmoConfig = config.getLlmoConfig();
+
+  // Check if site has LLMO config with data folder, if not calculate it
+  let dataFolder = llmoConfig?.dataFolder;
+  if (!dataFolder) {
+    log.debug(`Data folder not found in LLMO config, calculating from base URL: ${baseURL}`);
+    dataFolder = generateDataFolder(baseURL, env.ENV);
+  }
+
+  log.info(`Offboarding site ${siteId} with domain ${baseURL} and data folder ${dataFolder}`);
+
+  // Check if SharePoint folder exists and delete it
+  try {
+    const sharepointClient = await createSharePointClient(env);
+    const folder = sharepointClient.getDocument(`/sites/elmo-ui-data/${dataFolder}/`);
+    const folderExists = await folder.exists();
+
+    if (folderExists) {
+      log.info(`Deleting SharePoint folder: /sites/elmo-ui-data/${dataFolder}/`);
+      await folder.delete();
+      log.info(`Successfully deleted SharePoint folder for site ${siteId}`);
+    } else {
+      log.debug(`SharePoint folder does not exist: /sites/elmo-ui-data/${dataFolder}/`);
+    }
+  } catch (error) {
+    log.error(`Error deleting SharePoint folder for site ${siteId}: ${error.message}`);
+    // Continue with offboarding even if folder deletion fails
+  }
+
+  // Revoke site enrollment using tier client
+  try {
+    log.info(`Revoking LLMO enrollment for site ${siteId}`);
+    const tierClient = await TierClient.createForSite(context, site, LLMO_PRODUCT_CODE);
+    await tierClient.revokeSiteEnrollment();
+    log.info(`Successfully revoked LLMO enrollment for site ${siteId}`);
+  } catch (error) {
+    log.error(`Error revoking LLMO enrollment for site ${siteId}: ${error.message}`);
+    // Continue with offboarding even if enrollment revocation fails
+  }
+
+  // Remove LLMO configuration from site config
+  log.info(`Removing LLMO configuration from site ${siteId}`);
+  config.updateLlmoBrand(null);
+  config.updateLlmoDataFolder(null);
+
+  // Save the updated site config
+  site.setConfig(Config.toDynamoItem(config));
+  await site.save();
+  log.info(`Successfully removed LLMO configuration for site ${siteId}`);
+
+  log.info(`LLMO offboarding process completed for site ${siteId}`);
+
+  return {
+    siteId,
+    baseURL,
+    dataFolder,
+    message: 'LLMO offboarding completed successfully',
+  };
+}
