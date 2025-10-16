@@ -164,6 +164,53 @@ async function publishToAdminHlx(filename, outputLocation, log) {
 }
 
 /**
+ * Unpublishes a file from admin.hlx.page.
+ * @param {string} filename - The filename to unpublish
+ * @param {string} outputLocation - The output location
+ * @param {object} log - Logger instance
+ */
+async function unpublishFromAdminHlx(filename, outputLocation, log) {
+  try {
+    const org = 'adobe';
+    const site = 'project-elmo-ui-data';
+    const ref = 'main';
+    const jsonFilename = `${filename.replace(/\.[^/.]+$/, '')}.json`;
+    const path = `${outputLocation}/${jsonFilename}`;
+    const headers = { Cookie: `auth_token=${process.env.HLX_ADMIN_TOKEN}` };
+
+    if (!process.env.HLX_ADMIN_TOKEN) {
+      log.warn('LLMO offboarding: HLX_ADMIN_TOKEN is not set');
+    }
+
+    const baseUrl = 'https://admin.hlx.page';
+    const endpoints = [
+      { name: 'live', url: `${baseUrl}/live/${org}/${site}/${ref}/${path}` },
+      { name: 'preview', url: `${baseUrl}/preview/${org}/${site}/${ref}/${path}` },
+    ];
+
+    for (const [index, endpoint] of endpoints.entries()) {
+      log.debug(`Unpublishing Excel report via admin API (${endpoint.name}): ${endpoint.url}`);
+
+      // eslint-disable-next-line no-await-in-loop
+      const response = await fetch(endpoint.url, { method: 'DELETE', headers });
+
+      if (!response.ok) {
+        throw new Error(`${endpoint.name} unpublish failed: ${response.status} ${response.statusText}`);
+      }
+
+      log.debug(`Excel report successfully unpublished from ${endpoint.name}`);
+
+      if (index === 0) {
+        // eslint-disable-next-line no-await-in-loop,max-statements-per-line
+        await new Promise((resolve) => { setTimeout(resolve, 2000); });
+      }
+    }
+  } catch (unpublishError) {
+    log.error(`Failed to unpublish via admin.hlx.page: ${unpublishError.message}`);
+  }
+}
+
+/**
  * Copies template files to SharePoint for a new LLMO onboarding.
  * @param {string} dataFolder - The data folder name
  * @param {object} context - The request context
@@ -490,6 +537,7 @@ export async function performLlmoOnboarding(params, context) {
 
     // Attempt cleanup
     await deleteSharePointFolder(dataFolder, context);
+    await unpublishFromAdminHlx('query-index', dataFolder, log);
     if (site) {
       await revokeEnrollment(site, context);
     }
@@ -531,6 +579,9 @@ export async function performLlmoOffboarding(site, config, context) {
 
   // Remove LLMO configuration
   await removeLlmoConfig(site, config, context);
+
+  // Unpublish query-index from admin.hlx.page
+  await unpublishFromAdminHlx('query-index', dataFolder, log);
 
   log.info(`LLMO offboarding process completed for site ${siteId}`);
 
