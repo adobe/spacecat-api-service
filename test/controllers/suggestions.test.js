@@ -142,6 +142,7 @@ describe('Suggestions Controller', () => {
   const suggestionsFunctions = [
     'autofixSuggestions',
     'createSuggestions',
+    'deploySuggestionToEdge',
     'getAllForOpportunity',
     'getByID',
     'getByStatus',
@@ -2051,4 +2052,299 @@ describe('Suggestions Controller', () => {
       );
     });
   });
+
+  // describe('deploySuggestionToEdge (Tokowaka)', () => {
+  //   let s3ClientSendStub;
+  //   let tokowakaSuggestions;
+  //   let headingsOpportunity;
+
+  //   beforeEach(() => {
+  //     tokowakaSuggestions = [
+  //       {
+  //         getId: () => SUGGESTION_IDS[0],
+  //         getOpportunityId: () => OPPORTUNITY_ID,
+  //         getStatus: () => SuggestionModel.STATUSES.NEW,
+  //         getData: () => ({
+  //           url: 'https://example.com/page1',
+  //           headingTag: 'h1',
+  //           recommendedAction: 'New Heading Title',
+  //           checkType: 'heading-empty',
+  //         }),
+  //         setData: sandbox.stub().returnsThis(),
+  //         setUpdatedBy: sandbox.stub().returnsThis(),
+  //         save: sandbox.stub().returnsThis(),
+  //       },
+  //       {
+  //         getId: () => SUGGESTION_IDS[1],
+  //         getOpportunityId: () => OPPORTUNITY_ID,
+  //         getStatus: () => SuggestionModel.STATUSES.NEW,
+  //         getData: () => ({
+  //           url: 'https://example.com/page1',
+  //           headingTag: 'h2',
+  //           recommendedAction: 'New Subtitle',
+  //           checkType: 'heading-empty',
+  //         }),
+  //         setData: sandbox.stub().returnsThis(),
+  //         setUpdatedBy: sandbox.stub().returnsThis(),
+  //         save: sandbox.stub().returnsThis(),
+  //       },
+  //     ];
+
+  //     headingsOpportunity = {
+  //       getId: sandbox.stub().returns(OPPORTUNITY_ID),
+  //       getSiteId: sandbox.stub().returns(SITE_ID),
+  //       getType: sandbox.stub().returns('headings'),
+  //     };
+
+  //     site.getConfig = sandbox.stub().returns({ tokowakaApiKey: 'test-api-key-123' });
+  //     mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(headingsOpportunity);
+  //     mockSuggestion.allByOpportunityId.resolves(tokowakaSuggestions);
+
+  //     s3ClientSendStub = sandbox.stub().resolves();
+  //     context.s3Client = {
+  //       send: s3ClientSendStub,
+  //     };
+  //     context.env = {
+  //       TOKOWAKA_CONFIG_BUCKET: 'test-tokowaka-bucket',
+  //     };
+  //     context.log = {
+  //       info: sandbox.stub(),
+  //       warn: sandbox.stub(),
+  //       error: sandbox.stub(),
+  //       debug: sandbox.stub(),
+  //     };
+  //   });
+
+  //   it('should deploy headings suggestions successfully', async () => {
+  //     const response = await suggestionsController.deploySuggestionToEdge({
+  //       ...context,
+  //       params: {
+  //         siteId: SITE_ID,
+  //         opportunityId: OPPORTUNITY_ID,
+  //       },
+  //       data: {
+  //         suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+  //       },
+  //     });
+
+  //     expect(response.status).to.equal(207);
+  //     const body = await response.json();
+
+  //     // Check metadata
+  //     expect(body.metadata).to.deep.equal({
+  //       total: 2,
+  //       success: 2,
+  //       failed: 0,
+  //     });
+
+  //     // Check deployment info
+  //     expect(body.deployment.tokowakaApiKey).to.equal('test-api-key-123');
+  //     expect(body.deployment.s3Key).to.equal('test-api-key-123/v1/tokowaka-site-config.json');
+
+  //     // Check individual suggestions
+  //     expect(body.suggestions).to.have.length(2);
+  //     expect(body.suggestions[0].uuid).to.equal(SUGGESTION_IDS[0]);
+  //     expect(body.suggestions[0].statusCode).to.equal(200);
+  //     expect(body.suggestions[1].uuid).to.equal(SUGGESTION_IDS[1]);
+  //     expect(body.suggestions[1].statusCode).to.equal(200);
+
+  //     // Verify S3 upload was called
+  //     expect(s3ClientSendStub.calledOnce).to.be.true;
+
+  //     // Verify suggestion data was updated with deployment timestamp
+  //     const firstSugg = tokowakaSuggestions[0];
+  //     const secondSugg = tokowakaSuggestions[1];
+
+  //     expect(firstSugg.setData.calledOnce).to.be.true;
+  //     expect(secondSugg.setData.calledOnce).to.be.true;
+
+  //     // Verify tokowakaDeployed field was added
+  //     const firstCallArgs = firstSugg.setData.firstCall.args[0];
+  //     expect(firstCallArgs).to.have.property('tokowakaDeployed');
+  //     expect(firstCallArgs.tokowakaDeployed).to.be.a('number');
+
+  //     // Verify updatedBy was set
+  //     expect(firstSugg.setUpdatedBy.calledWith('tokowaka-deployment')).to.be.true;
+  //     expect(secondSugg.setUpdatedBy.calledWith('tokowaka-deployment')).to.be.true;
+
+  //     // Verify save was called
+  //     expect(firstSugg.save.calledOnce).to.be.true;
+  //     expect(secondSugg.save.calledOnce).to.be.true;
+  //   });
+
+  //   it('should return 400 if suggestionIds is empty', async () => {
+  //     const response = await suggestionsController.deploySuggestionToEdge({
+  //       ...context,
+  //       params: {
+  //         siteId: SITE_ID,
+  //         opportunityId: OPPORTUNITY_ID,
+  //       },
+  //       data: {
+  //         suggestionIds: [],
+  //       },
+  //     });
+
+  //     expect(response.status).to.equal(400);
+  //     const body = await response.json();
+  //     expect(body.message).to.include('non-empty array');
+  //   });
+
+  //   it('should return 400 if site does not have Tokowaka API key', async () => {
+  //     site.getConfig.returns({});
+
+  //     const response = await suggestionsController.deploySuggestionToEdge({
+  //       ...context,
+  //       params: {
+  //         siteId: SITE_ID,
+  //         opportunityId: OPPORTUNITY_ID,
+  //       },
+  //       data: {
+  //         suggestionIds: [SUGGESTION_IDS[0]],
+  //       },
+  //     });
+
+  //     expect(response.status).to.equal(400);
+  //     const body = await response.json();
+  //     expect(body.message).to.include('Tokowaka API key');
+  //   });
+
+  //   it('should handle S3 upload failure gracefully', async () => {
+  //     s3ClientSendStub.rejects(new Error('S3 upload failed'));
+
+  //     const response = await suggestionsController.deploySuggestionToEdge({
+  //       ...context,
+  //       params: {
+  //         siteId: SITE_ID,
+  //         opportunityId: OPPORTUNITY_ID,
+  //       },
+  //       data: {
+  //         suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+  //       },
+  //     });
+
+  //     expect(response.status).to.equal(207);
+  //     const body = await response.json();
+
+  //     // All suggestions should fail
+  //     expect(body.metadata.success).to.equal(0);
+  //     expect(body.metadata.failed).to.equal(2);
+  //     expect(body.suggestions[0].statusCode).to.equal(500);
+  //     expect(body.suggestions[0].message).to.include('Deployment failed');
+  //   });
+
+  //   it('should handle partial success when some suggestions not found', async () => {
+  //     const response = await suggestionsController.deploySuggestionToEdge({
+  //       ...context,
+  //       params: {
+  //         siteId: SITE_ID,
+  //         opportunityId: OPPORTUNITY_ID,
+  //       },
+  //       data: {
+  //         suggestionIds: [SUGGESTION_IDS[0], 'not-found-id', SUGGESTION_IDS[1]],
+  //       },
+  //     });
+
+  //     expect(response.status).to.equal(207);
+  //     const body = await response.json();
+
+  //     expect(body.metadata.total).to.equal(3);
+  //     expect(body.metadata.success).to.equal(2);
+  //     expect(body.metadata.failed).to.equal(1);
+
+  //     const failedSuggestion = body.suggestions.find((s) => s.uuid === 'not-found-id');
+  //     expect(failedSuggestion.statusCode).to.equal(404);
+  //     expect(failedSuggestion.message).to.include('not found');
+  //   });
+
+  //   it('should handle suggestions not in NEW status', async () => {
+  //     tokowakaSuggestions[0].getStatus = () => 'IN_PROGRESS';
+
+  //     const response = await suggestionsController.deploySuggestionToEdge({
+  //       ...context,
+  //       params: {
+  //         siteId: SITE_ID,
+  //         opportunityId: OPPORTUNITY_ID,
+  //       },
+  //       data: {
+  //         suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+  //       },
+  //     });
+
+  //     expect(response.status).to.equal(207);
+  //     const body = await response.json();
+
+  //     expect(body.metadata.success).to.equal(1);
+  //     expect(body.metadata.failed).to.equal(1);
+
+  //     const failedSuggestion = body.suggestions.find((s) => s.uuid === SUGGESTION_IDS[0]);
+  //     expect(failedSuggestion.statusCode).to.equal(400);
+  //     expect(failedSuggestion.message).to.include('not in NEW status');
+  //   });
+
+  //   it('should reject non-empty headings for headings opportunity', async () => {
+  //     tokowakaSuggestions[0].getData = () => ({
+  //       url: 'https://example.com/page1',
+  //       headingTag: 'h1',
+  //       recommendedAction: 'New Heading Title',
+  //       checkType: 'heading-missing', // Not 'heading-empty'
+  //     });
+
+  //     const response = await suggestionsController.deploySuggestionToEdge({
+  //       ...context,
+  //       params: {
+  //         siteId: SITE_ID,
+  //         opportunityId: OPPORTUNITY_ID,
+  //       },
+  //       data: {
+  //         suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+  //       },
+  //     });
+
+  //     expect(response.status).to.equal(207);
+  //     const body = await response.json();
+
+  //     expect(body.metadata.success).to.equal(1); // Only sugg-2 succeeds
+  //     expect(body.metadata.failed).to.equal(1); // sugg-1 fails
+
+  //     const failedSuggestion = body.suggestions.find((s) => s.uuid === SUGGESTION_IDS[0]);
+  //     expect(failedSuggestion.statusCode).to.equal(400);
+  //     expect(failedSuggestion.message).to.include('Only empty headings can be deployed');
+  //     expect(failedSuggestion.message).to.include('heading-missing');
+  //   });
+
+  //   it('should validate generated config structure', async () => {
+  //     const response = await suggestionsController.deploySuggestionToEdge({
+  //       ...context,
+  //       params: {
+  //         siteId: SITE_ID,
+  //         opportunityId: OPPORTUNITY_ID,
+  //       },
+  //       data: {
+  //         suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+  //       },
+  //     });
+
+  //     expect(response.status).to.equal(207);
+
+  //     const uploadedConfig = JSON.parse(s3ClientSendStub.firstCall.args[0].input.Body);
+
+  //     // Validate config structure
+  //     expect(uploadedConfig).to.have.property('siteId', SITE_ID);
+  //     expect(uploadedConfig).to.have.property('baseURL');
+  //     expect(uploadedConfig).to.have.property('version', '1.0');
+  //     expect(uploadedConfig).to.have.property('tokowakaForceFail', false);
+  //     expect(uploadedConfig).to.have.property('tokowakaOptimizations');
+
+  //     // Validate patch structure
+  //     const patches = uploadedConfig.tokowakaOptimizations['/page1'].patches;
+  //     expect(patches).to.have.length(2);
+  //     expect(patches[0]).to.have.property('op', 'replace');
+  //     expect(patches[0]).to.have.property('selector');
+  //     expect(patches[0]).to.have.property('value');
+  //     expect(patches[0]).to.have.property('opportunityId', OPPORTUNITY_ID);
+  //     expect(patches[0]).to.have.property('suggestionId');
+  //     expect(patches[0]).to.have.property('prerenderRequired', true);
+  //     expect(patches[0]).to.have.property('lastUpdated');
+  //   });
+  // });
 });
