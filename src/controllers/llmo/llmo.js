@@ -26,7 +26,6 @@ import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/confi
 import crypto from 'crypto';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import AccessControlUtil from '../../support/access-control-util.js';
-import { getImsUserToken } from '../../support/utils.js';
 import {
   applyFilters,
   applyInclusions,
@@ -387,15 +386,7 @@ function LlmoController(ctx) {
     const { log, s3, data } = context;
     const { siteId } = context.params;
 
-    let userId = 'unknown';
-    try {
-      const imsUserToken = getImsUserToken(context);
-      const imsUserProfile = await context.imsClient.getImsUserProfile(imsUserToken);
-      log.info(`llmo debug imsUserProfile: ${JSON.stringify(imsUserProfile)}`);
-      userId = imsUserProfile.userId || 'unknown';
-    } catch (error) {
-      log.warn(`Unable to fetch IMS user profile: ${error.message}`);
-    }
+    const userId = context.attributes?.authInfo?.getProfile()?.sub || 'unknown';
 
     try {
       if (!isObject(data)) {
@@ -462,9 +453,6 @@ function LlmoController(ctx) {
         `${numDeletedPrompts} deleted prompts`,
       ];
       const configSummary = summaryParts.join(', ');
-
-      log.info(`llmo debug s3.s3Client: ${JSON.stringify(s3.s3Client)}`);
-      log.info(`llmo debug authInfo: ${JSON.stringify(context.attributes.authInfo)}`);
 
       log.info(`User ${userId} modifying customer configuration (${configSummary}) for siteId: ${siteId}, version: ${version}`);
       return ok({ version });

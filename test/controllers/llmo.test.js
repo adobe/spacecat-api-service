@@ -84,15 +84,6 @@ describe('LlmoController', () => {
         isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
         composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
       },
-      '../../src/support/utils.js': {
-        getImsUserToken: (context) => {
-          const authHeader = context.pathInfo?.headers?.authorization;
-          if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            throw new Error('Missing Authorization header');
-          }
-          return authHeader.substring(7);
-        },
-      },
       '../../src/support/access-control-util.js': {
         default: class MockAccessControlUtil {
           static fromContext(context) {
@@ -270,23 +261,11 @@ describe('LlmoController', () => {
             first_name: 'Test',
             last_name: 'User',
             provider: 'GOOGLE',
+            sub: 'test-user-id',
           }),
         },
       },
-      pathInfo: {
-        method: 'GET',
-        suffix: '/llmo/sheet-data',
-        headers: {
-          authorization: 'Bearer test-ims-token',
-        },
-      },
-      imsClient: {
-        getImsUserProfile: sinon.stub().resolves({
-          userId: 'test-user-id',
-          email: 'test@example.com',
-          organizations: ['test-ims-org-id@AdobeOrg'],
-        }),
-      },
+      pathInfo: { method: 'GET', suffix: '/llmo/sheet-data' },
     };
 
     tracingFetchStub = sinon.stub();
@@ -295,14 +274,6 @@ describe('LlmoController', () => {
     llmoConfigSchemaStub = {
       safeParse: sinon.stub().returns({ success: true, data: {} }),
     };
-
-    // Reset IMS client stub to default behavior for each test
-    mockContext.imsClient.getImsUserProfile.resetBehavior();
-    mockContext.imsClient.getImsUserProfile.resolves({
-      userId: 'test-user-id',
-      email: 'test@example.com',
-      organizations: ['test-ims-org-id@AdobeOrg'],
-    });
 
     // Use the global LlmoController from before hook
     controller = LlmoController(mockContext);
@@ -1246,11 +1217,15 @@ describe('LlmoController', () => {
       );
     });
 
-    it('should use "unknown" as userId when IMS user profile does not contain userId', async () => {
-      mockContext.imsClient.getImsUserProfile.resolves({
+    it('should use "unknown" as userId when sub is missing from profile', async () => {
+      // Override getProfile to return profile without sub
+      mockContext.attributes.authInfo.getProfile = () => ({
         email: 'test@example.com',
-        organizations: ['test-ims-org-id@AdobeOrg'],
-        // userId is missing/undefined
+        trial_email: 'trial@example.com',
+        first_name: 'Test',
+        last_name: 'User',
+        provider: 'GOOGLE',
+        // sub is missing/undefined
       });
       const result = await controller.updateLlmoConfig(mockContext);
 
@@ -1260,8 +1235,9 @@ describe('LlmoController', () => {
       );
     });
 
-    it('should use "unknown" as userId in error when IMS user profile cannot be fetched', async () => {
-      mockContext.imsClient.getImsUserProfile.rejects(new Error('IMS error'));
+    it('should use "unknown" as userId in error when authInfo is missing', async () => {
+      // Remove authInfo
+      mockContext.attributes = {};
       writeConfigStub.rejects(new Error('S3 write failed'));
       readConfigStub.resolves({
         config: llmoConfig.defaultConfig(),
@@ -1274,9 +1250,6 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
       expect(mockLog.error).to.have.been.calledWith(
         sinon.match(/User unknown error updating llmo config/),
-      );
-      expect(mockLog.warn).to.have.been.calledWith(
-        sinon.match(/Unable to fetch IMS user profile: IMS error/),
       );
     });
 
