@@ -1,3 +1,10 @@
+# [1.208.0](https://github.com/adobe/spacecat-api-service/compare/v1.207.2...v1.208.0) (2025-10-17)
+
+
+### Features
+
+* support form accessiblity auto-fix ([#1345](https://github.com/adobe/spacecat-api-service/issues/1345)) ([790020c](https://github.com/adobe/spacecat-api-service/commit/790020c4c9d4cccbd96df5698fc31de46201c487))
+
 ## [1.207.2](https://github.com/adobe/spacecat-api-service/compare/v1.207.1...v1.207.2) (2025-10-17)
 
 
