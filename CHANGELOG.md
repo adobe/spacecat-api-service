@@ -1,3 +1,10 @@
+## [1.209.1](https://github.com/adobe/spacecat-api-service/compare/v1.209.0...v1.209.1) (2025-10-17)
+
+
+### Bug Fixes
+
+* add support for variations and action for auto fix ([#1235](https://github.com/adobe/spacecat-api-service/issues/1235)) ([f22ecf9](https://github.com/adobe/spacecat-api-service/commit/f22ecf92f9e568a34e6aafcd280175a85ffe5078))
+
 # [1.209.0](https://github.com/adobe/spacecat-api-service/compare/v1.208.1...v1.209.0) (2025-10-17)
 
 
