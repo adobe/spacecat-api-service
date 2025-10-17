@@ -208,7 +208,7 @@ function OrganizationsController(ctx, env) {
     const filteredSites = await filterSitesForProductCode(context, organizationId, finalSites, productCode);
     context.log.info(`filteredSites length: ${filteredSites.length}`);
 
-    return ok(filteredSites.map((site) => SiteDto.toJSON(site)));
+    return ok(finalSites.map((site) => SiteDto.toJSON(site)));
   };
 
   /**
