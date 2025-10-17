@@ -391,6 +391,7 @@ function LlmoController(ctx) {
     try {
       const imsUserToken = getImsUserToken(context);
       const imsUserProfile = await context.imsClient.getImsUserProfile(imsUserToken);
+      log.info(`llmo debug imsUserProfile: ${JSON.stringify(imsUserProfile)}`);
       userId = imsUserProfile.userId || 'unknown';
     } catch (error) {
       log.warn(`Unable to fetch IMS user profile: ${error.message}`);
@@ -462,7 +463,9 @@ function LlmoController(ctx) {
       ];
       const configSummary = summaryParts.join(', ');
 
-      log.info(`llmo context: ${JSON.stringify(context)}`);
+      log.info(`llmo debug s3.s3Client: ${JSON.stringify(s3.s3Client)}`);
+      log.info(`llmo debug authInfo: ${JSON.stringify(context.attributes.authInfo)}`);
+
       log.info(`User ${userId} modifying customer configuration (${configSummary}) for siteId: ${siteId}, version: ${version}`);
       return ok({ version });
     } catch (error) {
