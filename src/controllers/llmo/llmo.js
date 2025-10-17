@@ -462,6 +462,7 @@ function LlmoController(ctx) {
       ];
       const configSummary = summaryParts.join(', ');
 
+      log.info(`llmo context: ${JSON.stringify(context)}`);
       log.info(`User ${userId} modifying customer configuration (${configSummary}) for siteId: ${siteId}, version: ${version}`);
       return ok({ version });
     } catch (error) {
