@@ -50,6 +50,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} configurationController - The configuration controller.
  * @param {Object} hooksController - The hooks controller.
  * @param {Object} organizationsController - The organizations controller.
+ * @param {Object} projectsController - The projects controller.
  * @param {Object} sitesController - The sites controller.
  * @param {Object} experimentsController - The experiments controller.
  * @param {Object} slackController - The slack controller.
@@ -84,6 +85,7 @@ export default function getRouteHandlers(
   configurationController,
   hooksController,
   organizationsController,
+  projectsController,
   sitesController,
   experimentsController,
   slackController,
@@ -120,6 +122,8 @@ export default function getRouteHandlers(
     'GET /configurations/latest': configurationController.getLatest,
     'PUT /configurations/latest': configurationController.updateConfiguration,
     'GET /configurations/:version': configurationController.getByVersion,
+    'POST /configurations/audits': configurationController.registerAudit,
+    'DELETE /configurations/audits/:auditType': configurationController.unregisterAudit,
     'PATCH /configurations/sites/audits': sitesAuditsToggleController.execute,
     'POST /event/fulfillment': fulfillmentController.processFulfillmentEvents,
     'POST /event/fulfillment/:eventType': fulfillmentController.processFulfillmentEvents,
@@ -134,6 +138,17 @@ export default function getRouteHandlers(
     'DELETE /organizations/:organizationId': organizationsController.removeOrganization,
     'GET /organizations/:organizationId/sites': organizationsController.getSitesForOrganization,
     'GET /organizations/:organizationId/brands': brandsController.getBrandsForOrganization,
+    'GET /organizations/:organizationId/projects': organizationsController.getProjectsByOrganizationId,
+    'GET /organizations/:organizationId/projects/:projectId/sites': organizationsController.getSitesByProjectIdAndOrganizationId,
+    'GET /organizations/:organizationId/by-project-name/:projectName/sites': organizationsController.getSitesByProjectNameAndOrganizationId,
+    'GET /projects': projectsController.getAll,
+    'POST /projects': projectsController.createProject,
+    'GET /projects/:projectId': projectsController.getByID,
+    'PATCH /projects/:projectId': projectsController.updateProject,
+    'DELETE /projects/:projectId': projectsController.removeProject,
+    'GET /projects/:projectId/sites/primary-locale': projectsController.getPrimaryLocaleSites,
+    'GET /projects/:projectId/sites': projectsController.getSitesByProjectId,
+    'GET /projects/by-project-name/:projectName/sites': projectsController.getSitesByProjectName,
     'POST /preflight/jobs': preflightController.createPreflightJob,
     'GET /preflight/jobs/:jobId': preflightController.getPreflightJobStatusAndResult,
     'GET /sites': sitesController.getAll,
@@ -247,7 +262,8 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/llmo/sheet-data/:dataSource': llmoController.queryLlmoSheetData,
     'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': llmoController.queryLlmoSheetData,
     'GET /sites/:siteId/llmo/config': llmoController.getLlmoConfig,
-    'POST /sites/:siteId/llmo/config': llmoController.postLlmoConfig,
+    'PATCH /sites/:siteId/llmo/config': llmoController.updateLlmoConfig,
+    'POST /sites/:siteId/llmo/config': llmoController.updateLlmoConfig,
     'GET /sites/:siteId/llmo/questions': llmoController.getLlmoQuestions,
     'POST /sites/:siteId/llmo/questions': llmoController.addLlmoQuestion,
     'DELETE /sites/:siteId/llmo/questions/:questionKey': llmoController.removeLlmoQuestion,
@@ -259,6 +275,7 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/llmo/cdn-logs-filter': llmoController.patchLlmoCdnLogsFilter,
     'PATCH /sites/:siteId/llmo/cdn-logs-bucket-config': llmoController.patchLlmoCdnBucketConfig,
     'GET /sites/:siteId/llmo/global-sheet-data/:configName': llmoController.getLlmoGlobalSheetData,
+    'POST /llmo/onboard': llmoController.onboardCustomer,
 
     // Tier Specific Routes
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,
@@ -267,6 +284,7 @@ export default function getRouteHandlers(
     'GET /organizations/:organizationId/trial-users': trialUserController.getByOrganizationID,
     'POST /organizations/:organizationId/trial-user-invite': trialUserController.createTrialUserForEmailInvite,
     'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
+    'POST /organizations/:organizationId/entitlements': entitlementController.createEntitlement,
 
     // Sandbox audit route
     'POST /sites/:siteId/sandbox/audit': sandboxAuditController.triggerAudit,

@@ -81,6 +81,9 @@ describe('Configurations Controller', () => {
           'S03CR0FDC2V',
         ],
       }),
+      registerAudit: sandbox.stub(),
+      unregisterAudit: sandbox.stub(),
+      save: sandbox.stub().resolves(),
     },
   ];
 
@@ -88,6 +91,8 @@ describe('Configurations Controller', () => {
     'getAll',
     'getLatest',
     'getByVersion',
+    'registerAudit',
+    'unregisterAudit',
   ];
 
   let mockDataAccess;
@@ -237,5 +242,67 @@ describe('Configurations Controller', () => {
 
     expect(result.status).to.equal(400);
     expect(error).to.have.property('message', 'Configuration version required to be an integer');
+  });
+
+  it('registers an audit', async () => {
+    const result = await configurationsController.registerAudit({
+      data: {
+        auditType: 'cwv',
+        enabledByDefault: true,
+        interval: 'weekly',
+        productCodes: ['LLMO'],
+      },
+    });
+    expect(result.status).to.equal(201);
+  });
+
+  it('register audit returns bad request if register audit throws an error', async () => {
+    mockDataAccess.Configuration.findLatest.resolves({
+      ...configurations[1],
+      registerAudit: sandbox.stub().throws(new Error('Audit type missing')),
+    });
+    const result = await configurationsController.registerAudit({ data: {} });
+    const error = await result.json();
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'Audit type missing');
+  });
+
+  it('register audit returns forbidden if user is not an admin', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    const result = await configurationsController.registerAudit({
+      data: {
+        auditType: 'cwv',
+        enabledByDefault: true,
+        interval: 'weekly',
+        productCodes: ['LLMO'],
+      },
+    });
+    const error = await result.json();
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only admins can register audits');
+  });
+
+  it('unregisters an audit', async () => {
+    const result = await configurationsController.unregisterAudit({ params: { auditType: 'cwv' } });
+    expect(result.status).to.equal(204);
+  });
+
+  it('unregister audit returns bad request if unregister audit throws an error', async () => {
+    mockDataAccess.Configuration.findLatest.resolves({
+      ...configurations[1],
+      unregisterAudit: sandbox.stub().throws(new Error('Audit type missing')),
+    });
+    const result = await configurationsController.unregisterAudit({ params: {} });
+    const error = await result.json();
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'Audit type missing');
+  });
+
+  it('unregister audit returns forbidden if user is not an admin', async () => {
+    context.attributes.authInfo.withProfile({ is_admin: false });
+    const result = await configurationsController.unregisterAudit({ params: { auditType: 'cwv' } });
+    const error = await result.json();
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only admins can unregister audits');
   });
 });
