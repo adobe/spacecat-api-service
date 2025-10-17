@@ -1,3 +1,31 @@
+# [1.208.0](https://github.com/adobe/spacecat-api-service/compare/v1.207.2...v1.208.0) (2025-10-17)
+
+
+### Features
+
+* support form accessiblity auto-fix ([#1345](https://github.com/adobe/spacecat-api-service/issues/1345)) ([790020c](https://github.com/adobe/spacecat-api-service/commit/790020c4c9d4cccbd96df5698fc31de46201c487))
+
+## [1.207.2](https://github.com/adobe/spacecat-api-service/compare/v1.207.1...v1.207.2) (2025-10-17)
+
+
+### Bug Fixes
+
+* update data-access ([#1303](https://github.com/adobe/spacecat-api-service/issues/1303)) ([d89d4f0](https://github.com/adobe/spacecat-api-service/commit/d89d4f044319977b16a56ce863234811e23fa0ee))
+
+## [1.207.1](https://github.com/adobe/spacecat-api-service/compare/v1.207.0...v1.207.1) (2025-10-17)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1364](https://github.com/adobe/spacecat-api-service/issues/1364)) ([352bd70](https://github.com/adobe/spacecat-api-service/commit/352bd703bf833dce615e31adbb06e5d12e0c12c3))
+
+# [1.207.0](https://github.com/adobe/spacecat-api-service/compare/v1.206.2...v1.207.0) (2025-10-17)
+
+
+### Features
+
+* Sites 34129 adds many to many relationship between Fix Entity and Suggestions  ([#1316](https://github.com/adobe/spacecat-api-service/issues/1316)) ([18241f2](https://github.com/adobe/spacecat-api-service/commit/18241f2921cf51234dbeda76b5f4272924536c28))
+
 ## [1.206.2](https://github.com/adobe/spacecat-api-service/compare/v1.206.1...v1.206.2) (2025-10-17)
 
 

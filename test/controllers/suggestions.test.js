@@ -145,6 +145,7 @@ describe('Suggestions Controller', () => {
     'getAllForOpportunity',
     'getByID',
     'getByStatus',
+    'getSuggestionFixes',
     'patchSuggestion',
     'patchSuggestionsStatus',
     'removeSuggestion',
@@ -164,6 +165,7 @@ describe('Suggestions Controller', () => {
   let removeStub;
   let suggs;
   let altTextSuggs;
+  let formAccessibilitySuggs;
   let context;
   let apikeyAuthAttributes;
 
@@ -298,10 +300,84 @@ describe('Suggestions Controller', () => {
       },
     ];
 
+    formAccessibilitySuggs = [
+      {
+        id: SUGGESTION_IDS[0],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CODE_CHANGE',
+        rank: 1,
+        status: 'NEW',
+        data: {
+          isCodeChangeAvailable: true,
+          diffContent: 'diff --git ...',
+          source: 'form',
+          type: 'url',
+          issues: [
+            {
+              wcagLevel: 'AA',
+              severity: 'serious',
+              occurrences: 1,
+              htmlWithIssues: [
+                {
+                  targetSelector: 'label[for="country"] > span',
+                  updateFrom: '<span>(Optional)</span>',
+                },
+              ],
+              failureSummary: 'Fix any of the following:\n  Element has insufficient color contrast',
+              wcagRule: '1.4.3 Contrast (Minimum)',
+              understandingUrl: 'https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html',
+              description: 'Elements must meet minimum color contrast ratio thresholds',
+              type: 'color-contrast',
+            },
+          ],
+          url: 'https://www.sunstar.com/contact',
+        },
+        createdAt: '2025-09-11T06:09:32.472Z',
+        updatedAt: '2025-10-08T06:31:21.459Z',
+        updatedBy: 'system',
+      },
+      {
+        id: SUGGESTION_IDS[1],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CODE_CHANGE',
+        rank: 2,
+        status: 'NEW',
+        data: {
+          isCodeChangeAvailable: true,
+          diffContent: 'diff --git ...',
+          source: 'form',
+          type: 'url',
+          issues: [
+            {
+              wcagLevel: 'AA',
+              severity: 'serious',
+              occurrences: 1,
+              htmlWithIssues: [
+                {
+                  targetSelector: 'input[type="email"]',
+                  updateFrom: '<input type="email" />',
+                },
+              ],
+              failureSummary: 'Form elements must have labels',
+              wcagRule: '1.3.1 Info and Relationships',
+              understandingUrl: 'https://www.w3.org/WAI/WCAG22/Understanding/info-and-relationships.html',
+              description: 'Form elements must have labels',
+              type: 'label',
+            },
+          ],
+          url: 'https://www.sunstar.com/contact',
+        },
+        createdAt: '2025-09-11T06:09:32.472Z',
+        updatedAt: '2025-10-08T06:31:21.459Z',
+        updatedBy: 'system',
+      },
+    ];
+
     const isHandlerEnabledForSite = sandbox.stub();
     isHandlerEnabledForSite.withArgs('broken-backlinks-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('alt-text-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('meta-tags-auto-fix', site).returns(true);
+    isHandlerEnabledForSite.withArgs('form-accessibility-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('broken-backlinks-auto-fix', siteNotEnabled).returns(false);
     mockOpportunity = {
       findById: sandbox.stub(),
@@ -340,6 +416,7 @@ describe('Suggestions Controller', () => {
         }
         return Promise.resolve(mockSuggestionEntity(suggData));
       }),
+      getFixEntitiesBySuggestionId: sandbox.stub(),
     };
 
     mockSuggestionDataAccess = {
@@ -706,6 +783,174 @@ describe('Suggestions Controller', () => {
     expect(response.status).to.equal(404);
     const error = await response.json();
     expect(error).to.have.property('message', 'not found');
+  });
+
+  describe('getSuggestionFixes', () => {
+    const FIX_IDS = [
+      'fix-id-1',
+      'fix-id-2',
+      'fix-id-3',
+    ];
+
+    const mockFixEntities = [
+      {
+        getId: () => FIX_IDS[0],
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getType: () => 'CODE_CHANGE',
+        getCreatedAt: () => '2025-01-01T00:00:00.000Z',
+        getUpdatedAt: () => '2025-01-01T00:00:00.000Z',
+        getExecutedBy: () => 'test@test.com',
+        getExecutedAt: () => '2025-01-01T01:00:00.000Z',
+        getPublishedAt: () => '2025-01-01T02:00:00.000Z',
+        getChangeDetails: () => ({ file: 'index.js', changes: 'updated' }),
+        getStatus: () => 'COMPLETED',
+        getOrigin: () => 'MANUAL',
+      },
+      {
+        getId: () => FIX_IDS[1],
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getType: () => 'CONTENT_UPDATE',
+        getCreatedAt: () => '2025-01-02T00:00:00.000Z',
+        getUpdatedAt: () => '2025-01-02T00:00:00.000Z',
+        getExecutedBy: () => 'test@test.com',
+        getExecutedAt: () => '2025-01-02T01:00:00.000Z',
+        getPublishedAt: () => null,
+        getChangeDetails: () => ({ content: 'new content' }),
+        getStatus: () => 'IN_PROGRESS',
+        getOrigin: () => 'MANUAL',
+      },
+    ];
+
+    beforeEach(() => {
+      mockSuggestion.getFixEntitiesBySuggestionId.resolves(mockFixEntities);
+    });
+
+    it('gets all fixes for a suggestion successfully', async () => {
+      const response = await suggestionsController.getSuggestionFixes({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+          suggestionId: SUGGESTION_IDS[0],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+      expect(result).to.have.property('data');
+      expect(result.data).to.be.an('array').with.lengthOf(2);
+      expect(result.data[0]).to.have.property('id', FIX_IDS[0]);
+      expect(result.data[0]).to.have.property('type', 'CODE_CHANGE');
+      expect(result.data[0]).to.have.property('status', 'COMPLETED');
+      expect(result.data[1]).to.have.property('id', FIX_IDS[1]);
+      expect(result.data[1]).to.have.property('type', 'CONTENT_UPDATE');
+      expect(mockSuggestion.getFixEntitiesBySuggestionId)
+        .to.have.been.calledOnceWith(SUGGESTION_IDS[0]);
+    });
+
+    it('returns empty array when suggestion has no fixes', async () => {
+      mockSuggestion.getFixEntitiesBySuggestionId.resolves([]);
+      const response = await suggestionsController.getSuggestionFixes({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+          suggestionId: SUGGESTION_IDS[0],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+      expect(result).to.have.property('data');
+      expect(result.data).to.be.an('array').with.lengthOf(0);
+    });
+
+    it('returns bad request if no site ID is passed', async () => {
+      const response = await suggestionsController.getSuggestionFixes({
+        params: {
+          opportunityId: OPPORTUNITY_ID,
+          suggestionId: SUGGESTION_IDS[0],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Site ID required');
+      expect(mockSuggestion.getFixEntitiesBySuggestionId).to.not.have.been.called;
+    });
+
+    it('returns bad request if no opportunity ID is passed', async () => {
+      const response = await suggestionsController.getSuggestionFixes({
+        params: {
+          siteId: SITE_ID,
+          suggestionId: SUGGESTION_IDS[0],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Opportunity ID required');
+      expect(mockSuggestion.getFixEntitiesBySuggestionId).to.not.have.been.called;
+    });
+
+    it('returns bad request if no suggestion ID is passed', async () => {
+      const response = await suggestionsController.getSuggestionFixes({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Suggestion ID required');
+      expect(mockSuggestion.getFixEntitiesBySuggestionId).to.not.have.been.called;
+    });
+
+    it('returns not found if site does not exist', async () => {
+      const response = await suggestionsController.getSuggestionFixes({
+        params: {
+          siteId: SITE_ID_NOT_FOUND,
+          opportunityId: OPPORTUNITY_ID,
+          suggestionId: SUGGESTION_IDS[0],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(404);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Site not found');
+      expect(mockSuggestion.getFixEntitiesBySuggestionId).to.not.have.been.called;
+    });
+
+    it('returns forbidden if user does not belong to the organization', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+      const response = await suggestionsController.getSuggestionFixes({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+          suggestionId: SUGGESTION_IDS[0],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(403);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'User does not belong to the organization');
+      expect(mockSuggestion.getFixEntitiesBySuggestionId).to.not.have.been.called;
+    });
+
+    it('returns 500 error if getFixEntitiesBySuggestionId throws an error', async () => {
+      mockSuggestion.getFixEntitiesBySuggestionId.rejects(new Error('Database error'));
+      const response = await suggestionsController.getSuggestionFixes({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+          suggestionId: SUGGESTION_IDS[0],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(500);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Error retrieving fixes for suggestion');
+    });
   });
 
   it('creates 2 suggestions success', async () => {
@@ -1437,6 +1682,77 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[1].suggestion).to.exist;
       expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'IN_PROGRESS');
       expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'IN_PROGRESS');
+    });
+
+    it('triggers autofixSuggestion for form-accessibility (non-grouped)', async () => {
+      opportunity.getType = sandbox.stub().returns('form-accessibility');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(formAccessibilitySuggs[0]),
+          mockSuggestionEntity(formAccessibilitySuggs[1])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...formAccessibilitySuggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...formAccessibilitySuggs[1], status: 'IN_PROGRESS' }),
+      ]);
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse).to.have.property('suggestions');
+      expect(bulkPatchResponse).to.have.property('metadata');
+      expect(bulkPatchResponse.metadata).to.have.property('total', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('success', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('failed', 0);
+      expect(bulkPatchResponse.suggestions).to.have.property('length', 2);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 200);
+      expect(bulkPatchResponse.suggestions[1]).to.have.property('statusCode', 200);
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'IN_PROGRESS');
+      expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'IN_PROGRESS');
+      // Verify SQS was called once (non-grouped behavior)
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+    });
+
+    it('triggers autofixSuggestion for form-accessibility with multiple suggestions from same URL', async () => {
+      opportunity.getType = sandbox.stub().returns('form-accessibility');
+      // Both suggestions have the same URL
+      const formSugg1 = { ...formAccessibilitySuggs[0] };
+      const formSugg2 = {
+        ...formAccessibilitySuggs[1],
+        id: SUGGESTION_IDS[2],
+        data: {
+          ...formAccessibilitySuggs[1].data,
+          url: 'https://www.sunstar.com/contact', // Same URL as first suggestion
+        },
+      };
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(formSugg1),
+          mockSuggestionEntity(formSugg2)],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...formSugg1, status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...formSugg2, status: 'IN_PROGRESS' }),
+      ]);
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.metadata).to.have.property('success', 2);
+      // Verify SQS was called once with all suggestions, not grouped by URL
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
     });
 
     it('auto-fix suggestions status returns bad request if no site ID is passed', async () => {
