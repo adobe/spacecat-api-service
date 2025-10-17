@@ -28,6 +28,7 @@ import { OrganizationDto } from '../dto/organization.js';
 import { ProjectDto } from '../dto/project.js';
 import { SiteDto } from '../dto/site.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { filterSitesForProductCode } from '../support/utils.js';
 
 /**
  * Organizations controller. Provides methods to create, read, update and delete organizations.
@@ -37,6 +38,7 @@ import AccessControlUtil from '../support/access-control-util.js';
  * @constructor
  */
 function OrganizationsController(ctx, env) {
+  const X_PRODUCT_HEADER = 'x-product';
   if (!isNonEmptyObject(ctx)) {
     throw new Error('Context required');
   }
@@ -173,6 +175,12 @@ function OrganizationsController(ctx, env) {
    */
   const getSitesForOrganization = async (context) => {
     const organizationId = context.params?.organizationId;
+    const { pathInfo } = context;
+    const productCode = pathInfo.headers[X_PRODUCT_HEADER];
+
+    if (!hasText(productCode)) {
+      return badRequest('Product code required');
+    }
 
     if (!isValidUUID(organizationId)) {
       return badRequest('Organization ID required');
@@ -189,7 +197,9 @@ function OrganizationsController(ctx, env) {
 
     const sites = await Site.allByOrganizationId(organizationId);
 
-    return ok(sites.map((site) => SiteDto.toJSON(site)));
+    const filteredSites = await filterSitesForProductCode(context, sites, productCode);
+
+    return ok(filteredSites.map((site) => SiteDto.toJSON(site)));
   };
 
   /**
