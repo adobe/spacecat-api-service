@@ -48,12 +48,12 @@ function SuggestionsController(ctx, sqs, env) {
     throw new Error('Data access required');
   }
 
-  const NON_GROUPED_OPPTY_TYPES = [
+  const AUTOFIX_UNGROUPED_OPPTY_TYPES = [
     'broken-backlinks',
     'form-accessibility',
   ];
 
-  const shouldGroupSuggestions = (type) => !NON_GROUPED_OPPTY_TYPES.includes(type);
+  const shouldGroupSuggestionsForAutofix = (type) => !AUTOFIX_UNGROUPED_OPPTY_TYPES.includes(type);
 
   const {
     Opportunity, Suggestion, Site, Configuration,
@@ -519,7 +519,7 @@ function SuggestionsController(ctx, sqs, env) {
     });
 
     let suggestionGroups;
-    if (shouldGroupSuggestions(opportunity.getType())) {
+    if (shouldGroupSuggestionsForAutofix(opportunity.getType())) {
       const opportunityData = opportunity.getData();
       const suggestionsByUrl = validSuggestions.reduce((acc, suggestion) => {
         const data = suggestion.getData();
@@ -591,7 +591,7 @@ function SuggestionsController(ctx, sqs, env) {
     response.suggestions.sort((a, b) => a.index - b.index);
     const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
 
-    if (shouldGroupSuggestions(opportunity.getType())) {
+    if (shouldGroupSuggestionsForAutofix(opportunity.getType())) {
       await Promise.all(
         suggestionGroups.map(({ groupedSuggestions, url }) => sendAutofixMessage(
           sqs,
