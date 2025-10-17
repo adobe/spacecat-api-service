@@ -729,6 +729,7 @@ describe('Suggestions Controller', () => {
         getPublishedAt: () => '2025-01-01T02:00:00.000Z',
         getChangeDetails: () => ({ file: 'index.js', changes: 'updated' }),
         getStatus: () => 'COMPLETED',
+        getOrigin: () => 'MANUAL',
       },
       {
         getId: () => FIX_IDS[1],
@@ -741,6 +742,7 @@ describe('Suggestions Controller', () => {
         getPublishedAt: () => null,
         getChangeDetails: () => ({ content: 'new content' }),
         getStatus: () => 'IN_PROGRESS',
+        getOrigin: () => 'MANUAL',
       },
     ];
 

@@ -1243,6 +1243,25 @@ describe('Fixes Controller', () => {
         createSuggestion({ type: 'METADATA_UPDATE' }),
       ]);
 
+      fixEntitySuggestionCollection.allByFixEntityId.resolves(suggestions.map((s) => ({
+        getSuggestionId: () => s.getId(),
+        getFixEntityId: () => fix.getId(),
+      })));
+
+      fixEntityCollection.setSuggestionsForFixEntity.resolves({
+        createdItems: suggestions.map((s) => ({
+          getSuggestionId: () => s.getId(),
+          getFixEntityId: () => fix.getId(),
+        })),
+        errorItems: [],
+        removedCount: 0,
+      });
+
+      suggestionCollection.batchGetByKeys.resolves({
+        data: suggestions,
+        unprocessed: [],
+      });
+
       const newOrigin = FixEntity.ORIGINS.ASO;
       requestContext.data = {
         origin: newOrigin,
