@@ -385,6 +385,7 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
       'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status',
+      'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes',
       'GET /sites/:siteId/scraped-content/:type',
       'GET /sites/:siteId/top-pages',
       'GET /sites/:siteId/top-pages/:source',
