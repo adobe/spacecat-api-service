@@ -195,20 +195,14 @@ function OrganizationsController(ctx, env) {
 
     const sites = await Site.allByOrganizationId(organizationId);
 
-    // TODO: Testing - replicate sites to max 1400
-    const replicatedSites = [];
-    const targetCount = 3000;
-    const replicationFactor = Math.ceil(targetCount / sites.length);
-    for (let i = 0; i < replicationFactor; i += 1) {
-      replicatedSites.push(...sites);
-    }
-    const finalSites = replicatedSites.slice(0, targetCount);
-    context.log.info(`finalSites length: ${finalSites.length}`);
-    /* eslint-disable max-len */
-    const filteredSites = await filterSitesForProductCode(context, organizationId, finalSites, productCode);
-    context.log.info(`filteredSites length: ${filteredSites.length}`);
+    const filteredSites = await filterSitesForProductCode(
+      context,
+      organization,
+      sites,
+      productCode,
+    );
 
-    return ok(finalSites.map((site) => SiteDto.toJSON(site)));
+    return ok(filteredSites.map((site) => SiteDto.toJSON(site)));
   };
 
   /**

@@ -470,7 +470,7 @@ describe('Organizations Controller', () => {
     expect(error).to.have.property('message', 'Only admins can view all Organizations');
   });
 
-  it.skip('gets all sites of an organization', async () => {
+  it('gets all sites of an organization', async () => {
     mockDataAccess.Site.allByOrganizationId.resolves(sites);
     mockDataAccess.Organization.findById.resolves(organizations[0]);
 
@@ -529,6 +529,22 @@ describe('Organizations Controller', () => {
 
     expect(result.status).to.equal(400);
     expect(error).to.have.property('message', 'Organization ID required');
+  });
+
+  it('returns bad request if product code is not provided when getting sites for organization', async () => {
+    const contextWithoutProductCode = {
+      ...context,
+      pathInfo: {
+        headers: {},
+      },
+    };
+    const result = await organizationsController.getSitesForOrganization(
+      { params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...contextWithoutProductCode },
+    );
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'Product code required');
   });
 
   it('gets an organization by id', async () => {
