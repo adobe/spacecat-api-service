@@ -1056,8 +1056,8 @@ describe('User Activity Controller', () => {
         const result = await userActivityController.createTrialUserActivity(context);
 
         expect(result.status).to.equal(201);
-        expect(mockTrialUserWithStatus.setFirstName).to.have.been.calledWith(undefined);
-        expect(mockTrialUserWithStatus.setLastName).to.have.been.calledWith(undefined);
+        expect(mockTrialUserWithStatus.setFirstName).to.have.been.calledWith('-');
+        expect(mockTrialUserWithStatus.setLastName).to.have.been.calledWith('-');
         expect(mockTrialUserWithStatus.setStatus).to.have.been.calledWith('REGISTERED');
         expect(mockTrialUserWithStatus.setLastSeenAt).to.have.been.calledOnce;
         expect(mockTrialUserWithStatus.save).to.have.been.calledOnce;
@@ -1087,8 +1087,8 @@ describe('User Activity Controller', () => {
         const result = await userActivityController.createTrialUserActivity(context);
 
         expect(result.status).to.equal(201);
-        expect(mockTrialUserWithStatus.setFirstName).to.have.been.calledWith(undefined);
-        expect(mockTrialUserWithStatus.setLastName).to.have.been.calledWith(undefined);
+        expect(mockTrialUserWithStatus.setFirstName).to.have.been.calledWith('-');
+        expect(mockTrialUserWithStatus.setLastName).to.have.been.calledWith('-');
         expect(mockTrialUserWithStatus.setStatus).to.have.been.calledWith('REGISTERED');
         expect(mockTrialUserWithStatus.setLastSeenAt).to.have.been.calledOnce;
         expect(mockTrialUserWithStatus.save).to.have.been.calledOnce;
@@ -1120,7 +1120,7 @@ describe('User Activity Controller', () => {
 
         expect(result.status).to.equal(201);
         expect(mockTrialUserWithStatus.setFirstName).to.have.been.calledWith('John');
-        expect(mockTrialUserWithStatus.setLastName).to.have.been.calledWith(undefined);
+        expect(mockTrialUserWithStatus.setLastName).to.have.been.calledWith('-');
         expect(mockTrialUserWithStatus.setStatus).to.have.been.calledWith('REGISTERED');
         expect(mockTrialUserWithStatus.setLastSeenAt).to.have.been.calledOnce;
         expect(mockTrialUserWithStatus.save).to.have.been.calledOnce;

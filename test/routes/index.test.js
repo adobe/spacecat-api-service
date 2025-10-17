@@ -56,6 +56,18 @@ describe('getRouteHandlers', () => {
     getSlackConfigByImsOrgID: sinon.stub(),
   };
 
+  const mockProjectsController = {
+    getAll: sinon.stub(),
+    createProject: sinon.stub(),
+    getByID: sinon.stub(),
+    getByName: sinon.stub(),
+    getPrimaryLocaleSites: sinon.stub(),
+    getSitesByProjectId: sinon.stub(),
+    getSitesByProjectName: sinon.stub(),
+    removeProject: sinon.stub(),
+    updateProject: sinon.stub(),
+  };
+
   const mockSlackController = {
     handleEvent: sinon.stub(),
   };
@@ -188,14 +200,11 @@ describe('getRouteHandlers', () => {
     patchLlmoCustomerIntent: () => null,
     patchLlmoCdnLogsFilter: () => null,
     patchLlmoCdnBucketConfig: () => null,
+    onboardCustomer: () => null,
   };
 
   const mockSandboxAuditController = {
     triggerAudit: sinon.stub(),
-  };
-
-  const mockOrganizationIdentityProviderController = {
-    getByOrganizationID: () => null,
   };
 
   const mockUserActivityController = {
@@ -230,6 +239,7 @@ describe('getRouteHandlers', () => {
       mockConfigurationController,
       mockHooksController,
       mockOrganizationsController,
+      mockProjectsController,
       mockSitesController,
       mockExperimentsController,
       mockSlackController,
@@ -250,7 +260,6 @@ describe('getRouteHandlers', () => {
       mockTrafficController,
       mockFixesController,
       mockLlmoController,
-      mockOrganizationIdentityProviderController,
       mockUserActivityController,
       mockSiteEnrollmentController,
       mockTrialUserController,
@@ -263,9 +272,12 @@ describe('getRouteHandlers', () => {
       'GET /configurations',
       'GET /configurations/latest',
       'PUT /configurations/latest',
+      'POST /configurations/audits',
       'PATCH /configurations/sites/audits',
       'GET /organizations',
       'POST /organizations',
+      'GET /projects',
+      'POST /projects',
       'POST /preflight/jobs',
       'GET /sites',
       'POST /sites',
@@ -281,11 +293,13 @@ describe('getRouteHandlers', () => {
       'POST /tools/import/jobs',
       'POST /tools/scrape/jobs',
       'POST /consent-banner',
+      'POST /llmo/onboard',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
     expect(staticRoutes['PUT /configurations/latest']).to.equal(mockConfigurationController.updateConfiguration);
+    expect(staticRoutes['POST /configurations/audits']).to.equal(mockConfigurationController.registerAudit);
     expect(staticRoutes['PATCH /configurations/sites/audits']).to.equal(mockSitesAuditsToggleController.execute);
     expect(staticRoutes['GET /organizations']).to.equal(mockOrganizationsController.getAll);
     expect(staticRoutes['POST /organizations']).to.equal(mockOrganizationsController.createOrganization);
@@ -298,17 +312,22 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /tools/api-keys']).to.equal(mockApiKeyController.getApiKeys);
     expect(staticRoutes['POST /consent-banner']).to.equal(mockConsentBannerController.takeScreenshots);
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
+    expect(staticRoutes['POST /llmo/onboard']).to.equal(mockLlmoController.onboardCustomer);
 
     expect(dynamicRoutes).to.have.all.keys(
       'GET /audits/latest/:auditType',
       'GET /configurations/:version',
+      'DELETE /configurations/audits/:auditType',
       'POST /hooks/site-detection/cdn/:hookSecret',
       'POST /hooks/site-detection/rum/:hookSecret',
       'GET /organizations/:organizationId',
       'GET /organizations/:organizationId/brands',
+      'GET /organizations/:organizationId/projects',
+      'GET /organizations/:organizationId/projects/:projectId/sites',
+      'GET /organizations/:organizationId/by-project-name/:projectName/sites',
       'GET /organizations/:organizationId/sites',
-      'GET /organizations/:organizationId/organization-identity-provider',
       'GET /organizations/:organizationId/entitlements',
+      'POST /organizations/:organizationId/entitlements',
       'GET /organizations/:organizationId/trial-users',
       'POST /organizations/:organizationId/trial-user-invite',
       'GET /organizations/by-ims-org-id/:imsOrgId',
@@ -316,6 +335,12 @@ describe('getRouteHandlers', () => {
       'PATCH /organizations/:organizationId',
       'DELETE /organizations/:organizationId',
       'GET /preflight/jobs/:jobId',
+      'GET /projects/:projectId',
+      'PATCH /projects/:projectId',
+      'DELETE /projects/:projectId',
+      'GET /projects/:projectId/sites/primary-locale',
+      'GET /projects/:projectId/sites',
+      'GET /projects/by-project-name/:projectName/sites',
       'GET /sites/:siteId',
       'PATCH /sites/:siteId',
       'DELETE /sites/:siteId',
@@ -412,7 +437,11 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/config/cdn-logs',
       'GET /sites/:siteId/llmo/sheet-data/:dataSource',
       'GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource',
+      'POST /sites/:siteId/llmo/sheet-data/:dataSource',
+      'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource',
       'GET /sites/:siteId/llmo/config',
+      'PATCH /sites/:siteId/llmo/config',
+      'POST /sites/:siteId/llmo/config',
       'GET /sites/:siteId/llmo/questions',
       'POST /sites/:siteId/llmo/questions',
       'DELETE /sites/:siteId/llmo/questions/:questionKey',
@@ -432,6 +461,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /audits/latest/:auditType'].paramNames).to.deep.equal(['auditType']);
     expect(dynamicRoutes['GET /configurations/:version'].handler).to.equal(mockConfigurationController.getByVersion);
     expect(dynamicRoutes['GET /configurations/:version'].paramNames).to.deep.equal(['version']);
+    expect(dynamicRoutes['DELETE /configurations/audits/:auditType'].handler).to.equal(mockConfigurationController.unregisterAudit);
+    expect(dynamicRoutes['DELETE /configurations/audits/:auditType'].paramNames).to.deep.equal(['auditType']);
     expect(dynamicRoutes['GET /organizations/:organizationId'].handler).to.equal(mockOrganizationsController.getByID);
     expect(dynamicRoutes['GET /organizations/:organizationId'].paramNames).to.deep.equal(['organizationId']);
     expect(dynamicRoutes['GET /organizations/:organizationId/sites'].handler).to.equal(mockOrganizationsController.getSitesForOrganization);
@@ -560,5 +591,9 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/cdn-logs-bucket-config'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/global-sheet-data/:configName'].handler).to.equal(mockLlmoController.getLlmoGlobalSheetData);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/global-sheet-data/:configName'].paramNames).to.deep.equal(['siteId', 'configName']);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:dataSource'].handler).to.equal(mockLlmoController.queryLlmoSheetData);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:dataSource'].paramNames).to.deep.equal(['siteId', 'dataSource']);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource'].handler).to.equal(mockLlmoController.queryLlmoSheetData);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'dataSource']);
   });
 });

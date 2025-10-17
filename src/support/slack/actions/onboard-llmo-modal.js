@@ -11,23 +11,22 @@
  */
 
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
-import { createFrom } from '@adobe/spacecat-helix-content-sdk';
-import { Octokit } from '@octokit/rest';
-import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
-import { OrganizationIdentityProvider as OrganizationIdentityProviderModel } from '@adobe/spacecat-shared-data-access/src/models/organization-identity-provider/index.js';
 import {
   postErrorMessage,
 } from '../../../utils/slack/base.js';
+import {
+  createEntitlementAndEnrollment,
+  copyFilesToSharepoint,
+  updateIndexConfig,
+  enableAudits,
+} from '../../../controllers/llmo/llmo-onboarding.js';
 
 const REFERRAL_TRAFFIC_AUDIT = 'llmo-referral-traffic';
 const REFERRAL_TRAFFIC_IMPORT = 'traffic-analysis';
 const AGENTIC_TRAFFIC_ANALYSIS_AUDIT = 'cdn-analysis';
 const AGENTIC_TRAFFIC_REPORT_AUDIT = 'cdn-logs-report';
-
-const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
-const LLMO_TIER = EntitlementModel.TIERS.FREE_TRIAL;
-
-const IMS_PROVIDER = OrganizationIdentityProviderModel.PROVIDER_TYPES.IMS;
+const GEO_BRAND_PRESENCE_WEEKLY = 'geo-brand-presence';
+const GEO_BRAND_PRESENCE_DAILY = 'geo-brand-presence-daily';
 
 // site isn't on spacecat yet
 async function fullOnboardingModal(body, client, respond, brandURL) {
@@ -151,13 +150,48 @@ async function fullOnboardingModal(body, client, respond, brandURL) {
             text: 'Delivery Type',
           },
         },
+        {
+          type: 'input',
+          block_id: 'brand_presence_cadence_input',
+          element: {
+            type: 'static_select',
+            action_id: 'brand_presence_cadence',
+            initial_option: {
+              text: {
+                type: 'plain_text',
+                text: 'Weekly',
+              },
+              value: 'weekly',
+            },
+            options: [
+              {
+                text: {
+                  type: 'plain_text',
+                  text: 'Weekly',
+                },
+                value: 'weekly',
+              },
+              {
+                text: {
+                  type: 'plain_text',
+                  text: 'Daily',
+                },
+                value: 'daily',
+              },
+            ],
+          },
+          label: {
+            type: 'plain_text',
+            text: 'Brand Presence Cadence',
+          },
+        },
       ],
     },
   });
 }
 
 // site is already on spacecat
-async function elmoOnboardingModal(body, client, respond, brandURL) {
+async function elmoOnboardingModal(body, client, respond, brandURL, currentCadence = 'weekly') {
   const { user } = body;
 
   // Update the original message to show user's choice
@@ -230,6 +264,41 @@ async function elmoOnboardingModal(body, client, respond, brandURL) {
           label: {
             type: 'plain_text',
             text: 'IMS Organization ID',
+          },
+        },
+        {
+          type: 'input',
+          block_id: 'brand_presence_cadence_input',
+          element: {
+            type: 'static_select',
+            action_id: 'brand_presence_cadence',
+            initial_option: {
+              text: {
+                type: 'plain_text',
+                text: currentCadence === 'daily' ? 'Daily' : 'Weekly',
+              },
+              value: currentCadence,
+            },
+            options: [
+              {
+                text: {
+                  type: 'plain_text',
+                  text: 'Weekly',
+                },
+                value: 'weekly',
+              },
+              {
+                text: {
+                  type: 'plain_text',
+                  text: 'Daily',
+                },
+                value: 'daily',
+              },
+            ],
+          },
+          label: {
+            type: 'plain_text',
+            text: 'Brand Presence Cadence',
           },
         },
       ],
@@ -317,20 +386,23 @@ export function startLLMOOnboarding(lambdaContext) {
         return;
       }
 
-      const config = await site.getConfig();
-      const brand = config.getLlmoBrand();
+      // Detect current cadence for existing site
+      const { Configuration } = dataAccess;
+      const configuration = await Configuration.findLatest();
+      const isWeeklyEnabled = configuration.isHandlerEnabledForSite(
+        GEO_BRAND_PRESENCE_WEEKLY,
+        site,
+      );
+      const isDailyEnabled = configuration.isHandlerEnabledForSite(
+        GEO_BRAND_PRESENCE_DAILY,
+        site,
+      );
 
-      if (brand) {
-        await respond({
-          text: `:cdbot-error: It looks like ${brandURL} is already configured for LLMO with brand ${brand}`,
-          replace_original: true,
-        });
-        log.debug(`Aborted ${brandURL} onboarding: Already onboarded with brand ${brand}`);
-        return;
-      }
+      // Prefer daily if both are enabled (edge case), otherwise use what's enabled
+      const currentCadence = isDailyEnabled ? 'daily' : 'weekly';
+      log.debug(`Site ${site.getId()} current brand presence config: weekly=${isWeeklyEnabled}, daily=${isDailyEnabled}, detected cadence=${currentCadence}`);
 
-      await elmoOnboardingModal(body, client, respond, brandURL);
-
+      await elmoOnboardingModal(body, client, respond, brandURL, currentCadence);
       log.debug(`User ${user.id} started LLMO onboarding process for ${brandURL} with existing site ${site.getId()}.`);
     } catch (e) {
       log.error('Error handling start onboarding:', e);
@@ -340,132 +412,6 @@ export function startLLMOOnboarding(lambdaContext) {
       });
     }
   };
-}
-
-async function publishToAdminHlx(filename, outputLocation, log) {
-  try {
-    const org = 'adobe';
-    const site = 'project-elmo-ui-data';
-    const ref = 'main';
-    const jsonFilename = `${filename.replace(/\.[^/.]+$/, '')}.json`;
-    const path = `${outputLocation}/${jsonFilename}`;
-    const headers = { Cookie: `auth_token=${process.env.HLX_ADMIN_TOKEN}` };
-
-    if (!process.env.HLX_ADMIN_TOKEN) {
-      log.warn('LLMO onboarding: HLX_ADMIN_TOKEN is not set');
-    }
-
-    const baseUrl = 'https://admin.hlx.page';
-    const endpoints = [
-      { name: 'preview', url: `${baseUrl}/preview/${org}/${site}/${ref}/${path}` },
-      { name: 'live', url: `${baseUrl}/live/${org}/${site}/${ref}/${path}` },
-    ];
-
-    for (const [index, endpoint] of endpoints.entries()) {
-      log.debug(`Publishing Excel report via admin API (${endpoint.name}): ${endpoint.url}`);
-
-      // eslint-disable-next-line no-await-in-loop
-      const response = await fetch(endpoint.url, { method: 'POST', headers });
-
-      if (!response.ok) {
-        throw new Error(`${endpoint.name} failed: ${response.status} ${response.statusText}`);
-      }
-
-      log.debug(`Excel report successfully published to ${endpoint.name}`);
-
-      if (index === 0) {
-        // eslint-disable-next-line no-await-in-loop,max-statements-per-line
-        await new Promise((resolve) => { setTimeout(resolve, 2000); });
-      }
-    }
-  } catch (publishError) {
-    log.error(`Failed to publish via admin.hlx.page: ${publishError.message}`);
-  }
-}
-
-async function copyFilesToSharepoint(dataFolder, lambdaCtx, slackCtx) {
-  const { log } = lambdaCtx;
-  const { say } = slackCtx;
-
-  const SHAREPOINT_URL = 'https://adobe.sharepoint.com/:x:/r/sites/HelixProjects/Shared%20Documents/sites/elmo-ui-data';
-
-  const sharepointClient = await createFrom({
-    clientId: process.env.SHAREPOINT_CLIENT_ID,
-    clientSecret: process.env.SHAREPOINT_CLIENT_SECRET,
-    authority: process.env.SHAREPOINT_AUTHORITY,
-    domainId: process.env.SHAREPOINT_DOMAIN_ID,
-  }, { url: SHAREPOINT_URL, type: 'onedrive' });
-
-  log.debug(`Copying query-index to ${dataFolder}`);
-  const folder = sharepointClient.getDocument(`/sites/elmo-ui-data/${dataFolder}/`);
-  const templateQueryIndex = sharepointClient.getDocument('/sites/elmo-ui-data/template/query-index.xlsx');
-  const newQueryIndex = sharepointClient.getDocument(`/sites/elmo-ui-data/${dataFolder}/query-index.xlsx`);
-
-  // TODO: Instead of patching .exists, add this method https://github.com/adobe/spacecat-helix-content-sdk/issues/190
-  const folderExists = await folder.exists();
-  if (!folderExists) {
-    await folder.createFolder(dataFolder, '/');
-  } else {
-    log.warn(`Warning: Folder ${dataFolder} already exists. Skipping creation.`);
-    await say(`Folder ${dataFolder} already exists. Skipping creation.`);
-  }
-
-  const queryIndexExists = await newQueryIndex.exists();
-  if (!queryIndexExists) {
-    await templateQueryIndex.copy(`/${dataFolder}/query-index.xlsx`);
-  } else {
-    log.warn(`Warning: Query index at ${dataFolder} already exists. Skipping creation.`);
-    await say(`Query index in ${dataFolder} already exists. Skipping creation.`);
-  }
-
-  log.debug('Publishing query-index to admin.hlx.page');
-  await publishToAdminHlx('query-index', dataFolder, log);
-}
-
-// update https://github.com/adobe/project-elmo-ui-data/blob/main/helix-query.yaml
-async function updateIndexConfig(dataFolder, lambdaCtx, slackCtx) {
-  const { log } = lambdaCtx;
-  const { say } = slackCtx;
-
-  log.debug('Starting Git modification of helix query config');
-  const octokit = new Octokit({
-    auth: process.env.LLMO_ONBOARDING_GITHUB_TOKEN,
-  });
-
-  const owner = 'adobe';
-  const repo = 'project-elmo-ui-data';
-  const ref = 'main';
-  const path = 'helix-query.yaml';
-
-  const { data: file } = await octokit.repos.getContent({
-    owner, repo, ref, path,
-  });
-  const content = Buffer.from(file.content, 'base64').toString('utf-8');
-
-  if (content.includes(dataFolder)) {
-    log.warn(`Helix query yaml already contains string ${dataFolder}. Skipping update.`);
-    await say(`Helix query yaml already contains string ${dataFolder}. Skipping GitHub update.`);
-    return;
-  }
-
-  // add new config to end of file
-  const modifiedContent = `${content}${content.endsWith('\n') ? '' : '\n'}
-  ${dataFolder}:
-    <<: *default
-    include:
-      - '/${dataFolder}/**'
-    target: /${dataFolder}/query-index.xlsx
-`;
-
-  await octokit.repos.createOrUpdateFileContents({
-    owner,
-    repo,
-    ref,
-    path,
-    message: `Automation: Onboard ${dataFolder}`,
-    content: Buffer.from(modifiedContent).toString('base64'),
-    sha: file.sha,
-  });
 }
 
 async function createSiteAndOrganization(input, lambda, slackContext) {
@@ -489,91 +435,18 @@ async function createSiteAndOrganization(input, lambda, slackContext) {
   return site.getId();
 }
 
-async function createEntitlementAndEnrollment(site, lambdaCtx, slackCtx) {
-  const { dataAccess, log } = lambdaCtx;
-  const { say } = slackCtx;
-  const { Entitlement, SiteEnrollment } = dataAccess;
-
-  const orgId = site.getOrganizationId();
-
-  // find if there are any entitlements for this site enabling LLMO
-  const enrollments = await SiteEnrollment.allBySiteId(site.getId());
-  const llmoEntitlements = (await Promise.all(enrollments.map(async (enrollment) => {
-    // find entitlement for this enrollment
-    const entitlement = await Entitlement.findById(enrollment.getEntitlementId());
-    // check if the entitlement is for the same organization as the site
-    const entitlementOrgId = entitlement.getOrganizationId();
-    if (entitlementOrgId !== orgId) return null;
-    // check if the entitlement is for LLMO
-    const entitlementProductCode = entitlement.getProductCode();
-    return entitlementProductCode === LLMO_PRODUCT_CODE ? entitlement : null;
-  }))).filter((x) => !!x);
-
-  if (llmoEntitlements.length > 0) {
-    await say(`Site ${site.getId()} is already entitled to LLMO. Skipping entitlement grant.`);
-    log.warn(`Site ${site.getId()} already entitled to LLMO. Skipping.`);
-    return;
-  }
-
-  // create an entitlement
-  const newEntitlement = await Entitlement.create({
-    organizationId: orgId,
-    productCode: LLMO_PRODUCT_CODE,
-    tier: LLMO_TIER,
-    quotas: { llmo_trial_prompts: 200 },
-  });
-  await newEntitlement.save();
-  const newEntitlementId = newEntitlement.getId();
-
-  // create enrollment
-  const newEnrollment = await SiteEnrollment.create({
-    entitlementId: newEntitlementId,
-    siteId: site.getId(),
-  });
-  await newEnrollment.save();
-}
-
-async function createOrganizationIdentityProvider(site, lambdaCtx) {
-  const { dataAccess, log } = lambdaCtx;
-  const { OrganizationIdentityProvider, Organization } = dataAccess;
-
-  log.info('Starting IDP creation process.');
-
-  // Get the organization ID from the site
-  const organizationId = site.getOrganizationId();
-  const organization = await Organization.findById(organizationId);
-  const organizationImsOrgId = organization.getImsOrgId();
-
-  // Check if an IMS identity provider already exists for this organization
-  const existingIdps = await OrganizationIdentityProvider.allByOrganizationId(organizationId);
-  const existingIdp = existingIdps.find((idp) => idp.getProvider() === IMS_PROVIDER);
-
-  if (existingIdp) {
-    log.info(`Organization identity provider already exists for organization ${organizationId}, skipping creation`);
-    return;
-  }
-
-  log.info('No existing IDP found, creating new.');
-
-  // Create a new identity provider for the organization
-  const newIdp = await OrganizationIdentityProvider.create({
-    organizationId,
-    provider: OrganizationIdentityProviderModel.PROVIDER_TYPES.IMS,
-    externalId: organizationImsOrgId,
-  });
-
-  await newIdp.save();
-  log.info(`Created new organization identity provider for organization ${organizationId}`);
-}
-
 export async function onboardSite(input, lambdaCtx, slackCtx) {
-  const { log, dataAccess, sqs } = lambdaCtx;
+  const {
+    log, dataAccess, sqs, env,
+  } = lambdaCtx;
   const { say } = slackCtx;
   const {
-    baseURL, brandName, imsOrgId,
+    baseURL, brandName, imsOrgId, brandPresenceCadence = 'weekly',
   } = input;
   const { hostname } = new URL(baseURL);
-  const dataFolder = hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+  const dataFolderName = hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+  /* c8 ignore next */
+  const dataFolder = env.ENV === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
 
   const {
     Site, Configuration,
@@ -598,16 +471,13 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
     }
 
     // create entitlement
-    await createEntitlementAndEnrollment(site, lambdaCtx, slackCtx);
-
-    // create OrganizationIdentiyProvider
-    await createOrganizationIdentityProvider(site, lambdaCtx, slackCtx);
+    await createEntitlementAndEnrollment(site, lambdaCtx, slackCtx.say);
 
     // upload and publish the query index file
-    await copyFilesToSharepoint(dataFolder, lambdaCtx, slackCtx);
+    await copyFilesToSharepoint(dataFolder, lambdaCtx, slackCtx.say);
 
     // update indexing config in helix
-    await updateIndexConfig(dataFolder, lambdaCtx, slackCtx);
+    await updateIndexConfig(dataFolder, lambdaCtx, slackCtx.say);
 
     const siteId = site.getId();
 
@@ -630,7 +500,17 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
     // enable all necessary handlers
     const configuration = await Configuration.findLatest();
     configuration.enableHandlerForSite(REFERRAL_TRAFFIC_AUDIT, site);
-    configuration.enableHandlerForSite('geo-brand-presence', site);
+
+    // Enable the selected cadence and disable the other
+    if (brandPresenceCadence === 'daily') {
+      log.info(`Enabling daily brand presence audit and disabling weekly for site ${siteId}`);
+      configuration.enableHandlerForSite(GEO_BRAND_PRESENCE_DAILY, site);
+      configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY, site);
+    } else {
+      log.info(`Enabling weekly brand presence audit and disabling daily for site ${siteId}`);
+      configuration.enableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY, site);
+      configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_DAILY, site);
+    }
 
     // enable the cdn-analysis only if no other site in this organization already has it enabled
     const orgId = site.getOrganizationId();
@@ -647,26 +527,31 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
       log.debug(`Agentic traffic audits already enabled for organization ${orgId}, skipping`);
     }
 
-    // enable the cdn-logs-report audits for agentic traffic
-    configuration.enableHandlerForSite(AGENTIC_TRAFFIC_REPORT_AUDIT, site);
-
-    // enable llmo-customer-analysis handler - this generates LLMO excel sheets and triggers audits
-    configuration.enableHandlerForSite('llmo-customer-analysis', site);
-
     try {
       await configuration.save();
+
+      await enableAudits(site, lambdaCtx, [
+        AGENTIC_TRAFFIC_REPORT_AUDIT, // enable the cdn-logs-report audits for agentic traffic
+        'llmo-customer-analysis', // this generates LLMO excel sheets and triggers audits
+        REFERRAL_TRAFFIC_AUDIT,
+        'geo-brand-presence',
+        'headings',
+        'llm-blocked',
+      ]);
+
       await site.save();
       log.debug(`Successfully updated LLMO config for site ${siteId}`);
 
       // trigger the llmo-customer-analysis handler
-      const sqsTriggerMesasage = {
+      const sqsTriggerMessage = {
         type: 'llmo-customer-analysis',
         siteId,
         auditContext: {
           auditType: 'llmo-customer-analysis',
+          brandPresenceCadence,
         },
       };
-      await sqs.sendMessage(configuration.getQueues().audits, sqsTriggerMesasage);
+      await sqs.sendMessage(configuration.getQueues().audits, sqsTriggerMessage);
 
       const message = `:white_check_mark: *LLMO onboarding completed successfully!*
         
@@ -675,6 +560,7 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
 :file_folder: *Data Folder:* ${dataFolder}
 :label: *Brand:* ${brandName}
 :identification_card: *IMS Org ID:* ${imsOrgId}
+:calendar: *Brand Presence Cadence:* ${brandPresenceCadence}
 
 The LLMO Customer Analysis handler has been triggered. It will take a few minutes to complete.`;
 
@@ -716,6 +602,11 @@ export function onboardLLMOModal(lambdaContext) {
       const brandName = values.brand_name_input.brand_name.value;
       const imsOrgId = values.ims_org_input.ims_org_id.value;
       const deliveryType = values.delivery_type_input?.delivery_type?.selected_option?.value;
+      const brandPresenceCadenceRaw = values.brand_presence_cadence_input
+        ?.brand_presence_cadence?.selected_option?.value;
+      const brandPresenceCadence = (brandPresenceCadenceRaw === 'daily' || brandPresenceCadenceRaw === 'weekly')
+        ? brandPresenceCadenceRaw
+        : 'weekly';
 
       if (!brandName || !imsOrgId) {
         await ack({
@@ -732,6 +623,7 @@ export function onboardLLMOModal(lambdaContext) {
         brandName,
         imsOrgId,
         deliveryType: deliveryType ?? 'not set',
+        brandPresenceCadence,
         brandURL,
         originalChannel,
         originalThreadTs,
@@ -760,7 +652,7 @@ export function onboardLLMOModal(lambdaContext) {
       };
 
       await onboardSite({
-        brandName, baseURL: brandURL, imsOrgId, deliveryType,
+        brandName, baseURL: brandURL, imsOrgId, deliveryType, brandPresenceCadence,
       }, lambdaContext, slackContext);
 
       log.debug(`Onboard LLMO modal processed for user ${user.id}, site ${brandURL}`);
@@ -772,6 +664,238 @@ export function onboardLLMOModal(lambdaContext) {
           brand_name_input: 'There was an error processing the onboarding request.',
         },
       });
+    }
+  };
+}
+
+/* Handles "Add Entitlements" button click */
+export function addEntitlementsAction(lambdaContext) {
+  const { log, dataAccess } = lambdaContext;
+
+  return async ({ ack, body, client }) => {
+    const metadata = JSON.parse(body.actions[0].value);
+    const originalChannel = body.channel?.id;
+
+    const {
+      brandURL,
+      siteId,
+      originalThreadTs,
+      existingBrand,
+    } = metadata;
+
+    try {
+      await ack();
+      const { user } = body;
+
+      await client.chat.update({
+        channel: originalChannel,
+        ts: body.message.ts,
+        text: `:gear: ${user.name} is adding LLMO entitlements...`,
+        blocks: [],
+      });
+
+      const { Site } = dataAccess;
+      const site = await Site.findById(siteId);
+
+      if (!site) {
+        await client.chat.postMessage({
+          channel: originalChannel,
+          text: ':x: Site not found. Please try again.',
+          thread_ts: originalThreadTs,
+        });
+        return;
+      }
+
+      /* c8 ignore start */
+      const slackContext = {
+        say: async (message) => {
+          await client.chat.postMessage({
+            channel: originalChannel,
+            text: message,
+            thread_ts: originalThreadTs,
+          });
+        },
+      };
+      /* c8 ignore end */
+
+      await createEntitlementAndEnrollment(site, lambdaContext, slackContext.say);
+      await client.chat.postMessage({
+        channel: originalChannel,
+        text: `:white_check_mark: Successfully ensured LLMO entitlements and enrollments for *${brandURL}* (brand: *${existingBrand}*).`,
+        thread_ts: originalThreadTs,
+      });
+
+      log.debug(`Added entitlements for site ${siteId} (${brandURL}) for user ${user.id}`);
+    } catch (error) {
+      log.error('Error adding entitlements:', error);
+    }
+  };
+}
+
+/* Handles "Update IMS Organization" button click */
+export function updateOrgAction(lambdaContext) {
+  const { log, dataAccess } = lambdaContext;
+
+  return async ({ ack, body, client }) => {
+    try {
+      await ack();
+      const { user } = body;
+      const metadata = JSON.parse(body.actions[0].value);
+      const originalChannel = body.channel?.id;
+
+      await client.chat.update({
+        channel: originalChannel,
+        ts: body.message.ts,
+        text: `:gear: ${user.name} is updating IMS organization...`,
+        blocks: [],
+      });
+
+      const {
+        brandURL,
+        siteId,
+        existingBrand,
+        currentOrgId,
+        originalThreadTs,
+      } = metadata;
+
+      let currentImsOrgId = 'ABC123@AdobeOrg';
+      if (currentOrgId) {
+        try {
+          const { Organization } = dataAccess;
+          const currentOrg = await Organization.findById(currentOrgId);
+          if (currentOrg && currentOrg.getImsOrgId()) {
+            currentImsOrgId = currentOrg.getImsOrgId();
+          }
+        } catch (error) {
+          log.warn(`Could not fetch current IMS org ID for organization ${currentOrgId}: ${error.message}`);
+        }
+      }
+
+      await client.views.open({
+        trigger_id: body.trigger_id,
+        view: {
+          type: 'modal',
+          callback_id: 'update_ims_org_modal',
+          private_metadata: JSON.stringify({
+            originalChannel,
+            originalThreadTs,
+            brandURL,
+            siteId,
+            existingBrand,
+          }),
+          title: {
+            type: 'plain_text',
+            text: 'Update IMS Organization',
+          },
+          submit: {
+            type: 'plain_text',
+            text: 'Update & Apply',
+          },
+          close: {
+            type: 'plain_text',
+            text: 'Cancel',
+          },
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: `:arrows_counterclockwise: *Update IMS Organization*\n\nUpdating IMS organization for site *${brandURL}* (brand: *${existingBrand}*)\n\nProvide the new IMS Organization ID:`,
+              },
+            },
+            {
+              type: 'input',
+              block_id: 'new_ims_org_input',
+              element: {
+                type: 'plain_text_input',
+                action_id: 'new_ims_org_id',
+                placeholder: {
+                  type: 'plain_text',
+                  text: currentImsOrgId,
+                },
+              },
+              label: {
+                type: 'plain_text',
+                text: 'New IMS Organization ID',
+              },
+            },
+          ],
+        },
+      });
+
+      log.debug(`User ${user.id} started org update process for site ${siteId} (${brandURL})`);
+    } catch (error) {
+      log.error('Error starting org update:', error);
+    }
+  };
+}
+
+/* Handles "Update IMS Organization" modal submission */
+export function updateIMSOrgModal(lambdaContext) {
+  const { log, dataAccess } = lambdaContext;
+
+  return async ({ ack, body, client }) => {
+    try {
+      const { view, user } = body;
+      const { values } = view.state;
+
+      /* c8 ignore next */
+      const metadata = JSON.parse(view.private_metadata || '{}');
+      const {
+        originalChannel, originalThreadTs, brandURL, siteId, existingBrand,
+      } = metadata;
+
+      const newImsOrgId = values.new_ims_org_input.new_ims_org_id.value;
+
+      if (!newImsOrgId) {
+        await ack({
+          response_action: 'errors',
+          errors: {
+            new_ims_org_input: 'IMS Organization ID is required',
+          },
+        });
+        return;
+      }
+
+      await ack();
+      const responseChannel = originalChannel;
+      const responseThreadTs = originalThreadTs;
+      const { Site } = dataAccess;
+      const site = await Site.findById(siteId);
+
+      if (!site) {
+        await client.chat.postMessage({
+          channel: responseChannel,
+          text: ':x: Site not found. Please try again.',
+          thread_ts: responseThreadTs,
+        });
+        return;
+      }
+
+      /* c8 ignore start */
+      const slackContext = {
+        say: async (message) => {
+          await client.chat.postMessage({
+            channel: responseChannel,
+            text: message,
+            thread_ts: responseThreadTs,
+          });
+        },
+      };
+      /* c8 ignore end */
+
+      await checkOrg(newImsOrgId, site, lambdaContext, slackContext);
+      await createEntitlementAndEnrollment(site, lambdaContext, slackContext.say);
+
+      await client.chat.postMessage({
+        channel: responseChannel,
+        text: `:white_check_mark: Successfully updated organization and applied LLMO entitlements for *${brandURL}* (brand: *${existingBrand}*)`,
+        thread_ts: responseThreadTs,
+      });
+
+      log.debug(`Updated org and applied entitlements for site ${siteId} (${brandURL}) for user ${user.id}`);
+    } catch (error) {
+      log.error('Error updating organization:', error);
     }
   };
 }

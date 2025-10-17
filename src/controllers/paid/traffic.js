@@ -208,7 +208,7 @@ function TrafficController(context, log, env) {
 
     // add to cache
     let isCached = false;
-    if (response) {
+    if (response && response.length > 0) {
       isCached = await addResultJsonToCache(s3, cacheKey, response, log);
       log.info(`Athena result JSON to S3 cache (${cacheKey}) successful: ${isCached}`);
     }

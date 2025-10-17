@@ -33,6 +33,8 @@ tags:
     description: Audit operations
   - name: auth
     description: Init authentication against 3rd party services
+  - name: configuration
+    description: Configuration management operations
   - name: organization
     description: Organization operations
   - name: trigger
@@ -59,12 +61,12 @@ tags:
     description: Trial user management operations
   - name: user-activities
     description: User activity management operations
-  - name: organization-identity-providers
-    description: Organization identity provider management operations
   - name: sandbox
     description: Sandbox audit operations
   - name: reports
     description: Report generation and management operations
+  - name: project
+    description: Project management operations
 
 paths:
   /audits/latest/{auditType}:
@@ -81,6 +83,10 @@ paths:
     $ref: './configuration-api.yaml#/latest-configuration'
   /configurations/{version}:
     $ref: './configuration-api.yaml#/configuration'
+  /configurations/audits:
+    $ref: './configuration-api.yaml#/configuration-audits'
+  /configurations/audits/{auditType}:
+    $ref: './configuration-api.yaml#/configuration-audit'
   /configurations/sites/audits:
     $ref: './configurations-sites-audits-api.yaml#/configurations-sites-audits-toggle'
   /event/fulfillment:
@@ -107,13 +113,27 @@ paths:
 
   /organizations/{organizationId}/trial-user-invite:
     $ref: './trial-users-api.yaml#/trial-user-invite'
-  /organizations/{organizationId}/organization-identity-provider:
-    $ref: './organization-identity-providers-api.yaml#/organization-identity-provider-by-organization'
 
   /organizations/by-ims-org-id/{imsOrgId}:
     $ref: './organization-api.yaml#/organization-by-ims-org-id'
   /organizations/by-ims-org-id/{imsOrgId}/slack-config:
     $ref: './organization-api.yaml#/organization-slack-config-by-ims-org-id'
+  /organizations/{organizationId}/projects:
+    $ref: './organizations-api.yaml#/organization-projects'
+  /organizations/{organizationId}/projects/{projectId}/sites:
+    $ref: './organizations-api.yaml#/organization-project-sites'
+  /organizations/{organizationId}/by-project-name/{projectName}/sites:
+    $ref: './organizations-api.yaml#/organization-project-sites-by-name'
+  /projects:
+    $ref: './projects-api.yaml#/projects'
+  /projects/{projectId}:
+    $ref: './project-api.yaml#/project'
+  /projects/{projectId}/sites:
+    $ref: './project-api.yaml#/project-sites'
+  /projects/{projectId}/sites/primary-locale:
+    $ref: './project-api.yaml#/project-primary-locale-sites'
+  /projects/by-project-name/{projectName}/sites:
+    $ref: './project-api.yaml#/project-sites-by-name'
   /preflight/jobs:
     $ref: './preflight-api.yaml#/preflight-jobs'
   /preflight/jobs/{jobId}:
@@ -272,6 +292,8 @@ paths:
     $ref: './sandbox-audit-api.yaml#/sandbox-audit'
   /sites/{siteId}/llmo/cdn-logs-bucket-config:
     $ref: './llmo-api.yaml#/llmo-cdn-logs-bucket-config'
+  /llmo/onboard:
+    $ref: './llmo-api.yaml#/llmo-onboard'
   /sites/{siteId}/reports:
     $ref: './site-api.yaml#/site-reports'
   /sites/{siteId}/reports/{reportId}:

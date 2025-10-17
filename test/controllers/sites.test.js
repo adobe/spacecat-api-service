@@ -39,6 +39,7 @@ describe('Sites Controller', () => {
     info: sandbox.stub(),
     error: sandbox.stub(),
     warn: sandbox.stub(),
+    debug: sandbox.stub(),
   };
 
   const SITE_IDS = ['0b4dcf79-fe5f-410b-b11f-641f0bf56da3', 'c4420c67-b4e8-443d-b7ab-0099cfd5da20'];
@@ -65,10 +66,10 @@ describe('Sites Controller', () => {
 
   const sites = [
     {
-      siteId: SITE_IDS[0], baseURL: 'https://site1.com', deliveryType: 'aem_edge', authoringType: 'cs/crosswalk', deliveryConfig: {}, config: Config({}), hlxConfig: {}, isSandbox: false,
+      siteId: SITE_IDS[0], baseURL: 'https://site1.com', deliveryType: 'aem_edge', authoringType: 'cs/crosswalk', deliveryConfig: {}, config: Config({}), hlxConfig: {}, isSandbox: false, code: null,
     },
     {
-      siteId: SITE_IDS[1], baseURL: 'https://site2.com', deliveryType: 'aem_edge', authoringType: 'cs/crosswalk', config: Config({}), hlxConfig: {}, isSandbox: false,
+      siteId: SITE_IDS[1], baseURL: 'https://site2.com', deliveryType: 'aem_edge', authoringType: 'cs/crosswalk', config: Config({}), hlxConfig: {}, isSandbox: false, code: null,
     },
   ].map((site) => new Site(
     {
@@ -89,6 +90,7 @@ describe('Sites Controller', () => {
                 hlxConfig: { type: 'any', name: 'hlxConfig', get: (value) => value },
                 deliveryConfig: { type: 'any', name: 'deliveryConfig', get: (value) => value },
                 updatedBy: { type: 'string', name: 'updatedBy', get: (value) => value },
+                code: { type: 'any', name: 'code', get: (value) => value },
               },
             },
           },
@@ -153,12 +155,12 @@ describe('Sites Controller', () => {
     'removeSite',
     'updateSite',
     'updateCdnLogsConfig',
+    'getTopPages',
     'createKeyEvent',
     'getKeyEventsBySiteID',
     'removeKeyEvent',
     'getSiteMetricsBySource',
     'getPageMetricsBySource',
-    'getTopPages',
   ];
 
   let mockDataAccess;
@@ -1471,6 +1473,34 @@ describe('Sites Controller', () => {
     expect(updatedSite).to.have.property('isLive', true);
   });
 
+  it('updates a site with code config', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    const codeConfig = {
+      type: 'github',
+      owner: 'test-owner',
+      repo: 'test-repo',
+      ref: 'main',
+      url: 'https://github.com/test-owner/test-repo',
+    };
+
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        code: codeConfig,
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+
+    const updatedSite = await response.json();
+    expect(updatedSite).to.have.property('id', SITE_IDS[0]);
+    expect(updatedSite).to.have.property('code');
+    expect(updatedSite.code).to.deep.equal(codeConfig);
+  });
+
   describe('pageTypes validation', () => {
     it('updates site with valid pageTypes', async () => {
       const site = sites[0];
@@ -1646,6 +1676,126 @@ describe('Sites Controller', () => {
       expect(response.status).to.equal(400);
       const error = await response.json();
       expect(error).to.have.property('message', 'pageTypes[1] must have a name');
+    });
+  });
+
+  describe('isPrimaryLocale, language, and region updates', () => {
+    it('updates site with projectId', async () => {
+      const site = sites[0];
+      const currentProjectId = '550e8400-e29b-41d4-a716-446655440000';
+      const newProjectId = '650e8400-e29b-41d4-a716-446655440000';
+      site.getProjectId = sandbox.stub().returns(currentProjectId);
+      site.setProjectId = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { projectId: newProjectId },
+        ...defaultAuthAttributes,
+      });
+
+      expect(site.setProjectId).to.have.been.calledWith(newProjectId);
+      expect(site.save).to.have.been.calledOnce;
+      expect(response.status).to.equal(200);
+    });
+
+    it('updates site with isPrimaryLocale', async () => {
+      const site = sites[0];
+      site.getIsPrimaryLocale = sandbox.stub().returns(false);
+      site.setIsPrimaryLocale = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { isPrimaryLocale: true },
+        ...defaultAuthAttributes,
+      });
+
+      expect(site.setIsPrimaryLocale).to.have.been.calledWith(true);
+      expect(site.save).to.have.been.calledOnce;
+      expect(response.status).to.equal(200);
+    });
+
+    it('updates site with valid language in ISO 639-1 format', async () => {
+      const site = sites[0];
+      site.getLanguage = sandbox.stub().returns('en');
+      site.setLanguage = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { language: 'fr' },
+        ...defaultAuthAttributes,
+      });
+
+      expect(site.setLanguage).to.have.been.calledWith('fr');
+      expect(site.save).to.have.been.calledOnce;
+      expect(response.status).to.equal(200);
+    });
+
+    it('returns bad request for invalid language format', async () => {
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { language: 'EN' }, // Should be lowercase
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Language must be in ISO 639-1 format (2 lowercase letters)');
+    });
+
+    it('returns bad request for language with wrong length', async () => {
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { language: 'eng' }, // Should be 2 letters
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Language must be in ISO 639-1 format (2 lowercase letters)');
+    });
+
+    it('updates site with valid region in ISO 3166-1 alpha-2 format', async () => {
+      const site = sites[0];
+      site.getRegion = sandbox.stub().returns('US');
+      site.setRegion = sandbox.stub();
+      site.save = sandbox.stub().resolves(site);
+
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { region: 'FR' },
+        ...defaultAuthAttributes,
+      });
+
+      expect(site.setRegion).to.have.been.calledWith('FR');
+      expect(site.save).to.have.been.calledOnce;
+      expect(response.status).to.equal(200);
+    });
+
+    it('returns bad request for invalid region format', async () => {
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { region: 'us' }, // Should be uppercase
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Region must be in ISO 3166-1 alpha-2 format (2 uppercase letters)');
+    });
+
+    it('returns bad request for region with wrong length', async () => {
+      const response = await sitesController.updateSite({
+        params: { siteId: SITE_IDS[0] },
+        data: { region: 'USA' }, // Should be 2 letters
+        ...defaultAuthAttributes,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Region must be in ISO 3166-1 alpha-2 format (2 uppercase letters)');
     });
   });
 

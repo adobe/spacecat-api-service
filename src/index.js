@@ -40,6 +40,7 @@ import matchPath, { sanitizePath } from './utils/route-utils.js';
 
 import AuditsController from './controllers/audits.js';
 import OrganizationsController from './controllers/organizations.js';
+import ProjectsController from './controllers/project.js';
 import SitesController from './controllers/sites.js';
 import ExperimentsController from './controllers/experiments.js';
 import HooksController from './controllers/hooks.js';
@@ -67,8 +68,7 @@ import ConsentBannerController from './controllers/consentBanner.js';
 import ScrapeController from './controllers/scrape.js';
 import ScrapeJobController from './controllers/scrapeJob.js';
 import ReportsController from './controllers/reports.js';
-import LlmoController from './controllers/llmo.js';
-import OrganizationIdentityProvidersController from './controllers/organization-identity-providers.js';
+import LlmoController from './controllers/llmo/llmo.js';
 import UserActivitiesController from './controllers/user-activities.js';
 import SiteEnrollmentsController from './controllers/site-enrollments.js';
 import TrialUsersController from './controllers/trial-users.js';
@@ -111,6 +111,7 @@ async function run(request, context) {
     const configurationController = ConfigurationController(context);
     const hooksController = HooksController(context);
     const organizationsController = OrganizationsController(context, context.env);
+    const projectsController = ProjectsController(context, context.env);
     const sitesController = SitesController(context, log, context.env);
     const experimentsController = ExperimentsController(context);
     const slackController = SlackController(SlackApp);
@@ -131,7 +132,6 @@ async function run(request, context) {
     const reportsController = ReportsController(context, log, context.env);
     const llmoController = LlmoController(context);
     const fixesController = new FixesController(context);
-    const orgIdentityProvidersController = OrganizationIdentityProvidersController(context);
     const userActivitiesController = UserActivitiesController(context);
     const siteEnrollmentsController = SiteEnrollmentsController(context);
     const trialUsersController = TrialUsersController(context);
@@ -143,6 +143,7 @@ async function run(request, context) {
       configurationController,
       hooksController,
       organizationsController,
+      projectsController,
       sitesController,
       experimentsController,
       slackController,
@@ -163,7 +164,6 @@ async function run(request, context) {
       trafficController,
       fixesController,
       llmoController,
-      orgIdentityProvidersController,
       userActivitiesController,
       siteEnrollmentsController,
       trialUsersController,

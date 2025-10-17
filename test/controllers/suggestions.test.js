@@ -1634,7 +1634,8 @@ describe('Suggestions Controller', () => {
     });
   });
 
-  describe('auto-fix suggestions for CS', () => {
+  describe('auto-fix suggestions for CS', function () {
+    this.timeout(10000);
     let spySqs;
     let sqsSpy;
     let imsPromiseClient;

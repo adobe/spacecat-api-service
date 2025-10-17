@@ -39,6 +39,7 @@ describe('Preflight Controller', () => {
     info: sandbox.stub(),
     error: sandbox.stub(),
     warn: sandbox.stub(),
+    debug: sandbox.stub(),
   };
 
   const mockJob = {
@@ -169,7 +170,6 @@ describe('Preflight Controller', () => {
             urls: ['https://main--example-site.aem.page/test.html'],
             step: 'identify',
             enableAuthentication: true,
-            checks: ['canonical', 'links', 'metatags', 'body-size', 'lorem-ipsum', 'h1-count', 'accessibility', 'readability'],
           },
           jobType: 'preflight',
           tags: ['preflight'],
@@ -218,7 +218,6 @@ describe('Preflight Controller', () => {
             urls: ['https://main--example-site.aem.page/test.html'],
             step: 'identify',
             enableAuthentication: false,
-            checks: ['canonical', 'links', 'metatags', 'body-size', 'lorem-ipsum', 'h1-count', 'accessibility', 'readability'],
           },
           jobType: 'preflight',
           tags: ['preflight'],
@@ -233,88 +232,6 @@ describe('Preflight Controller', () => {
           siteId: 'test-site-123',
         },
       );
-    });
-
-    it('creates a preflight job with specific checks', async () => {
-      const context = {
-        data: {
-          urls: ['https://example.com/test.html'],
-          step: 'identify',
-          checks: ['canonical', 'metatags'],
-        },
-      };
-
-      const response = await preflightController.createPreflightJob(context);
-      expect(response.status).to.equal(202);
-
-      expect(mockDataAccess.AsyncJob.create).to.have.been.calledWith({
-        status: 'IN_PROGRESS',
-        metadata: {
-          payload: {
-            siteId: 'test-site-123',
-            urls: ['https://example.com/test.html'],
-            step: 'identify',
-            enableAuthentication: true,
-            checks: ['canonical', 'metatags'],
-          },
-          jobType: 'preflight',
-          tags: ['preflight'],
-        },
-      });
-    });
-
-    it('returns 400 Bad Request for empty checks array', async () => {
-      const context = {
-        data: {
-          urls: ['https://example.com/test.html'],
-          step: 'identify',
-          checks: [],
-        },
-      };
-
-      const response = await preflightController.createPreflightJob(context);
-      expect(response.status).to.equal(400);
-
-      const result = await response.json();
-      expect(result).to.deep.equal({
-        message: 'Invalid request: checks must be a non-empty array of strings',
-      });
-    });
-
-    it('returns 400 Bad Request for invalid check type', async () => {
-      const context = {
-        data: {
-          urls: ['https://example.com/test.html'],
-          step: 'identify',
-          checks: ['invalid-check'],
-        },
-      };
-
-      const response = await preflightController.createPreflightJob(context);
-      expect(response.status).to.equal(400);
-
-      const result = await response.json();
-      expect(result).to.deep.equal({
-        message: 'Invalid request: checks must be one of: canonical, links, metatags, body-size, lorem-ipsum, h1-count, accessibility, readability',
-      });
-    });
-
-    it('returns 400 Bad Request if checks is not an array', async () => {
-      const context = {
-        data: {
-          urls: ['https://example.com/test.html'],
-          step: 'identify',
-          checks: 'canonical',
-        },
-      };
-
-      const response = await preflightController.createPreflightJob(context);
-      expect(response.status).to.equal(400);
-
-      const result = await response.json();
-      expect(result).to.deep.equal({
-        message: 'Invalid request: checks must be a non-empty array of strings',
-      });
     });
 
     it('creates a preflight job successfully in CI environment', async () => {
@@ -353,7 +270,6 @@ describe('Preflight Controller', () => {
             urls: ['https://main--example-site.aem.page/test.html'],
             step: 'identify',
             enableAuthentication: true,
-            checks: ['canonical', 'links', 'metatags', 'body-size', 'lorem-ipsum', 'h1-count', 'accessibility', 'readability'],
           },
           jobType: 'preflight',
           tags: ['preflight'],
