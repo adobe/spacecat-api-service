@@ -429,11 +429,35 @@ function LlmoController(ctx) {
         },
       });
 
-      log.info(`Updated LLMO config in S3 for siteId: ${siteId}, version: ${version}`);
+      // Calculate config summary
+      const userId = context.attributes?.authInfo?.getProfile()?.email || 'system';
+      const numCategories = Object.keys(parsedConfig.categories || {}).length;
+      const numTopics = Object.keys(parsedConfig.topics || {}).length;
+      const numPrompts = Object.values(parsedConfig.topics || {}).reduce(
+        (total, topic) => total + (topic.prompts?.length || 0),
+        0,
+      );
+      const numBrandAliases = parsedConfig.brands?.aliases?.length || 0;
+      const numCompetitors = parsedConfig.competitors?.competitors?.length || 0;
+      const numDeletedPrompts = Object.keys(parsedConfig.deleted?.prompts || {}).length;
+
+      // Build config summary
+      const summaryParts = [
+        `${numPrompts} prompts`,
+        `${numCategories} categories`,
+        `${numTopics} topics`,
+        `${numBrandAliases} brand aliases`,
+        `${numCompetitors} competitors`,
+        `${numDeletedPrompts} deleted prompts`,
+      ];
+      const configSummary = summaryParts.join(', ');
+
+      log.info(`User ${userId} modifying customer configuration (${configSummary}) for siteId: ${siteId}, version: ${version}`);
       return ok({ version });
     } catch (error) {
       const msg = `${error?.message || /* c8 ignore next */ error}`;
-      log.error(`Error updating llmo config for siteId: ${siteId}, error: ${msg}`);
+      const userId = context.attributes?.authInfo?.getProfile()?.email || 'system';
+      log.error(`User ${userId} error updating llmo config for siteId: ${siteId}, error: ${msg}`);
       return badRequest(msg);
     }
   }
