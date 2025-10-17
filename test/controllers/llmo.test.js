@@ -1881,4 +1881,77 @@ describe('LlmoController', () => {
       expect(mockLog.error).to.have.been.calledWith('Error during LLMO onboarding: Validation error');
     });
   });
+
+  describe('offboardCustomer', () => {
+    let offboardingContext;
+    let performLlmoOffboardingStub;
+
+    beforeEach(() => {
+      const mockSiteConfig = {
+        getLlmoConfig: sinon.stub().returns({
+          dataFolder: 'dev/example-com',
+          brand: 'Test Brand',
+        }),
+      };
+
+      mockSite.getConfig = sinon.stub().returns(mockSiteConfig);
+
+      offboardingContext = {
+        ...mockContext,
+        params: {
+          siteId: 'site123',
+        },
+      };
+
+      performLlmoOffboardingStub = sinon.stub().resolves({
+        siteId: 'site123',
+        baseURL: 'https://example.com',
+        dataFolder: 'dev/example-com',
+        message: 'LLMO offboarding completed successfully',
+      });
+    });
+
+    it('should successfully offboard a customer', async () => {
+      const LlmoControllerOffboard = await esmock('../../src/controllers/llmo/llmo.js', {
+        '../../src/controllers/llmo/llmo-onboarding.js': {
+          performLlmoOffboarding: performLlmoOffboardingStub,
+        },
+        '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+      });
+      const testController = LlmoControllerOffboard(mockContext);
+
+      const result = await testController.offboardCustomer(offboardingContext);
+
+      expect(performLlmoOffboardingStub).to.have.been.calledOnce;
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.include({
+        message: 'LLMO offboarding completed successfully',
+        siteId: 'site123',
+        baseURL: 'https://example.com',
+        dataFolder: 'dev/example-com',
+        status: 'completed',
+      });
+      expect(responseBody.completedAt).to.be.a('string');
+    });
+
+    it('should return bad request when offboarding fails', async () => {
+      performLlmoOffboardingStub.rejects(new Error('Offboarding failed'));
+
+      const LlmoControllerOffboard = await esmock('../../src/controllers/llmo/llmo.js', {
+        '../../src/controllers/llmo/llmo-onboarding.js': {
+          performLlmoOffboarding: performLlmoOffboardingStub,
+        },
+        '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+      });
+      const testController = LlmoControllerOffboard(mockContext);
+
+      const result = await testController.offboardCustomer(offboardingContext);
+
+      expect(result.status).to.equal(400);
+      expect(mockLog.error).to.have.been.calledWith(
+        'Error during LLMO offboarding for site site123: Offboarding failed',
+      );
+    });
+  });
 });

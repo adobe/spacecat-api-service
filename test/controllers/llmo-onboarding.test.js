@@ -46,6 +46,7 @@ describe('LLMO Onboarding Functions', () => {
       info: sinon.stub(),
       error: sinon.stub(),
       debug: sinon.stub(),
+      warn: sinon.stub(),
     };
 
     // Create mock environment
@@ -667,6 +668,20 @@ describe('LLMO Onboarding Functions', () => {
         }),
       };
 
+      // Mock tracingFetch for publishToAdminHlx
+      const mockTracingFetch = sinon.stub().resolves({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+      });
+
+      // Mock setTimeout to execute immediately (avoid 2 second delay)
+      const originalSetTimeout = global.setTimeout;
+      global.setTimeout = sinon.stub().callsFake((fn) => {
+        fn();
+        return 1; // Return a fake timer ID
+      });
+
       // Mock the Config import
       const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
         '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
@@ -702,6 +717,10 @@ describe('LLMO Onboarding Functions', () => {
         },
         '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
           Config: mockConfig,
+        },
+        '@adobe/spacecat-shared-utils': {
+          tracingFetch: mockTracingFetch,
+          composeBaseURL: sinon.stub().callsFake((domain) => `https://${domain}`),
         },
       });
 
@@ -752,9 +771,15 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('llmo-customer-analysis', mockSite);
       expect(mockConfiguration.save).to.have.been.called;
 
+      // Verify tracingFetch was called for publishing
+      expect(mockTracingFetch).to.have.been.called;
+
       // Verify logging
       expect(mockLog.info).to.have.been.calledWith('Starting LLMO onboarding for IMS org ABC123@AdobeOrg, domain example.com, brand Test Brand');
       expect(mockLog.info).to.have.been.calledWith('Created site site123 for https://example.com');
+
+      // Restore setTimeout
+      global.setTimeout = originalSetTimeout;
     });
 
     it('should create new organization when organization does not exist', async () => {
@@ -803,6 +828,20 @@ describe('LLMO Onboarding Functions', () => {
         }),
       };
 
+      // Mock tracingFetch for publishToAdminHlx
+      const mockTracingFetch = sinon.stub().resolves({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+      });
+
+      // Mock setTimeout to execute immediately (avoid 2 second delay)
+      const originalSetTimeout = global.setTimeout;
+      global.setTimeout = sinon.stub().callsFake((fn) => {
+        fn();
+        return 1; // Return a fake timer ID
+      });
+
       // Mock the module
       const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
         '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
@@ -839,6 +878,10 @@ describe('LLMO Onboarding Functions', () => {
         '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
           Config: mockConfig,
         },
+        '@adobe/spacecat-shared-utils': {
+          tracingFetch: mockTracingFetch,
+          composeBaseURL: sinon.stub().callsFake((domain) => `https://${domain}`),
+        },
       });
 
       const context = {
@@ -869,6 +912,585 @@ describe('LLMO Onboarding Functions', () => {
       // Verify result
       expect(result.organizationId).to.equal('new-org-123');
       expect(result.siteId).to.equal('site456');
+
+      // Restore setTimeout
+      global.setTimeout = originalSetTimeout;
+    });
+
+    it('should call cleanup functions when site.save() throws an error', async () => {
+      // Mock organization
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      // Mock site that throws on save
+      const mockSite = {
+        getId: sinon.stub().returns('site789'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().rejects(new Error('Database save failed')),
+      };
+
+      // Mock configuration
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      // Setup mocks
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null); // New site
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      // Mock Config.toDynamoItem
+      const mockConfigToDynamoItem = sinon.stub().returns({ config: 'dynamo-item' });
+      const mockConfig = {
+        toDynamoItem: mockConfigToDynamoItem,
+      };
+
+      // Mock TierClient
+      const mockTierClient = {
+        createForSite: sinon.stub().returns({
+          createEntitlement: sinon.stub().resolves({
+            entitlement: {
+              getId: sinon.stub().returns('entitlement789'),
+            },
+            siteEnrollment: {
+              getId: sinon.stub().returns('enrollment789'),
+            },
+          }),
+          revokeSiteEnrollment: sinon.stub().resolves(),
+        }),
+      };
+
+      // Mock tracingFetch for unpublishFromAdminHlx (will be called twice in cleanup)
+      const mockTracingFetch = sinon.stub().resolves({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+      });
+
+      // Mock setTimeout to execute immediately
+      const originalSetTimeout = global.setTimeout;
+      global.setTimeout = sinon.stub().callsFake((fn) => {
+        fn();
+        return 1;
+      });
+
+      // Mock SharePoint folder operations
+      const mockSharePointFolderLocal = {
+        exists: sinon.stub().resolves(true),
+        delete: sinon.stub().resolves(),
+      };
+
+      const mockSharePointClientLocal = {
+        getDocument: sinon.stub().returns(mockSharePointFolderLocal),
+      };
+
+      // Mock the Config import
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+          Entitlement: {
+            PRODUCT_CODES: { LLMO: 'LLMO' },
+            TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+          },
+        },
+        '@adobe/spacecat-shared-tier-client': {
+          default: mockTierClient,
+        },
+        '@adobe/spacecat-helix-content-sdk': {
+          createFrom: sinon.stub().resolves(mockSharePointClientLocal),
+        },
+        '@octokit/rest': {
+          Octokit: sinon.stub().returns({
+            repos: {
+              getContent: sinon.stub().resolves({
+                data: {
+                  content: Buffer.from('test content').toString('base64'),
+                  sha: 'test-sha-123',
+                },
+              }),
+              createOrUpdateFileContents: sinon.stub().resolves(),
+            },
+          }),
+        },
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: mockConfig,
+        },
+        '@adobe/spacecat-shared-utils': {
+          tracingFetch: mockTracingFetch,
+          composeBaseURL: sinon.stub().callsFake((domain) => `https://${domain}`),
+        },
+      });
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+      };
+
+      const params = {
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      };
+
+      // Execute and expect error to be thrown
+      try {
+        await performLlmoOnboardingWithMocks(params, context);
+        expect.fail('Should have thrown an error');
+      } catch (error) {
+        expect(error.message).to.equal('Database save failed');
+      }
+
+      // Verify cleanup was attempted
+      expect(mockLog.error).to.have.been.calledWith(sinon.match('Error during LLMO onboarding: Database save failed. Attempting cleanup.'));
+
+      // Verify deleteSharePointFolder was called (which deletes folder and unpublishes)
+      expect(mockSharePointFolderLocal.exists).to.have.been.called;
+      expect(mockSharePointFolderLocal.delete).to.have.been.called;
+      expect(mockTracingFetch).to.have.callCount(6);
+
+      // Verify revokeEnrollment was called
+      const tierClient = mockTierClient.createForSite.returnValues[0];
+      expect(tierClient.revokeSiteEnrollment).to.have.been.called;
+
+      // Restore setTimeout
+      global.setTimeout = originalSetTimeout;
+    });
+  });
+
+  describe('createEntitlementAndEnrollment', () => {
+    it('should re-throw error when tierClient throws', async () => {
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+      };
+
+      const tierError = new Error('Tier service unavailable');
+      const mockTierClient = {
+        createForSite: sinon.stub().rejects(tierError),
+      };
+
+      const {
+        createEntitlementAndEnrollment: createEntitlementAndEnrollmentWithMocks,
+      } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-tier-client': {
+          default: mockTierClient,
+        },
+      });
+
+      try {
+        await createEntitlementAndEnrollmentWithMocks(mockSite, { log: mockLog });
+        expect.fail('Should have thrown an error');
+      } catch (error) {
+        expect(error.message).to.equal('Tier service unavailable');
+      }
+    });
+  });
+
+  describe('deleteSharePointFolder', () => {
+    async function setupDeleteSharePointFolderTest(folderExists, deleteResult) {
+      const mockFolder = {
+        exists: sinon.stub().resolves(folderExists),
+        delete: deleteResult instanceof Error
+          ? sinon.stub().rejects(deleteResult)
+          : sinon.stub().resolves(deleteResult),
+      };
+
+      const spClient = {
+        getDocument: sinon.stub().returns(mockFolder),
+      };
+
+      // Mock tracingFetch for unpublishFromAdminHlx
+      const mockTracingFetch = sinon.stub().resolves({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+      });
+
+      const {
+        deleteSharePointFolder: deleteSharePointFolderWithMocks,
+      } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-helix-content-sdk': {
+          createFrom: sinon.stub().resolves(spClient),
+        },
+        '@adobe/spacecat-shared-utils': {
+          tracingFetch: mockTracingFetch,
+        },
+      });
+
+      return {
+        deleteSharePointFolderWithMocks, mockFolder, spClient, mockTracingFetch,
+      };
+    }
+
+    it('should successfully delete a folder when it exists', async () => {
+      const dataFolder = 'dev/test-com';
+      const {
+        deleteSharePointFolderWithMocks,
+        mockFolder,
+        spClient,
+        mockTracingFetch,
+      } = await setupDeleteSharePointFolderTest(true);
+
+      await deleteSharePointFolderWithMocks(dataFolder, { log: mockLog, env: mockEnv });
+
+      expect(spClient.getDocument)
+        .to.have.been.calledWith('/sites/elmo-ui-data/dev/test-com/');
+      expect(mockFolder.exists).to.have.been.called;
+      expect(mockFolder.delete).to.have.been.called;
+
+      // Verify unpublishFromAdminHlx was called (via tracingFetch)
+      expect(mockTracingFetch).to.have.been.called;
+    });
+
+    it('should handle case when folder does not exist', async () => {
+      const dataFolder = 'dev/nonexistent-com';
+      const {
+        deleteSharePointFolderWithMocks,
+        mockFolder,
+        mockTracingFetch,
+      } = await setupDeleteSharePointFolderTest(false);
+
+      await deleteSharePointFolderWithMocks(dataFolder, { log: mockLog, env: mockEnv });
+
+      expect(mockFolder.exists).to.have.been.called;
+      expect(mockFolder.delete).to.not.have.been.called;
+
+      // Verify unpublishFromAdminHlx was still called even if folder doesn't exist
+      expect(mockTracingFetch).to.have.been.called;
+    });
+
+    it('should handle errors when folder delete fails', async () => {
+      const dataFolder = 'dev/error-com';
+      const deleteError = new Error('Permission denied');
+      const {
+        deleteSharePointFolderWithMocks,
+        mockFolder,
+        mockTracingFetch,
+      } = await setupDeleteSharePointFolderTest(true, deleteError);
+
+      await deleteSharePointFolderWithMocks(dataFolder, { log: mockLog, env: mockEnv });
+
+      expect(mockFolder.exists).to.have.been.called;
+      expect(mockLog.error).to.have.been.calledWith(
+        'Error deleting SharePoint folder dev/error-com: Permission denied',
+      );
+
+      // Verify unpublishFromAdminHlx was still called even after SharePoint error
+      expect(mockTracingFetch).to.have.been.called;
+    });
+  });
+
+  describe('revokeEnrollment', () => {
+    it('should log error when tier client throws an error', async () => {
+      // Mock site
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+      };
+
+      // Mock TierClient that throws an error
+      const mockTierClient = {
+        createForSite: sinon.stub().rejects(new Error('Tier service unavailable')),
+      };
+
+      // Mock the module with failing TierClient
+      const { revokeEnrollment: revokeEnrollmentWithMocks } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-tier-client': {
+          default: mockTierClient,
+        },
+      });
+
+      const context = {
+        log: mockLog,
+      };
+
+      // Call revokeEnrollment - should not throw
+      await revokeEnrollmentWithMocks(mockSite, context);
+
+      // Verify error was logged
+      expect(mockLog.error).to.have.been.calledWith('Error revoking LLMO enrollment for site site123: Tier service unavailable');
+
+      // Verify info logs were still called
+      expect(mockLog.info).to.have.been.calledWith('Revoking LLMO enrollment for site site123');
+
+      // Verify the successful log was NOT called since it failed
+      expect(mockLog.info).to.not.have.been.calledWith('Successfully revoked LLMO enrollment for site site123');
+    });
+
+    it('should log error when revokeSiteEnrollment throws an error', async () => {
+      // Mock site
+      const mockSite = {
+        getId: sinon.stub().returns('site456'),
+      };
+
+      // Mock TierClient where revokeSiteEnrollment throws
+      const mockTierClient = {
+        createForSite: sinon.stub().resolves({
+          revokeSiteEnrollment: sinon.stub().rejects(new Error('Enrollment not found')),
+        }),
+      };
+
+      // Mock the module with failing revokeSiteEnrollment
+      const { revokeEnrollment: revokeEnrollmentWithMocks } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-tier-client': {
+          default: mockTierClient,
+        },
+      });
+
+      const context = {
+        log: mockLog,
+      };
+
+      // Call revokeEnrollment - should not throw
+      await revokeEnrollmentWithMocks(mockSite, context);
+
+      // Verify error was logged
+      expect(mockLog.error).to.have.been.calledWith('Error revoking LLMO enrollment for site site456: Enrollment not found');
+
+      // Verify the successful log was NOT called since it failed
+      expect(mockLog.info).to.not.have.been.calledWith('Successfully revoked LLMO enrollment for site site456');
+    });
+  });
+
+  describe('performLlmoOffboarding', () => {
+    it('should successfully offboard a site (happy path)', async () => {
+      // Mock site
+      const mockSite = {
+        getId: sinon.stub().returns('site789'),
+        getBaseURL: sinon.stub().returns('https://offboard.com'),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      // Mock config with LLMO config
+      const mockConfig = {
+        getLlmoConfig: sinon.stub().returns({
+          dataFolder: 'dev/offboard-com',
+          brand: 'Test Brand',
+        }),
+        updateLlmoBrand: sinon.stub(),
+        updateLlmoDataFolder: sinon.stub(),
+      };
+
+      // Mock TierClient for revoke enrollment
+      const mockTierClient = {
+        createForSite: sinon.stub().resolves({
+          revokeSiteEnrollment: sinon.stub().resolves(),
+        }),
+      };
+
+      // Mock Config.toDynamoItem
+      const mockConfigClass = {
+        toDynamoItem: sinon.stub().returns({ config: 'dynamo-item' }),
+      };
+
+      // Mock tracingFetch for unpublishFromAdminHlx
+      const mockTracingFetch = sinon.stub().resolves({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+      });
+
+      // Mock composeBaseURL
+      const mockComposeBaseURL = sinon.stub().callsFake((url) => url);
+
+      // Mock the module with all dependencies
+      const { performLlmoOffboarding } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-tier-client': {
+          default: mockTierClient,
+        },
+        '@adobe/spacecat-helix-content-sdk': {
+          createFrom: sinon.stub().resolves({
+            getDocument: sinon.stub().returns({
+              exists: sinon.stub().resolves(true),
+              delete: sinon.stub().resolves(),
+            }),
+          }),
+        },
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: mockConfigClass,
+        },
+        '@adobe/spacecat-shared-utils': {
+          composeBaseURL: mockComposeBaseURL,
+          tracingFetch: mockTracingFetch,
+        },
+      });
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+      };
+
+      const result = await performLlmoOffboarding(mockSite, mockConfig, context);
+
+      // Verify the result
+      expect(result).to.deep.equal({
+        siteId: 'site789',
+        baseURL: 'https://offboard.com',
+        dataFolder: 'dev/offboard-com',
+        message: 'LLMO offboarding completed successfully',
+      });
+
+      // Verify LLMO config was retrieved
+      expect(mockConfig.getLlmoConfig).to.have.been.called;
+
+      // Verify LLMO config was removed
+      expect(mockConfig.updateLlmoBrand).to.have.been.calledWith(null);
+      expect(mockConfig.updateLlmoDataFolder).to.have.been.calledWith(null);
+      expect(mockSite.setConfig).to.have.been.calledWith({ config: 'dynamo-item' });
+      expect(mockSite.save).to.have.been.called;
+
+      // Verify TierClient was called to revoke enrollment
+      expect(mockTierClient.createForSite).to.have.been.called;
+
+      // Verify tracingFetch was called to unpublish from admin.hlx.page (2 times: live and preview)
+      expect(mockTracingFetch).to.have.been.calledTwice;
+
+      // Verify logging
+      expect(mockLog.info).to.have.been.calledWith('Starting LLMO offboarding process for site: site789');
+      expect(mockLog.info).to.have.been.calledWith('Offboarding site site789 with domain https://offboard.com and data folder dev/offboard-com');
+      expect(mockLog.info).to.have.been.calledWith('LLMO offboarding process completed for site site789');
+
+      // Verify no errors were logged (fetch should have succeeded)
+      expect(mockLog.error.called).to.be.false;
+    });
+
+    it('should successfully offboard a site when dataFolder is not set (recalculated)', async () => {
+      // Mock site
+      const mockSite = {
+        getId: sinon.stub().returns('site999'),
+        getBaseURL: sinon.stub().returns('https://recalc-test.com'),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      // Mock config with LLMO config that has NO dataFolder set
+      const mockConfig = {
+        getLlmoConfig: sinon.stub().returns({
+          brand: 'Test Brand',
+          // dataFolder is intentionally missing
+        }),
+        updateLlmoBrand: sinon.stub(),
+        updateLlmoDataFolder: sinon.stub(),
+      };
+
+      // Mock TierClient for revoke enrollment
+      const mockTierClient = {
+        createForSite: sinon.stub().resolves({
+          revokeSiteEnrollment: sinon.stub().resolves(),
+        }),
+      };
+
+      // Mock Config.toDynamoItem
+      const mockConfigClass = {
+        toDynamoItem: sinon.stub().returns({ config: 'dynamo-item' }),
+      };
+
+      // Mock tracingFetch for unpublishFromAdminHlx
+      const mockTracingFetch = sinon.stub().resolves({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+      });
+
+      // Mock composeBaseURL
+      const mockComposeBaseURL = sinon.stub().callsFake((url) => url);
+
+      // Mock the module with all dependencies
+      const { performLlmoOffboarding } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-tier-client': {
+          default: mockTierClient,
+        },
+        '@adobe/spacecat-helix-content-sdk': {
+          createFrom: sinon.stub().resolves({
+            getDocument: sinon.stub().returns({
+              exists: sinon.stub().resolves(true),
+              delete: sinon.stub().resolves(),
+            }),
+          }),
+        },
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: mockConfigClass,
+        },
+        '@adobe/spacecat-shared-utils': {
+          composeBaseURL: mockComposeBaseURL,
+          tracingFetch: mockTracingFetch,
+        },
+      });
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+      };
+
+      const result = await performLlmoOffboarding(mockSite, mockConfig, context);
+
+      // Verify the result - dataFolder should be recalculated
+      expect(result).to.deep.equal({
+        siteId: 'site999',
+        baseURL: 'https://recalc-test.com',
+        dataFolder: 'dev/recalc-test-com', // Recalculated from base URL
+        message: 'LLMO offboarding completed successfully',
+      });
+
+      // Verify LLMO config was retrieved
+      expect(mockConfig.getLlmoConfig).to.have.been.called;
+
+      // Verify debug log for recalculation
+      expect(mockLog.debug).to.have.been.calledWith('Data folder not found in LLMO config, calculating from base URL: https://recalc-test.com');
+
+      // Verify LLMO config was removed
+      expect(mockConfig.updateLlmoBrand).to.have.been.calledWith(null);
+      expect(mockConfig.updateLlmoDataFolder).to.have.been.calledWith(null);
+      expect(mockSite.setConfig).to.have.been.calledWith({ config: 'dynamo-item' });
+      expect(mockSite.save).to.have.been.called;
+
+      // Verify TierClient was called to revoke enrollment
+      expect(mockTierClient.createForSite).to.have.been.called;
+
+      // Verify tracingFetch was called to unpublish from admin.hlx.page (2 times: live and preview)
+      expect(mockTracingFetch).to.have.been.calledTwice;
+
+      // Verify logging
+      expect(mockLog.info).to.have.been.calledWith('Starting LLMO offboarding process for site: site999');
+      expect(mockLog.info).to.have.been.calledWith('Offboarding site site999 with domain https://recalc-test.com and data folder dev/recalc-test-com');
+      expect(mockLog.info).to.have.been.calledWith('LLMO offboarding process completed for site site999');
+
+      // Verify no errors were logged (fetch should have succeeded)
+      expect(mockLog.error.called).to.be.false;
+    });
+
+    it('should handle non-ok response when unpublishing from admin.hlx.page', async () => {
+      // Mock tracingFetch to return non-ok response
+      const mockTracingFetch = sinon.stub().resolves({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+      });
+
+      // Mock the module with tracingFetch
+      const { unpublishFromAdminHlx } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-shared-utils': {
+          tracingFetch: mockTracingFetch,
+        },
+      });
+
+      // Call unpublishFromAdminHlx directly
+      await unpublishFromAdminHlx('query-index', 'dev/offboard-com', mockLog);
+
+      // Verify that error was logged for unpublish failure
+      expect(mockLog.error).to.have.been.calledWith(sinon.match('Failed to unpublish via admin.hlx.page: live unpublish failed: 500 Internal Server Error'));
+
+      // Verify tracingFetch was called (attempted to unpublish)
+      expect(mockTracingFetch).to.have.been.called;
     });
   });
 });

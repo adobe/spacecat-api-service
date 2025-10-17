@@ -294,6 +294,8 @@ paths:
     $ref: './llmo-api.yaml#/llmo-cdn-logs-bucket-config'
   /llmo/onboard:
     $ref: './llmo-api.yaml#/llmo-onboard'
+  /sites/{siteId}/llmo/offboard:
+    $ref: './llmo-api.yaml#/llmo-offboard'
   /sites/{siteId}/reports:
     $ref: './site-api.yaml#/site-reports'
   /sites/{siteId}/reports/{reportId}:
