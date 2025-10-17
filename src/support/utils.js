@@ -1113,3 +1113,16 @@ export const onboardSingleSite = async (
 
   return reportLine;
 };
+
+export const filterSitesForProductCode = async (context, sites, productCode) => {
+  // for every site we will create tier client and will check valid entitlement and enrollment
+  const filteredSites = [];
+  for (const site of sites) {
+    const tierClient = await TierClient.createForSite(context, site, productCode);
+    const { entitlement, siteEnrollment } = await tierClient.checkValidEntitlement();
+    if (entitlement && siteEnrollment) {
+      filteredSites.push(site);
+    }
+  }
+  return filteredSites;
+};

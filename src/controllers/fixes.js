@@ -88,18 +88,48 @@ export class FixesController {
    */
   async getAllForOpportunity(context) {
     const { siteId, opportunityId } = context.params;
+    const { fixCreatedDate } = context.data || {};
 
     let res = checkRequestParams(siteId, opportunityId) ?? await this.#checkAccess(siteId);
     if (res) return res;
 
-    const fixEntities = await this.#FixEntity.allByOpportunityId(opportunityId);
+    let fixEntities = [];
+    let fixes = [];
+
+    if (hasText(fixCreatedDate)) {
+      const fixEntitiesWithSuggestions = await this.#FixEntity
+        .getAllFixesWithSuggestionByCreatedAt(opportunityId, fixCreatedDate);
+
+      if (fixEntitiesWithSuggestions.length === 0) {
+        return ok([]);
+      }
+
+      // Extract fix entities and attach suggestions to each one
+      fixEntities = fixEntitiesWithSuggestions.map((item) => {
+        const { fixEntity } = item;
+        // Attach suggestions to the fixEntity for DTO conversion
+        // eslint-disable-next-line no-underscore-dangle
+        fixEntity._suggestions = item.suggestions;
+        return fixEntity;
+      });
+
+      // Check ownership for the first fix entity to ensure
+      // the opportunity belongs to the site
+      res = await checkOwnership(fixEntities[0], opportunityId, siteId, this.#Opportunity);
+      if (res) return res;
+
+      fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
+      return ok(fixes);
+    }
+
+    fixEntities = await this.#FixEntity.allByOpportunityId(opportunityId);
 
     // Check whether the suggestion belongs to the opportunity,
     // and the opportunity belongs to the site.
     res = await checkOwnership(fixEntities[0], opportunityId, siteId, this.#Opportunity);
     if (res) return res;
 
-    const fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
+    fixes = fixEntities.map((fix) => FixDto.toJSON(fix));
     return ok(fixes);
   }
 
@@ -188,9 +218,16 @@ export class FixesController {
     const FixEntity = this.#FixEntity;
     const fixes = await Promise.all(context.data.map(async (fixData, index) => {
       try {
+        const fixEntity = await FixEntity.create({ ...fixData, opportunityId });
+        if (fixData.suggestionIds) {
+          const suggestions = await Promise.all(
+            fixData.suggestionIds.map((id) => this.#Suggestion.findById(id)),
+          );
+          await FixEntity.setSuggestionsForFixEntity(opportunityId, fixEntity, suggestions);
+        }
         return {
           index,
-          fix: FixDto.toJSON(await FixEntity.create({ ...fixData, opportunityId })),
+          fix: FixDto.toJSON(fixEntity),
           statusCode: 201,
         };
       } catch (error) {
@@ -326,10 +363,7 @@ export class FixesController {
         if (suggestions.some((s) => !s || s.getOpportunityId() !== opportunityId)) {
           return badRequest('Invalid suggestion IDs');
         }
-        for (const suggestion of suggestions) {
-          suggestion.setFixEntityId(fixId);
-        }
-        await Promise.all(suggestions.map((s) => s.save()));
+        await this.#FixEntity.setSuggestionsForFixEntity(opportunityId, fix, suggestions);
         hasUpdates = true;
       }
 

@@ -493,7 +493,6 @@ describe('GetPromptUsageCommand', () => {
       const categoryIdSite1 = '123e4567-e89b-12d3-a456-426614174000';
       const topicIdSite1 = '456e7890-e89b-12d3-a456-426614174001';
       const categoryIdSite3 = '123e4567-e89b-12d3-a456-426614174002';
-      const topicIdSite3 = '456e7890-e89b-12d3-a456-426614174003';
 
       const expectedConfigSite1 = {
         ...llmoConfig.defaultConfig(),
@@ -533,20 +532,7 @@ describe('GetPromptUsageCommand', () => {
             region: ['us'],
           },
         },
-        topics: {
-          [topicIdSite3]: {
-            name: 'test-topic',
-            category: categoryIdSite3,
-            prompts: [
-              {
-                prompt: 'What is the main topic?',
-                regions: ['ro'],
-                origin: 'human',
-                source: 'config',
-              },
-            ],
-          },
-        },
+        topics: {},
       };
 
       dataAccessStub.Organization.findByImsOrgId
@@ -593,9 +579,9 @@ describe('GetPromptUsageCommand', () => {
       });
 
       const args = [
-        'test-org-1@AdobeOrg\r',
-        'test-org-2@AdobeOrg\r',
-        'test-org-3@AdobeOrg\r',
+        'test-org-1@AdobeOrg',
+        'test-org-2@AdobeOrg',
+        'test-org-3@AdobeOrg',
       ];
       const command = GetPromptUsageCommand(context);
       await command.handleExecution(args, slackContext);
@@ -623,7 +609,7 @@ describe('GetPromptUsageCommand', () => {
 
       expect(lines[1]).to.equal('Test Org 1,test-org-1@AdobeOrg,FREE_TRIAL,2');
 
-      expect(lines[2]).to.equal('Test Org 3,test-org-3@AdobeOrg,PAID,1');
+      expect(lines[2]).to.equal('Test Org 3,test-org-3@AdobeOrg,PAID,0');
 
       expect(dataAccessStub.Organization.findByImsOrgId).to.have.been.calledWith('test-org-1@AdobeOrg');
       expect(dataAccessStub.Organization.findByImsOrgId).to.have.been.calledWith('test-org-2@AdobeOrg');
@@ -841,7 +827,7 @@ describe('GetPromptUsageCommand', () => {
       expect(channelId).to.equal('test-channel');
       expect(filename).to.match(/^prompt-usage-\d+-part1\.csv$/);
       expect(slackContext.say.firstCall.args[0]).to.equal(
-        ':progress-loader: Retrieving total number of prompts in use for *all* organizations...',
+        ':progress-loader: Retrieving total number of prompts in use for *all* organizations (excluding Adobe Corp)...',
       );
 
       const csvString = Buffer.isBuffer(csvBuffer)
@@ -1070,7 +1056,7 @@ describe('GetPromptUsageCommand', () => {
 
       expect(sendFileStub.calledOnce).to.be.true;
       expect(slackContext.say.firstCall.args[0]).to.equal(
-        ':progress-loader: Retrieving total number of prompts in use for *all* organizations...',
+        ':progress-loader: Retrieving total number of prompts in use for *all* organizations (excluding Adobe Corp)...',
       );
       expect(slackContext.say.secondCall.args[0]).to.equal(expectedMessage);
 
@@ -1242,7 +1228,7 @@ describe('GetPromptUsageCommand', () => {
       await command.handleExecution(args, slackContext);
 
       expect(slackContext.say.firstCall.args[0]).to.equal(
-        ':progress-loader: Retrieving total number of prompts in use for *all* organizations...',
+        ':progress-loader: Retrieving total number of prompts in use for *all* organizations (excluding Adobe Corp)...',
       );
       expect(slackContext.say.secondCall.args[0]).to.equal(expectedMessage);
 
@@ -1477,7 +1463,7 @@ describe('GetPromptUsageCommand', () => {
       expect(channelIdBatch1).to.equal('test-channel');
       expect(filenameBatch1).to.match(/^prompt-usage-\d+-part1\.csv$/);
       expect(slackContext.say.firstCall.args[0]).to.equal(
-        ':progress-loader: Retrieving total number of prompts in use for *all* organizations...',
+        ':progress-loader: Retrieving total number of prompts in use for *all* organizations (excluding Adobe Corp)...',
       );
 
       const csvStringBatch1 = Buffer.isBuffer(csvBufferBatch1)
@@ -1508,7 +1494,7 @@ describe('GetPromptUsageCommand', () => {
       expect(channelIdBatch2).to.equal('test-channel');
       expect(filenameBatch2).to.match(/^prompt-usage-\d+-part2\.csv$/);
       expect(slackContext.say.firstCall.args[0]).to.equal(
-        ':progress-loader: Retrieving total number of prompts in use for *all* organizations...',
+        ':progress-loader: Retrieving total number of prompts in use for *all* organizations (excluding Adobe Corp)...',
       );
 
       const csvStringBatch2 = Buffer.isBuffer(csvBufferBatch2)
@@ -1530,6 +1516,252 @@ describe('GetPromptUsageCommand', () => {
       expect(
         dataAccessStub.Organization.findByImsOrgId,
       ).to.have.been.calledWith('test-org-3@AdobeOrg');
+    });
+
+    it('skip IMS orgs marked as excluded when --all is used', async () => {
+      const excludedOrg = '9E1005A551ED61CA0A490D45@AdobeOrg';
+      const mockOrganization1 = {
+        getId: sinon.stub().returns('test-org-id1'),
+        getName: sinon.stub().returns('Test Org 1'),
+        getImsOrgId: sinon.stub().returns('test-org-1@AdobeOrg'),
+      };
+      const mockOrganization2 = {
+        getId: sinon.stub().returns('test-org-id2'),
+        getName: sinon.stub().returns('Test Org 2'),
+        getImsOrgId: sinon.stub().returns('test-org-2@AdobeOrg'),
+      };
+      const mockOrganization3 = {
+        getId: sinon.stub().returns('test-org-id3'),
+        getName: sinon.stub().returns('Test Org 3'),
+        getImsOrgId: sinon.stub().returns(excludedOrg),
+      };
+
+      const mockEntitlement1 = {
+        getId: () => 'ent1',
+        getOrganizationId: () => 'test-org-id1',
+        getProductCode: () => 'LLMO',
+        getTier: () => 'FREE_TRIAL',
+        getStatus: () => 'ACTIVE',
+        getQuotas: () => ({}),
+        getCreatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedBy: () => 'user1@example.com',
+      };
+
+      const mockEntitlement2 = {
+        getId: () => 'ent1',
+        getOrganizationId: () => 'test-org-id2',
+        getProductCode: () => 'LLMO',
+        getTier: () => 'PAID',
+        getStatus: () => 'ACTIVE',
+        getQuotas: () => ({}),
+        getCreatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedBy: () => 'user2@example.com',
+      };
+
+      const mockEntitlement3 = {
+        getId: () => 'ent3',
+        getOrganizationId: () => 'test-org-id3',
+        getProductCode: () => 'LLMO',
+        getTier: () => 'PAID',
+        getStatus: () => 'ACTIVE',
+        getQuotas: () => ({}),
+        getCreatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedBy: () => 'user3@example.com',
+      };
+
+      const mockSite1 = { getId: sinon.stub().returns('test-site-id1') };
+      const mockSite2 = { getId: sinon.stub().returns('test-site-id2') };
+      const mockSite3 = { getId: sinon.stub().returns('test-site-id3') };
+
+      const categoryIdSite1 = '123e4567-e89b-12d3-a456-426614174000';
+      const topicIdSite1 = '456e7890-e89b-12d3-a456-426614174001';
+      const categoryIdSite2 = '123e4567-e89b-12d3-a456-426614174002';
+      const topicIdSite2 = '456e7890-e89b-12d3-a456-426614174003';
+      const categoryIdSite3 = '123e4567-e89b-12d3-a456-426614174004';
+      const topicIdSite3 = '456e7890-e89b-12d3-a456-426614174005';
+
+      const expectedConfigSite1 = {
+        ...llmoConfig.defaultConfig(),
+        categories: {
+          [categoryIdSite1]: {
+            name: 'test-category',
+            region: ['us'],
+          },
+        },
+        topics: {
+          [topicIdSite1]: {
+            name: 'test-topic',
+            category: categoryIdSite1,
+            prompts: [
+              {
+                prompt: 'What is the main topic?',
+                regions: ['us'],
+                origin: 'human',
+                source: 'config',
+              },
+              {
+                prompt: 'What is the test topic?',
+                regions: ['in'],
+                origin: 'human',
+                source: 'config',
+              },
+            ],
+          },
+        },
+      };
+
+      const expectedConfigSite2 = {
+        ...llmoConfig.defaultConfig(),
+        categories: {
+          [categoryIdSite2]: {
+            name: 'test-category',
+            region: ['us'],
+          },
+        },
+        topics: {
+          [topicIdSite2]: {
+            name: 'test-topic',
+            category: categoryIdSite2,
+            prompts: [
+              {
+                prompt: 'What is the main topic?',
+                regions: ['ro'],
+                origin: 'human',
+                source: 'config',
+              },
+            ],
+          },
+        },
+      };
+
+      const expectedConfigSite3 = {
+        ...llmoConfig.defaultConfig(),
+        categories: {
+          [categoryIdSite3]: {
+            name: 'test-category',
+            region: ['us'],
+          },
+        },
+        topics: {
+          [topicIdSite3]: {
+            name: 'test-topic',
+            category: categoryIdSite3,
+            prompts: [
+              {
+                prompt: 'What is the main topic?',
+                regions: ['ro'],
+                origin: 'human',
+                source: 'config',
+              },
+            ],
+          },
+        },
+      };
+
+      dataAccessStub.Organization.findByImsOrgId
+        .withArgs('test-org-1@AdobeOrg')
+        .resolves(mockOrganization1);
+      dataAccessStub.Entitlement.allByOrganizationId
+        .withArgs('test-org-id1')
+        .resolves([mockEntitlement1]);
+
+      dataAccessStub.Organization.findByImsOrgId
+        .withArgs('test-org-2@AdobeOrg')
+        .resolves(mockOrganization2);
+      dataAccessStub.Entitlement.allByOrganizationId
+        .withArgs('test-org-id2')
+        .resolves([mockEntitlement2]);
+
+      dataAccessStub.Organization.findByImsOrgId
+        .withArgs(excludedOrg)
+        .resolves(mockOrganization3);
+      dataAccessStub.Entitlement.allByOrganizationId
+        .withArgs('test-org-id3')
+        .resolves([mockEntitlement3]);
+
+      dataAccessStub.Site.allByOrganizationId
+        .withArgs('test-org-id1')
+        .resolves([mockSite1]);
+      dataAccessStub.Site.allByOrganizationId
+        .withArgs('test-org-id2')
+        .resolves([mockSite2]);
+      dataAccessStub.Site.allByOrganizationId
+        .withArgs('test-org-id3')
+        .resolves([mockSite3]);
+
+      dataAccessStub.Organization.all.resolves([
+        mockOrganization1,
+        mockOrganization2,
+        mockOrganization3,
+      ]);
+
+      readConfigStub.withArgs(mockSite1.getId(), s3Client).resolves({
+        config: expectedConfigSite1,
+        exists: true,
+        version: 'v123',
+      });
+
+      readConfigStub.withArgs(mockSite2.getId(), s3Client).resolves({
+        config: expectedConfigSite2,
+        exists: true,
+        version: 'v123',
+      });
+
+      readConfigStub.withArgs(mockSite3.getId(), s3Client).resolves({
+        config: expectedConfigSite3,
+        exists: true,
+        version: 'v123',
+      });
+
+      const args = ['--all'];
+      const command = GetPromptUsageCommand(context);
+      await command.handleExecution(args, slackContext);
+
+      expect(sendFileStub.calledOnce).to.be.true;
+      const [
+        providedSlackContext,
+        csvBuffer,
+        filename,
+        title,
+        initialComment,
+        channelId,
+      ] = sendFileStub.firstCall.args;
+
+      expect(providedSlackContext).to.equal(slackContext);
+      expect(title).to.equal('Prompt Usage Report (part 1/1)');
+      expect(initialComment).to.equal(
+        'Here you can find the prompt usage report (part 1/1) :memo:',
+      );
+      expect(channelId).to.equal('test-channel');
+      expect(filename).to.match(/^prompt-usage-\d+-part1\.csv$/);
+      expect(slackContext.say.firstCall.args[0]).to.equal(
+        ':progress-loader: Retrieving total number of prompts in use for *all* organizations (excluding Adobe Corp)...',
+      );
+
+      const csvStringBatch = Buffer.isBuffer(csvBuffer)
+        ? csvBuffer.toString('utf8')
+        : String(csvBuffer);
+      const lines = csvStringBatch.trim().split(/\r?\n/);
+
+      expect(lines[0]).to.equal(
+        'IMS Org Name,IMS Org ID,Tier,Total number of prompts in use',
+      );
+      expect(lines[1]).to.equal('Test Org 1,test-org-1@AdobeOrg,FREE_TRIAL,2');
+      expect(lines[2]).to.equal('Test Org 2,test-org-2@AdobeOrg,PAID,1');
+      expect(lines.length).to.equal(3);
+
+      expect(
+        dataAccessStub.Organization.findByImsOrgId,
+      ).to.have.been.calledWith('test-org-1@AdobeOrg');
+      expect(
+        dataAccessStub.Organization.findByImsOrgId,
+      ).to.have.been.calledWith('test-org-2@AdobeOrg');
+      expect(
+        dataAccessStub.Organization.findByImsOrgId,
+      ).to.have.been.calledWith(excludedOrg);
     });
   });
 });

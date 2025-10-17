@@ -11,34 +11,40 @@
  */
 
 /**
- * @import { FixEntity } from "@adobe/spacecat-shared-data-access"
+ * @import { FixEntity, Suggestion } from "@adobe/spacecat-shared-data-access"
  */
 
+import { SuggestionDto } from './suggestion.js';
+
 /**
- * Data transfer object for Site.
+ * Data transfer object for Fix.
  */
 export const FixDto = {
 
   /**
-   * Converts a Suggestion object into a JSON object.
+   * Converts a FixEntity object into a JSON object.
    * @param {Readonly<FixEntity>} fix - FixEntity object.
    * @returns {{
    *  id: string
-   *  suggestionId: string
+   *  opportunityId: string
    *  type: string
+   *  createdAt: string
+   *  updatedAt: string
    *  executedBy: string
    *  executedAt: string
    *  publishedAt: string
    *  changeDetails: object
    *  status: string
+   *  suggestions?: Array<object>
    * }} JSON object.
    */
   toJSON(fix) {
-    return {
+    const result = {
       id: fix.getId(),
       opportunityId: fix.getOpportunityId(),
       type: fix.getType(),
       createdAt: fix.getCreatedAt(),
+      updatedAt: fix.getUpdatedAt(),
       executedBy: fix.getExecutedBy(),
       executedAt: fix.getExecutedAt(),
       publishedAt: fix.getPublishedAt(),
@@ -46,5 +52,14 @@ export const FixDto = {
       status: fix.getStatus(),
       origin: fix.getOrigin(),
     };
+
+    // Include suggestions if they are attached to the fix entity
+    // eslint-disable-next-line no-underscore-dangle
+    if (fix._suggestions && Array.isArray(fix._suggestions)) {
+      // eslint-disable-next-line no-underscore-dangle
+      result.suggestions = fix._suggestions.map((suggestion) => SuggestionDto.toJSON(suggestion));
+    }
+
+    return result;
   },
 };

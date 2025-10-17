@@ -1,3 +1,24 @@
+## [1.206.2](https://github.com/adobe/spacecat-api-service/compare/v1.206.1...v1.206.2) (2025-10-17)
+
+
+### Bug Fixes
+
+* revert product aware ([#1368](https://github.com/adobe/spacecat-api-service/issues/1368)) ([7922686](https://github.com/adobe/spacecat-api-service/commit/7922686c4a96fa2b2b55a3503cc59aa6879c9eeb))
+
+## [1.206.1](https://github.com/adobe/spacecat-api-service/compare/v1.206.0...v1.206.1) (2025-10-17)
+
+
+### Bug Fixes
+
+* return sites product aware ([#1367](https://github.com/adobe/spacecat-api-service/issues/1367)) ([66df494](https://github.com/adobe/spacecat-api-service/commit/66df494a53e7f72def4b5a7d1dd24ba9dd57a1e7))
+
+# [1.206.0](https://github.com/adobe/spacecat-api-service/compare/v1.205.3...v1.206.0) (2025-10-17)
+
+
+### Features
+
+* exclude Adobe Corp from the get-prompt-usage output ([#1363](https://github.com/adobe/spacecat-api-service/issues/1363)) ([d47fdad](https://github.com/adobe/spacecat-api-service/commit/d47fdad91f5c86364576be392d32e72e477f817c))
+
 ## [1.205.3](https://github.com/adobe/spacecat-api-service/compare/v1.205.2...v1.205.3) (2025-10-16)
 
 

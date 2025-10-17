@@ -207,10 +207,22 @@ describe('Organizations Controller', () => {
       Project: {
         allByOrganizationId: sinon.stub(),
       },
+      Entitlement: {
+        findByOrganizationIdAndProductCode: sinon.stub(),
+      },
+      SiteEnrollment: {
+        allBySiteId: sinon.stub(),
+      },
     };
 
     context = {
       dataAccess: mockDataAccess,
+      log: {
+        info: sinon.stub(),
+        error: sinon.stub(),
+        warn: sinon.stub(),
+        debug: sinon.stub(),
+      },
       pathInfo: {
         headers: { 'x-product': 'abcd' },
       },
@@ -461,6 +473,20 @@ describe('Organizations Controller', () => {
   it('gets all sites of an organization', async () => {
     mockDataAccess.Site.allByOrganizationId.resolves(sites);
     mockDataAccess.Organization.findById.resolves(organizations[0]);
+
+    // Mock entitlement and site enrollment for filtering
+    const mockEntitlement = {
+      getId: () => 'entitlement-123',
+      getProductCode: () => 'abcd',
+      getTier: () => 'premium',
+    };
+    const mockSiteEnrollment = {
+      getId: () => 'enrollment-123',
+      getEntitlementId: () => 'entitlement-123',
+    };
+
+    mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves(mockEntitlement);
+    mockDataAccess.SiteEnrollment.allBySiteId.resolves([mockSiteEnrollment]);
 
     const result = await organizationsController.getSitesForOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...context });
     const resultSites = await result.json();
