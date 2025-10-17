@@ -1,3 +1,17 @@
+## [1.208.1](https://github.com/adobe/spacecat-api-service/compare/v1.208.0...v1.208.1) (2025-10-17)
+
+
+### Bug Fixes
+
+* Product aware sites return ([#1371](https://github.com/adobe/spacecat-api-service/issues/1371)) ([e332c11](https://github.com/adobe/spacecat-api-service/commit/e332c11f5b091089bf27b7d649d36e0f23a88876))
+
+# [1.208.0](https://github.com/adobe/spacecat-api-service/compare/v1.207.2...v1.208.0) (2025-10-17)
+
+
+### Features
+
+* support form accessiblity auto-fix ([#1345](https://github.com/adobe/spacecat-api-service/issues/1345)) ([790020c](https://github.com/adobe/spacecat-api-service/commit/790020c4c9d4cccbd96df5698fc31de46201c487))
+
 ## [1.207.2](https://github.com/adobe/spacecat-api-service/compare/v1.207.1...v1.207.2) (2025-10-17)
 
 

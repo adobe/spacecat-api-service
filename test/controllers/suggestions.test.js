@@ -165,6 +165,7 @@ describe('Suggestions Controller', () => {
   let removeStub;
   let suggs;
   let altTextSuggs;
+  let formAccessibilitySuggs;
   let context;
   let apikeyAuthAttributes;
 
@@ -299,10 +300,84 @@ describe('Suggestions Controller', () => {
       },
     ];
 
+    formAccessibilitySuggs = [
+      {
+        id: SUGGESTION_IDS[0],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CODE_CHANGE',
+        rank: 1,
+        status: 'NEW',
+        data: {
+          isCodeChangeAvailable: true,
+          diffContent: 'diff --git ...',
+          source: 'form',
+          type: 'url',
+          issues: [
+            {
+              wcagLevel: 'AA',
+              severity: 'serious',
+              occurrences: 1,
+              htmlWithIssues: [
+                {
+                  targetSelector: 'label[for="country"] > span',
+                  updateFrom: '<span>(Optional)</span>',
+                },
+              ],
+              failureSummary: 'Fix any of the following:\n  Element has insufficient color contrast',
+              wcagRule: '1.4.3 Contrast (Minimum)',
+              understandingUrl: 'https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html',
+              description: 'Elements must meet minimum color contrast ratio thresholds',
+              type: 'color-contrast',
+            },
+          ],
+          url: 'https://www.sunstar.com/contact',
+        },
+        createdAt: '2025-09-11T06:09:32.472Z',
+        updatedAt: '2025-10-08T06:31:21.459Z',
+        updatedBy: 'system',
+      },
+      {
+        id: SUGGESTION_IDS[1],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CODE_CHANGE',
+        rank: 2,
+        status: 'NEW',
+        data: {
+          isCodeChangeAvailable: true,
+          diffContent: 'diff --git ...',
+          source: 'form',
+          type: 'url',
+          issues: [
+            {
+              wcagLevel: 'AA',
+              severity: 'serious',
+              occurrences: 1,
+              htmlWithIssues: [
+                {
+                  targetSelector: 'input[type="email"]',
+                  updateFrom: '<input type="email" />',
+                },
+              ],
+              failureSummary: 'Form elements must have labels',
+              wcagRule: '1.3.1 Info and Relationships',
+              understandingUrl: 'https://www.w3.org/WAI/WCAG22/Understanding/info-and-relationships.html',
+              description: 'Form elements must have labels',
+              type: 'label',
+            },
+          ],
+          url: 'https://www.sunstar.com/contact',
+        },
+        createdAt: '2025-09-11T06:09:32.472Z',
+        updatedAt: '2025-10-08T06:31:21.459Z',
+        updatedBy: 'system',
+      },
+    ];
+
     const isHandlerEnabledForSite = sandbox.stub();
     isHandlerEnabledForSite.withArgs('broken-backlinks-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('alt-text-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('meta-tags-auto-fix', site).returns(true);
+    isHandlerEnabledForSite.withArgs('form-accessibility-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('broken-backlinks-auto-fix', siteNotEnabled).returns(false);
     mockOpportunity = {
       findById: sandbox.stub(),
@@ -1607,6 +1682,77 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[1].suggestion).to.exist;
       expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'IN_PROGRESS');
       expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'IN_PROGRESS');
+    });
+
+    it('triggers autofixSuggestion for form-accessibility (non-grouped)', async () => {
+      opportunity.getType = sandbox.stub().returns('form-accessibility');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(formAccessibilitySuggs[0]),
+          mockSuggestionEntity(formAccessibilitySuggs[1])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...formAccessibilitySuggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...formAccessibilitySuggs[1], status: 'IN_PROGRESS' }),
+      ]);
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse).to.have.property('suggestions');
+      expect(bulkPatchResponse).to.have.property('metadata');
+      expect(bulkPatchResponse.metadata).to.have.property('total', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('success', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('failed', 0);
+      expect(bulkPatchResponse.suggestions).to.have.property('length', 2);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 200);
+      expect(bulkPatchResponse.suggestions[1]).to.have.property('statusCode', 200);
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'IN_PROGRESS');
+      expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'IN_PROGRESS');
+      // Verify SQS was called once (non-grouped behavior)
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+    });
+
+    it('triggers autofixSuggestion for form-accessibility with multiple suggestions from same URL', async () => {
+      opportunity.getType = sandbox.stub().returns('form-accessibility');
+      // Both suggestions have the same URL
+      const formSugg1 = { ...formAccessibilitySuggs[0] };
+      const formSugg2 = {
+        ...formAccessibilitySuggs[1],
+        id: SUGGESTION_IDS[2],
+        data: {
+          ...formAccessibilitySuggs[1].data,
+          url: 'https://www.sunstar.com/contact', // Same URL as first suggestion
+        },
+      };
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(formSugg1),
+          mockSuggestionEntity(formSugg2)],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...formSugg1, status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...formSugg2, status: 'IN_PROGRESS' }),
+      ]);
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.metadata).to.have.property('success', 2);
+      // Verify SQS was called once with all suggestions, not grouped by URL
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
     });
 
     it('auto-fix suggestions status returns bad request if no site ID is passed', async () => {
