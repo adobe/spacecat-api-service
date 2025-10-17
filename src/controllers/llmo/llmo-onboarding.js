@@ -407,8 +407,6 @@ export async function enableImports(site, imports = []) {
   });
 
   site.setConfig(Config.toDynamoItem(siteConfig));
-
-  await site.save();
 }
 
 export async function triggerAudits(audits, context, site) {
