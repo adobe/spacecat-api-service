@@ -1152,6 +1152,124 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(400);
     });
+
+    it('should log config summary with user email when updating config successfully', async () => {
+      const configWithAllFields = {
+        categories: {
+          [CATEGORY_ID]: {
+            name: 'test-category', region: ['us'],
+          },
+        },
+        topics: {
+          [TOPIC_ID]: {
+            name: 'test-topic',
+            category: CATEGORY_ID,
+            prompts: [
+              {
+                prompt: 'Prompt 1', regions: ['us'], origin: 'human', source: 'config',
+              },
+              {
+                prompt: 'Prompt 2', regions: ['us'], origin: 'ai', source: 'config',
+              },
+            ],
+          },
+        },
+        brands: {
+          aliases: [
+            {
+              aliases: ['brand1', 'brand2'], category: CATEGORY_ID, region: ['us'],
+            },
+          ],
+        },
+        competitors: {
+          competitors: [
+            {
+              name: 'competitor1', category: CATEGORY_ID, region: ['us'], aliases: [], urls: [],
+            },
+          ],
+        },
+        deleted: {
+          prompts: {
+            'deleted-prompt-1': {
+              deletedAt: '2024-01-01',
+            },
+            'deleted-prompt-2': {
+              deletedAt: '2024-01-02',
+            },
+          },
+        },
+      };
+      mockContext.data = configWithAllFields;
+      llmoConfigSchemaStub.safeParse.returns({ success: true, data: configWithAllFields });
+
+      const result = await controller.updateLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockLog.info).to.have.been.calledWith(
+        sinon.match(/User test@example\.com modifying customer configuration/)
+          .and(sinon.match(/2 prompts/))
+          .and(sinon.match(/1 categories/))
+          .and(sinon.match(/1 topics/))
+          .and(sinon.match(/1 brand aliases/))
+          .and(sinon.match(/1 competitors/))
+          .and(sinon.match(/2 deleted prompts/)),
+      );
+    });
+
+    it('should use "system" as userId when authInfo is not available', async () => {
+      mockContext.attributes = {};
+      const result = await controller.updateLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockLog.info).to.have.been.calledWith(
+        sinon.match(/User system modifying customer configuration/),
+      );
+    });
+
+    it('should use "system" as userId in error when authInfo is not available', async () => {
+      mockContext.attributes = {};
+      writeConfigStub.rejects(new Error('S3 write failed'));
+      readConfigStub.resolves({
+        config: llmoConfig.defaultConfig(),
+        exists: true,
+        version: 'v0',
+      });
+
+      const result = await controller.updateLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(400);
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/User system error updating llmo config/),
+      );
+    });
+
+    it('should handle topics with no prompts when calculating prompt count', async () => {
+      const configWithEmptyPrompts = {
+        categories: {
+          [CATEGORY_ID]: { name: 'test-category', region: ['us'] },
+        },
+        topics: {
+          [TOPIC_ID]: {
+            name: 'test-topic-1',
+            category: CATEGORY_ID,
+            prompts: [],
+          },
+          '456e7890-e89b-12d3-a456-426614174002': {
+            name: 'test-topic-2',
+            category: CATEGORY_ID,
+          },
+        },
+      };
+      mockContext.data = configWithEmptyPrompts;
+      llmoConfigSchemaStub.safeParse.returns({ success: true, data: configWithEmptyPrompts });
+
+      const result = await controller.updateLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockLog.info).to.have.been.calledWith(
+        sinon.match(/0 prompts/),
+      );
+    });
   });
 
   describe('getLlmoQuestions', () => {
