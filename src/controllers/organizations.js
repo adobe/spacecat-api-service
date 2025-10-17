@@ -195,8 +195,16 @@ function OrganizationsController(ctx, env) {
 
     const sites = await Site.allByOrganizationId(organizationId);
 
+    // TODO: Testing - replicate sites to max 1400
+    const replicatedSites = [];
+    const targetCount = 1400;
+    const replicationFactor = Math.ceil(targetCount / sites.length);
+    for (let i = 0; i < replicationFactor; i += 1) {
+      replicatedSites.push(...sites);
+    }
+    const finalSites = replicatedSites.slice(0, targetCount);
     /* eslint-disable max-len */
-    const filteredSites = await filterSitesForProductCode(context, organizationId, sites, productCode);
+    const filteredSites = await filterSitesForProductCode(context, organizationId, finalSites, productCode);
 
     return ok(filteredSites.map((site) => SiteDto.toJSON(site)));
   };
