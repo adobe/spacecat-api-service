@@ -164,48 +164,6 @@ async function publishToAdminHlx(filename, outputLocation, log) {
 }
 
 /**
- * Unpublishes a file from admin.hlx.page.
- * @param {string} filename - The filename to unpublish
- * @param {string} outputLocation - The output location
- * @param {object} log - Logger instance
- */
-export async function unpublishFromAdminHlx(filename, outputLocation, log) {
-  try {
-    const org = 'adobe';
-    const site = 'project-elmo-ui-data';
-    const ref = 'main';
-    const jsonFilename = `${filename.replace(/\.[^/.]+$/, '')}.json`;
-    const path = `${outputLocation}/${jsonFilename}`;
-    const headers = { Cookie: `auth_token=${process.env.HLX_ADMIN_TOKEN}` };
-
-    if (!process.env.HLX_ADMIN_TOKEN) {
-      log.warn('LLMO offboarding: HLX_ADMIN_TOKEN is not set');
-    }
-
-    const baseUrl = 'https://admin.hlx.page';
-    const endpoints = [
-      { name: 'live', url: `${baseUrl}/live/${org}/${site}/${ref}/${path}` },
-      { name: 'preview', url: `${baseUrl}/preview/${org}/${site}/${ref}/${path}` },
-    ];
-
-    for (const endpoint of endpoints.values()) {
-      log.debug(`Unpublishing Excel report via admin API (${endpoint.name}): ${endpoint.url}`);
-
-      // eslint-disable-next-line no-await-in-loop
-      const response = await fetch(endpoint.url, { method: 'DELETE', headers });
-
-      if (!response.ok) {
-        throw new Error(`${endpoint.name} unpublish failed: ${response.status} ${response.statusText}`);
-      }
-
-      log.debug(`Excel report successfully unpublished from ${endpoint.name}`);
-    }
-  } catch (unpublishError) {
-    log.error(`Failed to unpublish via admin.hlx.page: ${unpublishError.message}`);
-  }
-}
-
-/**
  * Starts a bulk status job for a given path.
  * @param {string} path - The folder path to get status for
  * @param {object} env - Environment variables
@@ -216,7 +174,10 @@ export async function startBulkStatusJob(path, env, log) {
   const org = 'adobe';
   const site = 'project-elmo-ui-data';
   const ref = 'main';
-  const headers = { Cookie: `auth_token=${env.HLX_ADMIN_TOKEN}` };
+  const headers = {
+    Cookie: `auth_token=${env.HLX_ADMIN_TOKEN}`,
+    'Content-Type': 'application/json',
+  };
 
   if (!env.HLX_ADMIN_TOKEN) {
     log.warn('LLMO offboarding: HLX_ADMIN_TOKEN is not set');
@@ -224,11 +185,17 @@ export async function startBulkStatusJob(path, env, log) {
   }
 
   const baseUrl = 'https://admin.hlx.page';
-  const url = `${baseUrl}/status/${org}/${site}/${ref}/${path}`;
+  const url = `${baseUrl}/status/${org}/${site}/${ref}/*`;
 
   log.debug(`Starting bulk status job for path: ${path}`);
 
-  const response = await fetch(url, { method: 'POST', headers });
+  const response = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      paths: [`/${path}/*`],
+    }),
+  });
 
   if (!response.ok) {
     throw new Error(`Failed to start bulk status job: ${response.status} ${response.statusText}`);
@@ -300,10 +267,11 @@ export async function pollJobStatus(jobName, env, log) {
 /**
  * Performs bulk unpublish and un-preview for a list of paths.
  * @param {Array<string>} paths - Array of paths to unpublish
+ * @param {string} dataFolder - Base data folder
  * @param {object} env - Environment variables
  * @param {object} log - Logger instance
  */
-export async function bulkUnpublishPaths(paths, env, log) {
+export async function bulkUnpublishPaths(paths, dataFolder, env, log) {
   if (!paths || paths.length === 0) {
     log.debug('No paths to unpublish');
     return;
@@ -328,14 +296,14 @@ export async function bulkUnpublishPaths(paths, env, log) {
   const pathsPayload = paths.map((path) => ({ path }));
 
   // Bulk unpublish (live)
-  const unpublishUrl = `${baseUrl}/live/${org}/${site}/${ref}`;
+  const unpublishUrl = `${baseUrl}/live/${org}/${site}/${ref}/${dataFolder}/*`;
   log.debug(`Starting bulk unpublish for ${paths.length} paths`);
 
   try {
     const unpublishResponse = await fetch(unpublishUrl, {
-      method: 'DELETE',
+      method: 'POST',
       headers,
-      body: JSON.stringify({ paths: pathsPayload }),
+      body: JSON.stringify({ paths: pathsPayload.map((o) => o.path), delete: true }),
     });
 
     if (!unpublishResponse.ok) {
@@ -349,14 +317,14 @@ export async function bulkUnpublishPaths(paths, env, log) {
   }
 
   // Bulk un-preview
-  const unpreviewUrl = `${baseUrl}/preview/${org}/${site}/${ref}`;
+  const unpreviewUrl = `${baseUrl}/preview/${org}/${site}/${ref}/${dataFolder}/*`;
   log.debug(`Starting bulk un-preview for ${paths.length} paths`);
 
   try {
     const unpreviewResponse = await fetch(unpreviewUrl, {
-      method: 'DELETE',
+      method: 'POST',
       headers,
-      body: JSON.stringify({ paths: pathsPayload }),
+      body: JSON.stringify({ paths: pathsPayload.map((o) => o.path), delete: true }),
     });
 
     if (!unpreviewResponse.ok) {
@@ -367,6 +335,41 @@ export async function bulkUnpublishPaths(paths, env, log) {
     }
   } catch (error) {
     log.error(`Error during bulk un-preview: ${error.message}`);
+  }
+}
+
+/**
+ * Unpublishes a file from admin.hlx.page.
+ * @param {string} dataFolder - The data folder to unpublish
+ * @param {object} env - Environment variables
+ * @param {object} log - Logger instance
+ */
+export async function unpublishFromAdminHlx(dataFolder, env, log) {
+  try {
+    // First, get bulk status of all files under the folder to know what needs to be unpublished
+    log.info(`Getting bulk status for folder: ${dataFolder}`);
+    const jobName = await startBulkStatusJob(dataFolder, env, log);
+
+    if (jobName) {
+      // Poll the job until it completes
+      const jobData = await pollJobStatus(jobName, env, log);
+
+      // Extract all paths from the resources
+      const paths = jobData?.data?.resources
+        ?.filter((resource) => resource.path.startsWith(`/${dataFolder}`))
+        .map((resource) => resource.path) || [];
+
+      if (paths.length > 0) {
+        log.info(`Found ${paths.length} paths to unpublish under folder ${dataFolder}`);
+        // Bulk unpublish and un-preview all paths
+        await bulkUnpublishPaths(paths, dataFolder, env, log);
+      } else {
+        log.debug(`No published paths found under folder ${dataFolder}`);
+      }
+    }
+  } catch (error) {
+    log.error(`Error during bulk unpublish for folder ${dataFolder}: ${error.message}`);
+    // Don't throw - continue with folder deletion
   }
 }
 
@@ -530,33 +533,6 @@ export async function deleteSharePointFolder(dataFolder, context) {
   const { log, env } = context;
 
   try {
-    // First, get bulk status of all files under the folder to know what needs to be unpublished
-    log.info(`Getting bulk status for folder: ${dataFolder}`);
-    const jobName = await startBulkStatusJob(dataFolder, env, log);
-
-    if (jobName) {
-      // Poll the job until it completes
-      const jobData = await pollJobStatus(jobName, env, log);
-
-      // Extract all paths from the resources
-      const paths = jobData?.data?.resources
-        ?.filter((resource) => resource.path.startsWith(`/${dataFolder}`))
-        .map((resource) => resource.path) || [];
-
-      if (paths.length > 0) {
-        log.info(`Found ${paths.length} paths to unpublish under folder ${dataFolder}`);
-        // Bulk unpublish and un-preview all paths
-        await bulkUnpublishPaths(paths, env, log);
-      } else {
-        log.debug(`No published paths found under folder ${dataFolder}`);
-      }
-    }
-  } catch (error) {
-    log.error(`Error during bulk unpublish for folder ${dataFolder}: ${error.message}`);
-    // Don't throw - continue with folder deletion
-  }
-
-  try {
     const sharepointClient = await createSharePointClient(env);
     const folder = sharepointClient.getDocument(`/sites/elmo-ui-data/${dataFolder}/`);
     const folderExists = await folder.exists();
@@ -572,6 +548,8 @@ export async function deleteSharePointFolder(dataFolder, context) {
     log.error(`Error deleting SharePoint folder ${dataFolder}: ${error.message}`);
     // Don't throw - allow offboarding to continue
   }
+
+  await unpublishFromAdminHlx(dataFolder, env, log);
 }
 
 /**
@@ -612,7 +590,9 @@ export async function removeLlmoConfig(site, config, context) {
   config.updateLlmoDataFolder(null);
 
   // Save the updated site config
-  site.setConfig(Config.toDynamoItem(config));
+  const dynamoItem = Config.toDynamoItem(config);
+  delete dynamoItem.llmo;
+  site.setConfig(dynamoItem);
   await site.save();
 
   log.info(`Successfully removed LLMO configuration for site ${siteId}`);
