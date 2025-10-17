@@ -352,7 +352,7 @@ export class FixesController {
     }
 
     const {
-      executedBy, executedAt, publishedAt, changeDetails, suggestionIds,
+      executedBy, executedAt, publishedAt, changeDetails, suggestionIds, origin,
     } = context.data;
 
     const Suggestion = this.#Suggestion;
@@ -384,6 +384,11 @@ export class FixesController {
 
       if (isNonEmptyObject(changeDetails)) {
         fix.setChangeDetails(changeDetails);
+        hasUpdates = true;
+      }
+
+      if (origin !== fix.getOrigin() && hasText(origin)) {
+        fix.setOrigin(origin);
         hasUpdates = true;
       }
 

@@ -50,6 +50,7 @@ export const FixDto = {
       publishedAt: fix.getPublishedAt(),
       changeDetails: fix.getChangeDetails(),
       status: fix.getStatus(),
+      origin: fix.getOrigin(),
     };
 
     // Include suggestions if they are attached to the fix entity

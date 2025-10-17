@@ -1237,6 +1237,46 @@ describe('Fixes Controller', () => {
       expect(new Set(await fix.getSuggestions())).deep.equals(new Set(suggestions));
     });
 
+    it('can patch a fix origin field', async () => {
+      const suggestions = await Promise.all([
+        createSuggestion({ type: 'CONTENT_UPDATE' }),
+        createSuggestion({ type: 'METADATA_UPDATE' }),
+      ]);
+
+      fixEntitySuggestionCollection.allByFixEntityId.resolves(suggestions.map((s) => ({
+        getSuggestionId: () => s.getId(),
+        getFixEntityId: () => fix.getId(),
+      })));
+
+      fixEntityCollection.setSuggestionsForFixEntity.resolves({
+        createdItems: suggestions.map((s) => ({
+          getSuggestionId: () => s.getId(),
+          getFixEntityId: () => fix.getId(),
+        })),
+        errorItems: [],
+        removedCount: 0,
+      });
+
+      suggestionCollection.batchGetByKeys.resolves({
+        data: suggestions,
+        unprocessed: [],
+      });
+
+      const newOrigin = FixEntity.ORIGINS.ASO;
+      requestContext.data = {
+        origin: newOrigin,
+        suggestionIds: suggestions.map((s) => s.getId()),
+      };
+
+      const response = await fixesController.patchFix(requestContext);
+      expect(response).includes({ status: 200 });
+      const responseData = await response.json();
+      expect(responseData).deep.equals(FixDto.toJSON(fix));
+      expect(responseData.origin).to.equal(FixEntity.ORIGINS.ASO);
+      expect(fix.getOrigin()).equals(newOrigin);
+      expect(new Set(await fix.getSuggestions())).deep.equals(new Set(suggestions));
+    });
+
     it('responds 404 if a suggestion does not exist', async () => {
       requestContext.data = {
         suggestionIds: ['15345195-62e6-494c-81b1-1d0da0b51d84'],
@@ -1483,12 +1523,67 @@ describe('Fixes Controller', () => {
       });
     });
   });
+
+  describe('FixDto', () => {
+    it('serializes fix entity with origin field', async () => {
+      const fixData = {
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        changeDetails: { arbitrary: 'test value' },
+        origin: FixEntity.ORIGINS.ASO,
+        status: FixEntity.STATUSES.DEPLOYED,
+        executedBy: 'test-user',
+        executedAt: '2025-05-19T01:23:45.678Z',
+        publishedAt: '2025-05-19T02:23:45.678Z',
+      };
+
+      const fix = await fixEntityCollection.create(fixData);
+      const serialized = FixDto.toJSON(fix);
+
+      expect(serialized).to.include.keys([
+        'id',
+        'opportunityId',
+        'type',
+        'createdAt',
+        'executedBy',
+        'executedAt',
+        'publishedAt',
+        'changeDetails',
+        'status',
+        'origin',
+      ]);
+
+      expect(serialized.origin).to.equal(FixEntity.ORIGINS.ASO);
+      expect(serialized.status).to.equal(FixEntity.STATUSES.DEPLOYED);
+      expect(serialized.type).to.equal(Suggestion.TYPES.CONTENT_UPDATE);
+      expect(serialized.opportunityId).to.equal(opportunityId);
+      expect(serialized.changeDetails).to.deep.equal({ arbitrary: 'test value' });
+      expect(serialized.executedBy).to.equal('test-user');
+      expect(serialized.executedAt).to.equal('2025-05-19T01:23:45.678Z');
+      expect(serialized.publishedAt).to.equal('2025-05-19T02:23:45.678Z');
+    });
+
+    it('serializes fix entity with default origin when not specified', async () => {
+      const fixData = {
+        type: Suggestion.TYPES.METADATA_UPDATE,
+        opportunityId,
+        changeDetails: { arbitrary: 'default test' },
+      };
+
+      const fix = await fixEntityCollection.create(fixData);
+      const serialized = FixDto.toJSON(fix);
+
+      expect(serialized.origin).to.equal(FixEntity.ORIGINS.SPACECAT);
+      expect(serialized.status).to.equal(FixEntity.STATUSES.PENDING);
+    });
+  });
 });
 
 const ISO_DATE = '2025-05-19T01:23:45.678Z';
 function fakeCreateFix(data) {
   data.fixEntityId ??= crypto.randomUUID();
   data.status ??= FixEntity.STATUSES.PENDING;
+  data.origin ??= FixEntity.ORIGINS.SPACECAT;
   data.changeDetails ??= { arbitrary: 'details' };
   data.createdAt ??= ISO_DATE;
   data.executedAt ??= ISO_DATE;

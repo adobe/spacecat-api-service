@@ -39,6 +39,7 @@ describe('Fix DTO', () => {
     getPublishedAt: () => '2025-01-04T00:00:00.000Z',
     getChangeDetails: () => ({ field: 'value' }),
     getStatus: () => 'PENDING',
+    getOrigin: () => 'MANUAL',
     ...overrides,
   });
 
@@ -72,6 +73,7 @@ describe('Fix DTO', () => {
         publishedAt: '2025-01-04T00:00:00.000Z',
         changeDetails: { field: 'value' },
         status: 'PENDING',
+        origin: 'MANUAL',
       });
       expect(json).to.not.have.property('suggestions');
     });
