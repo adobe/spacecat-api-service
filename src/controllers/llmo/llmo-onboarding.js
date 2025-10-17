@@ -169,7 +169,7 @@ async function publishToAdminHlx(filename, outputLocation, log) {
  * @param {string} outputLocation - The output location
  * @param {object} log - Logger instance
  */
-async function unpublishFromAdminHlx(filename, outputLocation, log) {
+export async function unpublishFromAdminHlx(filename, outputLocation, log) {
   try {
     const org = 'adobe';
     const site = 'project-elmo-ui-data';
@@ -188,7 +188,7 @@ async function unpublishFromAdminHlx(filename, outputLocation, log) {
       { name: 'preview', url: `${baseUrl}/preview/${org}/${site}/${ref}/${path}` },
     ];
 
-    for (const [index, endpoint] of endpoints.entries()) {
+    for (const endpoint of endpoints.values()) {
       log.debug(`Unpublishing Excel report via admin API (${endpoint.name}): ${endpoint.url}`);
 
       // eslint-disable-next-line no-await-in-loop
@@ -199,11 +199,6 @@ async function unpublishFromAdminHlx(filename, outputLocation, log) {
       }
 
       log.debug(`Excel report successfully unpublished from ${endpoint.name}`);
-
-      if (index === 0) {
-        // eslint-disable-next-line no-await-in-loop,max-statements-per-line
-        await new Promise((resolve) => { setTimeout(resolve, 2000); });
-      }
     }
   } catch (unpublishError) {
     log.error(`Failed to unpublish via admin.hlx.page: ${unpublishError.message}`);
@@ -385,6 +380,8 @@ export async function deleteSharePointFolder(dataFolder, context) {
     log.error(`Error deleting SharePoint folder ${dataFolder}: ${error.message}`);
     // Don't throw - allow offboarding to continue
   }
+
+  await unpublishFromAdminHlx('query-index', dataFolder, log);
 }
 
 /**
@@ -579,9 +576,6 @@ export async function performLlmoOffboarding(site, config, context) {
 
   // Remove LLMO configuration
   await removeLlmoConfig(site, config, context);
-
-  // Unpublish query-index from admin.hlx.page
-  await unpublishFromAdminHlx('query-index', dataFolder, log);
 
   log.info(`LLMO offboarding process completed for site ${siteId}`);
 
