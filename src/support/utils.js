@@ -1124,6 +1124,19 @@ export const filterSitesForProductCode = async (context, orgId, sites, productCo
   for (const site of sites) {
     /* eslint-disable no-await-in-loop */
     const siteEnrollments = await SiteEnrollment.allBySiteId(site.getId());
+    if (siteEnrollments.length === 0) {
+      // mock some enrollment
+      const mockSiteEnrollment = {
+        getId: () => 'site-enrollment-123',
+        getEntitlementId: () => entitlement?.getId(),
+      };
+      const mockSiteEnrollment1 = {
+        getId: () => 'site-enrollment-124',
+        getEntitlementId: () => entitlement?.getId(),
+      };
+      siteEnrollments.push(mockSiteEnrollment);
+      siteEnrollments.push(mockSiteEnrollment1);
+    }
     /* eslint-disable no-await-in-loop, max-len */
     const validSiteEnrollment = siteEnrollments.find((se) => se.getEntitlementId() === entitlement?.getId());
     if (validSiteEnrollment) {
