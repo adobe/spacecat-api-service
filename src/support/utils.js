@@ -1113,3 +1113,29 @@ export const onboardSingleSite = async (
 
   return reportLine;
 };
+
+/**
+ * TODO: This function should be moved to Tier Client
+ * @param {Object} context - The context object.
+ * @param {Object} organization - The organization object.
+ * @param {Array} sites - The sites array.
+ * @param {String} productCode - The product code.
+ * @returns {Array} - The filtered sites array.
+ */
+export const filterSitesForProductCode = async (context, organization, sites, productCode) => {
+  // for every site we will create tier client and will check valid entitlement and enrollment
+  const filteredSites = [];
+  const { SiteEnrollment } = context.dataAccess;
+  const tierClient = TierClient.createForOrg(context, organization, productCode);
+  const { entitlement } = await tierClient.checkValidEntitlement();
+  for (const site of sites) {
+    /* eslint-disable no-await-in-loop */
+    const siteEnrollments = await SiteEnrollment.allBySiteId(site.getId());
+    /* eslint-disable no-await-in-loop, max-len */
+    const validSiteEnrollment = siteEnrollments.find((se) => se.getEntitlementId() === entitlement?.getId());
+    if (validSiteEnrollment) {
+      filteredSites.push(site);
+    }
+  }
+  return filteredSites;
+};

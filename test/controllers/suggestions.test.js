@@ -146,6 +146,7 @@ describe('Suggestions Controller', () => {
     'getAllForOpportunity',
     'getByID',
     'getByStatus',
+    'getSuggestionFixes',
     'patchSuggestion',
     'patchSuggestionsStatus',
     'removeSuggestion',
@@ -165,6 +166,7 @@ describe('Suggestions Controller', () => {
   let removeStub;
   let suggs;
   let altTextSuggs;
+  let formAccessibilitySuggs;
   let context;
   let apikeyAuthAttributes;
 
@@ -299,10 +301,84 @@ describe('Suggestions Controller', () => {
       },
     ];
 
+    formAccessibilitySuggs = [
+      {
+        id: SUGGESTION_IDS[0],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CODE_CHANGE',
+        rank: 1,
+        status: 'NEW',
+        data: {
+          isCodeChangeAvailable: true,
+          diffContent: 'diff --git ...',
+          source: 'form',
+          type: 'url',
+          issues: [
+            {
+              wcagLevel: 'AA',
+              severity: 'serious',
+              occurrences: 1,
+              htmlWithIssues: [
+                {
+                  targetSelector: 'label[for="country"] > span',
+                  updateFrom: '<span>(Optional)</span>',
+                },
+              ],
+              failureSummary: 'Fix any of the following:\n  Element has insufficient color contrast',
+              wcagRule: '1.4.3 Contrast (Minimum)',
+              understandingUrl: 'https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html',
+              description: 'Elements must meet minimum color contrast ratio thresholds',
+              type: 'color-contrast',
+            },
+          ],
+          url: 'https://www.sunstar.com/contact',
+        },
+        createdAt: '2025-09-11T06:09:32.472Z',
+        updatedAt: '2025-10-08T06:31:21.459Z',
+        updatedBy: 'system',
+      },
+      {
+        id: SUGGESTION_IDS[1],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CODE_CHANGE',
+        rank: 2,
+        status: 'NEW',
+        data: {
+          isCodeChangeAvailable: true,
+          diffContent: 'diff --git ...',
+          source: 'form',
+          type: 'url',
+          issues: [
+            {
+              wcagLevel: 'AA',
+              severity: 'serious',
+              occurrences: 1,
+              htmlWithIssues: [
+                {
+                  targetSelector: 'input[type="email"]',
+                  updateFrom: '<input type="email" />',
+                },
+              ],
+              failureSummary: 'Form elements must have labels',
+              wcagRule: '1.3.1 Info and Relationships',
+              understandingUrl: 'https://www.w3.org/WAI/WCAG22/Understanding/info-and-relationships.html',
+              description: 'Form elements must have labels',
+              type: 'label',
+            },
+          ],
+          url: 'https://www.sunstar.com/contact',
+        },
+        createdAt: '2025-09-11T06:09:32.472Z',
+        updatedAt: '2025-10-08T06:31:21.459Z',
+        updatedBy: 'system',
+      },
+    ];
+
     const isHandlerEnabledForSite = sandbox.stub();
     isHandlerEnabledForSite.withArgs('broken-backlinks-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('alt-text-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('meta-tags-auto-fix', site).returns(true);
+    isHandlerEnabledForSite.withArgs('form-accessibility-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('broken-backlinks-auto-fix', siteNotEnabled).returns(false);
     mockOpportunity = {
       findById: sandbox.stub(),
@@ -341,6 +417,7 @@ describe('Suggestions Controller', () => {
         }
         return Promise.resolve(mockSuggestionEntity(suggData));
       }),
+      getFixEntitiesBySuggestionId: sandbox.stub(),
     };
 
     mockSuggestionDataAccess = {
@@ -707,6 +784,174 @@ describe('Suggestions Controller', () => {
     expect(response.status).to.equal(404);
     const error = await response.json();
     expect(error).to.have.property('message', 'not found');
+  });
+
+  describe('getSuggestionFixes', () => {
+    const FIX_IDS = [
+      'fix-id-1',
+      'fix-id-2',
+      'fix-id-3',
+    ];
+
+    const mockFixEntities = [
+      {
+        getId: () => FIX_IDS[0],
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getType: () => 'CODE_CHANGE',
+        getCreatedAt: () => '2025-01-01T00:00:00.000Z',
+        getUpdatedAt: () => '2025-01-01T00:00:00.000Z',
+        getExecutedBy: () => 'test@test.com',
+        getExecutedAt: () => '2025-01-01T01:00:00.000Z',
+        getPublishedAt: () => '2025-01-01T02:00:00.000Z',
+        getChangeDetails: () => ({ file: 'index.js', changes: 'updated' }),
+        getStatus: () => 'COMPLETED',
+        getOrigin: () => 'MANUAL',
+      },
+      {
+        getId: () => FIX_IDS[1],
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getType: () => 'CONTENT_UPDATE',
+        getCreatedAt: () => '2025-01-02T00:00:00.000Z',
+        getUpdatedAt: () => '2025-01-02T00:00:00.000Z',
+        getExecutedBy: () => 'test@test.com',
+        getExecutedAt: () => '2025-01-02T01:00:00.000Z',
+        getPublishedAt: () => null,
+        getChangeDetails: () => ({ content: 'new content' }),
+        getStatus: () => 'IN_PROGRESS',
+        getOrigin: () => 'MANUAL',
+      },
+    ];
+
+    beforeEach(() => {
+      mockSuggestion.getFixEntitiesBySuggestionId.resolves(mockFixEntities);
+    });
+
+    it('gets all fixes for a suggestion successfully', async () => {
+      const response = await suggestionsController.getSuggestionFixes({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+          suggestionId: SUGGESTION_IDS[0],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+      expect(result).to.have.property('data');
+      expect(result.data).to.be.an('array').with.lengthOf(2);
+      expect(result.data[0]).to.have.property('id', FIX_IDS[0]);
+      expect(result.data[0]).to.have.property('type', 'CODE_CHANGE');
+      expect(result.data[0]).to.have.property('status', 'COMPLETED');
+      expect(result.data[1]).to.have.property('id', FIX_IDS[1]);
+      expect(result.data[1]).to.have.property('type', 'CONTENT_UPDATE');
+      expect(mockSuggestion.getFixEntitiesBySuggestionId)
+        .to.have.been.calledOnceWith(SUGGESTION_IDS[0]);
+    });
+
+    it('returns empty array when suggestion has no fixes', async () => {
+      mockSuggestion.getFixEntitiesBySuggestionId.resolves([]);
+      const response = await suggestionsController.getSuggestionFixes({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+          suggestionId: SUGGESTION_IDS[0],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+      expect(result).to.have.property('data');
+      expect(result.data).to.be.an('array').with.lengthOf(0);
+    });
+
+    it('returns bad request if no site ID is passed', async () => {
+      const response = await suggestionsController.getSuggestionFixes({
+        params: {
+          opportunityId: OPPORTUNITY_ID,
+          suggestionId: SUGGESTION_IDS[0],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Site ID required');
+      expect(mockSuggestion.getFixEntitiesBySuggestionId).to.not.have.been.called;
+    });
+
+    it('returns bad request if no opportunity ID is passed', async () => {
+      const response = await suggestionsController.getSuggestionFixes({
+        params: {
+          siteId: SITE_ID,
+          suggestionId: SUGGESTION_IDS[0],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Opportunity ID required');
+      expect(mockSuggestion.getFixEntitiesBySuggestionId).to.not.have.been.called;
+    });
+
+    it('returns bad request if no suggestion ID is passed', async () => {
+      const response = await suggestionsController.getSuggestionFixes({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Suggestion ID required');
+      expect(mockSuggestion.getFixEntitiesBySuggestionId).to.not.have.been.called;
+    });
+
+    it('returns not found if site does not exist', async () => {
+      const response = await suggestionsController.getSuggestionFixes({
+        params: {
+          siteId: SITE_ID_NOT_FOUND,
+          opportunityId: OPPORTUNITY_ID,
+          suggestionId: SUGGESTION_IDS[0],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(404);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Site not found');
+      expect(mockSuggestion.getFixEntitiesBySuggestionId).to.not.have.been.called;
+    });
+
+    it('returns forbidden if user does not belong to the organization', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+      const response = await suggestionsController.getSuggestionFixes({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+          suggestionId: SUGGESTION_IDS[0],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(403);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'User does not belong to the organization');
+      expect(mockSuggestion.getFixEntitiesBySuggestionId).to.not.have.been.called;
+    });
+
+    it('returns 500 error if getFixEntitiesBySuggestionId throws an error', async () => {
+      mockSuggestion.getFixEntitiesBySuggestionId.rejects(new Error('Database error'));
+      const response = await suggestionsController.getSuggestionFixes({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+          suggestionId: SUGGESTION_IDS[0],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(500);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Error retrieving fixes for suggestion');
+    });
   });
 
   it('creates 2 suggestions success', async () => {
@@ -1440,6 +1685,77 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'IN_PROGRESS');
     });
 
+    it('triggers autofixSuggestion for form-accessibility (non-grouped)', async () => {
+      opportunity.getType = sandbox.stub().returns('form-accessibility');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(formAccessibilitySuggs[0]),
+          mockSuggestionEntity(formAccessibilitySuggs[1])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...formAccessibilitySuggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...formAccessibilitySuggs[1], status: 'IN_PROGRESS' }),
+      ]);
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse).to.have.property('suggestions');
+      expect(bulkPatchResponse).to.have.property('metadata');
+      expect(bulkPatchResponse.metadata).to.have.property('total', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('success', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('failed', 0);
+      expect(bulkPatchResponse.suggestions).to.have.property('length', 2);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 200);
+      expect(bulkPatchResponse.suggestions[1]).to.have.property('statusCode', 200);
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'IN_PROGRESS');
+      expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'IN_PROGRESS');
+      // Verify SQS was called once (non-grouped behavior)
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+    });
+
+    it('triggers autofixSuggestion for form-accessibility with multiple suggestions from same URL', async () => {
+      opportunity.getType = sandbox.stub().returns('form-accessibility');
+      // Both suggestions have the same URL
+      const formSugg1 = { ...formAccessibilitySuggs[0] };
+      const formSugg2 = {
+        ...formAccessibilitySuggs[1],
+        id: SUGGESTION_IDS[2],
+        data: {
+          ...formAccessibilitySuggs[1].data,
+          url: 'https://www.sunstar.com/contact', // Same URL as first suggestion
+        },
+      };
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(formSugg1),
+          mockSuggestionEntity(formSugg2)],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...formSugg1, status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...formSugg2, status: 'IN_PROGRESS' }),
+      ]);
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.metadata).to.have.property('success', 2);
+      // Verify SQS was called once with all suggestions, not grouped by URL
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+    });
+
     it('auto-fix suggestions status returns bad request if no site ID is passed', async () => {
       const response = await suggestionsController.autofixSuggestions({
         params: {
@@ -2062,28 +2378,42 @@ describe('Suggestions Controller', () => {
       tokowakaSuggestions = [
         {
           getId: () => SUGGESTION_IDS[0],
+          getType: () => 'headings',
           getOpportunityId: () => OPPORTUNITY_ID,
           getStatus: () => 'NEW',
+          getRank: () => 1,
           getData: () => ({
             url: 'https://example.com/page1',
             headingTag: 'h1',
             recommendedAction: 'New Heading Title',
             checkType: 'heading-empty',
+            path: 'h1.test-selector',
           }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
           setData: sandbox.stub().returnsThis(),
           setUpdatedBy: sandbox.stub().returnsThis(),
           save: sandbox.stub().returnsThis(),
         },
         {
           getId: () => SUGGESTION_IDS[1],
+          getType: () => 'headings',
           getOpportunityId: () => OPPORTUNITY_ID,
           getStatus: () => 'NEW',
+          getRank: () => 2,
           getData: () => ({
             url: 'https://example.com/page1',
             headingTag: 'h2',
             recommendedAction: 'New Subtitle',
             checkType: 'heading-empty',
+            path: 'h2.test-selector',
           }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
           setData: sandbox.stub().returnsThis(),
           setUpdatedBy: sandbox.stub().returnsThis(),
           save: sandbox.stub().returnsThis(),
@@ -2099,6 +2429,8 @@ describe('Suggestions Controller', () => {
       site.getConfig = sandbox.stub().returns({
         getTokowakaConfig: () => ({ apiKey: 'test-api-key-123' }),
       });
+      site.getBaseURL = sandbox.stub().returns('https://example.com');
+      site.getId = sandbox.stub().returns(SITE_ID);
       mockOpportunity.findById.resetBehavior();
       mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(headingsOpportunity);
       mockOpportunity.findById.withArgs(OPPORTUNITY_ID_NOT_ENABLED).resolves(opportunityNotEnabled);
@@ -2107,11 +2439,20 @@ describe('Suggestions Controller', () => {
       mockSuggestion.allByOpportunityId.resolves(tokowakaSuggestions);
 
       s3ClientSendStub = sandbox.stub().resolves();
-      context.s3Client = {
-        send: s3ClientSendStub,
+      context.s3 = {
+        s3Client: {
+          send: s3ClientSendStub,
+        },
       };
       context.env = {
-        TOKOWAKA_CONFIG_BUCKET: 'test-tokowaka-bucket',
+        TOKOWAKA_SITE_CONFIG_BUCKET: 'test-tokowaka-bucket',
+        TOKOWAKA_CDN_PROVIDER: 'test-cdn-provider',
+        TOKOWAKA_CDN_CONFIG: JSON.stringify({
+          cloudfront: {
+            distributionId: 'E123456',
+            region: 'us-east-1',
+          },
+        }),
       };
       context.log = {
         info: sandbox.stub(),
@@ -2174,6 +2515,55 @@ describe('Suggestions Controller', () => {
       expect(secondSugg.save.calledOnce).to.be.true;
     });
 
+    it('should return 400 if siteId is invalid', async () => {
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: 'invalid-id',
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.equal('Site ID required');
+    });
+
+    it('should return 400 if opportunityId is invalid', async () => {
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: 'invalid-id',
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.equal('Opportunity ID required');
+    });
+
+    it('should return 400 if no data provided', async () => {
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: null,
+      });
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.equal('No data provided');
+    });
+
     it('should return 400 if suggestionIds is empty', async () => {
       const response = await suggestionsController.deploySuggestionToEdge({
         ...context,
@@ -2191,10 +2581,8 @@ describe('Suggestions Controller', () => {
       expect(body.message).to.include('non-empty array');
     });
 
-    it('should return 400 if site does not have Tokowaka API key', async () => {
-      site.getConfig.returns({
-        getTokowakaConfig: () => ({}),
-      });
+    it('should return 404 if site not found', async () => {
+      mockSite.findById.withArgs(SITE_ID).resolves(null);
 
       const response = await suggestionsController.deploySuggestionToEdge({
         ...context,
@@ -2207,13 +2595,109 @@ describe('Suggestions Controller', () => {
         },
       });
 
-      expect(response.status).to.equal(400);
+      expect(response.status).to.equal(404);
       const body = await response.json();
-      expect(body.message).to.include('Tokowaka API key');
+      expect(body.message).to.equal('Site not found');
+    });
+
+    it('should return 403 if user does not have access to site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.equal('User does not belong to the organization');
+    });
+
+    it('should return 404 if opportunity not found', async () => {
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(null);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.equal('Opportunity not found');
+    });
+
+    it('should return 404 if opportunity does not match siteId', async () => {
+      const mismatchedOpportunity = {
+        getId: sandbox.stub().returns(OPPORTUNITY_ID),
+        getSiteId: sandbox.stub().returns('different-site-id'),
+        getType: sandbox.stub().returns('headings'),
+      };
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(mismatchedOpportunity);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.equal('Opportunity not found');
+    });
+
+    it('should return 500 if site does not have Tokowaka API key', async () => {
+      const suggestionsController2 = SuggestionsController({
+        dataAccess: {
+          ...mockSuggestionDataAccess,
+          Site: {
+            findById: sandbox.stub().resolves({
+              getConfig: sandbox.stub().returns({
+                getTokowakaConfig: sandbox.stub().returns({}),
+              }),
+            }),
+          },
+        },
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      const response = await suggestionsController2.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.total).to.equal(1);
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0].statusCode).to.equal(500);
+      expect(body.suggestions[0].message).to.include('Internal server error');
     });
 
     it('should handle S3 upload failure gracefully', async () => {
-      s3ClientSendStub.rejects(new Error('S3 upload failed'));
+      s3ClientSendStub.rejects(Object.assign(new Error('S3 upload failed', { status: 403 })));
 
       const response = await suggestionsController.deploySuggestionToEdge({
         ...context,

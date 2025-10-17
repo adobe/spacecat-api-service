@@ -115,6 +115,7 @@ function OnboardCommand(context) {
     profileName,
     workflowWaitTime,
     slackContext,
+    contextParam,
     additionalParams = {},
   ) => {
     // Load the profile configuration
@@ -128,7 +129,7 @@ function OnboardCommand(context) {
       profile,
       workflowWaitTime,
       slackContext,
-      context,
+      contextParam,
       additionalParams,
       {
         urlProcessor: extractURLFromSlackInput, // Pass URL processor for Slack input format

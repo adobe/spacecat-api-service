@@ -56,6 +56,18 @@ describe('getRouteHandlers', () => {
     getSlackConfigByImsOrgID: sinon.stub(),
   };
 
+  const mockProjectsController = {
+    getAll: sinon.stub(),
+    createProject: sinon.stub(),
+    getByID: sinon.stub(),
+    getByName: sinon.stub(),
+    getPrimaryLocaleSites: sinon.stub(),
+    getSitesByProjectId: sinon.stub(),
+    getSitesByProjectName: sinon.stub(),
+    removeProject: sinon.stub(),
+    updateProject: sinon.stub(),
+  };
+
   const mockSlackController = {
     handleEvent: sinon.stub(),
   };
@@ -227,6 +239,7 @@ describe('getRouteHandlers', () => {
       mockConfigurationController,
       mockHooksController,
       mockOrganizationsController,
+      mockProjectsController,
       mockSitesController,
       mockExperimentsController,
       mockSlackController,
@@ -263,6 +276,8 @@ describe('getRouteHandlers', () => {
       'PATCH /configurations/sites/audits',
       'GET /organizations',
       'POST /organizations',
+      'GET /projects',
+      'POST /projects',
       'POST /preflight/jobs',
       'GET /sites',
       'POST /sites',
@@ -307,6 +322,9 @@ describe('getRouteHandlers', () => {
       'POST /hooks/site-detection/rum/:hookSecret',
       'GET /organizations/:organizationId',
       'GET /organizations/:organizationId/brands',
+      'GET /organizations/:organizationId/projects',
+      'GET /organizations/:organizationId/projects/:projectId/sites',
+      'GET /organizations/:organizationId/by-project-name/:projectName/sites',
       'GET /organizations/:organizationId/sites',
       'GET /organizations/:organizationId/entitlements',
       'POST /organizations/:organizationId/entitlements',
@@ -317,6 +335,12 @@ describe('getRouteHandlers', () => {
       'PATCH /organizations/:organizationId',
       'DELETE /organizations/:organizationId',
       'GET /preflight/jobs/:jobId',
+      'GET /projects/:projectId',
+      'PATCH /projects/:projectId',
+      'DELETE /projects/:projectId',
+      'GET /projects/:projectId/sites/primary-locale',
+      'GET /projects/:projectId/sites',
+      'GET /projects/by-project-name/:projectName/sites',
       'GET /sites/:siteId',
       'PATCH /sites/:siteId',
       'DELETE /sites/:siteId',
@@ -362,6 +386,7 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
       'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status',
+      'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes',
       'GET /sites/:siteId/scraped-content/:type',
       'GET /sites/:siteId/top-pages',
       'GET /sites/:siteId/top-pages/:source',

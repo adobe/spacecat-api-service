@@ -50,6 +50,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} configurationController - The configuration controller.
  * @param {Object} hooksController - The hooks controller.
  * @param {Object} organizationsController - The organizations controller.
+ * @param {Object} projectsController - The projects controller.
  * @param {Object} sitesController - The sites controller.
  * @param {Object} experimentsController - The experiments controller.
  * @param {Object} slackController - The slack controller.
@@ -84,6 +85,7 @@ export default function getRouteHandlers(
   configurationController,
   hooksController,
   organizationsController,
+  projectsController,
   sitesController,
   experimentsController,
   slackController,
@@ -136,6 +138,17 @@ export default function getRouteHandlers(
     'DELETE /organizations/:organizationId': organizationsController.removeOrganization,
     'GET /organizations/:organizationId/sites': organizationsController.getSitesForOrganization,
     'GET /organizations/:organizationId/brands': brandsController.getBrandsForOrganization,
+    'GET /organizations/:organizationId/projects': organizationsController.getProjectsByOrganizationId,
+    'GET /organizations/:organizationId/projects/:projectId/sites': organizationsController.getSitesByProjectIdAndOrganizationId,
+    'GET /organizations/:organizationId/by-project-name/:projectName/sites': organizationsController.getSitesByProjectNameAndOrganizationId,
+    'GET /projects': projectsController.getAll,
+    'POST /projects': projectsController.createProject,
+    'GET /projects/:projectId': projectsController.getByID,
+    'PATCH /projects/:projectId': projectsController.updateProject,
+    'DELETE /projects/:projectId': projectsController.removeProject,
+    'GET /projects/:projectId/sites/primary-locale': projectsController.getPrimaryLocaleSites,
+    'GET /projects/:projectId/sites': projectsController.getSitesByProjectId,
+    'GET /projects/by-project-name/:projectName/sites': projectsController.getSitesByProjectName,
     'POST /preflight/jobs': preflightController.createPreflightJob,
     'GET /preflight/jobs/:jobId': preflightController.getPreflightJobStatusAndResult,
     'GET /sites': sitesController.getAll,
@@ -173,6 +186,7 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy': suggestionsController.deploySuggestionToEdge,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status': suggestionsController.getByStatus,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.getByID,
+    'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': suggestionsController.getSuggestionFixes,
     'POST /sites/:siteId/opportunities/:opportunityId/suggestions': suggestionsController.createSuggestions,
     'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status': suggestionsController.patchSuggestionsStatus,
     'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.patchSuggestion,
