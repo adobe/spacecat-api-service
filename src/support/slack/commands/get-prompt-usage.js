@@ -18,6 +18,7 @@ import { createObjectCsvStringifier } from '../../../utils/slack/csvHelper.cjs';
 
 const { readConfig } = llmo;
 const PHRASES = ['get-prompt-usage'];
+const EXCLUDED_IMS_ORGS = ['9E1005A551ED61CA0A490D45@AdobeOrg'];
 
 /**
  * Factory function to create the GetPromptUsage object.
@@ -144,7 +145,7 @@ function GetPromptUsageCommand(context) {
       if (imsOrgIds.length === 1 && imsOrgIds[0] === '--all') {
         const allOrgs = await Organization.all();
         imsOrgIds = allOrgs.map((org) => org.getImsOrgId());
-        await say(':progress-loader: Retrieving total number of prompts in use for *all* organizations...');
+        await say(':progress-loader: Retrieving total number of prompts in use for *all* organizations (excluding Adobe Corp)...');
       }
 
       const results = await Promise.allSettled(
@@ -160,7 +161,7 @@ function GetPromptUsageCommand(context) {
             tier,
             totalPrompts,
           } = res.value;
-          if (totalPrompts === 0) return undefined;
+          if (args[0] === '--all' && (totalPrompts === 0 || EXCLUDED_IMS_ORGS.includes(imsOrgID))) return undefined;
           return {
             organizationName,
             imsOrgID,
