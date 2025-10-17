@@ -202,7 +202,7 @@ async function publishToAdminHlx(filename, outputLocation, log) {
  * @param {Function} say - Optional function to send messages (e.g., Slack say function)
  * @returns {Promise<void>}
  */
-export async function copyFilesToSharepoint(dataFolder, context, say = () => {}) {
+export async function copyFilesToSharepoint(dataFolder, context, say = () => { }) {
   const { log, env } = context;
 
   const sharepointClient = await createSharePointClient(env);
@@ -241,7 +241,7 @@ export async function copyFilesToSharepoint(dataFolder, context, say = () => {})
  * @param {Function} say - Optional function to send messages (e.g., Slack say function)
  * @returns {Promise<void>}
  */
-export async function updateIndexConfig(dataFolder, context, say = () => {}) {
+export async function updateIndexConfig(dataFolder, context, say = () => { }) {
   const { log, env } = context;
 
   log.debug('Starting Git modification of helix query config');
@@ -292,7 +292,7 @@ export async function updateIndexConfig(dataFolder, context, say = () => {}) {
  * @param {object} slackContext - Slack context (optional, for Slack operations)
  * @returns {Promise<object>} The organization object
  */
-export async function createOrFindOrganization(imsOrgId, context, say = () => {}) {
+export async function createOrFindOrganization(imsOrgId, context, say = () => { }) {
   const { dataAccess, log } = context;
   const { Organization } = dataAccess;
 
@@ -351,7 +351,7 @@ export async function createOrFindSite(baseURL, organizationId, context) {
  * @param {Function} say - Optional function to send messages (e.g., Slack say function)
  * @returns {Promise<object>} The entitlement and enrollment objects
  */
-export async function createEntitlementAndEnrollment(site, context, say = () => {}) {
+export async function createEntitlementAndEnrollment(site, context, say = () => { }) {
   const { log } = context;
 
   try {
@@ -370,6 +370,35 @@ export async function createEntitlementAndEnrollment(site, context, say = () => 
   }
 }
 
+export async function createEntitlementAndEnrollmentForOrg(organization, context, say = () => { }) {
+  const { log } = context;
+
+  try {
+    const tierClient = TierClient.createForOrg(context, organization, LLMO_PRODUCT_CODE);
+    const { entitlement: existingEntitlement } = await tierClient.checkValidEntitlement(LLMO_TIER);
+    const { entitlement } = await tierClient.createEntitlement(LLMO_TIER);
+
+    const wasNewlyCreated = !existingEntitlement
+      || existingEntitlement.getId() !== entitlement.getId();
+
+    if (wasNewlyCreated) {
+      await say(`Successfully created LLMO entitlement ${entitlement.getId()} for organization ${organization.getId()}`);
+    } else {
+      await say(`Found existing LLMO entitlement ${entitlement.getId()} for organization ${organization.getId()}`);
+    }
+
+    log.info(`Successfully ensured LLMO access for organization ${organization.getId()} via entitlement ${entitlement.getId()}`);
+
+    return {
+      entitlement,
+    };
+  } catch (error) {
+    log.info(`Ensuring LLMO entitlement failed: ${error.message}`);
+    await say('❌ Ensuring LLMO entitlement failed');
+    throw error;
+  }
+}
+
 export async function enableAudits(site, context, audits = []) {
   const { dataAccess } = context;
   const { Configuration } = dataAccess;
@@ -379,6 +408,27 @@ export async function enableAudits(site, context, audits = []) {
     configuration.enableHandlerForSite(audit, site);
   });
   await configuration.save();
+}
+
+export async function performLlmoOrgOnboarding(imsOrgId, context, say = () => { }) {
+  const { log } = context;
+
+  log.info(`Starting LLMO organization onboarding for IMS Org ID: ${imsOrgId}`);
+  await say(`:gear: Starting LLMO IMS org onboarding for *${imsOrgId}*...`);
+  const organization = await createOrFindOrganization(imsOrgId, context, say);
+
+  try {
+    const { entitlement } = await createEntitlementAndEnrollmentForOrg(organization, context, say);
+
+    return {
+      organization,
+      message: 'LLMO organization onboarding completed successfully',
+      entitlement,
+    };
+  } catch (error) {
+    log.error(`Error creating entitlement for organization: ${error.message}`);
+    throw new Error(`Failed to create LLMO entitlement for organization: ${error.message}`);
+  }
 }
 
 /**
