@@ -68,7 +68,7 @@ describe('LlmoController', () => {
 
   before(async () => {
     // Set up esmock once for all tests
-    LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
+    LlmoController = await esmock('../../../src/controllers/llmo/llmo.js', {
       '@adobe/spacecat-shared-utils': {
         SPACECAT_USER_AGENT: TEST_USER_AGENT,
         tracingFetch: (...args) => tracingFetchStub(...args),
@@ -84,7 +84,7 @@ describe('LlmoController', () => {
         isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
         composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
       },
-      '../../src/support/access-control-util.js': {
+      '../../../src/support/access-control-util.js': {
         default: class MockAccessControlUtil {
           static fromContext(context) {
             return new MockAccessControlUtil(context);
@@ -106,8 +106,8 @@ describe('LlmoController', () => {
     });
 
     // Create controller with access denied for access control tests
-    const LlmoControllerDenied = await esmock('../../src/controllers/llmo/llmo.js', {
-      '../../src/support/access-control-util.js': {
+    const LlmoControllerDenied = await esmock('../../../src/controllers/llmo/llmo.js', {
+      '../../../src/support/access-control-util.js': {
         default: createMockAccessControlUtil(false),
       },
     });
@@ -1731,8 +1731,8 @@ describe('LlmoController', () => {
     });
 
     it('should successfully onboard a new customer', async () => {
-      const LlmoControllerOnboard = await esmock('../../src/controllers/llmo/llmo.js', {
-        '../../src/controllers/llmo/llmo-onboarding.js': {
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: validateSiteNotOnboardedStub,
           performLlmoOnboarding: performLlmoOnboardingStub,
           generateDataFolder: (baseURL, env) => {
@@ -1741,7 +1741,7 @@ describe('LlmoController', () => {
             return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
           },
         },
-        '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
         '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
           Config: { toDynamoItem: sinon.stub().returnsArg(0) },
         },
@@ -1788,13 +1788,13 @@ describe('LlmoController', () => {
           });
         }
 
-        const LlmoControllerOnboard = await esmock('../../src/controllers/llmo/llmo.js', {
-          '../../src/controllers/llmo/llmo-onboarding.js': {
+        const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+          '../../../src/controllers/llmo/llmo-onboarding.js': {
             validateSiteNotOnboarded: validateSiteNotOnboardedStub,
             performLlmoOnboarding: performLlmoOnboardingStub,
             generateDataFolder: () => 'dev/example-com',
           },
-          '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+          '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
           '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
             Config: { toDynamoItem: sinon.stub().returnsArg(0) },
           },
@@ -1822,13 +1822,13 @@ describe('LlmoController', () => {
         isValid: false,
         error: 'Site already assigned to different organization',
       });
-      const LlmoControllerOnboard = await esmock('../../src/controllers/llmo/llmo.js', {
-        '../../src/controllers/llmo/llmo-onboarding.js': {
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: validateSiteNotOnboardedStub,
           performLlmoOnboarding: performLlmoOnboardingStub,
           generateDataFolder: () => 'dev/example-com',
         },
-        '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
         '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
           Config: { toDynamoItem: sinon.stub().returnsArg(0) },
         },
@@ -1853,13 +1853,13 @@ describe('LlmoController', () => {
     it('should handle errors and log them', async () => {
       validateSiteNotOnboardedStub.reset();
       validateSiteNotOnboardedStub.rejects(new Error('Validation error'));
-      const LlmoControllerOnboard = await esmock('../../src/controllers/llmo/llmo.js', {
-        '../../src/controllers/llmo/llmo-onboarding.js': {
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: validateSiteNotOnboardedStub,
           performLlmoOnboarding: performLlmoOnboardingStub,
           generateDataFolder: () => 'dev/example-com',
         },
-        '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
         '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
           Config: { toDynamoItem: sinon.stub().returnsArg(0) },
         },
@@ -1912,11 +1912,11 @@ describe('LlmoController', () => {
     });
 
     it('should successfully offboard a customer', async () => {
-      const LlmoControllerOffboard = await esmock('../../src/controllers/llmo/llmo.js', {
-        '../../src/controllers/llmo/llmo-onboarding.js': {
+      const LlmoControllerOffboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
           performLlmoOffboarding: performLlmoOffboardingStub,
         },
-        '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
       });
       const testController = LlmoControllerOffboard(mockContext);
 
@@ -1938,11 +1938,11 @@ describe('LlmoController', () => {
     it('should return bad request when offboarding fails', async () => {
       performLlmoOffboardingStub.rejects(new Error('Offboarding failed'));
 
-      const LlmoControllerOffboard = await esmock('../../src/controllers/llmo/llmo.js', {
-        '../../src/controllers/llmo/llmo-onboarding.js': {
+      const LlmoControllerOffboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
           performLlmoOffboarding: performLlmoOffboardingStub,
         },
-        '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
       });
       const testController = LlmoControllerOffboard(mockContext);
 

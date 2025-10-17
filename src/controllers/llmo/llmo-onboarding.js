@@ -206,6 +206,171 @@ export async function unpublishFromAdminHlx(filename, outputLocation, log) {
 }
 
 /**
+ * Starts a bulk status job for a given path.
+ * @param {string} path - The folder path to get status for
+ * @param {object} env - Environment variables
+ * @param {object} log - Logger instance
+ * @returns {Promise<string>} The job name
+ */
+export async function startBulkStatusJob(path, env, log) {
+  const org = 'adobe';
+  const site = 'project-elmo-ui-data';
+  const ref = 'main';
+  const headers = { Cookie: `auth_token=${env.HLX_ADMIN_TOKEN}` };
+
+  if (!env.HLX_ADMIN_TOKEN) {
+    log.warn('LLMO offboarding: HLX_ADMIN_TOKEN is not set');
+    return null;
+  }
+
+  const baseUrl = 'https://admin.hlx.page';
+  const url = `${baseUrl}/status/${org}/${site}/${ref}/${path}`;
+
+  log.debug(`Starting bulk status job for path: ${path}`);
+
+  const response = await fetch(url, { method: 'POST', headers });
+
+  if (!response.ok) {
+    throw new Error(`Failed to start bulk status job: ${response.status} ${response.statusText}`);
+  }
+
+  const result = await response.json();
+  log.debug(`Bulk status job started: ${result.job?.name || result.name}`);
+
+  return result.job?.name || result.name;
+}
+
+/**
+ * Polls a job until it completes.
+ * @param {string} jobName - The job name to poll
+ * @param {object} env - Environment variables
+ * @param {object} log - Logger instance
+ * @returns {Promise<object>} The completed job data
+ */
+export async function pollJobStatus(jobName, env, log) {
+  const org = 'adobe';
+  const site = 'project-elmo-ui-data';
+  const ref = 'main';
+  const topic = 'status';
+  const headers = { Cookie: `auth_token=${env.HLX_ADMIN_TOKEN}` };
+
+  if (!env.HLX_ADMIN_TOKEN) {
+    log.warn('LLMO offboarding: HLX_ADMIN_TOKEN is not set');
+    return null;
+  }
+
+  const baseUrl = 'https://admin.hlx.page';
+  const url = `${baseUrl}/job/${org}/${site}/${ref}/${topic}/${jobName}/details`;
+
+  const pollInterval = 200; // 200ms as specified
+  const maxAttempts = 150; // 30 seconds timeout (150 * 200ms)
+  let attempts = 0;
+
+  log.debug(`Polling job status for: ${jobName}`);
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    // eslint-disable-next-line no-await-in-loop
+    const response = await fetch(url, { method: 'GET', headers });
+
+    if (!response.ok) {
+      throw new Error(`Failed to get job status: ${response.status} ${response.statusText}`);
+    }
+
+    // eslint-disable-next-line no-await-in-loop
+    const jobData = await response.json();
+
+    if (jobData.state === 'stopped' && jobData.data?.phase === 'completed') {
+      log.debug(`Job ${jobName} completed successfully`);
+      return jobData;
+    }
+
+    attempts += 1;
+    if (attempts >= maxAttempts) {
+      throw new Error(`Job polling timed out after ${maxAttempts * pollInterval}ms`);
+    }
+
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((resolve) => {
+      setTimeout(resolve, pollInterval);
+    });
+  }
+}
+
+/**
+ * Performs bulk unpublish and un-preview for a list of paths.
+ * @param {Array<string>} paths - Array of paths to unpublish
+ * @param {object} env - Environment variables
+ * @param {object} log - Logger instance
+ */
+export async function bulkUnpublishPaths(paths, env, log) {
+  if (!paths || paths.length === 0) {
+    log.debug('No paths to unpublish');
+    return;
+  }
+
+  const org = 'adobe';
+  const site = 'project-elmo-ui-data';
+  const ref = 'main';
+  const headers = {
+    Cookie: `auth_token=${env.HLX_ADMIN_TOKEN}`,
+    'Content-Type': 'application/json',
+  };
+
+  if (!env.HLX_ADMIN_TOKEN) {
+    log.warn('LLMO offboarding: HLX_ADMIN_TOKEN is not set');
+    return;
+  }
+
+  const baseUrl = 'https://admin.hlx.page';
+
+  // Prepare paths in the format required by bulk APIs
+  const pathsPayload = paths.map((path) => ({ path }));
+
+  // Bulk unpublish (live)
+  const unpublishUrl = `${baseUrl}/live/${org}/${site}/${ref}`;
+  log.debug(`Starting bulk unpublish for ${paths.length} paths`);
+
+  try {
+    const unpublishResponse = await fetch(unpublishUrl, {
+      method: 'DELETE',
+      headers,
+      body: JSON.stringify({ paths: pathsPayload }),
+    });
+
+    if (!unpublishResponse.ok) {
+      log.error(`Bulk unpublish failed: ${unpublishResponse.status} ${unpublishResponse.statusText}`);
+    } else {
+      const unpublishResult = await unpublishResponse.json();
+      log.debug(`Bulk unpublish job started: ${unpublishResult.job?.name || unpublishResult.name}`);
+    }
+  } catch (error) {
+    log.error(`Error during bulk unpublish: ${error.message}`);
+  }
+
+  // Bulk un-preview
+  const unpreviewUrl = `${baseUrl}/preview/${org}/${site}/${ref}`;
+  log.debug(`Starting bulk un-preview for ${paths.length} paths`);
+
+  try {
+    const unpreviewResponse = await fetch(unpreviewUrl, {
+      method: 'DELETE',
+      headers,
+      body: JSON.stringify({ paths: pathsPayload }),
+    });
+
+    if (!unpreviewResponse.ok) {
+      log.error(`Bulk un-preview failed: ${unpreviewResponse.status} ${unpreviewResponse.statusText}`);
+    } else {
+      const unpreviewResult = await unpreviewResponse.json();
+      log.debug(`Bulk un-preview job started: ${unpreviewResult.job?.name || unpreviewResult.name}`);
+    }
+  } catch (error) {
+    log.error(`Error during bulk un-preview: ${error.message}`);
+  }
+}
+
+/**
  * Copies template files to SharePoint for a new LLMO onboarding.
  * @param {string} dataFolder - The data folder name
  * @param {object} context - The request context
@@ -365,6 +530,33 @@ export async function deleteSharePointFolder(dataFolder, context) {
   const { log, env } = context;
 
   try {
+    // First, get bulk status of all files under the folder to know what needs to be unpublished
+    log.info(`Getting bulk status for folder: ${dataFolder}`);
+    const jobName = await startBulkStatusJob(dataFolder, env, log);
+
+    if (jobName) {
+      // Poll the job until it completes
+      const jobData = await pollJobStatus(jobName, env, log);
+
+      // Extract all paths from the resources
+      const paths = jobData?.data?.resources
+        ?.filter((resource) => resource.path.startsWith(`/${dataFolder}`))
+        .map((resource) => resource.path) || [];
+
+      if (paths.length > 0) {
+        log.info(`Found ${paths.length} paths to unpublish under folder ${dataFolder}`);
+        // Bulk unpublish and un-preview all paths
+        await bulkUnpublishPaths(paths, env, log);
+      } else {
+        log.debug(`No published paths found under folder ${dataFolder}`);
+      }
+    }
+  } catch (error) {
+    log.error(`Error during bulk unpublish for folder ${dataFolder}: ${error.message}`);
+    // Don't throw - continue with folder deletion
+  }
+
+  try {
     const sharepointClient = await createSharePointClient(env);
     const folder = sharepointClient.getDocument(`/sites/elmo-ui-data/${dataFolder}/`);
     const folderExists = await folder.exists();
@@ -380,8 +572,6 @@ export async function deleteSharePointFolder(dataFolder, context) {
     log.error(`Error deleting SharePoint folder ${dataFolder}: ${error.message}`);
     // Don't throw - allow offboarding to continue
   }
-
-  await unpublishFromAdminHlx('query-index', dataFolder, log);
 }
 
 /**
@@ -534,7 +724,6 @@ export async function performLlmoOnboarding(params, context) {
 
     // Attempt cleanup
     await deleteSharePointFolder(dataFolder, context);
-    await unpublishFromAdminHlx('query-index', dataFolder, log);
     if (site) {
       await revokeEnrollment(site, context);
     }

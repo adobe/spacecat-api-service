@@ -56,6 +56,7 @@ describe('LLMO Onboarding Functions', () => {
       SHAREPOINT_AUTHORITY: 'test-authority',
       SHAREPOINT_DOMAIN_ID: 'test-domain-id',
       DEFAULT_ORGANIZATION_ID: 'default-org-id',
+      HLX_ADMIN_TOKEN: 'test-admin-token',
     };
 
     // Create mock SharePoint client and folder
@@ -209,7 +210,7 @@ describe('LLMO Onboarding Functions', () => {
       mockSharePointClient: sharePointClient,
     } = options;
 
-    return esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+    return esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
       '@adobe/spacecat-shared-tier-client': {
         default: mockTierClient,
       },
@@ -229,7 +230,7 @@ describe('LLMO Onboarding Functions', () => {
   describe('generateDataFolder', () => {
     it('should generate correct data folder name for production environment', async () => {
       // Import the function
-      const { generateDataFolder } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {});
+      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
 
       // Test parameters
       const baseURL = 'https://test.com';
@@ -244,7 +245,7 @@ describe('LLMO Onboarding Functions', () => {
 
     it('should generate correct data folder name for development environment', async () => {
       // Import the function
-      const { generateDataFolder } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {});
+      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
 
       // Test parameters
       const baseURL = 'https://test.com';
@@ -259,7 +260,7 @@ describe('LLMO Onboarding Functions', () => {
 
     it('should handle complex domain names correctly', async () => {
       // Import the function
-      const { generateDataFolder } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {});
+      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
 
       // Test with a complex domain
       const baseURL = 'https://my-awesome-site.example.com';
@@ -274,7 +275,7 @@ describe('LLMO Onboarding Functions', () => {
 
     it('should handle domains with special characters', async () => {
       // Import the function
-      const { generateDataFolder } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {});
+      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
 
       // Test with special characters
       const baseURL = 'https://test-site.example.com:8080';
@@ -289,7 +290,7 @@ describe('LLMO Onboarding Functions', () => {
 
     it('should use default env as dev when not specified', async () => {
       // Import the function
-      const { generateDataFolder } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {});
+      const { generateDataFolder } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
 
       // Test parameters without env (should default to 'dev')
       const baseURL = 'https://test.com';
@@ -317,7 +318,7 @@ describe('LLMO Onboarding Functions', () => {
       };
 
       // Import the function with mocked dependencies
-      const { validateSiteNotOnboarded } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+      const { validateSiteNotOnboarded } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
         '@adobe/spacecat-helix-content-sdk': {
           createFrom: sinon.stub().resolves(mockSharePointClient),
         },
@@ -360,7 +361,7 @@ describe('LLMO Onboarding Functions', () => {
       };
 
       // Import the function with mocked dependencies
-      const { validateSiteNotOnboarded } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+      const { validateSiteNotOnboarded } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
         '@adobe/spacecat-helix-content-sdk': {
           createFrom: sinon.stub().resolves(mockSharePointClient),
         },
@@ -413,7 +414,7 @@ describe('LLMO Onboarding Functions', () => {
       };
 
       // Import the function with mocked dependencies
-      const { validateSiteNotOnboarded } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+      const { validateSiteNotOnboarded } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
         '@adobe/spacecat-helix-content-sdk': {
           createFrom: sinon.stub().resolves(mockSharePointClient),
         },
@@ -464,7 +465,7 @@ describe('LLMO Onboarding Functions', () => {
       };
 
       // Import the function with mocked dependencies
-      const { validateSiteNotOnboarded } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+      const { validateSiteNotOnboarded } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
         '@adobe/spacecat-helix-content-sdk': {
           createFrom: sinon.stub().resolves(mockSharePointClient),
         },
@@ -507,7 +508,7 @@ describe('LLMO Onboarding Functions', () => {
       };
 
       // Import the function with mocked dependencies
-      const { validateSiteNotOnboarded } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+      const { validateSiteNotOnboarded } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
         '@adobe/spacecat-helix-content-sdk': {
           createFrom: sinon.stub().resolves(mockSharePointClient),
         },
@@ -546,7 +547,7 @@ describe('LLMO Onboarding Functions', () => {
       };
 
       // Import the function with mocked dependencies
-      const { validateSiteNotOnboarded } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+      const { validateSiteNotOnboarded } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
         '@adobe/spacecat-helix-content-sdk': {
           createFrom: sinon.stub().resolves(mockSharePointClient),
         },
@@ -575,7 +576,7 @@ describe('LLMO Onboarding Functions', () => {
 
   describe('createOrFindOrganization', () => {
     it('should return existing organization when found', async () => {
-      const { createOrFindOrganization } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+      const { createOrFindOrganization } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
         '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
           Entitlement: {
             PRODUCT_CODES: { LLMO: 'LLMO' },
@@ -609,7 +610,7 @@ describe('LLMO Onboarding Functions', () => {
 
   describe('createOrFindSite', () => {
     it('should update organization ID when existing site has different organization', async () => {
-      const { createOrFindSite } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+      const { createOrFindSite } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
         '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
           Entitlement: {
             PRODUCT_CODES: { LLMO: 'LLMO' },
@@ -643,7 +644,7 @@ describe('LLMO Onboarding Functions', () => {
     });
 
     it('should not update organization ID when existing site has same organization', async () => {
-      const { createOrFindSite } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+      const { createOrFindSite } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
         '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
           Entitlement: {
             PRODUCT_CODES: { LLMO: 'LLMO' },
@@ -722,7 +723,7 @@ describe('LLMO Onboarding Functions', () => {
 
       // Mock the Config import
       const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
-        '../../src/controllers/llmo/llmo-onboarding.js',
+        '../../../src/controllers/llmo/llmo-onboarding.js',
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -836,7 +837,7 @@ describe('LLMO Onboarding Functions', () => {
 
       // Mock the module
       const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
-        '../../src/controllers/llmo/llmo-onboarding.js',
+        '../../../src/controllers/llmo/llmo-onboarding.js',
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -913,7 +914,48 @@ describe('LLMO Onboarding Functions', () => {
       // Use helper functions for common mocks
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
-      const mockTracingFetch = createMockTracingFetch();
+
+      // Create mock fetch that handles both publish and bulk unpublish flows
+      const mockTracingFetch = sinon.stub();
+      // Publish preview
+      mockTracingFetch.onCall(0).resolves({ ok: true, status: 200, statusText: 'OK' });
+      // Publish live
+      mockTracingFetch.onCall(1).resolves({ ok: true, status: 200, statusText: 'OK' });
+      // Bulk status job start
+      mockTracingFetch.onCall(2).resolves({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ name: 'job-test-123' }),
+      });
+      // Job polling
+      mockTracingFetch.onCall(3).resolves({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({
+          state: 'stopped',
+          data: {
+            phase: 'completed',
+            resources: [{ path: '/dev/example-com/query-index.json' }],
+          },
+        }),
+      });
+      // Bulk unpublish (live)
+      mockTracingFetch.onCall(4).resolves({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ name: 'unpublish-job-123' }),
+      });
+      // Bulk un-preview
+      mockTracingFetch.onCall(5).resolves({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ name: 'unpreview-job-123' }),
+      });
+
       const originalSetTimeout = mockSetTimeoutImmediate();
       const mockComposeBaseURL = createMockComposeBaseURL();
       const {
@@ -924,7 +966,7 @@ describe('LLMO Onboarding Functions', () => {
 
       // Mock the Config import
       const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
-        '../../src/controllers/llmo/llmo-onboarding.js',
+        '../../../src/controllers/llmo/llmo-onboarding.js',
         createCommonEsmockDependencies({
           mockTierClient,
           mockTracingFetch,
@@ -985,7 +1027,7 @@ describe('LLMO Onboarding Functions', () => {
 
       const {
         createEntitlementAndEnrollment: createEntitlementAndEnrollmentWithMocks,
-      } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+      } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
         '@adobe/spacecat-shared-tier-client': {
           default: mockTierClient,
         },
@@ -1001,7 +1043,7 @@ describe('LLMO Onboarding Functions', () => {
   });
 
   describe('deleteSharePointFolder', () => {
-    async function setupDeleteSharePointFolderTest(folderExists, deleteResult) {
+    async function setupDeleteSharePointFolderTest(folderExists, deleteResult, jobData = null) {
       const mockFolder = {
         exists: sinon.stub().resolves(folderExists),
         delete: deleteResult instanceof Error
@@ -1013,16 +1055,55 @@ describe('LLMO Onboarding Functions', () => {
         getDocument: sinon.stub().returns(mockFolder),
       };
 
-      // Mock tracingFetch for unpublishFromAdminHlx
-      const mockTracingFetch = sinon.stub().resolves({
+      // Mock tracingFetch for bulk status, job polling, and bulk unpublish
+      const mockTracingFetch = sinon.stub();
+
+      // Mock bulk status job start response
+      mockTracingFetch.onCall(0).resolves({
         ok: true,
         status: 200,
         statusText: 'OK',
+        json: async () => ({ name: 'job-test-123' }),
+      });
+
+      // Mock job polling response (completed)
+      const defaultJobData = jobData || {
+        state: 'stopped',
+        data: {
+          phase: 'completed',
+          resources: [
+            { path: '/dev/test-com/query-index.json' },
+            { path: '/dev/test-com/file1.json' },
+          ],
+        },
+      };
+
+      mockTracingFetch.onCall(1).resolves({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => defaultJobData,
+      });
+
+      // Mock bulk unpublish (live) response
+      mockTracingFetch.onCall(2).resolves({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ name: 'unpublish-job-123' }),
+      });
+
+      // Mock bulk un-preview response
+      mockTracingFetch.onCall(3).resolves({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ name: 'unpreview-job-123' }),
       });
 
       const {
         deleteSharePointFolder: deleteSharePointFolderWithMocks,
-      } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+      } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
         '@adobe/spacecat-helix-content-sdk': {
           createFrom: sinon.stub().resolves(spClient),
         },
@@ -1036,7 +1117,7 @@ describe('LLMO Onboarding Functions', () => {
       };
     }
 
-    it('should successfully delete a folder when it exists', async () => {
+    it('should successfully delete a folder and unpublish all files when it exists', async () => {
       const dataFolder = 'dev/test-com';
       const {
         deleteSharePointFolderWithMocks,
@@ -1052,8 +1133,19 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockFolder.exists).to.have.been.called;
       expect(mockFolder.delete).to.have.been.called;
 
-      // Verify unpublishFromAdminHlx was called (via tracingFetch)
-      expect(mockTracingFetch).to.have.been.called;
+      // Verify bulk status job was started
+      expect(mockTracingFetch.getCall(0).args[0]).to.include('/status/adobe/project-elmo-ui-data/main/dev/test-com');
+
+      // Verify job polling occurred
+      expect(mockTracingFetch.getCall(1).args[0]).to.include('/job/adobe/project-elmo-ui-data/main/status/job-test-123/details');
+
+      // Verify bulk unpublish was called
+      expect(mockTracingFetch.getCall(2).args[0]).to.include('/live/adobe/project-elmo-ui-data/main');
+      expect(mockTracingFetch.getCall(2).args[1].method).to.equal('DELETE');
+
+      // Verify bulk un-preview was called
+      expect(mockTracingFetch.getCall(3).args[0]).to.include('/preview/adobe/project-elmo-ui-data/main');
+      expect(mockTracingFetch.getCall(3).args[1].method).to.equal('DELETE');
     });
 
     it('should handle case when folder does not exist', async () => {
@@ -1069,7 +1161,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockFolder.exists).to.have.been.called;
       expect(mockFolder.delete).to.not.have.been.called;
 
-      // Verify unpublishFromAdminHlx was still called even if folder doesn't exist
+      // Verify bulk unpublish was still called even if folder doesn't exist
       expect(mockTracingFetch).to.have.been.called;
     });
 
@@ -1089,8 +1181,39 @@ describe('LLMO Onboarding Functions', () => {
         'Error deleting SharePoint folder dev/error-com: Permission denied',
       );
 
-      // Verify unpublishFromAdminHlx was still called even after SharePoint error
+      // Verify bulk unpublish was still called even after SharePoint error
       expect(mockTracingFetch).to.have.been.called;
+    });
+
+    it('should handle case when no paths need to be unpublished', async () => {
+      const dataFolder = 'dev/empty-com';
+      const emptyJobData = {
+        state: 'stopped',
+        data: {
+          phase: 'completed',
+          resources: [],
+        },
+      };
+
+      const {
+        deleteSharePointFolderWithMocks,
+        mockFolder,
+        mockTracingFetch,
+      } = await setupDeleteSharePointFolderTest(true, undefined, emptyJobData);
+
+      await deleteSharePointFolderWithMocks(dataFolder, { log: mockLog, env: mockEnv });
+
+      expect(mockFolder.exists).to.have.been.called;
+      expect(mockFolder.delete).to.have.been.called;
+
+      // Verify bulk status job was started
+      expect(mockTracingFetch.getCall(0).args[0]).to.include('/status/adobe/project-elmo-ui-data/main/dev/empty-com');
+
+      // Verify job polling occurred
+      expect(mockTracingFetch.getCall(1).args[0]).to.include('/job/adobe/project-elmo-ui-data/main/status/job-test-123/details');
+
+      // Verify bulk unpublish was NOT called (no paths)
+      expect(mockTracingFetch.callCount).to.equal(2);
     });
   });
 
@@ -1107,7 +1230,7 @@ describe('LLMO Onboarding Functions', () => {
       };
 
       // Mock the module with failing TierClient
-      const { revokeEnrollment: revokeEnrollmentWithMocks } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+      const { revokeEnrollment: revokeEnrollmentWithMocks } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
         '@adobe/spacecat-shared-tier-client': {
           default: mockTierClient,
         },
@@ -1144,7 +1267,7 @@ describe('LLMO Onboarding Functions', () => {
       };
 
       // Mock the module with failing revokeSiteEnrollment
-      const { revokeEnrollment: revokeEnrollmentWithMocks } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+      const { revokeEnrollment: revokeEnrollmentWithMocks } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
         '@adobe/spacecat-shared-tier-client': {
           default: mockTierClient,
         },
@@ -1188,7 +1311,44 @@ describe('LLMO Onboarding Functions', () => {
       // Create mocks using helper functions
       const mockTierClient = createMockTierClient(sinon);
       const mockConfigClass = createMockConfig(sinon);
-      const mockTracingFetch = createMockTracingFetch(sinon);
+
+      // Create mock fetch that handles bulk unpublish flow
+      const mockTracingFetch = sinon.stub();
+      // Bulk status job start
+      mockTracingFetch.onCall(0).resolves({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ name: 'job-test-123' }),
+      });
+      // Job polling
+      mockTracingFetch.onCall(1).resolves({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({
+          state: 'stopped',
+          data: {
+            phase: 'completed',
+            resources: [{ path: '/dev/offboard-com/query-index.json' }],
+          },
+        }),
+      });
+      // Bulk unpublish (live)
+      mockTracingFetch.onCall(2).resolves({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ name: 'unpublish-job-123' }),
+      });
+      // Bulk un-preview
+      mockTracingFetch.onCall(3).resolves({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ name: 'unpreview-job-123' }),
+      });
+
       const mockComposeBaseURL = sinon.stub().callsFake((url) => url);
       const sharePointClient = sinon.stub().resolves({
         getDocument: sinon.stub().returns({
@@ -1234,8 +1394,8 @@ describe('LLMO Onboarding Functions', () => {
       // Verify TierClient was called to revoke enrollment
       expect(mockTierClient.createForSite).to.have.been.called;
 
-      // Verify tracingFetch was called to unpublish from admin.hlx.page (2 times: live and preview)
-      expect(mockTracingFetch).to.have.been.calledTwice;
+      // Verify tracingFetch was called for bulk unpublish flow
+      expect(mockTracingFetch.callCount).to.equal(4);
 
       // Verify logging
       expect(mockLog.info).to.have.been.calledWith('Starting LLMO offboarding process for site: site789');
@@ -1268,7 +1428,44 @@ describe('LLMO Onboarding Functions', () => {
       // Create mocks using helper functions
       const mockTierClient = createMockTierClient(sinon);
       const mockConfigClass = createMockConfig(sinon);
-      const mockTracingFetch = createMockTracingFetch(sinon);
+
+      // Create mock fetch that handles bulk unpublish flow
+      const mockTracingFetch = sinon.stub();
+      // Bulk status job start
+      mockTracingFetch.onCall(0).resolves({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ name: 'job-test-456' }),
+      });
+      // Job polling
+      mockTracingFetch.onCall(1).resolves({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({
+          state: 'stopped',
+          data: {
+            phase: 'completed',
+            resources: [{ path: '/dev/recalc-test-com/query-index.json' }],
+          },
+        }),
+      });
+      // Bulk unpublish (live)
+      mockTracingFetch.onCall(2).resolves({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ name: 'unpublish-job-456' }),
+      });
+      // Bulk un-preview
+      mockTracingFetch.onCall(3).resolves({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => ({ name: 'unpreview-job-456' }),
+      });
+
       const mockComposeBaseURL = sinon.stub().callsFake((url) => url);
       const sharePointClient = sinon.stub().resolves({
         getDocument: sinon.stub().returns({
@@ -1317,8 +1514,7 @@ describe('LLMO Onboarding Functions', () => {
       // Verify TierClient was called to revoke enrollment
       expect(mockTierClient.createForSite).to.have.been.called;
 
-      // Verify tracingFetch was called to unpublish from admin.hlx.page (2 times: live and preview)
-      expect(mockTracingFetch).to.have.been.calledTwice;
+      expect(mockTracingFetch.callCount).to.equal(4);
 
       // Verify logging
       expect(mockLog.info).to.have.been.calledWith('Starting LLMO offboarding process for site: site999');
@@ -1338,7 +1534,7 @@ describe('LLMO Onboarding Functions', () => {
       });
 
       // Mock the module with tracingFetch
-      const { unpublishFromAdminHlx } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+      const { unpublishFromAdminHlx } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
         '@adobe/spacecat-shared-utils': {
           tracingFetch: mockTracingFetch,
         },
