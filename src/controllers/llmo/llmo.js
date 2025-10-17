@@ -26,6 +26,7 @@ import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/confi
 import crypto from 'crypto';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { getImsUserToken } from '../../support/utils.js';
 import {
   applyFilters,
   applyInclusions,
@@ -385,6 +386,16 @@ function LlmoController(ctx) {
   async function updateLlmoConfig(context) {
     const { log, s3, data } = context;
     const { siteId } = context.params;
+
+    let userId = 'unknown';
+    try {
+      const imsUserToken = getImsUserToken(context);
+      const imsUserProfile = await context.imsClient.getImsUserProfile(imsUserToken);
+      userId = imsUserProfile.userId || 'unknown';
+    } catch (error) {
+      log.warn(`Unable to fetch IMS user profile: ${error.message}`);
+    }
+
     try {
       if (!isObject(data)) {
         return badRequest('LLMO config update must be provided as an object');
@@ -430,7 +441,6 @@ function LlmoController(ctx) {
       });
 
       // Calculate config summary
-      const userId = context.attributes?.authInfo?.getProfile()?.email || 'system';
       const numCategories = Object.keys(parsedConfig.categories || {}).length;
       const numTopics = Object.keys(parsedConfig.topics || {}).length;
       const numPrompts = Object.values(parsedConfig.topics || {}).reduce(
@@ -456,7 +466,6 @@ function LlmoController(ctx) {
       return ok({ version });
     } catch (error) {
       const msg = `${error?.message || /* c8 ignore next */ error}`;
-      const userId = context.attributes?.authInfo?.getProfile()?.email || 'system';
       log.error(`User ${userId} error updating llmo config for siteId: ${siteId}, error: ${msg}`);
       return badRequest(msg);
     }
