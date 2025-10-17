@@ -70,6 +70,162 @@ describe('LLMO Onboarding Functions', () => {
     // _createSharePointClientStub = sinon.stub().resolves(mockSharePointClient);
   });
 
+  // Helper functions for common mock setups
+  const createMockTierClient = (sandbox = sinon) => ({
+    createForSite: sandbox.stub().returns({
+      createEntitlement: sandbox.stub().resolves({
+        entitlement: {
+          getId: sandbox.stub().returns('entitlement123'),
+        },
+        siteEnrollment: {
+          getId: sandbox.stub().returns('enrollment123'),
+        },
+      }),
+      revokeSiteEnrollment: sandbox.stub().resolves(),
+    }),
+  });
+
+  const createMockTracingFetch = (sandbox = sinon, options = {}) => {
+    const { ok = true, status = 200, statusText = 'OK' } = options;
+    return sandbox.stub().resolves({ ok, status, statusText });
+  };
+
+  const mockSetTimeoutImmediate = (sandbox = sinon) => {
+    const original = global.setTimeout;
+    global.setTimeout = sandbox.stub().callsFake((fn) => {
+      fn();
+      return 1;
+    });
+    return original;
+  };
+
+  const restoreSetTimeout = (original) => {
+    global.setTimeout = original;
+  };
+
+  const createMockConfig = (sandbox = sinon) => ({
+    toDynamoItem: sandbox.stub().returns({ config: 'dynamo-item' }),
+  });
+
+  const createMockComposeBaseURL = (sandbox = sinon) => sandbox.stub().callsFake((domain) => `https://${domain}`);
+
+  const createMockSharePointClient = (sandbox = sinon, options = {}) => {
+    const {
+      folderExists = false,
+      deleteResolves = true,
+    } = options;
+
+    const mockFolder = {
+      exists: sandbox.stub().resolves(folderExists),
+      createFolder: sandbox.stub().resolves(),
+      copy: sandbox.stub().resolves(),
+      delete: deleteResolves ? sandbox.stub().resolves() : sandbox.stub().rejects(new Error('Delete failed')),
+    };
+
+    return {
+      mockClient: {
+        getDocument: sandbox.stub().returns(mockFolder),
+      },
+      mockFolder,
+    };
+  };
+
+  const createMockOctokit = (sandbox = sinon, options = {}) => {
+    const { content = 'test content', sha = 'test-sha-123' } = options;
+
+    return sandbox.stub().returns({
+      repos: {
+        getContent: sandbox.stub().resolves({
+          data: {
+            content: Buffer.from(content).toString('base64'),
+            sha,
+          },
+        }),
+        createOrUpdateFileContents: sandbox.stub().resolves(),
+      },
+    });
+  };
+
+  const createCommonEsmockDependencies = (options = {}) => {
+    const {
+      mockTierClient,
+      mockTracingFetch,
+      mockConfig,
+      mockComposeBaseURL,
+      mockSharePointClient: sharePointClient,
+      mockOctokit,
+    } = options;
+
+    const deps = {
+      '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
+        Entitlement: {
+          PRODUCT_CODES: { LLMO: 'LLMO' },
+          TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
+        },
+      },
+    };
+
+    if (mockTierClient) {
+      deps['@adobe/spacecat-shared-tier-client'] = { default: mockTierClient };
+    }
+
+    if (sharePointClient) {
+      deps['@adobe/spacecat-helix-content-sdk'] = { createFrom: sinon.stub().resolves(sharePointClient) };
+    }
+
+    if (mockOctokit) {
+      deps['@octokit/rest'] = { Octokit: mockOctokit };
+    }
+
+    if (mockConfig) {
+      deps['@adobe/spacecat-shared-data-access/src/models/site/config.js'] = { Config: mockConfig };
+    }
+
+    if (mockTracingFetch || mockComposeBaseURL) {
+      deps['@adobe/spacecat-shared-utils'] = {};
+      if (mockTracingFetch) deps['@adobe/spacecat-shared-utils'].tracingFetch = mockTracingFetch;
+      if (mockComposeBaseURL) deps['@adobe/spacecat-shared-utils'].composeBaseURL = mockComposeBaseURL;
+    }
+
+    return deps;
+  };
+
+  /**
+   * Sets up and returns a mocked performLlmoOffboarding function for testing.
+   * @param {Object} options - Mock options
+   * @param {Object} options.mockTierClient - Mock TierClient instance
+   * @param {Function} options.mockTracingFetch - Mock tracingFetch function
+   * @param {Object} options.mockConfig - Mock Config class with toDynamoItem
+   * @param {Function} options.mockComposeBaseURL - Mock composeBaseURL function
+   * @param {Object} options.mockSharePointClient - Mock SharePoint client
+   * @returns {Promise<Object>} Mocked module with performLlmoOffboarding
+   */
+  const setupPerformLlmoOffboardingTest = async (options = {}) => {
+    const {
+      mockTierClient,
+      mockTracingFetch,
+      mockConfig,
+      mockComposeBaseURL,
+      mockSharePointClient: sharePointClient,
+    } = options;
+
+    return esmock('../../src/controllers/llmo/llmo-onboarding.js', {
+      '@adobe/spacecat-shared-tier-client': {
+        default: mockTierClient,
+      },
+      '@adobe/spacecat-helix-content-sdk': {
+        createFrom: sharePointClient,
+      },
+      '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+        Config: mockConfig,
+      },
+      '@adobe/spacecat-shared-utils': {
+        composeBaseURL: mockComposeBaseURL,
+        tracingFetch: mockTracingFetch,
+      },
+    });
+  };
+
   describe('generateDataFolder', () => {
     it('should generate correct data folder name for production environment', async () => {
       // Import the function
@@ -552,81 +708,30 @@ describe('LLMO Onboarding Functions', () => {
       mockDataAccess.Site.create.resolves(mockSite);
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
-      // Mock Config.toDynamoItem
-      const mockConfigToDynamoItem = sinon.stub().returns({ config: 'dynamo-item' });
-      const mockConfig = {
-        toDynamoItem: mockConfigToDynamoItem,
-      };
-
-      // Mock TierClient
-      const mockTierClient = {
-        createForSite: sinon.stub().returns({
-          createEntitlement: sinon.stub().resolves({
-            entitlement: {
-              getId: sinon.stub().returns('entitlement123'),
-            },
-            siteEnrollment: {
-              getId: sinon.stub().returns('enrollment123'),
-            },
-          }),
-        }),
-      };
-
-      // Mock tracingFetch for publishToAdminHlx
-      const mockTracingFetch = sinon.stub().resolves({
-        ok: true,
-        status: 200,
-        statusText: 'OK',
-      });
-
-      // Mock setTimeout to execute immediately (avoid 2 second delay)
-      const originalSetTimeout = global.setTimeout;
-      global.setTimeout = sinon.stub().callsFake((fn) => {
-        fn();
-        return 1; // Return a fake timer ID
-      });
+      // Use helper functions for common mocks
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      const originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
 
       // Mock the Config import
-      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
-        '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
-          Entitlement: {
-            PRODUCT_CODES: { LLMO: 'LLMO' },
-            TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
-          },
-        },
-        '@adobe/spacecat-shared-tier-client': {
-          default: mockTierClient,
-        },
-        '@adobe/spacecat-helix-content-sdk': {
-          createFrom: sinon.stub().resolves({
-            getDocument: sinon.stub().returns({
-              exists: sinon.stub().resolves(false),
-              createFolder: sinon.stub().resolves(),
-              copy: sinon.stub().resolves(),
-            }),
-          }),
-        },
-        '@octokit/rest': {
-          Octokit: sinon.stub().returns({
-            repos: {
-              getContent: sinon.stub().resolves({
-                data: {
-                  content: Buffer.from('test content').toString('base64'),
-                  sha: 'test-sha-123',
-                },
-              }),
-              createOrUpdateFileContents: sinon.stub().resolves(),
-            },
-          }),
-        },
-        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
-          Config: mockConfig,
-        },
-        '@adobe/spacecat-shared-utils': {
-          tracingFetch: mockTracingFetch,
-          composeBaseURL: sinon.stub().callsFake((domain) => `https://${domain}`),
-        },
-      });
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+        }),
+      );
 
       const context = {
         dataAccess: mockDataAccess,
@@ -683,7 +788,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockLog.info).to.have.been.calledWith('Created site site123 for https://example.com');
 
       // Restore setTimeout
-      global.setTimeout = originalSetTimeout;
+      restoreSetTimeout(originalSetTimeout);
     });
 
     it('should create new organization when organization does not exist', async () => {
@@ -717,76 +822,30 @@ describe('LLMO Onboarding Functions', () => {
       mockDataAccess.Site.create.resolves(mockSite);
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
-      // Mock Config.toDynamoItem
-      const mockConfig = {
-        toDynamoItem: sinon.stub().returns({ config: 'dynamo-item' }),
-      };
-
-      // Mock TierClient
-      const mockTierClient = {
-        createForSite: sinon.stub().returns({
-          createEntitlement: sinon.stub().resolves({
-            entitlement: { getId: sinon.stub().returns('entitlement456') },
-            siteEnrollment: { getId: sinon.stub().returns('enrollment456') },
-          }),
-        }),
-      };
-
-      // Mock tracingFetch for publishToAdminHlx
-      const mockTracingFetch = sinon.stub().resolves({
-        ok: true,
-        status: 200,
-        statusText: 'OK',
-      });
-
-      // Mock setTimeout to execute immediately (avoid 2 second delay)
-      const originalSetTimeout = global.setTimeout;
-      global.setTimeout = sinon.stub().callsFake((fn) => {
-        fn();
-        return 1; // Return a fake timer ID
-      });
+      // Use helper functions for common mocks
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      const originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit(sinon, { sha: 'test-sha-456' });
 
       // Mock the module
-      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
-        '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
-          Entitlement: {
-            PRODUCT_CODES: { LLMO: 'LLMO' },
-            TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
-          },
-        },
-        '@adobe/spacecat-shared-tier-client': {
-          default: mockTierClient,
-        },
-        '@adobe/spacecat-helix-content-sdk': {
-          createFrom: sinon.stub().resolves({
-            getDocument: sinon.stub().returns({
-              exists: sinon.stub().resolves(false),
-              createFolder: sinon.stub().resolves(),
-              copy: sinon.stub().resolves(),
-            }),
-          }),
-        },
-        '@octokit/rest': {
-          Octokit: sinon.stub().returns({
-            repos: {
-              getContent: sinon.stub().resolves({
-                data: {
-                  content: Buffer.from('test content').toString('base64'),
-                  sha: 'test-sha-456',
-                },
-              }),
-              createOrUpdateFileContents: sinon.stub().resolves(),
-            },
-          }),
-        },
-        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
-          Config: mockConfig,
-        },
-        '@adobe/spacecat-shared-utils': {
-          tracingFetch: mockTracingFetch,
-          composeBaseURL: sinon.stub().callsFake((domain) => `https://${domain}`),
-        },
-      });
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+        }),
+      );
 
       const context = {
         dataAccess: mockDataAccess,
@@ -818,7 +877,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(result.siteId).to.equal('site456');
 
       // Restore setTimeout
-      global.setTimeout = originalSetTimeout;
+      restoreSetTimeout(originalSetTimeout);
     });
 
     it('should call cleanup functions when site.save() throws an error', async () => {
@@ -851,86 +910,30 @@ describe('LLMO Onboarding Functions', () => {
       mockDataAccess.Site.create.resolves(mockSite);
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
-      // Mock Config.toDynamoItem
-      const mockConfigToDynamoItem = sinon.stub().returns({ config: 'dynamo-item' });
-      const mockConfig = {
-        toDynamoItem: mockConfigToDynamoItem,
-      };
-
-      // Mock TierClient
-      const mockTierClient = {
-        createForSite: sinon.stub().returns({
-          createEntitlement: sinon.stub().resolves({
-            entitlement: {
-              getId: sinon.stub().returns('entitlement789'),
-            },
-            siteEnrollment: {
-              getId: sinon.stub().returns('enrollment789'),
-            },
-          }),
-          revokeSiteEnrollment: sinon.stub().resolves(),
-        }),
-      };
-
-      // Mock tracingFetch for unpublishFromAdminHlx (will be called twice in cleanup)
-      const mockTracingFetch = sinon.stub().resolves({
-        ok: true,
-        status: 200,
-        statusText: 'OK',
-      });
-
-      // Mock setTimeout to execute immediately
-      const originalSetTimeout = global.setTimeout;
-      global.setTimeout = sinon.stub().callsFake((fn) => {
-        fn();
-        return 1;
-      });
-
-      // Mock SharePoint folder operations
-      const mockSharePointFolderLocal = {
-        exists: sinon.stub().resolves(true),
-        delete: sinon.stub().resolves(),
-      };
-
-      const mockSharePointClientLocal = {
-        getDocument: sinon.stub().returns(mockSharePointFolderLocal),
-      };
+      // Use helper functions for common mocks
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      const originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const {
+        mockClient: sharePointClientLocal,
+        mockFolder: mockSharePointFolderLocal,
+      } = createMockSharePointClient(sinon, { folderExists: true });
+      const mockOctokit = createMockOctokit();
 
       // Mock the Config import
-      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
-        '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js': {
-          Entitlement: {
-            PRODUCT_CODES: { LLMO: 'LLMO' },
-            TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
-          },
-        },
-        '@adobe/spacecat-shared-tier-client': {
-          default: mockTierClient,
-        },
-        '@adobe/spacecat-helix-content-sdk': {
-          createFrom: sinon.stub().resolves(mockSharePointClientLocal),
-        },
-        '@octokit/rest': {
-          Octokit: sinon.stub().returns({
-            repos: {
-              getContent: sinon.stub().resolves({
-                data: {
-                  content: Buffer.from('test content').toString('base64'),
-                  sha: 'test-sha-123',
-                },
-              }),
-              createOrUpdateFileContents: sinon.stub().resolves(),
-            },
-          }),
-        },
-        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
-          Config: mockConfig,
-        },
-        '@adobe/spacecat-shared-utils': {
-          tracingFetch: mockTracingFetch,
-          composeBaseURL: sinon.stub().callsFake((domain) => `https://${domain}`),
-        },
-      });
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClientLocal,
+          mockOctokit,
+        }),
+      );
 
       const context = {
         dataAccess: mockDataAccess,
@@ -965,7 +968,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(tierClient.revokeSiteEnrollment).to.have.been.called;
 
       // Restore setTimeout
-      global.setTimeout = originalSetTimeout;
+      restoreSetTimeout(originalSetTimeout);
     });
   });
 
@@ -1182,48 +1185,25 @@ describe('LLMO Onboarding Functions', () => {
         updateLlmoDataFolder: sinon.stub(),
       };
 
-      // Mock TierClient for revoke enrollment
-      const mockTierClient = {
-        createForSite: sinon.stub().resolves({
-          revokeSiteEnrollment: sinon.stub().resolves(),
+      // Create mocks using helper functions
+      const mockTierClient = createMockTierClient(sinon);
+      const mockConfigClass = createMockConfig(sinon);
+      const mockTracingFetch = createMockTracingFetch(sinon);
+      const mockComposeBaseURL = sinon.stub().callsFake((url) => url);
+      const sharePointClient = sinon.stub().resolves({
+        getDocument: sinon.stub().returns({
+          exists: sinon.stub().resolves(true),
+          delete: sinon.stub().resolves(),
         }),
-      };
-
-      // Mock Config.toDynamoItem
-      const mockConfigClass = {
-        toDynamoItem: sinon.stub().returns({ config: 'dynamo-item' }),
-      };
-
-      // Mock tracingFetch for unpublishFromAdminHlx
-      const mockTracingFetch = sinon.stub().resolves({
-        ok: true,
-        status: 200,
-        statusText: 'OK',
       });
 
-      // Mock composeBaseURL
-      const mockComposeBaseURL = sinon.stub().callsFake((url) => url);
-
-      // Mock the module with all dependencies
-      const { performLlmoOffboarding } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
-        '@adobe/spacecat-shared-tier-client': {
-          default: mockTierClient,
-        },
-        '@adobe/spacecat-helix-content-sdk': {
-          createFrom: sinon.stub().resolves({
-            getDocument: sinon.stub().returns({
-              exists: sinon.stub().resolves(true),
-              delete: sinon.stub().resolves(),
-            }),
-          }),
-        },
-        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
-          Config: mockConfigClass,
-        },
-        '@adobe/spacecat-shared-utils': {
-          composeBaseURL: mockComposeBaseURL,
-          tracingFetch: mockTracingFetch,
-        },
+      // Mock the module with all dependencies using helper
+      const { performLlmoOffboarding } = await setupPerformLlmoOffboardingTest({
+        mockTierClient,
+        mockTracingFetch,
+        mockConfig: mockConfigClass,
+        mockComposeBaseURL,
+        mockSharePointClient: sharePointClient,
       });
 
       const context = {
@@ -1285,48 +1265,25 @@ describe('LLMO Onboarding Functions', () => {
         updateLlmoDataFolder: sinon.stub(),
       };
 
-      // Mock TierClient for revoke enrollment
-      const mockTierClient = {
-        createForSite: sinon.stub().resolves({
-          revokeSiteEnrollment: sinon.stub().resolves(),
+      // Create mocks using helper functions
+      const mockTierClient = createMockTierClient(sinon);
+      const mockConfigClass = createMockConfig(sinon);
+      const mockTracingFetch = createMockTracingFetch(sinon);
+      const mockComposeBaseURL = sinon.stub().callsFake((url) => url);
+      const sharePointClient = sinon.stub().resolves({
+        getDocument: sinon.stub().returns({
+          exists: sinon.stub().resolves(true),
+          delete: sinon.stub().resolves(),
         }),
-      };
-
-      // Mock Config.toDynamoItem
-      const mockConfigClass = {
-        toDynamoItem: sinon.stub().returns({ config: 'dynamo-item' }),
-      };
-
-      // Mock tracingFetch for unpublishFromAdminHlx
-      const mockTracingFetch = sinon.stub().resolves({
-        ok: true,
-        status: 200,
-        statusText: 'OK',
       });
 
-      // Mock composeBaseURL
-      const mockComposeBaseURL = sinon.stub().callsFake((url) => url);
-
-      // Mock the module with all dependencies
-      const { performLlmoOffboarding } = await esmock('../../src/controllers/llmo/llmo-onboarding.js', {
-        '@adobe/spacecat-shared-tier-client': {
-          default: mockTierClient,
-        },
-        '@adobe/spacecat-helix-content-sdk': {
-          createFrom: sinon.stub().resolves({
-            getDocument: sinon.stub().returns({
-              exists: sinon.stub().resolves(true),
-              delete: sinon.stub().resolves(),
-            }),
-          }),
-        },
-        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
-          Config: mockConfigClass,
-        },
-        '@adobe/spacecat-shared-utils': {
-          composeBaseURL: mockComposeBaseURL,
-          tracingFetch: mockTracingFetch,
-        },
+      // Mock the module with all dependencies using helper
+      const { performLlmoOffboarding } = await setupPerformLlmoOffboardingTest({
+        mockTierClient,
+        mockTracingFetch,
+        mockConfig: mockConfigClass,
+        mockComposeBaseURL,
+        mockSharePointClient: sharePointClient,
       });
 
       const context = {
