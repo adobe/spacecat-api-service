@@ -771,9 +771,7 @@ function SuggestionsController(ctx, sqs, env) {
           });
         });
 
-        if (deploymentResult.s3Key) {
-          context.log.info(`Successfully updated Tokowaka site config at ${deploymentResult.s3Key} for ${succeededSuggestions.length} suggestions`);
-        }
+        context.log.info(`Successfully deployed ${succeededSuggestions.length} suggestions to Edge`);
       } catch (error) {
         context.log.error(`Error deploying to Tokowaka: ${error.message}`, error);
         // If deployment fails, mark all valid suggestions as failed

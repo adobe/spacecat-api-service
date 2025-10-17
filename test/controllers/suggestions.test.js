@@ -2063,7 +2063,7 @@ describe('Suggestions Controller', () => {
         {
           getId: () => SUGGESTION_IDS[0],
           getOpportunityId: () => OPPORTUNITY_ID,
-          getStatus: () => 'new',
+          getStatus: () => 'NEW',
           getData: () => ({
             url: 'https://example.com/page1',
             headingTag: 'h1',
@@ -2077,7 +2077,7 @@ describe('Suggestions Controller', () => {
         {
           getId: () => SUGGESTION_IDS[1],
           getOpportunityId: () => OPPORTUNITY_ID,
-          getStatus: () => 'new',
+          getStatus: () => 'NEW',
           getData: () => ({
             url: 'https://example.com/page1',
             headingTag: 'h2',
@@ -2099,7 +2099,11 @@ describe('Suggestions Controller', () => {
       site.getConfig = sandbox.stub().returns({
         getTokowakaConfig: () => ({ apiKey: 'test-api-key-123' }),
       });
+      mockOpportunity.findById.resetBehavior();
       mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(headingsOpportunity);
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID_NOT_ENABLED).resolves(opportunityNotEnabled);
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID_NOT_FOUND).resolves(null);
+      mockSuggestion.allByOpportunityId.resetBehavior();
       mockSuggestion.allByOpportunityId.resolves(tokowakaSuggestions);
 
       s3ClientSendStub = sandbox.stub().resolves();
