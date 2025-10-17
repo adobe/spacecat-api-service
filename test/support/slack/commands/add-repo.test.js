@@ -234,16 +234,29 @@ describe('AddRepoCommand', () => {
       });
     });
 
-    it('handles non-existent repository (404 error)', async () => {
+    it('handles private repo', async () => {
       nock('https://api.github.com')
-        .get('/repos/invalid/repo')
+        .get('/repos/private/repo')
         .reply(404);
 
-      args[1] = 'https://github.com/invalid/repo';
+      args[1] = 'https://github.com/private/repo';
       await command.handleExecution(args, slackContext);
 
-      // Assertions to confirm handling of non-existent repository
-      expect(slackContext.say.calledWith(':warning: The GitHub repository \'https://github.com/invalid/repo\' could not be found (private repo?).')).to.be.true;
+      // Should parse URL manually and add as private repo with 'main' branch
+      expect(siteStub.setCode).to.have.been.calledWith({
+        type: 'github',
+        owner: 'private',
+        repo: 'repo',
+        ref: 'main', // defaults to 'main' for private repos
+        url: 'https://github.com/private/repo',
+      });
+      expect(siteStub.save).to.have.been.called;
+
+      // Should send warning about adding as private repo
+      expect(slackContext.say.calledWithMatch(/GitHub API returned 404/)).to.be.true;
+      expect(slackContext.say.calledWithMatch(/Adding as private repo/)).to.be.true;
+      // Should send success message
+      expect(slackContext.say.calledWithMatch(/GitHub repo added/)).to.be.true;
     });
 
     it('handles errors other than 404 from GitHub API', async () => {
@@ -268,6 +281,79 @@ describe('AddRepoCommand', () => {
 
       // Assertions to confirm handling of network issues
       expect(slackContext.say.calledWithMatch(/Network error occurred/)).to.be.true;
+    });
+  });
+
+  describe('Branch Support', () => {
+    it('handles custom branch for public repository', async () => {
+      nock('https://api.github.com')
+        .get('/repos/valid/repo')
+        .reply(200, {
+          archived: false,
+          name: 'repo',
+          owner: { login: 'valid' },
+          default_branch: 'main',
+        });
+
+      const args = ['validSite.com', 'https://github.com/valid/repo', 'develop'];
+      const command = AddRepoCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(siteStub.setCode).to.have.been.calledWith({
+        type: 'github',
+        owner: 'valid',
+        repo: 'repo',
+        ref: 'develop', // Should use custom branch
+        url: 'https://github.com/valid/repo',
+      });
+      expect(siteStub.save).to.have.been.called;
+    });
+
+    it('handles custom branch for private repository', async () => {
+      nock('https://api.github.com')
+        .get('/repos/private/repo')
+        .reply(404);
+
+      const args = ['validSite.com', 'https://github.com/private/repo', 'feature-branch'];
+      const command = AddRepoCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(slackContext.say.calledWithMatch(/GitHub API returned 404/)).to.be.true;
+      expect(slackContext.say.calledWithMatch(/Adding as private repo/)).to.be.true;
+      expect(slackContext.say.calledWithMatch(/feature-branch/)).to.be.true;
+      expect(siteStub.setCode).to.have.been.calledWith({
+        type: 'github',
+        owner: 'private',
+        repo: 'repo',
+        ref: 'feature-branch', // Should use custom branch
+        url: 'https://github.com/private/repo',
+      });
+      expect(siteStub.save).to.have.been.called;
+
+      // Should send success message
+      expect(slackContext.say.calledWithMatch(/GitHub repo added/)).to.be.true;
+    });
+
+    it('handles private repository without custom branch (defaults to main)', async () => {
+      nock('https://api.github.com')
+        .get('/repos/private/repo')
+        .reply(404);
+
+      const args = ['validSite.com', 'https://github.com/private/repo'];
+      const command = AddRepoCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(siteStub.setCode).to.have.been.calledWith({
+        type: 'github',
+        owner: 'private',
+        repo: 'repo',
+        ref: 'main', // Should default to 'main' for private repos
+        url: 'https://github.com/private/repo',
+      });
+      expect(siteStub.save).to.have.been.called;
     });
   });
 });
