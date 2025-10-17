@@ -1114,13 +1114,19 @@ export const onboardSingleSite = async (
   return reportLine;
 };
 
-export const filterSitesForProductCode = async (context, sites, productCode) => {
+export const filterSitesForProductCode = async (context, orgId, sites, productCode) => {
   // for every site we will create tier client and will check valid entitlement and enrollment
   const filteredSites = [];
+  const { Organization, SiteEnrollment } = context.dataAccess;
+  const organization = await Organization.findById(orgId);
+  const tierClient = await TierClient.createForOrg(context, organization, productCode);
+  const { entitlement } = await tierClient.checkValidEntitlement();
   for (const site of sites) {
-    const tierClient = await TierClient.createForSite(context, site, productCode);
-    const { entitlement, siteEnrollment } = await tierClient.checkValidEntitlement();
-    if (entitlement && siteEnrollment) {
+    /* eslint-disable no-await-in-loop */
+    const siteEnrollments = await SiteEnrollment.allBySiteId(site.getId());
+    /* eslint-disable no-await-in-loop, max-len */
+    const validSiteEnrollment = siteEnrollments.find((se) => se.getEntitlementId() === entitlement?.getId());
+    if (validSiteEnrollment) {
       filteredSites.push(site);
     }
   }
