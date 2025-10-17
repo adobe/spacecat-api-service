@@ -751,7 +751,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockSiteConfig.getImports).to.have.been.called;
       expect(mockSiteConfig.enableImport).to.have.been.calledWith('top-pages', undefined);
 
-      // Verify site was saved (twice: once for imports, once for brand/data folder)
+      // Verify site was saved
       expect(mockSite.setConfig).to.have.been.calledWith({ config: 'dynamo-item' });
       expect(mockSite.setConfig).to.have.been.calledTwice;
       expect(mockSite.save).to.have.been.calledOnce;
