@@ -1,3 +1,10 @@
+## [1.206.1](https://github.com/adobe/spacecat-api-service/compare/v1.206.0...v1.206.1) (2025-10-17)
+
+
+### Bug Fixes
+
+* return sites product aware ([#1367](https://github.com/adobe/spacecat-api-service/issues/1367)) ([66df494](https://github.com/adobe/spacecat-api-service/commit/66df494a53e7f72def4b5a7d1dd24ba9dd57a1e7))
+
 # [1.206.0](https://github.com/adobe/spacecat-api-service/compare/v1.205.3...v1.206.0) (2025-10-17)
 
 
