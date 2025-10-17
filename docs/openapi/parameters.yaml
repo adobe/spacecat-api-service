@@ -33,6 +33,15 @@ deliveryType:
   required: true
   schema:
     $ref: './schemas.yaml#/DeliveryType'
+base64Url:
+  name: base64Url
+  description: Base64-encoded URL
+  in: path
+  required: true
+  schema:
+    type: string
+    format: base64url
+    example: "aHR0cHM6Ly9leGFtcGxlLmNvbS9wYWdl"
 base64BaseUrl:
   name: base64BaseUrl
   description: Base64-encoded base URL
@@ -49,6 +58,14 @@ base64PageUrl:
   schema:
     type: string
     format: base64url
+urlSource:
+  name: source
+  description: The source of the URLs (e.g., "manual")
+  in: path
+  required: true
+  schema:
+    type: string
+    example: "manual"
 ascending:
   name: ascending
   description: Whether to sort ascending or descending

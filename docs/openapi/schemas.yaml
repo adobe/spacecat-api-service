@@ -4630,3 +4630,239 @@ PreflightResultItem:
       type: string
       enum: [identify, suggest]
       description: The step of the preflight job when this result was generated
+
+AuditUrl:
+  type: object
+  required: [siteId, url, source, audits, createdAt, updatedAt, createdBy, updatedBy]
+  properties:
+    siteId:
+      $ref: '#/Id'
+    url:
+      $ref: '#/URL'
+    source:
+      type: string
+      description: Origin of the URL (e.g., "manual", "sitemap")
+      default: "manual"
+      example: "manual"
+    audits:
+      type: array
+      items:
+        type: string
+      description: Enabled audit types for this URL (can be empty)
+      example: ["accessibility", "broken-backlinks"]
+    createdAt:
+      $ref: '#/DateTime'
+    updatedAt:
+      $ref: '#/DateTime'
+    createdBy:
+      type: string
+      description: User or service who created the URL entry
+      example: "user-alice"
+    updatedBy:
+      type: string
+      description: Last user or service to modify the URL entry
+      example: "user-bob"
+  example:
+    siteId: "550e8400-e29b-41d4-a716-446655440000"
+    url: "https://example.com/foo/bar"
+    source: "manual"
+    audits: ["accessibility", "broken-backlinks"]
+    createdAt: "2025-10-10T12:00:00Z"
+    updatedAt: "2025-10-10T15:30:00Z"
+    createdBy: "user-alice"
+    updatedBy: "user-bob"
+
+AuditUrlList:
+  type: object
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/AuditUrl'
+      description: Array of audit URLs
+    cursor:
+      type: string
+      description: Pagination cursor for retrieving the next page of results
+      example: "eyJzaXRlSWQiOiIxMjMiLCJ1cmwiOiJodHRwczovL2V4YW1wbGUuY29tIn0"
+  example:
+    items:
+      - siteId: "550e8400-e29b-41d4-a716-446655440000"
+        url: "https://example.com/documents/report.pdf"
+        source: "manual"
+        audits: ["accessibility"]
+        createdAt: "2025-10-10T12:00:00Z"
+        updatedAt: "2025-10-10T12:00:00Z"
+        createdBy: "user-alice"
+        updatedBy: "user-alice"
+      - siteId: "550e8400-e29b-41d4-a716-446655440000"
+        url: "https://example.com/page2"
+        source: "sitemap"
+        audits: ["broken-backlinks"]
+        createdAt: "2025-10-10T12:00:00Z"
+        updatedAt: "2025-10-10T12:00:00Z"
+        createdBy: "system"
+        updatedBy: "system"
+    cursor: "eyJzaXRlSWQiOiIxMjMiLCJ1cmwiOiJodHRwczovL2V4YW1wbGUuY29tIn0"
+
+AuditUrlBulkResponse:
+  type: object
+  properties:
+    metadata:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total number of URLs in the request
+          example: 2
+        success:
+          type: integer
+          description: Number of URLs processed successfully
+          example: 1
+        failure:
+          type: integer
+          description: Number of URLs that failed to process
+          example: 1
+    failures:
+      type: array
+      items:
+        type: object
+        properties:
+          url:
+            type: string
+            description: The URL that failed to process
+            example: "https://example.com/invalid"
+          reason:
+            type: string
+            description: Reason for the failure
+            example: "URL does not belong to site domain"
+      description: Array of failed operations with reasons
+    items:
+      type: array
+      items:
+        $ref: '#/AuditUrl'
+      description: Array of successfully processed audit URLs
+  example:
+    metadata:
+      total: 2
+      success: 1
+      failure: 1
+    failures:
+      - url: "https://example.com/invalid"
+        reason: "URL does not belong to site domain"
+    items:
+      - siteId: "550e8400-e29b-41d4-a716-446655440000"
+        url: "https://example.com/page1"
+        source: "manual"
+        audits: ["accessibility", "broken-backlinks"]
+        createdAt: "2025-10-10T12:00:00Z"
+        updatedAt: "2025-10-10T15:30:00Z"
+        createdBy: "user-alice"
+        updatedBy: "user-bob"
+
+AuditUrlDeleteResponse:
+  type: object
+  properties:
+    metadata:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total number of URLs in the delete request
+          example: 2
+        success:
+          type: integer
+          description: Number of URLs deleted successfully
+          example: 1
+        failure:
+          type: integer
+          description: Number of URLs that failed to delete
+          example: 1
+    failures:
+      type: array
+      items:
+        type: object
+        properties:
+          url:
+            type: string
+            description: The URL that failed to delete
+            example: "https://example.com/from-sitemap"
+          reason:
+            type: string
+            description: Reason for the deletion failure
+            example: "Can only delete URLs with source='manual'"
+      description: Array of failed delete operations with reasons
+  example:
+    metadata:
+      total: 2
+      success: 1
+      failure: 1
+    failures:
+      - url: "https://example.com/from-sitemap"
+        reason: "Can only delete URLs with source='manual'"
+
+AuditUrlAddRequest:
+  type: array
+  minItems: 1
+  maxItems: 100
+  items:
+    type: object
+    required: [url, audits]
+    properties:
+      url:
+        type: string
+        format: uri
+        description: The URL to add (will be canonicalized)
+      source:
+        type: string
+        description: Source of the URL (defaults to "manual")
+        default: manual
+      audits:
+        type: array
+        items:
+          type: string
+        description: Array of audit types to enable for this URL
+  example:
+    - url: "https://example.com/page1.html"
+      source: "manual"
+      audits: ["accessibility", "broken-backlinks"]
+    - url: "https://example.com/page2.html"
+      audits: ["broken-backlinks"]
+
+AuditUrlUpdateRequest:
+  type: array
+  minItems: 1
+  maxItems: 100
+  items:
+    type: object
+    required: [url, audits]
+    properties:
+      url:
+        type: string
+        format: uri
+        description: The URL to update
+      audits:
+        type: array
+        items:
+          type: string
+        description: New audits array (replaces existing)
+  example:
+    - url: "https://example.com/page1.html"
+      audits: ["accessibility"]
+    - url: "https://example.com/page2.html"
+      audits: []
+
+AuditUrlDeleteRequest:
+  type: object
+  required: [urls]
+  properties:
+    urls:
+      type: array
+      minItems: 1
+      maxItems: 100
+      items:
+        type: string
+        format: uri
+  example:
+    urls:
+      - "https://example.com/page1.html"
+      - "https://example.com/page2.html"
