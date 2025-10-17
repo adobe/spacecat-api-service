@@ -18,6 +18,8 @@ import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
+import TierClient from '@adobe/spacecat-shared-tier-client';
+
 import EntitlementsController from '../../src/controllers/entitlements.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
 
@@ -69,6 +71,7 @@ describe('Entitlements Controller', () => {
 
   const mockAccessControlUtil = {
     hasAccess: sandbox.stub().resolves(true),
+    hasAdminAccess: sandbox.stub().returns(true),
   };
 
   let entitlementController;
@@ -79,6 +82,7 @@ describe('Entitlements Controller', () => {
     // Create a mock AccessControlUtil instance that will be used by the controller
     const mockAccessControlUtilInstance = {
       hasAccess: sandbox.stub().resolves(true),
+      hasAdminAccess: sandbox.stub().returns(true),
     };
 
     // Stub AccessControlUtil.fromContext to return our mock instance
@@ -100,6 +104,7 @@ describe('Entitlements Controller', () => {
 
     // Store reference to the mock instance for test manipulation
     mockAccessControlUtil.hasAccess = mockAccessControlUtilInstance.hasAccess;
+    mockAccessControlUtil.hasAdminAccess = mockAccessControlUtilInstance.hasAdminAccess;
   });
 
   afterEach(() => {
@@ -260,6 +265,199 @@ describe('Entitlements Controller', () => {
 
       // Verify that log.error was called
       expect(context.log.error).to.have.been.calledWith(`Error getting entitlements for organization ${organizationId}: ${orgError.message}`);
+    });
+  });
+
+  describe('createEntitlement', () => {
+    const mockCreatedEntitlement = {
+      getId: () => 'entitlement-123',
+      getOrganizationId: () => organizationId,
+      getProductCode: () => 'LLMO',
+      getTier: () => 'FREE_TRIAL',
+      getStatus: () => 'ACTIVE',
+      getQuotas: () => ({}),
+      getCreatedAt: () => '2023-01-01T00:00:00Z',
+      getUpdatedAt: () => '2023-01-01T00:00:00Z',
+      getUpdatedBy: () => 'admin@example.com',
+    };
+
+    const mockTierClient = {
+      createEntitlement: sandbox.stub().resolves({
+        entitlement: mockCreatedEntitlement,
+      }),
+    };
+
+    beforeEach(() => {
+      // Reset TierClient mock
+      sandbox.stub(TierClient, 'createForOrg').resolves(mockTierClient);
+    });
+
+    it('should create entitlement successfully for admin user', async () => {
+      const context = {
+        params: { organizationId },
+        log: { error: sinon.stub() },
+        authInfo: { getProfile: () => ({ email: 'admin@example.com' }) },
+      };
+
+      const result = await entitlementController.createEntitlement(context);
+
+      expect(result.status).to.equal(201);
+
+      // Parse the response body
+      const body = await result.json();
+      expect(body).to.have.property('id', 'entitlement-123');
+      expect(body).to.have.property('organizationId', organizationId);
+      expect(body).to.have.property('productCode', 'LLMO');
+      expect(body).to.have.property('tier', 'FREE_TRIAL');
+
+      // Verify TierClient was called correctly
+      expect(TierClient.createForOrg).to.have.been.calledWith(
+        context,
+        mockOrganization,
+        'LLMO',
+      );
+      expect(mockTierClient.createEntitlement).to.have.been.calledWith('FREE_TRIAL');
+    });
+
+    it('should return forbidden when user is not admin', async () => {
+      // Create a new controller instance with non-admin user
+      const nonAdminController = EntitlementsController({
+        dataAccess: mockDataAccess,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      });
+
+      // Override the hasAdminAccess method to return false for this test
+      mockAccessControlUtil.hasAdminAccess.returns(false);
+
+      const context = {
+        params: { organizationId },
+        log: { error: sinon.stub() },
+        authInfo: { getProfile: () => ({ email: 'user@example.com' }) },
+      };
+
+      const result = await nonAdminController.createEntitlement(context);
+
+      expect(result.status).to.equal(403);
+      const body = await result.json();
+      expect(body.message).to.equal('Only admins can create entitlements');
+
+      // Restore the original behavior
+      mockAccessControlUtil.hasAdminAccess.returns(true);
+    });
+
+    it('should return bad request for invalid organization ID', async () => {
+      const context = {
+        params: { organizationId: 'invalid-uuid' },
+        log: { error: sinon.stub() },
+        authInfo: { getProfile: () => ({ email: 'admin@example.com' }) },
+      };
+
+      const result = await entitlementController.createEntitlement(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Organization ID required');
+    });
+
+    it('should return not found for non-existent organization', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+
+      const context = {
+        params: { organizationId },
+        log: { error: sinon.stub() },
+        authInfo: { getProfile: () => ({ email: 'admin@example.com' }) },
+      };
+
+      const result = await entitlementController.createEntitlement(context);
+
+      expect(result.status).to.equal(404);
+      const body = await result.json();
+      expect(body.message).to.equal('Organization not found');
+    });
+
+    it('should return internal server error when TierClient creation fails', async () => {
+      const tierClientError = new Error('TierClient creation failed');
+      TierClient.createForOrg.rejects(tierClientError);
+
+      const context = {
+        params: { organizationId },
+        log: { error: sinon.stub() },
+        authInfo: { getProfile: () => ({ email: 'admin@example.com' }) },
+      };
+
+      const result = await entitlementController.createEntitlement(context);
+
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.equal('TierClient creation failed');
+
+      // Verify that log.error was called
+      expect(context.log.error).to.have.been.calledWith(`Error creating entitlement for organization ${organizationId}: ${tierClientError.message}`);
+    });
+
+    it('should return internal server error when entitlement creation fails', async () => {
+      const entitlementError = new Error('Entitlement creation failed');
+      mockTierClient.createEntitlement.rejects(entitlementError);
+
+      const context = {
+        params: { organizationId },
+        log: { error: sinon.stub() },
+        authInfo: { getProfile: () => ({ email: 'admin@example.com' }) },
+      };
+
+      const result = await entitlementController.createEntitlement(context);
+
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.equal('Entitlement creation failed');
+
+      // Verify that log.error was called
+      expect(context.log.error).to.have.been.calledWith(`Error creating entitlement for organization ${organizationId}: ${entitlementError.message}`);
+    });
+
+    it('should return internal server error when Organization.findById fails', async () => {
+      const orgError = new Error('Organization lookup failed');
+      mockDataAccess.Organization.findById.rejects(orgError);
+
+      const context = {
+        params: { organizationId },
+        log: { error: sinon.stub() },
+        authInfo: { getProfile: () => ({ email: 'admin@example.com' }) },
+      };
+
+      const result = await entitlementController.createEntitlement(context);
+
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.equal('Organization lookup failed');
+
+      // Verify that log.error was called
+      expect(context.log.error).to.have.been.calledWith(`Error creating entitlement for organization ${organizationId}: ${orgError.message}`);
+    });
+
+    it('should use correct product code and tier constants', async () => {
+      const context = {
+        params: { organizationId },
+        log: { error: sinon.stub() },
+        authInfo: { getProfile: () => ({ email: 'admin@example.com' }) },
+      };
+
+      await entitlementController.createEntitlement(context);
+
+      // Verify TierClient.createForOrg was called with correct product code
+      expect(TierClient.createForOrg).to.have.been.calledWith(
+        context,
+        mockOrganization,
+        'LLMO',
+      );
+
+      // Verify createEntitlement was called with correct tier
+      expect(mockTierClient.createEntitlement).to.have.been.calledWith('FREE_TRIAL');
     });
   });
 });

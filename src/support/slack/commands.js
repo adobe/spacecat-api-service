@@ -32,6 +32,7 @@ import setSiteOrganizationCommand from './commands/set-ims-org.js';
 import toggleSiteImport from './commands/toggle-site-import.js';
 import runTrafficAnalysisBackfill from './commands/run-traffic-analysis-backfill.js';
 import backfillLlmo from './commands/backfill-llmo.js';
+import getPromptUsage from './commands/get-prompt-usage.js';
 
 /**
  * Returns all commands.
@@ -62,4 +63,5 @@ export default (context) => [
   setSiteOrganizationCommand(context),
   toggleSiteImport(context),
   backfillLlmo(context),
+  getPromptUsage(context),
 ];

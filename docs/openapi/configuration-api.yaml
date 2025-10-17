@@ -46,3 +46,79 @@ configuration:
         $ref: './responses.yaml#/404-configuration-not-found-with-version'
       '500':
         $ref: './responses.yaml#/500'
+configuration-audits:
+  post:
+    tags:
+      - configuration
+    summary: Register a new audit type in the configuration
+    operationId: registerAudit
+    security:
+      - admin_key: [ ]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - auditType
+              - enabledByDefault
+              - interval
+              - productCodes
+            properties:
+              auditType:
+                type: string
+                description: The type of audit to register
+                example: "cwv"
+              enabledByDefault:
+                type: boolean
+                description: Whether this audit type should be enabled by default for new sites
+                example: true
+              interval:
+                type: string
+                description: The job interval for running the audit
+                example: "weekly"
+              productCodes:
+                type: array
+                items:
+                  type: string
+                  description: The product codes the audit should be executed for
+                  example: "LLMO"
+    responses:
+      '201':
+        description: Audit type registered successfully.
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '500':
+        $ref: './responses.yaml#/500'
+configuration-audit:
+  delete:
+    tags:
+      - configuration
+    summary: Unregister an audit type from the configuration
+    operationId: unregisterAudit
+    security:
+      - admin_key: [ ]
+    parameters:
+      - name: auditType
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The type of audit to unregister
+        example: "cwv"
+    responses:
+      '204':
+        description: Audit type unregistered successfully.
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '500':
+        $ref: './responses.yaml#/500'

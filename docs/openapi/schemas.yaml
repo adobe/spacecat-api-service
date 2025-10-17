@@ -60,6 +60,7 @@ AuditType:
     - 'experimentation-opportunities'
     - 'llm-error-pages'
     - 'prerender'
+    - 'summarization'
   example: 'cwv'
 URL:
   type: string
@@ -320,6 +321,61 @@ OrganizationUpdate:
               - '@user6'
       contentAiConfig:
         index: 'example-index-name'
+Project:
+  type: object
+  properties:
+    id:
+      description: The project ID in uuid format
+      $ref: '#/Id'
+    name:
+      description: The name of the project
+      type: string
+    organizationId:
+      description: The ID of the organization this project belongs to
+      $ref: '#/Id'
+    createdAt:
+      description: The date and time when the project was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: The date and time when the project was last updated
+      $ref: '#/DateTime'
+  example:
+    id: 'p1r2o3j4-e5c6-t7i8-d9a0-b11c12d13e14'
+    name: 'Example Project'
+    organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
+    createdAt: '2023-12-15T09:30:00Z'
+    updatedAt: '2024-01-19T11:20:00Z'
+ProjectList:
+  type: array
+  items:
+    $ref: './schemas.yaml#/Project'
+ProjectCreate:
+  type: object
+  required:
+    - name
+    - organizationId
+  properties:
+    name:
+      description: The name of the project
+      type: string
+    organizationId:
+      description: The ID of the organization this project belongs to
+      $ref: '#/Id'
+  example:
+    name: 'New Project'
+    organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
+ProjectUpdate:
+  type: object
+  properties:
+    name:
+      description: The name of the project
+      type: string
+    organizationId:
+      description: The ID of the organization this project belongs to
+      $ref: '#/Id'
+  example:
+    name: 'Updated Project Name'
+    organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
 Site:
   type: object
   properties:
@@ -329,6 +385,22 @@ Site:
     organizationId:
       description: The optional ID of the organization this site belongs to
       $ref: '#/Id'
+    projectId:
+      description: The optional ID of the project this site belongs to
+      $ref: '#/Id'
+    isPrimaryLocale:
+      description: Whether this site is the primary locale for the project
+      type: boolean
+    language:
+      description: The language code in ISO 639-1 format (2 lowercase letters)
+      type: string
+      pattern: '^[a-z]{2}$'
+      example: 'en'
+    region:
+      description: The region code in ISO 3166-1 alpha-2 format (2 uppercase letters)
+      type: string
+      pattern: '^[A-Z]{2}$'
+      example: 'US'
     baseURL:
       description: The base URL of the site
       $ref: '#/URL'
@@ -461,6 +533,22 @@ SiteCreate:
       description: The optional ID of the organization this site belongs to
       default: null
       $ref: '#/Id'
+    projectId:
+      description: The optional ID of the project this site belongs to
+      $ref: '#/Id'
+    isPrimaryLocale:
+      description: Whether this site is the primary locale for the project
+      type: boolean
+    language:
+      description: The language code in ISO 639-1 format (2 lowercase letters)
+      type: string
+      pattern: '^[a-z]{2}$'
+      example: 'en'
+    region:
+      description: The region code in ISO 3166-1 alpha-2 format (2 uppercase letters)
+      type: string
+      pattern: '^[A-Z]{2}$'
+      example: 'US'
     name:
       description: The name of the site
       type: string
@@ -488,6 +576,22 @@ SiteUpdate:
     organizationId:
       description: The optional ID of the organization this site belongs to
       $ref: '#/Id'
+    projectId:
+      description: The optional ID of the project this site belongs to
+      $ref: '#/Id'
+    isPrimaryLocale:
+      description: Whether this site is the primary locale for the project
+      type: boolean
+    language:
+      description: The language code in ISO 639-1 format (2 lowercase letters)
+      type: string
+      pattern: '^[a-z]{2}$'
+      example: 'en'
+    region:
+      description: The region code in ISO 3166-1 alpha-2 format (2 uppercase letters)
+      type: string
+      pattern: '^[A-Z]{2}$'
+      example: 'US'
     name:
       description: The name of the site
       type: string
@@ -878,6 +982,17 @@ AuditResult:
                 description: 'Array of performance metrics by device type'
                 items:
                   $ref: './schemas.yaml#/CWVMetric'
+    - type: object
+      description: The result of summarization audit.
+      properties:
+        success:
+          type: boolean
+          description: Whether the audit was successful
+        topPages:
+          type: array
+          description: A list of top pages
+          items:
+            type: string
 AuditList:
   type: array
   items:
@@ -3643,21 +3758,43 @@ LlmoConfig:
   description: LLMO (Large Language Model Optimizer) configuration for a site
   required:
     - entities
+    - categories
+    - topics
     - brands
     - competitors
   properties:
     entities:
       type: object
-      description: A record of entities (categories, topics, etc.) keyed by UUID
+      description: A record of entities keyed by UUID
       additionalProperties:
         $ref: '#/LlmoEntity'
       example:
         "123e4567-e89b-12d3-a456-426614174000":
           type: "category"
           name: "Technology"
+    categories:
+      type: object
+      description: A record of categories keyed by UUID
+      additionalProperties:
+        $ref: '#/LlmoCategory'
+      example:
+        "123e4567-e89b-12d3-a456-426614174000":
+          name: "Technology"
+          region: "us"
+    topics:
+      type: object
+      description: A record of topics with nested prompts keyed by UUID
+      additionalProperties:
+        $ref: '#/LlmoTopic'
+      example:
         "456e7890-e89b-12d3-a456-426614174001":
-          type: "topic"
           name: "AI/ML"
+          category: "123e4567-e89b-12d3-a456-426614174000"
+          prompts:
+            - prompt: "What are the latest AI trends?"
+              regions: ["us"]
+              origin: "human"
+              source: "config"
     brands:
       type: object
       description: Brand configuration with aliases
@@ -3680,7 +3817,7 @@ LlmoConfig:
           description: Array of competitor configurations
           items:
             $ref: '#/LlmoCompetitor'
-  additionalProperties: false
+  additionalProperties: true
 
 LlmoEntity:
   type: object
@@ -3699,6 +3836,104 @@ LlmoEntity:
       example: "Technology"
   additionalProperties: true
 
+LlmoCategory:
+  type: object
+  description: A category in the LLMO configuration
+  required:
+    - name
+    - region
+  properties:
+    name:
+      type: string
+      description: The name of the category
+      minLength: 1
+      example: "Technology"
+    region:
+      oneOf:
+        - type: string
+          pattern: '^[a-z][a-z]$'
+          description: Two-letter region code
+          example: "us"
+        - type: array
+          items:
+            type: string
+            pattern: '^[a-z][a-z]$'
+          description: Array of two-letter region codes
+          example: ["us", "eu"]
+  additionalProperties: true
+
+LlmoTopic:
+  type: object
+  description: A topic in the LLMO configuration with nested prompts
+  required:
+    - name
+    - prompts
+    - category
+  properties:
+    name:
+      type: string
+      description: The name of the topic
+      minLength: 1
+      example: "AI/ML"
+    prompts:
+      type: array
+      description: Array of prompts for this topic
+      minItems: 1
+      items:
+        $ref: '#/LlmoPrompt'
+    category:
+      oneOf:
+        - type: string
+          format: uuid
+          description: UUID reference to a category
+          example: "123e4567-e89b-12d3-a456-426614174000"
+        - type: string
+          description: Category name as string
+          minLength: 1
+          example: "Technology"
+  additionalProperties: true
+
+LlmoPrompt:
+  type: object
+  description: A prompt configuration within a topic
+  required:
+    - prompt
+    - regions
+    - origin
+    - source
+  properties:
+    prompt:
+      type: string
+      description: The prompt text
+      minLength: 1
+      example: "What are the latest AI trends?"
+    regions:
+      type: array
+      description: Array of two-letter region codes
+      items:
+        type: string
+        pattern: '^[a-z][a-z]$'
+      example: ["us", "eu"]
+    origin:
+      oneOf:
+        - type: string
+          enum: ["human", "ai"]
+          description: Standard origin types
+        - type: string
+          description: Custom origin type
+          minLength: 1
+      example: "human"
+    source:
+      oneOf:
+        - type: string
+          enum: ["config", "api"]
+          description: Standard source types
+        - type: string
+          description: Custom source type
+          minLength: 1
+      example: "config"
+  additionalProperties: true
+
 LlmoBrandAlias:
   type: object
   description: A brand alias configuration
@@ -3706,7 +3941,6 @@ LlmoBrandAlias:
     - aliases
     - category
     - region
-    - topic
   properties:
     aliases:
       type: array
@@ -3732,11 +3966,6 @@ LlmoBrandAlias:
             pattern: '^[a-z][a-z]$'
           description: Array of two-letter region codes
           example: ["us", "eu"]
-    topic:
-      type: string
-      format: uuid
-      description: UUID reference to a topic entity
-      example: "456e7890-e89b-12d3-a456-426614174001"
 
 LlmoCompetitor:
   type: object

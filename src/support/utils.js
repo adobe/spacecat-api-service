@@ -21,8 +21,11 @@ import {
   isObject,
   resolveCanonicalUrl, isValidIMSOrgId,
   detectAEMVersion,
+  detectLocale,
 } from '@adobe/spacecat-shared-utils';
 import TierClient from '@adobe/spacecat-shared-tier-client';
+import { iso6393 } from 'iso-639-3';
+import worldCountries from 'world-countries';
 
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import {
@@ -490,6 +493,93 @@ const isImportEnabled = (importType, imports) => {
 };
 
 /**
+ * Derives a project name from a base URL.
+ *
+ * @param {string} baseURL - The base URL
+ * @returns {string} The derived project name.
+ */
+export const deriveProjectName = (baseURL) => {
+  const parsedBaseURL = new URL(baseURL);
+  const { hostname } = parsedBaseURL;
+
+  // Split hostname by dots, if it has 3 or more parts, we assume it has a subdomain.
+  const parts = hostname.split('.');
+  if (parts.length <= 2) {
+    return hostname;
+  }
+
+  // Remove parts of the subdomain which are 2 or 3 letters long, max first two elements
+  for (let i = 0; i < Math.min(parts.length, 2); i += 1) {
+    const part = parts[i];
+    if (part.length === 2 || part.length === 3) {
+      parts[i] = null;
+    }
+  }
+
+  return parts.filter(Boolean).join('.');
+};
+
+/**
+ * Creates a new project if it does not exist yet.
+ *
+ * @param {Object} context - The Lambda context object.
+ * @param {Object} slackContext - The Slack context object.
+ * @param {string} baseURL - The base URL of the site.
+ * @param {string} projectId - The project ID.
+ * @returns {Promise<Object>} - The project object.
+ */
+export const createProject = async (
+  context,
+  slackContext,
+  baseURL,
+  organizationId,
+  projectId,
+) => {
+  const { dataAccess, log } = context;
+  const { say } = slackContext;
+  const { Project } = dataAccess;
+
+  try {
+    const projectName = deriveProjectName(baseURL);
+
+    // Find existing project if project id is provided
+    let existingProject;
+    if (projectId) {
+      const project = await Project.findById(projectId);
+      if (project) {
+        existingProject = project;
+      }
+    }
+
+    // Find existing project in the same org with the same name
+    if (!existingProject) {
+      const foundProject = (await Project.allByOrganizationId(organizationId))
+        .find((p) => p.getProjectName() === projectName);
+      if (foundProject) {
+        existingProject = foundProject;
+      }
+    }
+
+    if (existingProject) {
+      const message = `:information_source: Added site ${baseURL} to existing project ${existingProject.getProjectName()}. Project ID: ${existingProject.getId()}`;
+      await say(message);
+      return existingProject;
+    }
+
+    // Otherwise create new project
+    const newProject = await Project.create({ projectName, organizationId });
+    const message = `:information_source: Added site ${baseURL} to new project ${newProject.getProjectName()}. Project ID: ${newProject.getId()}`;
+    await say(message);
+
+    return newProject;
+  } catch (error) {
+    log.error(`Error creating project: ${error.message}`);
+    await say(`:x: Error creating project: ${error.message}`);
+    throw error;
+  }
+};
+
+/**
  * Creates or retrieves a site and its associated organization.
  *
  * @param {string} baseURL - The site base URL.
@@ -557,15 +647,6 @@ const createSiteAndOrganization = async (
       site = await Site.create({
         baseURL, deliveryType, isLive, organizationId, authoringType,
       });
-
-      if (deliveryConfig && Object.keys(deliveryConfig).length > 0) {
-        site.setDeliveryConfig(deliveryConfig);
-        // Also set authoring type if provided (needed when setting delivery config)
-        if (authoringType) {
-          site.setAuthoringType(authoringType);
-        }
-        await site.save();
-      }
     } catch (error) {
       log.error(`Error creating site: ${error.message}`);
       localReportLine.errors = error.message;
@@ -574,6 +655,15 @@ const createSiteAndOrganization = async (
 
       throw error;
     }
+  }
+
+  // Set deliveryConfig and authoringType if provided (will be saved later with other site data)
+  if (deliveryConfig && Object.keys(deliveryConfig).length > 0) {
+    site.setDeliveryConfig(deliveryConfig);
+    if (authoringType) {
+      site.setAuthoringType(authoringType);
+    }
+    await say(':white_check_mark: DeliveryConfig is added/updated to site configuration');
   }
 
   Object.assign(reportLine, localReportLine);
@@ -664,12 +754,11 @@ export const onboardSingleSite = async (
 
   const baseURL = options.urlProcessor ? options.urlProcessor(baseURLInput) : baseURLInput.trim();
   const imsOrgID = imsOrganizationID || env.DEMO_IMS_ORG;
-
   const profileName = options.profileName || 'unknown';
 
   const tier = additionalParams.tier || EntitlementModel.TIERS.FREE_TRIAL;
 
-  await say(`:gear: Starting ${profileName} environment setup for site ${baseURL}`);
+  await say(`:gear: Starting ${profileName} environment setup for site ${baseURL} with imsOrgID: ${imsOrgID} and tier: ${tier}`);
   await say(':key: Please make sure you have access to the AEM Shared Production Demo environment. Request access here: https://demo.adobe.com/demos/internal/AemSharedProdEnv.html');
 
   const reportLine = {
@@ -692,13 +781,45 @@ export const onboardSingleSite = async (
     if (!isValidUrl(baseURL)) {
       reportLine.errors = 'Invalid site base URL';
       reportLine.status = 'Failed';
+      log.error(`Invalid site base URL: ${baseURL}`);
+      await say(`:x: Invalid site base URL: ${baseURL}`);
       return reportLine;
     }
 
     if (!isValidIMSOrgId(imsOrgID)) {
       reportLine.errors = 'Invalid IMS Org ID';
       reportLine.status = 'Failed';
+      log.error(`Invalid IMS Org ID: ${imsOrgID}`);
+      await say(`:x: Invalid IMS Org ID: ${imsOrgID}`);
       return reportLine;
+    }
+
+    let language = additionalParams.language?.toLowerCase();
+    let region = additionalParams.region?.toUpperCase();
+
+    const languageValid = language && !!iso6393.find((lang) => lang.iso6301 === language);
+    const regionValid = region && !!worldCountries.find(
+      (c) => c.cca2.toLowerCase() === region.toLowerCase(),
+    );
+
+    // Auto-detect locale if language and/or region is not provided
+    if (!languageValid || !regionValid) {
+      try {
+        const locale = await detectLocale({ baseUrl: baseURL });
+        if (!language && locale.language) {
+          language = locale.language;
+        }
+        if (!region && locale.region) {
+          region = locale.region;
+        }
+      } catch (error) {
+        log.error(`Error detecting locale for site ${baseURL}: ${error.message}`);
+        await say(`:x: Error detecting locale for site ${baseURL}: ${error.message}`);
+
+        // Fallback to default language and region
+        language = 'en';
+        region = 'US';
+      }
     }
 
     // Create or retrieve site and organization
@@ -717,6 +838,8 @@ export const onboardSingleSite = async (
     if (!Object.values(EntitlementModel.TIERS).includes(tier)) {
       reportLine.errors = `Invalid tier: ${tier}`;
       reportLine.status = 'Failed';
+      log.error(`Invalid tier: ${tier}`);
+      await say(`:x: Invalid tier: ${tier}`);
       return reportLine;
     }
 
@@ -730,6 +853,33 @@ export const onboardSingleSite = async (
       tier,
     );
 
+    // Create new project or assign existing project
+    const project = await createProject(
+      context,
+      slackContext,
+      baseURL,
+      organizationId,
+      site.getProjectId() || additionalParams.projectId,
+    );
+    site.setProjectId(project.getId());
+    reportLine.projectId = project.getId();
+
+    // Assign language and region
+    const hasLanguage = hasText(site.getLanguage());
+    if (!hasLanguage) {
+      site.setLanguage(language);
+      reportLine.language = language;
+    } else {
+      reportLine.language = site.getLanguage();
+    }
+    const hasRegion = hasText(site.getRegion());
+    if (!hasRegion) {
+      site.setRegion(region);
+      reportLine.region = region;
+    } else {
+      reportLine.region = site.getRegion();
+    }
+
     const siteID = site.getId();
     reportLine.siteId = siteID;
 
@@ -738,6 +888,7 @@ export const onboardSingleSite = async (
       log.error(error);
       reportLine.errors = error;
       reportLine.status = 'Failed';
+      await say(`:x: Profile "${profileName}" not found or invalid.`);
       return reportLine;
     }
 
@@ -796,9 +947,10 @@ export const onboardSingleSite = async (
     try {
       await site.save();
     } catch (error) {
-      log.error(error);
+      log.error(`Failed to save site ${siteID} with updated config:`, error);
       reportLine.errors = error.message;
       reportLine.status = 'Failed';
+      await say(`:x: *Error saving site configuration:* ${error.message}`);
       return reportLine;
     }
 
@@ -878,6 +1030,12 @@ export const onboardSingleSite = async (
       },
     };
 
+    const scheduledRun = additionalParams.scheduledRun !== undefined
+      ? additionalParams.scheduledRun
+      : (profile.config?.scheduledRun || false);
+
+    await say(`:information_source: Scheduled run: ${scheduledRun}`);
+
     // Disable imports and audits job - only disable what was enabled during onboarding
     const disableImportAndAuditJob = {
       type: 'disable-import-audit-processor',
@@ -888,6 +1046,7 @@ export const onboardSingleSite = async (
       taskContext: {
         importTypes: importsEnabled || [],
         auditTypes: auditsEnabled || [],
+        scheduledRun,
         slackContext: {
           channelId: slackContext.channelId,
           threadTs: slackContext.threadTs,
@@ -927,11 +1086,6 @@ export const onboardSingleSite = async (
       },
     };
 
-    log.info(`Opportunity status job: ${JSON.stringify(opportunityStatusJob)}`);
-    log.info(`Disable import and audit job: ${JSON.stringify(disableImportAndAuditJob)}`);
-    log.info(`Demo URL job: ${JSON.stringify(demoURLJob)}`);
-    log.info(`CWV Demo Suggestions job: ${JSON.stringify(cwvDemoSuggestionsJob)}`);
-
     // Prepare and start step function workflow with the necessary parameters
     const workflowInput = {
       opportunityStatusJob,
@@ -950,6 +1104,7 @@ export const onboardSingleSite = async (
     });
     await sfnClient.send(startCommand);
   } catch (error) {
+    await say(`:x: Failed to start onboarding for site ${baseURL}: ${error.message}`);
     log.error(error);
     reportLine.errors = error.message;
     reportLine.status = 'Failed';
