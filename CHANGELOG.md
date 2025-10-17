@@ -1,3 +1,10 @@
+# [1.209.0](https://github.com/adobe/spacecat-api-service/compare/v1.208.1...v1.209.0) (2025-10-17)
+
+
+### Features
+
+* enhance LLMO config update logging with user and config summary ([#1370](https://github.com/adobe/spacecat-api-service/issues/1370)) ([d6f5ae1](https://github.com/adobe/spacecat-api-service/commit/d6f5ae1a12f37be6046f4189bf5e8e5b9dedb0b1))
+
 ## [1.208.1](https://github.com/adobe/spacecat-api-service/compare/v1.208.0...v1.208.1) (2025-10-17)
 
 
