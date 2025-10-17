@@ -1,3 +1,10 @@
+# [1.206.0](https://github.com/adobe/spacecat-api-service/compare/v1.205.3...v1.206.0) (2025-10-17)
+
+
+### Features
+
+* exclude Adobe Corp from the get-prompt-usage output ([#1363](https://github.com/adobe/spacecat-api-service/issues/1363)) ([d47fdad](https://github.com/adobe/spacecat-api-service/commit/d47fdad91f5c86364576be392d32e72e477f817c))
+
 ## [1.205.3](https://github.com/adobe/spacecat-api-service/compare/v1.205.2...v1.205.3) (2025-10-16)
 
 
