@@ -67,6 +67,8 @@ tags:
     description: Report generation and management operations
   - name: project
     description: Project management operations
+  - name: url-store
+    description: URL Store operations for managing audit URLs
 
 paths:
   /audits/latest/{auditType}:
@@ -200,6 +202,14 @@ paths:
     $ref: './site-enrollments-api.yaml#/site-enrollments-by-site'
   /sites/{siteId}/user-activities:
     $ref: './user-activities-api.yaml#/paths/~1sites~1{siteId}~1user-activities'
+  /sites/{siteId}/url-store:
+    $ref: './url-store-api.yaml#/list-all-urls'
+  /sites/{siteId}/url-store/by-source/{source}:
+    $ref: './url-store-api.yaml#/list-urls-by-source'
+  /sites/{siteId}/url-store/by-audit/{auditType}:
+    $ref: './url-store-api.yaml#/list-urls-by-audit'
+  /sites/{siteId}/url-store/{base64Url}:
+    $ref: './url-store-api.yaml#/get-url'
   /sites/{siteId}/key-events:
     $ref: './key-events-api.yaml#/key-events'
   /sites/{siteId}/key-events/{keyEventId}:
