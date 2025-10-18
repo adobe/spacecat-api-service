@@ -620,9 +620,11 @@ export function onboardSiteModal(lambdaContext) {
         }
       }
 
-      await ack();
-
+      // Load configuration before ack() to avoid delays
       const configuration = await Configuration.findLatest();
+
+      // Acknowledge immediately to close the modal
+      await ack();
       const additionalParams = {};
       if (deliveryType && deliveryType !== 'auto') {
         additionalParams.deliveryType = deliveryType;
