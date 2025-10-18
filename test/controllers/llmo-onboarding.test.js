@@ -625,12 +625,16 @@ describe('LLMO Onboarding Functions', () => {
       };
 
       // Mock site
+      const mockSiteConfig = {
+        updateLlmoBrand: sinon.stub(),
+        updateLlmoDataFolder: sinon.stub(),
+        getImports: sinon.stub().returns([]),
+        enableImport: sinon.stub(),
+      };
+
       const mockSite = {
         getId: sinon.stub().returns('site123'),
-        getConfig: sinon.stub().returns({
-          updateLlmoBrand: sinon.stub(),
-          updateLlmoDataFolder: sinon.stub(),
-        }),
+        getConfig: sinon.stub().returns(mockSiteConfig),
         setConfig: sinon.stub(),
         save: sinon.stub().resolves(),
       };
@@ -639,6 +643,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
         save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
 
       // Setup mocks
@@ -709,6 +714,9 @@ describe('LLMO Onboarding Functions', () => {
         dataAccess: mockDataAccess,
         log: mockLog,
         env: mockEnv,
+        sqs: {
+          sendMessage: sinon.stub().resolves(),
+        },
       };
 
       const params = {
@@ -738,17 +746,27 @@ describe('LLMO Onboarding Functions', () => {
       });
 
       // Verify site config was updated
-      expect(mockSite.getConfig().updateLlmoBrand).to.have.been.calledWith('Test Brand');
-      expect(mockSite.getConfig().updateLlmoDataFolder).to.have.been.calledWith('dev/example-com');
+      expect(mockSiteConfig.updateLlmoBrand).to.have.been.calledWith('Test Brand');
+      expect(mockSiteConfig.updateLlmoDataFolder).to.have.been.calledWith('dev/example-com');
+      expect(mockSiteConfig.getImports).to.have.been.called;
+      expect(mockSiteConfig.enableImport).to.have.been.calledWith('top-pages', undefined);
 
       // Verify site was saved
       expect(mockSite.setConfig).to.have.been.calledWith({ config: 'dynamo-item' });
-      expect(mockSite.save).to.have.been.called;
+      expect(mockSite.setConfig).to.have.been.calledTwice;
+      expect(mockSite.save).to.have.been.calledOnce;
 
       // Verify enableAudits was called
       expect(mockDataAccess.Configuration.findLatest).to.have.been.called;
+      // Verify all BASIC_AUDITS are enabled
       expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('headings', mockSite);
       expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('llm-blocked', mockSite);
+      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('canonical', mockSite);
+      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('hreflang', mockSite);
+      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('summarization', mockSite);
+      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('prerender', mockSite);
+      // Verify additional audits are enabled
+      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('llm-error-pages', mockSite);
       expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('llmo-customer-analysis', mockSite);
       expect(mockConfiguration.save).to.have.been.called;
 
@@ -770,6 +788,8 @@ describe('LLMO Onboarding Functions', () => {
         getConfig: sinon.stub().returns({
           updateLlmoBrand: sinon.stub(),
           updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
         }),
         setConfig: sinon.stub(),
         save: sinon.stub().resolves(),
@@ -779,6 +799,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
         save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
 
       // Setup mocks - organization does not exist
