@@ -142,14 +142,16 @@ export const sendAutofixMessage = async (
   opportunityId,
   suggestionIds,
   promiseToken,
-  variation,
+  variations,
+  action,
   { url } = {},
 ) => sqs.sendMessage(queueUrl, {
   opportunityId,
   siteId,
   suggestionIds,
   promiseToken,
-  variation,
+  variations,
+  action,
   url,
 });
 /* c8 ignore end */
