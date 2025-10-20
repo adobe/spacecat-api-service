@@ -390,6 +390,65 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockDataAccess.Organization.findByImsOrgId).to.not.have.been.called;
     });
 
+    it('should return isValid false when site is mission critical for ASO', async () => {
+      // Import the ASO_CRITICAL_SITES constant first
+      const { ASO_CRITICAL_SITES } = await import('../../../src/controllers/llmo/llmo-onboarding.js');
+
+      // Create mock existing site with an ID from ASO_CRITICAL_SITES
+      const criticalSiteId = ASO_CRITICAL_SITES[0];
+      const existingSite = {
+        getId: sinon.stub().returns(criticalSiteId),
+        getOrganizationId: sinon.stub().returns('some-org-id'),
+      };
+
+      // Create mock organization
+      const organization = {
+        getId: sinon.stub().returns('test-org-id'),
+      };
+
+      // Setup mocks
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+      mockDataAccess.Organization.findByImsOrgId.resolves(organization);
+      mockSharePointFolder.exists.resolves(false);
+
+      // Create context
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+      };
+
+      // Import the function with mocked dependencies
+      const { validateSiteNotOnboarded } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-helix-content-sdk': {
+          createFrom: sinon.stub().resolves(mockSharePointClient),
+        },
+      });
+
+      // Test parameters
+      const baseURL = 'https://critical-site.com';
+      const imsOrgId = 'test-tenant-id@AdobeOrg';
+      const dataFolder = 'dev/critical-site-com';
+
+      // Call the function
+      const result = await validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, context);
+
+      // Verify result
+      expect(result).to.deep.equal({
+        isValid: false,
+        error: 'Site https://critical-site.com is mission critical for ASO.',
+      });
+
+      // Verify checks were performed
+      expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith(baseURL);
+      expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledWith(imsOrgId);
+      expect(existingSite.getId).to.have.been.called;
+      // The check happens early, so organization.getId and existingSite.getOrganizationId
+      // should NOT be called (we return before those comparisons)
+      expect(organization.getId).to.not.have.been.called;
+      expect(existingSite.getOrganizationId).to.not.have.been.called;
+    });
+
     it('should return isValid false when site exists and is assigned to different organization', async () => {
       // Create mock existing site assigned to different organization
       const existingSite = {
