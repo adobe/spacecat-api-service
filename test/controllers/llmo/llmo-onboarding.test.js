@@ -393,6 +393,7 @@ describe('LLMO Onboarding Functions', () => {
     it('should return isValid false when site exists and is assigned to different organization', async () => {
       // Create mock existing site assigned to different organization
       const existingSite = {
+        getId: sinon.stub().returns('site-123'),
         getOrganizationId: sinon.stub().returns('different-org-id'),
       };
 
@@ -437,13 +438,14 @@ describe('LLMO Onboarding Functions', () => {
       // Verify all checks were performed
       expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith(baseURL);
       expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledWith(imsOrgId);
-      expect(existingSite.getOrganizationId).to.have.been.calledTwice;
+      expect(existingSite.getOrganizationId).to.have.been.calledThrice;
       expect(organization.getId).to.have.been.calledOnce;
     });
 
     it('should return isValid true when site exists but is assigned to default organization', async () => {
       // Create mock existing site assigned to default organization
       const existingSite = {
+        getId: sinon.stub().returns('site-123'),
         getOrganizationId: sinon.stub().returns('default-org-id'),
       };
 
@@ -492,6 +494,7 @@ describe('LLMO Onboarding Functions', () => {
     it('should return isValid false when site exists but organization does not exist and site is not assigned to default organization', async () => {
       // Create mock existing site assigned to a non-default organization
       const existingSite = {
+        getId: sinon.stub().returns('site-123'),
         getOrganizationId: sinon.stub().returns('some-other-org-id'),
       };
 
@@ -531,7 +534,7 @@ describe('LLMO Onboarding Functions', () => {
       // Verify all checks were performed
       expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith(baseURL);
       expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledWith(imsOrgId);
-      expect(existingSite.getOrganizationId).to.have.been.calledOnce;
+      expect(existingSite.getOrganizationId).to.have.been.calledTwice;
     });
 
     it('should return isValid false when error occurs during validation', async () => {
@@ -640,7 +643,8 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
       expect(mockSite.getOrganizationId).to.have.been.called;
       expect(mockSite.setOrganizationId).to.have.been.calledWith('new-org-456');
-      expect(mockSite.save).to.have.been.called;
+      // Note: save() is NOT called by createOrFindSite, it's the caller's responsibility
+      expect(mockSite.save).to.not.have.been.called;
     });
 
     it('should not update organization ID when existing site has same organization', async () => {

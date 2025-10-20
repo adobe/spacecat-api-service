@@ -390,6 +390,9 @@ function LlmoController(ctx) {
   async function updateLlmoConfig(context) {
     const { log, s3, data } = context;
     const { siteId } = context.params;
+
+    const userId = context.attributes?.authInfo?.getProfile()?.sub || 'unknown';
+
     try {
       if (!isObject(data)) {
         return badRequest('LLMO config update must be provided as an object');
@@ -434,11 +437,33 @@ function LlmoController(ctx) {
         },
       });
 
-      log.info(`Updated LLMO config in S3 for siteId: ${siteId}, version: ${version}`);
+      // Calculate config summary
+      const numCategories = Object.keys(parsedConfig.categories || {}).length;
+      const numTopics = Object.keys(parsedConfig.topics || {}).length;
+      const numPrompts = Object.values(parsedConfig.topics || {}).reduce(
+        (total, topic) => total + (topic.prompts?.length || 0),
+        0,
+      );
+      const numBrandAliases = parsedConfig.brands?.aliases?.length || 0;
+      const numCompetitors = parsedConfig.competitors?.competitors?.length || 0;
+      const numDeletedPrompts = Object.keys(parsedConfig.deleted?.prompts || {}).length;
+
+      // Build config summary
+      const summaryParts = [
+        `${numPrompts} prompts`,
+        `${numCategories} categories`,
+        `${numTopics} topics`,
+        `${numBrandAliases} brand aliases`,
+        `${numCompetitors} competitors`,
+        `${numDeletedPrompts} deleted prompts`,
+      ];
+      const configSummary = summaryParts.join(', ');
+
+      log.info(`User ${userId} modifying customer configuration (${configSummary}) for siteId: ${siteId}, version: ${version}`);
       return ok({ version });
     } catch (error) {
       const msg = `${error?.message || /* c8 ignore next */ error}`;
-      log.error(`Error updating llmo config for siteId: ${siteId}, error: ${msg}`);
+      log.error(`User ${userId} error updating llmo config for siteId: ${siteId}, error: ${msg}`);
       return badRequest(msg);
     }
   }
@@ -729,7 +754,9 @@ function LlmoController(ctx) {
       const profile = authInfo.getProfile();
 
       if (!profile || !profile.tenants?.[0]?.id) {
-        return badRequest('User profile or organization ID not found in authentication token');
+        const message = 'User profile or organization ID not found in authentication token';
+        log.warn(`LLMO onboarding validation failed for domain ${domain}, brand ${brandName}. Validation Error: ${message}`);
+        return badRequest(message);
       }
 
       const imsOrgId = `${profile.tenants[0].id}@AdobeOrg`;
@@ -743,6 +770,7 @@ function LlmoController(ctx) {
       // Validate that the site has not been onboarded yet
       const validation = await validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, context);
       if (!validation.isValid) {
+        log.warn(`LLMO onboarding validation failed for IMS org ${imsOrgId}, domain ${domain}, brand ${brandName}. Validation Error: ${validation.error}`);
         return badRequest(validation.error);
       }
 

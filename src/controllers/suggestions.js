@@ -27,6 +27,7 @@ import {
 
 import { ValidationError, Suggestion as SuggestionModel, Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { SuggestionDto } from '../dto/suggestion.js';
+import { FixDto } from '../dto/fix.js';
 import { sendAutofixMessage, getCSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 
@@ -47,6 +48,13 @@ function SuggestionsController(ctx, sqs, env) {
   if (!isObject(dataAccess)) {
     throw new Error('Data access required');
   }
+
+  const AUTOFIX_UNGROUPED_OPPTY_TYPES = [
+    'broken-backlinks',
+    'form-accessibility',
+  ];
+
+  const shouldGroupSuggestionsForAutofix = (type) => !AUTOFIX_UNGROUPED_OPPTY_TYPES.includes(type);
 
   const {
     Opportunity, Suggestion, Site, Configuration,
@@ -330,6 +338,45 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   /**
+   * Gets all fixes for a given suggestion
+   * @param {Object} context of the request
+   * @returns {Promise<Response>} Array of fixes response.
+   */
+  const getSuggestionFixes = async (context) => {
+    const siteId = context.params?.siteId;
+    const opportunityId = context.params?.opportunityId;
+    const suggestionId = context.params?.suggestionId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!isValidUUID(opportunityId)) {
+      return badRequest('Opportunity ID required');
+    }
+
+    if (!isValidUUID(suggestionId)) {
+      return badRequest('Suggestion ID required');
+    }
+
+    try {
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
+
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('User does not belong to the organization');
+      }
+
+      const fixes = await Suggestion.getFixEntitiesBySuggestionId(suggestionId);
+      return ok({ data: fixes.map((fix) => FixDto.toJSON(fix)) });
+    } catch (error) {
+      return createResponse({ message: 'Error retrieving fixes for suggestion' }, 500);
+    }
+  };
+
+  /**
    * Update the status of one or multiple suggestions in one transaction
    * @param {Object} context of the request
    * @returns {Promise<Response>} the updated opportunity data
@@ -470,9 +517,16 @@ function SuggestionsController(ctx, sqs, env) {
     if (!isNonEmptyObject(context.data)) {
       return badRequest('No updates provided');
     }
-    const { suggestionIds, variationName: variation } = context.data;
+    const { suggestionIds, variations, action } = context.data;
+
     if (!isArray(suggestionIds)) {
       return badRequest('Request body must be an array of suggestionIds');
+    }
+    if (variations && !isArray(variations)) {
+      return badRequest('variations must be an array');
+    }
+    if (action !== undefined && !hasText(action)) {
+      return badRequest('action cannot be empty');
     }
     const site = await Site.findById(siteId);
     if (!site) {
@@ -512,7 +566,7 @@ function SuggestionsController(ctx, sqs, env) {
     });
 
     let suggestionGroups;
-    if (opportunity.getType() !== 'broken-backlinks') {
+    if (shouldGroupSuggestionsForAutofix(opportunity.getType())) {
       const opportunityData = opportunity.getData();
       const suggestionsByUrl = validSuggestions.reduce((acc, suggestion) => {
         const data = suggestion.getData();
@@ -584,7 +638,7 @@ function SuggestionsController(ctx, sqs, env) {
     response.suggestions.sort((a, b) => a.index - b.index);
     const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
 
-    if (opportunity.getType() !== 'broken-backlinks') {
+    if (shouldGroupSuggestionsForAutofix(opportunity.getType())) {
       await Promise.all(
         suggestionGroups.map(({ groupedSuggestions, url }) => sendAutofixMessage(
           sqs,
@@ -593,7 +647,8 @@ function SuggestionsController(ctx, sqs, env) {
           opportunityId,
           groupedSuggestions.map((s) => s.getId()),
           promiseTokenResponse,
-          variation,
+          variations,
+          action,
           { url },
         )),
       );
@@ -663,6 +718,7 @@ function SuggestionsController(ctx, sqs, env) {
     getAllForOpportunity,
     getByID,
     getByStatus,
+    getSuggestionFixes,
     patchSuggestion,
     patchSuggestionsStatus,
     removeSuggestion,

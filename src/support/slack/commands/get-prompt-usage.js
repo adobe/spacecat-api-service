@@ -18,6 +18,7 @@ import { createObjectCsvStringifier } from '../../../utils/slack/csvHelper.cjs';
 
 const { readConfig } = llmo;
 const PHRASES = ['get-prompt-usage'];
+const EXCLUDED_IMS_ORGS = ['9E1005A551ED61CA0A490D45@AdobeOrg'];
 
 /**
  * Factory function to create the GetPromptUsage object.
@@ -144,8 +145,45 @@ function GetPromptUsageCommand(context) {
       if (imsOrgIds.length === 1 && imsOrgIds[0] === '--all') {
         const allOrgs = await Organization.all();
         imsOrgIds = allOrgs.map((org) => org.getImsOrgId());
-        await say(':progress-loader: Retrieving total number of prompts in use for *all* organizations...');
+        await say(':progress-loader: Retrieving total number of prompts in use for *all* organizations (excluding Adobe Corp)...');
       }
+
+      const results = await Promise.allSettled(
+        imsOrgIds.map((id) => getPromptUsageForSingleIMSOrg(id)),
+      );
+
+      const rows = results
+        .map((res) => {
+          if (res.status !== 'fulfilled') return undefined;
+          const {
+            organizationName,
+            imsOrgID,
+            tier,
+            totalPrompts,
+          } = res.value;
+          if (args[0] === '--all' && (totalPrompts === 0 || EXCLUDED_IMS_ORGS.includes(imsOrgID))) return undefined;
+          return {
+            organizationName,
+            imsOrgID,
+            tier,
+            totalPrompts,
+          };
+        })
+        .filter(Boolean);
+
+      if (rows.length === 0) {
+        await say(':information_source: No organizations with prompts in use.');
+        return;
+      }
+
+      rows.sort((a, b) => b.totalPrompts - a.totalPrompts);
+
+      const sanitizedRows = rows.map((row) => Object.fromEntries(
+        Object.entries(row).map(([key, val]) => [
+          key,
+          typeof val === 'string' ? val.replace(/[\r\n]+/g, ' ').trim() : val,
+        ]),
+      ));
 
       const csvStringifier = createObjectCsvStringifier({
         header: [
@@ -153,55 +191,19 @@ function GetPromptUsageCommand(context) {
           { id: 'imsOrgID', title: 'IMS Org ID' },
           { id: 'tier', title: 'Tier' },
           { id: 'totalPrompts', title: 'Total number of prompts in use' },
-          { id: 'error', title: 'Error' },
         ],
       });
 
-      const totalImsOrgs = imsOrgIds.length;
-      const pages = Math.ceil(totalImsOrgs / batchSize);
+      const totalRows = sanitizedRows.length;
+      const pages = Math.ceil(totalRows / batchSize);
 
       for (let page = 0; page < pages; page += 1) {
         const start = page * batchSize;
-        const end = Math.min(start + batchSize, totalImsOrgs);
-        const imsOrgBatch = imsOrgIds.slice(start, end);
-
-        // eslint-disable-next-line no-await-in-loop
-        const results = await Promise.allSettled(
-          imsOrgBatch.map((id) => getPromptUsageForSingleIMSOrg(id)),
-        );
-
-        const rows = results.map((res, i) => {
-          const imsOrgID = imsOrgBatch[i];
-          if (res.status === 'fulfilled') {
-            const { organizationName, tier, totalPrompts } = res.value;
-            return {
-              organizationName,
-              imsOrgID,
-              tier,
-              totalPrompts,
-              error: '',
-            };
-          }
-          return {
-            organizationName: '',
-            imsOrgID,
-            tier: '',
-            totalPrompts: '',
-            error: res.reason?.message,
-          };
-        });
-
-        const sanitizedRows = rows.map((row) => Object.fromEntries(
-          Object.entries(row).map(([key, val]) => [
-            key,
-            typeof val === 'string'
-              ? val.replace(/[\r\n]+/g, ' ').trim()
-              : val,
-          ]),
-        ));
+        const end = Math.min(start + batchSize, totalRows);
+        const rowsBatch = sanitizedRows.slice(start, end);
 
         const csv = csvStringifier.getHeaderString()
-          + csvStringifier.stringifyRecords(sanitizedRows);
+          + csvStringifier.stringifyRecords(rowsBatch);
         const csvBuffer = Buffer.from(csv, 'utf8');
 
         const part = page + 1;
