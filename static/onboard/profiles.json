@@ -1,14 +1,9 @@
 {
 	"test":  {
 		"audits": {
-			"scrape-top-pages": {},
 			"broken-backlinks": {},
-			"broken-internal-links": {},
 			"meta-tags": {},
-			"sitemap": {},
-			"cwv": {},
-			"alt-text": {},
-			"forms-opportunities": {}
+			"cwv": {}
 		},
 		"imports": {
 			"organic-traffic" : {},
