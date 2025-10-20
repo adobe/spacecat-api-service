@@ -391,8 +391,7 @@ export async function enableAudits(site, context, audits = []) {
   await configuration.save();
 }
 
-export async function enableImports(site, imports = []) {
-  const siteConfig = site.getConfig();
+export async function enableImports(siteConfig, imports = []) {
   const existingImports = siteConfig.getImports();
 
   imports.forEach(({ type, options }) => {
@@ -405,8 +404,6 @@ export async function enableImports(site, imports = []) {
       siteConfig.enableImport(type, options);
     }
   });
-
-  site.setConfig(Config.toDynamoItem(siteConfig));
 }
 
 export async function triggerAudits(audits, context, site) {
@@ -462,19 +459,13 @@ export async function performLlmoOnboarding(params, context) {
   // Update index config
   await updateIndexConfig(dataFolder, context);
 
-  // Enable imports
-  await enableImports(site, [
-    { type: 'top-pages' },
-  ]);
-
-  // Enable audits
-  await enableAudits(site, context, [...BASIC_AUDITS, 'llm-error-pages', 'llmo-customer-analysis']);
-
-  // Trigger audits
-  await triggerAudits([...BASIC_AUDITS], context, site);
-
   // Get current site config
   const siteConfig = site.getConfig();
+
+  // Enable imports
+  await enableImports(siteConfig, [
+    { type: 'top-pages' },
+  ]);
 
   // Update brand and data directory
   siteConfig.updateLlmoBrand(brandName.trim());
@@ -482,6 +473,13 @@ export async function performLlmoOnboarding(params, context) {
 
   // update the site config object
   site.setConfig(Config.toDynamoItem(siteConfig));
+
+  // Enable audits
+  await enableAudits(site, context, [...BASIC_AUDITS, 'llm-error-pages', 'llmo-customer-analysis']);
+
+  // Trigger audits
+  await triggerAudits([...BASIC_AUDITS], context, site);
+
   await site.save();
 
   return {

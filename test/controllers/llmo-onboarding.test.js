@@ -753,7 +753,7 @@ describe('LLMO Onboarding Functions', () => {
 
       // Verify site was saved
       expect(mockSite.setConfig).to.have.been.calledWith({ config: 'dynamo-item' });
-      expect(mockSite.setConfig).to.have.been.calledTwice;
+      expect(mockSite.setConfig).to.have.been.calledOnce;
       expect(mockSite.save).to.have.been.calledOnce;
 
       // Verify enableAudits was called
