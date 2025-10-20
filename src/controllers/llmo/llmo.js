@@ -795,6 +795,148 @@ function LlmoController(ctx) {
     }
   };
 
+  const processParquetFile = async (file, s3Client, s3Bucket, GetObjectCommand) => {
+    const getCommand = new GetObjectCommand({
+      Bucket: s3Bucket,
+      Key: file.Key,
+    });
+
+    const response = await s3Client.send(getCommand);
+    const buffer = await response.Body.transformToByteArray();
+
+    const { parquetMetadataAsync, parquetReadObjects } = await import('hyparquet');
+    const metadata = await parquetMetadataAsync(buffer);
+
+    const items = [];
+    for await (const batch of parquetReadObjects(buffer, metadata)) {
+      items.push(...batch);
+    }
+    return items;
+  };
+
+  const readPAAPromptsFromS3 = async (siteId, regions, s3, log, MAX_PROMPTS) => {
+    const {
+      s3Client, s3Bucket, GetObjectCommand, ListObjectsV2Command,
+    } = s3;
+    const basePrefix = `metrics/${siteId}/llmo-prompts-ahrefs/`;
+    const seenPrompts = new Set();
+    const allPrompts = [];
+
+    try {
+      const listCommand = new ListObjectsV2Command({
+        Bucket: s3Bucket,
+        Prefix: basePrefix,
+        MaxKeys: 200,
+      });
+
+      const listResult = await s3Client.send(listCommand);
+
+      if (!listResult.Contents || listResult.Contents.length === 0) {
+        log.info(`No Parquet files found for site ${siteId} at prefix ${basePrefix}`);
+        return [];
+      }
+
+      const parquetFiles = listResult.Contents
+        .filter((obj) => obj.Key.endsWith('.parquet'))
+        .filter((obj) => regions.some((region) => obj.Key.includes(`region=${region.toLowerCase()}`)));
+
+      log.info(`Found ${listResult.Contents.length} total files, processing ${parquetFiles.length} Parquet files for regions: ${regions.join(', ')}`);
+
+      const processNextFile = async (fileIndex) => {
+        if (fileIndex >= parquetFiles.length || allPrompts.length >= MAX_PROMPTS) {
+          return;
+        }
+
+        const file = parquetFiles[fileIndex];
+        try {
+          const items = await processParquetFile(file, s3Client, s3Bucket, GetObjectCommand);
+
+          for (const item of items) {
+            if (allPrompts.length >= MAX_PROMPTS) {
+              break;
+            }
+
+            const promptKey = item.prompt.toLowerCase();
+            if (!seenPrompts.has(promptKey)) {
+              seenPrompts.add(promptKey);
+              allPrompts.push(item);
+            }
+          }
+
+          log.debug(`Read ${allPrompts.length} unique prompts so far from ${file.Key}`);
+        } catch (fileError) {
+          log.warn(`Failed to read Parquet file ${file.Key}: ${fileError.message}`);
+        }
+
+        // Process next file
+        await processNextFile(fileIndex + 1);
+      };
+
+      await processNextFile(0);
+
+      if (allPrompts.length >= MAX_PROMPTS) {
+        log.info(`Reached ${MAX_PROMPTS} unique prompts, stopping file processing`);
+      }
+
+      log.info(`Successfully read ${allPrompts.length} unique prompts from S3`);
+      return allPrompts;
+    } catch (error) {
+      log.error(`Failed to read PAA prompts from S3 for site ${siteId}: ${error.message}`);
+      throw error;
+    }
+  };
+
+  const getLlmoPAAPrompts = async (context) => {
+    const { log, s3 } = context;
+    const { siteId } = context.params;
+
+    try {
+      const { llmoConfig } = await getSiteAndValidateLlmo(context);
+      const regions = llmoConfig.regions || ['us'];
+      const PROMPTS_LIMIT = 40;
+
+      log.info(`Fetching cached PAA prompts for site ${siteId} across regions: ${regions.join(', ')}`);
+
+      const allPrompts = await readPAAPromptsFromS3(siteId, regions, s3, log, PROMPTS_LIMIT);
+
+      if (!allPrompts || allPrompts.length === 0) {
+        log.warn(`No cached PAA prompts found for site ${siteId}. Import worker may not have run yet.`);
+        return ok({
+          prompts: [],
+          total: 0,
+          limit: PROMPTS_LIMIT,
+          regions,
+          message: 'No prompts available yet. Import worker will generate them on next scheduled run.',
+        });
+      }
+
+      const prompts = allPrompts.map((item) => ({
+        prompt: item.prompt,
+        regions: [item.region.toLowerCase()],
+        origin: 'ai',
+        keyword: item.keyword,
+        volume: item.volume,
+        category: item.category,
+        topic: item.topic,
+        url: item.url,
+        lastUpdated: item.keywordImportTime,
+      }));
+
+      log.info(`Retrieved ${prompts.length} unique PAA prompts from cache for site ${siteId}`);
+
+      return ok({
+        prompts,
+        total: prompts.length,
+        limit: PROMPTS_LIMIT,
+        regions,
+        lastUpdated: allPrompts[0]?.keywordImportTime,
+      });
+    } catch (error) {
+      log.error(`Error fetching cached PAA prompts for site ${siteId}: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -812,6 +954,7 @@ function LlmoController(ctx) {
     patchLlmoCdnBucketConfig,
     updateLlmoConfig,
     onboardCustomer,
+    getLlmoPAAPrompts,
   };
 }
 

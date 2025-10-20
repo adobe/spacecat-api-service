@@ -276,6 +276,7 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/llmo/cdn-logs-bucket-config': llmoController.patchLlmoCdnBucketConfig,
     'GET /sites/:siteId/llmo/global-sheet-data/:configName': llmoController.getLlmoGlobalSheetData,
     'POST /llmo/onboard': llmoController.onboardCustomer,
+    'GET /sites/:siteId/llmo/ai-prompts': llmoController.getLlmoPAAPrompts,
 
     // Tier Specific Routes
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,
