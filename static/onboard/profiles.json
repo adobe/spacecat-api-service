@@ -1,4 +1,51 @@
 {
+	"test":  {
+		"audits": {
+			"scrape-top-pages": {},
+			"broken-backlinks": {},
+			"broken-internal-links": {},
+			"meta-tags": {},
+			"sitemap": {},
+			"cwv": {},
+			"alt-text": {},
+			"forms-opportunities": {}
+		},
+		"imports": {
+			"organic-traffic" : {},
+			"top-pages" : {},
+			"organic-keywords" :{},
+			"all-traffic": {}
+		},
+		"config": {
+			"scheduledRun": false
+		},
+		"integrations": {}
+	},
+	"plg":  {
+		"audits": {
+			"scrape-top-pages": {},
+			"broken-backlinks": {},
+			"broken-internal-links": {},
+			"meta-tags": {},
+			"sitemap": {},
+			"cwv": {},
+			"alt-text": {},
+			"broken-backlinks-auto-suggest": {},
+			"meta-tags-auto-suggest": {},
+			"broken-internal-links-auto-suggest": {},
+			"forms-opportunities": {}
+		},
+		"imports": {
+			"organic-traffic" : {},
+			"top-pages" : {},
+			"organic-keywords" :{},
+			"all-traffic": {}
+		},
+		"config": {
+			"scheduledRun": false
+		},
+		"integrations": {}
+	},
 	"demo":  {
 		"audits": {
 			"scrape-top-pages": {},
