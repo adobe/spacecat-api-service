@@ -622,6 +622,9 @@ export async function removeLlmoConfig(site, config, context) {
     'llmo-customer-analysis',
     'llm-blocked',
     'llm-error-pages',
+    'cdn-analysis',
+    'cdn-logs-report',
+    'geo-brand-presence',
   ];
 
   // Update configuration to disable audits
