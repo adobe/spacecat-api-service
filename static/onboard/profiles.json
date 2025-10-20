@@ -67,7 +67,9 @@
 			"forms-opportunities": {},
 			"accessibility": {},
 			"hreflang": {},
-			"canonical": {}
+			"canonical": {},
+			"security-vulnerabilities": {},
+			"security-vulnerabilities-auto-suggest": {}
 		},
 		"imports": {
 			"organic-traffic" : {},
@@ -101,7 +103,9 @@
 			"forms-opportunities": {},
 			"accessibility": {},
 			"hreflang": {},
-			"canonical": {}
+			"canonical": {},
+			"security-vulnerabilities": {},
+			"security-vulnerabilities-auto-suggest": {}
 		},
 		"imports": {
 			"organic-traffic" : {},
