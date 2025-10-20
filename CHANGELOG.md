@@ -1,3 +1,10 @@
+# [1.210.0](https://github.com/adobe/spacecat-api-service/compare/v1.209.2...v1.210.0) (2025-10-20)
+
+
+### Features
+
+* Add new profiles and additional audits ([#1379](https://github.com/adobe/spacecat-api-service/issues/1379)) ([0495a16](https://github.com/adobe/spacecat-api-service/commit/0495a16cad11014ffd4c668d41d54975d1b26509))
+
 ## [1.209.2](https://github.com/adobe/spacecat-api-service/compare/v1.209.1...v1.209.2) (2025-10-18)
 
 
