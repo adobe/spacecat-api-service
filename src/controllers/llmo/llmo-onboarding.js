@@ -617,8 +617,21 @@ export async function removeLlmoConfig(site, config, context) {
 
   log.info(`Removing LLMO configuration from site ${siteId}`);
 
-  config.updateLlmoBrand(null);
-  config.updateLlmoDataFolder(null);
+  // LLMO-only audits we can disable safely
+  const AUDITS_TO_DISABLE = [
+    'llmo-customer-analysis',
+    'llm-blocked',
+    'llm-error-pages',
+  ];
+
+  // Update configuration to disable audits
+  const { dataAccess } = context;
+  const { Configuration } = dataAccess;
+  const configuration = await Configuration.findLatest();
+  AUDITS_TO_DISABLE.forEach((audit) => {
+    configuration.disableHandlerForSite(audit, site);
+  });
+  await configuration.save();
 
   // Save the updated site config
   const dynamoItem = Config.toDynamoItem(config);

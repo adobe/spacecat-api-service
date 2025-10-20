@@ -1367,8 +1367,6 @@ describe('LLMO Onboarding Functions', () => {
           dataFolder: 'dev/offboard-com',
           brand: 'Test Brand',
         }),
-        updateLlmoBrand: sinon.stub(),
-        updateLlmoDataFolder: sinon.stub(),
       };
 
       // Create mocks using helper functions
@@ -1420,6 +1418,13 @@ describe('LLMO Onboarding Functions', () => {
         }),
       });
 
+      // Mock configuration for audit disabling
+      const mockConfiguration = {
+        disableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
       // Mock the module with all dependencies using helper
       const { performLlmoOffboarding } = await setupPerformLlmoOffboardingTest({
         mockTierClient,
@@ -1448,9 +1453,14 @@ describe('LLMO Onboarding Functions', () => {
       // Verify LLMO config was retrieved
       expect(mockConfig.getLlmoConfig).to.have.been.called;
 
-      // Verify LLMO config was removed
-      expect(mockConfig.updateLlmoBrand).to.have.been.calledWith(null);
-      expect(mockConfig.updateLlmoDataFolder).to.have.been.calledWith(null);
+      // Verify audits were disabled
+      expect(mockDataAccess.Configuration.findLatest).to.have.been.called;
+      expect(mockConfiguration.disableHandlerForSite).to.have.been.calledWith('llmo-customer-analysis', mockSite);
+      expect(mockConfiguration.disableHandlerForSite).to.have.been.calledWith('llm-blocked', mockSite);
+      expect(mockConfiguration.disableHandlerForSite).to.have.been.calledWith('llm-error-pages', mockSite);
+      expect(mockConfiguration.save).to.have.been.called;
+
+      // Verify LLMO config was removed from site
       expect(mockSite.setConfig).to.have.been.calledWith({ config: 'dynamo-item' });
       expect(mockSite.save).to.have.been.called;
 
@@ -1484,8 +1494,6 @@ describe('LLMO Onboarding Functions', () => {
           brand: 'Test Brand',
           // dataFolder is intentionally missing
         }),
-        updateLlmoBrand: sinon.stub(),
-        updateLlmoDataFolder: sinon.stub(),
       };
 
       // Create mocks using helper functions
@@ -1537,6 +1545,13 @@ describe('LLMO Onboarding Functions', () => {
         }),
       });
 
+      // Mock configuration for audit disabling
+      const mockConfiguration = {
+        disableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
       // Mock the module with all dependencies using helper
       const { performLlmoOffboarding } = await setupPerformLlmoOffboardingTest({
         mockTierClient,
@@ -1568,9 +1583,14 @@ describe('LLMO Onboarding Functions', () => {
       // Verify debug log for recalculation
       expect(mockLog.debug).to.have.been.calledWith('Data folder not found in LLMO config, calculating from base URL: https://recalc-test.com');
 
-      // Verify LLMO config was removed
-      expect(mockConfig.updateLlmoBrand).to.have.been.calledWith(null);
-      expect(mockConfig.updateLlmoDataFolder).to.have.been.calledWith(null);
+      // Verify audits were disabled
+      expect(mockDataAccess.Configuration.findLatest).to.have.been.called;
+      expect(mockConfiguration.disableHandlerForSite).to.have.been.calledWith('llmo-customer-analysis', mockSite);
+      expect(mockConfiguration.disableHandlerForSite).to.have.been.calledWith('llm-blocked', mockSite);
+      expect(mockConfiguration.disableHandlerForSite).to.have.been.calledWith('llm-error-pages', mockSite);
+      expect(mockConfiguration.save).to.have.been.called;
+
+      // Verify LLMO config was removed from site
       expect(mockSite.setConfig).to.have.been.calledWith({ config: 'dynamo-item' });
       expect(mockSite.save).to.have.been.called;
 
