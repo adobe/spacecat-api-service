@@ -1134,18 +1134,18 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockFolder.delete).to.have.been.called;
 
       // Verify bulk status job was started
-      expect(mockTracingFetch.getCall(0).args[0]).to.include('/status/adobe/project-elmo-ui-data/main/dev/test-com');
+      expect(mockTracingFetch.getCall(0).args[0]).to.include('/status/adobe/project-elmo-ui-data/main/*');
 
       // Verify job polling occurred
       expect(mockTracingFetch.getCall(1).args[0]).to.include('/job/adobe/project-elmo-ui-data/main/status/job-test-123/details');
 
       // Verify bulk unpublish was called
-      expect(mockTracingFetch.getCall(2).args[0]).to.include('/live/adobe/project-elmo-ui-data/main');
-      expect(mockTracingFetch.getCall(2).args[1].method).to.equal('DELETE');
+      expect(mockTracingFetch.getCall(2).args[0]).to.include('/live/adobe/project-elmo-ui-data/main/dev/test-com/*');
+      expect(mockTracingFetch.getCall(2).args[1].method).to.equal('POST');
 
       // Verify bulk un-preview was called
-      expect(mockTracingFetch.getCall(3).args[0]).to.include('/preview/adobe/project-elmo-ui-data/main');
-      expect(mockTracingFetch.getCall(3).args[1].method).to.equal('DELETE');
+      expect(mockTracingFetch.getCall(3).args[0]).to.include('/preview/adobe/project-elmo-ui-data/main/dev/test-com/*');
+      expect(mockTracingFetch.getCall(3).args[1].method).to.equal('POST');
     });
 
     it('should handle case when folder does not exist', async () => {
@@ -1207,7 +1207,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockFolder.delete).to.have.been.called;
 
       // Verify bulk status job was started
-      expect(mockTracingFetch.getCall(0).args[0]).to.include('/status/adobe/project-elmo-ui-data/main/dev/empty-com');
+      expect(mockTracingFetch.getCall(0).args[0]).to.include('/status/adobe/project-elmo-ui-data/main/*');
 
       // Verify job polling occurred
       expect(mockTracingFetch.getCall(1).args[0]).to.include('/job/adobe/project-elmo-ui-data/main/status/job-test-123/details');
@@ -1526,8 +1526,9 @@ describe('LLMO Onboarding Functions', () => {
     });
 
     it('should handle non-ok response when unpublishing from admin.hlx.page', async () => {
-      // Mock tracingFetch to return non-ok response
-      const mockTracingFetch = sinon.stub().resolves({
+      // Mock tracingFetch - first call for bulk status job fails
+      const mockTracingFetch = sinon.stub();
+      mockTracingFetch.onCall(0).resolves({
         ok: false,
         status: 500,
         statusText: 'Internal Server Error',
@@ -1540,13 +1541,13 @@ describe('LLMO Onboarding Functions', () => {
         },
       });
 
-      // Call unpublishFromAdminHlx directly
-      await unpublishFromAdminHlx('query-index', 'dev/offboard-com', mockLog);
+      // Call unpublishFromAdminHlx with correct new signature (dataFolder, env, log)
+      await unpublishFromAdminHlx('dev/offboard-com', mockEnv, mockLog);
 
-      // Verify that error was logged for unpublish failure
-      expect(mockLog.error).to.have.been.calledWith(sinon.match('Failed to unpublish via admin.hlx.page: live unpublish failed: 500 Internal Server Error'));
+      // Verify that error was logged for bulk status job failure
+      expect(mockLog.error).to.have.been.calledWith(sinon.match('Error during bulk unpublish for folder dev/offboard-com'));
 
-      // Verify tracingFetch was called (attempted to unpublish)
+      // Verify tracingFetch was called (attempted to start bulk status job)
       expect(mockTracingFetch).to.have.been.called;
     });
   });

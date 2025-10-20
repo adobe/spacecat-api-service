@@ -91,7 +91,7 @@ describe('LLMO Bulk Unpublish Functions', () => {
       await deleteSharePointFolder('dev/test-com', { log: mockLog, env: mockEnv });
 
       // Verify the bulk status job was started
-      expect(mockTracingFetch.getCall(0).args[0]).to.include('/status/adobe/project-elmo-ui-data/main/dev/test-com');
+      expect(mockTracingFetch.getCall(0).args[0]).to.include('/status/adobe/project-elmo-ui-data/main/*');
       expect(mockTracingFetch.getCall(0).args[1].method).to.equal('POST');
 
       // Verify the debug log uses result.job.name (covers first branch of lines 238-240)
@@ -140,7 +140,7 @@ describe('LLMO Bulk Unpublish Functions', () => {
       await deleteSharePointFolder('dev/test-com', { log: mockLog, env: mockEnv });
 
       // Verify the bulk status job was started
-      expect(mockTracingFetch.getCall(0).args[0]).to.include('/status/adobe/project-elmo-ui-data/main/dev/test-com');
+      expect(mockTracingFetch.getCall(0).args[0]).to.include('/status/adobe/project-elmo-ui-data/main/*');
       expect(mockTracingFetch.getCall(0).args[1].method).to.equal('POST');
 
       // Verify the debug log uses result.name fallback (covers second branch of lines 238-240)
@@ -611,15 +611,15 @@ describe('LLMO Bulk Unpublish Functions', () => {
       await deleteSharePointFolder('dev/test-com', { log: mockLog, env: mockEnv });
 
       // Verify bulk unpublish was called
-      expect(mockTracingFetch.getCall(2).args[0]).to.equal('https://admin.hlx.page/live/adobe/project-elmo-ui-data/main');
-      expect(mockTracingFetch.getCall(2).args[1].method).to.equal('DELETE');
+      expect(mockTracingFetch.getCall(2).args[0]).to.equal('https://admin.hlx.page/live/adobe/project-elmo-ui-data/main/dev/test-com/*');
+      expect(mockTracingFetch.getCall(2).args[1].method).to.equal('POST');
       const unpublishBody = JSON.parse(mockTracingFetch.getCall(2).args[1].body);
       expect(unpublishBody.paths).to.have.lengthOf(2);
-      expect(unpublishBody.paths[0].path).to.equal('/dev/test-com/file1.json');
+      expect(unpublishBody.paths[0]).to.equal('/dev/test-com/file1.json');
 
       // Verify bulk un-preview was called
-      expect(mockTracingFetch.getCall(3).args[0]).to.equal('https://admin.hlx.page/preview/adobe/project-elmo-ui-data/main');
-      expect(mockTracingFetch.getCall(3).args[1].method).to.equal('DELETE');
+      expect(mockTracingFetch.getCall(3).args[0]).to.equal('https://admin.hlx.page/preview/adobe/project-elmo-ui-data/main/dev/test-com/*');
+      expect(mockTracingFetch.getCall(3).args[1].method).to.equal('POST');
       const unpreviewBody = JSON.parse(mockTracingFetch.getCall(3).args[1].body);
       expect(unpreviewBody.paths).to.have.lengthOf(2);
     });
@@ -1031,8 +1031,8 @@ describe('LLMO Bulk Unpublish Functions', () => {
       // Verify only 2 paths were sent for unpublish (filtered)
       const unpublishBody = JSON.parse(mockTracingFetch.getCall(2).args[1].body);
       expect(unpublishBody.paths).to.have.lengthOf(2);
-      expect(unpublishBody.paths[0].path).to.equal('/dev/test-com/file1.json');
-      expect(unpublishBody.paths[1].path).to.equal('/dev/test-com/subfolder/file3.json');
+      expect(unpublishBody.paths[0]).to.equal('/dev/test-com/file1.json');
+      expect(unpublishBody.paths[1]).to.equal('/dev/test-com/subfolder/file3.json');
     });
   });
 
@@ -1056,7 +1056,7 @@ describe('LLMO Bulk Unpublish Functions', () => {
     it('should return early when paths is null (direct unit test for lines 306-308)', async () => {
       const { bulkUnpublishPaths } = await import('../../../src/controllers/llmo/llmo-onboarding.js');
 
-      await bulkUnpublishPaths(null, mockEnv, mockLog);
+      await bulkUnpublishPaths(null, 'dev/test-com', mockEnv, mockLog);
 
       // Verify debug log was called (covers lines 306-308)
       expect(mockLog.debug).to.have.been.calledWith('No paths to unpublish');
@@ -1065,7 +1065,7 @@ describe('LLMO Bulk Unpublish Functions', () => {
     it('should return early when paths is empty array (direct unit test for lines 306-308)', async () => {
       const { bulkUnpublishPaths } = await import('../../../src/controllers/llmo/llmo-onboarding.js');
 
-      await bulkUnpublishPaths([], mockEnv, mockLog);
+      await bulkUnpublishPaths([], 'dev/test-com', mockEnv, mockLog);
 
       // Verify debug log was called (covers lines 306-308)
       expect(mockLog.debug).to.have.been.calledWith('No paths to unpublish');
@@ -1075,7 +1075,7 @@ describe('LLMO Bulk Unpublish Functions', () => {
       const envWithoutToken = { HLX_ADMIN_TOKEN: undefined };
       const { bulkUnpublishPaths } = await import('../../../src/controllers/llmo/llmo-onboarding.js');
 
-      await bulkUnpublishPaths(['/test/path.json'], envWithoutToken, mockLog);
+      await bulkUnpublishPaths(['/test/path.json'], 'dev/test-com', envWithoutToken, mockLog);
 
       // Verify warning was logged (covers lines 319-321)
       expect(mockLog.warn).to.have.been.calledWith('LLMO offboarding: HLX_ADMIN_TOKEN is not set');
@@ -1083,21 +1083,44 @@ describe('LLMO Bulk Unpublish Functions', () => {
   });
 
   describe('unpublishFromAdminHlx', () => {
-    it('should successfully unpublish a file from both live and preview', async () => {
+    it('should successfully unpublish files from both live and preview', async () => {
       const mockTracingFetch = sinon.stub();
 
-      // Mock unpublish from live
+      // Mock bulk status job start
       mockTracingFetch.onCall(0).resolves({
         ok: true,
         status: 200,
-        statusText: 'OK',
+        json: async () => ({ name: 'job-test-123' }),
       });
 
-      // Mock unpublish from preview
+      // Mock job polling
       mockTracingFetch.onCall(1).resolves({
         ok: true,
         status: 200,
-        statusText: 'OK',
+        json: async () => ({
+          state: 'stopped',
+          data: {
+            phase: 'completed',
+            resources: [
+              { path: '/dev/test-com/file1.json' },
+              { path: '/dev/test-com/file2.json' },
+            ],
+          },
+        }),
+      });
+
+      // Mock bulk unpublish (live)
+      mockTracingFetch.onCall(2).resolves({
+        ok: true,
+        status: 200,
+        json: async () => ({ name: 'unpublish-job-123' }),
+      });
+
+      // Mock bulk un-preview
+      mockTracingFetch.onCall(3).resolves({
+        ok: true,
+        status: 200,
+        json: async () => ({ name: 'unpreview-job-123' }),
       });
 
       const { unpublishFromAdminHlx } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
@@ -1106,32 +1129,30 @@ describe('LLMO Bulk Unpublish Functions', () => {
         },
       });
 
-      await unpublishFromAdminHlx('query-index.xlsx', 'dev/test-com', mockLog);
+      await unpublishFromAdminHlx('dev/test-com', mockEnv, mockLog);
 
-      // Verify both live and preview unpublish were called
-      expect(mockTracingFetch.callCount).to.equal(2);
+      // Verify all 4 calls were made (status, poll, unpublish, un-preview)
+      expect(mockTracingFetch.callCount).to.equal(4);
 
-      // Verify live unpublish
-      expect(mockTracingFetch.getCall(0).args[0]).to.equal(
-        'https://admin.hlx.page/live/adobe/project-elmo-ui-data/main/dev/test-com/query-index.json',
-      );
-      expect(mockTracingFetch.getCall(0).args[1].method).to.equal('DELETE');
+      // Verify bulk status job was started
+      expect(mockTracingFetch.getCall(0).args[0]).to.include('/status/adobe/project-elmo-ui-data/main/*');
 
-      // Verify preview unpublish
-      expect(mockTracingFetch.getCall(1).args[0]).to.equal(
-        'https://admin.hlx.page/preview/adobe/project-elmo-ui-data/main/dev/test-com/query-index.json',
-      );
-      expect(mockTracingFetch.getCall(1).args[1].method).to.equal('DELETE');
+      // Verify job polling
+      expect(mockTracingFetch.getCall(1).args[0]).to.include('/job/adobe/project-elmo-ui-data/main/status/job-test-123/details');
 
-      // Verify success debug logs (covers lines 200-202)
-      expect(mockLog.debug).to.have.been.calledWith('Excel report successfully unpublished from live');
-      expect(mockLog.debug).to.have.been.calledWith('Excel report successfully unpublished from preview');
+      // Verify bulk unpublish (live)
+      expect(mockTracingFetch.getCall(2).args[0]).to.equal('https://admin.hlx.page/live/adobe/project-elmo-ui-data/main/dev/test-com/*');
+      expect(mockTracingFetch.getCall(2).args[1].method).to.equal('POST');
+
+      // Verify bulk un-preview
+      expect(mockTracingFetch.getCall(3).args[0]).to.equal('https://admin.hlx.page/preview/adobe/project-elmo-ui-data/main/dev/test-com/*');
+      expect(mockTracingFetch.getCall(3).args[1].method).to.equal('POST');
     });
 
     it('should handle errors during unpublish', async () => {
       const mockTracingFetch = sinon.stub();
 
-      // Mock unpublish from live - fails
+      // Mock bulk status job start - fails
       mockTracingFetch.onCall(0).resolves({
         ok: false,
         status: 500,
@@ -1144,11 +1165,11 @@ describe('LLMO Bulk Unpublish Functions', () => {
         },
       });
 
-      await unpublishFromAdminHlx('query-index.xlsx', 'dev/test-com', mockLog);
+      await unpublishFromAdminHlx('dev/test-com', mockEnv, mockLog);
 
       // Verify error was logged
       expect(mockLog.error).to.have.been.calledWith(
-        sinon.match(/Failed to unpublish via admin.hlx.page/),
+        sinon.match(/Error during bulk unpublish for folder dev\/test-com/),
       );
     });
   });
