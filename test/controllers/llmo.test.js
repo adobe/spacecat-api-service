@@ -2009,4 +2009,22 @@ describe('LlmoController', () => {
       expect(mockLog.error).to.have.been.calledWith('Error during LLMO onboarding: Validation error');
     });
   });
+
+  describe.skip('getLlmoPAAPrompts', () => {
+    it('should return PAA prompts when entitlement is PAID tier', async () => {
+      // Test implementation skipped - not needed for now
+    });
+
+    it('should return forbidden when entitlement is FREE_TRIAL tier', async () => {
+      // Test implementation skipped - not needed for now
+    });
+
+    it('should return forbidden when no entitlement exists', async () => {
+      // Test implementation skipped - not needed for now
+    });
+
+    it('should handle S3 read errors gracefully', async () => {
+      // Test implementation skipped - not needed for now
+    });
+  });
 });
