@@ -65,13 +65,28 @@ describe('LlmoController', () => {
   let readConfigStub;
   let writeConfigStub;
   let llmoConfigSchemaStub;
+  let importLlmoPromptsAhrefsStub;
 
   before(async () => {
+    // Initialize the stub that will be used by the mocked module
+    importLlmoPromptsAhrefsStub = {
+      load: sinon.stub(),
+    };
+
     // Set up esmock once for all tests
     LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
       '@adobe/spacecat-shared-utils': {
         SPACECAT_USER_AGENT: TEST_USER_AGENT,
         tracingFetch: (...args) => tracingFetchStub(...args),
+        isoCalendarWeek: (date) => {
+          const d = new Date(date || Date.now());
+          const year = d.getFullYear();
+          const month = d.getMonth();
+          // Simple mock - return week 3 for Jan, week 52 for Dec
+          if (month === 0) return { year, week: 3 };
+          if (month === 11) return { year, week: 52 };
+          return { year, week: 1 };
+        },
         llmoConfig: {
           defaultConfig: llmoConfig.defaultConfig,
           readConfig: (...args) => readConfigStub(...args),
@@ -102,6 +117,9 @@ describe('LlmoController', () => {
       },
       '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
         Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+      },
+      '@adobe/spacecat-import-worker/src/handler/llmo-prompts-ahrefs.js': {
+        importLlmoPromptsAhrefs: importLlmoPromptsAhrefsStub,
       },
     });
 
@@ -894,6 +912,273 @@ describe('LlmoController', () => {
         `${EXTERNAL_API_BASE_URL}/${TEST_FOLDER}/analytics/test-data.json?limit=1000000`,
         sinon.match.object,
       );
+    });
+
+    describe('AI Prompts from S3', () => {
+      let originalCategories;
+
+      beforeEach(() => {
+        // Save original categories
+        originalCategories = mockLlmoConfig.categories;
+
+        // Mock the LLMO config with categories and regions
+        mockLlmoConfig.categories = [
+          { name: 'products', regions: ['us', 'uk'] },
+          { name: 'services', regions: ['us'] },
+        ];
+
+        // Reset the stub behavior
+        importLlmoPromptsAhrefsStub.load.reset();
+
+        // Reset log history
+        mockLog.info.resetHistory();
+        mockLog.warn.resetHistory();
+        mockLog.error.resetHistory();
+
+        // Reset context
+        mockContext.data = null;
+        mockContext.params.dataSource = '';
+      });
+
+      afterEach(() => {
+        // Restore original categories
+        mockLlmoConfig.categories = originalCategories;
+      });
+
+      it('should load and merge AI prompts for brand presence data', async () => {
+        const aemLiveData = {
+          ':type': 'sheet',
+          limit: 2,
+          offset: 0,
+          total: 2,
+          data: [
+            {
+              Prompt: 'Human prompt 1',
+              Region: 'us',
+              Origin: 'human',
+              Category: 'products',
+            },
+            {
+              Prompt: 'Human prompt 2',
+              Region: 'uk',
+              Origin: 'human',
+              Category: 'services',
+            },
+          ],
+          columns: ['Prompt', 'Region', 'Origin', 'Category'],
+        };
+
+        const s3PromptsUS = [
+          {
+            prompt: 'AI generated prompt 1',
+            region: 'us',
+            category: 'products',
+            topic: 'software',
+            url: 'https://example.com',
+            keyword: 'best software',
+            volume: 1000,
+            volumeImportTime: new Date('2025-01-15'),
+            keywordImportTime: new Date('2025-01-15'),
+          },
+        ];
+
+        const s3PromptsUK = [
+          {
+            prompt: 'AI generated prompt 2',
+            region: 'uk',
+            category: 'products',
+            topic: 'tools',
+            url: 'https://example.com/tools',
+            keyword: 'best tools',
+            volume: 500,
+            volumeImportTime: new Date('2025-01-16'),
+            keywordImportTime: new Date('2025-01-16'),
+          },
+        ];
+
+        tracingFetchStub.resolves(createMockResponse(aemLiveData));
+        mockContext.params.dataSource = 'brandpresence-all-2025-01-15';
+
+        // Mock S3 loads - return different data based on region
+        importLlmoPromptsAhrefsStub.load
+          .onCall(0).resolves(s3PromptsUS) // products/us
+          .onCall(1).resolves(s3PromptsUK) // products/uk
+          .onCall(2)
+          .resolves([]); // services/us
+
+        const result = await controller.queryLlmoSheetData();
+
+        expect(result.status).to.equal(200);
+        const responseBody = await result.json();
+
+        // Should have merged human and AI prompts
+        expect(responseBody.data.length).to.equal(4); // 2 human + 2 AI
+        expect(responseBody.total).to.equal(4);
+
+        // Check AI prompts have correct capitalized field names
+        const aiPrompts = responseBody.data.filter((p) => p.Origin === 'ai');
+        expect(aiPrompts.length).to.equal(2);
+        expect(aiPrompts[0]).to.have.property('Prompt');
+        expect(aiPrompts[0]).to.have.property('Region');
+        expect(aiPrompts[0]).to.have.property('Origin', 'ai');
+        expect(aiPrompts[0]).to.have.property('Source', 'ahrefs');
+        expect(aiPrompts[0]).to.have.property('Keyword');
+        expect(aiPrompts[0]).to.have.property('Volume');
+        expect(aiPrompts[0]).to.have.property('Category');
+        expect(aiPrompts[0]).to.have.property('Topics');
+        expect(aiPrompts[0]).to.have.property('URL');
+
+        // Verify load was called correctly
+        expect(importLlmoPromptsAhrefsStub.load.callCount).to.equal(3);
+      });
+
+      it('should merge AI prompts into multi-sheet format', async () => {
+        const aemLiveData = {
+          ':type': 'multi-sheet',
+          ':names': ['all', 'brand_vs_competitors'],
+          all: {
+            limit: 1,
+            offset: 0,
+            total: 1,
+            data: [
+              {
+                Prompt: 'Human prompt',
+                Region: 'us',
+                Origin: 'human',
+              },
+            ],
+          },
+          brand_vs_competitors: {
+            limit: 0,
+            offset: 0,
+            total: 0,
+            data: [],
+          },
+        };
+
+        const s3Prompts = [
+          {
+            prompt: 'AI prompt',
+            region: 'us',
+            category: 'products',
+            topic: 'software',
+            url: 'https://example.com',
+            keyword: 'keyword',
+            volume: 100,
+            volumeImportTime: new Date('2025-01-15'),
+          },
+        ];
+
+        tracingFetchStub.resolves(createMockResponse(aemLiveData));
+        mockContext.params.dataSource = 'brandpresence-chatgpt-2025-01-15';
+
+        // Mock S3 loads
+        importLlmoPromptsAhrefsStub.load.resolves(s3Prompts);
+
+        const result = await controller.queryLlmoSheetData();
+
+        expect(result.status).to.equal(200);
+        const responseBody = await result.json();
+
+        // AI prompts should be merged into 'all' sheet
+        expect(responseBody.all.data.length).to.be.greaterThan(1);
+        expect(responseBody.all.total).to.be.greaterThan(1);
+
+        const aiPrompt = responseBody.all.data.find((p) => p.Origin === 'ai');
+        expect(aiPrompt).to.exist;
+        expect(aiPrompt.Prompt).to.equal('AI prompt');
+      });
+
+      it('should handle empty category-region pairs gracefully', async () => {
+        mockLlmoConfig.categories = []; // No categories
+
+        const aemLiveData = {
+          ':type': 'sheet',
+          limit: 1,
+          offset: 0,
+          total: 1,
+          data: [{ Prompt: 'Human prompt' }],
+        };
+
+        tracingFetchStub.resolves(createMockResponse(aemLiveData));
+        mockContext.params.dataSource = 'brandpresence-all-2025-01-15';
+
+        const result = await controller.queryLlmoSheetData();
+
+        expect(result.status).to.equal(200);
+        const responseBody = await result.json();
+
+        // Should only have human prompts, no AI prompts added
+        expect(responseBody.data.length).to.equal(1);
+        expect(mockLog.warn).to.have.been.calledWith(
+          sinon.match(/No category-region pairs found/),
+        );
+      });
+
+      it('should handle S3 load errors gracefully', async () => {
+        const aemLiveData = {
+          ':type': 'sheet',
+          limit: 1,
+          offset: 0,
+          total: 1,
+          data: [{ Prompt: 'Human prompt' }],
+        };
+
+        tracingFetchStub.resolves(createMockResponse(aemLiveData));
+        mockContext.params.dataSource = 'brandpresence-all-2025-01-15';
+
+        // Make S3 load throw an error
+        importLlmoPromptsAhrefsStub.load.rejects(new Error('S3 connection failed'));
+
+        const result = await controller.queryLlmoSheetData();
+
+        expect(result.status).to.equal(200);
+        const responseBody = await result.json();
+
+        // Should still return human prompts even if S3 fails
+        expect(responseBody.data.length).to.equal(1);
+        expect(mockLog.error).to.have.been.calledWith(
+          sinon.match(/Error loading AI prompts/),
+        );
+      });
+
+      it('should not load AI prompts for non-brandpresence datasources', async () => {
+        const aemLiveData = {
+          ':type': 'sheet',
+          limit: 1,
+          offset: 0,
+          total: 1,
+          data: [{ id: 1 }],
+        };
+
+        tracingFetchStub.resolves(createMockResponse(aemLiveData));
+        mockContext.params.dataSource = 'agentictraffic-chatgpt-2025-01-15';
+
+        const result = await controller.queryLlmoSheetData();
+
+        expect(result.status).to.equal(200);
+        const responseBody = await result.json();
+
+        // Should only have original data, no AI prompts
+        expect(responseBody.data.length).to.equal(1);
+        // Verify S3 load was not called
+        expect(importLlmoPromptsAhrefsStub.load.called).to.be.false;
+      });
+
+      it('should extract correct week from datasource date', async () => {
+        const aemLiveData = { ':type': 'sheet', data: [], total: 0 };
+        tracingFetchStub.resolves(createMockResponse(aemLiveData));
+
+        // Test that weeks are extracted correctly
+        mockContext.params.dataSource = 'brandpresence-all-2025-01-15';
+        await controller.queryLlmoSheetData();
+
+        // Verify isoCalendarWeek was called with the correct date
+        // The mock returns week 3 for January dates
+        expect(importLlmoPromptsAhrefsStub.load.called).to.be.true;
+        const firstCall = importLlmoPromptsAhrefsStub.load.getCall(0);
+        expect(firstCall.args[0].partitions.week).to.equal('2025w03');
+      });
     });
   });
 

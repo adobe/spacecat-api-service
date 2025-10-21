@@ -21,10 +21,12 @@ import {
   llmoConfig as llmo,
   schemas,
   composeBaseURL,
+  isoCalendarWeek,
 } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import crypto from 'crypto';
-import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
+import { importLlmoPromptsAhrefs } from '@adobe/spacecat-import-worker/src/handler/llmo-prompts-ahrefs.js';
 import AccessControlUtil from '../../support/access-control-util.js';
 import {
   applyFilters,
@@ -95,6 +97,36 @@ function LlmoController(ctx) {
     if (!customerIntent.some((intent) => intent.key === intentKey)) {
       throw new Error('Invalid customer intent key, please provide a valid customer intent key');
     }
+  };
+
+  const getCalendarWeekFromDataSource = (dataSource) => {
+    const dateMatch = dataSource.match(/(\d{4})-(\d{2})-(\d{2})/);
+    let date = new Date();
+
+    if (dateMatch) {
+      const [, year, month, day] = dateMatch;
+      date = new Date(`${year}-${month}-${day}`);
+    }
+
+    const cw = isoCalendarWeek(date);
+    return `${cw.year}w${String(cw.week).padStart(2, '0')}`;
+  };
+
+  const getCategoryRegionPairs = (llmoConfig) => {
+    const pairs = [];
+    const categories = llmoConfig?.categories || [];
+
+    categories.forEach((categoryConfig) => {
+      const regions = categoryConfig.regions || [];
+      regions.forEach((region) => {
+        pairs.push({
+          category: categoryConfig.name,
+          region,
+        });
+      });
+    });
+
+    return pairs;
   };
 
   // Handles requests to the LLMO sheet data endpoint
@@ -186,6 +218,10 @@ function LlmoController(ctx) {
 
     try {
       const { llmoConfig } = await getSiteAndValidateLlmo(context);
+      let data;
+      let fetchDuration = 0;
+      let responseHeaders = {};
+
       const sheetURL = sheetType ? `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json` : `${llmoConfig.dataFolder}/${dataSource}.json`;
 
       // Add limit, offset and sheet query params to the url
@@ -216,10 +252,79 @@ function LlmoController(ctx) {
       }
 
       // Get the response data
-      let data = await response.json();
+      data = await response.json();
+      responseHeaders = response.headers ? Object.fromEntries(response.headers.entries()) : {};
       const fetchEndTime = Date.now();
-      const fetchDuration = fetchEndTime - fetchStartTime;
+      fetchDuration = fetchEndTime - fetchStartTime;
       log.info(`External API fetch completed - elapsed: ${fetchEndTime - methodStartTime}ms, duration: ${fetchDuration}ms`);
+
+      if (dataSource.includes('brandpresence')) {
+        const s3FetchStartTime = Date.now();
+        log.info(`Loading AI prompts from S3 parquet files for dataSource: ${dataSource}`);
+
+        const categoryRegionPairs = getCategoryRegionPairs(llmoConfig);
+
+        if (categoryRegionPairs.length > 0) {
+          const week = getCalendarWeekFromDataSource(dataSource);
+          log.info(`Loading AI prompts for week ${week} (from dataSource: ${dataSource}), ${categoryRegionPairs.length} category-region pairs`);
+
+          const promptsPromises = categoryRegionPairs.map(async ({ category, region }) => {
+            try {
+              const result = await importLlmoPromptsAhrefs.load({
+                siteId,
+                partitions: { region, category, week },
+              }, context);
+
+              if (!result || result.length === 0) {
+                log.info(`No AI prompts found for category: ${category}, region: ${region}`);
+                return [];
+              }
+
+              return result.map((item) => ({
+                Prompt: item.prompt,
+                Region: item.region,
+                Origin: 'ai',
+                Source: 'ahrefs',
+                Keyword: item.keyword,
+                Volume: item.volume,
+                Category: item.category,
+                Topics: item.topic,
+                URL: item.url,
+                'Last Updated': item.volumeImportTime || item.keywordImportTime,
+              }));
+            } catch (error) {
+              log.error(`Error loading AI prompts for category: ${category}, region: ${region}: ${error.message}`);
+              return [];
+            }
+          });
+
+          const aiPrompts = (await Promise.all(promptsPromises)).flat();
+
+          if (aiPrompts.length > 0) {
+            if (data[':type'] === 'sheet' && Array.isArray(data.data)) {
+              data.data = [...data.data, ...aiPrompts];
+              data.total = data.data.length;
+              data.limit = data.data.length;
+              log.info(`Merged ${aiPrompts.length} AI prompts with ${data.data.length - aiPrompts.length} existing records`);
+            } else if (data[':type'] === 'multi-sheet') {
+              if (data.all && Array.isArray(data.all.data)) {
+                data.all.data = [...data.all.data, ...aiPrompts];
+                data.all.total = data.all.data.length;
+                data.all.limit = data.all.data.length;
+                log.info(`Merged ${aiPrompts.length} AI prompts into 'all' sheet with ${data.all.data.length - aiPrompts.length} existing records`);
+              }
+            }
+          } else {
+            log.info('No AI prompts found in S3 to merge');
+          }
+        } else {
+          log.warn('No category-region pairs found in LLMO config, skipping AI prompts load from S3');
+        }
+
+        const s3FetchEndTime = Date.now();
+        const s3FetchDuration = s3FetchEndTime - s3FetchStartTime;
+        log.info(`S3 AI prompts fetch and merge completed - elapsed: ${s3FetchEndTime - methodStartTime}ms, duration: ${s3FetchDuration}ms`);
+      }
 
       // Keep only the required sheets
       if (sheets.length > 0 && (data[':type'] === 'multi-sheet')) {
@@ -289,9 +394,7 @@ function LlmoController(ctx) {
       log.info(`LLMO query completed - total duration: ${totalDuration}ms (fetch: ${fetchDuration}ms, inclusion: ${inclusionDuration}ms, filtering: ${filterDuration}ms, exclusion: ${exclusionDuration}ms, grouping: ${groupingDuration}ms, mapping: ${mappingDuration}ms)`);
 
       // Return the data and let the framework handle the compression
-      return ok(data, {
-        ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
-      });
+      return ok(data, responseHeaders);
     } catch (error) {
       const errorTime = Date.now();
       log.error(`Error proxying data for siteId: ${siteId}, error: ${error.message} - elapsed: ${errorTime - methodStartTime}ms`);
