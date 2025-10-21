@@ -173,7 +173,48 @@ describe('onboard-llmo-modal', () => {
     statusText: 'OK',
   });
 
+  const createDefaultMockTracingFetch = (sinonSandbox) => sinonSandbox.stub().resolves({
+    ok: true,
+    status: 200,
+    statusText: 'OK',
+  });
+
+  // Helper function to create mocked modules with custom tracingFetch
+  const createMockedModulesWithTracingFetch = async (mockTracingFetch) => {
+    const updatedMockedLLMOOnboarding = await esmock('../../../../src/controllers/llmo/llmo-onboarding.js', {
+      '@adobe/spacecat-shared-data-access/src/models/site/config.js': sharedConfigMock,
+      '@adobe/spacecat-helix-content-sdk': sharedSharepointMock,
+      '@octokit/rest': {
+        Octokit: octokitMock,
+      },
+      '@adobe/spacecat-shared-tier-client': {
+        default: tierClientMock,
+      },
+      '../../../../src/utils/slack/base.js': sharedSlackMock,
+      '@adobe/spacecat-shared-utils': {
+        composeBaseURL: sinon.stub().callsFake((url) => url),
+        tracingFetch: mockTracingFetch,
+      },
+    });
+
+    const testMockedModule = await esmock('../../../../src/support/slack/actions/onboard-llmo-modal.js', {
+      '@adobe/spacecat-shared-data-access/src/models/site/config.js': sharedConfigMock,
+      '@adobe/spacecat-helix-content-sdk': sharedSharepointMock,
+      '@octokit/rest': {
+        Octokit: octokitMock,
+      },
+      '@adobe/spacecat-shared-tier-client': {
+        default: tierClientMock,
+      },
+      '../../../../src/utils/slack/base.js': sharedSlackMock,
+      '../../../../src/controllers/llmo/llmo-onboarding.js': updatedMockedLLMOOnboarding,
+    });
+
+    return testMockedModule;
+  };
+
   before(async () => {
+    sandbox = sinon.createSandbox();
     // Create octokit mock
     octokitMock = sinon.stub().returns({
       repos: {
@@ -242,6 +283,10 @@ describe('onboard-llmo-modal', () => {
         default: tierClientMock,
       },
       '../../../../src/utils/slack/base.js': sharedSlackMock,
+      '@adobe/spacecat-shared-utils': {
+        composeBaseURL: sinon.stub().callsFake((url) => url),
+        tracingFetch: createDefaultMockTracingFetch(sandbox),
+      },
     });
 
     // Mock the ES modules that can't be stubbed directly
@@ -264,7 +309,7 @@ describe('onboard-llmo-modal', () => {
   beforeEach(() => {
     // Block all network requests during tests
     nock.disableNetConnect();
-    sandbox = sinon.createSandbox();
+    sandbox.restore();
     // Mock setTimeout to resolve immediately
     sandbox.stub(global, 'setTimeout').callsFake((fn) => {
       fn();
@@ -953,11 +998,12 @@ describe('onboard-llmo-modal', () => {
       const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSite });
       const slackCtx = createDefaultMockSlackCtx(sandbox);
 
-      // Mock fetch to throw an error
-      global.fetch = sandbox.stub().rejects(new Error('Network error'));
+      // Mock tracingFetch to throw an error
+      const mockTracingFetch = sandbox.stub().rejects(new Error('Network error'));
+      const testModule = await createMockedModulesWithTracingFetch(mockTracingFetch);
 
       // Execute the function
-      await onboardSite(input, lambdaCtx, slackCtx);
+      await testModule.onboardSite(input, lambdaCtx, slackCtx);
 
       // Verify that error was logged
       expect(lambdaCtx.log.error).to.have.been.calledWith(sinon.match('Failed to publish via admin.hlx.page: Network error'));
@@ -977,15 +1023,16 @@ describe('onboard-llmo-modal', () => {
       const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSite });
       const slackCtx = createDefaultMockSlackCtx(sandbox);
 
-      // Mock fetch to return non-ok response
-      global.fetch = sandbox.stub().resolves({
+      // Mock tracingFetch to return non-ok response
+      const mockTracingFetch = sandbox.stub().resolves({
         ok: false,
         status: 500,
         statusText: 'Internal Server Error',
       });
 
-      // Execute the function
-      await onboardSite(input, lambdaCtx, slackCtx);
+      // Re-mock modules with the failing tracingFetch
+      const testModule = await createMockedModulesWithTracingFetch(mockTracingFetch);
+      await testModule.onboardSite(input, lambdaCtx, slackCtx);
 
       // Verify that error was logged
       expect(lambdaCtx.log.error).to.have.been.calledWith(sinon.match('Failed to publish via admin.hlx.page: preview failed: 500 Internal Server Error'));
