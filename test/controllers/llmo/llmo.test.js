@@ -1800,6 +1800,8 @@ describe('LlmoController', () => {
         updateLlmoDataFolder: sinon.stub(),
         getSlackConfig: sinon.stub().returns(null),
         getHandlers: sinon.stub().returns([]),
+        isImportEnabled: sinon.stub().returns(false),
+        enableImport: sinon.stub(),
       };
 
       mockNewSite = {
@@ -1820,6 +1822,7 @@ describe('LlmoController', () => {
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
         save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 

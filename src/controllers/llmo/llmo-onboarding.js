@@ -22,6 +22,16 @@ const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
 const LLMO_TIER = EntitlementModel.TIERS.FREE_TRIAL;
 const SHAREPOINT_URL = 'https://adobe.sharepoint.com/:x:/r/sites/HelixProjects/Shared%20Documents/sites/elmo-ui-data';
 
+// These audits don't depend on any additonal data being configured
+export const BASIC_AUDITS = [
+  'headings',
+  'llm-blocked',
+  'canonical',
+  'hreflang',
+  'summarization',
+  'prerender',
+];
+
 export const ASO_DEMO_ORG = '66331367-70e6-4a49-8445-4f6d9c265af9';
 
 export const ASO_CRITICAL_SITES = [
@@ -682,6 +692,37 @@ export async function enableAudits(site, context, audits = []) {
   await configuration.save();
 }
 
+export async function enableImports(siteConfig, imports = []) {
+  const existingImports = siteConfig.getImports();
+
+  imports.forEach(({ type, options }) => {
+    // Check if import is already enabled
+    const isEnabled = existingImports?.find(
+      (imp) => imp.type === type && imp.enabled,
+    );
+
+    if (!isEnabled) {
+      siteConfig.enableImport(type, options);
+    }
+  });
+}
+
+export async function triggerAudits(audits, context, site) {
+  const { sqs, dataAccess, log } = context;
+  const { Configuration } = dataAccess;
+  const configuration = await Configuration.findLatest();
+
+  await Promise.allSettled(
+    audits.map(async (audit) => {
+      log.info(`Triggering ${audit} audit for site: ${site.getId()}`);
+      await sqs.sendMessage(configuration.getQueues().audits, {
+        type: audit,
+        siteId: site.getId(),
+      });
+    }),
+  );
+}
+
 /**
  * Complete LLMO onboarding process.
  * @param {object} params - Onboarding parameters
@@ -722,14 +763,15 @@ export async function performLlmoOnboarding(params, context) {
     await updateIndexConfig(dataFolder, context);
 
     // Enable audits
-    await enableAudits(site, context, [
-      'headings',
-      'llm-blocked',
-      'llmo-customer-analysis',
-    ]);
+    await enableAudits(site, context, [...BASIC_AUDITS, 'llm-error-pages', 'llmo-customer-analysis']);
 
     // Get current site config
     const siteConfig = site.getConfig();
+
+    // Enable imports
+    await enableImports(siteConfig, [
+      { type: 'top-pages' },
+    ]);
 
     // Update brand and data directory
     siteConfig.updateLlmoBrand(brandName.trim());
@@ -738,6 +780,9 @@ export async function performLlmoOnboarding(params, context) {
     // update the site config object
     site.setConfig(Config.toDynamoItem(siteConfig));
     await site.save();
+
+    // Trigger audits
+    await triggerAudits([...BASIC_AUDITS], context, site);
 
     return {
       siteId: site.getId(),

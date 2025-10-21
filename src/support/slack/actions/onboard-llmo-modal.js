@@ -19,6 +19,8 @@ import {
   copyFilesToSharepoint,
   updateIndexConfig,
   enableAudits,
+  BASIC_AUDITS,
+  triggerAudits,
 } from '../../../controllers/llmo/llmo-onboarding.js';
 
 const REFERRAL_TRAFFIC_AUDIT = 'llmo-referral-traffic';
@@ -494,6 +496,9 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
     // enable the llmo-prompts-ahrefs import
     siteConfig.enableImport('llmo-prompts-ahrefs', { limit: 25 });
 
+    // enable top 200 pages import
+    siteConfig.enableImport('top-pages');
+
     // update the site config object
     site.setConfig(Config.toDynamoItem(siteConfig));
 
@@ -531,12 +536,12 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
       await configuration.save();
 
       await enableAudits(site, lambdaCtx, [
+        ...BASIC_AUDITS,
         AGENTIC_TRAFFIC_REPORT_AUDIT, // enable the cdn-logs-report audits for agentic traffic
         'llmo-customer-analysis', // this generates LLMO excel sheets and triggers audits
         REFERRAL_TRAFFIC_AUDIT,
         'geo-brand-presence',
-        'headings',
-        'llm-blocked',
+        'llm-error-pages',
       ]);
 
       await site.save();
@@ -552,6 +557,8 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
         },
       };
       await sqs.sendMessage(configuration.getQueues().audits, sqsTriggerMessage);
+
+      await triggerAudits(BASIC_AUDITS, lambdaCtx, site);
 
       const message = `:white_check_mark: *LLMO onboarding completed successfully!*
         
