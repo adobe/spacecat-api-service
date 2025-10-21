@@ -65,13 +65,11 @@ describe('LlmoController', () => {
   let readConfigStub;
   let writeConfigStub;
   let llmoConfigSchemaStub;
-  let importLlmoPromptsAhrefsStub;
+  let loadLlmoPromptsFromS3Stub;
 
   before(async () => {
     // Initialize the stub that will be used by the mocked module
-    importLlmoPromptsAhrefsStub = {
-      load: sinon.stub(),
-    };
+    loadLlmoPromptsFromS3Stub = sinon.stub();
 
     // Set up esmock once for all tests
     LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
@@ -118,8 +116,8 @@ describe('LlmoController', () => {
       '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
         Config: { toDynamoItem: sinon.stub().returnsArg(0) },
       },
-      '@adobe/spacecat-import-worker/src/handler/llmo-prompts-ahrefs.js': {
-        importLlmoPromptsAhrefs: importLlmoPromptsAhrefsStub,
+      '../../src/utils/llmo-prompts-reader.js': {
+        loadLlmoPromptsFromS3: loadLlmoPromptsFromS3Stub,
       },
     });
 
@@ -928,7 +926,7 @@ describe('LlmoController', () => {
         ];
 
         // Reset the stub behavior
-        importLlmoPromptsAhrefsStub.load.reset();
+        loadLlmoPromptsFromS3Stub.reset();
 
         // Reset log history
         mockLog.info.resetHistory();
@@ -1000,7 +998,7 @@ describe('LlmoController', () => {
         mockContext.params.dataSource = 'brandpresence-all-2025-01-15';
 
         // Mock S3 loads - return different data based on region
-        importLlmoPromptsAhrefsStub.load
+        loadLlmoPromptsFromS3Stub
           .onCall(0).resolves(s3PromptsUS) // products/us
           .onCall(1).resolves(s3PromptsUK) // products/uk
           .onCall(2)
@@ -1029,7 +1027,7 @@ describe('LlmoController', () => {
         expect(aiPrompts[0]).to.have.property('URL');
 
         // Verify load was called correctly
-        expect(importLlmoPromptsAhrefsStub.load.callCount).to.equal(3);
+        expect(loadLlmoPromptsFromS3Stub.callCount).to.equal(3);
       });
 
       it('should merge AI prompts into multi-sheet format', async () => {
@@ -1073,7 +1071,7 @@ describe('LlmoController', () => {
         mockContext.params.dataSource = 'brandpresence-chatgpt-2025-01-15';
 
         // Mock S3 loads
-        importLlmoPromptsAhrefsStub.load.resolves(s3Prompts);
+        loadLlmoPromptsFromS3Stub.resolves(s3Prompts);
 
         const result = await controller.queryLlmoSheetData();
 
@@ -1128,7 +1126,7 @@ describe('LlmoController', () => {
         mockContext.params.dataSource = 'brandpresence-all-2025-01-15';
 
         // Make S3 load throw an error
-        importLlmoPromptsAhrefsStub.load.rejects(new Error('S3 connection failed'));
+        loadLlmoPromptsFromS3Stub.rejects(new Error('S3 connection failed'));
 
         const result = await controller.queryLlmoSheetData();
 
@@ -1162,7 +1160,7 @@ describe('LlmoController', () => {
         // Should only have original data, no AI prompts
         expect(responseBody.data.length).to.equal(1);
         // Verify S3 load was not called
-        expect(importLlmoPromptsAhrefsStub.load.called).to.be.false;
+        expect(loadLlmoPromptsFromS3Stub.called).to.be.false;
       });
 
       it('should extract correct week from datasource date', async () => {
@@ -1175,8 +1173,8 @@ describe('LlmoController', () => {
 
         // Verify isoCalendarWeek was called with the correct date
         // The mock returns week 3 for January dates
-        expect(importLlmoPromptsAhrefsStub.load.called).to.be.true;
-        const firstCall = importLlmoPromptsAhrefsStub.load.getCall(0);
+        expect(loadLlmoPromptsFromS3Stub.called).to.be.true;
+        const firstCall = loadLlmoPromptsFromS3Stub.getCall(0);
         expect(firstCall.args[0].partitions.week).to.equal('2025w03');
       });
     });

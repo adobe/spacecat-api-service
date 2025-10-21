@@ -26,7 +26,7 @@ import {
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import crypto from 'crypto';
-import { importLlmoPromptsAhrefs } from '@adobe/spacecat-import-worker/src/handler/llmo-prompts-ahrefs.js';
+import { loadLlmoPromptsFromS3 } from '../../utils/llmo-prompts-reader.js';
 import AccessControlUtil from '../../support/access-control-util.js';
 import {
   applyFilters,
@@ -270,7 +270,7 @@ function LlmoController(ctx) {
 
           const promptsPromises = categoryRegionPairs.map(async ({ category, region }) => {
             try {
-              const result = await importLlmoPromptsAhrefs.load({
+              const result = await loadLlmoPromptsFromS3({
                 siteId,
                 partitions: { region, category, week },
               }, context);
