@@ -1,3 +1,38 @@
+## [1.210.1](https://github.com/adobe/spacecat-api-service/compare/v1.210.0...v1.210.1) (2025-10-20)
+
+
+### Bug Fixes
+
+* send variations and action to autofix sqs message ([#1376](https://github.com/adobe/spacecat-api-service/issues/1376)) ([b6ed475](https://github.com/adobe/spacecat-api-service/commit/b6ed475e88552550f38e864bf1be20fb4bbedba0))
+
+# [1.210.0](https://github.com/adobe/spacecat-api-service/compare/v1.209.2...v1.210.0) (2025-10-20)
+
+
+### Features
+
+* Add new profiles and additional audits ([#1379](https://github.com/adobe/spacecat-api-service/issues/1379)) ([0495a16](https://github.com/adobe/spacecat-api-service/commit/0495a16cad11014ffd4c668d41d54975d1b26509))
+
+## [1.209.2](https://github.com/adobe/spacecat-api-service/compare/v1.209.1...v1.209.2) (2025-10-18)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v2.38.3 ([#1375](https://github.com/adobe/spacecat-api-service/issues/1375)) ([d7e3dfd](https://github.com/adobe/spacecat-api-service/commit/d7e3dfda817fa602cb66e8f028a6ee84fab5f957))
+
+## [1.209.1](https://github.com/adobe/spacecat-api-service/compare/v1.209.0...v1.209.1) (2025-10-17)
+
+
+### Bug Fixes
+
+* add support for variations and action for auto fix ([#1235](https://github.com/adobe/spacecat-api-service/issues/1235)) ([f22ecf9](https://github.com/adobe/spacecat-api-service/commit/f22ecf92f9e568a34e6aafcd280175a85ffe5078))
+
+# [1.209.0](https://github.com/adobe/spacecat-api-service/compare/v1.208.1...v1.209.0) (2025-10-17)
+
+
+### Features
+
+* enhance LLMO config update logging with user and config summary ([#1370](https://github.com/adobe/spacecat-api-service/issues/1370)) ([d6f5ae1](https://github.com/adobe/spacecat-api-service/commit/d6f5ae1a12f37be6046f4189bf5e8e5b9dedb0b1))
+
 ## [1.208.1](https://github.com/adobe/spacecat-api-service/compare/v1.208.0...v1.208.1) (2025-10-17)
 
 
