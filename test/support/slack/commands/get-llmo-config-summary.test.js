@@ -181,4 +181,37 @@ describe('GetLlmoConfigSummaryCommand', () => {
     await command.handleExecution([], slackContext);
     expect(sendFileStub.called).to.be.true;
   });
+
+  it('handles promise rejection in parallel processing', async () => {
+    const mockSites = [
+      {
+        getId: () => 'site-1',
+        getBaseURL: () => 'https://test1.com',
+        getOrganizationId: () => 'org-1',
+        getConfig: () => ({ getLlmoConfig: () => ({ llmo: true }) }),
+      },
+      {
+        getId: () => { throw new Error('Site ID error'); },
+        getBaseURL: () => 'https://test2.com',
+        getOrganizationId: () => 'org-2',
+        getConfig: () => ({ getLlmoConfig: () => ({ llmo: true }) }),
+      },
+    ];
+
+    context.dataAccess.Site.all.resolves(mockSites);
+
+    readConfigStub.resolves({
+      config: { categories: { cat1: {} } },
+      exists: true,
+    });
+
+    context.dataAccess.Organization.findById.resolves({
+      getImsOrgId: () => 'valid@AdobeOrg',
+    });
+
+    const command = GetLlmoConfigSummaryCommand(context);
+    await command.handleExecution([], slackContext);
+
+    expect(sendFileStub.called).to.be.true;
+  });
 });

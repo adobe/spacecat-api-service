@@ -89,38 +89,38 @@ function GetLlmoConfigSummaryCommand(context) {
         return;
       }
 
-      const results = [];
-      for (const site of sites) {
+      const sitePromises = sites.map(async (site) => {
         try {
-          // eslint-disable-next-line no-await-in-loop
           const config = await getLlmoConfig(site.getId());
-          if (config) {
-            const stats = calculateStats(config);
+          if (!config) return null;
 
-            // Get IMS Org ID from organization
-            // eslint-disable-next-line no-await-in-loop
-            const organization = await Organization.findById(site.getOrganizationId());
-            const imsOrgId = organization?.getImsOrgId();
+          const stats = calculateStats(config);
+          const organization = await Organization.findById(site.getOrganizationId());
+          const imsOrgId = organization?.getImsOrgId();
 
-            // Skip excluded IMS orgs
-            if (EXCLUDED_IMS_ORGS.includes(imsOrgId)) {
-              log.info(`Skipping excluded IMS org: ${imsOrgId} for site: ${site.getBaseURL()}`);
-              // eslint-disable-next-line no-continue
-              continue;
-            }
-
-            results.push({
-              baseURL: site.getBaseURL(),
-              siteId: site.getId(),
-              organizationId: site.getOrganizationId(),
-              imsOrgId,
-              ...stats,
-            });
+          // Skip excluded IMS orgs
+          if (EXCLUDED_IMS_ORGS.includes(imsOrgId)) {
+            log.info(`Skipping excluded IMS org: ${imsOrgId} for site: ${site.getBaseURL()}`);
+            return null;
           }
+
+          return {
+            baseURL: site.getBaseURL(),
+            siteId: site.getId(),
+            organizationId: site.getOrganizationId(),
+            imsOrgId,
+            ...stats,
+          };
         } catch (siteError) {
           log.warn(`Failed to process site ${site.getId()}: ${siteError.message}`);
+          return null;
         }
-      }
+      });
+
+      const siteResults = await Promise.allSettled(sitePromises);
+      const results = siteResults
+        .map((result) => (result.status === 'fulfilled' ? result.value : null))
+        .filter(Boolean);
 
       if (results.length === 0) {
         await say('No valid LLMO configurations found.');
