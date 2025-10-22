@@ -1,3 +1,10 @@
+## [1.212.1](https://github.com/adobe/spacecat-api-service/compare/v1.212.0...v1.212.1) (2025-10-22)
+
+
+### Bug Fixes
+
+* Add PLG and Test profiles to onboard form ([#1386](https://github.com/adobe/spacecat-api-service/issues/1386)) ([634c976](https://github.com/adobe/spacecat-api-service/commit/634c97665113ce8e0bb8b22bfabd40b3b738b10a))
+
 # [1.212.0](https://github.com/adobe/spacecat-api-service/compare/v1.211.0...v1.212.0) (2025-10-22)
 
 
