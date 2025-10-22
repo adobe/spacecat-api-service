@@ -11,7 +11,7 @@
  */
 
 import { llmoConfig as llmo, isValidUrl } from '@adobe/spacecat-shared-utils';
-import { sendFile } from '../../../utils/slack/base.js';
+import { sendFile, extractURLFromSlackInput } from '../../../utils/slack/base.js';
 import { createObjectCsvStringifier } from '../../../utils/slack/csvHelper.cjs';
 import BaseCommand from './base.js';
 
@@ -67,9 +67,9 @@ function GetLlmoConfigSummaryCommand(context) {
 
       if (siteInput) {
         await say(`🔍 Fetching LLMO configuration for site: ${siteInput}...`);
-        // Single site lookup
-        const site = isValidUrl(siteInput)
-          ? await Site.findByBaseURL(siteInput)
+        const baseURL = extractURLFromSlackInput(siteInput);
+        const site = isValidUrl(baseURL)
+          ? await Site.findByBaseURL(baseURL)
           : await Site.findById(siteInput);
 
         if (!site) {
