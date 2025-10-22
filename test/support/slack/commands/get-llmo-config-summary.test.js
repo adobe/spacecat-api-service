@@ -60,7 +60,7 @@ describe('GetLlmoConfigSummaryCommand', () => {
   it('initializes correctly', () => {
     const command = GetLlmoConfigSummaryCommand(context);
     expect(command.id).to.equal('get-llmo-config-summary');
-    expect(command.phrases).to.include('get llmo config summary');
+    expect(command.phrases).to.include('get-llmo-config-summary');
   });
 
   it('handles no LLMO sites found', async () => {

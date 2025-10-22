@@ -17,7 +17,7 @@ import BaseCommand from './base.js';
 
 const { readConfig } = llmo;
 
-const PHRASES = ['get llmo config summary', 'llmo config summary', 'llmo summary'];
+const PHRASES = ['get-llmo-config-summary'];
 const EXCLUDED_IMS_ORGS = ['9E1005A551ED61CA0A490D45@AdobeOrg'];
 
 function GetLlmoConfigSummaryCommand(context) {
