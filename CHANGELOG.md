@@ -1,3 +1,10 @@
+# [1.211.0](https://github.com/adobe/spacecat-api-service/compare/v1.210.2...v1.211.0) (2025-10-22)
+
+
+### Features
+
+* add FAQs audit ([#1382](https://github.com/adobe/spacecat-api-service/issues/1382)) ([9492b4b](https://github.com/adobe/spacecat-api-service/commit/9492b4b21855974f402a73bfc6bcab7465ce54c0))
+
 ## [1.210.2](https://github.com/adobe/spacecat-api-service/compare/v1.210.1...v1.210.2) (2025-10-21)
 
 
