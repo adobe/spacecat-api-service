@@ -208,6 +208,8 @@ export function startOnboarding(lambdaContext) {
                   const profileOptions = [
                     { text: 'Demo', value: 'demo' },
                     { text: 'Paid', value: 'paid' },
+                    { text: 'PLG', value: 'plg' },
+                    { text: 'Test', value: 'test' },
                   ];
 
                   // Use provided profile or default to 'demo'
@@ -249,6 +251,20 @@ export function startOnboarding(lambdaContext) {
                       text: 'Paid',
                     },
                     value: 'paid',
+                  },
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'PLG',
+                    },
+                    value: 'plg',
+                  },
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'Test',
+                    },
+                    value: 'test',
                   },
                 ],
               },
