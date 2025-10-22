@@ -1,3 +1,10 @@
+# [1.212.0](https://github.com/adobe/spacecat-api-service/compare/v1.211.0...v1.212.0) (2025-10-22)
+
+
+### Features
+
+* add slack command to retrieve stats for llmo config ([#1385](https://github.com/adobe/spacecat-api-service/issues/1385)) ([3c994a8](https://github.com/adobe/spacecat-api-service/commit/3c994a82c40d3de143a6e8c343dee8e0670047be))
+
 # [1.211.0](https://github.com/adobe/spacecat-api-service/compare/v1.210.2...v1.211.0) (2025-10-22)
 
 
