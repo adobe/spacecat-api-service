@@ -45,6 +45,7 @@ const ALL_AUDITS = [
   'alt-text',
   'prerender',
   'summarization',
+  'faqs',
 ];
 
 /**

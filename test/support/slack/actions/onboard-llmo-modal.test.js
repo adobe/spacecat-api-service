@@ -392,7 +392,7 @@ describe('onboard-llmo-modal', () => {
         organizationId: 'org123',
       });
       expect(mockSite.save).to.have.been.called;
-      expect(lambdaCtx.dataAccess.Configuration.findLatest).to.have.been.calledThrice;
+      expect(lambdaCtx.dataAccess.Configuration.findLatest).to.have.callCount(4);
 
       // Verify that TierClient was used for entitlement and enrollment
       expect(mockTierClient.createEntitlement).to.have.been.calledWith('FREE_TRIAL');
