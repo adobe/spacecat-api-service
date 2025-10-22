@@ -755,6 +755,8 @@ describe('LLMO Onboarding Functions', () => {
         getConfig: sinon.stub().returns({
           updateLlmoBrand: sinon.stub(),
           updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
         }),
         setConfig: sinon.stub(),
         save: sinon.stub().resolves(),
@@ -764,6 +766,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
         save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
 
       // Setup mocks
@@ -801,6 +804,9 @@ describe('LLMO Onboarding Functions', () => {
         dataAccess: mockDataAccess,
         log: mockLog,
         env: mockEnv,
+        sqs: {
+          sendMessage: sinon.stub().resolves(),
+        },
       };
 
       const params = {
@@ -868,6 +874,8 @@ describe('LLMO Onboarding Functions', () => {
         getConfig: sinon.stub().returns({
           updateLlmoBrand: sinon.stub(),
           updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
         }),
         setConfig: sinon.stub(),
         save: sinon.stub().resolves(),
@@ -877,6 +885,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
         save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
 
       // Setup mocks - organization does not exist
@@ -915,6 +924,9 @@ describe('LLMO Onboarding Functions', () => {
         dataAccess: mockDataAccess,
         log: mockLog,
         env: mockEnv,
+        sqs: {
+          sendMessage: sinon.stub().resolves(),
+        },
       };
 
       const params = {
@@ -957,6 +969,8 @@ describe('LLMO Onboarding Functions', () => {
         getConfig: sinon.stub().returns({
           updateLlmoBrand: sinon.stub(),
           updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
         }),
         setConfig: sinon.stub(),
         save: sinon.stub().rejects(new Error('Database save failed')),
@@ -966,6 +980,7 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
         save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
 
       // Setup mocks
@@ -1044,6 +1059,9 @@ describe('LLMO Onboarding Functions', () => {
         dataAccess: mockDataAccess,
         log: mockLog,
         env: mockEnv,
+        sqs: {
+          sendMessage: sinon.stub().resolves(),
+        },
       };
 
       const params = {
