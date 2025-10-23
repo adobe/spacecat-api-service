@@ -68,7 +68,7 @@ describe('LlmoController', () => {
 
   before(async () => {
     // Set up esmock once for all tests
-    LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
+    LlmoController = await esmock('../../../src/controllers/llmo/llmo.js', {
       '@adobe/spacecat-shared-utils': {
         SPACECAT_USER_AGENT: TEST_USER_AGENT,
         tracingFetch: (...args) => tracingFetchStub(...args),
@@ -84,7 +84,7 @@ describe('LlmoController', () => {
         isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
         composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
       },
-      '../../src/support/access-control-util.js': {
+      '../../../src/support/access-control-util.js': {
         default: class MockAccessControlUtil {
           static fromContext(context) {
             return new MockAccessControlUtil(context);
@@ -106,8 +106,8 @@ describe('LlmoController', () => {
     });
 
     // Create controller with access denied for access control tests
-    const LlmoControllerDenied = await esmock('../../src/controllers/llmo/llmo.js', {
-      '../../src/support/access-control-util.js': {
+    const LlmoControllerDenied = await esmock('../../../src/controllers/llmo/llmo.js', {
+      '../../../src/support/access-control-util.js': {
         default: createMockAccessControlUtil(false),
       },
     });
@@ -261,6 +261,7 @@ describe('LlmoController', () => {
             first_name: 'Test',
             last_name: 'User',
             provider: 'GOOGLE',
+            sub: 'test-user-id',
           }),
         },
       },
@@ -1152,6 +1153,133 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(400);
     });
+
+    it('should log config summary with user ID when updating config successfully', async () => {
+      const configWithAllFields = {
+        categories: {
+          [CATEGORY_ID]: {
+            name: 'test-category', region: ['us'],
+          },
+        },
+        topics: {
+          [TOPIC_ID]: {
+            name: 'test-topic',
+            category: CATEGORY_ID,
+            prompts: [
+              {
+                prompt: 'Prompt 1', regions: ['us'], origin: 'human', source: 'config',
+              },
+              {
+                prompt: 'Prompt 2', regions: ['us'], origin: 'ai', source: 'config',
+              },
+            ],
+          },
+        },
+        brands: {
+          aliases: [
+            {
+              aliases: ['brand1', 'brand2'], category: CATEGORY_ID, region: ['us'],
+            },
+          ],
+        },
+        competitors: {
+          competitors: [
+            {
+              name: 'competitor1', category: CATEGORY_ID, region: ['us'], aliases: [], urls: [],
+            },
+          ],
+        },
+        deleted: {
+          prompts: {
+            'deleted-prompt-1': {
+              deletedAt: '2024-01-01',
+            },
+            'deleted-prompt-2': {
+              deletedAt: '2024-01-02',
+            },
+          },
+        },
+      };
+      mockContext.data = configWithAllFields;
+      llmoConfigSchemaStub.safeParse.returns({ success: true, data: configWithAllFields });
+
+      const result = await controller.updateLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockLog.info).to.have.been.calledWith(
+        sinon.match(/User test-user-id modifying customer configuration/)
+          .and(sinon.match(/2 prompts/))
+          .and(sinon.match(/1 categories/))
+          .and(sinon.match(/1 topics/))
+          .and(sinon.match(/1 brand aliases/))
+          .and(sinon.match(/1 competitors/))
+          .and(sinon.match(/2 deleted prompts/)),
+      );
+    });
+
+    it('should use "unknown" as userId when sub is missing from profile', async () => {
+      // Override getProfile to return profile without sub
+      mockContext.attributes.authInfo.getProfile = () => ({
+        email: 'test@example.com',
+        trial_email: 'trial@example.com',
+        first_name: 'Test',
+        last_name: 'User',
+        provider: 'GOOGLE',
+        // sub is missing/undefined
+      });
+      const result = await controller.updateLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockLog.info).to.have.been.calledWith(
+        sinon.match(/User unknown modifying customer configuration/),
+      );
+    });
+
+    it('should use "unknown" as userId in error when authInfo is missing', async () => {
+      // Remove authInfo
+      mockContext.attributes = {};
+      writeConfigStub.rejects(new Error('S3 write failed'));
+      readConfigStub.resolves({
+        config: llmoConfig.defaultConfig(),
+        exists: true,
+        version: 'v0',
+      });
+
+      const result = await controller.updateLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(400);
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/User unknown error updating llmo config/),
+      );
+    });
+
+    it('should handle topics with no prompts when calculating prompt count', async () => {
+      const configWithEmptyPrompts = {
+        categories: {
+          [CATEGORY_ID]: { name: 'test-category', region: ['us'] },
+        },
+        topics: {
+          [TOPIC_ID]: {
+            name: 'test-topic-1',
+            category: CATEGORY_ID,
+            prompts: [],
+          },
+          '456e7890-e89b-12d3-a456-426614174002': {
+            name: 'test-topic-2',
+            category: CATEGORY_ID,
+          },
+        },
+      };
+      mockContext.data = configWithEmptyPrompts;
+      llmoConfigSchemaStub.safeParse.returns({ success: true, data: configWithEmptyPrompts });
+
+      const result = await controller.updateLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockLog.info).to.have.been.calledWith(
+        sinon.match(/0 prompts/),
+      );
+    });
   });
 
   describe('getLlmoQuestions', () => {
@@ -1672,6 +1800,8 @@ describe('LlmoController', () => {
         updateLlmoDataFolder: sinon.stub(),
         getSlackConfig: sinon.stub().returns(null),
         getHandlers: sinon.stub().returns([]),
+        isImportEnabled: sinon.stub().returns(false),
+        enableImport: sinon.stub(),
       };
 
       mockNewSite = {
@@ -1692,6 +1822,7 @@ describe('LlmoController', () => {
       const mockConfiguration = {
         enableHandlerForSite: sinon.stub(),
         save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
       };
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
@@ -1731,8 +1862,8 @@ describe('LlmoController', () => {
     });
 
     it('should successfully onboard a new customer', async () => {
-      const LlmoControllerOnboard = await esmock('../../src/controllers/llmo/llmo.js', {
-        '../../src/controllers/llmo/llmo-onboarding.js': {
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: validateSiteNotOnboardedStub,
           performLlmoOnboarding: performLlmoOnboardingStub,
           generateDataFolder: (baseURL, env) => {
@@ -1741,7 +1872,7 @@ describe('LlmoController', () => {
             return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
           },
         },
-        '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
         '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
           Config: { toDynamoItem: sinon.stub().returnsArg(0) },
         },
@@ -1788,13 +1919,13 @@ describe('LlmoController', () => {
           });
         }
 
-        const LlmoControllerOnboard = await esmock('../../src/controllers/llmo/llmo.js', {
-          '../../src/controllers/llmo/llmo-onboarding.js': {
+        const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+          '../../../src/controllers/llmo/llmo-onboarding.js': {
             validateSiteNotOnboarded: validateSiteNotOnboardedStub,
             performLlmoOnboarding: performLlmoOnboardingStub,
             generateDataFolder: () => 'dev/example-com',
           },
-          '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+          '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
           '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
             Config: { toDynamoItem: sinon.stub().returnsArg(0) },
           },
@@ -1822,13 +1953,13 @@ describe('LlmoController', () => {
         isValid: false,
         error: 'Site already assigned to different organization',
       });
-      const LlmoControllerOnboard = await esmock('../../src/controllers/llmo/llmo.js', {
-        '../../src/controllers/llmo/llmo-onboarding.js': {
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: validateSiteNotOnboardedStub,
           performLlmoOnboarding: performLlmoOnboardingStub,
           generateDataFolder: () => 'dev/example-com',
         },
-        '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
         '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
           Config: { toDynamoItem: sinon.stub().returnsArg(0) },
         },
@@ -1853,13 +1984,13 @@ describe('LlmoController', () => {
     it('should handle errors and log them', async () => {
       validateSiteNotOnboardedStub.reset();
       validateSiteNotOnboardedStub.rejects(new Error('Validation error'));
-      const LlmoControllerOnboard = await esmock('../../src/controllers/llmo/llmo.js', {
-        '../../src/controllers/llmo/llmo-onboarding.js': {
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: validateSiteNotOnboardedStub,
           performLlmoOnboarding: performLlmoOnboardingStub,
           generateDataFolder: () => 'dev/example-com',
         },
-        '../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
         '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
           Config: { toDynamoItem: sinon.stub().returnsArg(0) },
         },
@@ -1879,6 +2010,79 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(400);
       expect(mockLog.error).to.have.been.calledWith('Error during LLMO onboarding: Validation error');
+    });
+  });
+
+  describe('offboardCustomer', () => {
+    let offboardingContext;
+    let performLlmoOffboardingStub;
+
+    beforeEach(() => {
+      const mockSiteConfig = {
+        getLlmoConfig: sinon.stub().returns({
+          dataFolder: 'dev/example-com',
+          brand: 'Test Brand',
+        }),
+      };
+
+      mockSite.getConfig = sinon.stub().returns(mockSiteConfig);
+
+      offboardingContext = {
+        ...mockContext,
+        params: {
+          siteId: 'site123',
+        },
+      };
+
+      performLlmoOffboardingStub = sinon.stub().resolves({
+        siteId: 'site123',
+        baseURL: 'https://example.com',
+        dataFolder: 'dev/example-com',
+        message: 'LLMO offboarding completed successfully',
+      });
+    });
+
+    it('should successfully offboard a customer', async () => {
+      const LlmoControllerOffboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          performLlmoOffboarding: performLlmoOffboardingStub,
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+      });
+      const testController = LlmoControllerOffboard(mockContext);
+
+      const result = await testController.offboardCustomer(offboardingContext);
+
+      expect(performLlmoOffboardingStub).to.have.been.calledOnce;
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.include({
+        message: 'LLMO offboarding completed successfully',
+        siteId: 'site123',
+        baseURL: 'https://example.com',
+        dataFolder: 'dev/example-com',
+        status: 'completed',
+      });
+      expect(responseBody.completedAt).to.be.a('string');
+    });
+
+    it('should return bad request when offboarding fails', async () => {
+      performLlmoOffboardingStub.rejects(new Error('Offboarding failed'));
+
+      const LlmoControllerOffboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          performLlmoOffboarding: performLlmoOffboardingStub,
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+      });
+      const testController = LlmoControllerOffboard(mockContext);
+
+      const result = await testController.offboardCustomer(offboardingContext);
+
+      expect(result.status).to.equal(400);
+      expect(mockLog.error).to.have.been.calledWith(
+        'Error during LLMO offboarding for site site123: Offboarding failed',
+      );
     });
   });
 });

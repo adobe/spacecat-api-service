@@ -15,12 +15,22 @@ import { createFrom } from '@adobe/spacecat-helix-content-sdk';
 import { Octokit } from '@octokit/rest';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import TierClient from '@adobe/spacecat-shared-tier-client';
-import { composeBaseURL } from '@adobe/spacecat-shared-utils';
+import { composeBaseURL, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 
 // LLMO Constants
 const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
 const LLMO_TIER = EntitlementModel.TIERS.FREE_TRIAL;
 const SHAREPOINT_URL = 'https://adobe.sharepoint.com/:x:/r/sites/HelixProjects/Shared%20Documents/sites/elmo-ui-data';
+
+// These audits don't depend on any additonal data being configured
+export const BASIC_AUDITS = [
+  'headings',
+  'llm-blocked',
+  'canonical',
+  'hreflang',
+  'summarization',
+  'prerender',
+];
 
 export const ASO_DEMO_ORG = '66331367-70e6-4a49-8445-4f6d9c265af9';
 
@@ -196,6 +206,216 @@ async function publishToAdminHlx(filename, outputLocation, log) {
 }
 
 /**
+ * Starts a bulk status job for a given path.
+ * @param {string} path - The folder path to get status for
+ * @param {object} env - Environment variables
+ * @param {object} log - Logger instance
+ * @returns {Promise<string>} The job name
+ */
+export async function startBulkStatusJob(path, env, log) {
+  const org = 'adobe';
+  const site = 'project-elmo-ui-data';
+  const ref = 'main';
+  const headers = {
+    Cookie: `auth_token=${env.HLX_ADMIN_TOKEN}`,
+    'Content-Type': 'application/json',
+  };
+
+  if (!env.HLX_ADMIN_TOKEN) {
+    log.warn('LLMO offboarding: HLX_ADMIN_TOKEN is not set');
+    return null;
+  }
+
+  const baseUrl = 'https://admin.hlx.page';
+  const url = `${baseUrl}/status/${org}/${site}/${ref}/*`;
+
+  log.debug(`Starting bulk status job for path: ${path}`);
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      paths: [`/${path}/*`],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to start bulk status job: ${response.status} ${response.statusText}`);
+  }
+
+  const result = await response.json();
+  log.debug(`Bulk status job started: ${result.job?.name || result.name}`);
+
+  return result.job?.name || result.name;
+}
+
+/**
+ * Polls a job until it completes.
+ * @param {string} jobName - The job name to poll
+ * @param {object} env - Environment variables
+ * @param {object} log - Logger instance
+ * @returns {Promise<object>} The completed job data
+ */
+export async function pollJobStatus(jobName, env, log) {
+  const org = 'adobe';
+  const site = 'project-elmo-ui-data';
+  const ref = 'main';
+  const topic = 'status';
+  const headers = { Cookie: `auth_token=${env.HLX_ADMIN_TOKEN}` };
+
+  if (!env.HLX_ADMIN_TOKEN) {
+    log.warn('LLMO offboarding: HLX_ADMIN_TOKEN is not set');
+    return null;
+  }
+
+  const baseUrl = 'https://admin.hlx.page';
+  const url = `${baseUrl}/job/${org}/${site}/${ref}/${topic}/${jobName}/details`;
+
+  const pollInterval = 200; // 200ms as specified
+  const maxAttempts = 150; // 30 seconds timeout (150 * 200ms)
+  let attempts = 0;
+
+  log.debug(`Polling job status for: ${jobName}`);
+
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    // eslint-disable-next-line no-await-in-loop
+    const response = await fetch(url, { method: 'GET', headers });
+
+    if (!response.ok) {
+      throw new Error(`Failed to get job status: ${response.status} ${response.statusText}`);
+    }
+
+    // eslint-disable-next-line no-await-in-loop
+    const jobData = await response.json();
+
+    if (jobData.state === 'stopped' && jobData.data?.phase === 'completed') {
+      log.debug(`Job ${jobName} completed successfully`);
+      return jobData;
+    }
+
+    attempts += 1;
+    if (attempts >= maxAttempts) {
+      throw new Error(`Job polling timed out after ${maxAttempts * pollInterval}ms`);
+    }
+
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((resolve) => {
+      setTimeout(resolve, pollInterval);
+    });
+  }
+}
+
+/**
+ * Performs bulk unpublish and un-preview for a list of paths.
+ * @param {Array<string>} paths - Array of paths to unpublish
+ * @param {string} dataFolder - Base data folder
+ * @param {object} env - Environment variables
+ * @param {object} log - Logger instance
+ */
+export async function bulkUnpublishPaths(paths, dataFolder, env, log) {
+  if (!paths || paths.length === 0) {
+    log.debug('No paths to unpublish');
+    return;
+  }
+
+  const org = 'adobe';
+  const site = 'project-elmo-ui-data';
+  const ref = 'main';
+  const headers = {
+    Cookie: `auth_token=${env.HLX_ADMIN_TOKEN}`,
+    'Content-Type': 'application/json',
+  };
+
+  if (!env.HLX_ADMIN_TOKEN) {
+    log.warn('LLMO offboarding: HLX_ADMIN_TOKEN is not set');
+    return;
+  }
+
+  const baseUrl = 'https://admin.hlx.page';
+
+  // Prepare paths in the format required by bulk APIs
+  const pathsPayload = paths.map((path) => ({ path }));
+
+  // Bulk unpublish (live)
+  const unpublishUrl = `${baseUrl}/live/${org}/${site}/${ref}/${dataFolder}/*`;
+  log.debug(`Starting bulk unpublish for ${paths.length} paths`);
+
+  try {
+    const unpublishResponse = await fetch(unpublishUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ paths: pathsPayload.map((o) => o.path), delete: true }),
+    });
+
+    if (!unpublishResponse.ok) {
+      log.error(`Bulk unpublish failed: ${unpublishResponse.status} ${unpublishResponse.statusText}`);
+    } else {
+      const unpublishResult = await unpublishResponse.json();
+      log.debug(`Bulk unpublish job started: ${unpublishResult.job?.name || unpublishResult.name}`);
+    }
+  } catch (error) {
+    log.error(`Error during bulk unpublish: ${error.message}`);
+  }
+
+  // Bulk un-preview
+  const unpreviewUrl = `${baseUrl}/preview/${org}/${site}/${ref}/${dataFolder}/*`;
+  log.debug(`Starting bulk un-preview for ${paths.length} paths`);
+
+  try {
+    const unpreviewResponse = await fetch(unpreviewUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ paths: pathsPayload.map((o) => o.path), delete: true }),
+    });
+
+    if (!unpreviewResponse.ok) {
+      log.error(`Bulk un-preview failed: ${unpreviewResponse.status} ${unpreviewResponse.statusText}`);
+    } else {
+      const unpreviewResult = await unpreviewResponse.json();
+      log.debug(`Bulk un-preview job started: ${unpreviewResult.job?.name || unpreviewResult.name}`);
+    }
+  } catch (error) {
+    log.error(`Error during bulk un-preview: ${error.message}`);
+  }
+}
+
+/**
+ * Unpublishes a file from admin.hlx.page.
+ * @param {string} dataFolder - The data folder to unpublish
+ * @param {object} env - Environment variables
+ * @param {object} log - Logger instance
+ */
+export async function unpublishFromAdminHlx(dataFolder, env, log) {
+  try {
+    // First, get bulk status of all files under the folder to know what needs to be unpublished
+    log.info(`Getting bulk status for folder: ${dataFolder}`);
+    const jobName = await startBulkStatusJob(dataFolder, env, log);
+
+    if (jobName) {
+      // Poll the job until it completes
+      const jobData = await pollJobStatus(jobName, env, log);
+
+      // Extract all paths from the resources
+      const paths = jobData?.data?.resources
+        ?.filter((resource) => resource.path.startsWith(`/${dataFolder}`))
+        .map((resource) => resource.path) || [];
+
+      if (paths.length > 0) {
+        log.info(`Found ${paths.length} paths to unpublish under folder ${dataFolder}`);
+        // Bulk unpublish and un-preview all paths
+        await bulkUnpublishPaths(paths, dataFolder, env, log);
+      } else {
+        log.debug(`No published paths found under folder ${dataFolder}`);
+      }
+    }
+  } catch (error) {
+    log.error(`Error during bulk unpublish for folder ${dataFolder}: ${error.message}`);
+    // Don't throw - continue with folder deletion
+  }
+}
+
+/**
  * Copies template files to SharePoint for a new LLMO onboarding.
  * @param {string} dataFolder - The data folder name
  * @param {object} context - The request context
@@ -345,6 +565,97 @@ export async function createOrFindSite(baseURL, organizationId, context) {
 }
 
 /**
+ * Deletes the SharePoint folder for a site.
+ * @param {string} dataFolder - The data folder path
+ * @param {object} context - The request context
+ * @returns {Promise<void>}
+ */
+export async function deleteSharePointFolder(dataFolder, context) {
+  const { log, env } = context;
+
+  try {
+    const sharepointClient = await createSharePointClient(env);
+    const folder = sharepointClient.getDocument(`/sites/elmo-ui-data/${dataFolder}/`);
+    const folderExists = await folder.exists();
+
+    if (folderExists) {
+      log.info(`Deleting SharePoint folder: /sites/elmo-ui-data/${dataFolder}/`);
+      await folder.delete();
+      log.info(`Successfully deleted SharePoint folder: ${dataFolder}`);
+    } else {
+      log.debug(`SharePoint folder does not exist: /sites/elmo-ui-data/${dataFolder}/`);
+    }
+  } catch (error) {
+    log.error(`Error deleting SharePoint folder ${dataFolder}: ${error.message}`);
+    // Don't throw - allow offboarding to continue
+  }
+
+  await unpublishFromAdminHlx(dataFolder, env, log);
+}
+
+/**
+ * Revokes the LLMO enrollment for a site.
+ * @param {object} site - The site object
+ * @param {object} context - The request context
+ * @returns {Promise<void>}
+ */
+export async function revokeEnrollment(site, context) {
+  const { log } = context;
+  const siteId = site.getId();
+
+  try {
+    log.info(`Revoking LLMO enrollment for site ${siteId}`);
+    const tierClient = await TierClient.createForSite(context, site, LLMO_PRODUCT_CODE);
+    await tierClient.revokeSiteEnrollment();
+    log.info(`Successfully revoked LLMO enrollment for site ${siteId}`);
+  } catch (error) {
+    log.error(`Error revoking LLMO enrollment for site ${siteId}: ${error.message}`);
+    // Don't throw - allow offboarding to continue
+  }
+}
+
+/**
+ * Removes LLMO configuration from the site config.
+ * @param {object} site - The site object
+ * @param {object} config - The site config object
+ * @param {object} context - The request context
+ * @returns {Promise<void>}
+ */
+export async function removeLlmoConfig(site, config, context) {
+  const { log } = context;
+  const siteId = site.getId();
+
+  log.info(`Removing LLMO configuration from site ${siteId}`);
+
+  // LLMO-only audits we can disable safely
+  const AUDITS_TO_DISABLE = [
+    'llmo-customer-analysis',
+    'llm-blocked',
+    'llm-error-pages',
+    'cdn-analysis',
+    'cdn-logs-report',
+    'geo-brand-presence',
+  ];
+
+  // Update configuration to disable audits
+  const { dataAccess } = context;
+  const { Configuration } = dataAccess;
+  const configuration = await Configuration.findLatest();
+  AUDITS_TO_DISABLE.forEach((audit) => {
+    configuration.disableHandlerForSite(audit, site);
+  });
+  await configuration.save();
+
+  // Save the updated site config
+  const dynamoItem = Config.toDynamoItem(config);
+  delete dynamoItem.llmo;
+  site.setConfig(dynamoItem);
+  await site.save();
+
+  log.info(`Successfully removed LLMO configuration for site ${siteId}`);
+}
+
+/**
  * Creates entitlement and enrollment for LLMO.
  * @param {object} site - The site object
  * @param {object} context - The request context
@@ -381,6 +692,37 @@ export async function enableAudits(site, context, audits = []) {
   await configuration.save();
 }
 
+export async function enableImports(siteConfig, imports = []) {
+  const existingImports = siteConfig.getImports();
+
+  imports.forEach(({ type, options }) => {
+    // Check if import is already enabled
+    const isEnabled = existingImports?.find(
+      (imp) => imp.type === type && imp.enabled,
+    );
+
+    if (!isEnabled) {
+      siteConfig.enableImport(type, options);
+    }
+  });
+}
+
+export async function triggerAudits(audits, context, site) {
+  const { sqs, dataAccess, log } = context;
+  const { Configuration } = dataAccess;
+  const configuration = await Configuration.findLatest();
+
+  await Promise.allSettled(
+    audits.map(async (audit) => {
+      log.info(`Triggering ${audit} audit for site: ${site.getId()}`);
+      await sqs.sendMessage(configuration.getQueues().audits, {
+        type: audit,
+        siteId: site.getId(),
+      });
+    }),
+  );
+}
+
 /**
  * Complete LLMO onboarding process.
  * @param {object} params - Onboarding parameters
@@ -399,48 +741,109 @@ export async function performLlmoOnboarding(params, context) {
   const baseURL = composeBaseURL(domain);
   const dataFolder = generateDataFolder(baseURL, env.ENV);
 
-  log.info(`Starting LLMO onboarding for IMS org ${imsOrgId}, domain ${domain}, brand ${brandName}`);
+  let site;
+  try {
+    log.info(`Starting LLMO onboarding for IMS org ${imsOrgId}, domain ${domain}, brand ${brandName}`);
 
-  // Create or find organization
-  const organization = await createOrFindOrganization(imsOrgId, context);
+    // Create or find organization
+    const organization = await createOrFindOrganization(imsOrgId, context);
 
-  // Create site
-  const site = await createOrFindSite(baseURL, organization.getId(), context);
+    // Create site
+    site = await createOrFindSite(baseURL, organization.getId(), context);
 
-  log.info(`Created site ${site.getId()} for ${baseURL}`);
+    log.info(`Created site ${site.getId()} for ${baseURL}`);
 
-  // Create entitlement and enrollment
-  await createEntitlementAndEnrollment(site, context);
+    // Create entitlement and enrollment
+    await createEntitlementAndEnrollment(site, context);
 
-  // Copy files to SharePoint
-  await copyFilesToSharepoint(dataFolder, context);
+    // Copy files to SharePoint
+    await copyFilesToSharepoint(dataFolder, context);
 
-  // Update index config
-  await updateIndexConfig(dataFolder, context);
+    // Update index config
+    await updateIndexConfig(dataFolder, context);
 
-  // Enable audits
-  await enableAudits(site, context, [
-    'headings',
-    'llm-blocked',
-    'llmo-customer-analysis',
-  ]);
+    // Enable audits
+    await enableAudits(site, context, [...BASIC_AUDITS, 'llm-error-pages', 'llmo-customer-analysis']);
 
-  // Get current site config
-  const siteConfig = site.getConfig();
+    // Get current site config
+    const siteConfig = site.getConfig();
 
-  // Update brand and data directory
-  siteConfig.updateLlmoBrand(brandName.trim());
-  siteConfig.updateLlmoDataFolder(dataFolder.trim());
+    // Enable imports
+    await enableImports(siteConfig, [
+      { type: 'top-pages' },
+    ]);
 
-  // update the site config object
-  site.setConfig(Config.toDynamoItem(siteConfig));
-  await site.save();
+    // Update brand and data directory
+    siteConfig.updateLlmoBrand(brandName.trim());
+    siteConfig.updateLlmoDataFolder(dataFolder.trim());
+
+    // update the site config object
+    site.setConfig(Config.toDynamoItem(siteConfig));
+    await site.save();
+
+    // Trigger audits
+    await triggerAudits([...BASIC_AUDITS], context, site);
+
+    return {
+      siteId: site.getId(),
+      organizationId: organization.getId(),
+      baseURL,
+      dataFolder,
+      message: 'LLMO onboarding completed successfully',
+    };
+  } catch (error) {
+    log.error(`Error during LLMO onboarding: ${error.message}. Attempting cleanup.`);
+
+    // Attempt cleanup
+    await deleteSharePointFolder(dataFolder, context);
+    if (site) {
+      await revokeEnrollment(site, context);
+    }
+    // Rolling back llmo config is not required, as it's the last step and won't have been saved
+    throw error;
+  }
+}
+
+/**
+ * Complete LLMO offboarding process.
+ * @param {object} site - The validated site object
+ * @param {object} config - The site config object
+ * @param {object} context - The request context
+ * @returns {Promise<object>} Offboarding result
+ */
+export async function performLlmoOffboarding(site, config, context) {
+  const { log, env } = context;
+  const siteId = site.getId();
+
+  log.info(`Starting LLMO offboarding process for site: ${siteId}`);
+
+  const baseURL = site.getBaseURL();
+  const llmoConfig = config.getLlmoConfig();
+
+  // Check if site has LLMO config with data folder, if not calculate it
+  let dataFolder = llmoConfig?.dataFolder;
+  if (!dataFolder) {
+    log.debug(`Data folder not found in LLMO config, calculating from base URL: ${baseURL}`);
+    dataFolder = generateDataFolder(baseURL, env.ENV);
+  }
+
+  log.info(`Offboarding site ${siteId} with domain ${baseURL} and data folder ${dataFolder}`);
+
+  // Delete SharePoint folder
+  await deleteSharePointFolder(dataFolder, context);
+
+  // Revoke site enrollment
+  await revokeEnrollment(site, context);
+
+  // Remove LLMO configuration
+  await removeLlmoConfig(site, config, context);
+
+  log.info(`LLMO offboarding process completed for site ${siteId}`);
 
   return {
-    siteId: site.getId(),
-    organizationId: organization.getId(),
+    siteId,
     baseURL,
     dataFolder,
-    message: 'LLMO onboarding completed successfully',
+    message: 'LLMO offboarding completed successfully',
   };
 }

@@ -38,6 +38,7 @@ import {
   validateSiteNotOnboarded,
   generateDataFolder,
   performLlmoOnboarding,
+  performLlmoOffboarding,
 } from './llmo-onboarding.js';
 
 const { readConfig, writeConfig } = llmo;
@@ -60,7 +61,11 @@ function LlmoController(ctx) {
     if (!llmoConfig?.dataFolder) {
       throw new Error('LLM Optimizer is not enabled for this site, add llmo config to the site');
     }
-    const hasAccessToElmo = await accessControlUtil.hasAccess(site, '', EntitlementModel.PRODUCT_CODES.LLMO);
+    const hasAccessToElmo = await accessControlUtil.hasAccess(
+      site,
+      '',
+      EntitlementModel.PRODUCT_CODES.LLMO,
+    );
     if (!hasAccessToElmo) {
       throw new Error('Only users belonging to the organization can view its sites');
     }
@@ -385,6 +390,9 @@ function LlmoController(ctx) {
   async function updateLlmoConfig(context) {
     const { log, s3, data } = context;
     const { siteId } = context.params;
+
+    const userId = context.attributes?.authInfo?.getProfile()?.sub || 'unknown';
+
     try {
       if (!isObject(data)) {
         return badRequest('LLMO config update must be provided as an object');
@@ -429,11 +437,33 @@ function LlmoController(ctx) {
         },
       });
 
-      log.info(`Updated LLMO config in S3 for siteId: ${siteId}, version: ${version}`);
+      // Calculate config summary
+      const numCategories = Object.keys(parsedConfig.categories || {}).length;
+      const numTopics = Object.keys(parsedConfig.topics || {}).length;
+      const numPrompts = Object.values(parsedConfig.topics || {}).reduce(
+        (total, topic) => total + (topic.prompts?.length || 0),
+        0,
+      );
+      const numBrandAliases = parsedConfig.brands?.aliases?.length || 0;
+      const numCompetitors = parsedConfig.competitors?.competitors?.length || 0;
+      const numDeletedPrompts = Object.keys(parsedConfig.deleted?.prompts || {}).length;
+
+      // Build config summary
+      const summaryParts = [
+        `${numPrompts} prompts`,
+        `${numCategories} categories`,
+        `${numTopics} topics`,
+        `${numBrandAliases} brand aliases`,
+        `${numCompetitors} competitors`,
+        `${numDeletedPrompts} deleted prompts`,
+      ];
+      const configSummary = summaryParts.join(', ');
+
+      log.info(`User ${userId} modifying customer configuration (${configSummary}) for siteId: ${siteId}, version: ${version}`);
       return ok({ version });
     } catch (error) {
       const msg = `${error?.message || /* c8 ignore next */ error}`;
-      log.error(`Error updating llmo config for siteId: ${siteId}, error: ${msg}`);
+      log.error(`User ${userId} error updating llmo config for siteId: ${siteId}, error: ${msg}`);
       return badRequest(msg);
     }
   }
@@ -770,6 +800,42 @@ function LlmoController(ctx) {
     }
   };
 
+  /**
+   * Offboards a customer from LLMO.
+   * This endpoint handles the complete offboarding process including
+   * disabling audits and cleaning up LLMO configuration.
+   * @param {object} context - The request context.
+   * @returns {Promise<Response>} The offboarding response.
+   */
+  const offboardCustomer = async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+
+    try {
+      log.info(`Starting LLMO offboarding for site ${siteId}`);
+
+      // Validate site and LLMO access
+      const { site, config } = await getSiteAndValidateLlmo(context);
+
+      // Perform the complete offboarding process
+      const result = await performLlmoOffboarding(site, config, context);
+
+      log.info(`LLMO offboarding completed successfully for site ${siteId}`);
+
+      return ok({
+        message: result.message,
+        siteId: result.siteId,
+        baseURL: result.baseURL,
+        dataFolder: result.dataFolder,
+        status: 'completed',
+        completedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      log.error(`Error during LLMO offboarding for site ${siteId}: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -787,6 +853,7 @@ function LlmoController(ctx) {
     patchLlmoCdnBucketConfig,
     updateLlmoConfig,
     onboardCustomer,
+    offboardCustomer,
   };
 }
 

@@ -518,9 +518,16 @@ function SuggestionsController(ctx, sqs, env) {
     if (!isNonEmptyObject(context.data)) {
       return badRequest('No updates provided');
     }
-    const { suggestionIds, variationName: variation } = context.data;
+    const { suggestionIds, variations, action } = context.data;
+
     if (!isArray(suggestionIds)) {
       return badRequest('Request body must be an array of suggestionIds');
+    }
+    if (variations && !isArray(variations)) {
+      return badRequest('variations must be an array');
+    }
+    if (action !== undefined && !hasText(action)) {
+      return badRequest('action cannot be empty');
     }
     const site = await Site.findById(siteId);
     if (!site) {
@@ -641,7 +648,8 @@ function SuggestionsController(ctx, sqs, env) {
           opportunityId,
           groupedSuggestions.map((s) => s.getId()),
           promiseTokenResponse,
-          variation,
+          variations,
+          action,
           { url },
         )),
       );
