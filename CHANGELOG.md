@@ -1,3 +1,10 @@
+# [1.214.0](https://github.com/adobe/spacecat-api-service/compare/v1.213.2...v1.214.0) (2025-10-23)
+
+
+### Features
+
+* create dummy profile with no audits or imports ([#1390](https://github.com/adobe/spacecat-api-service/issues/1390)) ([9357152](https://github.com/adobe/spacecat-api-service/commit/935715283edcd760bf7c75f024c24bb45055235c))
+
 ## [1.213.2](https://github.com/adobe/spacecat-api-service/compare/v1.213.1...v1.213.2) (2025-10-23)
 
 
