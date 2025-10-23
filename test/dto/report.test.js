@@ -211,6 +211,97 @@ describe('Report DTO', () => {
         updatedBy: 'test@example.com',
       });
     });
+
+    it('returns report JSON with data field from getData() when no presignedUrlObject provided', () => {
+      const mockReportWithData = {
+        ...mockReport,
+        getData: () => ({
+          error: 'Report generation failed',
+          errorCode: 'INSUFFICIENT_DATA',
+        }),
+      };
+
+      const result = ReportDto.toJSON(mockReportWithData);
+
+      expect(result).to.deep.equal({
+        id: 'test-report-id',
+        siteId: 'test-site-id',
+        reportType: 'performance',
+        status: 'success',
+        reportPeriod: {
+          startDate: '2024-01-01',
+          endDate: '2024-01-31',
+        },
+        comparisonPeriod: {
+          startDate: '2023-12-01',
+          endDate: '2023-12-31',
+        },
+        storagePath: 'reports/test-site-id/performance/test-report-id/',
+        createdAt: '2024-01-15T10:30:00Z',
+        updatedAt: '2024-01-15T11:45:00Z',
+        updatedBy: 'test@example.com',
+        data: {
+          error: 'Report generation failed',
+          errorCode: 'INSUFFICIENT_DATA',
+        },
+      });
+    });
+
+    it('returns report JSON without data field when getData() returns null', () => {
+      const mockReportWithNullData = {
+        ...mockReport,
+        getData: () => null,
+      };
+
+      const result = ReportDto.toJSON(mockReportWithNullData);
+
+      expect(result).to.deep.equal({
+        id: 'test-report-id',
+        siteId: 'test-site-id',
+        reportType: 'performance',
+        status: 'success',
+        reportPeriod: {
+          startDate: '2024-01-01',
+          endDate: '2024-01-31',
+        },
+        comparisonPeriod: {
+          startDate: '2023-12-01',
+          endDate: '2023-12-31',
+        },
+        storagePath: 'reports/test-site-id/performance/test-report-id/',
+        createdAt: '2024-01-15T10:30:00Z',
+        updatedAt: '2024-01-15T11:45:00Z',
+        updatedBy: 'test@example.com',
+      });
+    });
+
+    it('returns report JSON without data field when getData() returns undefined', () => {
+      const mockReportWithUndefinedData = {
+        ...mockReport,
+        getData: () => undefined,
+      };
+
+      const result = ReportDto.toJSON(mockReportWithUndefinedData);
+
+      expect(result).to.deep.equal({
+        id: 'test-report-id',
+        siteId: 'test-site-id',
+        reportType: 'performance',
+        status: 'success',
+        reportPeriod: {
+          startDate: '2024-01-01',
+          endDate: '2024-01-31',
+        },
+        comparisonPeriod: {
+          startDate: '2023-12-01',
+          endDate: '2023-12-31',
+        },
+        storagePath: 'reports/test-site-id/performance/test-report-id/',
+        createdAt: '2024-01-15T10:30:00Z',
+        updatedAt: '2024-01-15T11:45:00Z',
+        updatedBy: 'test@example.com',
+      });
+    });
   });
 
   describe('toQueueMessage', () => {
