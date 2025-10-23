@@ -448,15 +448,25 @@ function ReportsController(ctx, log, env) {
         return notFound('Report not found');
       }
 
-      if (report.getStatus() !== ReportModel.STATUSES.SUCCESS) {
-        return createResponse({ message: 'Report is still processing.' }, 409);
-      }
-
       // Verify the report belongs to the specified site
       if (report.getSiteId() !== siteId) {
         return badRequest('Report does not belong to the specified site');
       }
 
+      const reportStatus = report.getStatus();
+
+      // Handle different report statuses
+      if (reportStatus === ReportModel.STATUSES.PROCESSING) {
+        return createResponse({ message: 'Report is still processing.' }, 409);
+      }
+
+      if (reportStatus === ReportModel.STATUSES.FAILED) {
+        // For failed reports, return report data with error information
+        const reportJSON = ReportDto.toJSON(report);
+        return ok(reportJSON);
+      }
+
+      // For successful reports, generate presigned URLs
       const rawReportKey = `${report.getRawStoragePath()}report.json`;
       const mystiqueReportKey = `${report.getEnhancedStoragePath()}report.json`;
       const rawPresignedUrlResult = await generatePresignedUrl(s3, s3ReportBucket, rawReportKey);
