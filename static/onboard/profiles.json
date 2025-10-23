@@ -2,9 +2,7 @@
 	"dummy":  {
 		"audits": {},
 		"imports": {},
-		"config": {
-			"scheduledRun": false
-		},
+		"config": {},
 		"integrations": {}
 	},
 	"test":  {
