@@ -997,10 +997,14 @@ export const onboardSingleSite = async (
     }
 
     reportLine.audits = auditTypes.join(', ');
-    await say(`:white_check_mark: *For site ${baseURL}*: Enabled imports: ${reportLine.imports} and audits: ${reportLine.audits}`);
+    const auditsMessage = reportLine.audits || 'None';
+    const importsMessage = reportLine.imports || 'None';
+    await say(`:white_check_mark: *For site ${baseURL}*: Enabled imports: ${importsMessage} and audits: ${auditsMessage}`);
 
     // trigger audit runs
-    await say(`:gear: Starting audits: ${auditTypes}`);
+    if (auditTypes.length > 0) {
+      await say(`:gear: Starting audits: ${auditTypes.join(', ')}`);
+    }
     for (const auditType of auditTypes) {
       /* eslint-disable no-await-in-loop */
       if (!latestConfiguration.isHandlerEnabledForSite(auditType, site)) {
