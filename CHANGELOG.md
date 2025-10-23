@@ -1,3 +1,10 @@
+# [1.213.0](https://github.com/adobe/spacecat-api-service/compare/v1.212.2...v1.213.0) (2025-10-23)
+
+
+### Features
+
+* handling failed reports ([#1387](https://github.com/adobe/spacecat-api-service/issues/1387)) ([71a5ede](https://github.com/adobe/spacecat-api-service/commit/71a5edeea6322e00a4562b76c1890422746f3678))
+
 ## [1.212.2](https://github.com/adobe/spacecat-api-service/compare/v1.212.1...v1.212.2) (2025-10-23)
 
 
