@@ -760,7 +760,7 @@ export const onboardSingleSite = async (
 
   const tier = additionalParams.tier || EntitlementModel.TIERS.FREE_TRIAL;
 
-  await say(`:gear: Starting ${profileName} environment setup for site ${baseURL} with imsOrgID: ${imsOrgID} and tier: ${tier}`);
+  await say(`:gear: Starting environment setup for site ${baseURL} with imsOrgID: ${imsOrgID} and tier: ${tier} using the ${profileName} profile`);
   await say(':key: Please make sure you have access to the AEM Shared Production Demo environment. Request access here: https://demo.adobe.com/demos/internal/AemSharedProdEnv.html');
 
   const reportLine = {
