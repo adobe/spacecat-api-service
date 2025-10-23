@@ -68,6 +68,21 @@ function AddRepoCommand(context) {
     }
   }
 
+  async function isOnboardedWithAemy(owner, repo, branch) {
+    const AEMY_ENDPOINT = `https://ec-xp-fapp-coordinator.azurewebsites.net/api/fn-ghapp/functions/get_installation_token/${owner}/${repo}/${branch}`;
+    try {
+      const response = await fetch(AEMY_ENDPOINT, { headers: { 'x-api-key': process.env.AEMY_API_KEY } });
+      if (response.ok) {
+        const data = await response.json();
+        return data.token !== null;
+      } else {
+        throw new Error('Failed to check if repository is onboarded with Aemy');
+      }
+    } catch (error) {
+      throw new Error(`Failed to check if repository is onboarded with Aemy: ${error.message}`);
+    }
+  }
+
   /**
    * Execute function for AddRepoCommand. This function validates the input, fetches the repository
    * information from the GitHub API, and saves it as a site in the database.
@@ -124,6 +139,12 @@ function AddRepoCommand(context) {
         owner = repoInfo.owner.login;
         repoName = repoInfo.name;
         branch = branchInput || repoInfo.default_branch;
+      }
+
+      const isOnboarded = await isOnboardedWithAemy(owner, repoName, branch);
+      if (!isOnboarded) {
+        await say(`:warning: The repository '${repoUrl}' is not onboarded with Aemy. Please onboard it with Aemy before adding it to a site.`);
+        return;
       }
 
       site.setGitHubURL(repoUrl);
