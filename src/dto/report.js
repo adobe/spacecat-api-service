@@ -34,7 +34,7 @@ export const ReportDto = {
    *  rawPresignedUrlExpiresAt?: string,
    *  mystiquePresignedUrl?: string,
    *  mystiquePresignedUrlExpiresAt?: string
-   * }
+   * } | object
    * }}
    */
   toJSON: (report, presignedUrlObject) => {
@@ -68,6 +68,12 @@ export const ReportDto = {
       if (presignedUrlObject.mystiquePresignedUrlExpiresAt) {
         result.data.mystiquePresignedUrlExpiresAt = presignedUrlObject
           .mystiquePresignedUrlExpiresAt;
+      }
+    } else if (typeof report.getData === 'function') {
+      // Add data from report entity if available (e.g., for failed reports)
+      const reportData = report.getData();
+      if (reportData) {
+        result.data = reportData;
       }
     }
 
