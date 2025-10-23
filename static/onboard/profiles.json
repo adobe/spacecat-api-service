@@ -1,4 +1,12 @@
 {
+	"dummy":  {
+		"audits": {},
+		"imports": {},
+		"config": {
+			"scheduledRun": false
+		},
+		"integrations": {}
+	},
 	"test":  {
 		"audits": {
 			"broken-backlinks": {},
