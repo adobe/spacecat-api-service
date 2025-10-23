@@ -2466,7 +2466,16 @@ describe('Suggestions Controller', () => {
       mockSuggestion.allByOpportunityId.resetBehavior();
       mockSuggestion.allByOpportunityId.resolves(tokowakaSuggestions);
 
-      s3ClientSendStub = sandbox.stub().resolves();
+      s3ClientSendStub = sandbox.stub().callsFake((command) => {
+        // Handle GetObjectCommand (fetchConfig) - return NoSuchKey to simulate no existing config
+        if (command.constructor.name === 'GetObjectCommand') {
+          const error = new Error('NoSuchKey');
+          error.name = 'NoSuchKey';
+          return Promise.reject(error);
+        }
+        // Handle PutObjectCommand (uploadConfig) - simulate successful upload
+        return Promise.resolve();
+      });
       context.s3 = {
         s3Client: {
           send: s3ClientSendStub,
@@ -2519,8 +2528,11 @@ describe('Suggestions Controller', () => {
       expect(body.suggestions[1].uuid).to.equal(SUGGESTION_IDS[1]);
       expect(body.suggestions[1].statusCode).to.equal(200);
 
-      // Verify S3 upload was called
-      expect(s3ClientSendStub.calledOnce).to.be.true;
+      // Verify S3 was called (GET to fetch existing config, PUT to upload)
+      expect(s3ClientSendStub.callCount).to.be.at.least(1);
+      // Verify PutObjectCommand was called for upload
+      const putObjectCalls = s3ClientSendStub.getCalls().filter((call) => call.args[0].constructor.name === 'PutObjectCommand');
+      expect(putObjectCalls).to.have.length(1);
 
       // Verify suggestion data was updated with deployment timestamp
       const firstSugg = tokowakaSuggestions[0];
@@ -2842,7 +2854,10 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(207);
 
-      const uploadedConfig = JSON.parse(s3ClientSendStub.firstCall.args[0].input.Body);
+      // Find the PutObjectCommand call (second call after GetObjectCommand)
+      const putObjectCall = s3ClientSendStub.getCalls().find((call) => call.args[0].constructor.name === 'PutObjectCommand');
+      expect(putObjectCall).to.exist;
+      const uploadedConfig = JSON.parse(putObjectCall.args[0].input.Body);
 
       // Validate config structure
       expect(uploadedConfig).to.have.property('siteId', SITE_ID);
