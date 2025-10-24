@@ -1,3 +1,10 @@
+## [1.214.1](https://github.com/adobe/spacecat-api-service/compare/v1.214.0...v1.214.1) (2025-10-24)
+
+
+### Bug Fixes
+
+* make set imsorg and add site command tier sensitive ([#1392](https://github.com/adobe/spacecat-api-service/issues/1392)) ([b4a6dd6](https://github.com/adobe/spacecat-api-service/commit/b4a6dd60d205a9582f5f15fdfea364b29e584bca))
+
 # [1.214.0](https://github.com/adobe/spacecat-api-service/compare/v1.213.2...v1.214.0) (2025-10-23)
 
 
