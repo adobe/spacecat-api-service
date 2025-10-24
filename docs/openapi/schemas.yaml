@@ -61,6 +61,7 @@ AuditType:
     - 'llm-error-pages'
     - 'prerender'
     - 'summarization'
+    - 'faqs'
   example: 'cwv'
 URL:
   type: string
@@ -993,6 +994,29 @@ AuditResult:
           description: A list of top pages
           items:
             type: string
+    - type: object
+      description: The result of FAQs audit
+      properties:
+        success:
+          type: boolean
+          description: Whether the audit was successful
+        promptsByUrl:
+          type: array
+          description: A list of prompts grouped by URL and topic
+          items:
+            type: object
+            properties:
+              url:
+                type: string
+                description: The URL of the page
+              topic:
+                type: string
+                description: The topic of the prompts
+              prompts:
+                type: array
+                description: A list of prompts for this URL and topic
+                items:
+                  type: string
 AuditList:
   type: array
   items:

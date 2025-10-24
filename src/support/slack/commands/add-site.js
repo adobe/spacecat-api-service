@@ -16,7 +16,7 @@ import {
   postErrorMessage,
 } from '../../../utils/slack/base.js';
 
-import { findDeliveryType, triggerAuditForSite } from '../../utils.js';
+import { findDeliveryType } from '../../utils.js';
 
 import BaseCommand from './base.js';
 
@@ -39,19 +39,24 @@ function AddSiteCommand(context) {
   });
 
   const { dataAccess, log, env } = context;
-  const { Configuration, Site } = dataAccess;
+  const { Site } = dataAccess;
 
   /**
    * Validates input and adds the site to db
-   * Runs an initial audit for the added base URL
+   * Shows a modal to select products for entitlement
    *
    * @param {string[]} args - The arguments provided to the command ([site]).
    * @param {Object} slackContext - The Slack context object.
    * @param {Function} slackContext.say - The Slack say function.
+   * @param {string} slackContext.channelId - The Slack channel ID.
+   * @param {string} slackContext.threadTs - The thread timestamp.
+   * @param {Object} slackContext.client - The Slack client for API calls.
    * @returns {Promise} A promise that resolves when the operation is complete.
    */
   const handleExecution = async (args, slackContext) => {
-    const { say } = slackContext;
+    const {
+      say, channelId, threadTs, client,
+    } = slackContext;
 
     try {
       const [baseURLInput, deliveryTypeArg] = args;
@@ -87,25 +92,87 @@ function AddSiteCommand(context) {
         return;
       }
 
-      const auditType = 'lhs-mobile';
-
       let message = `:white_check_mark: *Successfully added new site <${baseURL}|${baseURL}>*.\n`;
       message += `:delivrer: *Delivery type:* ${deliveryType}.\n`;
       if (newSite.getIsLive()) {
         message += ':rocket: Site is set to *live* by default\n';
       }
-      const configuration = await Configuration.findLatest();
-
-      // we still check for auditConfig.auditsDisabled() here as the default audit config may change
-      if (configuration.isHandlerEnabledForSite(auditType, newSite)) {
-        await triggerAuditForSite(newSite, auditType, undefined, slackContext, context);
-        message += 'First PSI check is triggered! :adobe-run:\'\n';
-        message += `In a minute, you can run _@spacecat get site ${baseURL}_`;
-      } else {
-        message += 'Audits are disabled for this site.';
-      }
 
       await say(message);
+
+      // Show button to select products for entitlement
+      const buttonMessage = await client.chat.postMessage({
+        channel: channelId,
+        thread_ts: threadTs,
+        text: `Choose products for site ${baseURL}`,
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `*Choose Products for Entitlement*\n\nSite: \`${baseURL}\`\n\nClick below to choose products and trigger initial audit:`,
+            },
+          },
+          {
+            type: 'actions',
+            elements: [
+              {
+                type: 'button',
+                text: {
+                  type: 'plain_text',
+                  text: 'Choose Products & Continue',
+                },
+                style: 'primary',
+                action_id: 'open_add_site_modal',
+                value: JSON.stringify({
+                  baseURL,
+                  siteId: newSite.getId(),
+                  channelId,
+                  threadTs,
+                  messageTs: 'placeholder',
+                }),
+              },
+            ],
+          },
+        ],
+      });
+
+      // Update the button with the actual message timestamp
+      await client.chat.update({
+        channel: channelId,
+        ts: buttonMessage.ts,
+        text: `Choose products for site ${baseURL}`,
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `*Choose Products for Entitlement*\n\nSite: \`${baseURL}\`\n\nClick below to choose products and trigger initial audit:`,
+            },
+          },
+          {
+            type: 'actions',
+            elements: [
+              {
+                type: 'button',
+                text: {
+                  type: 'plain_text',
+                  text: 'Choose Products & Continue',
+                },
+                style: 'primary',
+                action_id: 'open_add_site_modal',
+                value: JSON.stringify({
+                  baseURL,
+                  siteId: newSite.getId(),
+                  channelId,
+                  threadTs,
+                  messageTs: buttonMessage.ts,
+                }),
+              },
+            ],
+          },
+        ],
+      });
     } catch (error) {
       log.error(error);
       await postErrorMessage(say, error);

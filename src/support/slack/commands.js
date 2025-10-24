@@ -33,6 +33,7 @@ import toggleSiteImport from './commands/toggle-site-import.js';
 import runTrafficAnalysisBackfill from './commands/run-traffic-analysis-backfill.js';
 import backfillLlmo from './commands/backfill-llmo.js';
 import getPromptUsage from './commands/get-prompt-usage.js';
+import getLlmoConfigSummary from './commands/get-llmo-config-summary.js';
 
 /**
  * Returns all commands.
@@ -64,4 +65,5 @@ export default (context) => [
   toggleSiteImport(context),
   backfillLlmo(context),
   getPromptUsage(context),
+  getLlmoConfigSummary(context),
 ];
