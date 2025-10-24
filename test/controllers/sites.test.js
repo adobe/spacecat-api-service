@@ -283,7 +283,6 @@ describe('Sites Controller', () => {
     const response = await sitesController.updateSite({
       params: { siteId: SITE_IDS[0] },
       data: {
-        organizationId: 'b2c41adf-49c9-4d03-a84f-694491368723',
         isLive: false,
         deliveryType: 'other',
         authoringType: 'cs',
@@ -325,7 +324,6 @@ describe('Sites Controller', () => {
     const response = await sitesController.updateSite({
       params: { siteId: SITE_IDS[0] },
       data: {
-        organizationId: 'b2c41adf-49c9-4d03-a84f-694491368723',
         isLive: false,
         deliveryType: 'other',
         authoringType: 'cs',
@@ -360,6 +358,24 @@ describe('Sites Controller', () => {
       authorURL: 'https://author-p12652-e16854-cmstg.adobeaemcloud.com/',
       siteId: '1234',
     });
+  });
+
+  it('returns forbidden when trying to update organizationId', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        organizationId: 'b2c41adf-49c9-4d03-a84f-694491368723',
+        isLive: false,
+      },
+      ...defaultAuthAttributes,
+    });
+    const error = await response.json();
+
+    expect(site.save).to.have.not.been.called;
+    expect(response.status).to.equal(403);
+    expect(error).to.have.property('message', 'Updating organization ID is not allowed');
   });
 
   it('returns bad request when updating a site if id not provided', async () => {

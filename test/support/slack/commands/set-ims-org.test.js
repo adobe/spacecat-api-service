@@ -47,7 +47,17 @@ describe('SetSiteOrganizationCommand', () => {
       imsClient: imsClientStub,
       log: console,
     };
-    slackContext = { say: sinon.spy() };
+    slackContext = {
+      say: sinon.spy(),
+      channelId: 'C123456',
+      threadTs: '1234567890.123456',
+      client: {
+        chat: {
+          postMessage: sinon.stub().resolves({ ts: '1234567890.123457' }),
+          update: sinon.stub().resolves(),
+        },
+      },
+    };
   });
 
   describe('Initialization and BaseCommand Integration', () => {
@@ -95,87 +105,79 @@ describe('SetSiteOrganizationCommand', () => {
       expect(slackContext.say.called).to.be.true;
     });
 
-    it('updates site with existing Spacecat org if found', async () => {
+    it('shows button to select products when site is found', async () => {
       const mockSite = {
-        setOrganizationId: sinon.stub(),
-        save: sinon.stub().resolves(),
+        getId: () => 'site123',
       };
       siteStub.findByBaseURL.resolves(mockSite);
-
-      const mockOrg = {
-        getId: () => 'existingOrgId',
-      };
-      organizationStub.findByImsOrgId.resolves(mockOrg);
 
       const args = ['example.com', 'existingImsOrgId'];
       await command.handleExecution(args, slackContext);
 
       expect(siteStub.findByBaseURL.calledWith('https://example.com')).to.be.true;
-      expect(organizationStub.findByImsOrgId.calledWith('existingImsOrgId')).to.be.true;
-      expect(mockSite.setOrganizationId.calledWith('existingOrgId')).to.be.true;
-      expect(mockSite.save.calledOnce).to.be.true;
-      expect(slackContext.say.calledWithMatch(/Successfully updated site/)).to.be.true;
+      expect(slackContext.client.chat.postMessage.calledOnce).to.be.true;
+
+      const postMessageCall = slackContext.client.chat.postMessage.getCall(0);
+      expect(postMessageCall.args[0].channel).to.equal('C123456');
+      expect(postMessageCall.args[0].text).to.include('Ready to set IMS Org');
+      expect(postMessageCall.args[0].blocks).to.be.an('array');
+      expect(postMessageCall.args[0].blocks[1].elements[0].action_id).to.equal('open_set_ims_org_modal');
+
+      // Verify the button updates with the correct messageTs
+      expect(slackContext.client.chat.update.calledOnce).to.be.true;
     });
 
-    it('creates a new Spacecat org if none is found in DB and IMS org is found via imsClient', async () => {
+    it('passes correct data in button value including messageTs', async () => {
       const mockSite = {
-        setOrganizationId: sinon.stub(),
-        save: sinon.stub().resolves(),
+        getId: () => 'site456',
       };
       siteStub.findByBaseURL.resolves(mockSite);
-      organizationStub.findByImsOrgId.resolves(null);
-      imsClientStub.getImsOrganizationDetails.resolves({ orgName: 'Mock IMS Org' });
-
-      const mockNewOrg = {
-        getId: () => 'newOrgId',
-        save: sinon.stub().resolves(),
-      };
-      organizationStub.create.returns(mockNewOrg);
 
       const args = ['example.com', 'newImsOrgId'];
       await command.handleExecution(args, slackContext);
 
       expect(siteStub.findByBaseURL.calledWith('https://example.com')).to.be.true;
-      expect(organizationStub.findByImsOrgId.calledWith('newImsOrgId')).to.be.true;
-      expect(imsClientStub.getImsOrganizationDetails.calledWith('newImsOrgId')).to.be.true;
-      expect(organizationStub.create.calledWith({
-        name: 'Mock IMS Org',
-        imsOrgId: 'newImsOrgId',
-      })).to.be.true;
-      expect(mockNewOrg.save.calledOnce).to.be.true;
-      expect(mockSite.setOrganizationId.calledWith('newOrgId')).to.be.true;
-      expect(mockSite.save.calledOnce).to.be.true;
-      expect(slackContext.say.calledWithMatch(/Successfully \*created\* a new Spacecat org/)).to.be.true;
+
+      // Check the update call contains the correct button value with messageTs
+      const updateCall = slackContext.client.chat.update.getCall(0);
+      const buttonValue = JSON.parse(updateCall.args[0].blocks[1].elements[0].value);
+
+      expect(buttonValue.baseURL).to.equal('https://example.com');
+      expect(buttonValue.imsOrgId).to.equal('newImsOrgId');
+      expect(buttonValue.channelId).to.equal('C123456');
+      expect(buttonValue.threadTs).to.equal('1234567890.123456');
+      expect(buttonValue.messageTs).to.equal('1234567890.123457');
     });
 
-    it('informs user if IMS org cannot be found via imsClient', async () => {
-      const mockSite = {};
+    it('shows button with correct action_id for modal', async () => {
+      const mockSite = {
+        getId: () => 'site789',
+      };
       siteStub.findByBaseURL.resolves(mockSite);
-
-      organizationStub.findByImsOrgId.resolves(null);
-      imsClientStub.getImsOrganizationDetails.resolves(undefined);
 
       const args = ['example.com', 'unknownImsOrgId'];
       await command.handleExecution(args, slackContext);
 
-      expect(imsClientStub.getImsOrganizationDetails.calledWith('unknownImsOrgId')).to.be.true;
-      expect(slackContext.say.calledWithMatch(/Could not find an IMS org/)).to.be.true;
-      expect(organizationStub.create.notCalled).to.be.true;
+      const updateCall = slackContext.client.chat.update.getCall(0);
+      const actionId = updateCall.args[0].blocks[1].elements[0].action_id;
+
+      expect(actionId).to.equal('open_set_ims_org_modal');
+      expect(slackContext.client.chat.postMessage.calledOnce).to.be.true;
     });
 
-    it('handles IMS client errors gracefully', async () => {
-      const mockSite = {};
+    it('shows button text "Choose Products & Continue"', async () => {
+      const mockSite = {
+        getId: () => 'site999',
+      };
       siteStub.findByBaseURL.resolves(mockSite);
-
-      organizationStub.findByImsOrgId.resolves(null);
-      imsClientStub.getImsOrganizationDetails.rejects(new Error('Test IMS Error'));
 
       const args = ['example.com', 'badImsOrgId'];
       await command.handleExecution(args, slackContext);
 
-      expect(imsClientStub.getImsOrganizationDetails.calledWith('badImsOrgId')).to.be.true;
-      expect(slackContext.say.calledWithMatch(/Could not find an IMS org with the ID \*badImsOrgId\*/)).to.be.true;
-      expect(organizationStub.create.notCalled).to.be.true;
+      const postMessageCall = slackContext.client.chat.postMessage.getCall(0);
+      const buttonText = postMessageCall.args[0].blocks[1].elements[0].text.text;
+
+      expect(buttonText).to.equal('Choose Products & Continue');
     });
 
     it('handles unknown errors and calls postErrorMessage', async () => {
