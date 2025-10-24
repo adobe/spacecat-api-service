@@ -1,0 +1,223 @@
+/*
+ * Copyright 2024 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
+import TierClient from '@adobe/spacecat-shared-tier-client';
+
+import { triggerAuditForSite } from '../../utils.js';
+
+const MODAL_CALLBACK_ID = 'add_site_modal';
+const PRODUCTS_BLOCK_ID = 'products_block';
+const ASO_ACTION_ID = 'aso_checkbox';
+const LLMO_ACTION_ID = 'llmo_checkbox';
+
+/**
+ * Opens the product selection modal for add-site command.
+ * This is triggered by a button action.
+ */
+export function openAddSiteModal(lambdaContext) {
+  const { log } = lambdaContext;
+
+  return async ({ ack, body, client }) => {
+    await ack();
+
+    const {
+      value,
+    } = body.actions[0];
+    const {
+      baseURL, siteId, channelId, threadTs, messageTs,
+    } = JSON.parse(value);
+
+    const modalView = {
+      type: 'modal',
+      callback_id: MODAL_CALLBACK_ID,
+      title: {
+        type: 'plain_text',
+        text: 'Choose Products',
+      },
+      submit: {
+        type: 'plain_text',
+        text: 'Submit',
+      },
+      close: {
+        type: 'plain_text',
+        text: 'Cancel',
+      },
+      private_metadata: JSON.stringify({
+        baseURL, siteId, channelId, threadTs, messageTs,
+      }),
+      blocks: [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `*Choose products to ensure entitlement*\n\nSite: \`${baseURL}\``,
+          },
+        },
+        {
+          type: 'divider',
+        },
+        {
+          type: 'actions',
+          block_id: PRODUCTS_BLOCK_ID,
+          elements: [
+            {
+              type: 'checkboxes',
+              action_id: ASO_ACTION_ID,
+              options: [
+                {
+                  text: {
+                    type: 'plain_text',
+                    text: EntitlementModel.PRODUCT_CODES.ASO,
+                  },
+                  value: EntitlementModel.PRODUCT_CODES.ASO,
+                },
+              ],
+            },
+            {
+              type: 'checkboxes',
+              action_id: LLMO_ACTION_ID,
+              options: [
+                {
+                  text: {
+                    type: 'plain_text',
+                    text: EntitlementModel.PRODUCT_CODES.LLMO,
+                  },
+                  value: EntitlementModel.PRODUCT_CODES.LLMO,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    try {
+      await client.views.open({
+        trigger_id: body.trigger_id,
+        view: modalView,
+      });
+    } catch (error) {
+      log.error('Error opening modal:', error);
+    }
+  };
+}
+
+/**
+ * Handles the modal submission for add-site.
+ */
+export function addSiteModal(lambdaContext) {
+  const {
+    dataAccess, log,
+  } = lambdaContext;
+  const { Site, Configuration } = dataAccess;
+
+  return async ({ ack, body, client }) => {
+    try {
+      const {
+        view,
+      } = body;
+      const {
+        private_metadata: privateMetadata, state,
+      } = view;
+      const {
+        baseURL, siteId, channelId, threadTs, messageTs,
+      } = JSON.parse(privateMetadata);
+
+      // Extract selected products from checkboxes
+      const values = state.values[PRODUCTS_BLOCK_ID];
+      const selectedProducts = [];
+
+      if (values[ASO_ACTION_ID]?.selected_options?.length > 0) {
+        selectedProducts.push(EntitlementModel.PRODUCT_CODES.ASO);
+      }
+      if (values[LLMO_ACTION_ID]?.selected_options?.length > 0) {
+        selectedProducts.push(EntitlementModel.PRODUCT_CODES.LLMO);
+      }
+
+      // Create a say function to post back to the channel
+      const say = async (message) => {
+        await client.chat.postMessage({
+          channel: channelId,
+          thread_ts: threadTs,
+          text: message,
+        });
+      };
+
+      // Validate that at least one product is selected
+      if (selectedProducts.length === 0) {
+        await ack();
+        await say(':warning: Please select at least one product.');
+        return;
+      }
+
+      await ack();
+
+      // Find the site
+      const site = await Site.findById(siteId);
+      if (!site) {
+        log.error(`Site not found: ${siteId}`);
+        await say(`:x: Site not found: ${baseURL}`);
+        return;
+      }
+
+      // Remove the button by updating the message
+      await client.chat.update({
+        channel: channelId,
+        ts: messageTs,
+        text: `Processing products for site ${baseURL}`,
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `*Choose Products for Entitlement*\n\nSite: \`${baseURL}\`\n\n_Processing..._`,
+            },
+          },
+        ],
+      });
+
+      // Note: selectedProducts.length is always > 0 due to validation
+      const productsMessage = `\nSelected products for entitlement: *${selectedProducts.join(', ')}*`;
+      await say(`:white_check_mark: Products selected for site <${baseURL}|${baseURL}>${productsMessage}`);
+
+      // ensure entitlements and enrollments for selected products
+      /* eslint-disable no-await-in-loop */
+      for (const product of selectedProducts) {
+        const tierClient = await TierClient.createForSite(lambdaContext, site, product);
+        const { entitlement, siteEnrollment } = await tierClient.createEntitlement(
+          EntitlementModel.TIERS.FREE_TRIAL,
+        );
+        const message = `:white_check_mark: Ensured ${product} entitlement ${entitlement.getId()} `
+          + `(${EntitlementModel.TIERS.FREE_TRIAL}) and enrollment ${siteEnrollment.getId()} for site ${site.getId()}`;
+        await say(message);
+      }
+      /* eslint-enable no-await-in-loop */
+
+      // Trigger initial audit
+      const auditType = 'lhs-mobile';
+      const configuration = await Configuration.findLatest();
+
+      if (configuration.isHandlerEnabledForSite(auditType, site)) {
+        const slackContext = {
+          say, channelId, threadTs, client,
+        };
+        await triggerAuditForSite(site, auditType, undefined, slackContext, lambdaContext);
+        await say('First PSI check is triggered! :adobe-run:\'\n'
+          + `In a minute, you can run _@spacecat get site ${baseURL}_`);
+      } else {
+        await say('Audits are disabled for this site.');
+      }
+    } catch (error) {
+      log.error('Error handling modal submission:', error);
+    }
+  };
+}
