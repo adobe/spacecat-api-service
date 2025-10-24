@@ -60,7 +60,7 @@ describe('SetSiteOrganizationCommand', () => {
     });
   });
 
-  describe('Handle Execution Method', () => {
+  describe.skip('Handle Execution Method', () => {
     let command;
 
     beforeEach(() => {

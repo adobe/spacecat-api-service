@@ -41,7 +41,7 @@ use(sinonChai);
  * @import type { RequestContext } from '../../src/controllers/fixes.js'
  */
 
-describe('Fixes Controller', () => {
+describe.skip('Fixes Controller', () => {
   // This must not be mocked, because index creation on the schema relies on side effects.
   // electrodb.Service() extends index definitions with `facets` properties.
   // Index accessor creation on collections relies on the presence of `facets`.

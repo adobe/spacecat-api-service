@@ -25,6 +25,7 @@ import {
 import { onboardSiteModal, startOnboarding } from './onboard-modal.js';
 import { preflightConfigModal } from './preflight-config-modal.js';
 import openPreflightConfig from './open-preflight-config.js';
+import { openSetImsOrgModal, setImsOrgModal } from './set-ims-org-modal.js';
 
 const actions = {
   approveFriendsFamily,
@@ -35,10 +36,12 @@ const actions = {
   onboardSiteModal,
   onboardLLMOModal,
   updateIMSOrgModal,
+  setImsOrgModal,
   start_onboarding: startOnboarding,
   start_llmo_onboarding: startLLMOOnboarding,
   preflight_config_modal: preflightConfigModal,
   open_preflight_config: openPreflightConfig,
+  open_set_ims_org_modal: openSetImsOrgModal,
   add_entitlements_action: addEntitlementsAction,
   update_org_action: updateOrgAction,
 };

@@ -35,8 +35,8 @@ function SetSiteOrganizationCommand(context) {
     usageText: `${PHRASES[0]} {site} {imsOrgId}`,
   });
 
-  const { dataAccess, log, imsClient } = context;
-  const { Site, Organization } = dataAccess;
+  const { dataAccess, log } = context;
+  const { Site } = dataAccess;
 
   /**
    * Command execution logic:
@@ -53,7 +53,9 @@ function SetSiteOrganizationCommand(context) {
    * @param {Function} slackContext.say - The Slack 'say' function to post responses.
    */
   const handleExecution = async (args, slackContext) => {
-    const { say } = slackContext;
+    const {
+      say, channelId, threadTs, client,
+    } = slackContext;
 
     try {
       const [baseURLInput, userImsOrgId] = args;
@@ -75,49 +77,38 @@ function SetSiteOrganizationCommand(context) {
         return;
       }
 
-      let spaceCatOrg = await Organization.findByImsOrgId(userImsOrgId);
-
-      // if not found, try retrieving from IMS, then create a new spacecat org
-      if (!spaceCatOrg) {
-        let imsOrgDetails;
-        try {
-          imsOrgDetails = await imsClient.getImsOrganizationDetails(userImsOrgId);
-        } catch (error) {
-          log.error(`Error retrieving IMS Org details: ${error.message}`);
-          await say(`:x: Could not find an IMS org with the ID *${userImsOrgId}*.`);
-          return;
-        }
-
-        if (!imsOrgDetails) {
-          await say(`:x: Could not find an IMS org with the ID *${userImsOrgId}*.`);
-          return;
-        }
-
-        // create a new spacecat org
-        spaceCatOrg = await Organization.create({
-          name: imsOrgDetails.orgName,
-          imsOrgId: userImsOrgId,
-        });
-        await spaceCatOrg.save();
-
-        site.setOrganizationId(spaceCatOrg.getId());
-        await site.save();
-
-        // inform user that we created the org and set it
-        await say(
-          `:white_check_mark: Successfully *created* a new Spacecat org (Name: *${imsOrgDetails.orgName}*) `
-          + `and set it for site <${baseURL}|${baseURL}>!`,
-        );
-      } else {
-        // we already have a matching spacecat org
-        site.setOrganizationId(spaceCatOrg.getId());
-        await site.save();
-
-        await say(
-          `:white_check_mark: Successfully updated site <${baseURL}|${baseURL}> to use Spacecat org `
-          + `with imsOrgId: *${userImsOrgId}*.`,
-        );
-      }
+      // Show button to select products
+      await client.chat.postMessage({
+        channel: channelId,
+        thread_ts: threadTs,
+        text: `Ready to set IMS Org for site ${baseURL}`,
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `*Set IMS Organization*\n\nSite: \`${baseURL}\`\nIMS Org ID: \`${userImsOrgId}\`\n\nClick below to choose products for entitlement:`,
+            },
+          },
+          {
+            type: 'actions',
+            elements: [
+              {
+                type: 'button',
+                text: {
+                  type: 'plain_text',
+                  text: 'Choose Products & Continue',
+                },
+                style: 'primary',
+                action_id: 'open_set_ims_org_modal',
+                value: JSON.stringify({
+                  baseURL, imsOrgId: userImsOrgId, channelId, threadTs,
+                }),
+              },
+            ],
+          },
+        ],
+      });
     } catch (error) {
       log.error(error);
       await postErrorMessage(say, error);
