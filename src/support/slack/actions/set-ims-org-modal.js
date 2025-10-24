@@ -119,7 +119,7 @@ export function setImsOrgModal(lambdaContext) {
   return async ({ ack, body, client }) => {
     try {
       const {
-        view, user,
+        view,
       } = body;
       const {
         private_metadata: privateMetadata, state,
@@ -139,22 +139,6 @@ export function setImsOrgModal(lambdaContext) {
         selectedProducts.push(EntitlementModel.PRODUCT_CODES.LLMO);
       }
 
-      // Validate that at least one product is selected
-      if (selectedProducts.length === 0) {
-        await ack({
-          response_action: 'errors',
-          errors: {
-            [PRODUCTS_BLOCK_ID]: 'Please select at least one product',
-          },
-        });
-        return;
-      }
-
-      await ack();
-
-      // Log selected products
-      log.info(`User ${user.id} selected products: ${selectedProducts.join(', ')} for site ${baseURL} with IMS Org ID ${userImsOrgId}`);
-
       // Create a say function to post back to the channel
       const say = async (message) => {
         await client.chat.postMessage({
@@ -163,6 +147,15 @@ export function setImsOrgModal(lambdaContext) {
           text: message,
         });
       };
+
+      // Validate that at least one product is selected
+      if (selectedProducts.length === 0) {
+        await ack();
+        await say(':warning: Please select at least one product.');
+        return;
+      }
+
+      await ack();
 
       // Find the site
       const site = await Site.findByBaseURL(baseURL);

@@ -209,9 +209,8 @@ describe('SetImsOrgModal', () => {
       await handler({ ack, body, client });
 
       expect(ack.calledOnce).to.be.true;
-      const ackCall = ack.getCall(0).args[0];
-      expect(ackCall.response_action).to.equal('errors');
-      expect(ackCall.errors.products_block).to.equal('Please select at least one product');
+      expect(client.chat.postMessage.calledOnce).to.be.true;
+      expect(client.chat.postMessage.getCall(0).args[0].text).to.include('Please select at least one product');
     });
 
     it('creates new organization and entitlements when org not found', async () => {
