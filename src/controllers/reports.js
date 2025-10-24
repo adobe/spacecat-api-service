@@ -133,6 +133,22 @@ async function deleteS3Object(s3, bucket, key) {
   return s3Client.send(command);
 }
 
+async function getS3Object(s3, bucket, key) {
+  const {
+    s3Client,
+    GetObjectCommand,
+  } = s3;
+
+  const command = new GetObjectCommand({
+    Bucket: bucket,
+    Key: key,
+  });
+
+  const response = await s3Client.send(command);
+  const body = await response.Body.transformToString();
+  return JSON.parse(body);
+}
+
 async function uploadS3Object(s3, bucket, key, data) {
   const {
     s3Client,
@@ -620,11 +636,24 @@ function ReportsController(ctx, log, env) {
         return badRequest('Report does not have a valid storage path');
       }
 
-      // Upload the new enhanced report data to S3
+      // Fetch existing enhanced report data from S3 and merge with patch data
       const mystiqueReportKey = `${report.getEnhancedStoragePath()}report.json`;
+      let mergedData;
 
       try {
-        await uploadS3Object(s3, s3MystiqueBucket, mystiqueReportKey, data);
+        // Fetch existing report data
+        const existingData = await getS3Object(s3, s3MystiqueBucket, mystiqueReportKey);
+
+        // Shallow merge existing data with patch data (patch data takes precedence)
+        mergedData = { ...existingData, ...data };
+        log.info(`Merging patch data for report ${reportId}. Existing keys: ${Object.keys(existingData).length}, Patch keys: ${Object.keys(data).length}`);
+      } catch (fetchError) {
+        log.error(`Failed to fetch existing enhanced report from S3 for report ${reportId}: ${fetchError.message}`);
+        return internalServerError(`Failed to fetch existing report data: ${fetchError.message}`);
+      }
+
+      try {
+        await uploadS3Object(s3, s3MystiqueBucket, mystiqueReportKey, mergedData);
       } catch (s3Error) {
         log.error(`Failed to upload enhanced report to S3 for report ${reportId}: ${s3Error.message}`);
         return internalServerError(`Failed to update report in S3: ${s3Error.message}`);
