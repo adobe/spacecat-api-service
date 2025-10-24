@@ -16,7 +16,7 @@ import {
   updateMessageToProcessing,
   createEntitlementsForProducts,
   postEntitlementMessages,
-} from './modal-utils.js';
+} from './entitlement-modal-utils.js';
 
 const MODAL_CALLBACK_ID = 'set_ims_org_modal';
 

@@ -44,11 +44,11 @@ describe('AddSiteModal', () => {
     mockPostEntitlementMessages = sinon.stub();
 
     const module = await esmock('../../../../src/support/slack/actions/add-site-modal.js', {
-      '../../../../src/support/slack/actions/modal-utils.js': {
-        createProductSelectionModal: await import('../../../../src/support/slack/actions/modal-utils.js').then((m) => m.createProductSelectionModal),
-        extractSelectedProducts: await import('../../../../src/support/slack/actions/modal-utils.js').then((m) => m.extractSelectedProducts),
-        createSayFunction: await import('../../../../src/support/slack/actions/modal-utils.js').then((m) => m.createSayFunction),
-        updateMessageToProcessing: await import('../../../../src/support/slack/actions/modal-utils.js').then((m) => m.updateMessageToProcessing),
+      '../../../../src/support/slack/actions/entitlement-modal-utils.js': {
+        createProductSelectionModal: await import('../../../../src/support/slack/actions/entitlement-modal-utils.js').then((m) => m.createProductSelectionModal),
+        extractSelectedProducts: await import('../../../../src/support/slack/actions/entitlement-modal-utils.js').then((m) => m.extractSelectedProducts),
+        createSayFunction: await import('../../../../src/support/slack/actions/entitlement-modal-utils.js').then((m) => m.createSayFunction),
+        updateMessageToProcessing: await import('../../../../src/support/slack/actions/entitlement-modal-utils.js').then((m) => m.updateMessageToProcessing),
         createEntitlementsForProducts: mockCreateEntitlementsForProducts,
         postEntitlementMessages: mockPostEntitlementMessages,
       },

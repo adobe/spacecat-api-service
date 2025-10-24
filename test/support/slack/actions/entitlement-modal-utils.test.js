@@ -28,7 +28,7 @@ describe('Modal Utils', () => {
       createForSite: sinon.stub(),
     };
 
-    modalUtils = await esmock('../../../../src/support/slack/actions/modal-utils.js', {
+    modalUtils = await esmock('../../../../src/support/slack/actions/entitlement-modal-utils.js', {
       '@adobe/spacecat-shared-tier-client': {
         default: mockTierClient,
       },

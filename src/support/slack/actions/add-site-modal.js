@@ -17,7 +17,7 @@ import {
   updateMessageToProcessing,
   createEntitlementsForProducts,
   postEntitlementMessages,
-} from './modal-utils.js';
+} from './entitlement-modal-utils.js';
 
 const MODAL_CALLBACK_ID = 'add_site_modal';
 
