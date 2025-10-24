@@ -38,7 +38,7 @@ function AddRepoCommand(context) {
     name: 'Add GitHub Repo',
     description: 'Adds a Github repository to previously added site.',
     phrases: PHRASES,
-    usageText: `${PHRASES.join(' or ')} {site} {githubRepoURL}`,
+    usageText: `${PHRASES.join(' or ')} {site} {githubRepoURL} [branch]`,
   });
 
   const { dataAccess, log } = context;
@@ -68,6 +68,21 @@ function AddRepoCommand(context) {
     }
   }
 
+  async function isOnboardedWithAemy(owner, repo, branch) {
+    const AEMY_ENDPOINT = `https://ec-xp-fapp-coordinator.azurewebsites.net/api/fn-ghapp/functions/get_installation_token/${owner}/${repo}/${branch}`;
+    try {
+      const response = await fetch(AEMY_ENDPOINT, { headers: { 'x-api-key': process.env.AEMY_API_KEY } });
+      if (response.ok) {
+        const data = await response.json();
+        return data.token !== null;
+      } else {
+        throw new Error('Failed to check if repository is onboarded with Aemy');
+      }
+    } catch (error) {
+      throw new Error(`Failed to check if repository is onboarded with Aemy: ${error.message}`);
+    }
+  }
+
   /**
    * Execute function for AddRepoCommand. This function validates the input, fetches the repository
    * information from the GitHub API, and saves it as a site in the database.
@@ -81,7 +96,7 @@ function AddRepoCommand(context) {
     const { say } = slackContext;
 
     try {
-      const [baseURLInput, repoUrlInput] = args;
+      const [baseURLInput, repoUrlInput, branchInput] = args;
 
       const baseURL = extractURLFromSlackInput(baseURLInput);
       let repoUrl = extractURLFromSlackInput(repoUrlInput, false, false);
@@ -106,22 +121,38 @@ function AddRepoCommand(context) {
 
       const repoInfo = await fetchRepoInfo(repoUrl);
 
+      let owner;
+      let repoName;
+      let branch;
+
       if (repoInfo === null) {
-        await say(`:warning: The GitHub repository '${repoUrl}' could not be found (private repo?).`);
-        return;
+        [owner, repoName] = repoUrl.split('github.com/')[1].split('/');
+        branch = branchInput || 'main';
+
+        await say(`:warning: GitHub API returned 404 for ${repoUrl}. Adding as private repo with branch: ${branch}`);
+      } else {
+        if (repoInfo.archived) {
+          await say(`:warning: The GitHub repository '${repoUrl}' is archived. Please unarchive it before adding it to a site.`);
+          return;
+        }
+
+        owner = repoInfo.owner.login;
+        repoName = repoInfo.name;
+        branch = branchInput || repoInfo.default_branch;
       }
 
-      if (repoInfo.archived) {
-        await say(`:warning: The GitHub repository '${repoUrl}' is archived. Please unarchive it before adding it to a site.`);
+      const isOnboarded = await isOnboardedWithAemy(owner, repoName, branch);
+      if (!isOnboarded) {
+        await say(`:warning: The repository '${repoUrl}' is not onboarded with Aemy. Please onboard it with Aemy before adding it to a site.`);
         return;
       }
 
       site.setGitHubURL(repoUrl);
       const codeConfig = {
         type: 'github',
-        owner: repoInfo.owner.login,
-        repo: repoInfo.name,
-        ref: repoInfo.default_branch,
+        owner,
+        repo: repoName,
+        ref: branch,
         url: repoUrl,
       };
       site.setCode(codeConfig);
