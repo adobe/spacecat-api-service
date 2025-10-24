@@ -110,7 +110,9 @@ export function setImsOrgModal(lambdaContext) {
 
   return async ({ ack, body, client }) => {
     try {
+      log.info('setImsOrgModal handler called');
       await ack();
+      log.info('Modal submission acknowledged');
 
       const {
         view, user,
@@ -118,6 +120,7 @@ export function setImsOrgModal(lambdaContext) {
       const {
         private_metadata: privateMetadata, state,
       } = view;
+      log.info(`Private metadata: ${privateMetadata}`);
       const {
         baseURL, imsOrgId: userImsOrgId, channelId, threadTs,
       } = JSON.parse(privateMetadata);
@@ -214,6 +217,8 @@ export function setImsOrgModal(lambdaContext) {
       }
     } catch (error) {
       log.error('Error handling modal submission:', error);
+      log.error('Error stack:', error.stack);
+      log.error('Error details:', JSON.stringify(error, null, 2));
     }
   };
 }
