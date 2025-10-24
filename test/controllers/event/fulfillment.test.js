@@ -155,11 +155,11 @@ describe('Fulfillment Controller', () => {
     expect(results[0].status).to.equal('accepted');
   });
 
-  it('accepts valid event types (llmo-optimizer)', async () => {
+  it('accepts valid event types (llm-optimizer)', async () => {
     const eventArray = localFileToObject('sample-hoolihan-event.json');
     const response = await fulfillmentController.processFulfillmentEvents({
       data: eventArray,
-      params: { eventType: 'llmo-optimizer' },
+      params: { eventType: 'llm-optimizer' },
     });
     expect(response.status).to.equal(202);
     const results = await response.json();
