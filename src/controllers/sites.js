@@ -358,8 +358,7 @@ function SitesController(ctx, log, env) {
 
     if (hasText(requestBody.organizationId)
       && requestBody.organizationId !== site.getOrganizationId()) {
-      site.setOrganizationId(requestBody.organizationId);
-      updates = true;
+      return forbidden('Updating organization ID is not allowed');
     }
 
     if (requestBody.name !== site.getName()) {
