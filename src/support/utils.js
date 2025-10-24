@@ -926,7 +926,7 @@ export const onboardSingleSite = async (
     }
 
     // Resolve canonical URL for the site from the base URL
-    let resolvedUrl = await resolveCanonicalUrl(baseURL);
+    let resolvedUrl = await resolveCanonicalUrl(baseURL, 'HEAD', log);
     if (resolvedUrl === null) {
       log.warn(`Unable to resolve canonical URL for site ${siteID}, using base URL: ${baseURL}`);
       resolvedUrl = baseURL;
@@ -1029,6 +1029,7 @@ export const onboardSingleSite = async (
       organizationId,
       taskContext: {
         auditTypes,
+        onboardStartTime: Date.now(), // Track exact onboarding start time for log search
         slackContext: {
           channelId: slackContext.channelId,
           threadTs: slackContext.threadTs,
