@@ -77,8 +77,8 @@ function SetSiteOrganizationCommand(context) {
         return;
       }
 
-      // Show button to select products
-      await client.chat.postMessage({
+      // Show button to select products - first post the message
+      const buttonMessage = await client.chat.postMessage({
         channel: channelId,
         thread_ts: threadTs,
         text: `Ready to set IMS Org for site ${baseURL}`,
@@ -102,7 +102,48 @@ function SetSiteOrganizationCommand(context) {
                 style: 'primary',
                 action_id: 'open_set_ims_org_modal',
                 value: JSON.stringify({
-                  baseURL, imsOrgId: userImsOrgId, channelId, threadTs,
+                  baseURL,
+                  imsOrgId: userImsOrgId,
+                  channelId,
+                  threadTs,
+                  messageTs: 'placeholder',
+                }),
+              },
+            ],
+          },
+        ],
+      });
+
+      // Update the button with the actual message timestamp
+      await client.chat.update({
+        channel: channelId,
+        ts: buttonMessage.ts,
+        text: `Ready to set IMS Org for site ${baseURL}`,
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `*Set IMS Organization*\n\nSite: \`${baseURL}\`\nIMS Org ID: \`${userImsOrgId}\`\n\nClick below to choose products for entitlement:`,
+            },
+          },
+          {
+            type: 'actions',
+            elements: [
+              {
+                type: 'button',
+                text: {
+                  type: 'plain_text',
+                  text: 'Choose Products & Continue',
+                },
+                style: 'primary',
+                action_id: 'open_set_ims_org_modal',
+                value: JSON.stringify({
+                  baseURL,
+                  imsOrgId: userImsOrgId,
+                  channelId,
+                  threadTs,
+                  messageTs: buttonMessage.ts,
                 }),
               },
             ],

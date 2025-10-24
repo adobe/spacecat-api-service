@@ -9,6 +9,8 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
+import TierClient from '@adobe/spacecat-shared-tier-client';
 
 const MODAL_CALLBACK_ID = 'set_ims_org_modal';
 const PRODUCTS_BLOCK_ID = 'products_block';
@@ -19,7 +21,9 @@ const LLMO_ACTION_ID = 'llmo_checkbox';
  * Opens the product selection modal for set-ims-org command.
  * This is triggered by a button action.
  */
-export function openSetImsOrgModal() {
+export function openSetImsOrgModal(lambdaContext) {
+  const { log } = lambdaContext;
+
   return async ({ ack, body, client }) => {
     await ack();
 
@@ -27,7 +31,7 @@ export function openSetImsOrgModal() {
       value,
     } = body.actions[0];
     const {
-      baseURL, imsOrgId, channelId, threadTs,
+      baseURL, imsOrgId, channelId, threadTs, messageTs,
     } = JSON.parse(value);
 
     const modalView = {
@@ -46,7 +50,7 @@ export function openSetImsOrgModal() {
         text: 'Cancel',
       },
       private_metadata: JSON.stringify({
-        baseURL, imsOrgId, channelId, threadTs,
+        baseURL, imsOrgId, channelId, threadTs, messageTs,
       }),
       blocks: [
         {
@@ -70,9 +74,9 @@ export function openSetImsOrgModal() {
                 {
                   text: {
                     type: 'plain_text',
-                    text: 'ASO (Automated Site Optimization)',
+                    text: EntitlementModel.PRODUCT_CODES.ASO,
                   },
-                  value: 'ASO',
+                  value: EntitlementModel.PRODUCT_CODES.ASO,
                 },
               ],
             },
@@ -83,9 +87,9 @@ export function openSetImsOrgModal() {
                 {
                   text: {
                     type: 'plain_text',
-                    text: 'LLMO (Large Language Model Optimization)',
+                    text: EntitlementModel.PRODUCT_CODES.LLMO,
                   },
-                  value: 'LLMO',
+                  value: EntitlementModel.PRODUCT_CODES.LLMO,
                 },
               ],
             },
@@ -94,10 +98,14 @@ export function openSetImsOrgModal() {
       ],
     };
 
-    await client.views.open({
-      trigger_id: body.trigger_id,
-      view: modalView,
-    });
+    try {
+      await client.views.open({
+        trigger_id: body.trigger_id,
+        view: modalView,
+      });
+    } catch (error) {
+      log.error('Error opening modal:', error);
+    }
   };
 }
 
@@ -110,19 +118,14 @@ export function setImsOrgModal(lambdaContext) {
 
   return async ({ ack, body, client }) => {
     try {
-      log.info('setImsOrgModal handler called');
-      await ack();
-      log.info('Modal submission acknowledged');
-
       const {
         view, user,
       } = body;
       const {
         private_metadata: privateMetadata, state,
       } = view;
-      log.info(`Private metadata: ${privateMetadata}`);
       const {
-        baseURL, imsOrgId: userImsOrgId, channelId, threadTs,
+        baseURL, imsOrgId: userImsOrgId, channelId, threadTs, messageTs,
       } = JSON.parse(privateMetadata);
 
       // Extract selected products from checkboxes
@@ -130,11 +133,24 @@ export function setImsOrgModal(lambdaContext) {
       const selectedProducts = [];
 
       if (values[ASO_ACTION_ID]?.selected_options?.length > 0) {
-        selectedProducts.push('ASO');
+        selectedProducts.push(EntitlementModel.PRODUCT_CODES.ASO);
       }
       if (values[LLMO_ACTION_ID]?.selected_options?.length > 0) {
-        selectedProducts.push('LLMO');
+        selectedProducts.push(EntitlementModel.PRODUCT_CODES.LLMO);
       }
+
+      // Validate that at least one product is selected
+      if (selectedProducts.length === 0) {
+        await ack({
+          response_action: 'errors',
+          errors: {
+            [PRODUCTS_BLOCK_ID]: 'Please select at least one product',
+          },
+        });
+        return;
+      }
+
+      await ack();
 
       // Log selected products
       log.info(`User ${user.id} selected products: ${selectedProducts.join(', ')} for site ${baseURL} with IMS Org ID ${userImsOrgId}`);
@@ -184,41 +200,71 @@ export function setImsOrgModal(lambdaContext) {
         site.setOrganizationId(spaceCatOrg.getId());
         await site.save();
 
+        // Remove the button by updating the message
+        await client.chat.update({
+          channel: channelId,
+          ts: messageTs,
+          text: `Set IMS Org for site ${baseURL}`,
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: `*Set IMS Organization*\n\nSite: \`${baseURL}\`\nIMS Org ID: \`${userImsOrgId}\`\n\n_Processing..._`,
+              },
+            },
+          ],
+        });
+
         // inform user that we created the org and set it
-        const productsMessage = selectedProducts.length > 0
-          ? `\nSelected products for entitlement: *${selectedProducts.join(', ')}*`
-          : '';
+        // Note: selectedProducts.length is always > 0 due to validation
+        const productsMessage = `\nSelected products for entitlement: *${selectedProducts.join(', ')}*`;
         await say(
           `:white_check_mark: Successfully *created* a new Spacecat org (Name: *${imsOrgDetails.orgName}*) `
           + `and set it for site <${baseURL}|${baseURL}>!${productsMessage}`,
         );
-
-        // TODO: Create entitlements for selected products
-        if (selectedProducts.length > 0) {
-          log.info(`TODO: Create entitlements for products: ${selectedProducts.join(', ')}`);
-        }
       } else {
         // we already have a matching spacecat org
         site.setOrganizationId(spaceCatOrg.getId());
         await site.save();
 
-        const productsMessage = selectedProducts.length > 0
-          ? `\nSelected products for entitlement: *${selectedProducts.join(', ')}*`
-          : '';
+        // Remove the button by updating the message
+        await client.chat.update({
+          channel: channelId,
+          ts: messageTs,
+          text: `Set IMS Org for site ${baseURL}`,
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: `*Set IMS Organization*\n\nSite: \`${baseURL}\`\nIMS Org ID: \`${userImsOrgId}\`\n\n_Processing..._`,
+              },
+            },
+          ],
+        });
+
+        // Note: selectedProducts.length is always > 0 due to validation
+        const productsMessage = `\nSelected products for entitlement: *${selectedProducts.join(', ')}*`;
         await say(
           `:white_check_mark: Successfully updated site <${baseURL}|${baseURL}> to use Spacecat org `
           + `with imsOrgId: *${userImsOrgId}*.${productsMessage}`,
         );
-
-        // TODO: Create entitlements for selected products
-        if (selectedProducts.length > 0) {
-          log.info(`TODO: Create entitlements for products: ${selectedProducts.join(', ')}`);
-        }
       }
+      // ensure entitlements and enrollments for selected products
+      /* eslint-disable no-await-in-loop */
+      for (const product of selectedProducts) {
+        const tierClient = await TierClient.createForSite(lambdaContext, site, product);
+        const { entitlement, siteEnrollment } = await tierClient.createEntitlement(
+          EntitlementModel.TIERS.FREE_TRIAL,
+        );
+        const message = `:white_check_mark: Ensured ${product} entitlement ${entitlement.getId()} `
+          + `(${EntitlementModel.TIERS.FREE_TRIAL}) and enrollment ${siteEnrollment.getId()} for site ${site.getId()}`;
+        await say(message);
+      }
+      /* eslint-enable no-await-in-loop */
     } catch (error) {
       log.error('Error handling modal submission:', error);
-      log.error('Error stack:', error.stack);
-      log.error('Error details:', JSON.stringify(error, null, 2));
     }
   };
 }
