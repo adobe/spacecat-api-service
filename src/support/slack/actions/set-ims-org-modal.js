@@ -9,13 +9,16 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
-import TierClient from '@adobe/spacecat-shared-tier-client';
+import {
+  createProductSelectionModal,
+  extractSelectedProducts,
+  createSayFunction,
+  updateMessageToProcessing,
+  createEntitlementsForProducts,
+  postEntitlementMessages,
+} from './modal-utils.js';
 
 const MODAL_CALLBACK_ID = 'set_ims_org_modal';
-const PRODUCTS_BLOCK_ID = 'products_block';
-const ASO_ACTION_ID = 'aso_checkbox';
-const LLMO_ACTION_ID = 'llmo_checkbox';
 
 /**
  * Opens the product selection modal for set-ims-org command.
@@ -27,76 +30,21 @@ export function openSetImsOrgModal(lambdaContext) {
   return async ({ ack, body, client }) => {
     await ack();
 
-    const {
-      value,
-    } = body.actions[0];
+    const { value } = body.actions[0];
     const {
       baseURL, imsOrgId, channelId, threadTs, messageTs,
     } = JSON.parse(value);
 
-    const modalView = {
-      type: 'modal',
-      callback_id: MODAL_CALLBACK_ID,
-      title: {
-        type: 'plain_text',
-        text: 'Choose Products',
-      },
-      submit: {
-        type: 'plain_text',
-        text: 'Submit',
-      },
-      close: {
-        type: 'plain_text',
-        text: 'Cancel',
-      },
-      private_metadata: JSON.stringify({
-        baseURL, imsOrgId, channelId, threadTs, messageTs,
-      }),
-      blocks: [
-        {
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: `*Choose products to ensure entitlement*\n\nSite: \`${baseURL}\`\nIMS Org ID: \`${imsOrgId}\``,
-          },
-        },
-        {
-          type: 'divider',
-        },
-        {
-          type: 'actions',
-          block_id: PRODUCTS_BLOCK_ID,
-          elements: [
-            {
-              type: 'checkboxes',
-              action_id: ASO_ACTION_ID,
-              options: [
-                {
-                  text: {
-                    type: 'plain_text',
-                    text: EntitlementModel.PRODUCT_CODES.ASO,
-                  },
-                  value: EntitlementModel.PRODUCT_CODES.ASO,
-                },
-              ],
-            },
-            {
-              type: 'checkboxes',
-              action_id: LLMO_ACTION_ID,
-              options: [
-                {
-                  text: {
-                    type: 'plain_text',
-                    text: EntitlementModel.PRODUCT_CODES.LLMO,
-                  },
-                  value: EntitlementModel.PRODUCT_CODES.LLMO,
-                },
-              ],
-            },
-          ],
-        },
-      ],
+    const metadata = {
+      baseURL, imsOrgId, channelId, threadTs, messageTs,
     };
+    const description = `*Choose products to ensure entitlement*\n\nSite: \`${baseURL}\`\nIMS Org ID: \`${imsOrgId}\``;
+    const modalView = createProductSelectionModal(
+      MODAL_CALLBACK_ID,
+      metadata,
+      'Choose Products',
+      description,
+    );
 
     try {
       await client.views.open({
@@ -118,35 +66,17 @@ export function setImsOrgModal(lambdaContext) {
 
   return async ({ ack, body, client }) => {
     try {
-      const {
-        view,
-      } = body;
-      const {
-        private_metadata: privateMetadata, state,
-      } = view;
+      const { view } = body;
+      const { private_metadata: privateMetadata, state } = view;
       const {
         baseURL, imsOrgId: userImsOrgId, channelId, threadTs, messageTs,
       } = JSON.parse(privateMetadata);
 
       // Extract selected products from checkboxes
-      const values = state.values[PRODUCTS_BLOCK_ID];
-      const selectedProducts = [];
-
-      if (values[ASO_ACTION_ID]?.selected_options?.length > 0) {
-        selectedProducts.push(EntitlementModel.PRODUCT_CODES.ASO);
-      }
-      if (values[LLMO_ACTION_ID]?.selected_options?.length > 0) {
-        selectedProducts.push(EntitlementModel.PRODUCT_CODES.LLMO);
-      }
+      const selectedProducts = extractSelectedProducts(state);
 
       // Create a say function to post back to the channel
-      const say = async (message) => {
-        await client.chat.postMessage({
-          channel: channelId,
-          thread_ts: threadTs,
-          text: message,
-        });
-      };
+      const say = createSayFunction(client, channelId, threadTs);
 
       // Validate that at least one product is selected
       if (selectedProducts.length === 0) {
@@ -194,20 +124,13 @@ export function setImsOrgModal(lambdaContext) {
         await site.save();
 
         // Remove the button by updating the message
-        await client.chat.update({
-          channel: channelId,
-          ts: messageTs,
-          text: `Set IMS Org for site ${baseURL}`,
-          blocks: [
-            {
-              type: 'section',
-              text: {
-                type: 'mrkdwn',
-                text: `*Set IMS Organization*\n\nSite: \`${baseURL}\`\nIMS Org ID: \`${userImsOrgId}\`\n\n_Processing..._`,
-              },
-            },
-          ],
-        });
+        await updateMessageToProcessing(
+          client,
+          channelId,
+          messageTs,
+          baseURL,
+          'Set IMS Organization',
+        );
 
         // inform user that we created the org and set it
         // Note: selectedProducts.length is always > 0 due to validation
@@ -222,20 +145,13 @@ export function setImsOrgModal(lambdaContext) {
         await site.save();
 
         // Remove the button by updating the message
-        await client.chat.update({
-          channel: channelId,
-          ts: messageTs,
-          text: `Set IMS Org for site ${baseURL}`,
-          blocks: [
-            {
-              type: 'section',
-              text: {
-                type: 'mrkdwn',
-                text: `*Set IMS Organization*\n\nSite: \`${baseURL}\`\nIMS Org ID: \`${userImsOrgId}\`\n\n_Processing..._`,
-              },
-            },
-          ],
-        });
+        await updateMessageToProcessing(
+          client,
+          channelId,
+          messageTs,
+          baseURL,
+          'Set IMS Organization',
+        );
 
         // Note: selectedProducts.length is always > 0 due to validation
         const productsMessage = `\nSelected products for entitlement: *${selectedProducts.join(', ')}*`;
@@ -245,17 +161,13 @@ export function setImsOrgModal(lambdaContext) {
         );
       }
       // ensure entitlements and enrollments for selected products
-      /* eslint-disable no-await-in-loop */
-      for (const product of selectedProducts) {
-        const tierClient = await TierClient.createForSite(lambdaContext, site, product);
-        const { entitlement, siteEnrollment } = await tierClient.createEntitlement(
-          EntitlementModel.TIERS.FREE_TRIAL,
-        );
-        const message = `:white_check_mark: Ensured ${product} entitlement ${entitlement.getId()} `
-          + `(${EntitlementModel.TIERS.FREE_TRIAL}) and enrollment ${siteEnrollment.getId()} for site ${site.getId()}`;
-        await say(message);
-      }
-      /* eslint-enable no-await-in-loop */
+      const entitlementResults = await createEntitlementsForProducts(
+        lambdaContext,
+        site,
+        selectedProducts,
+      );
+
+      await postEntitlementMessages(say, entitlementResults, site.getId());
     } catch (error) {
       log.error('Error handling modal submission:', error);
     }

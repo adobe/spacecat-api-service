@@ -26,6 +26,8 @@ describe('SetImsOrgModal', () => {
   let mockLog;
   let mockImsClient;
   let mockTierClient;
+  let mockCreateEntitlementsForProducts;
+  let mockPostEntitlementMessages;
 
   before(async () => {
     // Mock TierClient globally
@@ -33,9 +35,18 @@ describe('SetImsOrgModal', () => {
       createForSite: sinon.stub(),
     };
 
+    // Create stubs for modal-utils functions
+    mockCreateEntitlementsForProducts = sinon.stub();
+    mockPostEntitlementMessages = sinon.stub();
+
     const module = await esmock('../../../../src/support/slack/actions/set-ims-org-modal.js', {
-      '@adobe/spacecat-shared-tier-client': {
-        default: mockTierClient,
+      '../../../../src/support/slack/actions/modal-utils.js': {
+        createProductSelectionModal: await import('../../../../src/support/slack/actions/modal-utils.js').then((m) => m.createProductSelectionModal),
+        extractSelectedProducts: await import('../../../../src/support/slack/actions/modal-utils.js').then((m) => m.extractSelectedProducts),
+        createSayFunction: await import('../../../../src/support/slack/actions/modal-utils.js').then((m) => m.createSayFunction),
+        updateMessageToProcessing: await import('../../../../src/support/slack/actions/modal-utils.js').then((m) => m.updateMessageToProcessing),
+        createEntitlementsForProducts: mockCreateEntitlementsForProducts,
+        postEntitlementMessages: mockPostEntitlementMessages,
       },
     });
 
@@ -69,8 +80,20 @@ describe('SetImsOrgModal', () => {
       imsClient: mockImsClient,
     };
 
-    // Reset TierClient stub
+    // Reset stubs
     mockTierClient.createForSite.reset();
+    mockCreateEntitlementsForProducts.reset();
+    mockPostEntitlementMessages.reset();
+
+    // Configure default return values
+    mockCreateEntitlementsForProducts.resolves([
+      {
+        product: 'ASO',
+        entitlementId: 'entitlement-id-1',
+        enrollmentId: 'enrollment-id-1',
+      },
+    ]);
+    mockPostEntitlementMessages.resolves();
   });
 
   describe('openSetImsOrgModal', () => {
@@ -236,12 +259,10 @@ describe('SetImsOrgModal', () => {
       mockDataAccess.Organization.create.returns(mockOrg);
       mockImsClient.getImsOrganizationDetails.resolves({ orgName: 'Test Org' });
 
-      mockTierClient.createForSite.returns({
-        createEntitlement: sinon.stub().resolves({
-          entitlement: mockEntitlement,
-          siteEnrollment: mockSiteEnrollment,
-        }),
-      });
+      mockCreateEntitlementsForProducts.resolves([
+        { product: 'ASO', entitlementId: mockEntitlement.getId(), enrollmentId: mockSiteEnrollment.getId() },
+        { product: 'LLMO', entitlementId: mockEntitlement.getId(), enrollmentId: mockSiteEnrollment.getId() },
+      ]);
 
       const body = {
         view: {
@@ -288,8 +309,12 @@ describe('SetImsOrgModal', () => {
       expect(updateCall.args[0].ts).to.equal('1234567890.123457');
 
       // Check success message
-      expect(client.chat.postMessage.calledThrice).to.be.true; // 1 success + 2 entitlements
+      expect(client.chat.postMessage.calledOnce).to.be.true; // 1 success message
       expect(client.chat.postMessage.getCall(0).args[0].text).to.include('Successfully *created*');
+
+      // Check entitlements were created and messages posted
+      expect(mockCreateEntitlementsForProducts.calledOnce).to.be.true;
+      expect(mockPostEntitlementMessages.calledOnce).to.be.true;
     });
 
     it('updates existing organization and creates entitlements', async () => {
@@ -312,12 +337,9 @@ describe('SetImsOrgModal', () => {
       mockDataAccess.Site.findByBaseURL.resolves(mockSite);
       mockDataAccess.Organization.findByImsOrgId.resolves(mockOrg);
 
-      mockTierClient.createForSite.returns({
-        createEntitlement: sinon.stub().resolves({
-          entitlement: mockEntitlement,
-          siteEnrollment: mockSiteEnrollment,
-        }),
-      });
+      mockCreateEntitlementsForProducts.resolves([
+        { product: 'ASO', entitlementId: mockEntitlement.getId(), enrollmentId: mockSiteEnrollment.getId() },
+      ]);
 
       const body = {
         view: {
@@ -354,8 +376,12 @@ describe('SetImsOrgModal', () => {
       expect(mockSite.save.calledOnce).to.be.true;
 
       // Check success message
-      expect(client.chat.postMessage.calledTwice).to.be.true; // 1 success + 1 entitlement
+      expect(client.chat.postMessage.calledOnce).to.be.true; // 1 success message
       expect(client.chat.postMessage.getCall(0).args[0].text).to.include('Successfully updated site');
+
+      // Check entitlements were created and messages posted
+      expect(mockCreateEntitlementsForProducts.calledOnce).to.be.true;
+      expect(mockPostEntitlementMessages.calledOnce).to.be.true;
     });
 
     it('handles site not found error', async () => {

@@ -28,6 +28,8 @@ describe('AddSiteModal', () => {
   let mockTierClient;
   let mockSqs;
   let triggerAuditForSiteStub;
+  let mockCreateEntitlementsForProducts;
+  let mockPostEntitlementMessages;
 
   before(async () => {
     // Mock TierClient globally
@@ -37,9 +39,18 @@ describe('AddSiteModal', () => {
 
     triggerAuditForSiteStub = sinon.stub();
 
+    // Create stubs for modal-utils functions
+    mockCreateEntitlementsForProducts = sinon.stub();
+    mockPostEntitlementMessages = sinon.stub();
+
     const module = await esmock('../../../../src/support/slack/actions/add-site-modal.js', {
-      '@adobe/spacecat-shared-tier-client': {
-        default: mockTierClient,
+      '../../../../src/support/slack/actions/modal-utils.js': {
+        createProductSelectionModal: await import('../../../../src/support/slack/actions/modal-utils.js').then((m) => m.createProductSelectionModal),
+        extractSelectedProducts: await import('../../../../src/support/slack/actions/modal-utils.js').then((m) => m.extractSelectedProducts),
+        createSayFunction: await import('../../../../src/support/slack/actions/modal-utils.js').then((m) => m.createSayFunction),
+        updateMessageToProcessing: await import('../../../../src/support/slack/actions/modal-utils.js').then((m) => m.updateMessageToProcessing),
+        createEntitlementsForProducts: mockCreateEntitlementsForProducts,
+        postEntitlementMessages: mockPostEntitlementMessages,
       },
       '../../../../src/support/utils.js': {
         triggerAuditForSite: triggerAuditForSiteStub,
@@ -83,6 +94,19 @@ describe('AddSiteModal', () => {
     // Reset stubs
     mockTierClient.createForSite.reset();
     triggerAuditForSiteStub.reset();
+    mockCreateEntitlementsForProducts.reset();
+    mockPostEntitlementMessages.reset();
+
+    // Configure default return values
+    mockCreateEntitlementsForProducts.resolves([
+      {
+        product: 'ASO',
+        entitlementId: 'entitlement-id-1',
+        enrollmentId: 'enrollment-id-1',
+      },
+    ]);
+    mockPostEntitlementMessages.resolves();
+    triggerAuditForSiteStub.resolves();
   });
 
   describe('openAddSiteModal', () => {
@@ -327,12 +351,14 @@ describe('AddSiteModal', () => {
       const updateCall = client.chat.update.getCall(0);
       expect(updateCall.args[0].ts).to.equal('1234567890.123457');
 
-      // Check success messages (1 for products selected + 2 for entitlements + 1 for audit)
-      expect(client.chat.postMessage.callCount).to.equal(4);
+      // Check success messages (1 for products selected + 1 for audit)
+      expect(client.chat.postMessage.callCount).to.equal(2);
       expect(client.chat.postMessage.getCall(0).args[0].text).to.include('Products selected');
-      expect(client.chat.postMessage.getCall(1).args[0].text).to.include('Ensured ASO entitlement');
-      expect(client.chat.postMessage.getCall(2).args[0].text).to.include('Ensured LLMO entitlement');
-      expect(client.chat.postMessage.getCall(3).args[0].text).to.include('First PSI check is triggered');
+      expect(client.chat.postMessage.getCall(1).args[0].text).to.include('First PSI check is triggered');
+
+      // Check entitlements were created and messages posted
+      expect(mockCreateEntitlementsForProducts.calledOnce).to.be.true;
+      expect(mockPostEntitlementMessages.calledOnce).to.be.true;
 
       // Check audit was triggered
       expect(triggerAuditForSiteStub.calledOnce).to.be.true;
@@ -397,10 +423,13 @@ describe('AddSiteModal', () => {
 
       expect(ack.calledOnce).to.be.true;
 
-      // Check success messages
-      // (1 for products selected + 1 for entitlement + 1 for audits disabled)
-      expect(client.chat.postMessage.callCount).to.equal(3);
-      expect(client.chat.postMessage.getCall(2).args[0].text).to.include('Audits are disabled');
+      // Check success messages (1 for products selected + 1 for audits disabled)
+      expect(client.chat.postMessage.callCount).to.equal(2);
+      expect(client.chat.postMessage.getCall(1).args[0].text).to.include('Audits are disabled');
+
+      // Check entitlements were created and messages posted
+      expect(mockCreateEntitlementsForProducts.calledOnce).to.be.true;
+      expect(mockPostEntitlementMessages.calledOnce).to.be.true;
 
       // Check audit was NOT triggered
       expect(triggerAuditForSiteStub.called).to.be.false;
@@ -465,14 +494,13 @@ describe('AddSiteModal', () => {
 
       expect(ack.calledOnce).to.be.true;
 
-      // Check only LLMO entitlement was created
-      // (1 for products selected + 1 for LLMO entitlement + 1 for audit)
-      expect(client.chat.postMessage.callCount).to.equal(3);
+      // Check only LLMO entitlement was created (1 for products selected + 1 for audit)
+      expect(client.chat.postMessage.callCount).to.equal(2);
       expect(client.chat.postMessage.getCall(0).args[0].text).to.include('LLMO');
-      expect(client.chat.postMessage.getCall(1).args[0].text).to.include('Ensured LLMO entitlement');
 
-      // Check TierClient was called only once
-      expect(mockTierClient.createForSite.calledOnce).to.be.true;
+      // Check entitlements were created and messages posted
+      expect(mockCreateEntitlementsForProducts.calledOnce).to.be.true;
+      expect(mockPostEntitlementMessages.calledOnce).to.be.true;
     });
 
     it('handles general errors gracefully', async () => {
