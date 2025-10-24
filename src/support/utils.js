@@ -142,14 +142,16 @@ export const sendAutofixMessage = async (
   opportunityId,
   suggestionIds,
   promiseToken,
-  variation,
+  variations,
+  action,
   { url } = {},
 ) => sqs.sendMessage(queueUrl, {
   opportunityId,
   siteId,
   suggestionIds,
   promiseToken,
-  variation,
+  variations,
+  action,
   url,
 });
 /* c8 ignore end */
@@ -758,7 +760,7 @@ export const onboardSingleSite = async (
 
   const tier = additionalParams.tier || EntitlementModel.TIERS.FREE_TRIAL;
 
-  await say(`:gear: Starting ${profileName} environment setup for site ${baseURL} with imsOrgID: ${imsOrgID} and tier: ${tier}`);
+  await say(`:gear: Starting environment setup for site ${baseURL} with imsOrgID: ${imsOrgID} and tier: ${tier} using the ${profileName} profile`);
   await say(':key: Please make sure you have access to the AEM Shared Production Demo environment. Request access here: https://demo.adobe.com/demos/internal/AemSharedProdEnv.html');
 
   const reportLine = {
@@ -995,10 +997,14 @@ export const onboardSingleSite = async (
     }
 
     reportLine.audits = auditTypes.join(', ');
-    await say(`:white_check_mark: *For site ${baseURL}*: Enabled imports: ${reportLine.imports} and audits: ${reportLine.audits}`);
+    const auditsMessage = reportLine.audits || 'None';
+    const importsMessage = reportLine.imports || 'None';
+    await say(`:white_check_mark: *For site ${baseURL}*: Enabled imports: ${importsMessage} and audits: ${auditsMessage}`);
 
     // trigger audit runs
-    await say(`:gear: Starting audits: ${auditTypes}`);
+    if (auditTypes.length > 0) {
+      await say(`:gear: Starting audits: ${auditTypes.join(', ')}`);
+    }
     for (const auditType of auditTypes) {
       /* eslint-disable no-await-in-loop */
       if (!latestConfiguration.isHandlerEnabledForSite(auditType, site)) {

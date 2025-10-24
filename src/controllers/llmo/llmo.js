@@ -38,6 +38,7 @@ import {
   validateSiteNotOnboarded,
   generateDataFolder,
   performLlmoOnboarding,
+  performLlmoOffboarding,
 } from './llmo-onboarding.js';
 
 const { readConfig, writeConfig } = llmo;
@@ -60,7 +61,11 @@ function LlmoController(ctx) {
     if (!llmoConfig?.dataFolder) {
       throw new Error('LLM Optimizer is not enabled for this site, add llmo config to the site');
     }
-    const hasAccessToElmo = await accessControlUtil.hasAccess(site, '', EntitlementModel.PRODUCT_CODES.LLMO);
+    const hasAccessToElmo = await accessControlUtil.hasAccess(
+      site,
+      '',
+      EntitlementModel.PRODUCT_CODES.LLMO,
+    );
     if (!hasAccessToElmo) {
       throw new Error('Only users belonging to the organization can view its sites');
     }
@@ -795,6 +800,42 @@ function LlmoController(ctx) {
     }
   };
 
+  /**
+   * Offboards a customer from LLMO.
+   * This endpoint handles the complete offboarding process including
+   * disabling audits and cleaning up LLMO configuration.
+   * @param {object} context - The request context.
+   * @returns {Promise<Response>} The offboarding response.
+   */
+  const offboardCustomer = async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+
+    try {
+      log.info(`Starting LLMO offboarding for site ${siteId}`);
+
+      // Validate site and LLMO access
+      const { site, config } = await getSiteAndValidateLlmo(context);
+
+      // Perform the complete offboarding process
+      const result = await performLlmoOffboarding(site, config, context);
+
+      log.info(`LLMO offboarding completed successfully for site ${siteId}`);
+
+      return ok({
+        message: result.message,
+        siteId: result.siteId,
+        baseURL: result.baseURL,
+        dataFolder: result.dataFolder,
+        status: 'completed',
+        completedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      log.error(`Error during LLMO offboarding for site ${siteId}: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -812,6 +853,7 @@ function LlmoController(ctx) {
     patchLlmoCdnBucketConfig,
     updateLlmoConfig,
     onboardCustomer,
+    offboardCustomer,
   };
 }
 

@@ -2158,6 +2158,31 @@ describe('ReportsController', () => {
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('Report is still processing.');
     });
+
+    it('should return report data for failed reports', async () => {
+      const failedReportData = {
+        error: 'Insufficient data for report generation',
+        errorCode: 'INSUFFICIENT_DATA',
+      };
+
+      mockReport.getStatus = () => 'failed';
+      mockReport.getData = () => failedReportData;
+
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+      };
+
+      const result = await reportsController.getReport(context);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.status).to.equal('failed');
+      expect(responseBody.data).to.deep.equal(failedReportData);
+      expect(responseBody.id).to.equal('987e6543-e21b-12d3-a456-426614174001');
+    });
   });
 
   describe('comparePeriods function (through duplicate checking)', () => {

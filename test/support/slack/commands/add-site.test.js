@@ -51,7 +51,17 @@ describe('AddSiteCommand', () => {
       sqs: sqsStub,
       env: { AUDIT_JOBS_QUEUE_URL: 'testQueueUrl', DEFAULT_ORGANIZATION_ID: 'default' },
     };
-    slackContext = { say: sinon.spy() };
+    slackContext = {
+      say: sinon.spy(),
+      channelId: 'C123456',
+      threadTs: '1234567890.123456',
+      client: {
+        chat: {
+          postMessage: sinon.stub().resolves({ ts: '1234567890.123457' }),
+          update: sinon.stub().resolves(),
+        },
+      },
+    };
   });
 
   describe('Initialization and BaseCommand Integration', () => {
@@ -77,6 +87,7 @@ describe('AddSiteCommand', () => {
 
       dataAccessStub.Site.findByBaseURL.resolves(null);
       dataAccessStub.Site.create.resolves({
+        getId: () => 'site123',
         getBaseURL: () => baseURL,
         getDeliveryType: () => 'other',
         getIsLive: () => true,
@@ -92,6 +103,8 @@ describe('AddSiteCommand', () => {
         baseURL: 'https://example.com', deliveryType: 'other', isLive: false, organizationId: 'default',
       });
       expect(slackContext.say.calledWith(sinon.match.string)).to.be.true;
+      expect(slackContext.client.chat.postMessage.calledOnce).to.be.true;
+      expect(slackContext.client.chat.update.calledOnce).to.be.true;
     });
 
     it('warns when an invalid site base URL is provided', async () => {
@@ -131,7 +144,7 @@ describe('AddSiteCommand', () => {
       expect(slackContext.say.calledWith(':x: Problem adding the site. Please contact the admins.')).to.be.true;
     });
 
-    it('sends an audit message after adding the site', async () => {
+    it('shows button to select products after adding the site', async () => {
       const baseURL = 'https://example.com';
       nock(baseURL)
         .get('/')
@@ -144,8 +157,6 @@ describe('AddSiteCommand', () => {
         getDeliveryType: () => 'other',
       };
       dataAccessStub.Site.create.resolves(site);
-      const configuration = { isHandlerEnabledForSite: sinon.stub().withArgs('lhs-mobile', site).resolves(true) };
-      dataAccessStub.Configuration.findLatest.resolves(configuration);
 
       const args = ['example.com'];
       const command = AddSiteCommand(context);
@@ -155,16 +166,20 @@ describe('AddSiteCommand', () => {
       expect(dataAccessStub.Site.create).to.have.been.calledWith({
         baseURL: 'https://example.com', deliveryType: 'other', isLive: false, organizationId: 'default',
       });
-      expect(sqsStub.sendMessage).called;
+      expect(slackContext.client.chat.postMessage.calledOnce).to.be.true;
+
+      const postMessageCall = slackContext.client.chat.postMessage.getCall(0);
+      expect(postMessageCall.args[0].blocks[1].elements[0].action_id).to.equal('open_add_site_modal');
     });
 
-    it('does not trigger audit after adding site when audits are disabled', async () => {
+    it('shows button even when audits are disabled', async () => {
       const baseURL = 'https://example.com';
       nock(baseURL)
         .get('/')
         .replyWithError('rainy weather');
       dataAccessStub.Site.findByBaseURL.resolves(null);
       const site = {
+        getId: () => 'site2',
         getBaseURL: () => baseURL,
         getDeliveryType: () => 'other',
         getIsError: () => false,
@@ -180,16 +195,17 @@ describe('AddSiteCommand', () => {
       expect(dataAccessStub.Site.create).to.have.been.calledWith({
         baseURL: 'https://example.com', deliveryType: 'other', isLive: false, organizationId: 'default',
       });
-      expect(sqsStub.sendMessage.called).to.be.false;
+      expect(slackContext.client.chat.postMessage.calledOnce).to.be.true;
     });
 
-    it('does not trigger audit after adding site when audit type is disabled', async () => {
+    it('shows button with correct data in value', async () => {
       const baseURL = 'https://example.com';
       nock(baseURL)
         .get('/')
         .replyWithError('rainy weather');
       dataAccessStub.Site.findByBaseURL.resolves(null);
       const site = {
+        getId: () => 'site3',
         getBaseURL: () => baseURL,
         getDeliveryType: () => 'other',
         getIsLive: () => true,
@@ -204,7 +220,15 @@ describe('AddSiteCommand', () => {
       expect(dataAccessStub.Site.create).to.have.been.calledWith({
         baseURL: 'https://example.com', deliveryType: 'other', isLive: false, organizationId: 'default',
       });
-      expect(sqsStub.sendMessage.called).to.be.false;
+
+      const updateCall = slackContext.client.chat.update.getCall(0);
+      const buttonValue = JSON.parse(updateCall.args[0].blocks[1].elements[0].value);
+
+      expect(buttonValue.baseURL).to.equal('https://example.com');
+      expect(buttonValue.siteId).to.equal('site3');
+      expect(buttonValue.channelId).to.equal('C123456');
+      expect(buttonValue.threadTs).to.equal('1234567890.123456');
+      expect(buttonValue.messageTs).to.equal('1234567890.123457');
     });
 
     it('reports when an error occurs', async () => {
@@ -230,6 +254,7 @@ describe('AddSiteCommand', () => {
 
       dataAccessStub.Site.findByBaseURL.resolves(null);
       dataAccessStub.Site.create.resolves({
+        getId: () => 'site4',
         getBaseURL: () => baseURL,
         getDeliveryType: () => 'aem_edge',
         getIsLive: () => true,
@@ -259,6 +284,7 @@ describe('AddSiteCommand', () => {
 
       dataAccessStub.Site.findByBaseURL.resolves(null);
       dataAccessStub.Site.create.resolves({
+        getId: () => 'site5',
         getBaseURL: () => baseURL,
         getDeliveryType: () => 'aem_cs',
         getIsLive: () => true,
@@ -284,6 +310,7 @@ describe('AddSiteCommand', () => {
 
       dataAccessStub.Site.findByBaseURL.resolves(null);
       dataAccessStub.Site.create.resolves({
+        getId: () => 'site6',
         getBaseURL: () => baseURL,
         getDeliveryType: () => 'aem_ams',
         getIsLive: () => true,

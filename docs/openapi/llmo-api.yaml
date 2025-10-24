@@ -359,6 +359,67 @@ llmo-onboard:
         $ref: './responses.yaml#/500'
     security: []
 
+llmo-offboard:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    tags:
+      - llmo
+    summary: Offboard customer from LLMO
+    description: |
+      Offboards a customer from LLMO (Large Language Model Optimizer).
+      This endpoint handles disabling audits and cleaning up LLMO configuration for a site.
+      The site must have LLMO enabled and the user must have appropriate permissions.
+    operationId: offboardCustomer
+    responses:
+      '200':
+        description: LLMO offboarding completed successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Success message
+                  example: "LLMO offboarding completed successfully"
+                siteId:
+                  type: string
+                  format: uuid
+                  description: The site ID that was offboarded
+                  example: "987fcdeb-51a2-43d1-9f12-345678901234"
+                baseURL:
+                  type: string
+                  format: uri
+                  description: The site's base URL
+                  example: "https://example.com"
+                status:
+                  type: string
+                  enum: ["completed", "failed"]
+                  description: The offboarding status
+                  example: "completed"
+                completedAt:
+                  type: string
+                  format: date-time
+                  description: The timestamp when offboarding was completed
+                  example: "2025-01-15T10:30:00Z"
+              required:
+                - message
+                - siteId
+                - status
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 llmo-questions:
   parameters:
     - $ref: './parameters.yaml#/siteId'
