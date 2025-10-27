@@ -1,3 +1,10 @@
+## [1.214.6](https://github.com/adobe/spacecat-api-service/compare/v1.214.5...v1.214.6) (2025-10-27)
+
+
+### Bug Fixes
+
+* mystique throttle - latest 100 jobs ([#1401](https://github.com/adobe/spacecat-api-service/issues/1401)) ([1acd645](https://github.com/adobe/spacecat-api-service/commit/1acd645675b5b98e5abb8d5594f6080590a049d3))
+
 ## [1.214.5](https://github.com/adobe/spacecat-api-service/compare/v1.214.4...v1.214.5) (2025-10-27)
 
 
