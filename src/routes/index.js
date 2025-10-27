@@ -78,6 +78,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} entitlementController - The entitlement controller.
  * @param {Object} sandboxAuditController - The sandbox audit controller.
  * @param {Object} reportsController - The reports controller.
+ * @param {Object} urlStoreController - The URL store controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -112,6 +113,7 @@ export default function getRouteHandlers(
   entitlementController,
   sandboxAuditController,
   reportsController,
+  urlStoreController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -219,6 +221,16 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/top-pages': sitesController.getTopPages,
     'GET /sites/:siteId/top-pages/:source': sitesController.getTopPages,
     'GET /sites/:siteId/top-pages/:source/:geo': sitesController.getTopPages,
+
+    // URL Store endpoints
+    'GET /sites/:siteId/url-store': urlStoreController.listUrls,
+    'GET /sites/:siteId/url-store/by-source/:source': urlStoreController.listUrlsBySource,
+    'GET /sites/:siteId/url-store/by-audit/:auditType': urlStoreController.listUrlsByAuditType,
+    'GET /sites/:siteId/url-store/:base64Url': urlStoreController.getUrl,
+    'POST /sites/:siteId/url-store': urlStoreController.addUrls,
+    'PATCH /sites/:siteId/url-store': urlStoreController.updateUrls,
+    'DELETE /sites/:siteId/url-store': urlStoreController.deleteUrls,
+
     'GET /slack/events': slackController.handleEvent,
     'POST /slack/events': slackController.handleEvent,
     'POST /slack/channels/invite-by-user-id': slackController.inviteUserToChannel,

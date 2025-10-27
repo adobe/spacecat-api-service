@@ -1,0 +1,328 @@
+url-store-list:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 100
+        description: Number of items to return per page
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Pagination cursor from previous response
+    tags:
+      - site
+      - url store
+    summary: List all URLs for a site
+    description: |
+      Retrieves all URLs stored for a site with pagination support.
+      URLs are returned in batches with a cursor for fetching the next page.
+    operationId: listUrls
+    responses:
+      '200':
+        description: A paginated list of audit URLs
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AuditUrlListResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+url-store-by-source:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: source
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Source of the URLs (e.g., "manual", "sitemap")
+    - name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 100
+      description: Number of items to return per page
+    - name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Pagination cursor from previous response
+  get:
+    tags:
+      - site
+      - url store
+    summary: List URLs by source
+    description: |
+      Retrieves URLs filtered by their source (e.g., "manual", "sitemap").
+      Results are paginated.
+    operationId: listUrlsBySource
+    responses:
+      '200':
+        description: A paginated list of audit URLs from the specified source
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AuditUrlListResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+url-store-by-audit:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: auditType
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Audit type to filter by (e.g., "accessibility", "broken-backlinks")
+    - name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 100
+      description: Number of items to return per page
+    - name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Pagination cursor from previous response
+  get:
+    tags:
+      - site
+      - url store
+    summary: List URLs by enabled audit type
+    description: |
+      Retrieves URLs that have a specific audit type enabled.
+      Results are paginated.
+    operationId: listUrlsByAuditType
+    responses:
+      '200':
+        description: A paginated list of audit URLs with the specified audit enabled
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AuditUrlListResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+url-store-get:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: base64Url
+      in: path
+      required: true
+      schema:
+        type: string
+      description: URL-safe base64 encoded URL without padding (RFC 4648 §5)
+  get:
+    tags:
+      - site
+      - url store
+    summary: Get a specific URL
+    description: |
+      Retrieves a specific URL by its base64-encoded representation.
+      The URL must be encoded using URL-safe base64 without padding (RFC 4648 §5).
+    operationId: getUrl
+    responses:
+      '200':
+        description: The requested audit URL
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AuditUrl'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+  post:
+    tags:
+      - site
+      - url store
+    summary: Add URLs (bulk operation)
+    description: |
+      Adds one or more URLs to the URL store. This operation is idempotent - 
+      if a URL already exists, it will be updated to source "manual".
+      
+      - Maximum 100 URLs per request
+      - URLs are canonicalized before storage
+      - Duplicate detection based on canonicalized URL
+      - Returns per-item success/failure information
+    operationId: addUrls
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 100
+            items:
+              $ref: './schemas.yaml#/AuditUrlInput'
+    responses:
+      '201':
+        description: URLs added successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AuditUrlBulkResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+  patch:
+    tags:
+      - site
+      - url store
+    summary: Update audit configurations (bulk operation)
+    description: |
+      Updates the audit configurations for one or more URLs.
+      Only the audits array is updated, completely overriding the existing value.
+      
+      - Maximum 100 URLs per request
+      - Works for URLs from any source
+      - Returns per-item success/failure information
+    operationId: updateUrls
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 100
+            items:
+              $ref: './schemas.yaml#/AuditUrlUpdate'
+    responses:
+      '200':
+        description: URLs updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AuditUrlBulkResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+  delete:
+    tags:
+      - site
+      - url store
+    summary: Remove URLs (bulk operation)
+    description: |
+      Removes one or more URLs from the URL store.
+      
+      - Maximum 100 URLs per request
+      - **Constraint**: Only URLs with source "manual" can be deleted
+      - Returns per-item success/failure information
+    operationId: deleteUrls
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - urls
+            properties:
+              urls:
+                type: array
+                minItems: 1
+                maxItems: 100
+                items:
+                  type: string
+                  format: uri
+                description: Array of URLs to delete
+    responses:
+      '200':
+        description: URLs deleted (with per-item status)
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AuditUrlDeleteResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+

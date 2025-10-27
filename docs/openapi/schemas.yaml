@@ -1636,6 +1636,223 @@ SiteTopPageList:
   type: array
   items:
     $ref: './schemas.yaml#/SiteTopPage'
+AuditUrl:
+  type: object
+  required:
+    - siteId
+    - url
+    - source
+    - audits
+    - createdAt
+    - updatedAt
+    - createdBy
+    - updatedBy
+  properties:
+    siteId:
+      description: Parent site identifier
+      $ref: '#/Id'
+    url:
+      description: URL after canonicalization
+      $ref: '#/URL'
+    source:
+      description: Origin of the URL
+      type: string
+      default: manual
+      example: manual
+    audits:
+      description: Enabled audit types
+      type: array
+      items:
+        type: string
+      example: ['accessibility', 'broken-backlinks']
+    createdAt:
+      description: ISO 8601 timestamp when created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: ISO 8601 timestamp when last modified
+      $ref: '#/DateTime'
+    createdBy:
+      description: User/service who created this URL
+      type: string
+      example: user-alice
+    updatedBy:
+      description: Last user/service to modify this URL
+      type: string
+      example: user-bob
+  example:
+    siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    url: 'https://example.com/documents/report.pdf'
+    source: 'manual'
+    audits: ['accessibility', 'broken-backlinks']
+    createdAt: '2025-10-10T12:00:00Z'
+    updatedAt: '2025-10-10T15:30:00Z'
+    createdBy: 'user-alice'
+    updatedBy: 'user-bob'
+AuditUrlInput:
+  type: object
+  required:
+    - url
+    - audits
+  properties:
+    url:
+      description: The URL to add
+      $ref: '#/URL'
+    source:
+      description: Origin of the URL (defaults to "manual")
+      type: string
+      default: manual
+    audits:
+      description: Enabled audit types
+      type: array
+      items:
+        type: string
+      example: ['accessibility', 'broken-backlinks']
+  example:
+    url: 'https://example.com/page1.html'
+    source: 'manual'
+    audits: ['accessibility', 'broken-backlinks']
+AuditUrlUpdate:
+  type: object
+  required:
+    - url
+    - audits
+  properties:
+    url:
+      description: The URL to update
+      $ref: '#/URL'
+    audits:
+      description: Enabled audit types (overrides existing)
+      type: array
+      items:
+        type: string
+      example: ['accessibility']
+  example:
+    url: 'https://example.com/page1.html'
+    audits: ['accessibility']
+AuditUrlListResponse:
+  type: object
+  required:
+    - items
+  properties:
+    items:
+      type: array
+      items:
+        $ref: './schemas.yaml#/AuditUrl'
+    cursor:
+      description: Pagination cursor for next page
+      type: string
+  example:
+    items:
+      - siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+        url: 'https://example.com/page1.html'
+        source: 'manual'
+        audits: ['accessibility']
+        createdAt: '2025-10-10T12:00:00Z'
+        updatedAt: '2025-10-10T15:30:00Z'
+        createdBy: 'user-alice'
+        updatedBy: 'user-bob'
+    cursor: 'eyJsYXN0S2V5Ijp7InNpdGVJZCI6ImV4YW1wbGUtY29tIn19'
+AuditUrlBulkResponse:
+  type: object
+  required:
+    - metadata
+    - failures
+    - items
+  properties:
+    metadata:
+      type: object
+      required:
+        - total
+        - success
+        - failure
+      properties:
+        total:
+          type: integer
+          description: Total number of URLs in the request
+        success:
+          type: integer
+          description: Number of successfully processed URLs
+        failure:
+          type: integer
+          description: Number of failed URLs
+    failures:
+      type: array
+      items:
+        type: object
+        required:
+          - url
+          - reason
+        properties:
+          url:
+            type: string
+          reason:
+            type: string
+      description: Per-item error information
+    items:
+      type: array
+      items:
+        $ref: './schemas.yaml#/AuditUrl'
+      description: Successfully processed URLs
+  example:
+    metadata:
+      total: 3
+      success: 2
+      failure: 1
+    failures:
+      - url: 'https://example.com/invalid'
+        reason: 'Invalid URL format'
+    items:
+      - siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+        url: 'https://example.com/page1.html'
+        source: 'manual'
+        audits: ['accessibility']
+        createdAt: '2025-10-10T12:00:00Z'
+        updatedAt: '2025-10-10T15:30:00Z'
+        createdBy: 'user-alice'
+        updatedBy: 'user-bob'
+AuditUrlDeleteResponse:
+  type: object
+  required:
+    - metadata
+    - failures
+  properties:
+    metadata:
+      type: object
+      required:
+        - total
+        - success
+        - failure
+      properties:
+        total:
+          type: integer
+          description: Total number of URLs in the request
+        success:
+          type: integer
+          description: Number of successfully deleted URLs
+        failure:
+          type: integer
+          description: Number of failed deletions
+    failures:
+      type: array
+      items:
+        type: object
+        required:
+          - url
+          - reason
+        properties:
+          url:
+            type: string
+          reason:
+            type: string
+      description: Per-item error information
+  example:
+    metadata:
+      total: 3
+      success: 2
+      failure: 1
+    failures:
+      - url: 'https://example.com/from-sitemap'
+        reason: 'Can only delete URLs with source: manual'
 SiteExperimentVariant:
   type: object
   properties:
