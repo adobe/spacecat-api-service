@@ -24,9 +24,11 @@ describe('AddRepoCommand', () => {
   let dataAccessStub;
   let sqsStub;
   let siteStub;
+  const AEMY_BASE_URL = 'https://test-aemy-base-url.net';
 
   beforeEach(() => {
     process.env.AEMY_API_KEY = 'test-api-key';
+    process.env.AEMY_BASE_URL = AEMY_BASE_URL;
 
     sqsStub = {
       sendMessage: sinon.stub().resolves(),
@@ -68,10 +70,7 @@ describe('AddRepoCommand', () => {
     context = {
       dataAccess: dataAccessStub,
       sqs: sqsStub,
-      env: {
-        AUDIT_JOBS_QUEUE_URL: 'testQueueUrl',
-        AEMY_API_KEY: 'test-api-key',
-      },
+      env: { AUDIT_JOBS_QUEUE_URL: 'testQueueUrl' },
       log: console,
     };
   });
@@ -99,7 +98,7 @@ describe('AddRepoCommand', () => {
           default_branch: 'main',
         });
 
-      const aemyScope = nock('https://ec-xp-fapp-coordinator.azurewebsites.net')
+      const aemyScope = nock(AEMY_BASE_URL)
         .get('/api/fn-ghapp/functions/get_installation_token/valid/repo/main')
         .reply(200, { token: 'some-token' });
 
@@ -144,7 +143,7 @@ describe('AddRepoCommand', () => {
           default_branch: 'main',
         });
 
-      const aemyScope = nock('https://ec-xp-fapp-coordinator.azurewebsites.net')
+      const aemyScope = nock(AEMY_BASE_URL)
         .get('/api/fn-ghapp/functions/get_installation_token/valid/repo/main')
         .reply(200, { token: 'some-token' });
 
@@ -237,7 +236,7 @@ describe('AddRepoCommand', () => {
           default_branch: 'main',
         });
 
-      const aemyScope = nock('https://ec-xp-fapp-coordinator.azurewebsites.net')
+      const aemyScope = nock(AEMY_BASE_URL)
         .get('/api/fn-ghapp/functions/get_installation_token/valid/repo/main')
         .reply(200, { token: 'some-token' });
 
@@ -260,7 +259,7 @@ describe('AddRepoCommand', () => {
         .get('/repos/private/repo')
         .reply(404);
 
-      const aemyScope = nock('https://ec-xp-fapp-coordinator.azurewebsites.net')
+      const aemyScope = nock(AEMY_BASE_URL)
         .get('/api/fn-ghapp/functions/get_installation_token/private/repo/main')
         .reply(200, { token: 'some-token' });
 
@@ -323,7 +322,7 @@ describe('AddRepoCommand', () => {
           default_branch: 'main',
         });
 
-      const aemyScope = nock('https://ec-xp-fapp-coordinator.azurewebsites.net')
+      const aemyScope = nock(AEMY_BASE_URL)
         .get('/api/fn-ghapp/functions/get_installation_token/valid/repo/develop')
         .reply(200, { token: 'some-token' });
 
@@ -348,7 +347,7 @@ describe('AddRepoCommand', () => {
         .get('/repos/private/repo')
         .reply(404);
 
-      const aemyScope = nock('https://ec-xp-fapp-coordinator.azurewebsites.net')
+      const aemyScope = nock(AEMY_BASE_URL)
         .get('/api/fn-ghapp/functions/get_installation_token/private/repo/feature-branch')
         .reply(200, { token: 'some-token' });
 
@@ -379,7 +378,7 @@ describe('AddRepoCommand', () => {
         .get('/repos/private/repo')
         .reply(404);
 
-      const aemyScope = nock('https://ec-xp-fapp-coordinator.azurewebsites.net')
+      const aemyScope = nock(AEMY_BASE_URL)
         .get('/api/fn-ghapp/functions/get_installation_token/private/repo/main')
         .reply(200, { token: 'some-token' });
 
@@ -401,7 +400,9 @@ describe('AddRepoCommand', () => {
   });
 
   describe('Aemy Integration', () => {
-    it('blocks repository not onboarded with Aemy', async () => {
+    it('throws error when AEMY_BASE_URL is not set', async () => {
+      delete process.env.AEMY_BASE_URL;
+
       nock('https://api.github.com')
         .get('/repos/valid/repo')
         .reply(200, {
@@ -411,9 +412,79 @@ describe('AddRepoCommand', () => {
           default_branch: 'main',
         });
 
-      const aemyNock = nock('https://ec-xp-fapp-coordinator.azurewebsites.net')
+      const args = ['validSite.com', 'https://github.com/valid/repo'];
+      const command = AddRepoCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(slackContext.say.calledWithMatch(/AEMY_BASE_URL is not set/)).to.be.true;
+      expect(siteStub.save).to.not.have.been.called;
+
+      // Restore for subsequent tests
+      process.env.AEMY_BASE_URL = AEMY_BASE_URL;
+    });
+
+    it('blocks repository not onboarded with Aemy (token is null)', async () => {
+      nock('https://api.github.com')
+        .get('/repos/valid/repo')
+        .reply(200, {
+          archived: false,
+          name: 'repo',
+          owner: { login: 'valid' },
+          default_branch: 'main',
+        });
+
+      const aemyNock = nock(AEMY_BASE_URL)
         .get('/api/fn-ghapp/functions/get_installation_token/valid/repo/main')
         .reply(200, { token: null });
+
+      const args = ['validSite.com', 'https://github.com/valid/repo'];
+      const command = AddRepoCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(aemyNock.isDone()).to.be.true;
+      expect(slackContext.say.calledWith(':warning: The repository \'https://github.com/valid/repo\' is not onboarded with Aemy. Please onboard it with Aemy before adding it to a site.')).to.be.true;
+      expect(siteStub.save).to.not.have.been.called;
+    });
+
+    it('blocks repository not onboarded with Aemy (token is empty string)', async () => {
+      nock('https://api.github.com')
+        .get('/repos/valid/repo')
+        .reply(200, {
+          archived: false,
+          name: 'repo',
+          owner: { login: 'valid' },
+          default_branch: 'main',
+        });
+
+      const aemyNock = nock(AEMY_BASE_URL)
+        .get('/api/fn-ghapp/functions/get_installation_token/valid/repo/main')
+        .reply(200, { token: '' });
+
+      const args = ['validSite.com', 'https://github.com/valid/repo'];
+      const command = AddRepoCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(aemyNock.isDone()).to.be.true;
+      expect(slackContext.say.calledWith(':warning: The repository \'https://github.com/valid/repo\' is not onboarded with Aemy. Please onboard it with Aemy before adding it to a site.')).to.be.true;
+      expect(siteStub.save).to.not.have.been.called;
+    });
+
+    it('blocks repository not onboarded with Aemy (token is undefined)', async () => {
+      nock('https://api.github.com')
+        .get('/repos/valid/repo')
+        .reply(200, {
+          archived: false,
+          name: 'repo',
+          owner: { login: 'valid' },
+          default_branch: 'main',
+        });
+
+      const aemyNock = nock(AEMY_BASE_URL)
+        .get('/api/fn-ghapp/functions/get_installation_token/valid/repo/main')
+        .reply(200, {});
 
       const args = ['validSite.com', 'https://github.com/valid/repo'];
       const command = AddRepoCommand(context);
@@ -435,7 +506,7 @@ describe('AddRepoCommand', () => {
           default_branch: 'main',
         });
 
-      const aemyNock = nock('https://ec-xp-fapp-coordinator.azurewebsites.net')
+      const aemyNock = nock(AEMY_BASE_URL)
         .get('/api/fn-ghapp/functions/get_installation_token/valid/repo/main')
         .reply(500, { error: 'Internal Server Error' });
 
@@ -459,7 +530,7 @@ describe('AddRepoCommand', () => {
           default_branch: 'main',
         });
 
-      const aemyNock = nock('https://ec-xp-fapp-coordinator.azurewebsites.net')
+      const aemyNock = nock(AEMY_BASE_URL)
         .get('/api/fn-ghapp/functions/get_installation_token/valid/repo/main')
         .replyWithError('Network error');
 

@@ -69,12 +69,16 @@ function AddRepoCommand(context) {
   }
 
   async function isOnboardedWithAemy(owner, repo, branch) {
-    const AEMY_ENDPOINT = `https://ec-xp-fapp-coordinator.azurewebsites.net/api/fn-ghapp/functions/get_installation_token/${owner}/${repo}/${branch}`;
+    const { AEMY_BASE_URL } = process.env;
+    if (!AEMY_BASE_URL) {
+      throw new Error('AEMY_BASE_URL is not set');
+    }
+    const AEMY_ENDPOINT = `${AEMY_BASE_URL}/api/fn-ghapp/functions/get_installation_token/${owner}/${repo}/${branch}`;
     try {
       const response = await fetch(AEMY_ENDPOINT, { headers: { 'x-api-key': process.env.AEMY_API_KEY } });
       if (response.ok) {
         const data = await response.json();
-        return data.token !== null;
+        return !!data.token;
       } else {
         throw new Error('Failed to check if repository is onboarded with Aemy');
       }
