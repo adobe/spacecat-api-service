@@ -1,3 +1,10 @@
+## [1.214.5](https://github.com/adobe/spacecat-api-service/compare/v1.214.4...v1.214.5) (2025-10-27)
+
+
+### Bug Fixes
+
+* return only 100 jobs instead of all (for mystique) ([#1399](https://github.com/adobe/spacecat-api-service/issues/1399)) ([3ba94ba](https://github.com/adobe/spacecat-api-service/commit/3ba94baa54fbe88fb6a0b68c49d13bb4c41bf1c3))
+
 ## [1.214.4](https://github.com/adobe/spacecat-api-service/compare/v1.214.3...v1.214.4) (2025-10-26)
 
 
