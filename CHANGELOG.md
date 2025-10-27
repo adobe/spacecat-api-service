@@ -1,3 +1,31 @@
+## [1.214.5](https://github.com/adobe/spacecat-api-service/compare/v1.214.4...v1.214.5) (2025-10-27)
+
+
+### Bug Fixes
+
+* return only 100 jobs instead of all (for mystique) ([#1399](https://github.com/adobe/spacecat-api-service/issues/1399)) ([3ba94ba](https://github.com/adobe/spacecat-api-service/commit/3ba94baa54fbe88fb6a0b68c49d13bb4c41bf1c3))
+
+## [1.214.4](https://github.com/adobe/spacecat-api-service/compare/v1.214.3...v1.214.4) (2025-10-26)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1397](https://github.com/adobe/spacecat-api-service/issues/1397)) ([b3aee71](https://github.com/adobe/spacecat-api-service/commit/b3aee713cd58e3b3889d2e5af2836eb8c9794431))
+
+## [1.214.3](https://github.com/adobe/spacecat-api-service/compare/v1.214.2...v1.214.3) (2025-10-25)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#1396](https://github.com/adobe/spacecat-api-service/issues/1396)) ([86cba2d](https://github.com/adobe/spacecat-api-service/commit/86cba2d153e5ad5f905c971add8c169480a1951f))
+
+## [1.214.2](https://github.com/adobe/spacecat-api-service/compare/v1.214.1...v1.214.2) (2025-10-25)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.65.0 ([#1395](https://github.com/adobe/spacecat-api-service/issues/1395)) ([afcdf10](https://github.com/adobe/spacecat-api-service/commit/afcdf105acacc3156303975fd3812c50766c2195))
+
 ## [1.214.1](https://github.com/adobe/spacecat-api-service/compare/v1.214.0...v1.214.1) (2025-10-24)
 
 
