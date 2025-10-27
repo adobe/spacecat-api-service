@@ -181,8 +181,8 @@ function ScrapeJobController(context) {
         return ok([]);
       }
 
-      // return the first max 100 jobs
-      return ok(jobs.slice(0, 100));
+      // return the latest max 100 jobs, sorted by startedAt (newest first)
+      return ok(jobs.sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt)).slice(0, 100));
     } catch (error) {
       log.error(`Failed to fetch scrape jobs by baseURL: ${decodedBaseURL}, ${error.message}`);
       return createErrorResponse(error);
