@@ -180,7 +180,9 @@ function ScrapeJobController(context) {
       if (!jobs || jobs.length === 0) {
         return ok([]);
       }
-      return ok(jobs);
+      // Limit to maximum 100 jobs
+      const limitedJobs = jobs.slice(0, 100);
+      return ok(limitedJobs);
     } catch (error) {
       log.error(`Failed to fetch scrape jobs by baseURL: ${decodedBaseURL}, ${error.message}`);
       return createErrorResponse(error);
