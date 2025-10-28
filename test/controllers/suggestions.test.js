@@ -2412,10 +2412,12 @@ describe('Suggestions Controller', () => {
           getRank: () => 1,
           getData: () => ({
             url: 'https://example.com/page1',
-            headingTag: 'h1',
             recommendedAction: 'New Heading Title',
             checkType: 'heading-empty',
-            path: 'h1.test-selector',
+            transformRules: {
+              action: 'replace',
+              selector: 'h1.test-selector',
+            },
           }),
           getKpiDeltas: () => ({}),
           getCreatedAt: () => '2025-01-15T10:00:00Z',
@@ -2433,10 +2435,12 @@ describe('Suggestions Controller', () => {
           getRank: () => 2,
           getData: () => ({
             url: 'https://example.com/page1',
-            headingTag: 'h2',
             recommendedAction: 'New Subtitle',
             checkType: 'heading-empty',
-            path: 'h2.test-selector',
+            transformRules: {
+              action: 'replace',
+              selector: 'h2.test-selector',
+            },
           }),
           getKpiDeltas: () => ({}),
           getCreatedAt: () => '2025-01-15T10:00:00Z',
@@ -2812,9 +2816,12 @@ describe('Suggestions Controller', () => {
     it('should reject non-empty headings for headings opportunity', async () => {
       tokowakaSuggestions[0].getData = () => ({
         url: 'https://example.com/page1',
-        headingTag: 'h1',
         recommendedAction: 'New Heading Title',
-        checkType: 'heading-missing', // Not 'heading-empty'
+        checkType: 'heading-missing', // Not eligible checkType
+        transformRules: {
+          action: 'replace',
+          selector: 'h1.test-selector',
+        },
       });
 
       const response = await suggestionsController.deploySuggestionToEdge({
@@ -2836,7 +2843,7 @@ describe('Suggestions Controller', () => {
 
       const failedSuggestion = body.suggestions.find((s) => s.uuid === SUGGESTION_IDS[0]);
       expect(failedSuggestion.statusCode).to.equal(400);
-      expect(failedSuggestion.message).to.include('Only empty headings can be deployed');
+      expect(failedSuggestion.message).to.include('can be deployed');
       expect(failedSuggestion.message).to.include('heading-missing');
     });
 

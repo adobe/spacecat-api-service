@@ -1,3 +1,66 @@
+## [1.214.7](https://github.com/adobe/spacecat-api-service/compare/v1.214.6...v1.214.7) (2025-10-28)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1405](https://github.com/adobe/spacecat-api-service/issues/1405)) ([a69ac7c](https://github.com/adobe/spacecat-api-service/commit/a69ac7c1c2c346bfb5b42fe26511104cc2032a66))
+
+## [1.214.6](https://github.com/adobe/spacecat-api-service/compare/v1.214.5...v1.214.6) (2025-10-27)
+
+
+### Bug Fixes
+
+* mystique throttle - latest 100 jobs ([#1401](https://github.com/adobe/spacecat-api-service/issues/1401)) ([1acd645](https://github.com/adobe/spacecat-api-service/commit/1acd645675b5b98e5abb8d5594f6080590a049d3))
+
+## [1.214.5](https://github.com/adobe/spacecat-api-service/compare/v1.214.4...v1.214.5) (2025-10-27)
+
+
+### Bug Fixes
+
+* return only 100 jobs instead of all (for mystique) ([#1399](https://github.com/adobe/spacecat-api-service/issues/1399)) ([3ba94ba](https://github.com/adobe/spacecat-api-service/commit/3ba94baa54fbe88fb6a0b68c49d13bb4c41bf1c3))
+
+## [1.214.4](https://github.com/adobe/spacecat-api-service/compare/v1.214.3...v1.214.4) (2025-10-26)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1397](https://github.com/adobe/spacecat-api-service/issues/1397)) ([b3aee71](https://github.com/adobe/spacecat-api-service/commit/b3aee713cd58e3b3889d2e5af2836eb8c9794431))
+
+## [1.214.3](https://github.com/adobe/spacecat-api-service/compare/v1.214.2...v1.214.3) (2025-10-25)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#1396](https://github.com/adobe/spacecat-api-service/issues/1396)) ([86cba2d](https://github.com/adobe/spacecat-api-service/commit/86cba2d153e5ad5f905c971add8c169480a1951f))
+
+## [1.214.2](https://github.com/adobe/spacecat-api-service/compare/v1.214.1...v1.214.2) (2025-10-25)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.65.0 ([#1395](https://github.com/adobe/spacecat-api-service/issues/1395)) ([afcdf10](https://github.com/adobe/spacecat-api-service/commit/afcdf105acacc3156303975fd3812c50766c2195))
+
+## [1.214.1](https://github.com/adobe/spacecat-api-service/compare/v1.214.0...v1.214.1) (2025-10-24)
+
+
+### Bug Fixes
+
+* make set imsorg and add site command tier sensitive ([#1392](https://github.com/adobe/spacecat-api-service/issues/1392)) ([b4a6dd6](https://github.com/adobe/spacecat-api-service/commit/b4a6dd60d205a9582f5f15fdfea364b29e584bca))
+
+# [1.214.0](https://github.com/adobe/spacecat-api-service/compare/v1.213.2...v1.214.0) (2025-10-23)
+
+
+### Features
+
+* create dummy profile with no audits or imports ([#1390](https://github.com/adobe/spacecat-api-service/issues/1390)) ([9357152](https://github.com/adobe/spacecat-api-service/commit/935715283edcd760bf7c75f024c24bb45055235c))
+
+## [1.213.2](https://github.com/adobe/spacecat-api-service/compare/v1.213.1...v1.213.2) (2025-10-23)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.63.0 ([#1391](https://github.com/adobe/spacecat-api-service/issues/1391)) ([bfce97e](https://github.com/adobe/spacecat-api-service/commit/bfce97e617d4cd4b69c615b080d61459c6979d8d))
+
 ## [1.213.1](https://github.com/adobe/spacecat-api-service/compare/v1.213.0...v1.213.1) (2025-10-23)
 
 
