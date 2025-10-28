@@ -901,7 +901,14 @@ describe('LlmoController', () => {
     const expectedConfig = {
       ...llmoConfig.defaultConfig(),
       categories: {
-        [CATEGORY_ID]: { name: 'test-category', region: ['us'] },
+        [CATEGORY_ID]: {
+          name: 'test-category',
+          region: ['us'],
+          urls: [
+            { value: 'https://example.com/tech', type: 'url' },
+            { value: 'https://example.com/news/*', type: 'prefix' },
+          ],
+        },
       },
       topics: {
         [TOPIC_ID]: {
@@ -1002,7 +1009,14 @@ describe('LlmoController', () => {
         [TOPIC_ID]: { type: 'topic', name: 'test-topic' },
       },
       categories: {
-        [CATEGORY_ID]: { name: 'test-category', region: ['us'] },
+        [CATEGORY_ID]: {
+          name: 'test-category',
+          region: ['us'],
+          urls: [
+            { value: 'https://example.com/tech', type: 'url' },
+            { value: 'https://example.com/news/*', type: 'prefix' },
+          ],
+        },
       },
       topics: {
         [TOPIC_ID]: {
@@ -1158,7 +1172,12 @@ describe('LlmoController', () => {
       const configWithAllFields = {
         categories: {
           [CATEGORY_ID]: {
-            name: 'test-category', region: ['us'],
+            name: 'test-category',
+            region: ['us'],
+            urls: [
+              { value: 'https://example.com/tech', type: 'url' },
+              { value: 'https://example.com/news/*', type: 'prefix' },
+            ],
           },
         },
         topics: {
@@ -1213,7 +1232,8 @@ describe('LlmoController', () => {
           .and(sinon.match(/1 topics/))
           .and(sinon.match(/1 brand aliases/))
           .and(sinon.match(/1 competitors/))
-          .and(sinon.match(/2 deleted prompts/)),
+          .and(sinon.match(/2 deleted prompts/))
+          .and(sinon.match(/2 category URLs/)),
       );
     });
 
@@ -1250,6 +1270,72 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
       expect(mockLog.error).to.have.been.calledWith(
         sinon.match(/User unknown error updating llmo config/),
+      );
+    });
+
+    it('should correctly count category URLs in config summary', async () => {
+      const configWithCategoryUrls = {
+        categories: {
+          [CATEGORY_ID]: {
+            name: 'test-category-1',
+            region: ['us'],
+            urls: [
+              { value: 'https://example.com/tech', type: 'url' },
+              { value: 'https://example.com/news/*', type: 'prefix' },
+              { value: 'https://example.com/blog/*', type: 'prefix' },
+            ],
+          },
+          '456e7890-e89b-12d3-a456-426614174002': {
+            name: 'test-category-2',
+            region: ['eu'],
+            urls: [
+              { value: 'https://example.eu/tech', type: 'url' },
+            ],
+          },
+          '789e1234-e89b-12d3-a456-426614174003': {
+            name: 'test-category-3',
+            region: ['us'],
+            // No URLs property
+          },
+        },
+        topics: {},
+        brands: { aliases: [] },
+        competitors: { competitors: [] },
+      };
+      mockContext.data = configWithCategoryUrls;
+      llmoConfigSchemaStub.safeParse.returns({ success: true, data: configWithCategoryUrls });
+
+      const result = await controller.updateLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockLog.info).to.have.been.calledWith(
+        sinon.match(/User test-user-id modifying customer configuration/)
+          .and(sinon.match(/4 category URLs/)),
+      );
+    });
+
+    it('should handle categories with no URLs when calculating URL count', async () => {
+      const configWithoutUrls = {
+        categories: {
+          [CATEGORY_ID]: {
+            name: 'test-category',
+            region: ['us'],
+            // No URLs property
+          },
+        },
+        topics: {},
+        brands: { aliases: [] },
+        competitors: { competitors: [] },
+      };
+      mockContext.data = configWithoutUrls;
+      llmoConfigSchemaStub.safeParse.returns({ success: true, data: configWithoutUrls });
+
+      const result = await controller.updateLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockLog.info).to.have.been.calledWith(
+        sinon.match(/User test-user-id modifying customer configuration/)
+          .and(sinon.match(/0 category URLs/)),
       );
     });
 
