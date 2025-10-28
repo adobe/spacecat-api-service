@@ -22,6 +22,7 @@ import {
   isArray, isNonEmptyArray,
   isNonEmptyObject,
   isObject,
+  isInteger,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 
@@ -131,11 +132,11 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('Opportunity ID required');
     }
 
-    if (Number.isNaN(pageSize) || pageSize < 1) {
+    if (!isInteger(pageSize) || pageSize < 1) {
       return badRequest('Page size must be greater than 0');
     }
 
-    if (Number.isNaN(pageNum) || pageNum < 0) {
+    if (!isInteger(pageNum) || pageNum < 0) {
       return badRequest('Page number must be greater than 0');
     }
 

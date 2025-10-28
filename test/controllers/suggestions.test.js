@@ -568,6 +568,7 @@ describe('Suggestions Controller', () => {
       params: {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
+        pageSize: 10,
         pageNum: -1,
       },
       ...context,
