@@ -116,6 +116,7 @@ describe('getRouteHandlers', () => {
 
   const mockSuggestionsController = {
     getAllForOpportunity: sinon.stub(),
+    getPagedForOpportunity: sinon.stub(),
     getByStatus: sinon.stub(),
     getByID: sinon.stub(),
     createSuggestions: sinon.stub(),
@@ -506,6 +507,7 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['DELETE /sites/:siteId/opportunities/:opportunityId'].handler).to.equal(mockOpportunitiesController.removeOpportunity);
     expect(dynamicRoutes['DELETE /sites/:siteId/opportunities/:opportunityId'].paramNames).to.deep.equal(['siteId', 'opportunityId']);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions'].handler).to.equal(mockSuggestionsController.getAllForOpportunity);
+    expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged'].handler).to.equal(mockSuggestionsController.getPagedForOpportunity);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions'].paramNames).to.deep.equal(['siteId', 'opportunityId']);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status'].handler).to.equal(mockSuggestionsController.getByStatus);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status'].paramNames).to.deep.equal(['siteId', 'opportunityId', 'status']);
