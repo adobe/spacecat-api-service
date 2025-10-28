@@ -194,6 +194,7 @@ llmo-config:
       Retrieves the LLMO (Large Language Model Optimizer) configuration for a specific site.
       This endpoint retrieves the configuration directly from S3 storage. The configuration
       includes entities (categories, topics), brand aliases, and competitor information.
+      Categories may include optional URLs for content matching.
 
       If a version parameter is provided, the specific version of the configuration will be
       retrieved. If the version does not exist, a 404 error will be returned. If no version
@@ -238,6 +239,9 @@ llmo-config:
       This operation completely overwrites the existing configuration with the provided payload.
       The payload is validated against the LLMO configuration schema before being stored in S3.
       The configuration must include entities, brands, and competitors sections.
+      
+      Categories can optionally include URLs that can be either exact URLs or URL prefixes
+      (ending with /*) to match against specific content areas.
     operationId: postLlmoConfig
     requestBody:
       required: true
