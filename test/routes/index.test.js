@@ -380,7 +380,7 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/opportunities/:opportunityId',
       'DELETE /sites/:siteId/opportunities/:opportunityId',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions',
-      'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged',
+      'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:pageNum/:pageSize',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
@@ -508,7 +508,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['DELETE /sites/:siteId/opportunities/:opportunityId'].handler).to.equal(mockOpportunitiesController.removeOpportunity);
     expect(dynamicRoutes['DELETE /sites/:siteId/opportunities/:opportunityId'].paramNames).to.deep.equal(['siteId', 'opportunityId']);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions'].handler).to.equal(mockSuggestionsController.getAllForOpportunity);
-    expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged'].handler).to.equal(mockSuggestionsController.getPagedForOpportunity);
+    expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:pageNum/:pageSize'].handler).to.equal(mockSuggestionsController.getPagedForOpportunity);
+    expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:pageNum/:pageSize'].paramNames).to.deep.equal(['siteId', 'opportunityId', 'pageNum', 'pageSize']);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions'].paramNames).to.deep.equal(['siteId', 'opportunityId']);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status'].handler).to.equal(mockSuggestionsController.getByStatus);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status'].paramNames).to.deep.equal(['siteId', 'opportunityId', 'status']);
