@@ -274,6 +274,8 @@ paths:
     $ref: './llmo-api.yaml#/llmo-sheet-data'
   /sites/{siteId}/llmo/sheet-data/{sheetType}/{dataSource}:
     $ref: './llmo-api.yaml#/llmo-sheet-data-with-type'
+  /sites/{siteId}/llmo/sheet-data/{sheetType}/{week}/{dataSource}:
+    $ref: './llmo-api.yaml#/llmo-sheet-data-with-type-and-week'
   /sites/{siteId}/llmo/global-sheet-data/{configName}:
     $ref: './llmo-api.yaml#/llmo-global-sheet-data'
   /sites/{siteId}/llmo/config:

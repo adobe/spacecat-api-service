@@ -434,6 +434,49 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       expect(await result.json()).to.deep.equal({ data: 'test-data' });
     });
+
+    it('should handle week parameter in URL construction', async () => {
+      const mockResponse = createMockResponse({ data: 'weekly-data' });
+      tracingFetchStub.resolves(mockResponse);
+      mockContext.params.sheetType = 'analytics';
+      mockContext.params.week = 'w01';
+
+      await controller.getLlmoSheetData(mockContext);
+
+      expect(tracingFetchStub).to.have.been.calledWith(
+        `${EXTERNAL_API_BASE_URL}/${TEST_FOLDER}/analytics/w01/test-data.json`,
+        sinon.match.object,
+      );
+    });
+
+    it('should handle week parameter with query params', async () => {
+      const mockResponse = createMockResponse({ data: 'weekly-data' });
+      tracingFetchStub.resolves(mockResponse);
+      mockContext.params.sheetType = 'analytics';
+      mockContext.params.week = 'w02';
+      mockContext.data = { limit: '50', offset: '10' };
+
+      await controller.getLlmoSheetData(mockContext);
+
+      expect(tracingFetchStub).to.have.been.calledWith(
+        `${EXTERNAL_API_BASE_URL}/${TEST_FOLDER}/analytics/w02/test-data.json?limit=50&offset=10`,
+        sinon.match.object,
+      );
+    });
+
+    it('should ignore week parameter when sheetType is not provided', async () => {
+      const mockResponse = createMockResponse({ data: 'test-data' });
+      tracingFetchStub.resolves(mockResponse);
+      mockContext.params.week = 'w01';
+      delete mockContext.params.sheetType;
+
+      await controller.getLlmoSheetData(mockContext);
+
+      expect(tracingFetchStub).to.have.been.calledWith(
+        `${EXTERNAL_API_BASE_URL}/${TEST_FOLDER}/test-data.json`,
+        sinon.match.object,
+      );
+    });
   });
 
   describe('getLlmoGlobalSheetData', () => {
@@ -892,6 +935,68 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       expect(tracingFetchStub).to.have.been.calledWith(
         `${EXTERNAL_API_BASE_URL}/${TEST_FOLDER}/analytics/test-data.json?limit=1000000`,
+        sinon.match.object,
+      );
+    });
+
+    it('should handle week parameter in URL construction', async () => {
+      tracingFetchStub.resolves(createMockResponse({ ':type': 'sheet', data: [] }));
+      mockContext.params.sheetType = 'analytics';
+      mockContext.params.week = 'w01';
+      mockContext.data = null;
+
+      const result = await controller.queryLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(tracingFetchStub).to.have.been.calledWith(
+        `${EXTERNAL_API_BASE_URL}/${TEST_FOLDER}/analytics/w01/test-data.json?limit=1000000`,
+        sinon.match.object,
+      );
+    });
+
+    it('should handle week parameter with filters and grouping', async () => {
+      const mockResponseData = {
+        ':type': 'sheet',
+        data: [
+          {
+            id: 1, status: 'active', week: 'w01', value: 100,
+          },
+          {
+            id: 2, status: 'inactive', week: 'w01', value: 200,
+          },
+        ],
+      };
+      tracingFetchStub.resolves(createMockResponse(mockResponseData));
+      mockContext.params.sheetType = 'analytics';
+      mockContext.params.week = 'w01';
+      mockContext.data = {
+        filters: { status: 'active' },
+        groupBy: ['status'],
+      };
+
+      const result = await controller.queryLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(tracingFetchStub).to.have.been.calledWith(
+        `${EXTERNAL_API_BASE_URL}/${TEST_FOLDER}/analytics/w01/test-data.json?limit=1000000`,
+        sinon.match.object,
+      );
+      const responseBody = await result.json();
+      expect(responseBody.data).to.have.length(1);
+      expect(responseBody.data[0].status).to.equal('active');
+    });
+
+    it('should ignore week parameter when sheetType is not provided', async () => {
+      tracingFetchStub.resolves(createMockResponse({ ':type': 'sheet', data: [] }));
+      mockContext.params.week = 'w01';
+      delete mockContext.params.sheetType;
+      mockContext.data = null;
+
+      const result = await controller.queryLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(tracingFetchStub).to.have.been.calledWith(
+        `${EXTERNAL_API_BASE_URL}/${TEST_FOLDER}/test-data.json?limit=1000000`,
         sinon.match.object,
       );
     });
