@@ -380,6 +380,7 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/opportunities/:opportunityId',
       'DELETE /sites/:siteId/opportunities/:opportunityId',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions',
+      'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
