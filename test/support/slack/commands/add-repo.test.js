@@ -24,8 +24,15 @@ describe('AddRepoCommand', () => {
   let dataAccessStub;
   let sqsStub;
   let siteStub;
+  const AEMY_BASE_URL = 'https://test-aemy-base-url.net';
+
+  // Helper function to construct Aemy API endpoint path
+  const getAemyEndpointPath = (owner, repo) => `/api/fn-ghapp/functions/get_installation_token/${owner}/${repo}`;
 
   beforeEach(() => {
+    process.env.AEMY_API_KEY = 'test-api-key';
+    process.env.AEMY_BASE_URL = AEMY_BASE_URL;
+
     sqsStub = {
       sendMessage: sinon.stub().resolves(),
     };
@@ -94,11 +101,16 @@ describe('AddRepoCommand', () => {
           default_branch: 'main',
         });
 
+      const aemyScope = nock(AEMY_BASE_URL)
+        .get(getAemyEndpointPath('valid', 'repo'))
+        .reply(200, { token: 'some-token' });
+
       const args = ['validSite.com', 'https://github.com/valid/repo'];
       const command = AddRepoCommand(context);
 
       await command.handleExecution(args, slackContext);
 
+      expect(aemyScope.isDone()).to.be.true;
       expect(slackContext.say.called).to.be.true;
       expect(siteStub.setGitHubURL).to.have.been.calledWith('https://github.com/valid/repo');
       expect(siteStub.setCode).to.have.been.calledWith({
@@ -134,10 +146,16 @@ describe('AddRepoCommand', () => {
           default_branch: 'main',
         });
 
+      const aemyScope = nock(AEMY_BASE_URL)
+        .get(getAemyEndpointPath('valid', 'repo'))
+        .reply(200, { token: 'some-token' });
+
       const args = ['validSite.com', 'github.com/valid/repo'];
       const command = AddRepoCommand(context);
 
       await command.handleExecution(args, slackContext);
+
+      expect(aemyScope.isDone()).to.be.true;
 
       expect(slackContext.say).calledWith('\n'
         + '      :white_check_mark: *GitHub repo added for <undefined|undefined>*\n'
@@ -221,9 +239,14 @@ describe('AddRepoCommand', () => {
           default_branch: 'main',
         });
 
+      const aemyScope = nock(AEMY_BASE_URL)
+        .get(getAemyEndpointPath('valid', 'repo'))
+        .reply(200, { token: 'some-token' });
+
       await command.handleExecution(args, slackContext);
 
       // Assertions to confirm repo info was fetched and handled correctly
+      expect(aemyScope.isDone()).to.be.true;
       expect(slackContext.say).calledWithMatch(/GitHub repo added/);
       expect(siteStub.setCode).to.have.been.calledWith({
         type: 'github',
@@ -234,16 +257,36 @@ describe('AddRepoCommand', () => {
       });
     });
 
-    it('handles non-existent repository (404 error)', async () => {
+    it('handles private repo', async () => {
       nock('https://api.github.com')
-        .get('/repos/invalid/repo')
+        .get('/repos/private/repo')
         .reply(404);
 
-      args[1] = 'https://github.com/invalid/repo';
+      const aemyScope = nock(AEMY_BASE_URL)
+        .get(getAemyEndpointPath('private', 'repo'))
+        .reply(200, { token: 'some-token' });
+
+      args[1] = 'https://github.com/private/repo';
       await command.handleExecution(args, slackContext);
 
-      // Assertions to confirm handling of non-existent repository
-      expect(slackContext.say.calledWith(':warning: The GitHub repository \'https://github.com/invalid/repo\' could not be found (private repo?).')).to.be.true;
+      // Should verify Aemy check was made
+      expect(aemyScope.isDone()).to.be.true;
+
+      // Should parse URL manually and add as private repo with 'main' branch
+      expect(siteStub.setCode).to.have.been.calledWith({
+        type: 'github',
+        owner: 'private',
+        repo: 'repo',
+        ref: 'main', // defaults to 'main' for private repos
+        url: 'https://github.com/private/repo',
+      });
+      expect(siteStub.save).to.have.been.called;
+
+      // Should send warning about adding as private repo
+      expect(slackContext.say.calledWithMatch(/GitHub API returned 404/)).to.be.true;
+      expect(slackContext.say.calledWithMatch(/Adding as private repo/)).to.be.true;
+      // Should send success message
+      expect(slackContext.say.calledWithMatch(/GitHub repo added/)).to.be.true;
     });
 
     it('handles errors other than 404 from GitHub API', async () => {
@@ -268,6 +311,240 @@ describe('AddRepoCommand', () => {
 
       // Assertions to confirm handling of network issues
       expect(slackContext.say.calledWithMatch(/Network error occurred/)).to.be.true;
+    });
+  });
+
+  describe('Branch Support', () => {
+    it('handles custom branch for public repository', async () => {
+      nock('https://api.github.com')
+        .get('/repos/valid/repo')
+        .reply(200, {
+          archived: false,
+          name: 'repo',
+          owner: { login: 'valid' },
+          default_branch: 'main',
+        });
+
+      const aemyScope = nock(AEMY_BASE_URL)
+        .get(getAemyEndpointPath('valid', 'repo'))
+        .reply(200, { token: 'some-token' });
+
+      const args = ['validSite.com', 'https://github.com/valid/repo', 'develop'];
+      const command = AddRepoCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(aemyScope.isDone()).to.be.true;
+      expect(siteStub.setCode).to.have.been.calledWith({
+        type: 'github',
+        owner: 'valid',
+        repo: 'repo',
+        ref: 'develop', // Should use custom branch
+        url: 'https://github.com/valid/repo',
+      });
+      expect(siteStub.save).to.have.been.called;
+    });
+
+    it('handles custom branch for private repository', async () => {
+      nock('https://api.github.com')
+        .get('/repos/private/repo')
+        .reply(404);
+
+      const aemyScope = nock(AEMY_BASE_URL)
+        .get(getAemyEndpointPath('private', 'repo'))
+        .reply(200, { token: 'some-token' });
+
+      const args = ['validSite.com', 'https://github.com/private/repo', 'feature-branch'];
+      const command = AddRepoCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(aemyScope.isDone()).to.be.true;
+      expect(slackContext.say.calledWithMatch(/GitHub API returned 404/)).to.be.true;
+      expect(slackContext.say.calledWithMatch(/Adding as private repo/)).to.be.true;
+      expect(slackContext.say.calledWithMatch(/feature-branch/)).to.be.true;
+      expect(siteStub.setCode).to.have.been.calledWith({
+        type: 'github',
+        owner: 'private',
+        repo: 'repo',
+        ref: 'feature-branch', // Should use custom branch
+        url: 'https://github.com/private/repo',
+      });
+      expect(siteStub.save).to.have.been.called;
+
+      // Should send success message
+      expect(slackContext.say.calledWithMatch(/GitHub repo added/)).to.be.true;
+    });
+
+    it('handles private repository without custom branch (defaults to main)', async () => {
+      nock('https://api.github.com')
+        .get('/repos/private/repo')
+        .reply(404);
+
+      const aemyScope = nock(AEMY_BASE_URL)
+        .get(getAemyEndpointPath('private', 'repo'))
+        .reply(200, { token: 'some-token' });
+
+      const args = ['validSite.com', 'https://github.com/private/repo'];
+      const command = AddRepoCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(aemyScope.isDone()).to.be.true;
+      expect(siteStub.setCode).to.have.been.calledWith({
+        type: 'github',
+        owner: 'private',
+        repo: 'repo',
+        ref: 'main', // Should default to 'main' for private repos
+        url: 'https://github.com/private/repo',
+      });
+      expect(siteStub.save).to.have.been.called;
+    });
+  });
+
+  describe('Aemy Integration', () => {
+    it('throws error when AEMY_BASE_URL is not set', async () => {
+      delete process.env.AEMY_BASE_URL;
+
+      nock('https://api.github.com')
+        .get('/repos/valid/repo')
+        .reply(200, {
+          archived: false,
+          name: 'repo',
+          owner: { login: 'valid' },
+          default_branch: 'main',
+        });
+
+      const args = ['validSite.com', 'https://github.com/valid/repo'];
+      const command = AddRepoCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(slackContext.say.calledWithMatch(/AEMY_BASE_URL is not set/)).to.be.true;
+      expect(siteStub.save).to.not.have.been.called;
+
+      // Restore for subsequent tests
+      process.env.AEMY_BASE_URL = AEMY_BASE_URL;
+    });
+
+    it('blocks repository not onboarded with Aemy (token is null)', async () => {
+      nock('https://api.github.com')
+        .get('/repos/valid/repo')
+        .reply(200, {
+          archived: false,
+          name: 'repo',
+          owner: { login: 'valid' },
+          default_branch: 'main',
+        });
+
+      const aemyNock = nock(AEMY_BASE_URL)
+        .get(getAemyEndpointPath('valid', 'repo'))
+        .reply(200, { token: null });
+
+      const args = ['validSite.com', 'https://github.com/valid/repo'];
+      const command = AddRepoCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(aemyNock.isDone()).to.be.true;
+      expect(slackContext.say.calledWith(':warning: The repository \'https://github.com/valid/repo\' is not onboarded with Aemy. Please onboard it with Aemy before adding it to a site.')).to.be.true;
+      expect(siteStub.save).to.not.have.been.called;
+    });
+
+    it('blocks repository not onboarded with Aemy (token is empty string)', async () => {
+      nock('https://api.github.com')
+        .get('/repos/valid/repo')
+        .reply(200, {
+          archived: false,
+          name: 'repo',
+          owner: { login: 'valid' },
+          default_branch: 'main',
+        });
+
+      const aemyNock = nock(AEMY_BASE_URL)
+        .get(getAemyEndpointPath('valid', 'repo'))
+        .reply(200, { token: '' });
+
+      const args = ['validSite.com', 'https://github.com/valid/repo'];
+      const command = AddRepoCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(aemyNock.isDone()).to.be.true;
+      expect(slackContext.say.calledWith(':warning: The repository \'https://github.com/valid/repo\' is not onboarded with Aemy. Please onboard it with Aemy before adding it to a site.')).to.be.true;
+      expect(siteStub.save).to.not.have.been.called;
+    });
+
+    it('blocks repository not onboarded with Aemy (token is undefined)', async () => {
+      nock('https://api.github.com')
+        .get('/repos/valid/repo')
+        .reply(200, {
+          archived: false,
+          name: 'repo',
+          owner: { login: 'valid' },
+          default_branch: 'main',
+        });
+
+      const aemyNock = nock(AEMY_BASE_URL)
+        .get(getAemyEndpointPath('valid', 'repo'))
+        .reply(200, {});
+
+      const args = ['validSite.com', 'https://github.com/valid/repo'];
+      const command = AddRepoCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(aemyNock.isDone()).to.be.true;
+      expect(slackContext.say.calledWith(':warning: The repository \'https://github.com/valid/repo\' is not onboarded with Aemy. Please onboard it with Aemy before adding it to a site.')).to.be.true;
+      expect(siteStub.save).to.not.have.been.called;
+    });
+
+    it('handles Aemy API error responses', async () => {
+      nock('https://api.github.com')
+        .get('/repos/valid/repo')
+        .reply(200, {
+          archived: false,
+          name: 'repo',
+          owner: { login: 'valid' },
+          default_branch: 'main',
+        });
+
+      const aemyNock = nock(AEMY_BASE_URL)
+        .get(getAemyEndpointPath('valid', 'repo'))
+        .reply(500, { error: 'Internal Server Error' });
+
+      const args = ['validSite.com', 'https://github.com/valid/repo'];
+      const command = AddRepoCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(aemyNock.isDone()).to.be.true;
+      expect(slackContext.say.calledWithMatch(/Failed to check if repository is onboarded with Aemy/)).to.be.true;
+      expect(siteStub.save).to.not.have.been.called;
+    });
+
+    it('handles Aemy API network errors', async () => {
+      nock('https://api.github.com')
+        .get('/repos/valid/repo')
+        .reply(200, {
+          archived: false,
+          name: 'repo',
+          owner: { login: 'valid' },
+          default_branch: 'main',
+        });
+
+      const aemyNock = nock(AEMY_BASE_URL)
+        .get(getAemyEndpointPath('valid', 'repo'))
+        .replyWithError('Network error');
+
+      const args = ['validSite.com', 'https://github.com/valid/repo'];
+      const command = AddRepoCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(aemyNock.isDone()).to.be.true;
+      expect(slackContext.say.calledWithMatch(/Network error/)).to.be.true;
+      expect(siteStub.save).to.not.have.been.called;
     });
   });
 });
