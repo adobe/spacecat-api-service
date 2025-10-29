@@ -121,8 +121,8 @@ function SuggestionsController(ctx, sqs, env) {
   const getPagedForOpportunity = async (context) => {
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId;
-    const pageSize = context.params?.pageSize || DEFAULT_PAGE_SIZE;
-    const pageNum = context.params?.pageNum || 0;
+    const pageSize = parseInt(context.params?.pageSize, 10) || DEFAULT_PAGE_SIZE;
+    const pageNum = parseInt(context.params?.pageNum, 10) || 0;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');

@@ -681,6 +681,25 @@ describe('Suggestions Controller', () => {
     expect(result.pagination).to.have.property('pageNum', 0);
   });
 
+  it('gets paged suggestions successfully when parameters come as strings from URL', async () => {
+    const response = await suggestionsController.getPagedForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        pageSize: '20',
+        pageNum: '0',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    const result = await response.json();
+    expect(result).to.have.property('suggestions');
+    expect(result).to.have.property('pagination');
+    expect(result.pagination).to.have.property('total', 1);
+    expect(result.pagination).to.have.property('pageSize', 20);
+    expect(result.pagination).to.have.property('pageNum', 0);
+  });
+
   it('gets all suggestions for an opportunity by status', async () => {
     const response = await suggestionsController.getByStatus({
       params: {
