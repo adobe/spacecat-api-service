@@ -26,6 +26,9 @@ describe('AddRepoCommand', () => {
   let siteStub;
   const AEMY_BASE_URL = 'https://test-aemy-base-url.net';
 
+  // Helper function to construct Aemy API endpoint path
+  const getAemyEndpointPath = (owner, repo) => `/api/fn-ghapp/functions/get_installation_token/${owner}/${repo}`;
+
   beforeEach(() => {
     process.env.AEMY_API_KEY = 'test-api-key';
     process.env.AEMY_BASE_URL = AEMY_BASE_URL;
@@ -99,7 +102,7 @@ describe('AddRepoCommand', () => {
         });
 
       const aemyScope = nock(AEMY_BASE_URL)
-        .get('/api/fn-ghapp/functions/get_installation_token/valid/repo/main')
+        .get(getAemyEndpointPath('valid', 'repo'))
         .reply(200, { token: 'some-token' });
 
       const args = ['validSite.com', 'https://github.com/valid/repo'];
@@ -144,7 +147,7 @@ describe('AddRepoCommand', () => {
         });
 
       const aemyScope = nock(AEMY_BASE_URL)
-        .get('/api/fn-ghapp/functions/get_installation_token/valid/repo/main')
+        .get(getAemyEndpointPath('valid', 'repo'))
         .reply(200, { token: 'some-token' });
 
       const args = ['validSite.com', 'github.com/valid/repo'];
@@ -237,7 +240,7 @@ describe('AddRepoCommand', () => {
         });
 
       const aemyScope = nock(AEMY_BASE_URL)
-        .get('/api/fn-ghapp/functions/get_installation_token/valid/repo/main')
+        .get(getAemyEndpointPath('valid', 'repo'))
         .reply(200, { token: 'some-token' });
 
       await command.handleExecution(args, slackContext);
@@ -260,7 +263,7 @@ describe('AddRepoCommand', () => {
         .reply(404);
 
       const aemyScope = nock(AEMY_BASE_URL)
-        .get('/api/fn-ghapp/functions/get_installation_token/private/repo/main')
+        .get(getAemyEndpointPath('private', 'repo'))
         .reply(200, { token: 'some-token' });
 
       args[1] = 'https://github.com/private/repo';
@@ -323,7 +326,7 @@ describe('AddRepoCommand', () => {
         });
 
       const aemyScope = nock(AEMY_BASE_URL)
-        .get('/api/fn-ghapp/functions/get_installation_token/valid/repo/develop')
+        .get(getAemyEndpointPath('valid', 'repo'))
         .reply(200, { token: 'some-token' });
 
       const args = ['validSite.com', 'https://github.com/valid/repo', 'develop'];
@@ -348,7 +351,7 @@ describe('AddRepoCommand', () => {
         .reply(404);
 
       const aemyScope = nock(AEMY_BASE_URL)
-        .get('/api/fn-ghapp/functions/get_installation_token/private/repo/feature-branch')
+        .get(getAemyEndpointPath('private', 'repo'))
         .reply(200, { token: 'some-token' });
 
       const args = ['validSite.com', 'https://github.com/private/repo', 'feature-branch'];
@@ -379,7 +382,7 @@ describe('AddRepoCommand', () => {
         .reply(404);
 
       const aemyScope = nock(AEMY_BASE_URL)
-        .get('/api/fn-ghapp/functions/get_installation_token/private/repo/main')
+        .get(getAemyEndpointPath('private', 'repo'))
         .reply(200, { token: 'some-token' });
 
       const args = ['validSite.com', 'https://github.com/private/repo'];
@@ -435,7 +438,7 @@ describe('AddRepoCommand', () => {
         });
 
       const aemyNock = nock(AEMY_BASE_URL)
-        .get('/api/fn-ghapp/functions/get_installation_token/valid/repo/main')
+        .get(getAemyEndpointPath('valid', 'repo'))
         .reply(200, { token: null });
 
       const args = ['validSite.com', 'https://github.com/valid/repo'];
@@ -459,7 +462,7 @@ describe('AddRepoCommand', () => {
         });
 
       const aemyNock = nock(AEMY_BASE_URL)
-        .get('/api/fn-ghapp/functions/get_installation_token/valid/repo/main')
+        .get(getAemyEndpointPath('valid', 'repo'))
         .reply(200, { token: '' });
 
       const args = ['validSite.com', 'https://github.com/valid/repo'];
@@ -483,7 +486,7 @@ describe('AddRepoCommand', () => {
         });
 
       const aemyNock = nock(AEMY_BASE_URL)
-        .get('/api/fn-ghapp/functions/get_installation_token/valid/repo/main')
+        .get(getAemyEndpointPath('valid', 'repo'))
         .reply(200, {});
 
       const args = ['validSite.com', 'https://github.com/valid/repo'];
@@ -507,7 +510,7 @@ describe('AddRepoCommand', () => {
         });
 
       const aemyNock = nock(AEMY_BASE_URL)
-        .get('/api/fn-ghapp/functions/get_installation_token/valid/repo/main')
+        .get(getAemyEndpointPath('valid', 'repo'))
         .reply(500, { error: 'Internal Server Error' });
 
       const args = ['validSite.com', 'https://github.com/valid/repo'];
@@ -531,7 +534,7 @@ describe('AddRepoCommand', () => {
         });
 
       const aemyNock = nock(AEMY_BASE_URL)
-        .get('/api/fn-ghapp/functions/get_installation_token/valid/repo/main')
+        .get(getAemyEndpointPath('valid', 'repo'))
         .replyWithError('Network error');
 
       const args = ['validSite.com', 'https://github.com/valid/repo'];

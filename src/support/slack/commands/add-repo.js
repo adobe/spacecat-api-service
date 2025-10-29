@@ -68,12 +68,12 @@ function AddRepoCommand(context) {
     }
   }
 
-  async function isOnboardedWithAemy(owner, repo, branch) {
+  async function isOnboardedWithAemy(owner, repo) {
     const { AEMY_BASE_URL } = process.env;
     if (!AEMY_BASE_URL) {
       throw new Error('AEMY_BASE_URL is not set');
     }
-    const AEMY_ENDPOINT = `${AEMY_BASE_URL}/api/fn-ghapp/functions/get_installation_token/${owner}/${repo}/${branch}`;
+    const AEMY_ENDPOINT = `${AEMY_BASE_URL}/api/fn-ghapp/functions/get_installation_token/${owner}/${repo}`;
     try {
       const response = await fetch(AEMY_ENDPOINT, { headers: { 'x-api-key': process.env.AEMY_API_KEY } });
       if (response.ok) {
@@ -145,7 +145,7 @@ function AddRepoCommand(context) {
         branch = branchInput || repoInfo.default_branch;
       }
 
-      const isOnboarded = await isOnboardedWithAemy(owner, repoName, branch);
+      const isOnboarded = await isOnboardedWithAemy(owner, repoName);
       if (!isOnboarded) {
         await say(`:warning: The repository '${repoUrl}' is not onboarded with Aemy. Please onboard it with Aemy before adding it to a site.`);
         return;
