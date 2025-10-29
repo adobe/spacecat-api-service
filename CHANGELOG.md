@@ -1,3 +1,50 @@
+## [1.217.1](https://github.com/adobe/spacecat-api-service/compare/v1.217.0...v1.217.1) (2025-10-29)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1412](https://github.com/adobe/spacecat-api-service/issues/1412)) ([fc1f22b](https://github.com/adobe/spacecat-api-service/commit/fc1f22b7de7e8aaf8f06c2d79efa4d59a085fa3d))
+
+# [1.217.0](https://github.com/adobe/spacecat-api-service/compare/v1.216.0...v1.217.0) (2025-10-29)
+
+
+### Bug Fixes
+
+* fixed parameter for suggestion paging ([#1411](https://github.com/adobe/spacecat-api-service/issues/1411)) ([6e8abbc](https://github.com/adobe/spacecat-api-service/commit/6e8abbcb2b4ca882f314e80ca27408b1e7c45fe5))
+
+
+### Features
+
+* add support to collect urls relevant to categories | LLMO-845 ([#1404](https://github.com/adobe/spacecat-api-service/issues/1404)) ([313a357](https://github.com/adobe/spacecat-api-service/commit/313a357a2fa0465336ef14c5931882b99b659d22))
+
+# [1.216.0](https://github.com/adobe/spacecat-api-service/compare/v1.215.1...v1.216.0) (2025-10-29)
+
+
+### Features
+
+* read daily brand presence files for llmo ([#1407](https://github.com/adobe/spacecat-api-service/issues/1407)) ([66de1a1](https://github.com/adobe/spacecat-api-service/commit/66de1a12f49b739f74d1e20b4a552882d48ed4d3))
+
+## [1.215.1](https://github.com/adobe/spacecat-api-service/compare/v1.215.0...v1.215.1) (2025-10-29)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1409](https://github.com/adobe/spacecat-api-service/issues/1409)) ([4406c46](https://github.com/adobe/spacecat-api-service/commit/4406c46b15a5d103a34430eb23e4b52d0dba8747))
+
+# [1.215.0](https://github.com/adobe/spacecat-api-service/compare/v1.214.9...v1.215.0) (2025-10-29)
+
+
+### Features
+
+* added paged suggestion function ([#1403](https://github.com/adobe/spacecat-api-service/issues/1403)) ([bdd9858](https://github.com/adobe/spacecat-api-service/commit/bdd98582903f55bd7d90ea670205e2156a8e1c40))
+
+## [1.214.9](https://github.com/adobe/spacecat-api-service/compare/v1.214.8...v1.214.9) (2025-10-29)
+
+
+### Bug Fixes
+
+* Enable addition of Private Repos in Spacecat via Slack and add s… ([#1373](https://github.com/adobe/spacecat-api-service/issues/1373)) ([2d9ab53](https://github.com/adobe/spacecat-api-service/commit/2d9ab53a01a46dcb040559ec43e8ea65f5bd7f1a))
+
 ## [1.214.8](https://github.com/adobe/spacecat-api-service/compare/v1.214.7...v1.214.8) (2025-10-28)
 
 

@@ -105,11 +105,21 @@ function LlmoController(ctx) {
   // Handles requests to the LLMO sheet data endpoint
   const getLlmoSheetData = async (context) => {
     const { log } = context;
-    const { siteId, dataSource, sheetType } = context.params;
+    const {
+      siteId, dataSource, sheetType, week,
+    } = context.params;
     const { env } = context;
     try {
       const { llmoConfig } = await getSiteAndValidateLlmo(context);
-      const sheetURL = sheetType ? `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json` : `${llmoConfig.dataFolder}/${dataSource}.json`;
+      // Construct the sheet URL based on which parameters are provided
+      let sheetURL;
+      if (sheetType && week) {
+        sheetURL = `${llmoConfig.dataFolder}/${sheetType}/${week}/${dataSource}.json`;
+      } else if (sheetType) {
+        sheetURL = `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json`;
+      } else {
+        sheetURL = `${llmoConfig.dataFolder}/${dataSource}.json`;
+      }
 
       // Add limit, offset and sheet query params to the url
       const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
@@ -156,7 +166,9 @@ function LlmoController(ctx) {
   // with query capabilities (filtering, exclusions, grouping)
   const queryLlmoSheetData = async (context) => {
     const { log } = context;
-    const { siteId, dataSource, sheetType } = context.params;
+    const {
+      siteId, dataSource, sheetType, week,
+    } = context.params;
     const { env } = context;
 
     // Start timing for the entire method
@@ -191,7 +203,15 @@ function LlmoController(ctx) {
 
     try {
       const { llmoConfig } = await getSiteAndValidateLlmo(context);
-      const sheetURL = sheetType ? `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json` : `${llmoConfig.dataFolder}/${dataSource}.json`;
+      // Construct the sheet URL based on which parameters are provided
+      let sheetURL;
+      if (sheetType && week) {
+        sheetURL = `${llmoConfig.dataFolder}/${sheetType}/${week}/${dataSource}.json`;
+      } else if (sheetType) {
+        sheetURL = `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json`;
+      } else {
+        sheetURL = `${llmoConfig.dataFolder}/${dataSource}.json`;
+      }
 
       // Add limit, offset and sheet query params to the url
       const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
@@ -447,6 +467,10 @@ function LlmoController(ctx) {
       const numBrandAliases = parsedConfig.brands?.aliases?.length || 0;
       const numCompetitors = parsedConfig.competitors?.competitors?.length || 0;
       const numDeletedPrompts = Object.keys(parsedConfig.deleted?.prompts || {}).length;
+      const numCategoryUrls = Object.values(parsedConfig.categories || {}).reduce(
+        (total, category) => total + (category.urls?.length || 0),
+        0,
+      );
 
       // Build config summary
       const summaryParts = [
@@ -456,6 +480,7 @@ function LlmoController(ctx) {
         `${numBrandAliases} brand aliases`,
         `${numCompetitors} competitors`,
         `${numDeletedPrompts} deleted prompts`,
+        `${numCategoryUrls} category URLs`,
       ];
       const configSummary = summaryParts.join(', ');
 
