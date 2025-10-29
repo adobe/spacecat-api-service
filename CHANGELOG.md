@@ -1,3 +1,10 @@
+## [1.214.9](https://github.com/adobe/spacecat-api-service/compare/v1.214.8...v1.214.9) (2025-10-29)
+
+
+### Bug Fixes
+
+* Enable addition of Private Repos in Spacecat via Slack and add s… ([#1373](https://github.com/adobe/spacecat-api-service/issues/1373)) ([2d9ab53](https://github.com/adobe/spacecat-api-service/commit/2d9ab53a01a46dcb040559ec43e8ea65f5bd7f1a))
+
 ## [1.214.8](https://github.com/adobe/spacecat-api-service/compare/v1.214.7...v1.214.8) (2025-10-28)
 
 
