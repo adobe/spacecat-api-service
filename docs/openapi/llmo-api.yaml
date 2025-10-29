@@ -145,6 +145,94 @@ llmo-sheet-data-with-type:
     security:
       - api_key: [ ]
 
+llmo-sheet-data-with-type-and-week:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: sheetType
+      in: path
+      required: true
+      description: The sheet type identifier to fetch from the external endpoint
+      schema:
+        type: string
+        example: 'analytics'
+    - name: week
+      in: path
+      required: true
+      description: The week identifier (e.g., w01, w02) to fetch time-series data
+      schema:
+        type: string
+        pattern: '^w\d{2}$'
+        example: 'w01'
+    - name: dataSource
+      in: path
+      required: true
+      description: The data source identifier to fetch from the external endpoint
+      schema:
+        type: string
+        example: 'questions'
+  get:
+    tags:
+      - llmo
+    summary: Get LLMO sheet data with sheet type and week
+    description: |
+      Retrieves data from the external LLMO data endpoint for a specific site with a specified sheet type and week.
+      This endpoint proxies data from the external HLX API based on the site's LLMO configuration.
+      The data is fetched from the path: {dataFolder}/{sheetType}/{week}/{dataSource}.json
+      This is useful for fetching time-series data organized by week.
+    operationId: getLlmoSheetDataWithTypeAndWeek
+    responses:
+      '200':
+        description: LLMO sheet data retrieved successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              description: The data returned from the external LLMO endpoint
+              additionalProperties: true
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+  post:
+    tags:
+      - llmo
+    summary: Query LLMO sheet data with sheet type and week using filters, exclusions, and grouping
+    description: |
+      Retrieves and processes data from the external LLMO data endpoint for a specific site with a specified sheet type,
+      week, and advanced querying capabilities. This endpoint allows filtering data with case-insensitive exact matching,
+      excluding specific fields from the response, and grouping data by specified attributes.
+      The data is fetched from the path: {dataFolder}/{sheetType}/{week}/{dataSource}.json
+      The endpoint fetches all available data (up to 1M records) to apply the query operations effectively.
+      This is useful for fetching and analyzing time-series data organized by week.
+    operationId: queryLlmoSheetDataWithTypeAndWeek
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/LlmoSheetDataQuery'
+    responses:
+      '200':
+        description: LLMO sheet data queried and processed successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              description: The processed data returned from the external LLMO endpoint after applying filters, exclusions, and grouping
+              additionalProperties: true
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 llmo-global-sheet-data:
   parameters:
     - $ref: './parameters.yaml#/siteId'
