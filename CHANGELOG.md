@@ -1,3 +1,10 @@
+# [1.216.0](https://github.com/adobe/spacecat-api-service/compare/v1.215.1...v1.216.0) (2025-10-29)
+
+
+### Features
+
+* read daily brand presence files for llmo ([#1407](https://github.com/adobe/spacecat-api-service/issues/1407)) ([66de1a1](https://github.com/adobe/spacecat-api-service/commit/66de1a12f49b739f74d1e20b4a552882d48ed4d3))
+
 ## [1.215.1](https://github.com/adobe/spacecat-api-service/compare/v1.215.0...v1.215.1) (2025-10-29)
 
 
