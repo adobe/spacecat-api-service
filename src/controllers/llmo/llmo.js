@@ -467,6 +467,10 @@ function LlmoController(ctx) {
       const numBrandAliases = parsedConfig.brands?.aliases?.length || 0;
       const numCompetitors = parsedConfig.competitors?.competitors?.length || 0;
       const numDeletedPrompts = Object.keys(parsedConfig.deleted?.prompts || {}).length;
+      const numCategoryUrls = Object.values(parsedConfig.categories || {}).reduce(
+        (total, category) => total + (category.urls?.length || 0),
+        0,
+      );
 
       // Build config summary
       const summaryParts = [
@@ -476,6 +480,7 @@ function LlmoController(ctx) {
         `${numBrandAliases} brand aliases`,
         `${numCompetitors} competitors`,
         `${numDeletedPrompts} deleted prompts`,
+        `${numCategoryUrls} category URLs`,
       ];
       const configSummary = summaryParts.join(', ');
 
