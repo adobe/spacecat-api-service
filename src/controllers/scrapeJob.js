@@ -43,6 +43,8 @@ function ScrapeJobController(context) {
 
   const HEADER_ERROR = 'x-error';
 
+  const MAX_JOBS_BY_BASEURL = 100;
+
   function createErrorResponse(error) {
     return createResponse({}, error.status || 500, {
       [HEADER_ERROR]: error.message,
@@ -182,7 +184,9 @@ function ScrapeJobController(context) {
       }
 
       // return the latest max 100 jobs, sorted by startedAt (newest first)
-      return ok(jobs.sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt)).slice(0, 100));
+      return ok(jobs.sort(
+        (a, b) => new Date(b.startedAt) - new Date(a.startedAt),
+      ).slice(0, MAX_JOBS_BY_BASEURL));
     } catch (error) {
       log.error(`Failed to fetch scrape jobs by baseURL: ${decodedBaseURL}, ${error.message}`);
       return createErrorResponse(error);
