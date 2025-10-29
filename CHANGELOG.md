@@ -1,3 +1,15 @@
+# [1.217.0](https://github.com/adobe/spacecat-api-service/compare/v1.216.0...v1.217.0) (2025-10-29)
+
+
+### Bug Fixes
+
+* fixed parameter for suggestion paging ([#1411](https://github.com/adobe/spacecat-api-service/issues/1411)) ([6e8abbc](https://github.com/adobe/spacecat-api-service/commit/6e8abbcb2b4ca882f314e80ca27408b1e7c45fe5))
+
+
+### Features
+
+* add support to collect urls relevant to categories | LLMO-845 ([#1404](https://github.com/adobe/spacecat-api-service/issues/1404)) ([313a357](https://github.com/adobe/spacecat-api-service/commit/313a357a2fa0465336ef14c5931882b99b659d22))
+
 # [1.216.0](https://github.com/adobe/spacecat-api-service/compare/v1.215.1...v1.216.0) (2025-10-29)
 
 
