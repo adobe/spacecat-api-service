@@ -35,15 +35,26 @@ export default (ctx) => {
     throw new Error('Data access required');
   }
 
-  const { Configuration, Site } = dataAccess;
+  const { Configuration, Site, Organization } = dataAccess;
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
-  const validateInput = ({ baseURL, auditType, enable }) => {
-    if (isString(baseURL) === false || baseURL.length === 0) {
-      throw new Error('Site URL is required.');
+  const validateInput = ({
+    baseURL, organizationId, auditType, enable,
+  }) => {
+    // Must have either baseURL or organizationId, but not both
+    const hasBaseURL = isString(baseURL) && baseURL.length > 0;
+    const hasOrgId = isString(organizationId) && organizationId.length > 0;
+
+    if (!hasBaseURL && !hasOrgId) {
+      throw new Error('Either Site URL (baseURL) or Organization ID (organizationId) is required.');
     }
 
-    if (!isValidUrl(baseURL)) {
+    if (hasBaseURL && hasOrgId) {
+      throw new Error('Cannot specify both baseURL and organizationId. Please provide only one.');
+    }
+
+    // Validate baseURL format if provided
+    if (hasBaseURL && !isValidUrl(baseURL)) {
       throw new Error(`Invalid Site URL format: "${baseURL}".`);
     }
 
@@ -81,9 +92,13 @@ export default (ctx) => {
       const configuration = await Configuration.findLatest();
 
       const responses = await Promise.all(
-        requestBody.map(async ({ baseURL, auditType, enable }) => {
+        requestBody.map(async ({
+          baseURL, organizationId, auditType, enable,
+        }) => {
           try {
-            validateInput({ baseURL, auditType, enable });
+            validateInput({
+              baseURL, organizationId, auditType, enable,
+            });
           } catch (error) {
             return {
               message: error.message,
@@ -91,9 +106,25 @@ export default (ctx) => {
             };
           }
 
-          const site = await Site.findByBaseURL(baseURL);
-          if (site === null) {
-            return { status: 404, message: `Site with baseURL: ${baseURL} not found.` };
+          // Determine if this is a site or org operation
+          const isSiteOperation = baseURL !== undefined;
+          let entity;
+          let entityDescription;
+
+          if (isSiteOperation) {
+            // Site operation
+            entity = await Site.findByBaseURL(baseURL);
+            if (entity === null) {
+              return { status: 404, message: `Site with baseURL: ${baseURL} not found.` };
+            }
+            entityDescription = `site "${entity.getBaseURL()}"`;
+          } else {
+            // Organization operation
+            entity = await Organization.findById(organizationId);
+            if (entity === null) {
+              return { status: 404, message: `Organization with ID: ${organizationId} not found.` };
+            }
+            entityDescription = `organization "${organizationId}"`;
           }
 
           const registeredAudits = configuration.getHandlers();
@@ -107,12 +138,28 @@ export default (ctx) => {
 
           hasUpdates = true;
           let successMessage;
-          if (enable === true) {
-            configuration.enableHandlerForSite(auditType, site);
-            successMessage = `The audit "${auditType}" has been enabled for the "${site.getBaseURL()}".`;
-          } else {
-            configuration.disableHandlerForSite(auditType, site);
-            successMessage = `The audit "${auditType}" has been disabled for the "${site.getBaseURL()}".`;
+
+          try {
+            if (enable === true) {
+              if (isSiteOperation) {
+                configuration.enableHandlerForSite(auditType, entity);
+              } else {
+                configuration.enableHandlerForOrg(auditType, entity);
+              }
+              successMessage = `The audit "${auditType}" has been enabled for the ${entityDescription}.`;
+            } else {
+              if (isSiteOperation) {
+                configuration.disableHandlerForSite(auditType, entity);
+              } else {
+                configuration.disableHandlerForOrg(auditType, entity);
+              }
+              successMessage = `The audit "${auditType}" has been disabled for the ${entityDescription}.`;
+            }
+          } catch (error) {
+            return {
+              status: 400,
+              message: error.message,
+            };
           }
 
           return { status: 200, message: successMessage };

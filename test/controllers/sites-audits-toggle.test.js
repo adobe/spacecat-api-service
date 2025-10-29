@@ -75,6 +75,9 @@ describe('Sites Audits Controller', () => {
       Site: {
         findByBaseURL: sandbox.stub(),
       },
+      Organization: {
+        findById: sandbox.stub(),
+      },
     };
 
     contextMock = {
@@ -168,7 +171,7 @@ describe('Sites Audits Controller', () => {
         + '"https://site0.com", but it was not',
     ).to.deep.equal({
       status: 200,
-      message: 'The audit "cwv" has been enabled for the "https://site0.com".',
+      message: 'The audit "cwv" has been enabled for the site "https://site0.com".',
     });
     expect(
       patchResponse[1],
@@ -176,7 +179,7 @@ describe('Sites Audits Controller', () => {
         + '"https://site0.com", but it was not',
     ).to.deep.equal({
       status: 200,
-      message: 'The audit "404" has been enabled for the "https://site0.com".',
+      message: 'The audit "404" has been enabled for the site "https://site0.com".',
     });
     expect(
       patchResponse[2],
@@ -184,7 +187,7 @@ describe('Sites Audits Controller', () => {
         + '"https://site.com", but it was not',
     ).to.deep.equal({
       status: 200,
-      message: 'The audit "cwv" has been disabled for the "https://site1.com".',
+      message: 'The audit "cwv" has been disabled for the site "https://site1.com".',
     });
     expect(
       patchResponse[3],
@@ -192,7 +195,7 @@ describe('Sites Audits Controller', () => {
         + '"https://site.com", but it was not',
     ).to.deep.equal({
       status: 200,
-      message: 'The audit "404" has been disabled for the "https://site1.com".',
+      message: 'The audit "404" has been disabled for the site "https://site1.com".',
     });
   });
 
@@ -284,7 +287,7 @@ describe('Sites Audits Controller', () => {
         'Expected patchResponse[0] to have a status of 400 and message indicating that the site URL is required, but it was not.',
       ).to.deep.equal({
         status: 400,
-        message: 'Site URL is required.',
+        message: 'Either Site URL (baseURL) or Organization ID (organizationId) is required.',
       });
       expect(
         patchResponse[1],
@@ -292,7 +295,7 @@ describe('Sites Audits Controller', () => {
           + '"https://site0.com", but it was not',
       ).to.deep.equal({
         status: 200,
-        message: 'The audit "404" has been enabled for the "https://site1.com".',
+        message: 'The audit "404" has been enabled for the site "https://site1.com".',
       });
     });
 
@@ -317,10 +320,10 @@ describe('Sites Audits Controller', () => {
 
       expect(
         patchResponse[0],
-        'Expected patchResponse[0] to have a status of 400 and message indicating that the site URL is required, but it was not.',
+        'Expected patchResponse[0] to have a status of 400 and message indicating that the site URL or organization ID is required, but it was not.',
       ).to.deep.equal({
         status: 400,
-        message: 'Site URL is required.',
+        message: 'Either Site URL (baseURL) or Organization ID (organizationId) is required.',
       });
       expect(
         patchResponse[1],
@@ -328,7 +331,7 @@ describe('Sites Audits Controller', () => {
           + '"https://site0.com", but it was not',
       ).to.deep.equal({
         status: 200,
-        message: 'The audit "404" has been enabled for the "https://site1.com".',
+        message: 'The audit "404" has been enabled for the site "https://site1.com".',
       });
     });
 
@@ -365,7 +368,7 @@ describe('Sites Audits Controller', () => {
           + '"https://site0.com", but it was not',
       ).to.deep.equal({
         status: 200,
-        message: 'The audit "404" has been enabled for the "https://site1.com".',
+        message: 'The audit "404" has been enabled for the site "https://site1.com".',
       });
     });
 
@@ -403,7 +406,7 @@ describe('Sites Audits Controller', () => {
           + '"https://site0.com", but it was not',
       ).to.deep.equal({
         status: 200,
-        message: 'The audit "404" has been enabled for the "https://site1.com".',
+        message: 'The audit "404" has been enabled for the site "https://site1.com".',
       });
     });
 
@@ -441,7 +444,7 @@ describe('Sites Audits Controller', () => {
           + '"https://site0.com", but it was not',
       ).to.deep.equal({
         status: 200,
-        message: 'The audit "404" has been enabled for the "https://site1.com".',
+        message: 'The audit "404" has been enabled for the site "https://site1.com".',
       });
     });
 
@@ -479,7 +482,7 @@ describe('Sites Audits Controller', () => {
           + '"https://site0.com", but it was not',
       ).to.deep.equal({
         status: 200,
-        message: 'The audit "404" has been enabled for the "https://site1.com".',
+        message: 'The audit "404" has been enabled for the site "https://site1.com".',
       });
     });
 
@@ -518,7 +521,7 @@ describe('Sites Audits Controller', () => {
           + '"https://site0.com", but it was not',
       ).to.deep.equal({
         status: 200,
-        message: 'The audit "404" has been enabled for the "https://site1.com".',
+        message: 'The audit "404" has been enabled for the site "https://site1.com".',
       });
     });
 
@@ -559,7 +562,7 @@ describe('Sites Audits Controller', () => {
           + '"https://site0.com", but it was not',
       ).to.deep.equal({
         status: 200,
-        message: 'The audit "404" has been enabled for the "https://site1.com".',
+        message: 'The audit "404" has been enabled for the site "https://site1.com".',
       });
     });
 
@@ -594,6 +597,221 @@ describe('Sites Audits Controller', () => {
       const error = await response.json();
       expect(response.status).to.equal(403);
       expect(error).to.have.property('message', 'Only admins can change configuration settings.');
+    });
+  });
+
+  describe('organization-level audit toggle', () => {
+    const organizations = [
+      { getId: () => 'org0', getName: () => 'Organization Zero' },
+      { getId: () => 'org1', getName: () => 'Organization One' },
+    ];
+
+    beforeEach(() => {
+      configurationMock.enableHandlerForOrg = sandbox.stub();
+      configurationMock.disableHandlerForOrg = sandbox.stub();
+    });
+
+    it('successfully enables an audit for an organization', async () => {
+      dataAccessMock.Organization.findById.withArgs('org0').resolves(organizations[0]);
+
+      const requestData = [
+        { organizationId: 'org0', auditType: 'cwv', enable: true },
+      ];
+      const response = await sitesAuditsToggleController.execute({
+        data: requestData,
+        log: logMock,
+      });
+      const patchResponse = await response.json();
+
+      expect(
+        configurationMock.enableHandlerForOrg.calledOnceWith('cwv', organizations[0]),
+        'Expected configuration.enableHandlerForOrg to be called once with "cwv" and organizations[0]',
+      ).to.be.true;
+      expect(
+        configurationMock.save.called,
+        'Expected dataAccess.updateConfiguration to be called, but it was not.',
+      ).to.be.true;
+
+      expect(patchResponse[0]).to.deep.equal({
+        status: 200,
+        message: 'The audit "cwv" has been enabled for the organization "org0".',
+      });
+    });
+
+    it('successfully disables an audit for an organization', async () => {
+      dataAccessMock.Organization.findById.withArgs('org1').resolves(organizations[1]);
+
+      const requestData = [
+        { organizationId: 'org1', auditType: '404', enable: false },
+      ];
+      const response = await sitesAuditsToggleController.execute({
+        data: requestData,
+        log: logMock,
+      });
+      const patchResponse = await response.json();
+
+      expect(
+        configurationMock.disableHandlerForOrg.calledOnceWith('404', organizations[1]),
+        'Expected configuration.disableHandlerForOrg to be called once with "404" and organizations[1]',
+      ).to.be.true;
+      expect(
+        configurationMock.save.called,
+        'Expected dataAccess.updateConfiguration to be called, but it was not.',
+      ).to.be.true;
+
+      expect(patchResponse[0]).to.deep.equal({
+        status: 200,
+        message: 'The audit "404" has been disabled for the organization "org1".',
+      });
+    });
+
+    it('returns 404 if organization not found', async () => {
+      dataAccessMock.Organization.findById.withArgs('org0').resolves(null);
+
+      const requestData = [
+        { organizationId: 'org0', auditType: 'cwv', enable: true },
+      ];
+      const response = await sitesAuditsToggleController.execute({
+        data: requestData,
+        log: logMock,
+      });
+      const patchResponse = await response.json();
+
+      expect(
+        configurationMock.enableHandlerForOrg.called,
+        'Expected configuration.enableHandlerForOrg to not be called',
+      ).to.be.false;
+      expect(
+        configurationMock.save.called,
+        'Expected save to not be called',
+      ).to.be.false;
+
+      expect(patchResponse[0]).to.deep.equal({
+        status: 404,
+        message: 'Organization with ID: org0 not found.',
+      });
+    });
+
+    it('processes mixed site and organization requests', async () => {
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(sites[0]);
+      dataAccessMock.Organization.findById.withArgs('org0').resolves(organizations[0]);
+
+      const requestData = [
+        { baseURL: 'https://site0.com', auditType: 'cwv', enable: true },
+        { organizationId: 'org0', auditType: '404', enable: false },
+      ];
+      const response = await sitesAuditsToggleController.execute({
+        data: requestData,
+        log: logMock,
+      });
+      const patchResponse = await response.json();
+
+      expect(
+        configurationMock.enableHandlerForSite.calledOnceWith('cwv', sites[0]),
+        'Expected configuration.enableHandlerForSite to be called once',
+      ).to.be.true;
+      expect(
+        configurationMock.disableHandlerForOrg.calledOnceWith('404', organizations[0]),
+        'Expected configuration.disableHandlerForOrg to be called once',
+      ).to.be.true;
+      expect(
+        configurationMock.save.called,
+        'Expected save to be called',
+      ).to.be.true;
+
+      expect(patchResponse[0]).to.deep.equal({
+        status: 200,
+        message: 'The audit "cwv" has been enabled for the site "https://site0.com".',
+      });
+      expect(patchResponse[1]).to.deep.equal({
+        status: 200,
+        message: 'The audit "404" has been disabled for the organization "org0".',
+      });
+    });
+
+    it('returns 400 if both baseURL and organizationId are provided', async () => {
+      const requestData = [
+        {
+          baseURL: 'https://site0.com', organizationId: 'org0', auditType: 'cwv', enable: true,
+        },
+      ];
+      const response = await sitesAuditsToggleController.execute({
+        data: requestData,
+        log: logMock,
+      });
+      const responses = await response.json();
+
+      expect(response.status).to.equal(207);
+      expect(responses[0]).to.deep.equal({
+        status: 400,
+        message: 'Cannot specify both baseURL and organizationId. Please provide only one.',
+      });
+    });
+
+    it('returns 400 if neither baseURL nor organizationId are provided', async () => {
+      const requestData = [
+        { auditType: 'cwv', enable: true },
+      ];
+      const response = await sitesAuditsToggleController.execute({
+        data: requestData,
+        log: logMock,
+      });
+      const responses = await response.json();
+
+      expect(response.status).to.equal(207);
+      expect(responses[0]).to.deep.equal({
+        status: 400,
+        message: 'Either Site URL (baseURL) or Organization ID (organizationId) is required.',
+      });
+    });
+
+    it('returns 400 if enableHandlerForOrg throws an error', async () => {
+      dataAccessMock.Organization.findById.withArgs('org0').resolves(organizations[0]);
+      configurationMock.enableHandlerForOrg.throws(new Error('Dependencies not met'));
+
+      const requestData = [
+        { organizationId: 'org0', auditType: 'cwv', enable: true },
+      ];
+      const response = await sitesAuditsToggleController.execute({
+        data: requestData,
+        log: logMock,
+      });
+      const patchResponse = await response.json();
+
+      expect(patchResponse[0]).to.deep.equal({
+        status: 400,
+        message: 'Dependencies not met',
+      });
+    });
+
+    it('handles partial failures in mixed operations', async () => {
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(sites[0]);
+      dataAccessMock.Organization.findById.withArgs('org0').resolves(null);
+      dataAccessMock.Organization.findById.withArgs('org1').resolves(organizations[1]);
+
+      const requestData = [
+        { baseURL: 'https://site0.com', auditType: 'cwv', enable: true },
+        { organizationId: 'org0', auditType: '404', enable: true },
+        { organizationId: 'org1', auditType: 'cwv', enable: false },
+      ];
+      const response = await sitesAuditsToggleController.execute({
+        data: requestData,
+        log: logMock,
+      });
+      const patchResponse = await response.json();
+
+      expect(patchResponse[0]).to.deep.equal({
+        status: 200,
+        message: 'The audit "cwv" has been enabled for the site "https://site0.com".',
+      });
+      expect(patchResponse[1]).to.deep.equal({
+        status: 404,
+        message: 'Organization with ID: org0 not found.',
+      });
+      expect(patchResponse[2]).to.deep.equal({
+        status: 200,
+        message: 'The audit "cwv" has been disabled for the organization "org1".',
+      });
     });
   });
 

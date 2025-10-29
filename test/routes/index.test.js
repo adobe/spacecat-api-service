@@ -272,9 +272,10 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes).to.have.all.keys(
       'GET /configurations',
       'GET /configurations/latest',
-      'PUT /configurations/latest',
+      'PATCH /configurations/latest',
       'POST /configurations/audits',
       'PATCH /configurations/sites/audits',
+      'PUT /configurations/latest/queues',
       'GET /organizations',
       'POST /organizations',
       'GET /projects',
@@ -299,9 +300,10 @@ describe('getRouteHandlers', () => {
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
-    expect(staticRoutes['PUT /configurations/latest']).to.equal(mockConfigurationController.updateConfiguration);
+    expect(staticRoutes['PATCH /configurations/latest']).to.equal(mockConfigurationController.updateConfiguration);
     expect(staticRoutes['POST /configurations/audits']).to.equal(mockConfigurationController.registerAudit);
     expect(staticRoutes['PATCH /configurations/sites/audits']).to.equal(mockSitesAuditsToggleController.execute);
+    expect(staticRoutes['PUT /configurations/latest/queues']).to.equal(mockConfigurationController.updateQueues);
     expect(staticRoutes['GET /organizations']).to.equal(mockOrganizationsController.getAll);
     expect(staticRoutes['POST /organizations']).to.equal(mockOrganizationsController.createOrganization);
     expect(staticRoutes['GET /sites']).to.equal(mockSitesController.getAll);
@@ -319,6 +321,8 @@ describe('getRouteHandlers', () => {
       'GET /audits/latest/:auditType',
       'GET /configurations/:version',
       'DELETE /configurations/audits/:auditType',
+      'PATCH /configurations/latest/handlers/:handlerType',
+      'PATCH /configurations/latest/jobs/:jobType',
       'POST /hooks/site-detection/cdn/:hookSecret',
       'POST /hooks/site-detection/rum/:hookSecret',
       'GET /organizations/:organizationId',

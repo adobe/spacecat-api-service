@@ -17,11 +17,13 @@ import {
   ok,
   created,
   noContent,
+  internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   isInteger,
   isNonEmptyObject,
 } from '@adobe/spacecat-shared-utils';
+import { checkConfiguration } from '@adobe/spacecat-shared-data-access';
 
 import { ConfigurationDto } from '../dto/configuration.js';
 import AccessControlUtil from '../support/access-control-util.js';
@@ -76,7 +78,7 @@ function ConfigurationController(ctx) {
   };
 
   /**
-   * Retrieves the latest configuration.
+   * Retrieves the latest configuration with schema validation.
    * @return {Promise<Response>} Configuration response.
    */
   const getLatest = async () => {
@@ -87,7 +89,16 @@ function ConfigurationController(ctx) {
     if (!configuration) {
       return notFound('Configuration not found');
     }
-    return ok(ConfigurationDto.toJSON(configuration));
+
+    // Validate configuration data against schema
+    try {
+      const configData = configuration.toJSON();
+      checkConfiguration(configData);
+      return ok(ConfigurationDto.toJSON(configuration));
+    } catch (validationError) {
+      const errorMessage = `Configuration data validation failed: ${validationError.message}`;
+      return internalServerError(errorMessage);
+    }
   };
 
   const registerAudit = async (context) => {
@@ -129,12 +140,163 @@ function ConfigurationController(ctx) {
     }
   };
 
+  /**
+   * Updates the queue URLs in the configuration.
+   * @param {UniversalContext} context - Context of the request.
+   * @return {Promise<Response>} Updated configuration response.
+   */
+  const updateQueues = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can update queue configuration');
+    }
+
+    const queues = context.data;
+
+    if (!isNonEmptyObject(queues)) {
+      return badRequest('Queues configuration is required and cannot be empty');
+    }
+
+    try {
+      const configuration = await Configuration.findLatest();
+      if (!configuration) {
+        return notFound('Configuration not found');
+      }
+
+      configuration.updateQueues(queues);
+      await configuration.save();
+
+      return ok(ConfigurationDto.toJSON(configuration));
+    } catch (error) {
+      return badRequest(error.message);
+    }
+  };
+
+  /**
+   * Updates a job's schedule and properties.
+   * @param {UniversalContext} context - Context of the request.
+   * @return {Promise<Response>} Updated configuration response.
+   */
+  const updateJob = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can update job configuration');
+    }
+
+    const { jobType } = context.params;
+    const properties = context.data;
+
+    if (!jobType) {
+      return badRequest('Job type is required');
+    }
+
+    if (!isNonEmptyObject(properties)) {
+      return badRequest('Job properties are required and cannot be empty');
+    }
+
+    try {
+      const configuration = await Configuration.findLatest();
+      if (!configuration) {
+        return notFound('Configuration not found');
+      }
+
+      configuration.updateJob(jobType, properties);
+      await configuration.save();
+
+      return ok(ConfigurationDto.toJSON(configuration));
+    } catch (error) {
+      return badRequest(error.message);
+    }
+  };
+
+  /**
+   * Updates a handler's properties.
+   * @param {UniversalContext} context - Context of the request.
+   * @return {Promise<Response>} Updated configuration response.
+   */
+  const updateHandler = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can update handler configuration');
+    }
+
+    const { handlerType } = context.params;
+    const properties = context.data;
+
+    if (!handlerType) {
+      return badRequest('Handler type is required');
+    }
+
+    if (!isNonEmptyObject(properties)) {
+      return badRequest('Handler properties are required and cannot be empty');
+    }
+
+    try {
+      const configuration = await Configuration.findLatest();
+      if (!configuration) {
+        return notFound('Configuration not found');
+      }
+
+      configuration.updateHandlerProperties(handlerType, properties);
+      await configuration.save();
+
+      return ok(ConfigurationDto.toJSON(configuration));
+    } catch (error) {
+      return badRequest(error.message);
+    }
+  };
+
+  /**
+   * Updates the entire configuration or specific sections.
+   * Allows updating handlers, jobs, and/or queues in a single request.
+   * @param {UniversalContext} context - Context of the request.
+   * @return {Promise<Response>} Updated configuration response.
+   */
+  const updateConfiguration = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can update configuration');
+    }
+
+    const configData = context.data;
+
+    if (!isNonEmptyObject(configData)) {
+      return badRequest('Configuration data is required and cannot be empty');
+    }
+
+    // Validate that at least one updatable field is provided
+    const hasHandlers = configData.handlers !== undefined;
+    const hasJobs = configData.jobs !== undefined;
+    const hasQueues = configData.queues !== undefined;
+
+    if (!hasHandlers && !hasJobs && !hasQueues) {
+      return badRequest('At least one of handlers, jobs, or queues must be provided');
+    }
+
+    try {
+      const configuration = await Configuration.findLatest();
+      if (!configuration) {
+        return notFound('Configuration not found');
+      }
+
+      // The model's updateConfiguration method will validate the data
+      configuration.updateConfiguration(configData);
+
+      // Save will create a new version automatically
+      await configuration.save();
+
+      return ok(ConfigurationDto.toJSON(configuration));
+    } catch (error) {
+      return badRequest(error.message);
+    }
+  };
+
   return {
     getAll,
     getByVersion,
     getLatest,
     registerAudit,
     unregisterAudit,
+    updateQueues,
+    updateJob,
+    updateHandler,
+    updateConfiguration,
   };
 }
 
