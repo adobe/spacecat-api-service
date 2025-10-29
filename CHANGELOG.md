@@ -1,3 +1,10 @@
+# [1.215.0](https://github.com/adobe/spacecat-api-service/compare/v1.214.9...v1.215.0) (2025-10-29)
+
+
+### Features
+
+* added paged suggestion function ([#1403](https://github.com/adobe/spacecat-api-service/issues/1403)) ([bdd9858](https://github.com/adobe/spacecat-api-service/commit/bdd98582903f55bd7d90ea670205e2156a8e1c40))
+
 ## [1.214.9](https://github.com/adobe/spacecat-api-service/compare/v1.214.8...v1.214.9) (2025-10-29)
 
 
