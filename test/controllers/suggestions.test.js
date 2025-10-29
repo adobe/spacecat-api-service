@@ -143,6 +143,7 @@ describe('Suggestions Controller', () => {
     'autofixSuggestions',
     'createSuggestions',
     'getAllForOpportunity',
+    'getPagedForOpportunity',
     'getByID',
     'getByStatus',
     'getSuggestionFixes',
@@ -546,6 +547,138 @@ describe('Suggestions Controller', () => {
     expect(response.status).to.equal(404);
     const error = await response.json();
     expect(error).to.have.property('message', 'Site not found');
+  });
+
+  it('gets paged suggestions returns bad request if pageSize is less than 1', async () => {
+    const response = await suggestionsController.getPagedForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        pageSize: -1,
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Page size must be greater than 0');
+  });
+
+  it('gets paged suggestions returns bad request if pageNum is negative', async () => {
+    const response = await suggestionsController.getPagedForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        pageSize: 10,
+        pageNum: -1,
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Page number must be greater than 0');
+  });
+
+  it('gets paged suggestions returns bad request if site ID is missing', async () => {
+    const response = await suggestionsController.getPagedForOpportunity({
+      params: {
+        opportunityId: OPPORTUNITY_ID,
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Site ID required');
+  });
+
+  it('gets paged suggestions returns bad request if opportunity ID is missing', async () => {
+    const response = await suggestionsController.getPagedForOpportunity({
+      params: {
+        siteId: SITE_ID,
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Opportunity ID required');
+  });
+
+  it('gets paged suggestions returns not found if site does not exist', async () => {
+    const response = await suggestionsController.getPagedForOpportunity({
+      params: {
+        siteId: SITE_ID_NOT_FOUND,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(404);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Site not found');
+  });
+
+  it('gets paged suggestions returns forbidden if user does not have access', async () => {
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+    const response = await suggestionsController.getPagedForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(403);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'User does not belong to the organization');
+  });
+
+  it('gets paged suggestions returns not found if opportunity does not belong to site', async () => {
+    const response = await suggestionsController.getPagedForOpportunity({
+      params: {
+        siteId: SITE_ID_NOT_ENABLED,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(404);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Opportunity not found');
+  });
+
+  it('gets paged suggestions for an opportunity successfully', async () => {
+    const response = await suggestionsController.getPagedForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        pageSize: 10,
+        pageNum: 0,
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    const result = await response.json();
+    expect(result).to.have.property('suggestions');
+    expect(result).to.have.property('pagination');
+    expect(result.pagination).to.have.property('total', 1);
+    expect(result.pagination).to.have.property('pageSize', 10);
+    expect(result.pagination).to.have.property('pageNum', 0);
+  });
+
+  it('gets paged suggestions returns empty array when no suggestions exist', async () => {
+    mockSuggestion.allByOpportunityId.resolves([]);
+    const response = await suggestionsController.getPagedForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        pageSize: 10,
+        pageNum: 0,
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    const result = await response.json();
+    expect(result).to.have.property('suggestions');
+    expect(result.suggestions).to.be.an('array').with.lengthOf(0);
+    expect(result.pagination).to.have.property('total', 0);
+    expect(result.pagination).to.have.property('pageSize', 10);
+    expect(result.pagination).to.have.property('pageNum', 0);
   });
 
   it('gets all suggestions for an opportunity by status', async () => {
@@ -1617,11 +1750,11 @@ describe('Suggestions Controller', () => {
     it('triggers autofixSuggestion and sets suggestions to in-progress', async () => {
       opportunity.getType = sandbox.stub().returns('meta-tags');
       mockSuggestion.allByOpportunityId.resolves(
-        [mockSuggestionEntity(suggs[0]),
-          mockSuggestionEntity(suggs[2])],
+        [mockSuggestionEntity(suggs[0]), mockSuggestionEntity(suggs[2])],
       );
       mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
-        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' }),
+      ]);
       const response = await suggestionsController.autofixSuggestions({
         params: {
           siteId: SITE_ID,
@@ -1993,7 +2126,8 @@ describe('Suggestions Controller', () => {
     it('triggers autofixSuggestion and sets suggestions to in-progress for CS', async () => {
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0]),
-          mockSuggestionEntity(suggs[2])],
+          mockSuggestionEntity(suggs[2]),
+        ],
       );
       mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
         mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
@@ -2038,7 +2172,8 @@ describe('Suggestions Controller', () => {
     it('triggers autofixSuggestion without encryption secrets', async () => {
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0]),
-          mockSuggestionEntity(suggs[2])],
+          mockSuggestionEntity(suggs[2]),
+        ],
       );
       mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
         mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
@@ -2063,10 +2198,12 @@ describe('Suggestions Controller', () => {
     it('auto-fix suggestions returns 400 without authorization header', async () => {
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0]),
-          mockSuggestionEntity(suggs[2])],
+          mockSuggestionEntity(suggs[2]),
+        ],
       );
       mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
-        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' }),
+      ]);
       const response = await suggestionsControllerWithIms.autofixSuggestions({
         params: {
           siteId: SITE_ID,
@@ -2099,7 +2236,8 @@ describe('Suggestions Controller', () => {
       }, spySqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0]),
-          mockSuggestionEntity(suggs[2])],
+          mockSuggestionEntity(suggs[2]),
+        ],
       );
       mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
         mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
