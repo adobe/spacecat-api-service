@@ -86,6 +86,7 @@ describe('Sites Controller', () => {
                 gitHubURL: { type: 'string', name: 'gitHubURL', get: (value) => value },
                 isLive: { type: 'boolean', name: 'isLive', get: (value) => value },
                 isSandbox: { type: 'boolean', name: 'isSandbox', get: (value) => value },
+                requiresValidation: { type: 'boolean', name: 'requiresValidation', get: (value) => value },
                 organizationId: { type: 'string', name: 'organizationId', get: (value) => value },
                 hlxConfig: { type: 'any', name: 'hlxConfig', get: (value) => value },
                 deliveryConfig: { type: 'any', name: 'deliveryConfig', get: (value) => value },
