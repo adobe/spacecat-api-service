@@ -27,6 +27,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 
 import { ValidationError, Suggestion as SuggestionModel, Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import { SuggestionDto } from '../dto/suggestion.js';
 import { FixDto } from '../dto/fix.js';
 import { sendAutofixMessage, getCSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
@@ -114,8 +115,8 @@ function SuggestionsController(ctx, sqs, env) {
   /**
    * Gets a page of suggestions for a given site and opportunity
    * @param {Object} context of the request
-   * @param {number} context.params.pageSize - Number of suggestions per page. Default=100.
-   * @param {number} context.params.pageNum - The page number to return. Default=0.
+   * @param {number} context.params.limit - Number of suggestions per page. Default=100.
+   * @param {number} context.params.cursor - The next cursor or null for first page.
    * @returns {Promise<Response>} Array of suggestions response.
    */
   const getAllForOpportunityPaged = async (context) => {
@@ -777,9 +778,158 @@ function SuggestionsController(ctx, sqs, env) {
     }
   };
 
+  /**
+   * Deploys suggestions through Tokowaka edge delivery
+   * @param {Object} context of the request
+   * @returns {Promise<Response>} Deployment response
+   */
+  const deploySuggestionToEdge = async (context) => {
+    const siteId = context.params?.siteId;
+    const opportunityId = context.params?.opportunityId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!isValidUUID(opportunityId)) {
+      return badRequest('Opportunity ID required');
+    }
+
+    // validate request body
+    if (!isNonEmptyObject(context.data)) {
+      return badRequest('No data provided');
+    }
+    const { suggestionIds } = context.data;
+    if (!isArray(suggestionIds) || suggestionIds.length === 0) {
+      return badRequest('Request body must contain a non-empty array of suggestionIds');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
+    }
+
+    const opportunity = await Opportunity.findById(opportunityId);
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound('Opportunity not found');
+    }
+
+    // Fetch all suggestions for this opportunity
+    const allSuggestions = await Suggestion.allByOpportunityId(opportunityId);
+
+    // Track valid, failed, and missing suggestions
+    const validSuggestions = [];
+    const failedSuggestions = [];
+
+    // Check each requested suggestion (basic validation only)
+    suggestionIds.forEach((suggestionId, index) => {
+      const suggestion = allSuggestions.find((s) => s.getId() === suggestionId);
+
+      if (!suggestion) {
+        failedSuggestions.push({
+          uuid: suggestionId,
+          index,
+          message: 'Suggestion not found',
+          statusCode: 404,
+        });
+      } else if (suggestion.getStatus() !== SuggestionModel.STATUSES.NEW) {
+        failedSuggestions.push({
+          uuid: suggestionId,
+          index,
+          message: 'Suggestion is not in NEW status',
+          statusCode: 400,
+        });
+      } else {
+        validSuggestions.push(suggestion);
+      }
+    });
+
+    let succeededSuggestions = [];
+
+    // Only attempt deployment if we have valid suggestions
+    if (isNonEmptyArray(validSuggestions)) {
+      try {
+        const tokowakaClient = TokowakaClient.createFrom(context);
+        const deploymentResult = await tokowakaClient.deploySuggestions(
+          site,
+          opportunity,
+          validSuggestions,
+        );
+
+        // Process deployment results
+        const {
+          succeededSuggestions: deployedSuggestions,
+          failedSuggestions: ineligibleSuggestions,
+        } = deploymentResult;
+
+        // Update successfully deployed suggestions with deployment timestamp
+        const deploymentTimestamp = Date.now();
+        succeededSuggestions = await Promise.all(
+          deployedSuggestions.map(async (suggestion) => {
+            const currentData = suggestion.getData();
+            suggestion.setData({
+              ...currentData,
+              tokowakaDeployed: deploymentTimestamp,
+            });
+            suggestion.setUpdatedBy('tokowaka-deployment');
+            return suggestion.save();
+          }),
+        );
+
+        // Add ineligible suggestions to failed list
+        ineligibleSuggestions.forEach((item) => {
+          failedSuggestions.push({
+            uuid: item.suggestion.getId(),
+            index: suggestionIds.indexOf(item.suggestion.getId()),
+            message: item.reason,
+            statusCode: 400,
+          });
+        });
+
+        context.log.info(`Successfully deployed ${succeededSuggestions.length} suggestions to Edge`);
+      } catch (error) {
+        context.log.error(`Error deploying to Tokowaka: ${error.message}`, error);
+        // If deployment fails, mark all valid suggestions as failed
+        validSuggestions.forEach((suggestion) => {
+          failedSuggestions.push({
+            uuid: suggestion.getId(),
+            index: suggestionIds.indexOf(suggestion.getId()),
+            message: 'Deployment failed: Internal server error',
+            statusCode: 500,
+          });
+        });
+      }
+    }
+
+    const response = {
+      suggestions: [
+        ...succeededSuggestions.map((suggestion) => ({
+          uuid: suggestion.getId(),
+          index: suggestionIds.indexOf(suggestion.getId()),
+          statusCode: 200,
+          suggestion: SuggestionDto.toJSON(suggestion),
+        })),
+        ...failedSuggestions,
+      ],
+      metadata: {
+        total: suggestionIds.length,
+        success: succeededSuggestions.length,
+        failed: failedSuggestions.length,
+      },
+    };
+    response.suggestions.sort((a, b) => a.index - b.index);
+
+    return createResponse(response, 207);
+  };
+
   return {
     autofixSuggestions,
     createSuggestions,
+    deploySuggestionToEdge,
     getAllForOpportunity,
     getAllForOpportunityPaged,
     getByID,
