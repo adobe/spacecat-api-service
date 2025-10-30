@@ -97,7 +97,12 @@ function GetLlmoConfigSummaryCommand(context) {
           const stats = calculateStats(config);
           const organization = await Organization.findById(site.getOrganizationId());
           const imsOrgId = organization?.getImsOrgId();
-          const imsOrgName = organization?.getName() || 'N/A';
+          const rawOrgName = organization?.getName() || 'N/A';
+          // Sanitize org name by removing/replacing control characters and normalizing whitespace
+          const imsOrgName = rawOrgName
+            .replace(/[\r\n\t\v\f]/g, ' ') // Replace control characters with space
+            .replace(/\s+/g, ' ') // Normalize multiple spaces to single space
+            .trim();
 
           // Skip excluded IMS orgs
           if (EXCLUDED_IMS_ORGS.includes(imsOrgId)) {
