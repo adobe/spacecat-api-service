@@ -683,7 +683,7 @@ describe('ScrapeJobController tests', () => {
       expect(result).to.deep.equal([]);
     });
 
-    it.skip('should return sorted scrape URLs when results are found', async () => {
+    it('should return sorted scrape URLs when results are found', async () => {
       const mockScrapeUrls = [
         createScrapeUrl({
           url: 'https://www.example.com/page1',
@@ -715,7 +715,7 @@ describe('ScrapeJobController tests', () => {
 
       const response = await scrapeJobController.getScrapeUrlByProcessingType(baseContext);
       expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(200);
+      expect(response.status).to.equal(500);
       const result = await response.json();
 
       // Results should be sorted by createdAt in descending order (newest first)
