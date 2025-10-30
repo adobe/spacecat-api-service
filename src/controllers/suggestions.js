@@ -781,7 +781,7 @@ function SuggestionsController(ctx, sqs, env) {
     autofixSuggestions,
     createSuggestions,
     getAllForOpportunity,
-    getPagedForOpportunity: getAllForOpportunityPaged,
+    getAllForOpportunityPaged,
     getByID,
     getByStatus,
     getSuggestionFixes,

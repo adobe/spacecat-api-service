@@ -143,7 +143,7 @@ describe('Suggestions Controller', () => {
     'autofixSuggestions',
     'createSuggestions',
     'getAllForOpportunity',
-    'getPagedForOpportunity',
+    'getAllForOpportunityPaged',
     'getByID',
     'getByStatus',
     'getSuggestionFixes',
@@ -559,7 +559,7 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets paged suggestions returns bad request if limit is less than 1', async () => {
-    const response = await suggestionsController.getPagedForOpportunity({
+    const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
@@ -573,7 +573,7 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets paged suggestions returns bad request if cursor is invalid', async () => {
-    const response = await suggestionsController.getPagedForOpportunity({
+    const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
@@ -588,7 +588,7 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets paged suggestions returns bad request if site ID is missing', async () => {
-    const response = await suggestionsController.getPagedForOpportunity({
+    const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
         opportunityId: OPPORTUNITY_ID,
       },
@@ -600,7 +600,7 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets paged suggestions returns bad request if opportunity ID is missing', async () => {
-    const response = await suggestionsController.getPagedForOpportunity({
+    const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
         siteId: SITE_ID,
       },
@@ -612,7 +612,7 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets paged suggestions returns not found if site does not exist', async () => {
-    const response = await suggestionsController.getPagedForOpportunity({
+    const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
         siteId: SITE_ID_NOT_FOUND,
         opportunityId: OPPORTUNITY_ID,
@@ -626,7 +626,7 @@ describe('Suggestions Controller', () => {
 
   it('gets paged suggestions returns forbidden if user does not have access', async () => {
     sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
-    const response = await suggestionsController.getPagedForOpportunity({
+    const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
@@ -639,7 +639,7 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets paged suggestions returns not found if opportunity does not belong to site', async () => {
-    const response = await suggestionsController.getPagedForOpportunity({
+    const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
         siteId: SITE_ID_NOT_ENABLED,
         opportunityId: OPPORTUNITY_ID,
@@ -652,7 +652,7 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets paged suggestions for an opportunity successfully', async () => {
-    const response = await suggestionsController.getPagedForOpportunity({
+    const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
@@ -677,7 +677,7 @@ describe('Suggestions Controller', () => {
       newCursor: undefined,
     });
     mockSuggestion.allByOpportunityId.returns(emptyResults);
-    const response = await suggestionsController.getPagedForOpportunity({
+    const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
@@ -695,7 +695,7 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets paged suggestions successfully when parameters come as strings from URL', async () => {
-    const response = await suggestionsController.getPagedForOpportunity({
+    const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
@@ -722,7 +722,7 @@ describe('Suggestions Controller', () => {
     });
     mockSuggestion.allByOpportunityId.returns(resultsWithCursor);
 
-    const response = await suggestionsController.getPagedForOpportunity({
+    const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
@@ -750,7 +750,7 @@ describe('Suggestions Controller', () => {
     resultsWithCursor.go = goStub;
     mockSuggestion.allByOpportunityId.returns(resultsWithCursor);
 
-    await suggestionsController.getPagedForOpportunity({
+    await suggestionsController.getAllForOpportunityPaged({
       params: {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
@@ -776,7 +776,7 @@ describe('Suggestions Controller', () => {
     });
     mockSuggestion.allByOpportunityId.returns(resultsWithNullOpportunity);
 
-    const response = await suggestionsController.getPagedForOpportunity({
+    const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
@@ -807,7 +807,7 @@ describe('Suggestions Controller', () => {
     });
     mockSuggestion.allByOpportunityId.returns(resultsWithWrongSite);
 
-    const response = await suggestionsController.getPagedForOpportunity({
+    const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
