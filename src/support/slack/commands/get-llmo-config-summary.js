@@ -97,6 +97,7 @@ function GetLlmoConfigSummaryCommand(context) {
           const stats = calculateStats(config);
           const organization = await Organization.findById(site.getOrganizationId());
           const imsOrgId = organization?.getImsOrgId();
+          const imsOrgName = organization?.getName();
 
           // Skip excluded IMS orgs
           if (EXCLUDED_IMS_ORGS.includes(imsOrgId)) {
@@ -108,6 +109,7 @@ function GetLlmoConfigSummaryCommand(context) {
             baseURL: site.getBaseURL(),
             siteId: site.getId(),
             organizationId: site.getOrganizationId(),
+            imsOrgName,
             imsOrgId,
             ...stats,
           };
@@ -134,6 +136,7 @@ function GetLlmoConfigSummaryCommand(context) {
           { id: 'siteId', title: 'Site ID' },
           { id: 'organizationId', title: 'Organization ID' },
           { id: 'imsOrgId', title: 'IMS Org ID' },
+          { id: 'imsOrgName', title: 'IMS Org Name' },
           { id: 'categories', title: 'Categories' },
           { id: 'topics', title: 'Topics' },
           { id: 'prompts', title: 'Prompts' },
