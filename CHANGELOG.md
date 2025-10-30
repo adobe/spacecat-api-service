@@ -1,3 +1,10 @@
+## [1.220.1](https://github.com/adobe/spacecat-api-service/compare/v1.220.0...v1.220.1) (2025-10-30)
+
+
+### Bug Fixes
+
+* handle org names with special characters in name ([#1418](https://github.com/adobe/spacecat-api-service/issues/1418)) ([c8ad352](https://github.com/adobe/spacecat-api-service/commit/c8ad352b818fcefb4ebc893d554913e76f4db0ed))
+
 # [1.220.0](https://github.com/adobe/spacecat-api-service/compare/v1.219.3...v1.220.0) (2025-10-30)
 
 
