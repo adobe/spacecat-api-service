@@ -1,3 +1,11 @@
+## [1.219.2](https://github.com/adobe/spacecat-api-service/compare/v1.219.1...v1.219.2) (2025-10-30)
+
+
+### Bug Fixes
+
+* add tokowaka auto-deploy api ([#1357](https://github.com/adobe/spacecat-api-service/issues/1357)) ([9f42743](https://github.com/adobe/spacecat-api-service/commit/9f42743a9b8e88dc4992d4ab02c2931b61e888a8))
+* update package lock to latest ([#1417](https://github.com/adobe/spacecat-api-service/issues/1417)) ([6c3a3f2](https://github.com/adobe/spacecat-api-service/commit/6c3a3f2d2bd130fa25c91f59f2722bafe0256a7c))
+
 ## [1.219.1](https://github.com/adobe/spacecat-api-service/compare/v1.219.0...v1.219.1) (2025-10-30)
 
 
