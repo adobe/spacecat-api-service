@@ -1,3 +1,10 @@
+# [1.221.0](https://github.com/adobe/spacecat-api-service/compare/v1.220.1...v1.221.0) (2025-10-30)
+
+
+### Features
+
+* add 'llmo-customer-analysis' to supported features in llmo-onbo… ([#1421](https://github.com/adobe/spacecat-api-service/issues/1421)) ([70fb80d](https://github.com/adobe/spacecat-api-service/commit/70fb80dd67361dda1506e58daabbd87579b8a02c))
+
 ## [1.220.1](https://github.com/adobe/spacecat-api-service/compare/v1.220.0...v1.220.1) (2025-10-30)
 
 
