@@ -46,6 +46,7 @@ export const SiteDto = {
     isLive: site.getIsLive(),
     isSandbox: site.getIsSandbox(),
     isLiveToggledAt: site.getIsLiveToggledAt(),
+    requiresValidation: site.getRequiresValidation(),
     createdAt: site.getCreatedAt(),
     updatedAt: site.getUpdatedAt(),
     config: Config.toDynamoItem(site.getConfig()),

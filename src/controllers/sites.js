@@ -356,6 +356,12 @@ function SitesController(ctx, log, env) {
       updates = true;
     }
 
+    if (isBoolean(requestBody.requiresValidation)
+        && requestBody.requiresValidation !== site.getRequiresValidation()) {
+      site.setRequiresValidation(requestBody.requiresValidation);
+      updates = true;
+    }
+
     if (hasText(requestBody.organizationId)
       && requestBody.organizationId !== site.getOrganizationId()) {
       return forbidden('Updating organization ID is not allowed');
