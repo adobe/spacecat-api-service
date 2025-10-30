@@ -1,3 +1,10 @@
+## [1.219.1](https://github.com/adobe/spacecat-api-service/compare/v1.219.0...v1.219.1) (2025-10-30)
+
+
+### Bug Fixes
+
+* handle orgs missing org names in the get-llmo-config-summary command ([#1416](https://github.com/adobe/spacecat-api-service/issues/1416)) ([94ad5ba](https://github.com/adobe/spacecat-api-service/commit/94ad5ba3587070db8e2878b77f805b6bd3f45f4a))
+
 # [1.219.0](https://github.com/adobe/spacecat-api-service/compare/v1.218.0...v1.219.0) (2025-10-30)
 
 
