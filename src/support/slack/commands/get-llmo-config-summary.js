@@ -97,7 +97,7 @@ function GetLlmoConfigSummaryCommand(context) {
           const stats = calculateStats(config);
           const organization = await Organization.findById(site.getOrganizationId());
           const imsOrgId = organization?.getImsOrgId();
-          const imsOrgName = organization?.getName();
+          const imsOrgName = organization?.getName() || 'N/A';
 
           // Skip excluded IMS orgs
           if (EXCLUDED_IMS_ORGS.includes(imsOrgId)) {
