@@ -30,7 +30,6 @@ export const BASIC_AUDITS = [
   'hreflang',
   'summarization',
   'prerender',
-  'llmo-customer-analysis',
 ];
 
 export const ASO_DEMO_ORG = '66331367-70e6-4a49-8445-4f6d9c265af9';
@@ -783,7 +782,7 @@ export async function performLlmoOnboarding(params, context) {
     await site.save();
 
     // Trigger audits
-    await triggerAudits([...BASIC_AUDITS], context, site);
+    await triggerAudits([...BASIC_AUDITS, 'llmo-customer-analysis'], context, site);
 
     return {
       siteId: site.getId(),
