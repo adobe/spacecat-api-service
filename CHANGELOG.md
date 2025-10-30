@@ -1,3 +1,24 @@
+## [1.219.1](https://github.com/adobe/spacecat-api-service/compare/v1.219.0...v1.219.1) (2025-10-30)
+
+
+### Bug Fixes
+
+* handle orgs missing org names in the get-llmo-config-summary command ([#1416](https://github.com/adobe/spacecat-api-service/issues/1416)) ([94ad5ba](https://github.com/adobe/spacecat-api-service/commit/94ad5ba3587070db8e2878b77f805b6bd3f45f4a))
+
+# [1.219.0](https://github.com/adobe/spacecat-api-service/compare/v1.218.0...v1.219.0) (2025-10-30)
+
+
+### Features
+
+* include org name in the llmo usage command ([#1415](https://github.com/adobe/spacecat-api-service/issues/1415)) ([9f3e065](https://github.com/adobe/spacecat-api-service/commit/9f3e065205ce561147beea4d890a31e44e7af6f5))
+
+# [1.218.0](https://github.com/adobe/spacecat-api-service/compare/v1.217.1...v1.218.0) (2025-10-30)
+
+
+### Features
+
+* add support for llmo-optimizer fulfillment event type ([#1393](https://github.com/adobe/spacecat-api-service/issues/1393)) ([258cc08](https://github.com/adobe/spacecat-api-service/commit/258cc08fbbb25d578944293c5b5941f830da246e))
+
 ## [1.217.1](https://github.com/adobe/spacecat-api-service/compare/v1.217.0...v1.217.1) (2025-10-29)
 
 
