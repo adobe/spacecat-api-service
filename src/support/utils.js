@@ -926,7 +926,7 @@ export const onboardSingleSite = async (
     }
 
     // Resolve canonical URL for the site from the base URL
-    let resolvedUrl = await resolveCanonicalUrl(baseURL, 'HEAD', log);
+    let resolvedUrl = await resolveCanonicalUrl(baseURL);
     if (resolvedUrl === null) {
       log.warn(`Unable to resolve canonical URL for site ${siteID}, using base URL: ${baseURL}`);
       resolvedUrl = baseURL;
