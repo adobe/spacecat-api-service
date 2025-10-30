@@ -2225,6 +2225,40 @@ ScrapeJobsByBaseURLResponse:
   items:
     $ref: '#/CreateAsyncJobAcceptedResponse'
 
+ScrapeUrl:
+  type: object
+  properties:
+    url:
+      description: The URL that was scraped
+      type: string
+    processingType:
+      description: The processing type/handler used for this scrape
+      type: string
+    status:
+      description: The status of the scrape
+      type: string
+      enum:
+        - 'COMPLETE'
+        - 'FAILED'
+        - 'PENDING'
+    path:
+      description: The S3 path of the scraped content if the scrape was successful
+      type: string
+    createdAt:
+      description: The timestamp when the scrape was created
+      $ref: '#/DateTime'
+  example:
+    url: 'https://example.com/page1'
+    processingType: 'form'
+    status: 'COMPLETE'
+    path: 'scrapes/12d6ac8e-d5e4-4788-90eb-b69e10e74abc/page1.html'
+    createdAt: '2024-01-01T10:00:00.000Z'
+
+ScrapeUrlsByProcessingTypeResponse:
+  type: array
+  items:
+    $ref: '#/ScrapeUrl'
+
 BrokenBacklink:
   type: object
   properties:

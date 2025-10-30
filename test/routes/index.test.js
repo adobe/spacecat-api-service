@@ -93,6 +93,7 @@ describe('getRouteHandlers', () => {
     getScrapeJobResult: sinon.stub(),
     getScrapeJobProgress: sinon.stub(),
     getScrapeJobsByDateRange: sinon.stub(),
+    getScrapeUrlByProcessingType: sinon.stub(),
   };
 
   const mockApiKeyController = {
@@ -439,6 +440,7 @@ describe('getRouteHandlers', () => {
       'DELETE /sites/:siteId/reports/:reportId',
       'GET /tools/scrape/jobs/by-base-url/:baseURL',
       'GET /tools/scrape/jobs/by-base-url/:baseURL/by-processingtype/:processingType',
+      'GET /tools/scrape/jobs/by-url/:url/:processingType',
       'PATCH /sites/:siteId/config/cdn-logs',
       'GET /sites/:siteId/llmo/sheet-data/:dataSource',
       'GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource',
