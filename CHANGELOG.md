@@ -1,3 +1,10 @@
+# [1.218.0](https://github.com/adobe/spacecat-api-service/compare/v1.217.1...v1.218.0) (2025-10-30)
+
+
+### Features
+
+* add support for llmo-optimizer fulfillment event type ([#1393](https://github.com/adobe/spacecat-api-service/issues/1393)) ([258cc08](https://github.com/adobe/spacecat-api-service/commit/258cc08fbbb25d578944293c5b5941f830da246e))
+
 ## [1.217.1](https://github.com/adobe/spacecat-api-service/compare/v1.217.0...v1.217.1) (2025-10-29)
 
 
