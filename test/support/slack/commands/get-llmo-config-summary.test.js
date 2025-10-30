@@ -142,6 +142,34 @@ describe('GetLlmoConfigSummaryCommand', () => {
     expect(context.log.info.calledWith(sinon.match('LLMO config summary completed: 1 sites processed'))).to.be.true;
   });
 
+  it('successfully generates CSV for missing IMS org name', async () => {
+    const mockSites = [{
+      getId: () => 'site-1',
+      getBaseURL: () => 'https://test.com',
+      getOrganizationId: () => 'org-1',
+      getConfig: () => ({ getLlmoConfig: () => ({ llmo: true }) }),
+    }];
+
+    const mockConfig = {
+      categories: { cat1: {} },
+      topics: { topic1: { prompts: ['prompt1'] } },
+      brands: { aliases: ['alias1'] },
+      competitors: { competitors: ['comp1'] },
+      deleted: { prompts: { deleted1: {} } },
+      cdnBucketConfig: { cdnProvider: 'cloudflare' },
+    };
+
+    context.dataAccess.Site.all.resolves(mockSites);
+    context.dataAccess.Organization.findById.resolves({ getImsOrgId: () => 'valid@AdobeOrg', getName: () => undefined });
+    readConfigStub.resolves({ config: mockConfig, exists: true });
+
+    const command = GetLlmoConfigSummaryCommand(context);
+    await command.handleExecution([], slackContext);
+
+    expect(sendFileStub.called).to.be.true;
+    expect(context.log.info.calledWith(sinon.match('LLMO config summary completed: 1 sites processed'))).to.be.true;
+  });
+
   it('handles errors gracefully', async () => {
     context.dataAccess.Site.all.rejects(new Error('Database error'));
     const command = GetLlmoConfigSummaryCommand(context);
