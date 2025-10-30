@@ -1,3 +1,10 @@
+# [1.220.0](https://github.com/adobe/spacecat-api-service/compare/v1.219.3...v1.220.0) (2025-10-30)
+
+
+### Features
+
+* add route to get scrapeUrl by url and processingType ([#1413](https://github.com/adobe/spacecat-api-service/issues/1413)) ([4890c2b](https://github.com/adobe/spacecat-api-service/commit/4890c2bfaaafb211bd5b82ae045a55b247b1f880))
+
 ## [1.219.3](https://github.com/adobe/spacecat-api-service/compare/v1.219.2...v1.219.3) (2025-10-30)
 
 
