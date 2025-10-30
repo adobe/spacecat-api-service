@@ -1537,6 +1537,26 @@ describe('Sites Controller', () => {
     expect(updatedSite).to.have.property('requiresValidation', true);
   });
 
+  it('updates a site requiresValidation to false', async () => {
+    const site = sites[0];
+    site.setRequiresValidation(true);
+    site.save = sandbox.spy(site.save);
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        requiresValidation: false,
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(site.save).to.have.been.calledOnce;
+    expect(response.status).to.equal(200);
+
+    const updatedSite = await response.json();
+    expect(updatedSite).to.have.property('id', SITE_IDS[0]);
+    expect(updatedSite).to.have.property('requiresValidation', false);
+  });
+
   it('does not update site when requiresValidation is the same', async () => {
     const site = sites[0];
     site.setRequiresValidation(true);
@@ -1545,6 +1565,25 @@ describe('Sites Controller', () => {
       params: { siteId: SITE_IDS[0] },
       data: {
         requiresValidation: true, // Same as current value
+      },
+      ...defaultAuthAttributes,
+    });
+
+    expect(site.save).to.have.not.been.called;
+    expect(response.status).to.equal(400);
+
+    const error = await response.json();
+    expect(error).to.have.property('message', 'No updates provided');
+  });
+
+  it('ignores non-boolean requiresValidation values', async () => {
+    const site = sites[0];
+    site.save = sandbox.spy(site.save);
+    const response = await sitesController.updateSite({
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        // should be ignored by isBoolean check
+        requiresValidation: 'true',
       },
       ...defaultAuthAttributes,
     });
