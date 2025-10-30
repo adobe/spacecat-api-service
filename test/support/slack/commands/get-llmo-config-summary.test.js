@@ -103,6 +103,7 @@ describe('GetLlmoConfigSummaryCommand', () => {
     context.dataAccess.Site.all.resolves(mockSites);
     context.dataAccess.Organization.findById.resolves({
       getImsOrgId: () => '9E1005A551ED61CA0A490D45@AdobeOrg', // Excluded org
+      getName: () => 'Excluded Org',
     });
     readConfigStub.resolves({ config: { categories: {} }, exists: true });
 
@@ -131,7 +132,35 @@ describe('GetLlmoConfigSummaryCommand', () => {
     };
 
     context.dataAccess.Site.all.resolves(mockSites);
-    context.dataAccess.Organization.findById.resolves({ getImsOrgId: () => 'valid@AdobeOrg' });
+    context.dataAccess.Organization.findById.resolves({ getImsOrgId: () => 'valid@AdobeOrg', getName: () => 'Valid Org' });
+    readConfigStub.resolves({ config: mockConfig, exists: true });
+
+    const command = GetLlmoConfigSummaryCommand(context);
+    await command.handleExecution([], slackContext);
+
+    expect(sendFileStub.called).to.be.true;
+    expect(context.log.info.calledWith(sinon.match('LLMO config summary completed: 1 sites processed'))).to.be.true;
+  });
+
+  it('successfully generates CSV for missing IMS org name', async () => {
+    const mockSites = [{
+      getId: () => 'site-1',
+      getBaseURL: () => 'https://test.com',
+      getOrganizationId: () => 'org-1',
+      getConfig: () => ({ getLlmoConfig: () => ({ llmo: true }) }),
+    }];
+
+    const mockConfig = {
+      categories: { cat1: {} },
+      topics: { topic1: { prompts: ['prompt1'] } },
+      brands: { aliases: ['alias1'] },
+      competitors: { competitors: ['comp1'] },
+      deleted: { prompts: { deleted1: {} } },
+      cdnBucketConfig: { cdnProvider: 'cloudflare' },
+    };
+
+    context.dataAccess.Site.all.resolves(mockSites);
+    context.dataAccess.Organization.findById.resolves({ getImsOrgId: () => 'valid@AdobeOrg', getName: () => undefined });
     readConfigStub.resolves({ config: mockConfig, exists: true });
 
     const command = GetLlmoConfigSummaryCommand(context);
@@ -174,7 +203,7 @@ describe('GetLlmoConfigSummaryCommand', () => {
     expect(slackContext.say.calledWith('No valid LLMO configurations found.')).to.be.true;
 
     slackContext.say.resetHistory();
-    context.dataAccess.Organization.findById.resolves({ getImsOrgId: () => 'valid@AdobeOrg' });
+    context.dataAccess.Organization.findById.resolves({ getImsOrgId: () => 'valid@AdobeOrg', getName: () => 'Valid Org' });
     readConfigStub.resolves({ config: { topics: { topic1: {} } }, exists: true });
 
     command = GetLlmoConfigSummaryCommand(context);
@@ -207,6 +236,7 @@ describe('GetLlmoConfigSummaryCommand', () => {
 
     context.dataAccess.Organization.findById.resolves({
       getImsOrgId: () => 'valid@AdobeOrg',
+      getName: () => 'Valid Org',
     });
 
     const command = GetLlmoConfigSummaryCommand(context);

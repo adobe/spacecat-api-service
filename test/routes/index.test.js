@@ -383,6 +383,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:pageNum/:pageSize',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix',
+      'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions',
