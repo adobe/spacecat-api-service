@@ -1,3 +1,10 @@
+# [1.219.0](https://github.com/adobe/spacecat-api-service/compare/v1.218.0...v1.219.0) (2025-10-30)
+
+
+### Features
+
+* include org name in the llmo usage command ([#1415](https://github.com/adobe/spacecat-api-service/issues/1415)) ([9f3e065](https://github.com/adobe/spacecat-api-service/commit/9f3e065205ce561147beea4d890a31e44e7af6f5))
+
 # [1.218.0](https://github.com/adobe/spacecat-api-service/compare/v1.217.1...v1.218.0) (2025-10-30)
 
 
