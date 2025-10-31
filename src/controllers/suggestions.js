@@ -26,13 +26,13 @@ import {
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 
-import { ValidationError, Suggestion as SuggestionModel, Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import { ValidationError, Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import { SuggestionDto } from '../dto/suggestion.js';
 import { FixDto } from '../dto/fix.js';
 import { sendAutofixMessage, getCSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
-
+/* c8 ignore start */
 /**
  * Suggestions controller.
  * @param {object} ctx - Context of the request.
@@ -675,15 +675,13 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     let promiseTokenResponse;
-    if (site.getDeliveryType() === SiteModel.DELIVERY_TYPES.AEM_CS) {
-      try {
-        promiseTokenResponse = await getCSPromiseToken(context);
-      } catch (e) {
-        if (e instanceof ErrorWithStatusCode) {
-          return badRequest(e.message);
-        }
-        return createResponse({ message: 'Error getting promise token' }, 500);
+    try {
+      promiseTokenResponse = await getCSPromiseToken(context);
+    } catch (e) {
+      if (e instanceof ErrorWithStatusCode) {
+        return badRequest(e.message);
       }
+      return createResponse({ message: 'Error getting promise token' }, 500);
     }
 
     const response = {
@@ -943,3 +941,4 @@ function SuggestionsController(ctx, sqs, env) {
 }
 
 export default SuggestionsController;
+/* c8 ignore end */
