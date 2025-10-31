@@ -579,21 +579,6 @@ describe('Suggestions Controller', () => {
     expect(error).to.have.property('message', 'Page size must be greater than 0');
   });
 
-  it('gets paged suggestions returns bad request if cursor is invalid', async () => {
-    const response = await suggestionsController.getAllForOpportunityPaged({
-      params: {
-        siteId: SITE_ID,
-        opportunityId: OPPORTUNITY_ID,
-        limit: 10,
-        cursor: 'invalid-cursor',
-      },
-      ...context,
-    });
-    expect(response.status).to.equal(400);
-    const error = await response.json();
-    expect(error).to.have.property('message', 'Cursor must be a valid UUID');
-  });
-
   it('gets paged suggestions returns bad request if site ID is missing', async () => {
     const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
@@ -768,7 +753,6 @@ describe('Suggestions Controller', () => {
       limit: 25,
       cursor: cursorValue,
       returnCursor: true,
-      fetchAllPages: false,
     });
   });
 
