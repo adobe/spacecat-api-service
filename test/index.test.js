@@ -48,6 +48,7 @@ describe('Index Tests', () => {
         'best-practices': 0.6,
       },
     }),
+    getInvocationId: () => 'some-invocation',
   };
 
   const scrapeJobConfiguration = {

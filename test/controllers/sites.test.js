@@ -178,6 +178,7 @@ describe('Sites Controller', () => {
           getIsError: sandbox.stub().returns(false),
           getIsLive: sandbox.stub().returns(true),
           getSiteId: sandbox.stub().returns(SITE_IDS[0]),
+          getInvocationId: sandbox.stub().returns('some-invocation-id'),
         }),
       },
       KeyEvent: {
@@ -555,6 +556,7 @@ describe('Sites Controller', () => {
       getIsError: () => false,
       getIsLive: () => true,
       getSiteId: () => SITE_IDS[0],
+      getInvocationId: () => 'some-invocation-id',
     };
     sites.forEach((site) => {
       // eslint-disable-next-line no-param-reassign
