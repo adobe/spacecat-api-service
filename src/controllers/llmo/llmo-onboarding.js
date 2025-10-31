@@ -782,7 +782,7 @@ export async function performLlmoOnboarding(params, context) {
     await site.save();
 
     // Trigger audits
-    await triggerAudits([...BASIC_AUDITS], context, site);
+    await triggerAudits([...BASIC_AUDITS, 'llmo-customer-analysis'], context, site);
 
     return {
       siteId: site.getId(),

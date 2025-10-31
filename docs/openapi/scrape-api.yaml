@@ -160,6 +160,34 @@ get-scrape-jobs-by-base-url-and-processing-type:
       '500':
         $ref: './responses.yaml#/500'
 
+get-scrape-urls-by-url-and-processing-type:
+  parameters:
+    - $ref: './parameters.yaml#/base64Url'
+    - $ref: './parameters.yaml#/processingType'
+  get:
+    tags:
+      - scrape
+    security:
+      - api_key: [ ]
+    summary: Get Scrape URLs by URL and Processing Type
+    description: |
+      ⚠️ **EXPERIMENTAL / PROTOTYPE**
+      This endpoint is used to retrieve scraped URLs by a specific URL and processing type.
+      The URL and processingType must be provided in the path parameter. (see samples)
+      Returns an array of scrape URL results sorted by creation date (newest first).
+    operationId: getScrapeUrlByProcessingType
+    responses:
+      '200':
+        description: Scrape URL results
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/ScrapeUrlsByProcessingTypeResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '500':
+        $ref: './responses.yaml#/500'
+
 get-scraped-content-list:
   parameters:
     - $ref: './parameters.yaml#/siteId'

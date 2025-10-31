@@ -97,6 +97,12 @@ function GetLlmoConfigSummaryCommand(context) {
           const stats = calculateStats(config);
           const organization = await Organization.findById(site.getOrganizationId());
           const imsOrgId = organization?.getImsOrgId();
+          const rawOrgName = organization?.getName() || 'N/A';
+          // Sanitize org name by removing/replacing control characters and normalizing whitespace
+          const imsOrgName = rawOrgName
+            .replace(/[\r\n\t\v\f]/g, ' ') // Replace control characters with space
+            .replace(/\s+/g, ' ') // Normalize multiple spaces to single space
+            .trim();
 
           // Skip excluded IMS orgs
           if (EXCLUDED_IMS_ORGS.includes(imsOrgId)) {
@@ -108,6 +114,7 @@ function GetLlmoConfigSummaryCommand(context) {
             baseURL: site.getBaseURL(),
             siteId: site.getId(),
             organizationId: site.getOrganizationId(),
+            imsOrgName,
             imsOrgId,
             ...stats,
           };
@@ -133,6 +140,7 @@ function GetLlmoConfigSummaryCommand(context) {
           { id: 'baseURL', title: 'Site URL' },
           { id: 'siteId', title: 'Site ID' },
           { id: 'organizationId', title: 'Organization ID' },
+          { id: 'imsOrgName', title: 'IMS Org Name' },
           { id: 'imsOrgId', title: 'IMS Org ID' },
           { id: 'categories', title: 'Categories' },
           { id: 'topics', title: 'Topics' },
