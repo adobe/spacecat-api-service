@@ -664,7 +664,7 @@ describe('ScrapeJobController tests', () => {
       // eslint-disable-next-line max-len
       baseContext.dataAccess.ScrapeUrl.allRecentByUrlAndProcessingType = sandbox.stub().resolves([]);
       baseContext.params.url = encodedUrl;
-      baseContext.params.processingType = 'form';
+      baseContext.params.processingType = '';
 
       const response = await scrapeJobController.getScrapeUrlByProcessingType(baseContext);
       expect(response).to.be.an.instanceOf(Response);
