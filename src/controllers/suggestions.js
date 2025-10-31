@@ -123,7 +123,7 @@ function SuggestionsController(ctx, sqs, env) {
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId;
     const limit = parseInt(context.params?.limit, 10) || DEFAULT_PAGE_SIZE;
-    const cursor = context.params?.cursor;
+    const cursor = context.params?.cursor || null;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
