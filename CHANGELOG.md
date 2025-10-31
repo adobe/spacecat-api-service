@@ -1,3 +1,38 @@
+## [1.222.1](https://github.com/adobe/spacecat-api-service/compare/v1.222.0...v1.222.1) (2025-10-31)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v2.38.8 ([#1427](https://github.com/adobe/spacecat-api-service/issues/1427)) ([ff0cf11](https://github.com/adobe/spacecat-api-service/commit/ff0cf11bc97106c2a7f3c65e397e9d455a5c8af2))
+
+# [1.222.0](https://github.com/adobe/spacecat-api-service/compare/v1.221.2...v1.222.0) (2025-10-31)
+
+
+### Features
+
+* changed paging to suggestion cursor approach ([#1420](https://github.com/adobe/spacecat-api-service/issues/1420)) ([b722889](https://github.com/adobe/spacecat-api-service/commit/b722889f04ddb78b890139f54eeaa662ee3797c1))
+
+## [1.221.2](https://github.com/adobe/spacecat-api-service/compare/v1.221.1...v1.221.2) (2025-10-31)
+
+
+### Bug Fixes
+
+* **audit-dto:** support for invocation id ([#1424](https://github.com/adobe/spacecat-api-service/issues/1424)) ([33b75e1](https://github.com/adobe/spacecat-api-service/commit/33b75e129cfdb574f66e7fda2245ec46164fa5a0))
+
+## [1.221.1](https://github.com/adobe/spacecat-api-service/compare/v1.221.0...v1.221.1) (2025-10-31)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1422](https://github.com/adobe/spacecat-api-service/issues/1422)) ([7f75c8b](https://github.com/adobe/spacecat-api-service/commit/7f75c8b1755f63727564a7641bb696ab8b1c83b4))
+
+# [1.221.0](https://github.com/adobe/spacecat-api-service/compare/v1.220.1...v1.221.0) (2025-10-30)
+
+
+### Features
+
+* add 'llmo-customer-analysis' to supported features in llmo-onbo… ([#1421](https://github.com/adobe/spacecat-api-service/issues/1421)) ([70fb80d](https://github.com/adobe/spacecat-api-service/commit/70fb80dd67361dda1506e58daabbd87579b8a02c))
+
 ## [1.220.1](https://github.com/adobe/spacecat-api-service/compare/v1.220.0...v1.220.1) (2025-10-30)
 
 
