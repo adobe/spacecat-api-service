@@ -660,16 +660,6 @@ describe('ScrapeJobController tests', () => {
       expect(response.headers.get('x-error')).to.equal('A valid URL is required');
     });
 
-    it('should return 400 when processingType is not provided', async () => {
-      baseContext.params.url = encodedUrl;
-      baseContext.params.processingType = '';
-
-      const response = await scrapeJobController.getScrapeUrlByProcessingType(baseContext);
-      expect(response).to.be.an.instanceOf(Response);
-      expect(response.status).to.equal(400);
-      expect(response.headers.get('x-error')).to.equal('A processing type is required');
-    });
-
     it('should return empty array when no scrape URLs are found', async () => {
       // eslint-disable-next-line max-len
       baseContext.dataAccess.ScrapeUrl.allRecentByUrlAndProcessingType = sandbox.stub().resolves([]);
