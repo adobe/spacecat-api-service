@@ -215,6 +215,65 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   /**
+     * Gets all suggestions for a given site, opportunity and status
+     * @param {Object} context of the request
+     * @returns {Promise<Response>} Array of suggestions response.
+     */
+  const getByStatusPaged = async (context) => {
+    const siteId = context.params?.siteId;
+    const opptyId = context.params?.opportunityId;
+    const status = context.params?.status || undefined;
+    const limit = parseInt(context.params?.limit, 10) || DEFAULT_PAGE_SIZE;
+    const cursor = context.params?.cursor || null;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(opptyId)) {
+      return badRequest('Opportunity ID required');
+    }
+    if (!hasText(status)) {
+      return badRequest('Status is required');
+    }
+
+    if (!isInteger(limit) || limit < 1) {
+      return badRequest('Page size must be greater than 0');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
+    }
+
+    const results = await Suggestion.allByOpportunityIdAndStatus(opptyId, status, {
+      limit,
+      cursor,
+      returnCursor: true,
+    });
+    const { data: suggestionEntities = [], cursor: newCursor = null } = results;
+    // Check if the opportunity belongs to the site
+    if (suggestionEntities.length > 0) {
+      const oppty = await suggestionEntities[0].getOpportunity();
+      if (!oppty || oppty.getSiteId() !== siteId) {
+        return notFound('Opportunity not found');
+      }
+    }
+    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg));
+    return ok({
+      suggestions,
+      pagination: {
+        limit,
+        cursor: newCursor ?? null,
+        hasMore: !!newCursor,
+      },
+    });
+  };
+
+  /**
    * Get a suggestion given a site, opportunity and suggestion ID
    * @param {Object} context of the request
    * @returns {Promise<Response>} Suggestion response.
@@ -934,6 +993,7 @@ function SuggestionsController(ctx, sqs, env) {
     getAllForOpportunityPaged,
     getByID,
     getByStatus,
+    getByStatusPaged,
     getSuggestionFixes,
     patchSuggestion,
     patchSuggestionsStatus,
