@@ -403,14 +403,20 @@ describe('Suggestions Controller', () => {
     mockOpportunity.findById.withArgs(OPPORTUNITY_ID_NOT_ENABLED).resolves(opportunityNotEnabled);
     mockOpportunity.findById.withArgs(OPPORTUNITY_ID_NOT_FOUND).resolves(null);
 
-    mockSuggestionResults = [mockSuggestionEntity(suggs[0])];
-    mockSuggestionResults.go = sandbox.stub().resolves({
+    mockSuggestionResults = {
       suggestionEntities: [mockSuggestionEntity(suggs[0])],
       newCursor: undefined,
-    });
+    };
 
     mockSuggestion = {
-      allByOpportunityId: sandbox.stub().returns(mockSuggestionResults),
+      allByOpportunityId: sandbox.stub().callsFake((opptyId, options) => {
+        // If options are provided (paged call), return object with suggestionEntities and newCursor
+        if (options) {
+          return Promise.resolve(mockSuggestionResults);
+        }
+        // Otherwise (non-paged call), return array directly
+        return Promise.resolve(mockSuggestionResults.suggestionEntities);
+      }),
 
       allByOpportunityIdAndStatus: sandbox.stub().resolves([mockSuggestionEntity(suggs[0])]),
       findById: sandbox.stub().callsFake((id) => {
@@ -672,12 +678,11 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets paged suggestions returns empty array when no suggestions exist', async () => {
-    const emptyResults = [];
-    emptyResults.go = sandbox.stub().resolves({
+    const emptyResults = {
       suggestionEntities: [],
       newCursor: undefined,
-    });
-    mockSuggestion.allByOpportunityId.returns(emptyResults);
+    };
+    mockSuggestion.allByOpportunityId.resolves(emptyResults);
     const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
         siteId: SITE_ID,
@@ -716,12 +721,11 @@ describe('Suggestions Controller', () => {
 
   it('gets paged suggestions with cursor for next page', async () => {
     const nextCursorToken = 'next-page-cursor-uuid-123e4567-e89b-12d3-a456-426614174000';
-    const resultsWithCursor = [mockSuggestionEntity(suggs[0])];
-    resultsWithCursor.go = sandbox.stub().resolves({
+    const resultsWithCursor = {
       suggestionEntities: [mockSuggestionEntity(suggs[0])],
       newCursor: nextCursorToken,
-    });
-    mockSuggestion.allByOpportunityId.returns(resultsWithCursor);
+    };
+    mockSuggestion.allByOpportunityId.resolves(resultsWithCursor);
 
     const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
@@ -741,15 +745,13 @@ describe('Suggestions Controller', () => {
     expect(result.pagination).to.have.property('hasMore', true);
   });
 
-  it('gets paged suggestions passes cursor to go method', async () => {
+  it('gets paged suggestions passes cursor and limit to allByOpportunityId', async () => {
     const cursorValue = '123e4567-e89b-12d3-a456-426614174000';
-    const resultsWithCursor = [mockSuggestionEntity(suggs[0])];
-    const goStub = sandbox.stub().resolves({
+    const resultsWithCursor = {
       suggestionEntities: [mockSuggestionEntity(suggs[0])],
       newCursor: undefined,
-    });
-    resultsWithCursor.go = goStub;
-    mockSuggestion.allByOpportunityId.returns(resultsWithCursor);
+    };
+    mockSuggestion.allByOpportunityId.resolves(resultsWithCursor);
 
     await suggestionsController.getAllForOpportunityPaged({
       params: {
@@ -761,8 +763,9 @@ describe('Suggestions Controller', () => {
       ...context,
     });
 
-    expect(goStub).to.have.been.calledOnce;
-    expect(goStub).to.have.been.calledWith({ limit: 25, cursor: cursorValue });
+    expect(mockSuggestion.allByOpportunityId).to.have.been.calledOnce;
+    // eslint-disable-next-line max-len
+    expect(mockSuggestion.allByOpportunityId).to.have.been.calledWith(OPPORTUNITY_ID, { limit: 25, cursor: cursorValue });
   });
 
   it('gets paged suggestions returns not found when opportunity is null', async () => {
@@ -770,12 +773,11 @@ describe('Suggestions Controller', () => {
     // Override getOpportunity to return null
     mockEntity.getOpportunity = () => null;
 
-    const resultsWithNullOpportunity = [mockEntity];
-    resultsWithNullOpportunity.go = sandbox.stub().resolves({
+    const resultsWithNullOpportunity = {
       suggestionEntities: [mockEntity],
       newCursor: undefined,
-    });
-    mockSuggestion.allByOpportunityId.returns(resultsWithNullOpportunity);
+    };
+    mockSuggestion.allByOpportunityId.resolves(resultsWithNullOpportunity);
 
     const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
@@ -801,12 +803,11 @@ describe('Suggestions Controller', () => {
       },
     });
 
-    const resultsWithWrongSite = [mockEntity];
-    resultsWithWrongSite.go = sandbox.stub().resolves({
+    const resultsWithWrongSite = {
       suggestionEntities: [mockEntity],
       newCursor: undefined,
-    });
-    mockSuggestion.allByOpportunityId.returns(resultsWithWrongSite);
+    };
+    mockSuggestion.allByOpportunityId.resolves(resultsWithWrongSite);
 
     const response = await suggestionsController.getAllForOpportunityPaged({
       params: {

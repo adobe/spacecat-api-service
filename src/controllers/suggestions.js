@@ -151,8 +151,10 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     const { suggestionEntities, newCursor } = await Suggestion
-      .allByOpportunityId(opptyId)
-      .go({ limit, cursor });
+      .allByOpportunityId(opptyId, {
+        limit,
+        cursor,
+      });
 
     // Check if the opportunity belongs to the site
     if (suggestionEntities.length > 0) {
