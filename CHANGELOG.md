@@ -1,3 +1,10 @@
+# [1.222.0](https://github.com/adobe/spacecat-api-service/compare/v1.221.2...v1.222.0) (2025-10-31)
+
+
+### Features
+
+* changed paging to suggestion cursor approach ([#1420](https://github.com/adobe/spacecat-api-service/issues/1420)) ([b722889](https://github.com/adobe/spacecat-api-service/commit/b722889f04ddb78b890139f54eeaa662ee3797c1))
+
 ## [1.221.2](https://github.com/adobe/spacecat-api-service/compare/v1.221.1...v1.221.2) (2025-10-31)
 
 
