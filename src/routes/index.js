@@ -187,6 +187,8 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix': suggestionsController.autofixSuggestions,
     'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy': suggestionsController.deploySuggestionToEdge,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status': suggestionsController.getByStatus,
+    'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit/:cursor': suggestionsController.getByStatusPaged,
+    'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit': suggestionsController.getByStatusPaged,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.getByID,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': suggestionsController.getSuggestionFixes,
     'POST /sites/:siteId/opportunities/:opportunityId/suggestions': suggestionsController.createSuggestions,

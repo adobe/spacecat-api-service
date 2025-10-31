@@ -1,3 +1,10 @@
+# [1.223.0](https://github.com/adobe/spacecat-api-service/compare/v1.222.1...v1.223.0) (2025-10-31)
+
+
+### Features
+
+* added paged getByStatus ([#1428](https://github.com/adobe/spacecat-api-service/issues/1428)) ([03dda9f](https://github.com/adobe/spacecat-api-service/commit/03dda9ffe5225e081aedf5cd36ab7d22233a75f4))
+
 ## [1.222.1](https://github.com/adobe/spacecat-api-service/compare/v1.222.0...v1.222.1) (2025-10-31)
 
 

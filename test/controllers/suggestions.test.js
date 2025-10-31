@@ -147,6 +147,7 @@ describe('Suggestions Controller', () => {
     'deploySuggestionToEdge',
     'getByID',
     'getByStatus',
+    'getByStatusPaged',
     'getSuggestionFixes',
     'patchSuggestion',
     'patchSuggestionsStatus',
@@ -908,6 +909,297 @@ describe('Suggestions Controller', () => {
       ...context,
     });
     expect(mockSuggestionDataAccess.Suggestion.allByOpportunityIdAndStatus.calledOnce).to.be.true;
+    expect(response.status).to.equal(404);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Opportunity not found');
+  });
+
+  it('gets paged suggestions by status returns bad request if site ID is missing', async () => {
+    const response = await suggestionsController.getByStatusPaged({
+      params: {
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Site ID required');
+  });
+
+  it('gets paged suggestions by status returns bad request if opportunity ID is missing', async () => {
+    const response = await suggestionsController.getByStatusPaged({
+      params: {
+        siteId: SITE_ID,
+        status: 'NEW',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Opportunity ID required');
+  });
+
+  it('gets paged suggestions by status returns bad request if status is missing', async () => {
+    const response = await suggestionsController.getByStatusPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Status is required');
+  });
+
+  it('gets paged suggestions by status returns bad request if limit is less than 1', async () => {
+    const response = await suggestionsController.getByStatusPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+        limit: -1,
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Page size must be greater than 0');
+  });
+
+  it('gets paged suggestions by status returns not found if site does not exist', async () => {
+    const response = await suggestionsController.getByStatusPaged({
+      params: {
+        siteId: SITE_ID_NOT_FOUND,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(404);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Site not found');
+  });
+
+  it('gets paged suggestions by status returns forbidden if user does not have access', async () => {
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+    const response = await suggestionsController.getByStatusPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(403);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'User does not belong to the organization');
+  });
+
+  it('gets paged suggestions by status returns not found if opportunity does not belong to site', async () => {
+    mockSuggestion.allByOpportunityIdAndStatus.callsFake((opptyId, status, options) => {
+      if (options) {
+        return Promise.resolve({
+          data: [mockSuggestionEntity(suggs[0])],
+          cursor: undefined,
+        });
+      }
+      return Promise.resolve([mockSuggestionEntity(suggs[0])]);
+    });
+    const response = await suggestionsController.getByStatusPaged({
+      params: {
+        siteId: SITE_ID_NOT_ENABLED,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(404);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Opportunity not found');
+  });
+
+  it('gets paged suggestions by status successfully', async () => {
+    mockSuggestion.allByOpportunityIdAndStatus.callsFake((opptyId, status, options) => {
+      if (options) {
+        return Promise.resolve({
+          data: [mockSuggestionEntity(suggs[0])],
+          cursor: undefined,
+        });
+      }
+      return Promise.resolve([mockSuggestionEntity(suggs[0])]);
+    });
+    const response = await suggestionsController.getByStatusPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+      },
+      ...context,
+    });
+    expect(mockSuggestionDataAccess.Suggestion.allByOpportunityIdAndStatus.calledOnce).to.be.true;
+    expect(response.status).to.equal(200);
+    const result = await response.json();
+    expect(result).to.have.property('suggestions');
+    expect(result.suggestions).to.be.an('array').with.lengthOf(1);
+    expect(result).to.have.property('pagination');
+    expect(result.pagination).to.deep.equal({
+      limit: 100,
+      cursor: null,
+      hasMore: false,
+    });
+  });
+
+  it('gets paged suggestions by status with empty results', async () => {
+    mockSuggestion.allByOpportunityIdAndStatus.callsFake((opptyId, status, options) => {
+      if (options) {
+        return Promise.resolve({
+          data: [],
+          cursor: undefined,
+        });
+      }
+      return Promise.resolve([]);
+    });
+    const response = await suggestionsController.getByStatusPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    const result = await response.json();
+    expect(result.suggestions).to.be.an('array').with.lengthOf(0);
+    expect(result.pagination).to.deep.equal({
+      limit: 100,
+      cursor: null,
+      hasMore: false,
+    });
+  });
+
+  it('gets paged suggestions by status successfully when parameters come as strings from URL', async () => {
+    mockSuggestion.allByOpportunityIdAndStatus.callsFake((opptyId, status, options) => {
+      if (options) {
+        return Promise.resolve({
+          data: [mockSuggestionEntity(suggs[0])],
+          cursor: 'next-cursor-value',
+        });
+      }
+      return Promise.resolve([mockSuggestionEntity(suggs[0])]);
+    });
+    const response = await suggestionsController.getByStatusPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+        limit: '50',
+        cursor: 'some-cursor',
+      },
+      ...context,
+    });
+    expect(mockSuggestionDataAccess.Suggestion.allByOpportunityIdAndStatus.calledOnce).to.be.true;
+    expect(response.status).to.equal(200);
+    const result = await response.json();
+    expect(result.suggestions).to.be.an('array').with.lengthOf(1);
+    expect(result.pagination).to.deep.equal({
+      limit: 50,
+      cursor: 'next-cursor-value',
+      hasMore: true,
+    });
+  });
+
+  it('gets paged suggestions by status with cursor parameter calls with correct options', async () => {
+    mockSuggestion.allByOpportunityIdAndStatus.callsFake((opptyId, status, options) => {
+      if (options) {
+        return Promise.resolve({
+          data: [mockSuggestionEntity(suggs[0])],
+          cursor: 'next-cursor',
+        });
+      }
+      return Promise.resolve([mockSuggestionEntity(suggs[0])]);
+    });
+
+    await suggestionsController.getByStatusPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+        limit: 25,
+        cursor: 'previous-cursor',
+      },
+      ...context,
+    });
+
+    expect(mockSuggestion.allByOpportunityIdAndStatus).to.have.been.calledWith(
+      OPPORTUNITY_ID,
+      'NEW',
+      {
+        limit: 25,
+        cursor: 'previous-cursor',
+        returnCursor: true,
+      },
+    );
+  });
+
+  it('gets paged suggestions by status handles null opportunity correctly', async () => {
+    const mockSuggestionWithNullOpportunity = {
+      ...mockSuggestionEntity(suggs[0]),
+      getOpportunity: sandbox.stub().returns(null),
+    };
+
+    mockSuggestion.allByOpportunityIdAndStatus.callsFake((opptyId, status, options) => {
+      if (options) {
+        return Promise.resolve({
+          data: [mockSuggestionWithNullOpportunity],
+          cursor: null,
+        });
+      }
+      return Promise.resolve([mockSuggestionWithNullOpportunity]);
+    });
+
+    const response = await suggestionsController.getByStatusPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+      },
+      ...context,
+    });
+
+    expect(response.status).to.equal(404);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Opportunity not found');
+  });
+
+  it('gets paged suggestions by status handles opportunity with wrong site ID', async () => {
+    const mockSuggestionWithWrongSite = {
+      ...mockSuggestionEntity(suggs[0]),
+      getOpportunity: sandbox.stub().returns({
+        getSiteId: () => SITE_ID_NOT_ENABLED,
+      }),
+    };
+
+    mockSuggestion.allByOpportunityIdAndStatus.callsFake((opptyId, status, options) => {
+      if (options) {
+        return Promise.resolve({
+          data: [mockSuggestionWithWrongSite],
+          cursor: null,
+        });
+      }
+      return Promise.resolve([mockSuggestionWithWrongSite]);
+    });
+
+    const response = await suggestionsController.getByStatusPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+      },
+      ...context,
+    });
+
     expect(response.status).to.equal(404);
     const error = await response.json();
     expect(error).to.have.property('message', 'Opportunity not found');
