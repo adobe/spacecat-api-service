@@ -150,11 +150,14 @@ function SuggestionsController(ctx, sqs, env) {
       return forbidden('User does not belong to the organization');
     }
 
-    const { suggestionEntities, newCursor } = await Suggestion
+    const results = await Suggestion
       .allByOpportunityId(opptyId, {
         limit,
         cursor,
+        returnCursor: true,
+        fetchAllPages: false,
       });
+    const { data: suggestionEntities = [], cursor: newCursor = null } = results;
 
     // Check if the opportunity belongs to the site
     if (suggestionEntities.length > 0) {
