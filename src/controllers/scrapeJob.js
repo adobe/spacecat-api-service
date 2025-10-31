@@ -197,11 +197,12 @@ function ScrapeJobController(context) {
 
   async function getScrapeUrlByProcessingType(requestContext) {
     const { url: encodedUrl, processingType } = parseRequestContext(requestContext);
+    let requestedProcessingType = processingType;
 
     if (!hasText(encodedUrl)) {
       return badRequest('A valid URL is required');
     } else if (!hasText(processingType)) {
-      return badRequest('A processing type is required');
+      requestedProcessingType = 'default';
     }
 
     let decodedUrl = encodedUrl;
@@ -209,7 +210,7 @@ function ScrapeJobController(context) {
       decodedUrl = Buffer.from(encodedUrl, 'base64').toString('utf-8').trim();
       const scrapeUrls = await scrapeClient.getScrapeUrlsByProcessingType(
         decodedUrl,
-        processingType,
+        requestedProcessingType,
       );
 
       if (!scrapeUrls || scrapeUrls.length === 0) {
