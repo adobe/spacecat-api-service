@@ -1706,6 +1706,22 @@ describe('ReportsController', () => {
     });
 
     it('should successfully update enhanced report data', async () => {
+      // Mock existing data in S3
+      const existingData = {
+        title: 'Existing Report Title',
+        summary: 'Existing report summary',
+        metrics: { seo: 85, accessibility: 90 },
+        recommendations: ['Existing recommendation 1'],
+        generatedAt: '2024-01-01T00:00:00Z',
+      };
+
+      // Mock S3 GET operation to return existing data
+      mockContext.s3.s3Client.send.onFirstCall().resolves({
+        Body: {
+          transformToString: () => Promise.resolve(JSON.stringify(existingData)),
+        },
+      });
+
       const context = {
         params: {
           siteId: '123e4567-e89b-12d3-a456-426614174000',
@@ -1730,9 +1746,12 @@ describe('ReportsController', () => {
       });
       expect(responseBody.updatedAt).to.be.a('string');
 
-      // Verify S3 upload was called with correct parameters
+      // Verify S3 GET was called first to fetch existing data
+      expect(mockContext.s3.GetObjectCommand).to.have.been.calledOnce;
+      expect(mockContext.s3.s3Client.send).to.have.been.calledTwice; // Once for GET, once for PUT
+
+      // Verify S3 PUT was called with merged data
       expect(mockContext.s3.PutObjectCommand).to.have.been.calledOnce;
-      expect(mockContext.s3.s3Client.send).to.have.been.calledOnce;
 
       const putCommand = mockContext.s3.PutObjectCommand.getCall(0).args[0];
       const mystiqueReportKey = 'reports/123e4567-e89b-12d3-a456-426614174000/performance/987e6543-e21b-12d3-a456-426614174001/enhanced/report.json';
@@ -1743,12 +1762,74 @@ describe('ReportsController', () => {
         ContentType: 'application/json',
       });
 
-      // Verify the uploaded data matches the request data
+      // Verify uploaded data is shallow merged (existing + patch, patch takes precedence)
       const uploadedData = JSON.parse(putCommand.Body);
-      expect(uploadedData).to.deep.equal(context.data);
+      const expectedMergedData = {
+        title: 'Existing Report Title', // from existing data
+        summary: 'Updated report summary', // from patch data (overwrites existing)
+        metrics: { performance: 95 }, // from patch data (completely replaces existing)
+        recommendations: ['Updated recommendation 1', 'Updated recommendation 2'], // from patch data (overwrites existing)
+        generatedAt: '2024-01-01T00:00:00Z', // from existing data
+      };
+      expect(uploadedData).to.deep.equal(expectedMergedData);
 
       // Verify report was saved to update timestamp
       expect(mockReport.save).to.have.been.calledOnce;
+    });
+
+    it('should shallow merge objects correctly', async () => {
+      // Mock existing data with nested metrics
+      const existingData = {
+        title: 'Performance Report',
+        metrics: {
+          performance: { score: 85, loadTime: 2.5 },
+          seo: { score: 90, issues: 2 },
+          accessibility: { score: 88, violations: 1 },
+        },
+        metadata: { version: '1.0', createdBy: 'system' },
+      };
+
+      // Mock S3 GET operation to return existing data
+      mockContext.s3.s3Client.send.onFirstCall().resolves({
+        Body: {
+          transformToString: () => Promise.resolve(JSON.stringify(existingData)),
+        },
+      });
+
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+        data: {
+          // Update metrics and metadata objects (will replace entirely)
+          metrics: {
+            performance: { score: 95 }, // Replaces entire metrics object
+          },
+          metadata: { updatedBy: 'user123' }, // Replaces entire metadata object
+        },
+        s3: mockContext.s3,
+      };
+
+      const result = await reportsController.patchReport(context);
+
+      expect(result.status).to.equal(200);
+
+      // Verify the uploaded data shows proper shallow merge
+      const putCommand = mockContext.s3.PutObjectCommand.getCall(0).args[0];
+      const uploadedData = JSON.parse(putCommand.Body);
+
+      const expectedMergedData = {
+        title: 'Performance Report', // preserved from existing
+        metrics: {
+          performance: { score: 95 }, // completely replaced (seo & accessibility lost)
+        },
+        metadata: {
+          updatedBy: 'user123', // completely replaced (version & createdBy lost)
+        },
+      };
+
+      expect(uploadedData).to.deep.equal(expectedMergedData);
     });
 
     it('should return bad request when report is not in success status', async () => {
@@ -1829,8 +1910,33 @@ describe('ReportsController', () => {
       expect(responseBody.message).to.equal('Request data is required');
     });
 
+    it('should return internal server error when S3 fetch fails', async () => {
+      mockContext.s3.s3Client.send.onFirstCall().rejects(new Error('S3 fetch failed'));
+
+      const context = {
+        params: {
+          siteId: '123e4567-e89b-12d3-a456-426614174000',
+          reportId: '987e6543-e21b-12d3-a456-426614174001',
+        },
+        data: { summary: 'Updated summary' },
+        s3: mockContext.s3,
+      };
+
+      const result = await reportsController.patchReport(context);
+
+      expect(result.status).to.equal(500);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Failed to fetch existing report data: S3 fetch failed');
+    });
+
     it('should return internal server error when S3 upload fails', async () => {
-      mockContext.s3.s3Client.send.rejects(new Error('S3 upload failed'));
+      // Mock successful GET, but failing PUT
+      mockContext.s3.s3Client.send.onFirstCall().resolves({
+        Body: {
+          transformToString: () => Promise.resolve(JSON.stringify({ existing: 'data' })),
+        },
+      });
+      mockContext.s3.s3Client.send.onSecondCall().rejects(new Error('S3 upload failed'));
 
       const context = {
         params: {
