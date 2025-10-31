@@ -133,10 +133,6 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('Opportunity ID required');
     }
 
-    if (hasText(cursor) && !isValidUUID(cursor)) {
-      return badRequest('Cursor must be a valid UUID');
-    }
-
     if (!isInteger(limit) || limit < 1) {
       return badRequest('Page size must be greater than 0');
     }
@@ -155,7 +151,6 @@ function SuggestionsController(ctx, sqs, env) {
         limit,
         cursor,
         returnCursor: true,
-        fetchAllPages: false,
       });
     const { data: suggestionEntities = [], cursor: newCursor = null } = results;
 
