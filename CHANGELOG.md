@@ -1,3 +1,10 @@
+## [1.221.2](https://github.com/adobe/spacecat-api-service/compare/v1.221.1...v1.221.2) (2025-10-31)
+
+
+### Bug Fixes
+
+* **audit-dto:** support for invocation id ([#1424](https://github.com/adobe/spacecat-api-service/issues/1424)) ([33b75e1](https://github.com/adobe/spacecat-api-service/commit/33b75e129cfdb574f66e7fda2245ec46164fa5a0))
+
 ## [1.221.1](https://github.com/adobe/spacecat-api-service/compare/v1.221.0...v1.221.1) (2025-10-31)
 
 
