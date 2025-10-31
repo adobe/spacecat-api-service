@@ -140,6 +140,7 @@ describe('ScrapeJobController tests', () => {
       },
       ScrapeUrl: {
         allByScrapeJobId: sandbox.stub().resolves([]),
+        allRecentByUrlAndProcessingType: sandbox.stub().resolves([]),
         create: (data) => createScrapeUrl(data),
       },
     };
@@ -639,6 +640,116 @@ describe('ScrapeJobController tests', () => {
       expect(response).to.be.an.instanceOf(Response);
       expect(response.status).to.equal(400);
       expect(response.headers.get('x-error')).to.equal('Base URL required');
+    });
+  });
+
+  describe('getScrapeUrlByProcessingType', () => {
+    const encodedUrl = Buffer.from('https://www.example.com/page1').toString('base64');
+
+    beforeEach(() => {
+      scrapeJobController = ScrapeJobController(baseContext);
+    });
+
+    it('should return 400 when URL is not provided', async () => {
+      baseContext.params.url = '';
+      baseContext.params.processingType = 'form';
+
+      const response = await scrapeJobController.getScrapeUrlByProcessingType(baseContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('A valid URL is required');
+    });
+
+    it('should return 400 when processingType is not provided', async () => {
+      baseContext.params.url = encodedUrl;
+      baseContext.params.processingType = '';
+
+      const response = await scrapeJobController.getScrapeUrlByProcessingType(baseContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(400);
+      expect(response.headers.get('x-error')).to.equal('A processing type is required');
+    });
+
+    it('should return empty array when no scrape URLs are found', async () => {
+      // eslint-disable-next-line max-len
+      baseContext.dataAccess.ScrapeUrl.allRecentByUrlAndProcessingType = sandbox.stub().resolves([]);
+      baseContext.params.url = encodedUrl;
+      baseContext.params.processingType = 'form';
+
+      const response = await scrapeJobController.getScrapeUrlByProcessingType(baseContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+      expect(result).to.deep.equal([]);
+    });
+
+    it('should return sorted scrape URLs when results are found', async () => {
+      const mockScrapeUrls = [
+        createScrapeUrl({
+          url: 'https://www.example.com/page1',
+          processingType: 'form',
+          status: 'COMPLETE',
+          createdAt: '2024-01-01T10:00:00.000Z',
+          path: 'path/to/result1',
+        }),
+        createScrapeUrl({
+          url: 'https://www.example.com/page2',
+          processingType: 'form',
+          status: 'COMPLETE',
+          createdAt: '2024-01-02T10:00:00.000Z',
+          path: 'path/to/result2',
+        }),
+        createScrapeUrl({
+          url: 'https://www.example.com/page3',
+          processingType: 'form',
+          status: 'COMPLETE',
+          createdAt: '2024-01-01T15:00:00.000Z',
+          path: 'path/to/result3',
+        }),
+      ];
+
+      // eslint-disable-next-line max-len
+      baseContext.dataAccess.ScrapeUrl.allRecentByUrlAndProcessingType = sandbox.stub().resolves(mockScrapeUrls);
+      baseContext.params.url = encodedUrl;
+      baseContext.params.processingType = 'form';
+
+      const response = await scrapeJobController.getScrapeUrlByProcessingType(baseContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+
+      // Results should be sorted by createdAt in descending order (newest first)
+      expect(result).to.have.lengthOf(3);
+      expect(result[0].createdAt).to.equal('2024-01-02T10:00:00.000Z');
+      expect(result[1].createdAt).to.equal('2024-01-01T15:00:00.000Z');
+      expect(result[2].createdAt).to.equal('2024-01-01T10:00:00.000Z');
+    });
+
+    it('should handle errors gracefully', async () => {
+      baseContext.dataAccess.ScrapeUrl.allRecentByUrlAndProcessingType = sandbox.stub().rejects(new Error('Database connection failed'));
+      baseContext.params.url = encodedUrl;
+      baseContext.params.processingType = 'form';
+
+      const response = await scrapeJobController.getScrapeUrlByProcessingType(baseContext);
+      expect(response).to.be.an.instanceOf(Response);
+      expect(response.status).to.equal(500);
+      expect(response.headers.get('x-error')).to.equal('Failed to fetch scrape URL by URL: https://www.example.com/page1 and processing type: form, Database connection failed');
+    });
+
+    it('should decode base64 URL correctly', async () => {
+      const allRecentByUrlAndProcessingTypeStub = sandbox.stub().resolves([]);
+      // eslint-disable-next-line max-len
+      baseContext.dataAccess.ScrapeUrl.allRecentByUrlAndProcessingType = allRecentByUrlAndProcessingTypeStub;
+      baseContext.params.url = encodedUrl;
+      baseContext.params.processingType = 'form';
+
+      await scrapeJobController.getScrapeUrlByProcessingType(baseContext);
+
+      // Verify the decoded URL was passed to the data access layer
+      expect(allRecentByUrlAndProcessingTypeStub).to.have.been.calledOnce;
+      const callArgs = allRecentByUrlAndProcessingTypeStub.getCall(0).args;
+      expect(callArgs[0]).to.equal('https://www.example.com/page1');
+      expect(callArgs[1]).to.equal('form');
     });
   });
 });

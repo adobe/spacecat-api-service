@@ -39,6 +39,7 @@ function FulfillmentController(context) {
   const FULFILLMENT_EVENT_TYPES = {
     EDGE_DELIVERY_SERVICES: 'edge-delivery-services',
     AEM_SITES_OPTIMIZER: 'aem-sites-optimizer',
+    LLM_OPTIMIZER: 'llm-optimizer',
   };
 
   async function queueEventsForProcessing(hoolihanEventArray, eventType) {
