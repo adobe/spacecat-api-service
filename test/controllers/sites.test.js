@@ -1144,20 +1144,9 @@ describe('Sites Controller', () => {
       },
     });
 
-    const resp = await (await sitesControllerMock.default(context).getSiteMetricsBySource({
+    const controller = sitesControllerMock.default(context, loggerStub, context.env);
+    const resp = await (await controller.getSiteMetricsBySource({
       params: { siteId, source, metric },
-      log: {
-        info: sandbox.spy(),
-        warn: sandbox.spy(),
-        error: sandbox.spy(),
-      },
-      s3: {
-        s3Client: {
-          send: sinon.stub(),
-        },
-        s3Bucket: 'test-bucket',
-        region: 'us-west-2',
-      },
     })).json();
 
     expect(resp).to.deep.equal(storedMetrics);
@@ -1233,15 +1222,15 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Only users belonging to the organization can view its metrics');
   });
 
-  // RUM metrics filtering tests for lines
-  describe('RUM metrics filtering by top pages', () => {
+  // Metrics filtering tests for lines 577-615
+  describe('Metrics filtering by top pages', () => {
     beforeEach(() => {
       // Reset mocks for each test
       mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo.reset();
       mockDataAccess.SiteTopPage.allBySiteId.reset();
     });
 
-    it('filters RUM cwv-hourly metrics using ahrefs global top pages', async () => {
+    it('filters metrics using ahrefs global top pages when filterTopPages=true', async () => {
       const siteId = sites[0].getId();
       const source = 'rum';
       const metric = 'cwv-hourly-7d-2025-11-02';
@@ -1273,6 +1262,7 @@ describe('Sites Controller', () => {
       const controller = sitesControllerMock.default(context, loggerStub, context.env);
       const result = await controller.getSiteMetricsBySource({
         params: { siteId, source, metric },
+        data: { filterTopPages: 'true' },
       });
 
       const response = await result.json();
@@ -1318,6 +1308,7 @@ describe('Sites Controller', () => {
       const controller = sitesControllerMock.default(context, loggerStub, context.env);
       const result = await controller.getSiteMetricsBySource({
         params: { siteId, source, metric },
+        data: { filterTopPages: 'true' },
       });
 
       const response = await result.json();
@@ -1350,6 +1341,7 @@ describe('Sites Controller', () => {
       const controller = sitesControllerMock.default(context, loggerStub, context.env);
       const result = await controller.getSiteMetricsBySource({
         params: { siteId, source, metric },
+        data: { filterTopPages: 'true' },
       });
 
       const response = await result.json();
@@ -1358,14 +1350,14 @@ describe('Sites Controller', () => {
       expect(response).to.have.length(2);
     });
 
-    it('does not filter non-RUM metrics', async () => {
+    it('does not filter when filterTopPages is not set', async () => {
       const siteId = sites[0].getId();
-      const source = 'ahrefs';
-      const metric = 'organic-traffic';
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
 
       const mockMetrics = [
-        { url: 'https://example.com/page1', value: 100 },
-        { url: 'https://example.com/page2', value: 200 },
+        { url: 'https://example.com/page1', lcp: 1500, cls: 0.1 },
+        { url: 'https://example.com/page2', lcp: 2000, cls: 0.2 },
       ];
 
       const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
@@ -1376,6 +1368,7 @@ describe('Sites Controller', () => {
       const controller = sitesControllerMock.default(context, loggerStub, context.env);
       const result = await controller.getSiteMetricsBySource({
         params: { siteId, source, metric },
+        // No data.filterTopPages parameter
       });
 
       const response = await result.json();
@@ -1387,15 +1380,21 @@ describe('Sites Controller', () => {
       expect(mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo).to.not.have.been.called;
     });
 
-    it('does not filter non-cwv-hourly RUM metrics', async () => {
+    it('works with different metric types when filterTopPages=true', async () => {
       const siteId = sites[0].getId();
-      const source = 'rum';
-      const metric = 'page-views';
+      const source = 'ahrefs';
+      const metric = 'organic-traffic';
+
+      const mockTopPages = [
+        { getUrl: () => 'https://example.com/page1' },
+      ];
 
       const mockMetrics = [
         { url: 'https://example.com/page1', views: 100 },
-        { url: 'https://example.com/page2', views: 200 },
+        { url: 'https://example.com/page2', views: 200 }, // Not in top pages
       ];
+
+      mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo.resolves(mockTopPages);
 
       const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
       const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
@@ -1405,15 +1404,17 @@ describe('Sites Controller', () => {
       const controller = sitesControllerMock.default(context, loggerStub, context.env);
       const result = await controller.getSiteMetricsBySource({
         params: { siteId, source, metric },
+        data: { filterTopPages: 'true' },
       });
 
       const response = await result.json();
 
-      // Should return all unfiltered metrics (no filtering applied)
-      expect(response).to.have.length(2);
+      // Should filter to only page1 (matching top pages)
+      expect(response).to.have.length(1);
+      expect(response[0].url).to.equal('https://example.com/page1');
 
-      // Verify SiteTopPage was not called
-      expect(mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo).to.not.have.been.called;
+      // Verify SiteTopPage was called
+      expect(mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo).to.have.been.called;
     });
 
     it('returns unfiltered metrics when top pages have no valid URLs (lines 606-607)', async () => {
@@ -1448,6 +1449,7 @@ describe('Sites Controller', () => {
       const controller = sitesControllerMock.default(context, loggerStub, context.env);
       const result = await controller.getSiteMetricsBySource({
         params: { siteId, source, metric },
+        data: { filterTopPages: 'true' },
       });
 
       const response = await result.json();
@@ -1482,6 +1484,7 @@ describe('Sites Controller', () => {
       const controller = sitesControllerMock.default(context, loggerStub, context.env);
       const result = await controller.getSiteMetricsBySource({
         params: { siteId, source, metric },
+        data: { filterTopPages: 'true' },
       });
 
       const response = await result.json();
@@ -1490,7 +1493,7 @@ describe('Sites Controller', () => {
       expect(response).to.have.length(2);
 
       expect(loggerStub.error).to.have.been.calledWith(
-        `Error filtering RUM metrics by top pages for site ${siteId}: Database connection failed`,
+        `Error filtering metrics by top pages for site ${siteId}: Database connection failed`,
       );
     });
   });

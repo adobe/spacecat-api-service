@@ -548,6 +548,7 @@ function SitesController(ctx, log, env) {
     const siteId = context.params?.siteId;
     const metric = context.params?.metric;
     const source = context.params?.source;
+    const filterTopPages = context.data?.filterTopPages === 'true';
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -572,8 +573,8 @@ function SitesController(ctx, log, env) {
 
     let metrics = await getStoredMetrics({ siteId, metric, source }, context);
 
-    // Filter RUM metrics to only include top 100 pages to prevent 413 payload errors
-    if (source === 'rum' && metric.includes('cwv-hourly')) {
+    // Filter metrics to only include top 100 pages when requested
+    if (filterTopPages) {
       try {
         const { SiteTopPage } = dataAccess;
 
@@ -601,7 +602,7 @@ function SitesController(ctx, log, env) {
             metrics = metrics.filter((metricEntry) => (
               metricEntry.url && topPageUrlSet.has(metricEntry.url)));
 
-            log.info(`Filtered RUM metrics from ${originalCount} to ${metrics.length} entries for top ${topPageUrls.length} pages`);
+            log.info(`Filtered metrics from ${originalCount} to ${metrics.length} entries for top ${topPageUrls.length} pages`);
           } else {
             log.warn(`No valid URLs found in top pages for site ${siteId}, returning unfiltered metrics`);
           }
@@ -609,7 +610,7 @@ function SitesController(ctx, log, env) {
           log.warn(`No top pages found for site ${siteId}, returning unfiltered metrics`);
         }
       } catch (error) {
-        log.error(`Error filtering RUM metrics by top pages for site ${siteId}: ${error.message}`);
+        log.error(`Error filtering metrics by top pages for site ${siteId}: ${error.message}`);
         // Continue with unfiltered metrics if filtering fails
       }
     }
