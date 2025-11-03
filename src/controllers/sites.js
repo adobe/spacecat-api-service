@@ -548,7 +548,7 @@ function SitesController(ctx, log, env) {
     const siteId = context.params?.siteId;
     const metric = context.params?.metric;
     const source = context.params?.source;
-    const filterTopPages = context.data?.filterTopPages === 'true';
+    const filterByTop100PageViews = context.data?.filterByTop100PageViews === 'true';
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -573,45 +573,16 @@ function SitesController(ctx, log, env) {
 
     let metrics = await getStoredMetrics({ siteId, metric, source }, context);
 
-    // Filter metrics to only include top pages when requested
-    if (filterTopPages) {
-      try {
-        const { SiteTopPage } = dataAccess;
+    // Filter to top 100 pages by pageViews when requested
+    if (filterByTop100PageViews) {
+      // Sort by pageViews in descending order and take top 100
+      const originalCount = metrics.length;
+      metrics = metrics
+        .filter((metricEntry) => metricEntry.pageviews !== undefined)
+        .sort((a, b) => (b.pageviews || 0) - (a.pageviews || 0))
+        .slice(0, 100);
 
-        // Get top pages from ahrefs global data (most commonly used source)
-        let topPages = await SiteTopPage.allBySiteIdAndSourceAndGeo(siteId, 'ahrefs', 'global');
-
-        // If no ahrefs data, try other sources
-        if (!topPages || topPages.length === 0) {
-          topPages = await SiteTopPage.allBySiteId(siteId);
-        }
-
-        if (topPages && topPages.length > 0) {
-          // Extract URLs from all top pages
-          const topPageUrls = topPages
-            .map((page) => page.getUrl())
-            .filter((url) => url); // Remove any null/undefined URLs
-
-          if (topPageUrls.length > 0) {
-            // Create a Set for faster lookup
-            const topPageUrlSet = new Set(topPageUrls);
-
-            // Filter metrics to only include top pages
-            const originalCount = metrics.length;
-            metrics = metrics.filter((metricEntry) => (
-              metricEntry.url && topPageUrlSet.has(metricEntry.url)));
-
-            log.info(`Filtered metrics from ${originalCount} to ${metrics.length} entries for top ${topPageUrls.length} pages`);
-          } else {
-            log.warn(`No valid URLs found in top pages for site ${siteId}, returning unfiltered metrics`);
-          }
-        } else {
-          log.warn(`No top pages found for site ${siteId}, returning unfiltered metrics`);
-        }
-      } catch (error) {
-        log.error(`Error filtering metrics by top pages for site ${siteId}: ${error.message}`);
-        // Continue with unfiltered metrics if filtering fails
-      }
+      log.info(`Filtered metrics from ${originalCount} to ${metrics.length} entries based on top pageViews`);
     }
 
     return ok(metrics);
