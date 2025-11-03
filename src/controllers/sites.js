@@ -573,7 +573,7 @@ function SitesController(ctx, log, env) {
 
     let metrics = await getStoredMetrics({ siteId, metric, source }, context);
 
-    // Filter metrics to only include top 100 pages when requested
+    // Filter metrics to only include top pages when requested
     if (filterTopPages) {
       try {
         const { SiteTopPage } = dataAccess;
@@ -587,9 +587,8 @@ function SitesController(ctx, log, env) {
         }
 
         if (topPages && topPages.length > 0) {
-          // Limit to top 100 pages and extract URLs
+          // Extract URLs from all top pages
           const topPageUrls = topPages
-            .slice(0, 100)
             .map((page) => page.getUrl())
             .filter((url) => url); // Remove any null/undefined URLs
 

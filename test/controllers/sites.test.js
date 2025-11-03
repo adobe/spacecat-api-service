@@ -1222,7 +1222,7 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Only users belonging to the organization can view its metrics');
   });
 
-  // Metrics filtering tests for lines 577-615
+  // Metrics filtering tests for lines
   describe('Metrics filtering by top pages', () => {
     beforeEach(() => {
       // Reset mocks for each test
