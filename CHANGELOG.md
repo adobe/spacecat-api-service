@@ -1,3 +1,52 @@
+## [1.223.3](https://github.com/adobe/spacecat-api-service/compare/v1.223.2...v1.223.3) (2025-11-02)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1431](https://github.com/adobe/spacecat-api-service/issues/1431)) ([ff3fd73](https://github.com/adobe/spacecat-api-service/commit/ff3fd73363e514fc929f1eb09ef5c9e615df9631))
+
+## [1.223.2](https://github.com/adobe/spacecat-api-service/compare/v1.223.1...v1.223.2) (2025-11-01)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#1430](https://github.com/adobe/spacecat-api-service/issues/1430)) ([3d841ef](https://github.com/adobe/spacecat-api-service/commit/3d841ef5ab4d41d5912873e4f1a4b399502167f2))
+
+## [1.223.1](https://github.com/adobe/spacecat-api-service/compare/v1.223.0...v1.223.1) (2025-10-31)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.69.2 ([#1429](https://github.com/adobe/spacecat-api-service/issues/1429)) ([dfba9c7](https://github.com/adobe/spacecat-api-service/commit/dfba9c770e1e9b0e968c8e614e9264610cbced3b))
+
+# [1.223.0](https://github.com/adobe/spacecat-api-service/compare/v1.222.1...v1.223.0) (2025-10-31)
+
+
+### Features
+
+* added paged getByStatus ([#1428](https://github.com/adobe/spacecat-api-service/issues/1428)) ([03dda9f](https://github.com/adobe/spacecat-api-service/commit/03dda9ffe5225e081aedf5cd36ab7d22233a75f4))
+
+## [1.222.1](https://github.com/adobe/spacecat-api-service/compare/v1.222.0...v1.222.1) (2025-10-31)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v2.38.8 ([#1427](https://github.com/adobe/spacecat-api-service/issues/1427)) ([ff0cf11](https://github.com/adobe/spacecat-api-service/commit/ff0cf11bc97106c2a7f3c65e397e9d455a5c8af2))
+
+# [1.222.0](https://github.com/adobe/spacecat-api-service/compare/v1.221.2...v1.222.0) (2025-10-31)
+
+
+### Features
+
+* changed paging to suggestion cursor approach ([#1420](https://github.com/adobe/spacecat-api-service/issues/1420)) ([b722889](https://github.com/adobe/spacecat-api-service/commit/b722889f04ddb78b890139f54eeaa662ee3797c1))
+
+## [1.221.2](https://github.com/adobe/spacecat-api-service/compare/v1.221.1...v1.221.2) (2025-10-31)
+
+
+### Bug Fixes
+
+* **audit-dto:** support for invocation id ([#1424](https://github.com/adobe/spacecat-api-service/issues/1424)) ([33b75e1](https://github.com/adobe/spacecat-api-service/commit/33b75e129cfdb574f66e7fda2245ec46164fa5a0))
+
 ## [1.221.1](https://github.com/adobe/spacecat-api-service/compare/v1.221.0...v1.221.1) (2025-10-31)
 
 

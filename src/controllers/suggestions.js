@@ -115,15 +115,15 @@ function SuggestionsController(ctx, sqs, env) {
   /**
    * Gets a page of suggestions for a given site and opportunity
    * @param {Object} context of the request
-   * @param {number} context.params.pageSize - Number of suggestions per page. Default=100.
-   * @param {number} context.params.pageNum - The page number to return. Default=0.
+   * @param {number} context.params.limit - Number of suggestions per page. Default=100.
+   * @param {number} context.params.cursor - The next cursor or null for first page.
    * @returns {Promise<Response>} Array of suggestions response.
    */
-  const getPagedForOpportunity = async (context) => {
+  const getAllForOpportunityPaged = async (context) => {
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId;
-    const pageSize = parseInt(context.params?.pageSize, 10) || DEFAULT_PAGE_SIZE;
-    const pageNum = parseInt(context.params?.pageNum, 10) || 0;
+    const limit = parseInt(context.params?.limit, 10) || DEFAULT_PAGE_SIZE;
+    const cursor = context.params?.cursor || null;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -133,12 +133,8 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('Opportunity ID required');
     }
 
-    if (!isInteger(pageSize) || pageSize < 1) {
+    if (!isInteger(limit) || limit < 1) {
       return badRequest('Page size must be greater than 0');
-    }
-
-    if (!isInteger(pageNum) || pageNum < 0) {
-      return badRequest('Page number must be greater than 0');
     }
 
     const site = await Site.findById(siteId);
@@ -150,7 +146,14 @@ function SuggestionsController(ctx, sqs, env) {
       return forbidden('User does not belong to the organization');
     }
 
-    const suggestionEntities = await Suggestion.allByOpportunityId(opptyId);
+    const results = await Suggestion
+      .allByOpportunityId(opptyId, {
+        limit,
+        cursor,
+        returnCursor: true,
+      });
+    const { data: suggestionEntities = [], cursor: newCursor = null } = results;
+
     // Check if the opportunity belongs to the site
     if (suggestionEntities.length > 0) {
       const oppty = await suggestionEntities[0].getOpportunity();
@@ -159,18 +162,14 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
 
-    const startIndex = pageNum * pageSize;
-    const endIndex = startIndex + pageSize;
-    const suggestions = suggestionEntities.length > 0 ? suggestionEntities
-      .slice(startIndex, endIndex)
-      .map((sugg) => SuggestionDto.toJSON(sugg)) : [];
+    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg));
 
     return ok({
       suggestions,
       pagination: {
-        total: suggestionEntities.length,
-        pageSize,
-        pageNum,
+        limit,
+        cursor: newCursor ?? null,
+        hasMore: !!newCursor,
       },
     });
   };
@@ -213,6 +212,65 @@ function SuggestionsController(ctx, sqs, env) {
     }
     const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg));
     return ok(suggestions);
+  };
+
+  /**
+     * Gets all suggestions for a given site, opportunity and status
+     * @param {Object} context of the request
+     * @returns {Promise<Response>} Array of suggestions response.
+     */
+  const getByStatusPaged = async (context) => {
+    const siteId = context.params?.siteId;
+    const opptyId = context.params?.opportunityId;
+    const status = context.params?.status || undefined;
+    const limit = parseInt(context.params?.limit, 10) || DEFAULT_PAGE_SIZE;
+    const cursor = context.params?.cursor || null;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(opptyId)) {
+      return badRequest('Opportunity ID required');
+    }
+    if (!hasText(status)) {
+      return badRequest('Status is required');
+    }
+
+    if (!isInteger(limit) || limit < 1) {
+      return badRequest('Page size must be greater than 0');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
+    }
+
+    const results = await Suggestion.allByOpportunityIdAndStatus(opptyId, status, {
+      limit,
+      cursor,
+      returnCursor: true,
+    });
+    const { data: suggestionEntities = [], cursor: newCursor = null } = results;
+    // Check if the opportunity belongs to the site
+    if (suggestionEntities.length > 0) {
+      const oppty = await suggestionEntities[0].getOpportunity();
+      if (!oppty || oppty.getSiteId() !== siteId) {
+        return notFound('Opportunity not found');
+      }
+    }
+    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg));
+    return ok({
+      suggestions,
+      pagination: {
+        limit,
+        cursor: newCursor ?? null,
+        hasMore: !!newCursor,
+      },
+    });
   };
 
   /**
@@ -932,9 +990,10 @@ function SuggestionsController(ctx, sqs, env) {
     createSuggestions,
     deploySuggestionToEdge,
     getAllForOpportunity,
-    getPagedForOpportunity,
+    getAllForOpportunityPaged,
     getByID,
     getByStatus,
+    getByStatusPaged,
     getSuggestionFixes,
     patchSuggestion,
     patchSuggestionsStatus,
