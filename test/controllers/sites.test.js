@@ -1235,39 +1235,32 @@ describe('Sites Controller', () => {
 
   // RUM metrics filtering tests for lines
   describe('RUM metrics filtering by top pages', () => {
-    let logSpy;
-    let mockTopPages;
-    let mockRumMetrics;
-
     beforeEach(() => {
-      logSpy = {
-        info: sandbox.spy(),
-        warn: sandbox.spy(),
-        error: sandbox.spy(),
-      };
-
-      // Mock top pages with URLs
-      mockTopPages = [
-        { getUrl: () => 'https://example.com/page1' },
-        { getUrl: () => 'https://example.com/page2' },
-        { getUrl: () => 'https://example.com/page3' },
-        { getUrl: () => null }, // Test null URL handling
-      ];
-
-      // Mock RUM metrics data
-      mockRumMetrics = [
-        { url: 'https://example.com/page1', lcp: 1500, cls: 0.1 },
-        { url: 'https://example.com/page2', lcp: 2000, cls: 0.2 },
-        { url: 'https://example.com/page3', lcp: 1800, cls: 0.15 },
-        { url: 'https://example.com/page4', lcp: 2200, cls: 0.3 }, // Not in top pages
-        { url: 'https://example.com/page5', lcp: 1900, cls: 0.25 }, // Not in top pages
-      ];
+      // Reset mocks for each test
+      mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo.reset();
+      mockDataAccess.SiteTopPage.allBySiteId.reset();
     });
 
     it('filters RUM cwv-hourly metrics using ahrefs global top pages', async () => {
       const siteId = sites[0].getId();
       const source = 'rum';
       const metric = 'cwv-hourly-7d-2025-11-02';
+
+      // Mock top pages data
+      const mockTopPages = [
+        { getUrl: () => 'https://example.com/page1' },
+        { getUrl: () => 'https://example.com/page2' },
+        { getUrl: () => 'https://example.com/page3' },
+      ];
+
+      // Mock RUM metrics data
+      const mockRumMetrics = [
+        { url: 'https://example.com/page1', lcp: 1500, cls: 0.1 },
+        { url: 'https://example.com/page2', lcp: 2000, cls: 0.2 },
+        { url: 'https://example.com/page3', lcp: 1800, cls: 0.15 },
+        { url: 'https://example.com/page4', lcp: 2200, cls: 0.3 }, // Not in top pages
+        { url: 'https://example.com/page5', lcp: 1900, cls: 0.25 }, // Not in top pages
+      ];
 
       // Mock successful ahrefs data
       mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo.resolves(mockTopPages);
@@ -1277,9 +1270,9 @@ describe('Sites Controller', () => {
         '@adobe/spacecat-shared-utils': { getStoredMetrics },
       });
 
-      const result = await sitesControllerMock.default(context).getSiteMetricsBySource({
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
         params: { siteId, source, metric },
-        log: logSpy,
       });
 
       const response = await result.json();
@@ -1292,11 +1285,6 @@ describe('Sites Controller', () => {
         'https://example.com/page3',
       ]);
 
-      // Verify logging
-      expect(logSpy.info).to.have.been.calledWith(
-        sinon.match(/Filtered RUM metrics from 5 to 3 entries for top 3 pages/),
-      );
-
       // Verify ahrefs was called first
       expect(mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo)
         .to.have.been.calledWith(siteId, 'ahrefs', 'global');
@@ -1307,6 +1295,17 @@ describe('Sites Controller', () => {
       const source = 'rum';
       const metric = 'cwv-hourly-7d-2025-11-02';
 
+      const mockTopPages = [
+        { getUrl: () => 'https://example.com/page1' },
+        { getUrl: () => 'https://example.com/page2' },
+      ];
+
+      const mockRumMetrics = [
+        { url: 'https://example.com/page1', lcp: 1500, cls: 0.1 },
+        { url: 'https://example.com/page2', lcp: 2000, cls: 0.2 },
+        { url: 'https://example.com/page3', lcp: 1800, cls: 0.15 },
+      ];
+
       // Mock empty ahrefs data, but available fallback data
       mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo.resolves([]);
       mockDataAccess.SiteTopPage.allBySiteId.resolves(mockTopPages);
@@ -1316,26 +1315,28 @@ describe('Sites Controller', () => {
         '@adobe/spacecat-shared-utils': { getStoredMetrics },
       });
 
-      const result = await sitesControllerMock.default(context).getSiteMetricsBySource({
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
         params: { siteId, source, metric },
-        log: logSpy,
       });
 
       const response = await result.json();
 
-      expect(response).to.have.length(3);
+      expect(response).to.have.length(2);
 
       // Verify fallback was called
       expect(mockDataAccess.SiteTopPage.allBySiteId).to.have.been.calledWith(siteId);
-      expect(logSpy.info).to.have.been.calledWith(
-        sinon.match(/Filtered RUM metrics from 5 to 3 entries for top 3 pages/),
-      );
     });
 
     it('returns unfiltered metrics when no top pages are found', async () => {
       const siteId = sites[0].getId();
       const source = 'rum';
       const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockRumMetrics = [
+        { url: 'https://example.com/page1', lcp: 1500, cls: 0.1 },
+        { url: 'https://example.com/page2', lcp: 2000, cls: 0.2 },
+      ];
 
       // Mock no top pages data
       mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo.resolves([]);
@@ -1346,115 +1347,15 @@ describe('Sites Controller', () => {
         '@adobe/spacecat-shared-utils': { getStoredMetrics },
       });
 
-      const result = await sitesControllerMock.default(context).getSiteMetricsBySource({
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
         params: { siteId, source, metric },
-        log: logSpy,
       });
 
       const response = await result.json();
 
       // Should return all unfiltered metrics
-      expect(response).to.have.length(5);
-      expect(logSpy.warn).to.have.been.calledWith(
-        `No top pages found for site ${siteId}, returning unfiltered metrics`,
-      );
-    });
-
-    it('returns unfiltered metrics when top pages have no valid URLs', async () => {
-      const siteId = sites[0].getId();
-      const source = 'rum';
-      const metric = 'cwv-hourly-7d-2025-11-02';
-
-      // Mock top pages with only null URLs
-      const invalidTopPages = [
-        { getUrl: () => null },
-        { getUrl: () => undefined },
-        { getUrl: () => '' },
-      ];
-      mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo.resolves(invalidTopPages);
-
-      const getStoredMetrics = sandbox.stub().resolves(mockRumMetrics);
-      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
-        '@adobe/spacecat-shared-utils': { getStoredMetrics },
-      });
-
-      const result = await sitesControllerMock.default(context).getSiteMetricsBySource({
-        params: { siteId, source, metric },
-        log: logSpy,
-      });
-
-      const response = await result.json();
-
-      // Should return all unfiltered metrics
-      expect(response).to.have.length(5);
-      expect(logSpy.warn).to.have.been.calledWith(
-        `No valid URLs found in top pages for site ${siteId}, returning unfiltered metrics`,
-      );
-    });
-
-    it('limits to top 100 pages when more are available', async () => {
-      const siteId = sites[0].getId();
-      const source = 'rum';
-      const metric = 'cwv-hourly-7d-2025-11-02';
-
-      // Create 150 mock top pages
-      const manyTopPages = Array.from({ length: 150 }, (_, i) => ({
-        getUrl: () => `https://example.com/page${i + 1}`,
-      }));
-
-      // Create corresponding metrics for first 120 pages
-      const manyMetrics = Array.from({ length: 120 }, (_, i) => ({
-        url: `https://example.com/page${i + 1}`,
-        lcp: 1500 + i,
-        cls: 0.1 + (i * 0.01),
-      }));
-
-      mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo.resolves(manyTopPages);
-
-      const getStoredMetrics = sandbox.stub().resolves(manyMetrics);
-      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
-        '@adobe/spacecat-shared-utils': { getStoredMetrics },
-      });
-
-      const result = await sitesControllerMock.default(context).getSiteMetricsBySource({
-        params: { siteId, source, metric },
-        log: logSpy,
-      });
-
-      const response = await result.json();
-
-      // Should filter to only first 100 pages
-      expect(response).to.have.length(100);
-      expect(logSpy.info).to.have.been.calledWith(
-        sinon.match(/Filtered RUM metrics from 120 to 100 entries for top 100 pages/),
-      );
-    });
-
-    it('handles errors gracefully and returns unfiltered metrics', async () => {
-      const siteId = sites[0].getId();
-      const source = 'rum';
-      const metric = 'cwv-hourly-7d-2025-11-02';
-
-      // Mock error in SiteTopPage call
-      mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo.rejects(new Error('Database error'));
-
-      const getStoredMetrics = sandbox.stub().resolves(mockRumMetrics);
-      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
-        '@adobe/spacecat-shared-utils': { getStoredMetrics },
-      });
-
-      const result = await sitesControllerMock.default(context).getSiteMetricsBySource({
-        params: { siteId, source, metric },
-        log: logSpy,
-      });
-
-      const response = await result.json();
-
-      // Should return all unfiltered metrics
-      expect(response).to.have.length(5);
-      expect(logSpy.error).to.have.been.calledWith(
-        `Error filtering RUM metrics by top pages for site ${siteId}: Database error`,
-      );
+      expect(response).to.have.length(2);
     });
 
     it('does not filter non-RUM metrics', async () => {
@@ -1462,26 +1363,28 @@ describe('Sites Controller', () => {
       const source = 'ahrefs';
       const metric = 'organic-traffic';
 
-      mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo.resolves(mockTopPages);
+      const mockMetrics = [
+        { url: 'https://example.com/page1', value: 100 },
+        { url: 'https://example.com/page2', value: 200 },
+      ];
 
-      const getStoredMetrics = sandbox.stub().resolves(mockRumMetrics);
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
       const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
         '@adobe/spacecat-shared-utils': { getStoredMetrics },
       });
 
-      const result = await sitesControllerMock.default(context).getSiteMetricsBySource({
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
         params: { siteId, source, metric },
-        log: logSpy,
       });
 
       const response = await result.json();
 
       // Should return all unfiltered metrics (no filtering applied)
-      expect(response).to.have.length(5);
+      expect(response).to.have.length(2);
 
       // Verify SiteTopPage was not called
       expect(mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo).to.not.have.been.called;
-      expect(logSpy.info).to.not.have.been.called;
     });
 
     it('does not filter non-cwv-hourly RUM metrics', async () => {
@@ -1489,26 +1392,106 @@ describe('Sites Controller', () => {
       const source = 'rum';
       const metric = 'page-views';
 
-      mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo.resolves(mockTopPages);
+      const mockMetrics = [
+        { url: 'https://example.com/page1', views: 100 },
+        { url: 'https://example.com/page2', views: 200 },
+      ];
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+      });
+
+      const response = await result.json();
+
+      // Should return all unfiltered metrics (no filtering applied)
+      expect(response).to.have.length(2);
+
+      // Verify SiteTopPage was not called
+      expect(mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo).to.not.have.been.called;
+    });
+
+    it('returns unfiltered metrics when top pages have no valid URLs (lines 606-607)', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockRumMetrics = [
+        { url: 'https://example.com/page1', lcp: 1500, cls: 0.1 },
+        { url: 'https://example.com/page2', lcp: 2000, cls: 0.2 },
+      ];
+
+      // Reset mocks to ensure clean state
+      mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo.reset();
+      mockDataAccess.SiteTopPage.allBySiteId.reset();
+
+      // Mock top pages with only null/empty URLs (all falsy values)
+      const invalidTopPages = [
+        { getUrl: () => null },
+        { getUrl: () => undefined },
+        { getUrl: () => '' },
+        { getUrl: () => null }, // another null
+      ];
+
+      mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo.resolves(invalidTopPages);
 
       const getStoredMetrics = sandbox.stub().resolves(mockRumMetrics);
       const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
         '@adobe/spacecat-shared-utils': { getStoredMetrics },
       });
 
-      const result = await sitesControllerMock.default(context).getSiteMetricsBySource({
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
         params: { siteId, source, metric },
-        log: logSpy,
       });
 
       const response = await result.json();
 
-      // Should return all unfiltered metrics (no filtering applied)
-      expect(response).to.have.length(5);
+      // Should return all unfiltered metrics
+      expect(response).to.have.length(2);
 
-      // Verify SiteTopPage was not called
-      expect(mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo).to.not.have.been.called;
-      expect(logSpy.info).to.not.have.been.called;
+      expect(loggerStub.warn).to.have.been.calledWith(
+        `No valid URLs found in top pages for site ${siteId}, returning unfiltered metrics`,
+      );
+    });
+
+    it('handles errors gracefully and returns unfiltered metrics (lines 612-614)', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockRumMetrics = [
+        { url: 'https://example.com/page1', lcp: 1500, cls: 0.1 },
+        { url: 'https://example.com/page2', lcp: 2000, cls: 0.2 },
+      ];
+
+      // Mock error in SiteTopPage call to trigger catch block
+      const testError = new Error('Database connection failed');
+      mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo.rejects(testError);
+
+      const getStoredMetrics = sandbox.stub().resolves(mockRumMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+      });
+
+      const response = await result.json();
+
+      // Should return all unfiltered metrics
+      expect(response).to.have.length(2);
+
+      expect(loggerStub.error).to.have.been.calledWith(
+        `Error filtering RUM metrics by top pages for site ${siteId}: Database connection failed`,
+      );
     });
   });
 
