@@ -54,6 +54,7 @@ describe('Audits Controller', () => {
       isError: false,
       isLive: true,
       fullAuditRef: 'https://lh-metrics.com/audit/123',
+      invocationId: 'some-invocation-id1',
       auditResult: {
         scores: {
           performance: 0.5,
@@ -70,6 +71,7 @@ describe('Audits Controller', () => {
       isError: false,
       isLive: true,
       fullAuditRef: 'https://lh-metrics.com/audit/234',
+      invocationId: 'some-invocation-id2',
       auditResult: {
         scores: {
           performance: 0.5,
@@ -86,6 +88,7 @@ describe('Audits Controller', () => {
       isError: false,
       isLive: true,
       fullAuditRef: 'https://lh-metrics.com/audit/345',
+      invocationId: 'some-invocation-id3',
       auditResult: {
         scores: {
           'first-contentful-paint': 0.5,
@@ -631,6 +634,7 @@ describe('Audits Controller', () => {
         getBrandConfig: () => ({ brandId: 'test-brand' }),
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
+        getTokowakaConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -668,6 +672,7 @@ describe('Audits Controller', () => {
         getBrandConfig: () => ({ brandId: 'test-brand' }),
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
+        getTokowakaConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -706,6 +711,7 @@ describe('Audits Controller', () => {
         getBrandConfig: () => ({ brandId: 'test-brand' }),
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
+        getTokowakaConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -747,6 +753,7 @@ describe('Audits Controller', () => {
         getBrandConfig: () => ({ brandId: 'test-brand' }),
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
+        getTokowakaConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -828,6 +835,7 @@ describe('Audits Controller', () => {
         getBrandConfig: () => ({ brandId: 'test-brand' }),
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
+        getTokowakaConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -870,6 +878,7 @@ describe('Audits Controller', () => {
         getBrandConfig: () => ({ brandId: 'test-brand' }),
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
+        getTokowakaConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -910,6 +919,7 @@ describe('Audits Controller', () => {
         getImports: () => [],
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
+        getTokowakaConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -949,6 +959,7 @@ describe('Audits Controller', () => {
         getImports: () => [],
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
+        getTokowakaConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -987,6 +998,7 @@ describe('Audits Controller', () => {
         getHandlers: () => (({ [auditType]: {} })),
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
+        getTokowakaConfig: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -1051,6 +1063,7 @@ describe('Audits Controller', () => {
           getBrandConfig: () => ({ brandId: 'test-brand' }),
           getCdnLogsConfig: () => ({}),
           getLlmoConfig: () => ({}),
+          getTokowakaConfig: () => ({}),
         };
 
         site.getConfig = () => siteConfig;

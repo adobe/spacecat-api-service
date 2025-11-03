@@ -182,8 +182,13 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/opportunities/:opportunityId': opportunitiesController.patchOpportunity,
     'DELETE /sites/:siteId/opportunities/:opportunityId': opportunitiesController.removeOpportunity,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions': suggestionsController.getAllForOpportunity,
+    'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit/:cursor': suggestionsController.getAllForOpportunityPaged,
+    'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit': suggestionsController.getAllForOpportunityPaged,
     'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix': suggestionsController.autofixSuggestions,
+    'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy': suggestionsController.deploySuggestionToEdge,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status': suggestionsController.getByStatus,
+    'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit/:cursor': suggestionsController.getByStatusPaged,
+    'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit': suggestionsController.getByStatusPaged,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': suggestionsController.getByID,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': suggestionsController.getSuggestionFixes,
     'POST /sites/:siteId/opportunities/:opportunityId/suggestions': suggestionsController.createSuggestions,
@@ -245,6 +250,7 @@ export default function getRouteHandlers(
     'GET /tools/scrape/jobs/by-date-range/:startDate/:endDate/all-jobs': scrapeJobController.getScrapeJobsByDateRange,
     'GET /tools/scrape/jobs/by-base-url/:baseURL': scrapeJobController.getScrapeJobsByBaseURL,
     'GET /tools/scrape/jobs/by-base-url/:baseURL/by-processingtype/:processingType': scrapeJobController.getScrapeJobsByBaseURL,
+    'GET /tools/scrape/jobs/by-url/:url/:processingType': scrapeJobController.getScrapeUrlByProcessingType,
 
     // Fixes
     'GET /sites/:siteId/opportunities/:opportunityId/fixes': (c) => fixesController.getAllForOpportunity(c),
@@ -259,8 +265,10 @@ export default function getRouteHandlers(
     // LLMO Specific Routes
     'GET /sites/:siteId/llmo/sheet-data/:dataSource': llmoController.getLlmoSheetData,
     'GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': llmoController.getLlmoSheetData,
+    'GET /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource': llmoController.getLlmoSheetData,
     'POST /sites/:siteId/llmo/sheet-data/:dataSource': llmoController.queryLlmoSheetData,
     'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': llmoController.queryLlmoSheetData,
+    'POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource': llmoController.queryLlmoSheetData,
     'GET /sites/:siteId/llmo/config': llmoController.getLlmoConfig,
     'PATCH /sites/:siteId/llmo/config': llmoController.updateLlmoConfig,
     'POST /sites/:siteId/llmo/config': llmoController.updateLlmoConfig,

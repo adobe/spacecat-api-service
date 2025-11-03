@@ -26,6 +26,7 @@ export const AuditDto = {
    * fullAuditRef: string,
    * isLive: boolean,
    * siteId: string
+   * invocationId: string
    * }} JSON object.
    */
   toJSON: (audit) => ({
@@ -36,6 +37,7 @@ export const AuditDto = {
     isLive: audit.getIsLive(),
     isError: audit.getIsError(),
     siteId: audit.getSiteId(),
+    invocationId: audit.getInvocationId(),
   }),
 
   /**
@@ -48,6 +50,7 @@ export const AuditDto = {
    * fullAuditRef: string,
    * isLive: boolean,
    * siteId: string
+   * invocationId: string
    * }} JSON object.
    */
   toAbbreviatedJSON: (audit) => {
@@ -68,6 +71,7 @@ export const AuditDto = {
       isLive: audit.getIsLive(),
       isError: audit.getIsError(),
       siteId: audit.getSiteId(),
+      invocationId: audit.getInvocationId(),
     };
   },
 };

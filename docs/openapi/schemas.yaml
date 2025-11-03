@@ -2225,6 +2225,40 @@ ScrapeJobsByBaseURLResponse:
   items:
     $ref: '#/CreateAsyncJobAcceptedResponse'
 
+ScrapeUrl:
+  type: object
+  properties:
+    url:
+      description: The URL that was scraped
+      type: string
+    processingType:
+      description: The processing type/handler used for this scrape
+      type: string
+    status:
+      description: The status of the scrape
+      type: string
+      enum:
+        - 'COMPLETE'
+        - 'FAILED'
+        - 'PENDING'
+    path:
+      description: The S3 path of the scraped content if the scrape was successful
+      type: string
+    createdAt:
+      description: The timestamp when the scrape was created
+      $ref: '#/DateTime'
+  example:
+    url: 'https://example.com/page1'
+    processingType: 'form'
+    status: 'COMPLETE'
+    path: 'scrapes/12d6ac8e-d5e4-4788-90eb-b69e10e74abc/page1.html'
+    createdAt: '2024-01-01T10:00:00.000Z'
+
+ScrapeUrlsByProcessingTypeResponse:
+  type: array
+  items:
+    $ref: '#/ScrapeUrl'
+
 BrokenBacklink:
   type: object
   properties:
@@ -3805,6 +3839,11 @@ LlmoConfig:
         "123e4567-e89b-12d3-a456-426614174000":
           name: "Technology"
           region: "us"
+          urls:
+            - value: "https://example.com/tech"
+              type: "url"
+            - value: "https://example.com/technology/*"
+              type: "prefix"
     topics:
       type: object
       description: A record of topics with nested prompts keyed by UUID
@@ -3884,7 +3923,36 @@ LlmoCategory:
             pattern: '^[a-z][a-z]$'
           description: Array of two-letter region codes
           example: ["us", "eu"]
+    urls:
+      type: array
+      description: Optional array of URLs associated with this category
+      items:
+        $ref: '#/LlmoCategoryUrl'
+      example:
+        - value: "https://example.com/tech"
+          type: "url"
+        - value: "https://example.com/news/*"
+          type: "prefix"
   additionalProperties: true
+
+LlmoCategoryUrl:
+  type: object
+  description: A URL configuration for a category
+  required:
+    - value
+    - type
+  properties:
+    value:
+      type: string
+      description: The URL value - can be a complete URL or a URL prefix
+      minLength: 1
+      example: "https://example.com/tech"
+    type:
+      type: string
+      enum: ["url", "prefix"]
+      description: The type of URL - 'url' for exact URLs, 'prefix' for URL prefixes (ending with /*)
+      example: "url"
+  additionalProperties: false
 
 LlmoTopic:
   type: object
