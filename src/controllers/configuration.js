@@ -32,7 +32,7 @@ function ConfigurationController(ctx) {
   if (!isNonEmptyObject(ctx)) {
     throw new Error('Context required');
   }
-  const { dataAccess } = ctx;
+  const { dataAccess, log } = ctx;
   if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
   }
@@ -345,7 +345,11 @@ function ConfigurationController(ctx) {
         message: `Configuration successfully restored from version ${versionToRestore}`,
       });
     } catch (error) {
-      return badRequest(error.message);
+      log.error('Configuration restore failed:', error);
+      const errorMessage = error.message
+        || (typeof error.toString === 'function' ? error.toString() : null)
+        || 'Configuration restore failed';
+      return badRequest(errorMessage);
     }
   };
 

@@ -136,6 +136,12 @@ describe('Configurations Controller', () => {
 
     context = {
       dataAccess: mockDataAccess,
+      log: {
+        info: sandbox.stub(),
+        warn: sandbox.stub(),
+        error: sandbox.stub(),
+        debug: sandbox.stub(),
+      },
       pathInfo: {
         headers: { 'x-product': 'abcd' },
       },
@@ -516,6 +522,44 @@ describe('Configurations Controller', () => {
 
     expect(result.status).to.equal(400);
     expect(error).to.have.property('message', 'Validation failed');
+  });
+
+  it('returns bad request with toString when error has no message property', async () => {
+    const errorWithoutMessage = {
+      toString: () => 'Custom error string',
+    };
+    const latestConfig = {
+      ...configurations[1],
+      updateConfiguration: sandbox.stub().throws(errorWithoutMessage),
+      save: sandbox.stub().resolves(),
+      setSlackRoles: sandbox.stub(),
+    };
+    mockDataAccess.Configuration.findLatest.resolves(latestConfig);
+    mockDataAccess.Configuration.findByVersion.resolves(configurations[0]);
+
+    const result = await configurationsController.restoreVersion({ params: { version: '1' } });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'Custom error string');
+  });
+
+  it('returns bad request with fallback message when error has neither message nor toString', async () => {
+    const errorWithoutMessageOrToString = Object.create(null);
+    const latestConfig = {
+      ...configurations[1],
+      updateConfiguration: sandbox.stub().throws(errorWithoutMessageOrToString),
+      save: sandbox.stub().resolves(),
+      setSlackRoles: sandbox.stub(),
+    };
+    mockDataAccess.Configuration.findLatest.resolves(latestConfig);
+    mockDataAccess.Configuration.findByVersion.resolves(configurations[0]);
+
+    const result = await configurationsController.restoreVersion({ params: { version: '1' } });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'Configuration restore failed');
   });
 
   it('registers an audit', async () => {
