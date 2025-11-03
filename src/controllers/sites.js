@@ -570,7 +570,49 @@ function SitesController(ctx, log, env) {
       return forbidden('Only users belonging to the organization can view its metrics');
     }
 
-    const metrics = await getStoredMetrics({ siteId, metric, source }, context);
+    let metrics = await getStoredMetrics({ siteId, metric, source }, context);
+
+    // Filter RUM metrics to only include top 100 pages to prevent 413 payload errors
+    if (source === 'rum' && metric.includes('cwv-hourly')) {
+      try {
+        const { SiteTopPage } = dataAccess;
+
+        // Get top pages from ahrefs global data (most commonly used source)
+        let topPages = await SiteTopPage.allBySiteIdAndSourceAndGeo(siteId, 'ahrefs', 'global');
+
+        // If no ahrefs data, try other sources
+        if (!topPages || topPages.length === 0) {
+          topPages = await SiteTopPage.allBySiteId(siteId);
+        }
+
+        if (topPages && topPages.length > 0) {
+          // Limit to top 100 pages and extract URLs
+          const topPageUrls = topPages
+            .slice(0, 100)
+            .map((page) => page.getUrl())
+            .filter((url) => url); // Remove any null/undefined URLs
+
+          if (topPageUrls.length > 0) {
+            // Create a Set for faster lookup
+            const topPageUrlSet = new Set(topPageUrls);
+
+            // Filter metrics to only include top pages
+            const originalCount = metrics.length;
+            metrics = metrics.filter((metricEntry) => (
+              metricEntry.url && topPageUrlSet.has(metricEntry.url)));
+
+            log.info(`Filtered RUM metrics from ${originalCount} to ${metrics.length} entries for top ${topPageUrls.length} pages`);
+          } else {
+            log.warn(`No valid URLs found in top pages for site ${siteId}, returning unfiltered metrics`);
+          }
+        } else {
+          log.warn(`No top pages found for site ${siteId}, returning unfiltered metrics`);
+        }
+      } catch (error) {
+        log.error(`Error filtering RUM metrics by top pages for site ${siteId}: ${error.message}`);
+        // Continue with unfiltered metrics if filtering fails
+      }
+    }
 
     return ok(metrics);
   };
