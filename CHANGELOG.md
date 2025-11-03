@@ -1,3 +1,10 @@
+## [1.223.4](https://github.com/adobe/spacecat-api-service/compare/v1.223.3...v1.223.4) (2025-11-03)
+
+
+### Bug Fixes
+
+* implement proper PATCH behavior for report updates ([#1394](https://github.com/adobe/spacecat-api-service/issues/1394)) ([8710f3a](https://github.com/adobe/spacecat-api-service/commit/8710f3a3d11ba9a824be9146974ceafc2bf86ccb))
+
 ## [1.223.3](https://github.com/adobe/spacecat-api-service/compare/v1.223.2...v1.223.3) (2025-11-02)
 
 
