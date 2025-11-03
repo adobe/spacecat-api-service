@@ -63,10 +63,11 @@ function ConfigurationController(ctx) {
     if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can view configurations');
     }
-    const configurationVersion = context.params?.version;
+    // URL parameters come as strings, so we need to parse to integer
+    const configurationVersion = parseInt(context.params?.version, 10);
 
-    if (!isInteger(configurationVersion)) {
-      return badRequest('Configuration version required to be an integer');
+    if (!isInteger(configurationVersion) || configurationVersion < 1) {
+      return badRequest('Configuration version required to be a positive integer');
     }
 
     const configuration = await Configuration.findByVersion(configurationVersion);
@@ -287,6 +288,67 @@ function ConfigurationController(ctx) {
     }
   };
 
+  /**
+   * Restores configuration to a specific version by creating a new version
+   * with the data from the specified version.
+   * @param {UniversalContext} context - Context of the request.
+   * @return {Promise<Response>} Configuration response.
+   */
+  const restoreVersion = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can restore configurations');
+    }
+
+    // URL parameters come as strings, so we need to parse to integer
+    const versionToRestore = parseInt(context.params?.version, 10);
+
+    if (!isInteger(versionToRestore) || versionToRestore < 1) {
+      return badRequest('Configuration version required to be a positive integer');
+    }
+
+    try {
+      // Fetch the version to restore
+      const oldConfiguration = await Configuration.findByVersion(versionToRestore);
+      if (!oldConfiguration) {
+        return notFound(`Configuration version ${versionToRestore} not found`);
+      }
+
+      // Fetch the latest configuration to update
+      const latestConfiguration = await Configuration.findLatest();
+      if (!latestConfiguration) {
+        return notFound('Latest configuration not found');
+      }
+
+      // Extract the data to restore (handlers, jobs, queues)
+      const restoreData = {
+        handlers: oldConfiguration.getHandlers(),
+        jobs: oldConfiguration.getJobs(),
+        queues: oldConfiguration.getQueues(),
+      };
+
+      // Update the latest configuration with the old data
+      // This will create a new version with the restored data
+      latestConfiguration.updateConfiguration(restoreData);
+
+      // Restore slackRoles separately (it's not part of updateConfiguration)
+      const oldSlackRoles = oldConfiguration.getSlackRoles();
+      if (oldSlackRoles) {
+        latestConfiguration.setSlackRoles(oldSlackRoles);
+      }
+
+      // Save will create a new version automatically
+      await latestConfiguration.save();
+
+      return ok({
+        ...ConfigurationDto.toJSON(latestConfiguration),
+        restoredFrom: versionToRestore,
+        message: `Configuration successfully restored from version ${versionToRestore}`,
+      });
+    } catch (error) {
+      return badRequest(error.message);
+    }
+  };
+
   return {
     getAll,
     getByVersion,
@@ -297,6 +359,7 @@ function ConfigurationController(ctx) {
     updateJob,
     updateHandler,
     updateConfiguration,
+    restoreVersion,
   };
 }
 

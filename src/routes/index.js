@@ -122,6 +122,7 @@ export default function getRouteHandlers(
     'GET /configurations/latest': configurationController.getLatest,
     'PATCH /configurations/latest': configurationController.updateConfiguration,
     'GET /configurations/:version': configurationController.getByVersion,
+    'POST /configurations/:version/restore': configurationController.restoreVersion,
     'POST /configurations/audits': configurationController.registerAudit,
     'DELETE /configurations/audits/:auditType': configurationController.unregisterAudit,
     'PUT /configurations/latest/queues': configurationController.updateQueues,

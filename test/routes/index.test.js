@@ -29,6 +29,12 @@ describe('getRouteHandlers', () => {
     getByVersion: sinon.stub(),
     getLatest: sinon.stub(),
     updateConfiguration: sinon.stub(),
+    registerAudit: sinon.stub(),
+    unregisterAudit: sinon.stub(),
+    updateQueues: sinon.stub(),
+    updateJob: sinon.stub(),
+    updateHandler: sinon.stub(),
+    restoreVersion: sinon.stub(),
   };
 
   const mockHooksController = {
@@ -320,6 +326,7 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes).to.have.all.keys(
       'GET /audits/latest/:auditType',
       'GET /configurations/:version',
+      'POST /configurations/:version/restore',
       'DELETE /configurations/audits/:auditType',
       'PATCH /configurations/latest/handlers/:handlerType',
       'PATCH /configurations/latest/jobs/:jobType',
@@ -468,6 +475,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /audits/latest/:auditType'].paramNames).to.deep.equal(['auditType']);
     expect(dynamicRoutes['GET /configurations/:version'].handler).to.equal(mockConfigurationController.getByVersion);
     expect(dynamicRoutes['GET /configurations/:version'].paramNames).to.deep.equal(['version']);
+    expect(dynamicRoutes['POST /configurations/:version/restore'].handler).to.equal(mockConfigurationController.restoreVersion);
+    expect(dynamicRoutes['POST /configurations/:version/restore'].paramNames).to.deep.equal(['version']);
     expect(dynamicRoutes['DELETE /configurations/audits/:auditType'].handler).to.equal(mockConfigurationController.unregisterAudit);
     expect(dynamicRoutes['DELETE /configurations/audits/:auditType'].paramNames).to.deep.equal(['auditType']);
     expect(dynamicRoutes['GET /organizations/:organizationId'].handler).to.equal(mockOrganizationsController.getByID);

@@ -213,6 +213,83 @@ configuration:
         $ref: './responses.yaml#/404-configuration-not-found-with-version'
       '500':
         $ref: './responses.yaml#/500'
+configuration-restore:
+  post:
+    tags:
+      - configuration
+    summary: Restore configuration to a specific version
+    description: |
+      Restores the configuration to a specific version by creating a new version
+      with the data (handlers, jobs, queues, slackRoles) from the specified version.
+      This creates a new configuration version, preserving the complete version history.
+      Only administrators can restore configurations.
+    operationId: restoreConfigurationVersion
+    security:
+      - admin_key: [ ]
+    parameters:
+      - name: version
+        in: path
+        required: true
+        description: The version number to restore from
+        schema:
+          type: integer
+          minimum: 1
+        example: 2376
+    responses:
+      '200':
+        description: Configuration successfully restored
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: './schemas.yaml#/Configuration'
+                - type: object
+                  properties:
+                    restoredFrom:
+                      type: integer
+                      description: The version number that was restored from
+                      example: 2376
+                    message:
+                      type: string
+                      description: Success message
+                      example: "Configuration successfully restored from version 2376"
+            examples:
+              restore-success:
+                summary: Successful restore example
+                value:
+                  version: 2501
+                  handlers:
+                    404:
+                      enabledByDefault: true
+                      productCodes: ["ASO"]
+                      dependencies: []
+                      enabled:
+                        sites: []
+                        orgs: []
+                      disabled:
+                        sites: []
+                        orgs: []
+                  jobs:
+                    - type: "404"
+                      group: "audits"
+                      interval: "daily"
+                  queues:
+                    audits: "https://sqs.us-east-1.amazonaws.com/1234/audits"
+                    imports: "https://sqs.us-east-1.amazonaws.com/1234/imports"
+                  slackRoles:
+                    admin: ["user1", "user2"]
+                  restoredFrom: 2376
+                  message: "Configuration successfully restored from version 2376"
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
 configuration-audits:
   post:
     tags:
