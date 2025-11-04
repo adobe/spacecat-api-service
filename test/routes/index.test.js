@@ -325,8 +325,8 @@ describe('getRouteHandlers', () => {
 
     expect(dynamicRoutes).to.have.all.keys(
       'GET /audits/latest/:auditType',
-      'GET /configurations/:version',
       'POST /configurations/:version/restore',
+      'GET /configurations/:version',
       'DELETE /configurations/audits/:auditType',
       'PATCH /configurations/latest/handlers/:handlerType',
       'PATCH /configurations/latest/jobs/:jobType',
