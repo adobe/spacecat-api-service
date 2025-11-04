@@ -174,6 +174,8 @@ function LlmoController(ctx) {
     // Start timing for the entire method
     const methodStartTime = Date.now();
 
+    const FIXED_LLMO_LIMIT = 1000000;
+
     // Extract and validate request body structure
     const {
       sheets = [],
@@ -181,6 +183,8 @@ function LlmoController(ctx) {
       include = [],
       exclude = [],
       groupBy = [],
+      limit = FIXED_LLMO_LIMIT, // Default to 1M records to return all records
+      offset = 0, // Default to 0 to return the first 1M records
     } = context.data || {};
 
     // Validate request body structure
@@ -215,11 +219,12 @@ function LlmoController(ctx) {
 
       // Add limit, offset and sheet query params to the url
       const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
-
-      // This endpoint does not support limit as it needs to go through
-      // all records to apply filters, exclusions and grouping
-      const FIXED_LLMO_LIMIT = 1000000;
-      url.searchParams.set('limit', FIXED_LLMO_LIMIT);
+      if (limit) {
+        url.searchParams.set('limit', limit);
+      }
+      if (offset) {
+        url.searchParams.set('offset', offset);
+      }
 
       // Log setup completion time
       const setupTime = Date.now();
