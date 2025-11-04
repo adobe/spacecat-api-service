@@ -183,8 +183,8 @@ function LlmoController(ctx) {
       include = [],
       exclude = [],
       groupBy = [],
-      limit = FIXED_LLMO_LIMIT,
-      offset = 0,
+      limit = FIXED_LLMO_LIMIT, // Default to 1M records to return all records
+      offset = 0, // Default to 0 to return the first 1M records
     } = context.data || {};
 
     // Validate request body structure
