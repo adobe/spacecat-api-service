@@ -48,6 +48,7 @@ describe('Audit DTO', () => {
       getIsLive: () => true,
       getIsError: () => false,
       getSiteId: () => 'site-id',
+      getInvocationId: () => 'some-invocation',
     };
 
     const auditJson = AuditDto.toAbbreviatedJSON(audit);
@@ -60,6 +61,7 @@ describe('Audit DTO', () => {
       isLive: true,
       isError: false,
       siteId: 'site-id',
+      invocationId: 'some-invocation',
     });
   });
 });
