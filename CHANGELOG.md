@@ -1,3 +1,17 @@
+## [1.223.6](https://github.com/adobe/spacecat-api-service/compare/v1.223.5...v1.223.6) (2025-11-04)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1438](https://github.com/adobe/spacecat-api-service/issues/1438)) ([54a9be5](https://github.com/adobe/spacecat-api-service/commit/54a9be512d0205ea83b88e5bfbfb25643b22a8ea))
+
+## [1.223.5](https://github.com/adobe/spacecat-api-service/compare/v1.223.4...v1.223.5) (2025-11-04)
+
+
+### Bug Fixes
+
+* **scrapeJob:** make processingType optional ([#1426](https://github.com/adobe/spacecat-api-service/issues/1426)) ([96500b3](https://github.com/adobe/spacecat-api-service/commit/96500b34fc3106e228cbfeafebffc198b6642045))
+
 ## [1.223.4](https://github.com/adobe/spacecat-api-service/compare/v1.223.3...v1.223.4) (2025-11-03)
 
 
