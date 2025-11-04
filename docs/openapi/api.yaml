@@ -150,6 +150,8 @@ paths:
     $ref: './scrape-api.yaml#/get-scrape-jobs-by-base-url'
   /tools/scrape/jobs/by-base-url/{base64BaseUrl}/by-processingtype/{processingType}:
     $ref: './scrape-api.yaml#/get-scrape-jobs-by-base-url-and-processing-type'
+  /tools/scrape/jobs/by-url/{base64Url}/{processingType}:
+    $ref: './scrape-api.yaml#/get-scrape-urls-by-url-and-processing-type'
   /consent-banner:
     $ref: './consent-banner-api.yaml#/consent-banner'
   /sites:
