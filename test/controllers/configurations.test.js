@@ -616,7 +616,11 @@ describe('Configurations Controller', () => {
         productCodes: ['LLMO'],
       },
     });
+    const response = await result.json();
     expect(result.status).to.equal(201);
+    expect(response).to.have.property('message', 'Audit type "cwv" has been successfully registered');
+    expect(response).to.have.property('version');
+    expect(Object.keys(response)).to.have.lengthOf(2); // Only message and version
   });
 
   it('register audit returns bad request if register audit throws an error', async () => {
@@ -647,7 +651,11 @@ describe('Configurations Controller', () => {
 
   it('unregisters an audit', async () => {
     const result = await configurationsController.unregisterAudit({ params: { auditType: 'cwv' } });
-    expect(result.status).to.equal(204);
+    const response = await result.json();
+    expect(result.status).to.equal(200);
+    expect(response).to.have.property('message', 'Audit type "cwv" has been successfully unregistered');
+    expect(response).to.have.property('version');
+    expect(Object.keys(response)).to.have.lengthOf(2); // Only message and version
   });
 
   it('unregister audit returns bad request if unregister audit throws an error', async () => {

@@ -331,6 +331,25 @@ configuration-audits:
     responses:
       '201':
         description: Audit type registered successfully.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Success message including the audit type that was registered
+                  example: "Audit type \"cwv\" has been successfully registered"
+                version:
+                  type: string
+                  description: The new configuration version after registering
+                  example: "2379"
+            examples:
+              register-success:
+                summary: Successful register example
+                value:
+                  message: "Audit type \"cwv\" has been successfully registered"
+                  version: "2379"
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -356,8 +375,27 @@ configuration-audit:
         description: The type of audit to unregister
         example: "cwv"
     responses:
-      '204':
+      '200':
         description: Audit type unregistered successfully.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Success message including the audit type that was unregistered
+                  example: "Audit type \"cwv\" has been successfully unregistered"
+                version:
+                  type: string
+                  description: The new configuration version after unregistering
+                  example: "2378"
+            examples:
+              unregister-success:
+                summary: Successful unregister example
+                value:
+                  message: "Audit type \"cwv\" has been successfully unregistered"
+                  version: "2378"
       '400':
         $ref: './responses.yaml#/400'
       '401':
