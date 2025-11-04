@@ -331,20 +331,6 @@ configuration-audits:
     responses:
       '201':
         description: Audit type registered successfully.
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                message:
-                  type: string
-                  description: Success message including the audit type that was registered
-                  example: "Audit type \"cwv\" has been successfully registered"
-            examples:
-              register-success:
-                summary: Successful register example
-                value:
-                  message: "Audit type \"cwv\" has been successfully registered"
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -370,22 +356,8 @@ configuration-audit:
         description: The type of audit to unregister
         example: "cwv"
     responses:
-      '200':
+      '204':
         description: Audit type unregistered successfully.
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                message:
-                  type: string
-                  description: Success message including the audit type that was unregistered
-                  example: "Audit type \"cwv\" has been successfully unregistered"
-            examples:
-              unregister-success:
-                summary: Successful unregister example
-                value:
-                  message: "Audit type \"cwv\" has been successfully unregistered"
       '400':
         $ref: './responses.yaml#/400'
       '401':

@@ -16,6 +16,7 @@ import {
   notFound,
   ok,
   created,
+  noContent,
   internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import {
@@ -117,9 +118,7 @@ function ConfigurationController(ctx) {
       const configuration = await Configuration.findLatest();
       configuration.registerAudit(auditType, enabledByDefault, interval, productCodes);
       await configuration.save();
-      return created({
-        message: `Audit type "${auditType}" has been successfully registered`,
-      });
+      return created(null);
     } catch (error) {
       return badRequest(error.message);
     }
@@ -136,9 +135,7 @@ function ConfigurationController(ctx) {
       const configuration = await Configuration.findLatest();
       configuration.unregisterAudit(auditType);
       await configuration.save();
-      return ok({
-        message: `Audit type "${auditType}" has been successfully unregistered`,
-      });
+      return noContent();
     } catch (error) {
       return badRequest(error.message);
     }
