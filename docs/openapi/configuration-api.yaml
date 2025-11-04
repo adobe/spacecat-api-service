@@ -340,16 +340,11 @@ configuration-audits:
                   type: string
                   description: Success message including the audit type that was registered
                   example: "Audit type \"cwv\" has been successfully registered"
-                version:
-                  type: string
-                  description: The new configuration version after registering
-                  example: "2379"
             examples:
               register-success:
                 summary: Successful register example
                 value:
                   message: "Audit type \"cwv\" has been successfully registered"
-                  version: "2379"
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -386,16 +381,11 @@ configuration-audit:
                   type: string
                   description: Success message including the audit type that was unregistered
                   example: "Audit type \"cwv\" has been successfully unregistered"
-                version:
-                  type: string
-                  description: The new configuration version after unregistering
-                  example: "2378"
             examples:
               unregister-success:
                 summary: Successful unregister example
                 value:
                   message: "Audit type \"cwv\" has been successfully unregistered"
-                  version: "2378"
       '400':
         $ref: './responses.yaml#/400'
       '401':

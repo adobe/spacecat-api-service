@@ -119,7 +119,6 @@ function ConfigurationController(ctx) {
       await configuration.save();
       return created({
         message: `Audit type "${auditType}" has been successfully registered`,
-        version: configuration.getVersion(),
       });
     } catch (error) {
       return badRequest(error.message);
@@ -139,7 +138,6 @@ function ConfigurationController(ctx) {
       await configuration.save();
       return ok({
         message: `Audit type "${auditType}" has been successfully unregistered`,
-        version: configuration.getVersion(),
       });
     } catch (error) {
       return badRequest(error.message);
