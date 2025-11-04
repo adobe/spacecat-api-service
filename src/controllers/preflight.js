@@ -17,7 +17,7 @@ import {
   badRequest, internalServerError, notFound, ok, accepted,
 } from '@adobe/spacecat-shared-http-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
-import { getCSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
+import { getIMSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
 
 export const AUDIT_STEP_IDENTIFY = 'identify';
 export const AUDIT_STEP_SUGGEST = 'suggest';
@@ -128,7 +128,7 @@ function PreflightController(ctx, log, env) {
       let promiseTokenResponse;
       if (CS_TYPES.includes(site.getAuthoringType())) {
         try {
-          promiseTokenResponse = await getCSPromiseToken(context);
+          promiseTokenResponse = await getIMSPromiseToken(context);
         } catch (e) {
           log.error(`Failed to get promise token: ${e.message}`);
           if (e instanceof ErrorWithStatusCode) {

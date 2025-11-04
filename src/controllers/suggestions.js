@@ -30,7 +30,7 @@ import { ValidationError, Suggestion as SuggestionModel } from '@adobe/spacecat-
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import { SuggestionDto } from '../dto/suggestion.js';
 import { FixDto } from '../dto/fix.js';
-import { sendAutofixMessage, getCSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
+import { sendAutofixMessage, getIMSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 /* c8 ignore start */
 /**
@@ -734,7 +734,7 @@ function SuggestionsController(ctx, sqs, env) {
 
     let promiseTokenResponse;
     try {
-      promiseTokenResponse = await getCSPromiseToken(context);
+      promiseTokenResponse = await getIMSPromiseToken(context);
     } catch (e) {
       if (e instanceof ErrorWithStatusCode) {
         return badRequest(e.message);
