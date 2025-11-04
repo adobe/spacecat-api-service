@@ -299,7 +299,7 @@ describe('LlmoController', () => {
         headers: {
           Authorization: `token ${TEST_API_KEY}`,
           'User-Agent': TEST_USER_AGENT,
-          'Accept-Encoding': 'gzip',
+          'Accept-Encoding': 'br, gzip, deflate',
         },
       });
     });
@@ -366,7 +366,7 @@ describe('LlmoController', () => {
         headers: {
           Authorization: 'token hlx_api_key_missing',
           'User-Agent': TEST_USER_AGENT,
-          'Accept-Encoding': 'gzip',
+          'Accept-Encoding': 'br, gzip, deflate',
         },
       });
     });
