@@ -1,3 +1,31 @@
+## [1.223.4](https://github.com/adobe/spacecat-api-service/compare/v1.223.3...v1.223.4) (2025-11-03)
+
+
+### Bug Fixes
+
+* implement proper PATCH behavior for report updates ([#1394](https://github.com/adobe/spacecat-api-service/issues/1394)) ([8710f3a](https://github.com/adobe/spacecat-api-service/commit/8710f3a3d11ba9a824be9146974ceafc2bf86ccb))
+
+## [1.223.3](https://github.com/adobe/spacecat-api-service/compare/v1.223.2...v1.223.3) (2025-11-02)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1431](https://github.com/adobe/spacecat-api-service/issues/1431)) ([ff3fd73](https://github.com/adobe/spacecat-api-service/commit/ff3fd73363e514fc929f1eb09ef5c9e615df9631))
+
+## [1.223.2](https://github.com/adobe/spacecat-api-service/compare/v1.223.1...v1.223.2) (2025-11-01)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#1430](https://github.com/adobe/spacecat-api-service/issues/1430)) ([3d841ef](https://github.com/adobe/spacecat-api-service/commit/3d841ef5ab4d41d5912873e4f1a4b399502167f2))
+
+## [1.223.1](https://github.com/adobe/spacecat-api-service/compare/v1.223.0...v1.223.1) (2025-10-31)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.69.2 ([#1429](https://github.com/adobe/spacecat-api-service/issues/1429)) ([dfba9c7](https://github.com/adobe/spacecat-api-service/commit/dfba9c770e1e9b0e968c8e614e9264610cbced3b))
+
 # [1.223.0](https://github.com/adobe/spacecat-api-service/compare/v1.222.1...v1.223.0) (2025-10-31)
 
 
