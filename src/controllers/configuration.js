@@ -326,6 +326,18 @@ function ConfigurationController(ctx) {
         queues: oldConfiguration.getQueues(),
       };
 
+      // Fix handlers that don't have productCodes (from old configurations)
+      // Set a default productCode if missing to pass validation
+      if (restoreData.handlers) {
+        Object.keys(restoreData.handlers).forEach((handlerType) => {
+          const handler = restoreData.handlers[handlerType];
+          if (!handler.productCodes || handler.productCodes.length === 0) {
+            log.warn(`Handler "${handlerType}" missing productCodes, adding default ['ASO']`);
+            handler.productCodes = ['ASO']; // Default product code
+          }
+        });
+      }
+
       // Update the latest configuration with the old data
       // This will create a new version with the restored data
       latestConfiguration.updateConfiguration(restoreData);

@@ -562,6 +562,51 @@ describe('Configurations Controller', () => {
     expect(error).to.have.property('message', 'Configuration restore failed');
   });
 
+  it('restores configuration with missing productCodes by adding defaults', async () => {
+    // Create old configuration without productCodes (simulating old data)
+    const oldConfigWithoutProductCodes = {
+      ...configurations[0],
+      getHandlers: () => ({
+        404: {
+          enabledByDefault: true,
+          dependencies: [],
+          // productCodes missing - simulating old configuration
+        },
+        cwv: {
+          enabledByDefault: true,
+          productCodes: ['ASO'], // This one has it
+        },
+      }),
+    };
+
+    const mockUpdateConfig = sandbox.stub();
+    const mockSave = sandbox.stub().resolves();
+    const mockSetSlackRoles = sandbox.stub();
+
+    const latestConfig = {
+      ...configurations[1],
+      updateConfiguration: mockUpdateConfig,
+      save: mockSave,
+      setSlackRoles: mockSetSlackRoles,
+      toJSON: () => ({ ...configData2 }),
+    };
+
+    mockDataAccess.Configuration.findLatest.resolves(latestConfig);
+    mockDataAccess.Configuration.findByVersion.resolves(oldConfigWithoutProductCodes);
+
+    const result = await configurationsController.restoreVersion({ params: { version: '1' } });
+
+    // Verify that updateConfiguration was called with handlers that now have productCodes
+    expect(mockUpdateConfig).to.have.been.calledOnce;
+    const restoreData = mockUpdateConfig.firstCall.args[0];
+    expect(restoreData.handlers['404']).to.have.property('productCodes');
+    expect(restoreData.handlers['404'].productCodes).to.deep.equal(['ASO']);
+    expect(restoreData.handlers.cwv.productCodes).to.deep.equal(['ASO']);
+
+    expect(mockSave).to.have.been.calledOnce;
+    expect(result.status).to.equal(200);
+  });
+
   it('registers an audit', async () => {
     const result = await configurationsController.registerAudit({
       data: {
