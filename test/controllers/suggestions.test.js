@@ -2169,7 +2169,31 @@ describe('Suggestions Controller', () => {
   });
 
   describe('auto-fix suggestions', () => {
-    xit('triggers autofixSuggestion and sets suggestions to in-progress', async () => {
+    let suggestionsControllerWithMock;
+    beforeEach(async () => {
+      const mockPromiseToken = {
+        promise_token: 'promiseTokenExample',
+        expires_in: 14399,
+        token_type: 'promise_token',
+      };
+
+      const suggestionControllerWithMock = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/utils.js': {
+          getIMSPromiseToken: async () => mockPromiseToken,
+        },
+      });
+      suggestionsControllerWithMock = suggestionControllerWithMock({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'abcd' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    });
+
+    afterEach(() => {
+      sandbox.restore();
+    });
+
+    it('triggers autofixSuggestion and sets suggestions to in-progress', async () => {
       opportunity.getType = sandbox.stub().returns('meta-tags');
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0]), mockSuggestionEntity(suggs[2])],
@@ -2177,7 +2201,7 @@ describe('Suggestions Controller', () => {
       mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
         mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' }),
       ]);
-      const response = await suggestionsController.autofixSuggestions({
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
         params: {
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,
@@ -2204,7 +2228,7 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'IN_PROGRESS');
     });
 
-    xit('triggers autofixSuggestion and sets suggestions to in-progress for alt-text', async () => {
+    it('triggers autofixSuggestion and sets suggestions to in-progress for alt-text', async () => {
       opportunity.getType = sandbox.stub().returns('alt-text');
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(altTextSuggs[0]),
@@ -2212,7 +2236,7 @@ describe('Suggestions Controller', () => {
       );
       mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...altTextSuggs[0], status: 'IN_PROGRESS' }),
         mockSuggestionEntity({ ...altTextSuggs[1], status: 'IN_PROGRESS' })]);
-      const response = await suggestionsController.autofixSuggestions({
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
         params: {
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,
@@ -2239,7 +2263,7 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'IN_PROGRESS');
     });
 
-    xit('triggers autofixSuggestion for form-accessibility (non-grouped)', async () => {
+    it('triggers autofixSuggestion for form-accessibility (non-grouped)', async () => {
       opportunity.getType = sandbox.stub().returns('form-accessibility');
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(formAccessibilitySuggs[0]),
@@ -2249,7 +2273,7 @@ describe('Suggestions Controller', () => {
         mockSuggestionEntity({ ...formAccessibilitySuggs[0], status: 'IN_PROGRESS' }),
         mockSuggestionEntity({ ...formAccessibilitySuggs[1], status: 'IN_PROGRESS' }),
       ]);
-      const response = await suggestionsController.autofixSuggestions({
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
         params: {
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,
@@ -2274,7 +2298,7 @@ describe('Suggestions Controller', () => {
       expect(mockSqs.sendMessage).to.have.been.calledOnce;
     });
 
-    xit('triggers autofixSuggestion for form-accessibility with multiple suggestions from same URL', async () => {
+    it('triggers autofixSuggestion for form-accessibility with multiple suggestions from same URL', async () => {
       opportunity.getType = sandbox.stub().returns('form-accessibility');
       // Both suggestions have the same URL
       const formSugg1 = { ...formAccessibilitySuggs[0] };
@@ -2294,7 +2318,7 @@ describe('Suggestions Controller', () => {
         mockSuggestionEntity({ ...formSugg1, status: 'IN_PROGRESS' }),
         mockSuggestionEntity({ ...formSugg2, status: 'IN_PROGRESS' }),
       ]);
-      const response = await suggestionsController.autofixSuggestions({
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
         params: {
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,
@@ -2433,8 +2457,8 @@ describe('Suggestions Controller', () => {
       expect(error).to.have.property('message', 'Handler is not enabled for site 07efc218-79f6-48b5-970e-deb0f88ce01b autofix type broken-backlinks');
     });
 
-    xit('does not set IN_PROGRESS if no valid suggestions', async () => {
-      const response = await suggestionsController.autofixSuggestions({
+    it('does not set IN_PROGRESS if no valid suggestions', async () => {
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
         params: {
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,
@@ -2446,11 +2470,11 @@ describe('Suggestions Controller', () => {
       expect(mockSuggestion.bulkUpdateStatus).to.not.have.been.called;
     });
 
-    xit('auto-fix suggestions status fails passed suggestions not found', async () => {
+    it('auto-fix suggestions status fails passed suggestions not found', async () => {
       mockSuggestion.allByOpportunityId.resolves([
         mockSuggestionEntity(suggs[2])]);
       mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
-      const response = await suggestionsController.autofixSuggestions({
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
         params: {
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,
@@ -2475,11 +2499,11 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'Suggestion not found');
     });
 
-    xit('autofix suggestion patches suggestion status fails passed suggestions not new', async () => {
+    it('autofix suggestion patches suggestion status fails passed suggestions not new', async () => {
       mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggs[0]),
         mockSuggestionEntity(suggs[1])]);
       mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' })]);
-      const response = await suggestionsController.autofixSuggestions({
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
         params: {
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,
@@ -2854,6 +2878,29 @@ describe('Suggestions Controller', () => {
   });
 
   describe('autofixSuggestions access control', () => {
+    let suggestionsControllerWithMock;
+    beforeEach(async () => {
+      const mockPromiseToken = {
+        promise_token: 'promiseTokenExample',
+        expires_in: 14399,
+        token_type: 'promise_token',
+      };
+      const suggestionControllerWithMock = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/utils.js': {
+          getIMSPromiseToken: async () => mockPromiseToken,
+        },
+      });
+      suggestionsControllerWithMock = suggestionControllerWithMock({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'abcd' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    });
+
+    afterEach(() => {
+      sandbox.restore();
+    });
+
     it('returns forbidden when user does not have auto_fix permission', async () => {
       // Mock site and opportunity
       const testSite = {
@@ -2905,7 +2952,7 @@ describe('Suggestions Controller', () => {
       );
     });
 
-    xit('allows autofix when user has auto_fix permission', async () => {
+    it('allows autofix when user has auto_fix permission', async () => {
       // Mock site and opportunity
       const testSite = {
         id: SITE_ID,
@@ -2935,7 +2982,7 @@ describe('Suggestions Controller', () => {
         return true;
       });
 
-      const response = await suggestionsController.autofixSuggestions({
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
         params: {
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,

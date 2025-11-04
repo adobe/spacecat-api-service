@@ -32,7 +32,7 @@ import { SuggestionDto } from '../dto/suggestion.js';
 import { FixDto } from '../dto/fix.js';
 import { sendAutofixMessage, getIMSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
-/* c8 ignore start */
+
 /**
  * Suggestions controller.
  * @param {object} ctx - Context of the request.
@@ -1000,4 +1000,3 @@ function SuggestionsController(ctx, sqs, env) {
 }
 
 export default SuggestionsController;
-/* c8 ignore end */
