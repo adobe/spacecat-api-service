@@ -41,7 +41,6 @@ export default (ctx) => {
   const validateInput = ({
     baseURL, organizationId, auditType, enable,
   }) => {
-    // Must have either baseURL or organizationId, but not both
     const hasBaseURL = isString(baseURL) && baseURL.length > 0;
     const hasOrgId = isString(organizationId) && organizationId.length > 0;
 
@@ -53,7 +52,6 @@ export default (ctx) => {
       throw new Error('Cannot specify both baseURL and organizationId. Please provide only one.');
     }
 
-    // Validate baseURL format if provided
     if (hasBaseURL && !isValidUrl(baseURL)) {
       throw new Error(`Invalid Site URL format: "${baseURL}".`);
     }
@@ -106,7 +104,6 @@ export default (ctx) => {
             };
           }
 
-          // Determine if this is a site or org operation
           const isSiteOperation = baseURL !== undefined;
           let entity;
           let entityDescription;

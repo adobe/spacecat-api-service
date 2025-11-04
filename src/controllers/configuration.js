@@ -266,7 +266,6 @@ function ConfigurationController(ctx) {
       return badRequest('Configuration data is required and cannot be empty');
     }
 
-    // Validate that at least one updatable field is provided
     const hasHandlers = configData.handlers !== undefined;
     const hasJobs = configData.jobs !== undefined;
     const hasQueues = configData.queues !== undefined;
@@ -281,10 +280,8 @@ function ConfigurationController(ctx) {
         return notFound('Configuration not found');
       }
 
-      // The model's updateConfiguration method will validate the data
       configuration.updateConfiguration(configData);
 
-      // Save will create a new version automatically
       await configuration.save();
 
       return ok(ConfigurationDto.toJSON(configuration));
@@ -331,29 +328,13 @@ function ConfigurationController(ctx) {
         queues: oldConfiguration.getQueues(),
       };
 
-      // Fix handlers that don't have productCodes (from old configurations)
-      // Set a default productCode if missing to pass validation
-      if (restoreData.handlers) {
-        Object.keys(restoreData.handlers).forEach((handlerType) => {
-          const handler = restoreData.handlers[handlerType];
-          if (!handler.productCodes || handler.productCodes.length === 0) {
-            log.warn(`Handler "${handlerType}" missing productCodes, adding default ['ASO']`);
-            handler.productCodes = ['ASO']; // Default product code
-          }
-        });
-      }
-
-      // Update the latest configuration with the old data
-      // This will create a new version with the restored data
       latestConfiguration.updateConfiguration(restoreData);
 
-      // Restore slackRoles separately (it's not part of updateConfiguration)
       const oldSlackRoles = oldConfiguration.getSlackRoles();
       if (oldSlackRoles) {
         latestConfiguration.setSlackRoles(oldSlackRoles);
       }
 
-      // Save will create a new version automatically
       await latestConfiguration.save();
 
       return ok({
