@@ -578,6 +578,8 @@ describe('LlmoController', () => {
       tracingFetchStub.resolves(createMockResponse(mockResponseData));
       mockContext.data = {
         filters: { status: 'active', category: 'premium' },
+        offset: 10,
+        limit: 100,
       };
 
       const result = await controller.queryLlmoSheetData(mockContext);

@@ -1,3 +1,24 @@
+## [1.223.9](https://github.com/adobe/spacecat-api-service/compare/v1.223.8...v1.223.9) (2025-11-04)
+
+
+### Bug Fixes
+
+* send promise token for non cs sites as well ([#1423](https://github.com/adobe/spacecat-api-service/issues/1423)) ([2ca116b](https://github.com/adobe/spacecat-api-service/commit/2ca116b491fd4801dfc39fc83319fbf6ac64e5f0))
+
+## [1.223.8](https://github.com/adobe/spacecat-api-service/compare/v1.223.7...v1.223.8) (2025-11-04)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1439](https://github.com/adobe/spacecat-api-service/issues/1439)) ([345c010](https://github.com/adobe/spacecat-api-service/commit/345c0101e68e3f3a2c996d08ef87ba9483da6292))
+
+## [1.223.7](https://github.com/adobe/spacecat-api-service/compare/v1.223.6...v1.223.7) (2025-11-04)
+
+
+### Bug Fixes
+
+* add comments for default limit and offset values ([#1440](https://github.com/adobe/spacecat-api-service/issues/1440)) ([52d3126](https://github.com/adobe/spacecat-api-service/commit/52d312675b2642166bc0b9aaacdfa27eab02ae55))
+
 ## [1.223.6](https://github.com/adobe/spacecat-api-service/compare/v1.223.5...v1.223.6) (2025-11-04)
 
 
