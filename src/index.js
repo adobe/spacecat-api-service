@@ -32,7 +32,7 @@ import {
   elevatedSlackClientWrapper,
   SLACK_TARGETS,
 } from '@adobe/spacecat-shared-slack-client';
-import { hasText, resolveSecretsName } from '@adobe/spacecat-shared-utils';
+import { hasText, resolveSecretsName, logWrapper } from '@adobe/spacecat-shared-utils';
 
 import sqs from './support/sqs.js';
 import getRouteHandlers from './routes/index.js';
@@ -86,11 +86,11 @@ const isValidUUIDV4 = (uuid) => uuidRegex.test(uuid);
  * @returns {Response} a response
  */
 async function run(request, context) {
-  const { log, pathInfo } = context;
+  const { contextualLog, pathInfo } = context;
   const { route, suffix, method } = pathInfo;
 
   if (!hasText(route)) {
-    log.info(`Unable to extract path info. Wrong format: ${suffix}`);
+    contextualLog.info(`Unable to extract path info. Wrong format: ${suffix}`);
     return notFound('wrong path format');
   }
 
@@ -112,7 +112,7 @@ async function run(request, context) {
     const hooksController = HooksController(context);
     const organizationsController = OrganizationsController(context, context.env);
     const projectsController = ProjectsController(context, context.env);
-    const sitesController = SitesController(context, log, context.env);
+    const sitesController = SitesController(context, contextualLog, context.env);
     const experimentsController = ExperimentsController(context);
     const slackController = SlackController(SlackApp);
     const fulfillmentController = FulfillmentController(context);
@@ -121,15 +121,15 @@ async function run(request, context) {
     const sitesAuditsToggleController = SitesAuditsToggleController(context);
     const opportunitiesController = OpportunitiesController(context);
     const suggestionsController = SuggestionsController(context, context.sqs, context.env);
-    const brandsController = BrandsController(context, log, context.env);
+    const brandsController = BrandsController(context, contextualLog, context.env);
     const paidController = PaidController(context);
-    const trafficController = TrafficController(context, log, context.env);
-    const preflightController = PreflightController(context, log, context.env);
+    const trafficController = TrafficController(context, contextualLog, context.env);
+    const preflightController = PreflightController(context, contextualLog, context.env);
     const demoController = DemoController(context);
     const consentBannerController = ConsentBannerController(context);
     const scrapeController = ScrapeController(context);
     const scrapeJobController = ScrapeJobController(context);
-    const reportsController = ReportsController(context, log, context.env);
+    const reportsController = ReportsController(context, contextualLog, context.env);
     const llmoController = LlmoController(context);
     const fixesController = new FixesController(context);
     const userActivitiesController = UserActivitiesController(context);
@@ -193,7 +193,7 @@ async function run(request, context) {
     }
   } catch (e) {
     const t1 = Date.now();
-    log.error(`Handler exception after ${t1 - t0} ms. Path: ${sanitizePath(suffix)}`, e);
+    contextualLog.error(`Handler exception after ${t1 - t0} ms. Path: ${sanitizePath(suffix)}`, e);
     return internalServerError(e.message);
   }
 }
@@ -204,6 +204,7 @@ export const main = wrap(run)
   .with(authWrapper, {
     authHandlers: [JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler],
   })
+  .with(logWrapper)
   .with(dataAccess)
   .with(bodyData)
   .with(multipartFormData)
