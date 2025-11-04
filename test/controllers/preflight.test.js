@@ -78,6 +78,7 @@ describe('Preflight Controller', () => {
     },
     Site: {
       findByPreviewURL: sandbox.stub().resolves(mockSite),
+      findByBaseURL: sandbox.stub().resolves(mockSite),
     },
   };
 
@@ -286,6 +287,55 @@ describe('Preflight Controller', () => {
       );
     });
 
+    it('creates a preflight job successfully in a HEADESS environment', async () => {
+      const context = {
+        data: {
+          urls: ['https://cdn.url'],
+          step: 'identify',
+        },
+      };
+      const headlessSite = {
+        getId: () => 'test-site-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.HEADLESS,
+      };
+      mockDataAccess.Site.findByPreviewURL.resolves(null);
+      mockDataAccess.Site.findByBaseURL.resolves(headlessSite);
+
+      const response = await preflightController.createPreflightJob(context);
+      expect(response.status).to.equal(202);
+
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        jobId,
+        status: 'IN_PROGRESS',
+        createdAt: '2024-03-20T10:00:00Z',
+        pollUrl: `https://spacecat.experiencecloud.live/api/v1/preflight/jobs/${jobId}`,
+      });
+
+      expect(mockDataAccess.AsyncJob.create).to.have.been.calledWith({
+        status: 'IN_PROGRESS',
+        metadata: {
+          payload: {
+            siteId: 'test-site-123',
+            urls: ['https://cdn.url'],
+            step: 'identify',
+            enableAuthentication: true,
+          },
+          jobType: 'preflight',
+          tags: ['preflight'],
+        },
+      });
+
+      expect(mockSqs.sendMessage).to.have.been.calledWith(
+        'https://sqs.test.amazonaws.com/audit-queue',
+        {
+          jobId,
+          type: 'preflight',
+          siteId: 'test-site-123',
+        },
+      );
+    });
+
     it('extracts base URL correctly from full URL', async () => {
       const context = {
         data: {
@@ -301,6 +351,7 @@ describe('Preflight Controller', () => {
 
     it('handles errors during site lookup', async () => {
       mockDataAccess.Site.findByPreviewURL.resolves(null);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
 
       const context = {
         data: {

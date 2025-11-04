@@ -108,7 +108,16 @@ function PreflightController(ctx, log, env) {
 
       const url = new URL(data.urls[0]);
       const previewBaseURL = `${url.protocol}//${url.hostname}`;
-      const site = await dataAccess.Site.findByPreviewURL(previewBaseURL);
+      let site = await dataAccess.Site.findByPreviewURL(previewBaseURL);
+
+      if (!site) {
+        // backoff for headless
+        site = await dataAccess.Site.findByBaseURL(previewBaseURL);
+        if (!site || site.getAuthoringType() !== SiteModel.AUTHORING_TYPES.HEADLESS) {
+          throw new Error(`No site found for preview URL: ${previewBaseURL}`);
+        }
+      }
+
       let enableAuthentication = false;
       // check head request for preview url
       const headResponse = await fetch(`${previewBaseURL}`, {
@@ -119,10 +128,6 @@ function PreflightController(ctx, log, env) {
       });
       if (headResponse.status !== 200) {
         enableAuthentication = true;
-      }
-
-      if (!site) {
-        throw new Error(`No site found for preview URL: ${previewBaseURL}`);
       }
 
       let promiseTokenResponse;
