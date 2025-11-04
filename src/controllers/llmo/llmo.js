@@ -13,6 +13,7 @@
 import {
   ok, badRequest, forbidden, createResponse, notFound,
 } from '@adobe/spacecat-shared-http-utils';
+import { Response } from '@adobe/fetch';
 import {
   SPACECAT_USER_AGENT,
   tracingFetch as fetch,
