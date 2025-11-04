@@ -1,3 +1,10 @@
+## [1.223.9](https://github.com/adobe/spacecat-api-service/compare/v1.223.8...v1.223.9) (2025-11-04)
+
+
+### Bug Fixes
+
+* send promise token for non cs sites as well ([#1423](https://github.com/adobe/spacecat-api-service/issues/1423)) ([2ca116b](https://github.com/adobe/spacecat-api-service/commit/2ca116b491fd4801dfc39fc83319fbf6ac64e5f0))
+
 ## [1.223.8](https://github.com/adobe/spacecat-api-service/compare/v1.223.7...v1.223.8) (2025-11-04)
 
 
