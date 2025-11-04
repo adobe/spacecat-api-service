@@ -155,6 +155,7 @@ function LlmoController(ctx) {
       // Return the data and let the framework handle the compression
       return ok(data, {
         ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
+        'Content-Encoding': 'br',
       });
     } catch (error) {
       log.error(`Error proxying data for siteId: ${siteId}, error: ${error.message}`);
@@ -316,6 +317,7 @@ function LlmoController(ctx) {
       // Return the data and let the framework handle the compression
       return ok(data, {
         ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
+        'Content-Encoding': 'br',
       });
     } catch (error) {
       const errorTime = Date.now();
