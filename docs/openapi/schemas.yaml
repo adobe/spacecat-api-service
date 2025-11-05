@@ -2645,7 +2645,6 @@ PaginationMetadata:
     cursor:
       description: The cursor to use for fetching the next page, or null if there are no more pages
       type: string
-      nullable: true
       example: "eyJzayI6IjIwMjQtMDEtMTVUMTI6MzA6MDBaIiwiaWQiOiIxMjNlNDU2Ny1lODliLTEyZDMtYTQ1Ni00MjY2MTQxNzQwMDAifQ=="
     hasMore:
       description: Indicates whether there are more pages available
