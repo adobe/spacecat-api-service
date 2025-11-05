@@ -1,3 +1,10 @@
+# [1.224.0](https://github.com/adobe/spacecat-api-service/compare/v1.223.10...v1.224.0) (2025-11-05)
+
+
+### Features
+
+* artifacts upload action ([#1437](https://github.com/adobe/spacecat-api-service/issues/1437)) ([9237eca](https://github.com/adobe/spacecat-api-service/commit/9237eca60b0b11af78bef85e7003b08c371c9c8e))
+
 ## [1.223.10](https://github.com/adobe/spacecat-api-service/compare/v1.223.9...v1.223.10) (2025-11-05)
 
 
