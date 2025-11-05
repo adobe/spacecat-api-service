@@ -112,8 +112,8 @@ jobs:
           AWS_REGION: us-east-1
           AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID_DEV}}
 
-      - name: Create ZIP File
-        run: zip -r spacecat-services--api-service-latest.zip .
+      - name: Copy Build Artifact
+        run: cp dist/spacecat-services/api-service@*.zip spacecat-services--api-service-latest.zip
         env:
           AWS_REGION: us-east-1
           AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID_DEV}}
