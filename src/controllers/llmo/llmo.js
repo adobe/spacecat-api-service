@@ -25,7 +25,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
-import { brotliCompressSync } from 'zlib';
+import { brotliCompressSync, constants as zlibConstants } from 'zlib';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import AccessControlUtil from '../../support/access-control-util.js';
 import {
@@ -97,7 +97,11 @@ function LlmoController(ctx) {
     // if content-type is JSON, serialize and optionally compress with brotli
     if (finalContentType?.toLowerCase().includes(CONTENT_TYPE_JSON)) {
       const jsonBody = body === '' ? '' : JSON.stringify(body);
-      responseBody = wantsBrotli ? brotliCompressSync(Buffer.from(jsonBody)) : jsonBody;
+      responseBody = wantsBrotli ? brotliCompressSync(Buffer.from(jsonBody), {
+        params: {
+          [zlibConstants.BROTLI_PARAM_QUALITY]: 4,
+        },
+      }) : jsonBody;
     }
 
     return new Response(responseBody, {
