@@ -1,3 +1,10 @@
+## [1.223.10](https://github.com/adobe/spacecat-api-service/compare/v1.223.9...v1.223.10) (2025-11-05)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-scrape-client to v2.3.0 ([#1444](https://github.com/adobe/spacecat-api-service/issues/1444)) ([d6220b2](https://github.com/adobe/spacecat-api-service/commit/d6220b21d0e19985e704ff2ff642e3a14c41d1a6))
+
 ## [1.223.9](https://github.com/adobe/spacecat-api-service/compare/v1.223.8...v1.223.9) (2025-11-04)
 
 
