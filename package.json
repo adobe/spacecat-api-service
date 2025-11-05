@@ -1,6 +1,6 @@
 {
   "name": "@adobe/spacecat-api-service",
-  "version": "1.223.9",
+  "version": "1.224.0",
   "description": "SpaceCat API Service",
   "main": "src/index.js",
   "type": "module",
@@ -79,7 +79,7 @@
     "@adobe/spacecat-shared-http-utils": "1.17.9",
     "@adobe/spacecat-shared-ims-client": "1.9.2",
     "@adobe/spacecat-shared-rum-api-client": "2.38.9",
-    "@adobe/spacecat-shared-scrape-client": "2.2.2",
+    "@adobe/spacecat-shared-scrape-client": "2.3.0",
     "@adobe/spacecat-shared-slack-client": "1.5.29",
     "@adobe/spacecat-shared-tier-client": "1.2.2",
     "@adobe/spacecat-shared-tokowaka-client": "1.0.1",
