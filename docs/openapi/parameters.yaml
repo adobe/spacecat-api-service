@@ -224,6 +224,13 @@ processingType:
   required: true
   schema:
     type: string
+processingTypeOptional:
+  name: processingType
+  description: Optional, The processing type/handler used by the scrape job, will use "default" if not provided
+  in: path
+  required: false
+  schema:
+    type: string
 weekNumber:
   name: weekNumber
   description: The ISO week number (1-53)
