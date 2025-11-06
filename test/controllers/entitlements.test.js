@@ -460,4 +460,613 @@ describe('Entitlements Controller', () => {
       expect(mockTierClient.createEntitlement).to.have.been.calledWith('FREE_TRIAL');
     });
   });
+
+  describe('addEnrollments', () => {
+    const entitlementId = '456e7890-e89b-12d3-a456-426614174000';
+    const siteId1 = '111e1111-e89b-12d3-a456-426614174001';
+    const siteId2 = '222e2222-e89b-12d3-a456-426614174002';
+
+    const mockEntitlement = {
+      getId: () => entitlementId,
+      getOrganizationId: () => organizationId,
+    };
+
+    const mockSite1 = {
+      getId: () => siteId1,
+    };
+
+    const mockSite2 = {
+      getId: () => siteId2,
+    };
+
+    const mockEnrollment1 = {
+      getId: () => 'enrollment-1',
+      getSiteId: () => siteId1,
+      getEntitlementId: () => entitlementId,
+      getCreatedAt: () => '2023-01-01T00:00:00Z',
+    };
+
+    const mockEnrollment2 = {
+      getId: () => 'enrollment-2',
+      getSiteId: () => siteId2,
+      getEntitlementId: () => entitlementId,
+      getCreatedAt: () => '2023-01-01T00:00:00Z',
+    };
+
+    beforeEach(() => {
+      mockDataAccess.Entitlement.findById = sandbox.stub().resolves(mockEntitlement);
+      mockDataAccess.Site = {
+        findById: sandbox.stub(),
+      };
+      mockDataAccess.SiteEnrollment = {
+        create: sandbox.stub(),
+        allBySiteId: sandbox.stub().resolves([]),
+      };
+    });
+
+    it('should add enrollments successfully for valid data', async () => {
+      mockDataAccess.Site.findById.withArgs(siteId1).resolves(mockSite1);
+      mockDataAccess.Site.findById.withArgs(siteId2).resolves(mockSite2);
+      mockDataAccess.SiteEnrollment.create.onFirstCall().resolves(mockEnrollment1);
+      mockDataAccess.SiteEnrollment.create.onSecondCall().resolves(mockEnrollment2);
+
+      const context = {
+        params: { entitlementId },
+        data: { siteIds: [siteId1, siteId2] },
+        log: { error: sinon.stub(), info: sinon.stub() },
+      };
+
+      const result = await entitlementController.addEnrollments(context);
+
+      expect(result.status).to.equal(201);
+      const body = await result.json();
+      expect(body.success).to.have.length(2);
+      expect(body.errors).to.have.length(0);
+      expect(body.summary.total).to.equal(2);
+      expect(body.summary.successful).to.equal(2);
+      expect(body.summary.failed).to.equal(0);
+    });
+
+    it('should return forbidden when user is not admin', async () => {
+      mockAccessControlUtil.hasAdminAccess.returns(false);
+
+      const context = {
+        params: { entitlementId },
+        data: { siteIds: [siteId1] },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.addEnrollments(context);
+
+      expect(result.status).to.equal(403);
+      const body = await result.json();
+      expect(body.message).to.equal('Only admins can add enrollments');
+
+      mockAccessControlUtil.hasAdminAccess.returns(true);
+    });
+
+    it('should return bad request for invalid entitlement ID', async () => {
+      const context = {
+        params: { entitlementId: 'invalid-uuid' },
+        data: { siteIds: [siteId1] },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.addEnrollments(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Entitlement ID required');
+    });
+
+    it('should return bad request when siteIds array is missing', async () => {
+      const context = {
+        params: { entitlementId },
+        data: {},
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.addEnrollments(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('siteIds array is required and must not be empty');
+    });
+
+    it('should return bad request when siteIds array is empty', async () => {
+      const context = {
+        params: { entitlementId },
+        data: { siteIds: [] },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.addEnrollments(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('siteIds array is required and must not be empty');
+    });
+
+    it('should return bad request for invalid site IDs', async () => {
+      const context = {
+        params: { entitlementId },
+        data: { siteIds: ['invalid-uuid-1', 'invalid-uuid-2'] },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.addEnrollments(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('Invalid site IDs');
+    });
+
+    it('should return not found when entitlement does not exist', async () => {
+      mockDataAccess.Entitlement.findById.resolves(null);
+
+      const context = {
+        params: { entitlementId },
+        data: { siteIds: [siteId1] },
+        log: { error: sinon.stub(), info: sinon.stub() },
+      };
+
+      const result = await entitlementController.addEnrollments(context);
+
+      expect(result.status).to.equal(404);
+      const body = await result.json();
+      expect(body.message).to.equal('Entitlement not found');
+    });
+
+    it('should handle errors when site does not exist', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const context = {
+        params: { entitlementId },
+        data: { siteIds: [siteId1] },
+        log: { error: sinon.stub(), info: sinon.stub() },
+      };
+
+      const result = await entitlementController.addEnrollments(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      // The body is the full response object, not just the message
+      expect(body.success).to.be.an('array');
+      expect(body.errors).to.be.an('array');
+      expect(body.errors).to.have.length(1);
+      expect(body.errors[0].error).to.equal('Site not found');
+    });
+
+    it('should handle errors when enrollment already exists', async () => {
+      mockDataAccess.Site.findById.resolves(mockSite1);
+      mockDataAccess.SiteEnrollment.allBySiteId.resolves([mockEnrollment1]);
+
+      const context = {
+        params: { entitlementId },
+        data: { siteIds: [siteId1] },
+        log: { error: sinon.stub(), info: sinon.stub() },
+      };
+
+      const result = await entitlementController.addEnrollments(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      // The body is the full response object, not just the message
+      expect(body.success).to.be.an('array');
+      expect(body.errors).to.be.an('array');
+      expect(body.errors).to.have.length(1);
+      expect(body.errors[0].error).to.equal('Enrollment already exists');
+    });
+
+    it('should handle partial success when some sites fail', async () => {
+      mockDataAccess.Site.findById.withArgs(siteId1).resolves(mockSite1);
+      mockDataAccess.Site.findById.withArgs(siteId2).resolves(null);
+      mockDataAccess.SiteEnrollment.create.resolves(mockEnrollment1);
+
+      const context = {
+        params: { entitlementId },
+        data: { siteIds: [siteId1, siteId2] },
+        log: { error: sinon.stub(), info: sinon.stub() },
+      };
+
+      const result = await entitlementController.addEnrollments(context);
+
+      expect(result.status).to.equal(201);
+      const body = await result.json();
+      expect(body.success).to.have.length(1);
+      expect(body.errors).to.have.length(1);
+      expect(body.summary.successful).to.equal(1);
+      expect(body.summary.failed).to.equal(1);
+    });
+
+    it('should handle errors when SiteEnrollment.create fails', async () => {
+      mockDataAccess.Site.findById.resolves(mockSite1);
+      mockDataAccess.SiteEnrollment.allBySiteId.resolves([]);
+      const createError = new Error('Failed to create enrollment');
+      mockDataAccess.SiteEnrollment.create.rejects(createError);
+
+      const context = {
+        params: { entitlementId },
+        data: { siteIds: [siteId1] },
+        log: { error: sinon.stub(), info: sinon.stub() },
+      };
+
+      const result = await entitlementController.addEnrollments(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.success).to.be.an('array');
+      expect(body.errors).to.be.an('array');
+      expect(body.errors).to.have.length(1);
+      expect(body.errors[0].error).to.equal('Failed to create enrollment');
+      expect(context.log.error.calledWith(`Error creating enrollment for site ${siteId1}: Failed to create enrollment`)).to.be.true;
+    });
+
+    it('should return internal server error when database operation fails', async () => {
+      const dbError = new Error('Database error');
+      mockDataAccess.Entitlement.findById.rejects(dbError);
+
+      const context = {
+        params: { entitlementId },
+        data: { siteIds: [siteId1] },
+        log: { error: sinon.stub(), info: sinon.stub() },
+      };
+
+      const result = await entitlementController.addEnrollments(context);
+
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.equal('Database error');
+    });
+
+    it('should handle Promise.allSettled rejection gracefully', async () => {
+      // Create a Proxy around siteIds array that causes map to create rejecting promises
+      const proxiedSiteIds = new Proxy([siteId1], {
+        get(target, prop) {
+          if (prop === 'map') {
+            return function map() {
+              // Return an array with a promise that rejects
+              return [Promise.reject(new Error('Unexpected promise rejection'))];
+            };
+          }
+          return target[prop];
+        },
+      });
+
+      const context = {
+        params: { entitlementId },
+        data: { siteIds: proxiedSiteIds },
+        log: { error: sinon.stub(), info: sinon.stub() },
+      };
+
+      const result = await entitlementController.addEnrollments(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.errors).to.have.length(1);
+      expect(body.errors[0].siteId).to.equal('unknown');
+      expect(body.errors[0].error).to.equal('Unexpected promise rejection');
+    });
+
+    it('should handle Promise.allSettled rejection without message gracefully', async () => {
+      // Create a Proxy that causes map to create rejecting promises without message
+      const proxiedSiteIds = new Proxy([siteId1], {
+        get(target, prop) {
+          if (prop === 'map') {
+            return function map() {
+              // Return a promise that rejects with an object without message
+              return [Promise.reject(new Error())];
+            };
+          }
+          return target[prop];
+        },
+      });
+
+      const context = {
+        params: { entitlementId },
+        data: { siteIds: proxiedSiteIds },
+        log: { error: sinon.stub(), info: sinon.stub() },
+      };
+
+      const result = await entitlementController.addEnrollments(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.errors).to.have.length(1);
+      expect(body.errors[0].siteId).to.equal('unknown');
+      expect(body.errors[0].error).to.equal('Unknown error');
+    });
+  });
+
+  describe('deleteEnrollments', () => {
+    const enrollmentId1 = '111e1111-e89b-12d3-a456-426614174001';
+    const enrollmentId2 = '222e2222-e89b-12d3-a456-426614174002';
+    const siteId1 = '333e3333-e89b-12d3-a456-426614174003';
+    const siteId2 = '444e4444-e89b-12d3-a456-426614174004';
+    const entitlementId = '555e5555-e89b-12d3-a456-426614174005';
+
+    const mockEnrollment1 = {
+      getId: () => enrollmentId1,
+      getSiteId: () => siteId1,
+      getEntitlementId: () => entitlementId,
+      remove: sandbox.stub().resolves(),
+    };
+
+    const mockEnrollment2 = {
+      getId: () => enrollmentId2,
+      getSiteId: () => siteId2,
+      getEntitlementId: () => entitlementId,
+      remove: sandbox.stub().resolves(),
+    };
+
+    beforeEach(() => {
+      mockDataAccess.SiteEnrollment = {
+        findById: sandbox.stub(),
+      };
+    });
+
+    it('should delete enrollments successfully for valid data', async () => {
+      mockDataAccess.SiteEnrollment.findById.withArgs(enrollmentId1).resolves(mockEnrollment1);
+      mockDataAccess.SiteEnrollment.findById.withArgs(enrollmentId2).resolves(mockEnrollment2);
+
+      const context = {
+        params: {},
+        data: { enrollmentIds: [enrollmentId1, enrollmentId2] },
+        log: { error: sinon.stub(), info: sinon.stub() },
+      };
+
+      const result = await entitlementController.deleteEnrollments(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.success).to.have.length(2);
+      expect(body.errors).to.have.length(0);
+      expect(body.summary.total).to.equal(2);
+      expect(body.summary.successful).to.equal(2);
+      expect(body.summary.failed).to.equal(0);
+
+      expect(mockEnrollment1.remove).to.have.been.calledOnce;
+      expect(mockEnrollment2.remove).to.have.been.calledOnce;
+    });
+
+    it('should return forbidden when user is not admin', async () => {
+      mockAccessControlUtil.hasAdminAccess.returns(false);
+
+      const context = {
+        params: {},
+        data: { enrollmentIds: [enrollmentId1] },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.deleteEnrollments(context);
+
+      expect(result.status).to.equal(403);
+      const body = await result.json();
+      expect(body.message).to.equal('Only admins can delete enrollments');
+
+      mockAccessControlUtil.hasAdminAccess.returns(true);
+    });
+
+    it('should return bad request when enrollmentIds array is missing', async () => {
+      const context = {
+        params: {},
+        data: {},
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.deleteEnrollments(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('enrollmentIds array is required and must not be empty');
+    });
+
+    it('should return bad request when enrollmentIds array is empty', async () => {
+      const context = {
+        params: {},
+        data: { enrollmentIds: [] },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.deleteEnrollments(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('enrollmentIds array is required and must not be empty');
+    });
+
+    it('should return bad request for invalid enrollment IDs', async () => {
+      const context = {
+        params: {},
+        data: { enrollmentIds: ['invalid-uuid-1', 'invalid-uuid-2'] },
+        log: { error: sinon.stub() },
+      };
+
+      const result = await entitlementController.deleteEnrollments(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('Invalid enrollment IDs');
+    });
+
+    it('should handle errors when enrollment does not exist', async () => {
+      mockDataAccess.SiteEnrollment.findById.resolves(null);
+
+      const context = {
+        params: {},
+        data: { enrollmentIds: [enrollmentId1] },
+        log: { error: sinon.stub(), info: sinon.stub() },
+      };
+
+      const result = await entitlementController.deleteEnrollments(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      // The body is the full response object, not just the message
+      expect(body.success).to.be.an('array');
+      expect(body.errors).to.be.an('array');
+      expect(body.errors).to.have.length(1);
+      expect(body.errors[0].error).to.equal('Enrollment not found');
+    });
+
+    it('should handle partial success when some enrollments fail', async () => {
+      mockDataAccess.SiteEnrollment.findById.withArgs(enrollmentId1).resolves(mockEnrollment1);
+      mockDataAccess.SiteEnrollment.findById.withArgs(enrollmentId2).resolves(null);
+
+      const context = {
+        params: {},
+        data: { enrollmentIds: [enrollmentId1, enrollmentId2] },
+        log: { error: sinon.stub(), info: sinon.stub() },
+      };
+
+      const result = await entitlementController.deleteEnrollments(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.success).to.have.length(1);
+      expect(body.errors).to.have.length(1);
+      expect(body.summary.successful).to.equal(1);
+      expect(body.summary.failed).to.equal(1);
+    });
+
+    it('should handle errors during enrollment removal', async () => {
+      const removeError = new Error('Remove failed');
+      const failingEnrollment = {
+        getId: () => enrollmentId1,
+        getSiteId: () => siteId1,
+        getEntitlementId: () => entitlementId,
+        remove: sandbox.stub().rejects(removeError),
+      };
+
+      mockDataAccess.SiteEnrollment.findById.withArgs(enrollmentId1).resolves(failingEnrollment);
+      mockDataAccess.SiteEnrollment.findById.withArgs(enrollmentId2).resolves(mockEnrollment2);
+
+      const context = {
+        params: {},
+        data: { enrollmentIds: [enrollmentId1, enrollmentId2] },
+        log: { error: sinon.stub(), info: sinon.stub() },
+      };
+
+      const result = await entitlementController.deleteEnrollments(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.success).to.have.length(1);
+      expect(body.errors).to.have.length(1);
+      expect(body.errors[0].error).to.equal('Remove failed');
+    });
+
+    it('should handle errors during enrollment removal in the loop', async () => {
+      // This tests the inner catch block when findById throws an error
+      const dbError = new Error('Database error during findById');
+      mockDataAccess.SiteEnrollment.findById.rejects(dbError);
+
+      const context = {
+        params: {},
+        data: { enrollmentIds: [enrollmentId1] },
+        log: { error: sinon.stub(), info: sinon.stub() },
+      };
+
+      const result = await entitlementController.deleteEnrollments(context);
+
+      // The error is caught in the inner try-catch and added to errors
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.errors).to.have.length(1);
+      expect(body.errors[0].error).to.equal('Database error during findById');
+    });
+
+    it('should return internal server error when unexpected error occurs', async () => {
+      // This test verifies the outer catch block by creating a controller
+      // with a Proxy dataAccess that throws when SiteEnrollment is accessed
+      const proxyDataAccess = new Proxy(mockDataAccess, {
+        get(target, prop) {
+          if (prop === 'SiteEnrollment') {
+            throw new Error('DataAccess error');
+          }
+          return target[prop];
+        },
+      });
+
+      const brokenContext = {
+        dataAccess: proxyDataAccess,
+        env: {},
+        log: { error: sandbox.stub(), info: sandbox.stub() },
+        attributes: {},
+      };
+
+      const brokenController = EntitlementsController(brokenContext);
+
+      const context = {
+        params: {},
+        data: { enrollmentIds: [enrollmentId1] },
+        log: { error: sinon.stub(), info: sinon.stub() },
+      };
+
+      const result = await brokenController.deleteEnrollments(context);
+
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.equal('DataAccess error');
+      expect(context.log.error.calledWith('Error deleting enrollments: DataAccess error')).to.be.true;
+    });
+
+    it('should handle Promise.allSettled rejection gracefully', async () => {
+      // Create a Proxy around enrollmentIds array that causes map to create rejecting promises
+      const proxiedEnrollmentIds = new Proxy([enrollmentId1], {
+        get(target, prop) {
+          if (prop === 'map') {
+            return function map() {
+              // Return an array with a promise that rejects
+              return [Promise.reject(new Error('Unexpected deletion error'))];
+            };
+          }
+          return target[prop];
+        },
+      });
+
+      const context = {
+        params: {},
+        data: { enrollmentIds: proxiedEnrollmentIds },
+        log: { error: sinon.stub(), info: sinon.stub() },
+      };
+
+      const result = await entitlementController.deleteEnrollments(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.errors).to.have.length(1);
+      expect(body.errors[0].enrollmentId).to.equal('unknown');
+      expect(body.errors[0].error).to.equal('Unexpected deletion error');
+    });
+
+    it('should handle Promise.allSettled rejection without message gracefully', async () => {
+      // Create a Proxy that causes map to create rejecting promises without message
+      const proxiedEnrollmentIds = new Proxy([enrollmentId1], {
+        get(target, prop) {
+          if (prop === 'map') {
+            return function map() {
+              // Return a promise that rejects with an object without message
+              return [Promise.reject(new Error())];
+            };
+          }
+          return target[prop];
+        },
+      });
+
+      const context = {
+        params: {},
+        data: { enrollmentIds: proxiedEnrollmentIds },
+        log: { error: sinon.stub(), info: sinon.stub() },
+      };
+
+      const result = await entitlementController.deleteEnrollments(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.errors).to.have.length(1);
+      expect(body.errors[0].enrollmentId).to.equal('unknown');
+      expect(body.errors[0].error).to.equal('Unknown error');
+    });
+  });
 });

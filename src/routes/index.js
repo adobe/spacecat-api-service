@@ -295,6 +295,8 @@ export default function getRouteHandlers(
     'POST /organizations/:organizationId/trial-user-invite': trialUserController.createTrialUserForEmailInvite,
     'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
     'POST /organizations/:organizationId/entitlements': entitlementController.createEntitlement,
+    'POST /entitlements/:entitlementId/enrollments': entitlementController.addEnrollments,
+    'DELETE /enrollments': entitlementController.deleteEnrollments,
 
     // Sandbox audit route
     'POST /sites/:siteId/sandbox/audit': sandboxAuditController.triggerAudit,

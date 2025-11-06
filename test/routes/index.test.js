@@ -297,6 +297,7 @@ describe('getRouteHandlers', () => {
       'POST /tools/scrape/jobs',
       'POST /consent-banner',
       'POST /llmo/onboard',
+      'DELETE /enrollments',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
@@ -331,6 +332,7 @@ describe('getRouteHandlers', () => {
       'GET /organizations/:organizationId/sites',
       'GET /organizations/:organizationId/entitlements',
       'POST /organizations/:organizationId/entitlements',
+      'POST /entitlements/:entitlementId/enrollments',
       'GET /organizations/:organizationId/trial-users',
       'POST /organizations/:organizationId/trial-user-invite',
       'GET /organizations/by-ims-org-id/:imsOrgId',
