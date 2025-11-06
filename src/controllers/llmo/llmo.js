@@ -13,7 +13,6 @@
 import {
   ok, badRequest, forbidden, createResponse, notFound,
 } from '@adobe/spacecat-shared-http-utils';
-import { Response } from '@adobe/fetch';
 import {
   SPACECAT_USER_AGENT,
   tracingFetch as fetch,
@@ -25,7 +24,6 @@ import {
 } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
-import { brotliCompressSync, constants as zlibConstants } from 'zlib';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import AccessControlUtil from '../../support/access-control-util.js';
 import {
@@ -48,67 +46,8 @@ const { llmoConfig: llmoConfigSchema } = schemas;
 
 const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
 
-// HTTP Header Constants
-const HEADER_CONTENT_TYPE = 'content-type';
-const HEADER_CONTENT_ENCODING = 'content-encoding';
-const CONTENT_TYPE_JSON = 'application/json';
-
 function LlmoController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
-
-  /**
- * Case-insensitive getter for headers.
- */
-  function getHeader(headers, key) {
-    const lowerKey = key.toLowerCase();
-    const actualKey = Object.keys(headers).find((k) => k.toLowerCase() === lowerKey);
-    return actualKey ? headers[actualKey] : undefined;
-  }
-
-  /**
-   * Case-insensitive setter for headers.
-   */
-  function setHeader(headers, key, value) {
-    const lowerKey = key.toLowerCase();
-    const actualKey = Object.keys(headers).find((k) => k.toLowerCase() === lowerKey);
-    if (actualKey) {
-      /* c8 ignore next 3 */
-      // eslint-disable-next-line no-param-reassign
-      headers[actualKey] = value;
-    } else {
-      // eslint-disable-next-line no-param-reassign
-      headers[key] = value;
-    }
-  }
-
-  function createBrotliCompressedResponse(body, headers = {}, status = 200) {
-    let responseBody = body;
-
-    const contentType = getHeader(headers, HEADER_CONTENT_TYPE);
-    const contentEncoding = getHeader(headers, HEADER_CONTENT_ENCODING);
-    const wantsBrotli = contentEncoding?.toLowerCase() === 'br';
-    // default to application/json if content-type not set
-    if (!contentType) {
-      setHeader(headers, HEADER_CONTENT_TYPE, `${CONTENT_TYPE_JSON}; charset=utf-8`);
-    }
-
-    const finalContentType = getHeader(headers, HEADER_CONTENT_TYPE);
-
-    // if content-type is JSON, serialize and optionally compress with brotli
-    if (finalContentType?.toLowerCase().includes(CONTENT_TYPE_JSON)) {
-      const jsonBody = body === '' ? '' : JSON.stringify(body);
-      responseBody = wantsBrotli ? brotliCompressSync(Buffer.from(jsonBody), {
-        params: {
-          [zlibConstants.BROTLI_PARAM_QUALITY]: 4,
-        },
-      }) : jsonBody;
-    }
-
-    return new Response(responseBody, {
-      status,
-      headers,
-    });
-  }
 
   // Helper function to get site and validate LLMO config
   const getSiteAndValidateLlmo = async (context) => {
@@ -215,7 +154,7 @@ function LlmoController(ctx) {
       const data = await response.json();
 
       // Return the data, pass through any compression headers from upstream
-      return createBrotliCompressedResponse(data, {
+      return ok(data, {
         ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
       });
     } catch (error) {
@@ -376,7 +315,7 @@ function LlmoController(ctx) {
       log.info(`LLMO query completed - total duration: ${totalDuration}ms (fetch: ${fetchDuration}ms, inclusion: ${inclusionDuration}ms, filtering: ${filterDuration}ms, exclusion: ${exclusionDuration}ms, grouping: ${groupingDuration}ms, mapping: ${mappingDuration}ms)`);
 
       // Return the data, pass through any compression headers from upstream
-      return createBrotliCompressedResponse(data, {
+      return ok(data, {
         ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
       });
     } catch (error) {

@@ -76,7 +76,7 @@
     "@adobe/spacecat-shared-brand-client": "1.1.26",
     "@adobe/spacecat-shared-data-access": "2.77.1",
     "@adobe/spacecat-shared-gpt-client": "1.6.7",
-    "@adobe/spacecat-shared-http-utils": "1.17.9",
+    "@adobe/spacecat-shared-http-utils": "1.18.0",
     "@adobe/spacecat-shared-ims-client": "1.9.1",
     "@adobe/spacecat-shared-rum-api-client": "2.38.8",
     "@adobe/spacecat-shared-scrape-client": "2.2.1",
