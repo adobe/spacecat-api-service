@@ -163,7 +163,7 @@ get-scrape-jobs-by-base-url-and-processing-type:
 get-scrape-urls-by-url-and-processing-type:
   parameters:
     - $ref: './parameters.yaml#/base64Url'
-    - $ref: './parameters.yaml#/processingType'
+    - $ref: './parameters.yaml#/processingTypeOptional'
   get:
     tags:
       - scrape

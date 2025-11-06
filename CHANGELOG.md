@@ -1,3 +1,59 @@
+## [1.224.1](https://github.com/adobe/spacecat-api-service/compare/v1.224.0...v1.224.1) (2025-11-06)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-http-utils to v1.18.0 ([#1448](https://github.com/adobe/spacecat-api-service/issues/1448)) ([0214ac5](https://github.com/adobe/spacecat-api-service/commit/0214ac5ff88f85d9e4298c6dd7f5ed3db4ddf0f9))
+
+# [1.224.0](https://github.com/adobe/spacecat-api-service/compare/v1.223.10...v1.224.0) (2025-11-05)
+
+
+### Features
+
+* artifacts upload action ([#1437](https://github.com/adobe/spacecat-api-service/issues/1437)) ([9237eca](https://github.com/adobe/spacecat-api-service/commit/9237eca60b0b11af78bef85e7003b08c371c9c8e))
+
+## [1.223.10](https://github.com/adobe/spacecat-api-service/compare/v1.223.9...v1.223.10) (2025-11-05)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-scrape-client to v2.3.0 ([#1444](https://github.com/adobe/spacecat-api-service/issues/1444)) ([d6220b2](https://github.com/adobe/spacecat-api-service/commit/d6220b21d0e19985e704ff2ff642e3a14c41d1a6))
+
+## [1.223.9](https://github.com/adobe/spacecat-api-service/compare/v1.223.8...v1.223.9) (2025-11-04)
+
+
+### Bug Fixes
+
+* send promise token for non cs sites as well ([#1423](https://github.com/adobe/spacecat-api-service/issues/1423)) ([2ca116b](https://github.com/adobe/spacecat-api-service/commit/2ca116b491fd4801dfc39fc83319fbf6ac64e5f0))
+
+## [1.223.8](https://github.com/adobe/spacecat-api-service/compare/v1.223.7...v1.223.8) (2025-11-04)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1439](https://github.com/adobe/spacecat-api-service/issues/1439)) ([345c010](https://github.com/adobe/spacecat-api-service/commit/345c0101e68e3f3a2c996d08ef87ba9483da6292))
+
+## [1.223.7](https://github.com/adobe/spacecat-api-service/compare/v1.223.6...v1.223.7) (2025-11-04)
+
+
+### Bug Fixes
+
+* add comments for default limit and offset values ([#1440](https://github.com/adobe/spacecat-api-service/issues/1440)) ([52d3126](https://github.com/adobe/spacecat-api-service/commit/52d312675b2642166bc0b9aaacdfa27eab02ae55))
+
+## [1.223.6](https://github.com/adobe/spacecat-api-service/compare/v1.223.5...v1.223.6) (2025-11-04)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1438](https://github.com/adobe/spacecat-api-service/issues/1438)) ([54a9be5](https://github.com/adobe/spacecat-api-service/commit/54a9be512d0205ea83b88e5bfbfb25643b22a8ea))
+
+## [1.223.5](https://github.com/adobe/spacecat-api-service/compare/v1.223.4...v1.223.5) (2025-11-04)
+
+
+### Bug Fixes
+
+* **scrapeJob:** make processingType optional ([#1426](https://github.com/adobe/spacecat-api-service/issues/1426)) ([96500b3](https://github.com/adobe/spacecat-api-service/commit/96500b34fc3106e228cbfeafebffc198b6642045))
+
 ## [1.223.4](https://github.com/adobe/spacecat-api-service/compare/v1.223.3...v1.223.4) (2025-11-03)
 
 

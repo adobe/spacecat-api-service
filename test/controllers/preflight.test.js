@@ -472,7 +472,7 @@ describe('Preflight Controller', () => {
       const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
         '../../src/support/utils.js': {
           ...utils,
-          getCSPromiseToken: async () => mockPromiseToken,
+          getIMSPromiseToken: async () => mockPromiseToken,
           ErrorWithStatusCode: utils.ErrorWithStatusCode,
         },
       });
@@ -516,7 +516,7 @@ describe('Preflight Controller', () => {
       const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
         '../../src/support/utils.js': {
           ...utils,
-          getCSPromiseToken: async () => { throw new utils.ErrorWithStatusCode('Missing Authorization header', 400); },
+          getIMSPromiseToken: async () => { throw new utils.ErrorWithStatusCode('Missing Authorization header', 400); },
           ErrorWithStatusCode: utils.ErrorWithStatusCode,
         },
       });
@@ -555,7 +555,7 @@ describe('Preflight Controller', () => {
       const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
         '../../src/support/utils.js': {
           ...utils,
-          getCSPromiseToken: async () => { throw new Error('Generic error'); },
+          getIMSPromiseToken: async () => { throw new Error('Generic error'); },
           ErrorWithStatusCode: utils.ErrorWithStatusCode,
         },
       });

@@ -450,7 +450,7 @@ export function getImsUserToken(context) {
  * }>} - The promise token response.
  * @throws {ErrorWithStatusCode} - If the Authorization header is missing.
  */
-export async function getCSPromiseToken(context) {
+export async function getIMSPromiseToken(context) {
   // get IMS promise token and attach to queue message
   let userToken;
   try {
