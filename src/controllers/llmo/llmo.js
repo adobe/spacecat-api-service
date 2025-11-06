@@ -48,6 +48,7 @@ const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem
 
 function LlmoController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
+
   // Helper function to get site and validate LLMO config
   const getSiteAndValidateLlmo = async (context) => {
     const { siteId } = context.params;
@@ -140,7 +141,7 @@ function LlmoController(ctx) {
         headers: {
           Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
           'User-Agent': SPACECAT_USER_AGENT,
-          'Accept-Encoding': 'gzip',
+          'Accept-Encoding': 'br',
         },
       });
 
@@ -152,7 +153,7 @@ function LlmoController(ctx) {
       // Get the response data
       const data = await response.json();
 
-      // Return the data and let the framework handle the compression
+      // Return the data, pass through any compression headers from upstream
       return ok(data, {
         ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
       });
@@ -236,7 +237,7 @@ function LlmoController(ctx) {
         headers: {
           Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
           'User-Agent': SPACECAT_USER_AGENT,
-          'Accept-Encoding': 'gzip',
+          'Accept-Encoding': 'br',
         },
       });
 
@@ -318,7 +319,7 @@ function LlmoController(ctx) {
       const totalDuration = methodEndTime - methodStartTime;
       log.info(`LLMO query completed - total duration: ${totalDuration}ms (fetch: ${fetchDuration}ms, inclusion: ${inclusionDuration}ms, filtering: ${filterDuration}ms, exclusion: ${exclusionDuration}ms, grouping: ${groupingDuration}ms, mapping: ${mappingDuration}ms)`);
 
-      // Return the data and let the framework handle the compression
+      // Return the data, pass through any compression headers from upstream
       return ok(data, {
         ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
       });
@@ -361,7 +362,7 @@ function LlmoController(ctx) {
         headers: {
           Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
           'User-Agent': SPACECAT_USER_AGENT,
-          'Accept-Encoding': 'gzip',
+          'Accept-Encoding': 'br',
         },
       });
 

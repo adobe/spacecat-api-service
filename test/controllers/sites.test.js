@@ -1144,20 +1144,9 @@ describe('Sites Controller', () => {
       },
     });
 
-    const resp = await (await sitesControllerMock.default(context).getSiteMetricsBySource({
+    const controller = sitesControllerMock.default(context, loggerStub, context.env);
+    const resp = await (await controller.getSiteMetricsBySource({
       params: { siteId, source, metric },
-      log: {
-        info: sandbox.spy(),
-        warn: sandbox.spy(),
-        error: sandbox.spy(),
-      },
-      s3: {
-        s3Client: {
-          send: sinon.stub(),
-        },
-        s3Bucket: 'test-bucket',
-        region: 'us-west-2',
-      },
     })).json();
 
     expect(resp).to.deep.equal(storedMetrics);
@@ -1231,6 +1220,208 @@ describe('Sites Controller', () => {
 
     expect(result.status).to.equal(403);
     expect(error).to.have.property('message', 'Only users belonging to the organization can view its metrics');
+  });
+
+  // Metrics filtering tests
+  describe('Metrics filtering by top pageViews', () => {
+    it('filters metrics to top 100 by pageViews when filterByTop100PageViews=true', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      // Create mock metrics with pageviews - 150 total, unsorted
+      const mockMetrics = Array.from({ length: 150 }, (_, i) => ({
+        url: `https://example.com/page${i}`,
+        pageviews: Math.floor(Math.random() * 10000),
+        lcp: 1500 + i,
+        cls: 0.1,
+      }));
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTop100PageViews: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Should filter to top 100
+      expect(response).to.have.length(100);
+
+      // Verify they are sorted by pageviews descending
+      response.slice(0, -1).forEach((item, index) => {
+        expect(item.pageviews).to.be.at.least(response[index + 1].pageviews);
+      });
+    });
+
+    it('filters out metrics without pageViews when filterByTop100PageViews=true', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockMetrics = [
+        { url: 'https://example.com/page1', pageviews: 5000, lcp: 1500 },
+        { url: 'https://example.com/page2', pageviews: 3000, lcp: 2000 },
+        { url: 'https://example.com/page3', lcp: 1800 }, // No pageviews
+        { url: 'https://example.com/page4', pageviews: 4000, lcp: 2200 },
+      ];
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTop100PageViews: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Should only include 3 metrics with pageviews, sorted by pageviews descending
+      expect(response).to.have.length(3);
+      expect(response[0].url).to.equal('https://example.com/page1'); // 5000
+      expect(response[1].url).to.equal('https://example.com/page4'); // 4000
+      expect(response[2].url).to.equal('https://example.com/page2'); // 3000
+    });
+
+    it('does not filter when filterByTop100PageViews is not set', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockMetrics = [
+        { url: 'https://example.com/page1', lcp: 1500, cls: 0.1 },
+        { url: 'https://example.com/page2', lcp: 2000, cls: 0.2 },
+      ];
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        // No data.filterByTop100PageViews parameter
+      });
+
+      const response = await result.json();
+
+      // Should return all unfiltered metrics (no filtering applied)
+      expect(response).to.have.length(2);
+    });
+
+    it('works with different metric types when filterByTop100PageViews=true', async () => {
+      const siteId = sites[0].getId();
+      const source = 'ahrefs';
+      const metric = 'organic-traffic';
+
+      const mockMetrics = [
+        { url: 'https://example.com/page1', pageviews: 100, views: 100 },
+        { url: 'https://example.com/page2', pageviews: 200, views: 200 },
+        { url: 'https://example.com/page3', pageviews: 150, views: 150 },
+      ];
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTop100PageViews: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Should return top 3 by pageviews, sorted descending
+      expect(response).to.have.length(3);
+      expect(response[0].url).to.equal('https://example.com/page2'); // 200 pageviews
+      expect(response[1].url).to.equal('https://example.com/page3'); // 150 pageviews
+      expect(response[2].url).to.equal('https://example.com/page1'); // 100 pageviews
+    });
+
+    it('returns all metrics when less than 100 have pageviews', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      // Create only 50 metrics with pageviews
+      const mockRumMetrics = Array.from({ length: 50 }, (_, i) => ({
+        url: `https://example.com/page${i}`,
+        pageviews: 1000 - i,
+        lcp: 1500,
+        cls: 0.1,
+      }));
+
+      const getStoredMetrics = sandbox.stub().resolves(mockRumMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTop100PageViews: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Should return all 50 metrics (less than the 100 limit)
+      expect(response).to.have.length(50);
+
+      // Verify they are sorted by pageviews descending
+      expect(response[0].pageviews).to.equal(1000);
+      expect(response[49].pageviews).to.equal(951);
+    });
+
+    it('handles null and zero pageviews correctly in sorting', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockMetrics = [
+        { url: 'https://example.com/page1', pageviews: 100, lcp: 1500 },
+        { url: 'https://example.com/page2', pageviews: null, lcp: 2000 },
+        { url: 'https://example.com/page3', pageviews: 0, lcp: 1800 },
+        { url: 'https://example.com/page4', pageviews: 50, lcp: 2200 },
+        { url: 'https://example.com/page5', pageviews: 0, lcp: 1600 },
+      ];
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTop100PageViews: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Should include only metrics where pageviews !== undefined
+      // null !== undefined is true, so null is kept
+      expect(response).to.have.length(5);
+      // Sorted: page1 (100), page4 (50), then pageviews that are 0 or null (falsy)
+      // The || 0 operator converts null to 0 for sorting
+      expect(response[0].pageviews).to.equal(100);
+      expect(response[1].pageviews).to.equal(50);
+      // Remaining items have pageviews that are falsy (0 or null)
+      // They all get treated as 0 in the sort, so order among them doesn't matter
+      expect([0, null]).to.include(response[2].pageviews);
+      expect([0, null]).to.include(response[3].pageviews);
+      expect([0, null]).to.include(response[4].pageviews);
+    });
   });
 
   it('get page metrics by source returns list of metrics', async () => {

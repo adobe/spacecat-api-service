@@ -548,6 +548,7 @@ function SitesController(ctx, log, env) {
     const siteId = context.params?.siteId;
     const metric = context.params?.metric;
     const source = context.params?.source;
+    const filterByTop100PageViews = context.data?.filterByTop100PageViews === 'true';
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -570,7 +571,19 @@ function SitesController(ctx, log, env) {
       return forbidden('Only users belonging to the organization can view its metrics');
     }
 
-    const metrics = await getStoredMetrics({ siteId, metric, source }, context);
+    let metrics = await getStoredMetrics({ siteId, metric, source }, context);
+
+    // Filter to top 100 pages by pageViews when requested
+    if (filterByTop100PageViews) {
+      // Sort by pageViews in descending order and take top 100
+      const originalCount = metrics.length;
+      metrics = metrics
+        .filter((metricEntry) => metricEntry.pageviews !== undefined)
+        .sort((a, b) => (b.pageviews || 0) - (a.pageviews || 0))
+        .slice(0, 100);
+
+      log.info(`Filtered metrics from ${originalCount} to ${metrics.length} entries based on top pageViews`);
+    }
 
     return ok(metrics);
   };
