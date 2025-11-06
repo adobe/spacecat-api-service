@@ -296,7 +296,7 @@ export default function getRouteHandlers(
     'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
     'POST /organizations/:organizationId/entitlements': entitlementController.createEntitlement,
     'POST /entitlements/:entitlementId/enrollments': entitlementController.addEnrollments,
-    'DELETE /enrollments': entitlementController.deleteEnrollments,
+    'POST /enrollments/delete': entitlementController.deleteEnrollments,
 
     // Sandbox audit route
     'POST /sites/:siteId/sandbox/audit': sandboxAuditController.triggerAudit,

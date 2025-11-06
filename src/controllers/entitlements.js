@@ -252,6 +252,8 @@ function EntitlementsController(ctx) {
 
   /**
    * Deletes enrollments by their IDs.
+   * Note: Uses POST method instead of DELETE because the @adobe/helix-shared-body-data
+   * middleware does not parse request bodies for DELETE requests.
    * @param {object} context - Context of the request.
    * @returns {Promise<Response>} Response with deletion results.
    */
