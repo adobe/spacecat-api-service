@@ -1,3 +1,10 @@
+# [1.225.0](https://github.com/adobe/spacecat-api-service/compare/v1.224.2...v1.225.0) (2025-11-06)
+
+
+### Features
+
+* **slack/backfill-llmo:** add llmo-referral-traffic backfill ([#1449](https://github.com/adobe/spacecat-api-service/issues/1449)) ([d785c7c](https://github.com/adobe/spacecat-api-service/commit/d785c7c29524345d3cf9390995d04653ffab2445))
+
 ## [1.224.2](https://github.com/adobe/spacecat-api-service/compare/v1.224.1...v1.224.2) (2025-11-06)
 
 
