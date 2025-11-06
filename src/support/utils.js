@@ -1137,9 +1137,12 @@ export const filterSitesForProductCode = async (context, organization, sites, pr
   const BATCH_SIZE = 100;
   const filteredSites = [];
 
+  // Process only the first 5 sites
+  const sitesToProcess = sites.slice(0, 5);
+
   // Process sites in parallel batches of 100
-  for (let i = 0; i < sites.length; i += BATCH_SIZE) {
-    const batch = sites.slice(i, i + BATCH_SIZE);
+  for (let i = 0; i < sitesToProcess.length; i += BATCH_SIZE) {
+    const batch = sitesToProcess.slice(i, i + BATCH_SIZE);
 
     /* eslint-disable no-await-in-loop */
     const batchResults = await Promise.all(
