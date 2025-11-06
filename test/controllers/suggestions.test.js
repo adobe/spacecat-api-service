@@ -404,20 +404,10 @@ describe('Suggestions Controller', () => {
     mockOpportunity.findById.withArgs(OPPORTUNITY_ID_NOT_ENABLED).resolves(opportunityNotEnabled);
     mockOpportunity.findById.withArgs(OPPORTUNITY_ID_NOT_FOUND).resolves(null);
 
-    mockSuggestionResults = {
-      data: [mockSuggestionEntity(suggs[0])],
-      cursor: undefined,
-    };
+    mockSuggestionResults = [mockSuggestionEntity(suggs[0])];
 
     mockSuggestion = {
-      allByOpportunityId: sandbox.stub().callsFake((opptyId, options) => {
-        // If options are provided (paged call), return object with data and cursor
-        if (options) {
-          return Promise.resolve(mockSuggestionResults);
-        }
-        // Otherwise (non-paged call), return array directly
-        return Promise.resolve([mockSuggestionEntity(suggs[0])]);
-      }),
+      allByOpportunityId: sandbox.stub().callsFake(() => Promise.resolve(mockSuggestionResults)),
 
       allByOpportunityIdAndStatus: sandbox.stub().resolves([mockSuggestionEntity(suggs[0])]),
       findById: sandbox.stub().callsFake((id) => {
@@ -664,10 +654,7 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets paged suggestions returns empty array when no suggestions exist', async () => {
-    const emptyResults = {
-      data: [],
-      cursor: undefined,
-    };
+    const emptyResults = [];
     mockSuggestion.allByOpportunityId.resolves(emptyResults);
     const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
@@ -705,56 +692,40 @@ describe('Suggestions Controller', () => {
     expect(result.pagination).to.have.property('hasMore', false);
   });
 
-  it('gets paged suggestions with cursor for next page', async () => {
-    const nextCursorToken = 'next-page-cursor-uuid-123e4567-e89b-12d3-a456-426614174000';
-    const resultsWithCursor = {
-      data: [mockSuggestionEntity(suggs[0])],
-      cursor: nextCursorToken,
-    };
-    mockSuggestion.allByOpportunityId.resolves(resultsWithCursor);
+  it('gets next page of suggestions after cursor', async () => {
+    const firstSuggestion = mockSuggestionEntity({ ...suggs[0] });
+    const secondSuggestion = mockSuggestionEntity({ ...suggs[1] });
+    const thirdSuggestion = mockSuggestionEntity({ ...suggs[2] });
+
+    mockSuggestion
+      .allByOpportunityId
+      .resolves([firstSuggestion, secondSuggestion, thirdSuggestion]);
+
+    const cursorValue = Buffer
+      .from(JSON.stringify({ lastId: firstSuggestion.getId() }), 'utf8')
+      .toString('base64');
 
     const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
-        limit: 10,
-      },
-      ...context,
-    });
-    expect(response.status).to.equal(200);
-    const result = await response.json();
-    expect(result).to.have.property('suggestions');
-    expect(result.suggestions).to.be.an('array').with.lengthOf(1);
-    expect(result).to.have.property('pagination');
-    expect(result.pagination).to.have.property('limit', 10);
-    expect(result.pagination).to.have.property('cursor', nextCursorToken);
-    expect(result.pagination).to.have.property('hasMore', true);
-  });
-
-  it('gets paged suggestions passes cursor and limit to allByOpportunityId', async () => {
-    const cursorValue = '123e4567-e89b-12d3-a456-426614174000';
-    const resultsWithCursor = {
-      data: [mockSuggestionEntity(suggs[0])],
-      cursor: undefined,
-    };
-    mockSuggestion.allByOpportunityId.resolves(resultsWithCursor);
-
-    await suggestionsController.getAllForOpportunityPaged({
-      params: {
-        siteId: SITE_ID,
-        opportunityId: OPPORTUNITY_ID,
-        limit: 25,
+        limit: 1,
         cursor: cursorValue,
       },
       ...context,
     });
 
-    expect(mockSuggestion.allByOpportunityId).to.have.been.calledOnce;
-    expect(mockSuggestion.allByOpportunityId).to.have.been.calledWith(OPPORTUNITY_ID, {
-      limit: 25,
-      cursor: cursorValue,
-      returnCursor: true,
-    });
+    expect(response.status).to.equal(200);
+    const result = await response.json();
+    expect(result).to.have.property('suggestions');
+    expect(result.suggestions).to.be.an('array').with.lengthOf(1);
+    expect(result).to.have.property('pagination');
+    expect(result.pagination).to.have.property('limit', 1);
+    const expectedNextCursor = Buffer
+      .from(JSON.stringify({ lastId: secondSuggestion.getId() }), 'utf8')
+      .toString('base64');
+    expect(result.pagination).to.have.property('cursor', expectedNextCursor);
+    expect(result.pagination).to.have.property('hasMore', true);
   });
 
   it('gets paged suggestions returns not found when opportunity is null', async () => {
@@ -762,11 +733,7 @@ describe('Suggestions Controller', () => {
     // Override getOpportunity to return null
     mockEntity.getOpportunity = () => null;
 
-    const resultsWithNullOpportunity = {
-      data: [mockEntity],
-      cursor: undefined,
-    };
-    mockSuggestion.allByOpportunityId.resolves(resultsWithNullOpportunity);
+    mockSuggestion.allByOpportunityId.resolves([mockEntity]);
 
     const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
@@ -792,11 +759,7 @@ describe('Suggestions Controller', () => {
       },
     });
 
-    const resultsWithWrongSite = {
-      data: [mockEntity],
-      cursor: undefined,
-    };
-    mockSuggestion.allByOpportunityId.resolves(resultsWithWrongSite);
+    mockSuggestion.allByOpportunityId.resolves([mockEntity]);
 
     const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
@@ -810,6 +773,63 @@ describe('Suggestions Controller', () => {
     expect(response.status).to.equal(404);
     const error = await response.json();
     expect(error).to.have.property('message', 'Opportunity not found');
+  });
+
+  it('gets paged suggestions returns bad request when cursor points to missing suggestion', async () => {
+    const existingSuggestion = mockSuggestionEntity({ ...suggs[0] });
+    mockSuggestion.allByOpportunityId.resolves([existingSuggestion]);
+    const missingCursor = Buffer
+      .from(JSON.stringify({ lastId: 'non-existent-id' }), 'utf8')
+      .toString('base64');
+
+    const response = await suggestionsController.getAllForOpportunityPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        limit: 10,
+        cursor: missingCursor,
+      },
+      ...context,
+    });
+
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Cursor is invalid');
+  });
+
+  it('gets paged suggestions returns bad request when cursor payload is null', async () => {
+    mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggs[0])]);
+    const nullCursor = Buffer.from('null', 'utf8').toString('base64');
+
+    const response = await suggestionsController.getAllForOpportunityPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        limit: 10,
+        cursor: nullCursor,
+      },
+      ...context,
+    });
+
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Cursor is invalid');
+  });
+
+  it('gets paged suggestions returns bad request when cursor token cannot be decoded', async () => {
+    const response = await suggestionsController.getAllForOpportunityPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        limit: 10,
+        cursor: 'invalid-base64-cursor',
+      },
+      ...context,
+    });
+
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Cursor is invalid');
   });
 
   it('gets all suggestions for an opportunity by status', async () => {
@@ -998,15 +1018,9 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets paged suggestions by status returns not found if opportunity does not belong to site', async () => {
-    mockSuggestion.allByOpportunityIdAndStatus.callsFake((opptyId, status, options) => {
-      if (options) {
-        return Promise.resolve({
-          data: [mockSuggestionEntity(suggs[0])],
-          cursor: undefined,
-        });
-      }
-      return Promise.resolve([mockSuggestionEntity(suggs[0])]);
-    });
+    mockSuggestion
+      .allByOpportunityIdAndStatus
+      .resolves([mockSuggestionEntity(suggs[0])]);
     const response = await suggestionsController.getByStatusPaged({
       params: {
         siteId: SITE_ID_NOT_ENABLED,
@@ -1020,16 +1034,84 @@ describe('Suggestions Controller', () => {
     expect(error).to.have.property('message', 'Opportunity not found');
   });
 
-  it('gets paged suggestions by status successfully', async () => {
-    mockSuggestion.allByOpportunityIdAndStatus.callsFake((opptyId, status, options) => {
-      if (options) {
-        return Promise.resolve({
-          data: [mockSuggestionEntity(suggs[0])],
-          cursor: undefined,
-        });
-      }
-      return Promise.resolve([mockSuggestionEntity(suggs[0])]);
+  it('gets paged suggestions by status returns bad request for invalid cursor token', async () => {
+    const response = await suggestionsController.getByStatusPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+        cursor: 'invalid-cursor',
+      },
+      ...context,
     });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Cursor is invalid');
+  });
+
+  it('gets paged suggestions by status returns bad request when cursor points to missing suggestion', async () => {
+    const existingSuggestion = mockSuggestionEntity({ ...suggs[0] });
+    mockSuggestion
+      .allByOpportunityIdAndStatus
+      .resolves([existingSuggestion]);
+    const missingCursor = Buffer
+      .from(JSON.stringify({ lastId: 'missing-suggestion-id' }), 'utf8')
+      .toString('base64');
+
+    const response = await suggestionsController.getByStatusPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+        cursor: missingCursor,
+      },
+      ...context,
+    });
+
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Cursor is invalid');
+  });
+
+  it('gets paged suggestions by status returns bad request when cursor payload is null', async () => {
+    mockSuggestion
+      .allByOpportunityIdAndStatus
+      .resolves([mockSuggestionEntity(suggs[0])]);
+    const nullCursor = Buffer.from('null', 'utf8').toString('base64');
+
+    const response = await suggestionsController.getByStatusPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+        cursor: nullCursor,
+      },
+      ...context,
+    });
+
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Cursor is invalid');
+  });
+
+  it('gets paged suggestions by status returns bad request when cursor token cannot be decoded', async () => {
+    const response = await suggestionsController.getByStatusPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+        cursor: 'invalid-base64-cursor',
+      },
+      ...context,
+    });
+
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Cursor is invalid');
+  });
+
+  it('gets paged suggestions by status successfully', async () => {
+    mockSuggestion.allByOpportunityIdAndStatus.resolves([mockSuggestionEntity(suggs[0])]);
     const response = await suggestionsController.getByStatusPaged({
       params: {
         siteId: SITE_ID,
@@ -1052,15 +1134,7 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets paged suggestions by status with empty results', async () => {
-    mockSuggestion.allByOpportunityIdAndStatus.callsFake((opptyId, status, options) => {
-      if (options) {
-        return Promise.resolve({
-          data: [],
-          cursor: undefined,
-        });
-      }
-      return Promise.resolve([]);
-    });
+    mockSuggestion.allByOpportunityIdAndStatus.resolves([]);
     const response = await suggestionsController.getByStatusPaged({
       params: {
         siteId: SITE_ID,
@@ -1080,67 +1154,38 @@ describe('Suggestions Controller', () => {
   });
 
   it('gets paged suggestions by status successfully when parameters come as strings from URL', async () => {
-    mockSuggestion.allByOpportunityIdAndStatus.callsFake((opptyId, status, options) => {
-      if (options) {
-        return Promise.resolve({
-          data: [mockSuggestionEntity(suggs[0])],
-          cursor: 'next-cursor-value',
-        });
-      }
-      return Promise.resolve([mockSuggestionEntity(suggs[0])]);
-    });
+    const firstSuggestion = mockSuggestionEntity({ ...suggs[0] });
+    const secondSuggestion = mockSuggestionEntity({ ...suggs[1] });
+    const thirdSuggestion = mockSuggestionEntity({ ...suggs[2] });
+    mockSuggestion
+      .allByOpportunityIdAndStatus
+      .resolves([firstSuggestion, secondSuggestion, thirdSuggestion]);
+    const incomingCursor = Buffer
+      .from(JSON.stringify({ lastId: firstSuggestion.getId() }), 'utf8')
+      .toString('base64');
     const response = await suggestionsController.getByStatusPaged({
       params: {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
         status: 'NEW',
-        limit: '50',
-        cursor: 'some-cursor',
+        limit: '1',
+        cursor: incomingCursor,
       },
       ...context,
     });
     expect(mockSuggestionDataAccess.Suggestion.allByOpportunityIdAndStatus.calledOnce).to.be.true;
     expect(response.status).to.equal(200);
     const result = await response.json();
+    const expectedNextCursor = Buffer.from(
+      JSON.stringify({ lastId: secondSuggestion.getId() }),
+      'utf8',
+    ).toString('base64');
     expect(result.suggestions).to.be.an('array').with.lengthOf(1);
     expect(result.pagination).to.deep.equal({
-      limit: 50,
-      cursor: 'next-cursor-value',
+      limit: 1,
+      cursor: expectedNextCursor,
       hasMore: true,
     });
-  });
-
-  it('gets paged suggestions by status with cursor parameter calls with correct options', async () => {
-    mockSuggestion.allByOpportunityIdAndStatus.callsFake((opptyId, status, options) => {
-      if (options) {
-        return Promise.resolve({
-          data: [mockSuggestionEntity(suggs[0])],
-          cursor: 'next-cursor',
-        });
-      }
-      return Promise.resolve([mockSuggestionEntity(suggs[0])]);
-    });
-
-    await suggestionsController.getByStatusPaged({
-      params: {
-        siteId: SITE_ID,
-        opportunityId: OPPORTUNITY_ID,
-        status: 'NEW',
-        limit: 25,
-        cursor: 'previous-cursor',
-      },
-      ...context,
-    });
-
-    expect(mockSuggestion.allByOpportunityIdAndStatus).to.have.been.calledWith(
-      OPPORTUNITY_ID,
-      'NEW',
-      {
-        limit: 25,
-        cursor: 'previous-cursor',
-        returnCursor: true,
-      },
-    );
   });
 
   it('gets paged suggestions by status handles null opportunity correctly', async () => {
@@ -1149,15 +1194,7 @@ describe('Suggestions Controller', () => {
       getOpportunity: sandbox.stub().returns(null),
     };
 
-    mockSuggestion.allByOpportunityIdAndStatus.callsFake((opptyId, status, options) => {
-      if (options) {
-        return Promise.resolve({
-          data: [mockSuggestionWithNullOpportunity],
-          cursor: null,
-        });
-      }
-      return Promise.resolve([mockSuggestionWithNullOpportunity]);
-    });
+    mockSuggestion.allByOpportunityIdAndStatus.resolves([mockSuggestionWithNullOpportunity]);
 
     const response = await suggestionsController.getByStatusPaged({
       params: {
@@ -1181,15 +1218,7 @@ describe('Suggestions Controller', () => {
       }),
     };
 
-    mockSuggestion.allByOpportunityIdAndStatus.callsFake((opptyId, status, options) => {
-      if (options) {
-        return Promise.resolve({
-          data: [mockSuggestionWithWrongSite],
-          cursor: null,
-        });
-      }
-      return Promise.resolve([mockSuggestionWithWrongSite]);
-    });
+    mockSuggestion.allByOpportunityIdAndStatus.resolves([mockSuggestionWithWrongSite]);
 
     const response = await suggestionsController.getByStatusPaged({
       params: {

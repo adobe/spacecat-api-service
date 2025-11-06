@@ -123,7 +123,23 @@ function SuggestionsController(ctx, sqs, env) {
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId;
     const limit = parseInt(context.params?.limit, 10) || DEFAULT_PAGE_SIZE;
-    const cursor = context.params?.cursor || null;
+    const cursorToken = context.params?.cursor || null;
+    let lastId = null;
+    if (hasText(cursorToken)) {
+      try {
+        const decodedCursor = Buffer.from(cursorToken, 'base64').toString('utf8');
+        const parsedCursor = JSON.parse(decodedCursor) ?? {};
+        const parsedLastId = parsedCursor.lastId;
+
+        if (!hasText(parsedLastId)) {
+          return badRequest('Cursor is invalid');
+        }
+
+        lastId = parsedLastId;
+      } catch (error) {
+        return badRequest('Cursor is invalid');
+      }
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -146,30 +162,45 @@ function SuggestionsController(ctx, sqs, env) {
       return forbidden('User does not belong to the organization');
     }
 
-    const results = await Suggestion
-      .allByOpportunityId(opptyId, {
-        limit,
-        cursor,
-        returnCursor: true,
-      });
-    const { data: suggestionEntities = [], cursor: newCursor = null } = results;
+    const suggestionEntities = await Suggestion.allByOpportunityId(opptyId);
+
+    let startIndex = 0;
+    if (hasText(lastId)) {
+      const index = suggestionEntities.findIndex((suggestion) => suggestion?.getId?.() === lastId);
+      if (index === -1) {
+        return badRequest('Cursor is invalid');
+      }
+      startIndex = index + 1;
+    }
+
+    const pageSuggestions = suggestionEntities.slice(startIndex, startIndex + limit);
+    const hasMore = suggestionEntities.length > (startIndex + pageSuggestions.length);
 
     // Check if the opportunity belongs to the site
-    if (suggestionEntities.length > 0) {
-      const oppty = await suggestionEntities[0].getOpportunity();
+    if (pageSuggestions.length > 0) {
+      const oppty = await pageSuggestions[0].getOpportunity();
       if (!oppty || oppty.getSiteId() !== siteId) {
         return notFound('Opportunity not found');
       }
     }
 
-    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg));
+    const suggestions = pageSuggestions.map((sugg) => SuggestionDto.toJSON(sugg));
+
+    let newCursor = null;
+    if (hasMore && pageSuggestions.length > 0) {
+      const lastSuggestion = pageSuggestions[pageSuggestions.length - 1];
+      const lastSuggestionId = lastSuggestion?.getId?.();
+      if (hasText(lastSuggestionId)) {
+        newCursor = Buffer.from(JSON.stringify({ lastId: lastSuggestionId }), 'utf8').toString('base64');
+      }
+    }
 
     return ok({
       suggestions,
       pagination: {
         limit,
-        cursor: newCursor ?? null,
-        hasMore: !!newCursor,
+        cursor: newCursor,
+        hasMore,
       },
     });
   };
@@ -224,7 +255,23 @@ function SuggestionsController(ctx, sqs, env) {
     const opptyId = context.params?.opportunityId;
     const status = context.params?.status || undefined;
     const limit = parseInt(context.params?.limit, 10) || DEFAULT_PAGE_SIZE;
-    const cursor = context.params?.cursor || null;
+    const cursorToken = context.params?.cursor || null;
+    let lastId = null;
+    if (hasText(cursorToken)) {
+      try {
+        const decodedCursor = Buffer.from(cursorToken, 'base64').toString('utf8');
+        const parsedCursor = JSON.parse(decodedCursor) ?? {};
+        const parsedLastId = parsedCursor.lastId;
+
+        if (!hasText(parsedLastId)) {
+          return badRequest('Cursor is invalid');
+        }
+
+        lastId = parsedLastId;
+      } catch (error) {
+        return badRequest('Cursor is invalid');
+      }
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -249,26 +296,43 @@ function SuggestionsController(ctx, sqs, env) {
       return forbidden('User does not belong to the organization');
     }
 
-    const results = await Suggestion.allByOpportunityIdAndStatus(opptyId, status, {
-      limit,
-      cursor,
-      returnCursor: true,
-    });
-    const { data: suggestionEntities = [], cursor: newCursor = null } = results;
+    const suggestionEntities = await Suggestion.allByOpportunityIdAndStatus(opptyId, status);
+
+    let startIndex = 0;
+    if (hasText(lastId)) {
+      const index = suggestionEntities.findIndex((suggestion) => suggestion?.getId?.() === lastId);
+      if (index === -1) {
+        return badRequest('Cursor is invalid');
+      }
+      startIndex = index + 1;
+    }
+
+    const pageSuggestions = suggestionEntities.slice(startIndex, startIndex + limit);
+    const hasMore = suggestionEntities.length > (startIndex + pageSuggestions.length);
+
     // Check if the opportunity belongs to the site
-    if (suggestionEntities.length > 0) {
-      const oppty = await suggestionEntities[0].getOpportunity();
+    if (pageSuggestions.length > 0) {
+      const oppty = await pageSuggestions[0].getOpportunity();
       if (!oppty || oppty.getSiteId() !== siteId) {
         return notFound('Opportunity not found');
       }
     }
-    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg));
+    const suggestions = pageSuggestions.map((sugg) => SuggestionDto.toJSON(sugg));
+
+    let newCursor = null;
+    if (hasMore && pageSuggestions.length > 0) {
+      const lastSuggestion = pageSuggestions[pageSuggestions.length - 1];
+      const lastSuggestionId = lastSuggestion?.getId?.();
+      if (hasText(lastSuggestionId)) {
+        newCursor = Buffer.from(JSON.stringify({ lastId: lastSuggestionId }), 'utf8').toString('base64');
+      }
+    }
     return ok({
       suggestions,
       pagination: {
         limit,
-        cursor: newCursor ?? null,
-        hasMore: !!newCursor,
+        cursor: newCursor,
+        hasMore,
       },
     });
   };
