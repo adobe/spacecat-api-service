@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { isValidUrl } from '@adobe/spacecat-shared-utils';
+import { isValidUrl, getLastNumberOfWeeks } from '@adobe/spacecat-shared-utils';
 import {
   extractURLFromSlackInput,
   postErrorMessage,
@@ -23,6 +23,7 @@ const PHRASES = ['backfill-llmo'];
 const AUDIT_TYPES = {
   CDN_ANALYSIS: 'cdn-analysis',
   CDN_LOGS_REPORT: 'cdn-logs-report',
+  LLMO_REFERRAL_TRAFFIC: 'llmo-referral-traffic',
 };
 
 function parseArgs(args) {
@@ -86,6 +87,26 @@ async function triggerBackfill(context, configuration, siteId, auditType, timeVa
       }
       break;
     }
+
+    case AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC: {
+      const weeks = timeValue;
+      const weekYearPairs = getLastNumberOfWeeks(weeks);
+
+      for (const { week, year } of weekYearPairs) {
+        const message = {
+          type: auditType,
+          siteId,
+          auditContext: {
+            week,
+            year,
+          },
+        };
+        // eslint-disable-next-line no-await-in-loop
+        await sqs.sendMessage(configuration.getQueues().audits, message);
+      }
+      break;
+    }
+
     /* c8 ignore start */
     default:
       throw new Error(`Unsupported audit type: ${auditType}`);
@@ -117,6 +138,7 @@ function BackfillLlmoCommand(context) {
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_ANALYSIS} days=3\``);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_REPORT} weeks=2\``);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_REPORT} weeks=0\` (current week)`);
+        await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC} weeks=2\``);
         return;
       }
 
@@ -153,8 +175,15 @@ function BackfillLlmoCommand(context) {
           }
           break;
 
+        case AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC:
+          timeValue = parseInt(parsed.weeks, 10);
+          if (Number.isNaN(timeValue)) timeValue = 1;
+
+          timeDesc = `${timeValue} previous ${timeValue === 1 ? 'week' : 'weeks'}`;
+          break;
+
         default:
-          await say(`:warning: Supported audits: ${AUDIT_TYPES.CDN_ANALYSIS}, ${AUDIT_TYPES.CDN_LOGS_REPORT}`);
+          await say(`:warning: Supported audits: ${AUDIT_TYPES.CDN_ANALYSIS}, ${AUDIT_TYPES.CDN_LOGS_REPORT}, ${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC}`);
           return;
       }
 
@@ -176,6 +205,9 @@ function BackfillLlmoCommand(context) {
           break;
         case AUDIT_TYPES.CDN_LOGS_REPORT:
           totalMessages = timeValue === 0 ? 1 : timeValue;
+          break;
+        case AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC:
+          totalMessages = timeValue;
           break;
         /* c8 ignore start */
         default:
