@@ -23,6 +23,7 @@ use(sinonChai);
 const AUDIT_TYPES = {
   CDN_ANALYSIS: 'cdn-analysis',
   CDN_LOGS_REPORT: 'cdn-logs-report',
+  LLMO_REFERRAL_TRAFFIC: 'llmo-referral-traffic',
 };
 
 describe('BackfillLlmoCommand', () => {
@@ -108,6 +109,32 @@ describe('BackfillLlmoCommand', () => {
       expect(sqsStub.sendMessage.callCount).to.equal(1);
     });
 
+    it('triggers llmo-referral-traffic backfill with default weeks', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(siteStub);
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution(['baseurl=https://example.com', `audit=${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC}`], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      expect(slackContext.say.firstCall.args[0]).to.include(`:gear: Starting ${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC} backfill for https://example.com (1 previous week)...`);
+      expect(sqsStub.sendMessage.called).to.be.true;
+      // Default weeks=1, so should send 1 message
+      expect(sqsStub.sendMessage.callCount).to.equal(1);
+    });
+
+    it('triggers llmo-referral-traffic backfill with custom weeks', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(siteStub);
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution(['baseurl=https://example.com', `audit=${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC}`, 'weeks=2'], slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      expect(slackContext.say.firstCall.args[0]).to.include(`:gear: Starting ${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC} backfill for https://example.com (2 previous weeks)...`);
+      expect(sqsStub.sendMessage.called).to.be.true;
+      // weeks=2, so should send 2 messages
+      expect(sqsStub.sendMessage.callCount).to.equal(2);
+    });
+
     it('triggers cdn-analysis backfill with custom days', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(siteStub);
       const command = BackfillLlmoCommand(context);
@@ -167,6 +194,26 @@ describe('BackfillLlmoCommand', () => {
       expect(message.auditContext.processFullDay).to.be.true;
     });
 
+    it('sends correct SQS message structure for llmo-referral-traffic', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(siteStub);
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution(['baseurl=https://example.com', `audit=${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC}`, 'weeks=1'], slackContext);
+
+      expect(sqsStub.sendMessage.called).to.be.true;
+      const [queueUrl, message] = sqsStub.sendMessage.firstCall.args;
+      expect(queueUrl).to.equal('test-audits-queue-url');
+      expect(message).to.have.property('type', AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC);
+      expect(message).to.have.property('siteId', 'test-site-id');
+      expect(message).to.have.property('auditContext');
+      expect(message.auditContext).to.have.all.keys('week', 'year');
+      expect(message.auditContext.week).to.be.a('number');
+      expect(message.auditContext.year).to.be.a('number');
+      expect(message.auditContext.week).to.be.at.least(1);
+      expect(message.auditContext.week).to.be.at.most(53);
+      expect(message.auditContext.year).to.be.at.least(2024);
+    });
+
     it('responds with usage when no arguments provided', async () => {
       const command = BackfillLlmoCommand(context);
 
@@ -213,7 +260,7 @@ describe('BackfillLlmoCommand', () => {
 
       await command.handleExecution(['baseurl=https://example.com', 'audit=unsupported'], slackContext);
 
-      expect(slackContext.say.calledWith(`:warning: Supported audits: ${AUDIT_TYPES.CDN_ANALYSIS}, ${AUDIT_TYPES.CDN_LOGS_REPORT}`)).to.be.true;
+      expect(slackContext.say.calledWith(`:warning: Supported audits: ${AUDIT_TYPES.CDN_ANALYSIS}, ${AUDIT_TYPES.CDN_LOGS_REPORT}, ${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC}`)).to.be.true;
     });
 
     it('logs errors when they occur', async () => {
