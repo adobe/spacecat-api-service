@@ -775,6 +775,7 @@ function SuggestionsController(ctx, sqs, env) {
           promiseTokenResponse,
           variations,
           action,
+          customData,
           { url },
         )),
       );
