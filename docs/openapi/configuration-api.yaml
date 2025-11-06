@@ -42,7 +42,7 @@ latest-configuration:
             properties:
               handlers:
                 type: object
-                description: Handlers configuration (replaces entire handlers object)
+                description: Handlers configuration (merges with existing handlers - adds new, updates existing)
                 additionalProperties:
                   type: object
                   properties:
@@ -95,7 +95,7 @@ latest-configuration:
                       minimum: 1
               jobs:
                 type: array
-                description: Jobs configuration (replaces entire jobs array)
+                description: Jobs configuration (merges with existing jobs - updates matching jobs by type and group)
                 items:
                   type: object
                   properties:
@@ -109,7 +109,7 @@ latest-configuration:
                       enum: [never, every-hour, daily, weekly, every-saturday, every-sunday, fortnightly, fortnightly-saturday, fortnightly-sunday, monthly]
               queues:
                 type: object
-                description: Queue URLs configuration (replaces entire queues object)
+                description: Queue URLs configuration (merges with existing queues - updates only specified queue URLs)
                 properties:
                   audits:
                     type: string
