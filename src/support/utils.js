@@ -1130,18 +1130,30 @@ export const onboardSingleSite = async (
  */
 export const filterSitesForProductCode = async (context, organization, sites, productCode) => {
   // for every site we will create tier client and will check valid entitlement and enrollment
-  const filteredSites = [];
   const { SiteEnrollment } = context.dataAccess;
   const tierClient = TierClient.createForOrg(context, organization, productCode);
   const { entitlement } = await tierClient.checkValidEntitlement();
-  for (const site of sites) {
+
+  const BATCH_SIZE = 100;
+  const filteredSites = [];
+
+  // Process sites in parallel batches of 100
+  for (let i = 0; i < sites.length; i += BATCH_SIZE) {
+    const batch = sites.slice(i, i + BATCH_SIZE);
+
     /* eslint-disable no-await-in-loop */
-    const siteEnrollments = await SiteEnrollment.allBySiteId(site.getId());
-    /* eslint-disable no-await-in-loop, max-len */
-    const validSiteEnrollment = siteEnrollments.find((se) => se.getEntitlementId() === entitlement?.getId());
-    if (validSiteEnrollment) {
-      filteredSites.push(site);
-    }
+    const batchResults = await Promise.all(
+      batch.map(async (site) => {
+        const siteEnrollments = await SiteEnrollment.allBySiteId(site.getId());
+        const validSiteEnrollment = siteEnrollments
+          .find((se) => se.getEntitlementId() === entitlement?.getId());
+        return validSiteEnrollment ? site : null;
+      }),
+    );
+
+    // Filter out null values and add to results
+    filteredSites.push(...batchResults.filter(Boolean));
   }
+
   return filteredSites;
 };
