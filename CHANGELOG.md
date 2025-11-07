@@ -1,3 +1,38 @@
+## [1.225.2](https://github.com/adobe/spacecat-api-service/compare/v1.225.1...v1.225.2) (2025-11-07)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.70.0 ([#1454](https://github.com/adobe/spacecat-api-service/issues/1454)) ([a89c334](https://github.com/adobe/spacecat-api-service/commit/a89c3343f3bd440fa437a9cc91fe9ae2752c7e38))
+
+## [1.225.1](https://github.com/adobe/spacecat-api-service/compare/v1.225.0...v1.225.1) (2025-11-06)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1450](https://github.com/adobe/spacecat-api-service/issues/1450)) ([ca7a85b](https://github.com/adobe/spacecat-api-service/commit/ca7a85b7906296f99381ddbb2413e58c2be552d7))
+
+# [1.225.0](https://github.com/adobe/spacecat-api-service/compare/v1.224.2...v1.225.0) (2025-11-06)
+
+
+### Features
+
+* **slack/backfill-llmo:** add llmo-referral-traffic backfill ([#1449](https://github.com/adobe/spacecat-api-service/issues/1449)) ([d785c7c](https://github.com/adobe/spacecat-api-service/commit/d785c7c29524345d3cf9390995d04653ffab2445))
+
+## [1.224.2](https://github.com/adobe/spacecat-api-service/compare/v1.224.1...v1.224.2) (2025-11-06)
+
+
+### Bug Fixes
+
+* use brotli compression for elmo endpoints | LLMO-1076 ([74df966](https://github.com/adobe/spacecat-api-service/commit/74df96641e9a27d96d95aa32352d47adea0cfe02))
+
+## [1.224.1](https://github.com/adobe/spacecat-api-service/compare/v1.224.0...v1.224.1) (2025-11-06)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-http-utils to v1.18.0 ([#1448](https://github.com/adobe/spacecat-api-service/issues/1448)) ([0214ac5](https://github.com/adobe/spacecat-api-service/commit/0214ac5ff88f85d9e4298c6dd7f5ed3db4ddf0f9))
+
 # [1.224.0](https://github.com/adobe/spacecat-api-service/compare/v1.223.10...v1.224.0) (2025-11-05)
 
 
