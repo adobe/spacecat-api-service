@@ -27,7 +27,7 @@ class ValkeyCache {
   }
 
   /**
-   * Initialize and connect to Valkey
+   * Initialize and connect to Valkey (lazy connection)
    */
   async connect() {
     if (this.isConnected && this.client) {
@@ -96,6 +96,8 @@ class ValkeyCache {
    * @returns {Promise<object|null>} - The cached data or null if not found
    */
   async get(filePath) {
+    // Lazy connect on first use
+    await this.connect();
     if (!this.isConnected || !this.client) {
       this.log.warn('Valkey not connected, skipping cache get');
       return null;
@@ -128,6 +130,8 @@ class ValkeyCache {
    * @returns {Promise<boolean>} - True if successfully cached, false otherwise
    */
   async set(filePath, data, ttl = CACHE_TTL_SECONDS) {
+    // Lazy connect on first use
+    await this.connect();
     if (!this.isConnected || !this.client) {
       this.log.warn('Valkey not connected, skipping cache set');
       return false;
@@ -154,6 +158,8 @@ class ValkeyCache {
    * @returns {Promise<boolean>} - True if successfully deleted, false otherwise
    */
   async delete(filePath) {
+    // Lazy connect on first use
+    await this.connect();
     if (!this.isConnected || !this.client) {
       this.log.warn('Valkey not connected, skipping cache delete');
       return false;
@@ -200,11 +206,8 @@ export function valkeyClientWrapper(fn) {
     if (!context.valkey) {
       const { env, log } = context;
 
-      // Create Valkey cache instance
+      // Create Valkey cache instance (connection is lazy - happens on first use)
       const cache = new ValkeyCache(env, log);
-
-      // Connect to Valkey
-      await cache.connect();
 
       context.valkey = {
         cache,
