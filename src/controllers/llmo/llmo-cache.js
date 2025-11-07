@@ -1,0 +1,191 @@
+/*
+ * Copyright 2025 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+import { createClient } from 'redis';
+
+// Cache TTL in seconds (2 hours by default)
+const CACHE_TTL_SECONDS = 2 * 60 * 60;
+
+/**
+ * LLMO Cache Helper using AWS Valkey (Redis-compatible)
+ */
+class LlmoCache {
+  constructor(env, log) {
+    this.log = log;
+    this.env = env;
+    this.client = null;
+    this.isConnected = false;
+  }
+
+  /**
+   * Initialize and connect to Valkey
+   */
+  async connect() {
+    if (this.isConnected && this.client) {
+      return;
+    }
+
+    try {
+      // Use environment variable or default host (without protocol prefix)
+      const host = this.env.VALKEY_HOST || 'elmodata-u65bcl.serverless.use1.cache.amazonaws.com';
+      const port = this.env.VALKEY_PORT || 6379;
+
+      this.log.info(`Attempting to connect to Valkey at ${host}:${port} with TLS`);
+
+      this.client = createClient({
+        socket: {
+          host,
+          port: parseInt(port, 10),
+          connectTimeout: 10000, // 10 seconds timeout
+          tls: true, // Enable TLS for rediss:// connections
+          rejectUnauthorized: false, // AWS certificates are self-signed
+          reconnectStrategy: (retries) => {
+            if (retries > 3) {
+              this.log.error('Max Valkey reconnection attempts reached');
+              return false; // Stop reconnecting
+            }
+            return Math.min(retries * 100, 3000);
+          },
+        },
+      });
+
+      this.client.on('error', (err) => {
+        this.log.error(`Valkey client error: ${err.message}`);
+        this.isConnected = false;
+      });
+
+      this.client.on('connect', () => {
+        this.log.info('Valkey client connected');
+        this.isConnected = true;
+      });
+
+      this.client.on('disconnect', () => {
+        this.log.warn('Valkey client disconnected');
+        this.isConnected = false;
+      });
+
+      await this.client.connect();
+      this.isConnected = true;
+      this.log.info('Successfully connected to Valkey');
+    } catch (error) {
+      this.log.error(`Failed to connect to Valkey: ${error.message}`);
+      this.isConnected = false;
+      this.client = null;
+    }
+  }
+
+  /**
+   * Generate cache key for a file path
+   */
+  static getCacheKey(filePath) {
+    return `llmo:file:${filePath}`;
+  }
+
+  /**
+   * Get cached data for a file
+   * @param {string} filePath - The file path to use as cache key
+   * @returns {Promise<object|null>} - The cached data or null if not found
+   */
+  async get(filePath) {
+    if (!this.isConnected || !this.client) {
+      this.log.warn('Valkey not connected, skipping cache get');
+      return null;
+    }
+
+    try {
+      const cacheKey = this.getCacheKey(filePath);
+      this.log.info(`Checking Valkey cache for key: ${cacheKey}`);
+
+      const cachedData = await this.client.get(cacheKey);
+
+      if (cachedData) {
+        this.log.info(`Cache HIT for key: ${cacheKey}`);
+        return JSON.parse(cachedData);
+      }
+
+      this.log.info(`Cache MISS for key: ${cacheKey}`);
+      return null;
+    } catch (error) {
+      this.log.error(`Error getting from Valkey cache: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Set cached data for a file
+   * @param {string} filePath - The file path to use as cache key
+   * @param {object} data - The data to cache
+   * @param {number} ttl - Time to live in seconds (optional, defaults to CACHE_TTL_SECONDS)
+   * @returns {Promise<boolean>} - True if successfully cached, false otherwise
+   */
+  async set(filePath, data, ttl = CACHE_TTL_SECONDS) {
+    if (!this.isConnected || !this.client) {
+      this.log.warn('Valkey not connected, skipping cache set');
+      return false;
+    }
+
+    try {
+      const cacheKey = this.getCacheKey(filePath);
+      this.log.info(`Setting Valkey cache for key: ${cacheKey} with TTL: ${ttl}s`);
+
+      const serializedData = JSON.stringify(data);
+      await this.client.setEx(cacheKey, ttl, serializedData);
+
+      this.log.info(`Successfully cached data for key: ${cacheKey}`);
+      return true;
+    } catch (error) {
+      this.log.error(`Error setting Valkey cache: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Delete cached data for a file
+   * @param {string} filePath - The file path to use as cache key
+   * @returns {Promise<boolean>} - True if successfully deleted, false otherwise
+   */
+  async delete(filePath) {
+    if (!this.isConnected || !this.client) {
+      this.log.warn('Valkey not connected, skipping cache delete');
+      return false;
+    }
+
+    try {
+      const cacheKey = this.getCacheKey(filePath);
+      this.log.info(`Deleting Valkey cache for key: ${cacheKey}`);
+
+      await this.client.del(cacheKey);
+      return true;
+    } catch (error) {
+      this.log.error(`Error deleting from Valkey cache: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Disconnect from Valkey
+   */
+  async disconnect() {
+    if (this.client && this.isConnected) {
+      try {
+        await this.client.quit();
+        this.log.info('Disconnected from Valkey');
+      } catch (error) {
+        this.log.error(`Error disconnecting from Valkey: ${error.message}`);
+      }
+    }
+    this.isConnected = false;
+    this.client = null;
+  }
+}
+
+export default LlmoCache;
