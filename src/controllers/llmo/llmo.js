@@ -40,6 +40,7 @@ import {
   performLlmoOnboarding,
   performLlmoOffboarding,
 } from './llmo-onboarding.js';
+import LlmoQuery from './llmo-query.js';
 
 const { readConfig, writeConfig } = llmo;
 const { llmoConfig: llmoConfigSchema } = schemas;
@@ -49,8 +50,63 @@ const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem
 function LlmoController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
-  // Helper function to get site and validate LLMO config
+  // // Helper function to create a mock site for dev mode
+  // const createMockSite = (context) => {
+  //   const { env } = context;
+  //   const dataFolder = env.DEV_LLMO_DATA_FOLDER || 'dev/test-site';
+  //   const brand = env.DEV_LLMO_BRAND || 'Test Brand';
+
+  //   const mockLlmoConfig = {
+  //     dataFolder,
+  //     brand,
+  //     questions: {
+  //       Human: [],
+  //       AI: [],
+  //     },
+  //     customerIntent: [],
+  //   };
+
+  //   const mockConfig = {
+  //     getLlmoConfig: () => mockLlmoConfig,
+  //     getLlmoHumanQuestions: () => [],
+  //     getLlmoAIQuestions: () => [],
+  //     getLlmoCustomerIntent: () => [],
+  //     addLlmoHumanQuestions: () => { },
+  //     addLlmoAIQuestions: () => { },
+  //     removeLlmoQuestion: () => { },
+  //     updateLlmoQuestion: () => { },
+  //     addLlmoCustomerIntent: () => { },
+  //     removeLlmoCustomerIntent: () => { },
+  //     updateLlmoCustomerIntent: () => { },
+  //     updateLlmoCdnlogsFilter: () => { },
+  //     updateLlmoCdnBucketConfig: () => { },
+  //     updateLlmoBrand: () => { },
+  //     updateLlmoDataFolder: () => { },
+  //   };
+
+  //   const mockSite = {
+  //     getId: () => context.params.siteId,
+  //     getConfig: () => mockConfig,
+  //     setConfig: () => { },
+  //     save: async () => { },
+  //     getOrganizationId: () => 'mock-org-id',
+  //     getBaseURL: () => 'https://example.com',
+  //   };
+
+  //   return { site: mockSite, config: mockConfig, llmoConfig: mockLlmoConfig };
+  // };
+
+  // Helper function to get site and validate LLMO confign
   const getSiteAndValidateLlmo = async (context) => {
+    // const { env, log } = context;
+
+    // // DEV MODE BYPASS: Use mock data if ENV=dev and DEV_SKIP_DYNAMODB=true
+    // if (env.ENV === 'dev' && env.DEV_SKIP_DYNAMODB === 'true') {
+    //   log.info('DEV MODE: Using mock site data, skipping DynamoDB');
+    //   return createMockSite(context);
+    // }
+
+    // PRODUCTION MODE: Normal flow
     const { siteId } = context.params;
     const { dataAccess } = context;
     const { Site } = dataAccess;
@@ -867,6 +923,11 @@ function LlmoController(ctx) {
     }
   };
 
+  const query = async (context) => {
+    const llmoQuery = new LlmoQuery(getSiteAndValidateLlmo);
+    return llmoQuery.query(context);
+  };
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -885,6 +946,7 @@ function LlmoController(ctx) {
     updateLlmoConfig,
     onboardCustomer,
     offboardCustomer,
+    query,
   };
 }
 

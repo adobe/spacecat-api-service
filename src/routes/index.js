@@ -267,6 +267,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/sheet-data/:dataSource': llmoController.getLlmoSheetData,
     'GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': llmoController.getLlmoSheetData,
     'GET /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource': llmoController.getLlmoSheetData,
+    'GET /sites/:siteId/llmo/query': llmoController.query,
     'POST /sites/:siteId/llmo/sheet-data/:dataSource': llmoController.queryLlmoSheetData,
     'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': llmoController.queryLlmoSheetData,
     'POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource': llmoController.queryLlmoSheetData,
