@@ -644,9 +644,9 @@ export function onboardSiteModal(lambdaContext) {
         }
       }
 
+      const configuration = await Configuration.findLatest();
       await ack();
 
-      const configuration = await Configuration.findLatest();
       const additionalParams = {};
       if (deliveryType && deliveryType !== 'auto') {
         additionalParams.deliveryType = deliveryType;
