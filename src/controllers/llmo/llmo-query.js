@@ -43,7 +43,7 @@ export default class LlmoQuery {
     const cacheFetchTime = Date.now() - cacheStartTime;
 
     if (cachedData) {
-      log.info(`✓ Cache HIT for file: ${cacheFilePath} (fetch time: ${cacheFetchTime}ms)`);
+      log.info(`✓ Fetch from cache HIT for file: ${cacheFilePath} (fetch time: ${cacheFetchTime}ms)`);
       return {
         data: cachedData,
         headers: {},
@@ -97,7 +97,7 @@ export default class LlmoQuery {
       const data = await response.json();
       const totalFetchTime = Date.now() - sourceFetchStartTime;
 
-      log.info(`✓ Source fetch completed for ${cacheFilePath} (network time: ${responseTime}ms, JSON parse time: ${totalFetchTime - responseTime}ms, total: ${totalFetchTime}ms)`);
+      log.info(`✓ Fetch from HELIX ${cacheFilePath} (network time: ${responseTime}ms, JSON parse time: ${totalFetchTime - responseTime}ms, total: ${totalFetchTime}ms)`);
 
       // Cache the raw data (async, don't wait for it)
       if (cache) {
