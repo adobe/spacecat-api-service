@@ -1138,7 +1138,7 @@ export const filterSitesForProductCode = async (context, organization, sites, pr
   const filteredSites = [];
 
   // Process only the first 5 sites
-  const sitesToProcess = sites.slice(0, 5);
+  const sitesToProcess = sites;
 
   // Process sites in parallel batches of 100
   for (let i = 0; i < sitesToProcess.length; i += BATCH_SIZE) {
