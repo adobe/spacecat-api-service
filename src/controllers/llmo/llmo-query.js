@@ -251,7 +251,7 @@ export default class LlmoQuery {
           return result;
         });
 
-        return ok({ files: processedResults });
+        return ok({ files: processedResults }, { 'Content-Encoding': 'br' });
       }
 
       // Single-file mode: construct the sheet URL based on path parameters
