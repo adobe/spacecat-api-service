@@ -144,6 +144,7 @@ export const sendAutofixMessage = async (
   promiseToken,
   variations,
   action,
+  customData,
   { url } = {},
 ) => sqs.sendMessage(queueUrl, {
   opportunityId,
@@ -153,6 +154,7 @@ export const sendAutofixMessage = async (
   variations,
   action,
   url,
+  ...(customData && { customData }),
 });
 /* c8 ignore end */
 
