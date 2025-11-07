@@ -49,6 +49,36 @@ ADMIN_API_KEY=api_key_for_admin_requests
 npm start
 ```
 
+### Running Locally without AWS Credentials
+
+For testing LLMO endpoints without full AWS access, you can use dev mode to bypass DynamoDB:
+
+1. Copy `.env.example` to `.env`:
+```bash
+cp .env.example .env
+```
+
+2. Get the real `LLMO_HLX_API_KEY` from AWS Secrets Manager (production secret: `/spacecat/llmo/hlx-api-key`) and update it in `.env`
+
+3. Enable dev mode in `.env`:
+```plaintext
+DEV_SKIP_DYNAMODB=true
+DEV_LLMO_DATA_FOLDER=adobe  # or any other customer folder
+```
+
+4. Start the server:
+```bash
+npm start
+```
+
+5. Test an endpoint:
+```bash
+curl -H "x-api-key: local-dev-key" \
+  "http://localhost:3000/sites/test-site-id/llmo/customer-intent"
+```
+
+**Note**: Dev mode only works for LLMO endpoints. Other endpoints may still require valid AWS credentials.
+
 ### Build
 
 ```bash
