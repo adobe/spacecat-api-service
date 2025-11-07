@@ -16,9 +16,9 @@ import { createClient } from 'redis';
 const CACHE_TTL_SECONDS = 2 * 60 * 60;
 
 /**
- * LLMO Cache Helper using AWS Valkey (Redis-compatible)
+ * LLMO Cache Helper using AWS ElastiCache Valkey (Redis-compatible)
  */
-class LlmoCache {
+class ValkeyCache {
   constructor(env, log) {
     this.log = log;
     this.env = env;
@@ -39,14 +39,14 @@ class LlmoCache {
       const host = this.env.VALKEY_HOST || 'elmodata-u65bcl.serverless.use1.cache.amazonaws.com';
       const port = this.env.VALKEY_PORT || 6379;
 
-      this.log.info(`Attempting to connect to Valkey at ${host}:${port} with TLS`);
+      this.log.info(`Attempting to connect to ElastiCache Valkey at ${host}:${port} with TLS`);
 
       this.client = createClient({
         socket: {
           host,
           port: parseInt(port, 10),
           connectTimeout: 10000, // 10 seconds timeout
-          tls: true, // Enable TLS for rediss:// connections
+          tls: true, // Enable TLS for ElastiCache connections
           rejectUnauthorized: false, // AWS certificates are self-signed
           reconnectStrategy: (retries) => {
             if (retries > 3) {
@@ -75,7 +75,7 @@ class LlmoCache {
 
       await this.client.connect();
       this.isConnected = true;
-      this.log.info('Successfully connected to Valkey');
+      this.log.info('Successfully connected to ElastiCache Valkey');
     } catch (error) {
       this.log.error(`Failed to connect to Valkey: ${error.message}`);
       this.isConnected = false;
@@ -102,7 +102,7 @@ class LlmoCache {
     }
 
     try {
-      const cacheKey = this.getCacheKey(filePath);
+      const cacheKey = ValkeyCache.getCacheKey(filePath);
       this.log.info(`Checking Valkey cache for key: ${cacheKey}`);
 
       const cachedData = await this.client.get(cacheKey);
@@ -134,7 +134,7 @@ class LlmoCache {
     }
 
     try {
-      const cacheKey = this.getCacheKey(filePath);
+      const cacheKey = ValkeyCache.getCacheKey(filePath);
       this.log.info(`Setting Valkey cache for key: ${cacheKey} with TTL: ${ttl}s`);
 
       const serializedData = JSON.stringify(data);
@@ -160,7 +160,7 @@ class LlmoCache {
     }
 
     try {
-      const cacheKey = this.getCacheKey(filePath);
+      const cacheKey = ValkeyCache.getCacheKey(filePath);
       this.log.info(`Deleting Valkey cache for key: ${cacheKey}`);
 
       await this.client.del(cacheKey);
@@ -188,4 +188,28 @@ class LlmoCache {
   }
 }
 
-export default LlmoCache;
+/**
+ * Wrapper function to enable access to ElastiCache Valkey capabilities via the context.
+ * When wrapped with this function, the cache is available as context.valkey.cache
+ *
+ * @param {UniversalAction} fn
+ * @returns {function(object, UniversalContext): Promise<Response>}
+ */
+export function valkeyClientWrapper(fn) {
+  return async (request, context) => {
+    if (!context.valkey) {
+      const { env, log } = context;
+
+      // Create Valkey cache instance
+      const cache = new ValkeyCache(env, log);
+
+      // Connect to Valkey
+      await cache.connect();
+
+      context.valkey = {
+        cache,
+      };
+    }
+    return fn(request, context);
+  };
+}

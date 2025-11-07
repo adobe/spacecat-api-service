@@ -15,35 +15,23 @@ import { SPACECAT_USER_AGENT, tracingFetch as fetch } from '@adobe/spacecat-shar
 import {
   applyFilters, applyInclusions, applySort, applyPagination,
 } from './llmo-utils.js';
-import LlmoCache from './llmo-cache.js';
 
 export default class LlmoQuery {
   constructor(getSiteAndValidateLlmo) {
     this.getSiteAndValidateLlmo = getSiteAndValidateLlmo;
-    this.cache = null;
-  }
-
-  /**
-     * Initialize the cache connection
-     * @private
-     */
-  async initializeCache(env, log) {
-    if (!this.cache) {
-      this.cache = new LlmoCache(env, log);
-      await this.cache.connect();
-    }
   }
 
   /**
      * Fetches a single file from the external endpoint with caching
      * @private
      */
-  async fetchSingleFile(context, filePath, llmoConfig) {
-    const { log, env } = context;
+  static async fetchSingleFile(context, filePath, llmoConfig) {
+    const { log, env, valkey } = context;
     const { sheet } = context.data;
 
-    // Initialize cache if not already done
-    await this.initializeCache(env, log);
+    // Get cache from context (initialized by valkeyClientWrapper)
+    const cache = valkey?.cache;
+
     // Construct cache key (includes dataFolder and filePath, optionally sheet)
     const cacheFilePath = sheet
       ? `${llmoConfig.dataFolder}/${filePath}?sheet=${sheet}`
@@ -51,7 +39,7 @@ export default class LlmoQuery {
 
     // Try to get from cache first
     const cacheStartTime = Date.now();
-    const cachedData = await this.cache.get(cacheFilePath);
+    const cachedData = cache ? await cache.get(cacheFilePath) : null;
     const cacheFetchTime = Date.now() - cacheStartTime;
 
     if (cachedData) {
@@ -112,9 +100,11 @@ export default class LlmoQuery {
       log.info(`✓ Source fetch completed for ${cacheFilePath} (network time: ${responseTime}ms, JSON parse time: ${totalFetchTime - responseTime}ms, total: ${totalFetchTime}ms)`);
 
       // Cache the raw data (async, don't wait for it)
-      this.cache.set(cacheFilePath, data).catch((error) => {
-        log.error(`Failed to cache data for ${cacheFilePath}: ${error.message}`);
-      });
+      if (cache) {
+        cache.set(cacheFilePath, data).catch((error) => {
+          log.error(`Failed to cache data for ${cacheFilePath}: ${error.message}`);
+        });
+      }
 
       return {
         data,
@@ -254,7 +244,7 @@ export default class LlmoQuery {
           if (result.status === 'success' && result.data) {
             return {
               ...result,
-              data: this.processData(result.data, queryParams),
+              data: LlmoQuery.processData(result.data, queryParams),
             };
           }
           return result;
@@ -277,7 +267,7 @@ export default class LlmoQuery {
       const { data, headers } = await this.fetchSingleFile(context, filePath, llmoConfig);
 
       // Apply filters and inclusions to the data
-      const processedData = this.processData(data, queryParams);
+      const processedData = LlmoQuery.processData(data, queryParams);
 
       // Return the processed data, pass through any compression headers from upstream
       return ok(processedData, headers);
