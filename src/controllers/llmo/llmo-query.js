@@ -22,10 +22,11 @@ export default class LlmoQuery {
   }
 
   /**
-     * Fetches a single file from the external endpoint with caching
-     * @private
-     */
-  static async fetchSingleFile(context, filePath, llmoConfig) {
+   * Fetches a single file from the external endpoint with caching
+   * @private
+   */
+  // eslint-disable-next-line class-methods-use-this
+  async fetchSingleFile(context, filePath, llmoConfig) {
     const { log, env, valkey } = context;
     const { sheet } = context.data;
 
