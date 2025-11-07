@@ -212,6 +212,7 @@ describe('Organizations Controller', () => {
       },
       SiteEnrollmentV2: {
         allBySiteId: sinon.stub(),
+        batchGetByKeys: sinon.stub(),
       },
     };
 
@@ -480,13 +481,22 @@ describe('Organizations Controller', () => {
       getProductCode: () => 'abcd',
       getTier: () => 'premium',
     };
-    const mockSiteEnrollment = {
+    const mockSiteEnrollment1 = {
       getId: () => 'enrollment-123',
       getEntitlementId: () => 'entitlement-123',
+      getSiteId: () => 'site1',
+    };
+    const mockSiteEnrollment2 = {
+      getId: () => 'enrollment-124',
+      getEntitlementId: () => 'entitlement-123',
+      getSiteId: () => 'site2',
     };
 
     mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves(mockEntitlement);
-    mockDataAccess.SiteEnrollmentV2.allBySiteId.resolves([mockSiteEnrollment]);
+    mockDataAccess.SiteEnrollmentV2.batchGetByKeys.resolves({
+      data: [mockSiteEnrollment1, mockSiteEnrollment2],
+      unprocessed: [],
+    });
 
     const result = await organizationsController.getSitesForOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...context });
     const resultSites = await result.json();

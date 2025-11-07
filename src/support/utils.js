@@ -1134,29 +1134,22 @@ export const filterSitesForProductCode = async (context, organization, sites, pr
   const tierClient = TierClient.createForOrg(context, organization, productCode);
   const { entitlement } = await tierClient.checkValidEntitlement();
 
-  const BATCH_SIZE = 100;
-  const filteredSites = [];
+  // Build composite keys for batch query (entitlementId + siteId pairs)
+  const keys = sites.map((site) => ({
+    entitlementId: entitlement?.getId(),
+    siteId: site.getId(),
+  }));
 
-  // Process only the first 5 sites
-  const sitesToProcess = sites;
+  // Fetch all site enrollments in a single batch query
+  const { data: siteEnrollments } = await SiteEnrollmentV2.batchGetByKeys(keys);
 
-  // Process sites in parallel batches of 100
-  for (let i = 0; i < sitesToProcess.length; i += BATCH_SIZE) {
-    const batch = sitesToProcess.slice(i, i + BATCH_SIZE);
+  // Create a Set of siteIds that have valid enrollments for faster lookup
+  const enrolledSiteIds = new Set(
+    siteEnrollments.map((enrollment) => enrollment.getSiteId()),
+  );
 
-    /* eslint-disable no-await-in-loop */
-    const batchResults = await Promise.all(
-      batch.map(async (site) => {
-        const siteEnrollments = await SiteEnrollmentV2.allBySiteId(site.getId());
-        const validSiteEnrollment = siteEnrollments
-          .find((se) => se.getEntitlementId() === entitlement?.getId());
-        return validSiteEnrollment ? site : null;
-      }),
-    );
-
-    // Filter out null values and add to results
-    filteredSites.push(...batchResults.filter(Boolean));
-  }
+  // Filter sites that have valid enrollments
+  const filteredSites = sites.filter((site) => enrolledSiteIds.has(site.getId()));
 
   return filteredSites;
 };

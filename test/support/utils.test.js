@@ -13,8 +13,8 @@
 /* eslint-env mocha */
 import { expect } from 'chai';
 import sinon from 'sinon';
-
-import { createProject, deriveProjectName } from '../../src/support/utils.js';
+import TierClient from '@adobe/spacecat-shared-tier-client';
+import { createProject, deriveProjectName, filterSitesForProductCode } from '../../src/support/utils.js';
 
 describe('utils', () => {
   describe('deriveProjectName', () => {
@@ -150,6 +150,192 @@ describe('utils', () => {
       await expect(createProject(context, slackContext, 'https://fr.example.com/', 'org123')).to.be.rejectedWith('Failed to create project');
       expect(context.log.error).to.have.been.calledWith('Error creating project: Failed to create project');
       expect(slackContext.say).to.have.been.calledWith(':x: Error creating project: Failed to create project');
+    });
+  });
+
+  describe('filterSitesForProductCode', () => {
+    let sandbox;
+    let context;
+    let organization;
+    let mockTierClient;
+
+    beforeEach(() => {
+      sandbox = sinon.createSandbox();
+
+      mockTierClient = {
+        checkValidEntitlement: sandbox.stub(),
+      };
+
+      sandbox.stub(TierClient, 'createForOrg').returns(mockTierClient);
+
+      context = {
+        log: {
+          error: sandbox.stub(),
+          info: sandbox.stub(),
+        },
+        dataAccess: {
+          SiteEnrollmentV2: {
+            batchGetByKeys: sandbox.stub(),
+          },
+        },
+      };
+
+      organization = {
+        getId: () => 'org-123',
+        getName: () => 'Test Organization',
+      };
+    });
+
+    afterEach(() => {
+      sandbox.restore();
+    });
+
+    it('filters sites that have valid enrollments for the product code', async () => {
+      const sites = [
+        { getId: () => 'site-1', getBaseURL: () => 'https://site1.com' },
+        { getId: () => 'site-2', getBaseURL: () => 'https://site2.com' },
+        { getId: () => 'site-3', getBaseURL: () => 'https://site3.com' },
+      ];
+
+      const mockEntitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'LLMO',
+      };
+
+      const mockEnrollments = [
+        { getSiteId: () => 'site-1', getEntitlementId: () => 'entitlement-123' },
+        { getSiteId: () => 'site-3', getEntitlementId: () => 'entitlement-123' },
+      ];
+
+      mockTierClient.checkValidEntitlement.resolves({ entitlement: mockEntitlement });
+      context.dataAccess.SiteEnrollmentV2.batchGetByKeys.resolves({
+        data: mockEnrollments,
+        unprocessed: [],
+      });
+
+      const result = await filterSitesForProductCode(context, organization, sites, 'LLMO');
+
+      expect(result).to.have.lengthOf(2);
+      expect(result[0].getId()).to.equal('site-1');
+      expect(result[1].getId()).to.equal('site-3');
+      expect(TierClient.createForOrg).to.have.been.calledWith(context, organization, 'LLMO');
+      expect(context.dataAccess.SiteEnrollmentV2.batchGetByKeys).to.have.been.calledOnce;
+    });
+
+    it('returns empty array when no sites have valid enrollments', async () => {
+      const sites = [
+        { getId: () => 'site-1', getBaseURL: () => 'https://site1.com' },
+        { getId: () => 'site-2', getBaseURL: () => 'https://site2.com' },
+      ];
+
+      const mockEntitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'LLMO',
+      };
+
+      mockTierClient.checkValidEntitlement.resolves({ entitlement: mockEntitlement });
+      context.dataAccess.SiteEnrollmentV2.batchGetByKeys.resolves({
+        data: [],
+        unprocessed: [],
+      });
+
+      const result = await filterSitesForProductCode(context, organization, sites, 'LLMO');
+
+      expect(result).to.have.lengthOf(0);
+    });
+
+    it('returns empty array when no entitlement exists', async () => {
+      const sites = [
+        { getId: () => 'site-1', getBaseURL: () => 'https://site1.com' },
+      ];
+
+      mockTierClient.checkValidEntitlement.resolves({ entitlement: null });
+      context.dataAccess.SiteEnrollmentV2.batchGetByKeys.resolves({
+        data: [],
+        unprocessed: [],
+      });
+
+      const result = await filterSitesForProductCode(context, organization, sites, 'LLMO');
+
+      expect(result).to.have.lengthOf(0);
+    });
+
+    it('handles empty sites array', async () => {
+      const sites = [];
+
+      const mockEntitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'LLMO',
+      };
+
+      mockTierClient.checkValidEntitlement.resolves({ entitlement: mockEntitlement });
+      context.dataAccess.SiteEnrollmentV2.batchGetByKeys.resolves({
+        data: [],
+        unprocessed: [],
+      });
+
+      const result = await filterSitesForProductCode(context, organization, sites, 'LLMO');
+
+      expect(result).to.have.lengthOf(0);
+    });
+
+    it('builds correct composite keys for batch query', async () => {
+      const sites = [
+        { getId: () => 'site-1', getBaseURL: () => 'https://site1.com' },
+        { getId: () => 'site-2', getBaseURL: () => 'https://site2.com' },
+      ];
+
+      const mockEntitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'LLMO',
+      };
+
+      mockTierClient.checkValidEntitlement.resolves({ entitlement: mockEntitlement });
+      context.dataAccess.SiteEnrollmentV2.batchGetByKeys.resolves({
+        data: [],
+        unprocessed: [],
+      });
+
+      await filterSitesForProductCode(context, organization, sites, 'LLMO');
+
+      const expectedKeys = [
+        { entitlementId: 'entitlement-123', siteId: 'site-1' },
+        { entitlementId: 'entitlement-123', siteId: 'site-2' },
+      ];
+
+      expect(context.dataAccess.SiteEnrollmentV2.batchGetByKeys)
+        .to.have.been.calledWith(expectedKeys);
+    });
+
+    it('filters sites correctly when some enrollments match', async () => {
+      const sites = [
+        { getId: () => 'site-1', getBaseURL: () => 'https://site1.com' },
+        { getId: () => 'site-2', getBaseURL: () => 'https://site2.com' },
+        { getId: () => 'site-3', getBaseURL: () => 'https://site3.com' },
+        { getId: () => 'site-4', getBaseURL: () => 'https://site4.com' },
+      ];
+
+      const mockEntitlement = {
+        getId: () => 'entitlement-456',
+        getProductCode: () => 'ASO',
+      };
+
+      const mockEnrollments = [
+        { getSiteId: () => 'site-2', getEntitlementId: () => 'entitlement-456' },
+        { getSiteId: () => 'site-4', getEntitlementId: () => 'entitlement-456' },
+      ];
+
+      mockTierClient.checkValidEntitlement.resolves({ entitlement: mockEntitlement });
+      context.dataAccess.SiteEnrollmentV2.batchGetByKeys.resolves({
+        data: mockEnrollments,
+        unprocessed: [],
+      });
+
+      const result = await filterSitesForProductCode(context, organization, sites, 'ASO');
+
+      expect(result).to.have.lengthOf(2);
+      expect(result[0].getId()).to.equal('site-2');
+      expect(result[1].getId()).to.equal('site-4');
     });
   });
 });
