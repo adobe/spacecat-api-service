@@ -54,6 +54,7 @@ function SuggestionsController(ctx, sqs, env) {
   const AUTOFIX_UNGROUPED_OPPTY_TYPES = [
     'broken-backlinks',
     'form-accessibility',
+    'product-metatags',
   ];
 
   const DEFAULT_PAGE_SIZE = 100;
@@ -642,7 +643,9 @@ function SuggestionsController(ctx, sqs, env) {
     if (!isNonEmptyObject(context.data)) {
       return badRequest('No updates provided');
     }
-    const { suggestionIds, variations, action } = context.data;
+    const {
+      suggestionIds, variations, action, customData,
+    } = context.data;
 
     if (!isArray(suggestionIds)) {
       return badRequest('Request body must be an array of suggestionIds');
@@ -772,6 +775,7 @@ function SuggestionsController(ctx, sqs, env) {
           promiseTokenResponse,
           variations,
           action,
+          customData,
           { url },
         )),
       );
@@ -783,6 +787,9 @@ function SuggestionsController(ctx, sqs, env) {
         opportunityId,
         succeededSuggestions.map((s) => s.getId()),
         promiseTokenResponse,
+        variations,
+        action,
+        customData,
       );
     }
 
