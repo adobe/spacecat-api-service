@@ -441,7 +441,7 @@ describe('onboard-modal', () => {
           Configuration: configurationMock,
           Organization: organizationMock,
           Entitlement: entitlementMock,
-          SiteEnrollment: siteEnrollmentMock,
+          SiteEnrollmentV2: siteEnrollmentMock,
         },
         env: {
           DEMO_IMS_ORG: '1234567894ABCDEF12345678@AdobeOrg',

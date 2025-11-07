@@ -59,7 +59,7 @@ describe('Site Enrollment Controller', () => {
     Site: {
       findById: sandbox.stub().resolves(mockSite),
     },
-    SiteEnrollment: {
+    SiteEnrollmentV2: {
       allBySiteId: sandbox.stub().resolves(mockSiteEnrollments),
     },
   };
@@ -93,7 +93,7 @@ describe('Site Enrollment Controller', () => {
 
     // Reset stubs
     mockDataAccess.Site.findById = sandbox.stub().resolves(mockSite);
-    mockDataAccess.SiteEnrollment.allBySiteId = sandbox.stub().resolves(mockSiteEnrollments);
+    mockDataAccess.SiteEnrollmentV2.allBySiteId = sandbox.stub().resolves(mockSiteEnrollments);
 
     // Store reference to the mock instance for test manipulation
     mockAccessControlUtil.hasAccess = mockAccessControlUtilInstance.hasAccess;
@@ -209,7 +209,7 @@ describe('Site Enrollment Controller', () => {
 
     it('should return internal server error when database operation fails', async () => {
       const dbError = new Error('Database connection failed');
-      mockDataAccess.SiteEnrollment.allBySiteId.rejects(dbError);
+      mockDataAccess.SiteEnrollmentV2.allBySiteId.rejects(dbError);
 
       const context = {
         params: { siteId },

@@ -498,7 +498,7 @@ describe('Entitlements Controller', () => {
       mockDataAccess.Site = {
         findById: sandbox.stub(),
       };
-      mockDataAccess.SiteEnrollment = {
+      mockDataAccess.SiteEnrollmentV2 = {
         create: sandbox.stub(),
         allBySiteId: sandbox.stub().resolves([]),
       };
@@ -507,8 +507,8 @@ describe('Entitlements Controller', () => {
     it('should add enrollments successfully for valid data', async () => {
       mockDataAccess.Site.findById.withArgs(siteId1).resolves(mockSite1);
       mockDataAccess.Site.findById.withArgs(siteId2).resolves(mockSite2);
-      mockDataAccess.SiteEnrollment.create.onFirstCall().resolves(mockEnrollment1);
-      mockDataAccess.SiteEnrollment.create.onSecondCall().resolves(mockEnrollment2);
+      mockDataAccess.SiteEnrollmentV2.create.onFirstCall().resolves(mockEnrollment1);
+      mockDataAccess.SiteEnrollmentV2.create.onSecondCall().resolves(mockEnrollment2);
 
       const context = {
         params: { entitlementId },
@@ -639,7 +639,7 @@ describe('Entitlements Controller', () => {
 
     it('should handle errors when enrollment already exists', async () => {
       mockDataAccess.Site.findById.resolves(mockSite1);
-      mockDataAccess.SiteEnrollment.allBySiteId.resolves([mockEnrollment1]);
+      mockDataAccess.SiteEnrollmentV2.allBySiteId.resolves([mockEnrollment1]);
 
       const context = {
         params: { entitlementId },
@@ -661,7 +661,7 @@ describe('Entitlements Controller', () => {
     it('should handle partial success when some sites fail', async () => {
       mockDataAccess.Site.findById.withArgs(siteId1).resolves(mockSite1);
       mockDataAccess.Site.findById.withArgs(siteId2).resolves(null);
-      mockDataAccess.SiteEnrollment.create.resolves(mockEnrollment1);
+      mockDataAccess.SiteEnrollmentV2.create.resolves(mockEnrollment1);
 
       const context = {
         params: { entitlementId },
@@ -681,9 +681,9 @@ describe('Entitlements Controller', () => {
 
     it('should handle errors when SiteEnrollment.create fails', async () => {
       mockDataAccess.Site.findById.resolves(mockSite1);
-      mockDataAccess.SiteEnrollment.allBySiteId.resolves([]);
+      mockDataAccess.SiteEnrollmentV2.allBySiteId.resolves([]);
       const createError = new Error('Failed to create enrollment');
-      mockDataAccess.SiteEnrollment.create.rejects(createError);
+      mockDataAccess.SiteEnrollmentV2.create.rejects(createError);
 
       const context = {
         params: { entitlementId },
@@ -800,14 +800,14 @@ describe('Entitlements Controller', () => {
     };
 
     beforeEach(() => {
-      mockDataAccess.SiteEnrollment = {
+      mockDataAccess.SiteEnrollmentV2 = {
         findById: sandbox.stub(),
       };
     });
 
     it('should delete enrollments successfully for valid data', async () => {
-      mockDataAccess.SiteEnrollment.findById.withArgs(enrollmentId1).resolves(mockEnrollment1);
-      mockDataAccess.SiteEnrollment.findById.withArgs(enrollmentId2).resolves(mockEnrollment2);
+      mockDataAccess.SiteEnrollmentV2.findById.withArgs(enrollmentId1).resolves(mockEnrollment1);
+      mockDataAccess.SiteEnrollmentV2.findById.withArgs(enrollmentId2).resolves(mockEnrollment2);
 
       const context = {
         params: {},
@@ -890,7 +890,7 @@ describe('Entitlements Controller', () => {
     });
 
     it('should handle errors when enrollment does not exist', async () => {
-      mockDataAccess.SiteEnrollment.findById.resolves(null);
+      mockDataAccess.SiteEnrollmentV2.findById.resolves(null);
 
       const context = {
         params: {},
@@ -910,8 +910,8 @@ describe('Entitlements Controller', () => {
     });
 
     it('should handle partial success when some enrollments fail', async () => {
-      mockDataAccess.SiteEnrollment.findById.withArgs(enrollmentId1).resolves(mockEnrollment1);
-      mockDataAccess.SiteEnrollment.findById.withArgs(enrollmentId2).resolves(null);
+      mockDataAccess.SiteEnrollmentV2.findById.withArgs(enrollmentId1).resolves(mockEnrollment1);
+      mockDataAccess.SiteEnrollmentV2.findById.withArgs(enrollmentId2).resolves(null);
 
       const context = {
         params: {},
@@ -938,8 +938,8 @@ describe('Entitlements Controller', () => {
         remove: sandbox.stub().rejects(removeError),
       };
 
-      mockDataAccess.SiteEnrollment.findById.withArgs(enrollmentId1).resolves(failingEnrollment);
-      mockDataAccess.SiteEnrollment.findById.withArgs(enrollmentId2).resolves(mockEnrollment2);
+      mockDataAccess.SiteEnrollmentV2.findById.withArgs(enrollmentId1).resolves(failingEnrollment);
+      mockDataAccess.SiteEnrollmentV2.findById.withArgs(enrollmentId2).resolves(mockEnrollment2);
 
       const context = {
         params: {},
@@ -959,7 +959,7 @@ describe('Entitlements Controller', () => {
     it('should handle errors during enrollment removal in the loop', async () => {
       // This tests the inner catch block when findById throws an error
       const dbError = new Error('Database error during findById');
-      mockDataAccess.SiteEnrollment.findById.rejects(dbError);
+      mockDataAccess.SiteEnrollmentV2.findById.rejects(dbError);
 
       const context = {
         params: {},
@@ -981,7 +981,7 @@ describe('Entitlements Controller', () => {
       // with a Proxy dataAccess that throws when SiteEnrollment is accessed
       const proxyDataAccess = new Proxy(mockDataAccess, {
         get(target, prop) {
-          if (prop === 'SiteEnrollment') {
+          if (prop === 'SiteEnrollmentV2') {
             throw new Error('DataAccess error');
           }
           return target[prop];

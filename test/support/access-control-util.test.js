@@ -113,7 +113,7 @@ describe('Access Control Util', () => {
         Entitlement: { TIER: { FREE_TRIAL: 'free_trial', PAID: 'paid' }, findByOrganizationIdAndProductCode: sinon.stub() },
         TrialUser: { STATUS: { REGISTERED: 'registered' }, findByEmailId: sinon.stub() },
         OrganizationIdentityProvider: {},
-        SiteEnrollment: { findBySiteId: sinon.stub() },
+        SiteEnrollmentV2: { findBySiteId: sinon.stub() },
       },
     };
   });
@@ -565,7 +565,7 @@ describe('Access Control Util', () => {
     let mockEntitlement;
     let mockTrialUser;
     let mockIdentityProvider;
-    let mockSiteEnrollment;
+    let mockSiteEnrollmentV2;
     let mockAuthInfo;
     let mockTierClient;
 
@@ -600,7 +600,7 @@ describe('Access Control Util', () => {
         create: sinon.stub(),
       };
 
-      mockSiteEnrollment = {
+      mockSiteEnrollmentV2 = {
         allBySiteId: sinon.stub(),
       };
 
@@ -639,7 +639,7 @@ describe('Access Control Util', () => {
           Entitlement: mockEntitlement,
           TrialUser: mockTrialUser,
           OrganizationIdentityProvider: mockIdentityProvider,
-          SiteEnrollment: mockSiteEnrollment,
+          SiteEnrollmentV2: mockSiteEnrollmentV2,
         },
       };
 
@@ -771,7 +771,7 @@ describe('Access Control Util', () => {
 
       await expect(util.validateEntitlement(mockOrg, null, 'llmo')).to.not.be.rejected;
 
-      expect(mockSiteEnrollment.allBySiteId).to.not.have.been.called;
+      expect(mockSiteEnrollmentV2.allBySiteId).to.not.have.been.called;
     });
 
     it('should create trial user when tier is free_trial and trial user does not exist', async () => {
@@ -1018,7 +1018,7 @@ describe('Access Control Util', () => {
           Entitlement: mockEntitlement,
           TrialUser: mockTrialUser,
           OrganizationIdentityProvider: mockIdentityProvider,
-          SiteEnrollment: mockSiteEnrollment,
+          SiteEnrollmentV2: mockSiteEnrollmentV2,
         },
       };
 
@@ -1071,7 +1071,7 @@ describe('Access Control Util', () => {
           Entitlement: mockEntitlement,
           TrialUser: mockTrialUser,
           OrganizationIdentityProvider: mockIdentityProvider,
-          SiteEnrollment: mockSiteEnrollment,
+          SiteEnrollmentV2: mockSiteEnrollmentV2,
         },
       };
 
@@ -1087,7 +1087,7 @@ describe('Access Control Util', () => {
     let mockEntitlement;
     let mockTrialUser;
     let mockIdentityProvider;
-    let mockSiteEnrollment;
+    let mockSiteEnrollmentV2;
     let mockTierClient;
 
     beforeEach(() => {
@@ -1109,7 +1109,7 @@ describe('Access Control Util', () => {
         allByOrganizationId: sinon.stub(),
       };
 
-      mockSiteEnrollment = {
+      mockSiteEnrollmentV2 = {
         allBySiteId: sinon.stub(),
       };
 
@@ -1144,7 +1144,7 @@ describe('Access Control Util', () => {
           Entitlement: mockEntitlement,
           TrialUser: mockTrialUser,
           OrganizationIdentityProvider: mockIdentityProvider,
-          SiteEnrollment: mockSiteEnrollment,
+          SiteEnrollmentV2: mockSiteEnrollmentV2,
         },
       };
 
@@ -1166,7 +1166,7 @@ describe('Access Control Util', () => {
       mockTierClient.checkValidEntitlement.resolves({ entitlement });
 
       // Mock site enrollment to return empty array (no site entitlement)
-      mockSiteEnrollment.allBySiteId.resolves([]);
+      mockSiteEnrollmentV2.allBySiteId.resolves([]);
 
       await expect(util.hasAccess(site, '', 'llmo')).to.be.rejectedWith('Missing enrollment for site');
 
@@ -1240,7 +1240,7 @@ describe('Access Control Util', () => {
         },
       ];
 
-      mockSiteEnrollment.allBySiteId.resolves(mockSiteEnrollments);
+      mockSiteEnrollmentV2.allBySiteId.resolves(mockSiteEnrollments);
 
       await expect(util.hasAccess(site, '', 'llmo')).to.be.rejectedWith('Missing enrollment for site');
 
@@ -1253,7 +1253,7 @@ describe('Access Control Util', () => {
       const mockEntitlement = {};
       const mockTrialUser = {};
       const mockIdentityProvider = {};
-      const mockSiteEnrollment = {};
+      const mockSiteEnrollmentV2 = {};
 
       const testContext = {
         log: {
@@ -1276,7 +1276,7 @@ describe('Access Control Util', () => {
           Entitlement: mockEntitlement,
           TrialUser: mockTrialUser,
           OrganizationIdentityProvider: mockIdentityProvider,
-          SiteEnrollment: mockSiteEnrollment,
+          SiteEnrollmentV2: mockSiteEnrollmentV2,
         },
       };
 
@@ -1285,7 +1285,7 @@ describe('Access Control Util', () => {
       expect(util.Entitlement).to.equal(mockEntitlement);
       expect(util.TrialUser).to.equal(mockTrialUser);
       expect(util.IdentityProvider).to.equal(mockIdentityProvider);
-      expect(util.SiteEnrollment).to.equal(mockSiteEnrollment);
+      expect(util.SiteEnrollmentV2).to.equal(mockSiteEnrollmentV2);
     });
   });
 });

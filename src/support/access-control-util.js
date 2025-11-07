@@ -55,7 +55,7 @@ export default class AccessControlUtil {
       }
       this.authInfo = attributes?.authInfo;
       this.Entitlement = context.dataAccess.Entitlement;
-      this.SiteEnrollment = context.dataAccess.SiteEnrollment;
+      this.SiteEnrollmentV2 = context.dataAccess.SiteEnrollmentV2;
       this.TrialUser = context.dataAccess.TrialUser;
       this.IdentityProvider = context.dataAccess.OrganizationIdentityProvider;
       this.xProductHeader = pathInfo.headers[X_PRODUCT_HEADER];

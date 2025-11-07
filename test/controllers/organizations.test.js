@@ -210,7 +210,7 @@ describe('Organizations Controller', () => {
       Entitlement: {
         findByOrganizationIdAndProductCode: sinon.stub(),
       },
-      SiteEnrollment: {
+      SiteEnrollmentV2: {
         allBySiteId: sinon.stub(),
       },
     };
@@ -486,7 +486,7 @@ describe('Organizations Controller', () => {
     };
 
     mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves(mockEntitlement);
-    mockDataAccess.SiteEnrollment.allBySiteId.resolves([mockSiteEnrollment]);
+    mockDataAccess.SiteEnrollmentV2.allBySiteId.resolves([mockSiteEnrollment]);
 
     const result = await organizationsController.getSitesForOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...context });
     const resultSites = await result.json();

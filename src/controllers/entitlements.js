@@ -151,7 +151,7 @@ function EntitlementsController(ctx) {
         return notFound('Entitlement not found');
       }
 
-      const { SiteEnrollment, Site } = dataAccess;
+      const { SiteEnrollmentV2, Site } = dataAccess;
 
       // Process each siteId in parallel
       const enrollmentPromises = siteIds.map(async (siteId) => {
@@ -167,7 +167,7 @@ function EntitlementsController(ctx) {
           }
 
           // Check if enrollment already exists
-          const existingEnrollments = await SiteEnrollment.allBySiteId(siteId);
+          const existingEnrollments = await SiteEnrollmentV2.allBySiteId(siteId);
           const existingEnrollment = existingEnrollments.find(
             (enrollment) => enrollment.getEntitlementId() === entitlementId,
           );
@@ -181,7 +181,7 @@ function EntitlementsController(ctx) {
           }
 
           // Create enrollment
-          const enrollment = await SiteEnrollment.create({
+          const enrollment = await SiteEnrollmentV2.create({
             siteId,
             entitlementId,
           });
@@ -274,13 +274,13 @@ function EntitlementsController(ctx) {
     }
 
     try {
-      const { SiteEnrollment } = dataAccess;
+      const { SiteEnrollmentV2 } = dataAccess;
 
       // Process each enrollmentId in parallel
       const deletionPromises = enrollmentIds.map(async (enrollmentId) => {
         try {
           // Verify enrollment exists
-          const enrollment = await SiteEnrollment.findById(enrollmentId);
+          const enrollment = await SiteEnrollmentV2.findById(enrollmentId);
           if (!enrollment) {
             return {
               success: false,

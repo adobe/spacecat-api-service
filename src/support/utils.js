@@ -1130,7 +1130,7 @@ export const onboardSingleSite = async (
  */
 export const filterSitesForProductCode = async (context, organization, sites, productCode) => {
   // for every site we will create tier client and will check valid entitlement and enrollment
-  const { SiteEnrollment } = context.dataAccess;
+  const { SiteEnrollmentV2 } = context.dataAccess;
   const tierClient = TierClient.createForOrg(context, organization, productCode);
   const { entitlement } = await tierClient.checkValidEntitlement();
 
@@ -1147,7 +1147,7 @@ export const filterSitesForProductCode = async (context, organization, sites, pr
     /* eslint-disable no-await-in-loop */
     const batchResults = await Promise.all(
       batch.map(async (site) => {
-        const siteEnrollments = await SiteEnrollment.allBySiteId(site.getId());
+        const siteEnrollments = await SiteEnrollmentV2.allBySiteId(site.getId());
         const validSiteEnrollment = siteEnrollments
           .find((se) => se.getEntitlementId() === entitlement?.getId());
         return validSiteEnrollment ? site : null;

@@ -203,7 +203,7 @@ describe('LlmoController', () => {
         }),
         TIERS: { FREE_TRIAL: 'free_trial' },
       },
-      SiteEnrollment: {
+      SiteEnrollmentV2: {
         allBySiteId: sinon.stub().resolves([{
           getEntitlementId: sinon.stub().returns('entitlement-123'),
         }]),

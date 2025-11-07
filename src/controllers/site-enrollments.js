@@ -41,7 +41,7 @@ function SiteEnrollmentsController(ctx) {
     throw new Error('Data access required');
   }
 
-  const { SiteEnrollment, Site } = dataAccess;
+  const { SiteEnrollmentV2, Site } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
@@ -68,7 +68,7 @@ function SiteEnrollmentsController(ctx) {
         return forbidden('Access denied to this site');
       }
 
-      const siteEnrollments = await SiteEnrollment.allBySiteId(siteId);
+      const siteEnrollments = await SiteEnrollmentV2.allBySiteId(siteId);
       const enrollments = siteEnrollments.map(
         (enrollment) => SiteEnrollmentDto.toJSON(enrollment),
       );

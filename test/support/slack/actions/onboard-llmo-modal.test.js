@@ -151,7 +151,7 @@ describe('onboard-llmo-modal', () => {
         Configuration: mockConfiguration,
         Organization: mockOrganization,
         Entitlement: mockEntitlement,
-        SiteEnrollment: mockSiteEnrollment,
+        SiteEnrollmentV2: mockSiteEnrollment,
 
       },
       env: {
