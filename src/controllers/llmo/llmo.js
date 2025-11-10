@@ -41,6 +41,7 @@ import {
   performLlmoOffboarding,
 } from './llmo-onboarding.js';
 import LlmoQuerySpecificCache from './llmo-query-specific.js';
+import LlmoQueryFileCache from './llmo-query.js';
 
 const { readConfig, writeConfig } = llmo;
 const { llmoConfig: llmoConfigSchema } = schemas;
@@ -924,7 +925,7 @@ function LlmoController(ctx) {
   };
 
   const queryFile = async (context) => {
-    const llmoQuery = new LlmoQuerySpecificCache(getSiteAndValidateLlmo);
+    const llmoQuery = new LlmoQueryFileCache(getSiteAndValidateLlmo);
     return llmoQuery.query(context);
   };
 
