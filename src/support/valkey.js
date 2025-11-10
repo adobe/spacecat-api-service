@@ -178,6 +178,60 @@ class ValkeyCache {
   }
 
   /**
+   * Clear all cached data matching the LLMO cache pattern
+   * Uses SCAN to safely iterate through keys without blocking Redis
+   * @returns {Promise<{success: boolean, deletedCount: number}>} -
+   * Result with success status and count of deleted keys
+   */
+  async clearAll() {
+    // Lazy connect on first use
+    await this.connect();
+    if (!this.isConnected || !this.client) {
+      this.log.warn('Valkey not connected, skipping cache clear');
+      return { success: false, deletedCount: 0 };
+    }
+
+    try {
+      const pattern = 'llmo:file:*';
+      this.log.info(`Clearing all Valkey cache entries matching pattern: ${pattern}`);
+
+      let cursor = 0;
+      let deletedCount = 0;
+      const keysToDelete = [];
+
+      // Use SCAN to iterate through keys matching the pattern
+      /* eslint-disable no-await-in-loop */
+      do {
+        const result = await this.client.scan(cursor, {
+          MATCH: pattern,
+          COUNT: 100, // Scan 100 keys at a time
+        });
+
+        cursor = result.cursor;
+        const { keys } = result;
+
+        if (keys.length > 0) {
+          keysToDelete.push(...keys);
+        }
+      } while (cursor !== 0);
+      /* eslint-enable no-await-in-loop */
+
+      // Delete all found keys
+      if (keysToDelete.length > 0) {
+        this.log.info(`Found ${keysToDelete.length} keys to delete`);
+        await this.client.del(keysToDelete);
+        deletedCount = keysToDelete.length;
+      }
+
+      this.log.info(`Successfully cleared ${deletedCount} cache entries`);
+      return { success: true, deletedCount };
+    } catch (error) {
+      this.log.error(`Error clearing Valkey cache: ${error.message}`);
+      return { success: false, deletedCount: 0 };
+    }
+  }
+
+  /**
    * Disconnect from Valkey
    */
   async disconnect() {
