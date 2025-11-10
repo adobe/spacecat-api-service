@@ -1,3 +1,10 @@
+## [1.227.1](https://github.com/adobe/spacecat-api-service/compare/v1.227.0...v1.227.1) (2025-11-10)
+
+
+### Bug Fixes
+
+* **data-access:** bump dep to 2.80.2 ([#1465](https://github.com/adobe/spacecat-api-service/issues/1465)) ([0dded2d](https://github.com/adobe/spacecat-api-service/commit/0dded2d7413391af1596010375596c6fa05bca46))
+
 # [1.227.0](https://github.com/adobe/spacecat-api-service/compare/v1.226.0...v1.227.0) (2025-11-10)
 
 
