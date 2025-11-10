@@ -1,3 +1,31 @@
+## [1.225.6](https://github.com/adobe/spacecat-api-service/compare/v1.225.5...v1.225.6) (2025-11-10)
+
+
+### Bug Fixes
+
+* update enrollment query ([#1463](https://github.com/adobe/spacecat-api-service/issues/1463)) ([11c13a9](https://github.com/adobe/spacecat-api-service/commit/11c13a931556d4bf7db373102ddfbd7b5a6d737a))
+
+## [1.225.5](https://github.com/adobe/spacecat-api-service/compare/v1.225.4...v1.225.5) (2025-11-09)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1461](https://github.com/adobe/spacecat-api-service/issues/1461)) ([ff14d5e](https://github.com/adobe/spacecat-api-service/commit/ff14d5ebf829df1dfc6e6c750397a11d71620c98))
+
+## [1.225.4](https://github.com/adobe/spacecat-api-service/compare/v1.225.3...v1.225.4) (2025-11-08)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#1460](https://github.com/adobe/spacecat-api-service/issues/1460)) ([c07dfeb](https://github.com/adobe/spacecat-api-service/commit/c07dfebd6a3134144550024551c3fa33e8746ff3))
+
+## [1.225.3](https://github.com/adobe/spacecat-api-service/compare/v1.225.2...v1.225.3) (2025-11-07)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1455](https://github.com/adobe/spacecat-api-service/issues/1455)) ([85f7912](https://github.com/adobe/spacecat-api-service/commit/85f7912ebca004f4d4e0014aa6368affbfe1adf8))
+
 ## [1.225.2](https://github.com/adobe/spacecat-api-service/compare/v1.225.1...v1.225.2) (2025-11-07)
 
 

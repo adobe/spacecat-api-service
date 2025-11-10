@@ -383,6 +383,7 @@ describe('Suggestions Controller', () => {
     isHandlerEnabledForSite.withArgs('alt-text-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('meta-tags-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('form-accessibility-auto-fix', site).returns(true);
+    isHandlerEnabledForSite.withArgs('product-metatags-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('broken-backlinks-auto-fix', siteNotEnabled).returns(false);
     mockOpportunity = {
       findById: sandbox.stub(),
@@ -2332,6 +2333,176 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.metadata).to.have.property('success', 2);
       // Verify SQS was called once with all suggestions, not grouped by URL
       expect(mockSqs.sendMessage).to.have.been.calledOnce;
+    });
+
+    it('triggers autofixSuggestion for product-metatags (non-grouped)', async () => {
+      opportunity.getType = sandbox.stub().returns('product-metatags');
+      const productMetatagsSuggs = [
+        {
+          id: SUGGESTION_IDS[0],
+          opportunityId: OPPORTUNITY_ID,
+          type: 'METADATA_UPDATE',
+          rank: 1,
+          status: 'NEW',
+          data: {
+            url: 'https://www.example.com/product1',
+            metaTags: { description: 'Product description' },
+          },
+          updatedAt: new Date(),
+        },
+        {
+          id: SUGGESTION_IDS[1],
+          opportunityId: OPPORTUNITY_ID,
+          type: 'METADATA_UPDATE',
+          rank: 2,
+          status: 'NEW',
+          data: {
+            url: 'https://www.example.com/product2',
+            metaTags: { title: 'Product title' },
+          },
+          updatedAt: new Date(),
+        },
+      ];
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(productMetatagsSuggs[0]),
+          mockSuggestionEntity(productMetatagsSuggs[1])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...productMetatagsSuggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...productMetatagsSuggs[1], status: 'IN_PROGRESS' }),
+      ]);
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.metadata).to.have.property('total', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('success', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('failed', 0);
+      expect(bulkPatchResponse.suggestions).to.have.property('length', 2);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 200);
+      expect(bulkPatchResponse.suggestions[1]).to.have.property('statusCode', 200);
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'IN_PROGRESS');
+      expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'IN_PROGRESS');
+      // Verify SQS was called once (non-grouped behavior)
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+    });
+
+    it('triggers autofixSuggestion with customData for non-grouped type', async () => {
+      opportunity.getType = sandbox.stub().returns('product-metatags');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0]), mockSuggestionEntity(suggs[2])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' }),
+      ]);
+
+      const customData = {
+        workflowId: 'test-workflow-123',
+        additionalParam: 'test-value',
+      };
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]],
+          customData,
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.metadata).to.have.property('success', 2);
+
+      // Verify sendAutofixMessage was called with customData
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const sqsCallArgs = mockSqs.sendMessage.firstCall.args;
+      expect(sqsCallArgs[1]).to.have.property('customData');
+      expect(sqsCallArgs[1].customData).to.deep.equal(customData);
+    });
+
+    it('triggers autofixSuggestion without customData for grouped type', async () => {
+      opportunity.getType = sandbox.stub().returns('form-accessibility');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(formAccessibilitySuggs[0])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...formAccessibilitySuggs[0], status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          // No customData provided
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.metadata).to.have.property('success', 1);
+
+      // Verify sendAutofixMessage was called without customData (undefined)
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const sqsCallArgs = mockSqs.sendMessage.firstCall.args;
+      expect(sqsCallArgs[1]).to.not.have.property('customData');
+    });
+
+    it('triggers autofixSuggestion with empty customData object for non-grouped type', async () => {
+      opportunity.getType = sandbox.stub().returns('product-metatags');
+      const productMetatagsSugg = {
+        id: SUGGESTION_IDS[0],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'METADATA_UPDATE',
+        rank: 1,
+        status: 'NEW',
+        data: {
+          url: 'https://www.example.com/product1',
+          metaTags: { description: 'Product description' },
+        },
+        updatedAt: new Date(),
+      };
+      mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(productMetatagsSugg)]);
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...productMetatagsSugg, status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          customData: {},
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.metadata).to.have.property('success', 1);
+
+      // Verify sendAutofixMessage was called with empty customData object
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const sqsCallArgs = mockSqs.sendMessage.firstCall.args;
+      expect(sqsCallArgs[1]).to.have.property('customData');
+      expect(sqsCallArgs[1].customData).to.deep.equal({});
     });
 
     it('auto-fix suggestions status returns bad request if no site ID is passed', async () => {
