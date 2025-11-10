@@ -19,6 +19,7 @@ import {
   tracingFetch as fetch,
   isValidUrl,
   isObject,
+  isNonEmptyObject,
   resolveCanonicalUrl, isValidIMSOrgId,
   detectAEMVersion,
   detectLocale,
@@ -1136,7 +1137,7 @@ export const filterSitesForProductCode = async (context, organization, sites, pr
   const tierClient = TierClient.createForOrg(context, organization, productCode);
   const { entitlement } = await tierClient.checkValidEntitlement();
 
-  if (!entitlement) {
+  if (!isNonEmptyObject(entitlement)) {
     return [];
   }
 
