@@ -87,7 +87,6 @@ export default class LlmoQuery {
         signal: controller.signal,
       });
       clearTimeout(timeoutId);
-      const responseTime = Date.now() - sourceFetchStartTime;
 
       if (!response.ok) {
         log.error(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
@@ -98,7 +97,7 @@ export default class LlmoQuery {
       const data = await response.json();
       const totalFetchTime = Date.now() - sourceFetchStartTime;
 
-      log.info(`✓ Fetch from HELIX ${cacheFilePath} (network time: ${responseTime}ms, JSON parse time: ${totalFetchTime - responseTime}ms, total: ${totalFetchTime}ms)`);
+      log.info(`✓ Fetch from HELIX ${cacheFilePath}: ${totalFetchTime}ms)`);
 
       // Cache the raw data (async, don't wait for it)
       if (cache) {
