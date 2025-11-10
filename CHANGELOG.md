@@ -1,3 +1,10 @@
+## [1.225.6](https://github.com/adobe/spacecat-api-service/compare/v1.225.5...v1.225.6) (2025-11-10)
+
+
+### Bug Fixes
+
+* update enrollment query ([#1463](https://github.com/adobe/spacecat-api-service/issues/1463)) ([11c13a9](https://github.com/adobe/spacecat-api-service/commit/11c13a931556d4bf7db373102ddfbd7b5a6d737a))
+
 ## [1.225.5](https://github.com/adobe/spacecat-api-service/compare/v1.225.4...v1.225.5) (2025-11-09)
 
 
