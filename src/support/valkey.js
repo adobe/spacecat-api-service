@@ -219,8 +219,13 @@ class ValkeyCache {
       // Delete all found keys
       if (keysToDelete.length > 0) {
         this.log.info(`Found ${keysToDelete.length} keys to delete`);
-        await this.client.del(keysToDelete);
-        deletedCount = keysToDelete.length;
+        keysToDelete.forEach((key) => {
+          this.log.info(`Deleting key: ${key}`);
+        });
+        // await this.client.del(keysToDelete);
+        // deletedCount = keysToDelete.length;
+
+        deletedCount = 0;
       }
 
       this.log.info(`Successfully cleared ${deletedCount} cache entries`);
