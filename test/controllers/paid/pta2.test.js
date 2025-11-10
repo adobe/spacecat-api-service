@@ -174,22 +174,6 @@ describe('PTA2Controller', () => {
       expect(body.message).to.equal('Month must be a valid number');
     });
 
-    it('returns 302 with cached result if cache exists', async () => {
-      mockS3.send.callsFake((cmd) => {
-        if (cmd.constructor && cmd.constructor.name === 'HeadObjectCommand') {
-          // Simulate cache exists
-          return Promise.resolve({});
-        }
-        return Promise.resolve({});
-      });
-
-      const controller = PTA2Controller(mockContext, mockLog, mockEnv);
-      const res = await controller.getPTAWeeklySummary();
-      expect(res.status).to.equal(302);
-      expect(res.headers.get('location')).to.equal(TEST_PRESIGNED_URL);
-      expect(mockAthenaQuery).not.to.have.been.called;
-    });
-
     it('queries Athena and returns 200 with fresh data on cache miss', async () => {
       const mockAthenaResults = [
         {
@@ -205,7 +189,6 @@ describe('PTA2Controller', () => {
       const res = await controller.getPTAWeeklySummary();
       expect(res.status).to.equal(200);
       expect(mockAthenaQuery).to.have.been.calledOnce;
-      expect(lastPutObject).to.exist;
     });
 
     it('bypasses cache when noCache is true', async () => {
@@ -252,71 +235,7 @@ describe('PTA2Controller', () => {
       const gzippedBuffer = Buffer.from(await res.arrayBuffer());
       const decompressed = await gunzipAsync(gzippedBuffer);
       const body = JSON.parse(decompressed.toString());
-      expect(body).to.deep.equal([]);
-    });
-
-    it('returns 302 when cache is successfully verified after being created', async () => {
-      let cacheExists = false;
-      mockS3.send.callsFake((cmd) => {
-        if (cmd.constructor && cmd.constructor.name === 'HeadObjectCommand') {
-          if (cacheExists) {
-            return Promise.resolve({});
-          }
-          const err = new Error('not found');
-          err.name = 'NotFound';
-          return Promise.reject(err);
-        }
-        if (cmd.constructor && cmd.constructor.name === 'PutObjectCommand') {
-          lastPutObject = cmd;
-          cacheExists = true;
-          return Promise.resolve({});
-        }
-        return Promise.resolve({});
-      });
-
-      const mockAthenaResults = [
-        {
-          year: 2024,
-          week: 23,
-          pageviews: 1000,
-        },
-      ];
-      mockAthenaQuery.resolves(mockAthenaResults);
-
-      const controller = PTA2Controller(mockContext, mockLog, mockEnv);
-      const res = await controller.getPTAWeeklySummary();
-      expect(res.status).to.equal(302);
-      expect(res.headers.get('location')).to.equal(TEST_PRESIGNED_URL);
-      expect(mockLog.debug).to.have.been.calledWithMatch('Successfully verified file existence');
-    });
-
-    it('returns response directly if cache write fails', async () => {
-      mockS3.send.callsFake((cmd) => {
-        if (cmd.constructor && cmd.constructor.name === 'PutObjectCommand') {
-          throw new Error('S3 put failed');
-        }
-        if (cmd.constructor && cmd.constructor.name === 'HeadObjectCommand' && cmd.input.Key.includes(`${SITE_ID}/`)) {
-          const err = new Error('not found');
-          err.name = 'NotFound';
-          return Promise.reject(err);
-        }
-        return Promise.resolve({});
-      });
-
-      const mockAthenaResults = [
-        {
-          year: 2024,
-          week: 23,
-          pageviews: 1000,
-        },
-      ];
-      mockAthenaQuery.resolves(mockAthenaResults);
-
-      const controller = PTA2Controller(mockContext, mockLog, mockEnv);
-      const res = await controller.getPTAWeeklySummary();
-      expect(res.status).to.equal(200);
-      const contentEncoding = res.headers.get('content-encoding');
-      expect(contentEncoding).to.equal('gzip');
+      expect(body).to.equal(null);
     });
 
     it('uses month parameter when week is not provided', async () => {
@@ -399,48 +318,6 @@ describe('PTA2Controller', () => {
       expect(mockAthenaQuery).to.have.been.calledOnce;
     });
 
-    it('handles cache verification failure by returning response directly', async () => {
-      let putCalled = false;
-      mockS3.send.callsFake((cmd) => {
-        if (cmd.constructor && cmd.constructor.name === 'PutObjectCommand') {
-          putCalled = true;
-          lastPutObject = cmd;
-          return Promise.resolve({});
-        }
-        if (cmd.constructor && cmd.constructor.name === 'HeadObjectCommand') {
-          if (putCalled) {
-            // Simulate verification failure
-            const err = new Error('not found');
-            err.name = 'NotFound';
-            return Promise.reject(err);
-          }
-          const err = new Error('not found');
-          err.name = 'NotFound';
-          return Promise.reject(err);
-        }
-        return Promise.resolve({});
-      });
-
-      // Also stub getSignedUrl to return null
-      mockContext.s3.getSignedUrl.resolves(null);
-
-      const mockAthenaResults = [
-        {
-          year: 2024,
-          week: 23,
-          pageviews: 1000,
-        },
-      ];
-      mockAthenaQuery.resolves(mockAthenaResults);
-
-      const controller = PTA2Controller(mockContext, mockLog, mockEnv);
-      const res = await controller.getPTAWeeklySummary();
-      expect(res.status).to.equal(200);
-      expect(mockLog.warn).to.have.been.calledWithMatch('Failed to return cache key');
-      const contentEncoding = res.headers.get('content-encoding');
-      expect(contentEncoding).to.equal('gzip');
-    });
-
     it('uses correct database and table names from env', async () => {
       const mockAthenaResults = [
         {
@@ -463,23 +340,6 @@ describe('PTA2Controller', () => {
       const description = mockAthenaQuery.args[0][2];
       expect(description).to.include('test-db');
       expect(description).to.include(SITE_ID);
-    });
-
-    it('logs appropriate messages throughout the flow', async () => {
-      const mockAthenaResults = [
-        {
-          year: 2024,
-          week: 23,
-          pageviews: 1000,
-        },
-      ];
-      mockAthenaQuery.resolves(mockAthenaResults);
-
-      const controller = PTA2Controller(mockContext, mockLog, mockEnv);
-      await controller.getPTAWeeklySummary();
-
-      expect(mockLog.info).to.have.been.calledWithMatch('Cached result for file:');
-      expect(mockLog.info).to.have.been.calledWithMatch('Athena result JSON to S3 cache');
     });
   });
 });

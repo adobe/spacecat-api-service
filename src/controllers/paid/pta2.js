@@ -15,24 +15,15 @@ import {
   notFound,
   forbidden,
   badRequest,
-  found,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   AWSAthenaClient, getPTASummaryQuery, PTASummaryResponseDto,
 } from '@adobe/spacecat-shared-athena-client';
 import crypto from 'crypto';
 import AccessControlUtil from '../../support/access-control-util.js';
-import {
-  getS3CachedResult,
-  addResultJsonToCache,
-  fileExists,
-  getSignedUrlWithRetries,
-} from './caching-helper.js';
 
-function getCacheKey(siteId, query, cacheLocation) {
-  const outPrefix = crypto.createHash('md5').update(query).digest('hex');
-  const cacheKey = `${cacheLocation}/${siteId}/${outPrefix}.json`;
-  return { cacheKey, outPrefix };
+function getOutPrefix(query) {
+  return crypto.createHash('md5').update(query).digest('hex');
 }
 
 function validateTemporalParams({ year, week, month }) {
@@ -80,10 +71,8 @@ function validateTemporalParams({ year, week, month }) {
   }
 }
 
-const isTrue = (value) => value === true || value === 'true';
-
 function PTA2Controller(context, log, env) {
-  const { dataAccess, s3 } = context;
+  const { dataAccess } = context;
   const { Site } = dataAccess;
 
   const {
@@ -94,26 +83,9 @@ function PTA2Controller(context, log, env) {
 
   // constants
   const ATHENA_TEMP_FOLDER = `s3://${bucketName}/rum-metrics-compact/temp/out`;
-  const CACHE_LOCATION = `s3://${bucketName}/rum-metrics-compact/cache`;
-
-  async function tryGetCacheResult(siteId, query, noCache) {
-    const { cacheKey, outPrefix } = getCacheKey(siteId, query, CACHE_LOCATION);
-    if (isTrue(noCache)) {
-      return { cachedResultUrl: null, cacheKey, outPrefix };
-    }
-    const maxAttempts = 1;
-    if (await fileExists(s3, cacheKey, log, maxAttempts)) {
-      const ignoreNotFound = true;
-      const cachedUrl = await getS3CachedResult(s3, cacheKey, log, ignoreNotFound);
-      return { cachedResultUrl: cachedUrl, cacheKey, outPrefix };
-    }
-    log.info(`Cached result for file: ${cacheKey} does not exist`);
-    return { cachedResultUrl: null, cacheKey, outPrefix };
-  }
 
   async function getPTAWeeklySummary() {
     /* c8 ignore next 1 */
-    const requestId = context.invocation?.requestId;
     const siteId = context.params?.siteId;
     const site = await Site.findById(siteId);
     if (!site) {
@@ -127,7 +99,7 @@ function PTA2Controller(context, log, env) {
 
     // validate input params
     const {
-      year, week, month, noCache,
+      year, week, month,
     } = context.data;
 
     const temporal = validateTemporalParams({ year, week, month });
@@ -138,7 +110,6 @@ function PTA2Controller(context, log, env) {
     const { yearInt, weekInt, monthInt } = temporal.values;
 
     const tableName = `${rumMetricsDatabase}.${rumMetricsCompactTable}`;
-
     const description = `fetch PTA2 Weekly Summary data db: ${rumMetricsDatabase}| siteKey: ${siteId} | year: ${year} | month: ${month} | week: ${week} } `;
 
     // build query
@@ -150,17 +121,7 @@ function PTA2Controller(context, log, env) {
       tableName,
     });
 
-    // first try to get from cache
-    const { cachedResultUrl, cacheKey, outPrefix } = await tryGetCacheResult(
-      siteId,
-      query,
-      noCache,
-    );
-
-    if (cachedResultUrl) {
-      log.info(`Successfully fetched presigned URL for cached result file: ${cacheKey}. Request ID: ${requestId}`);
-      return found(cachedResultUrl);
-    }
+    const outPrefix = getOutPrefix(query);
 
     // if not cached, query Athena
     const resultLocation = `${ATHENA_TEMP_FOLDER}/${outPrefix}`;
@@ -169,27 +130,9 @@ function PTA2Controller(context, log, env) {
     const results = await athenaClient.query(query, rumMetricsDatabase, description);
     const response = results.map((row) => PTASummaryResponseDto.toJSON(row));
 
-    // add to cache
-    let isCached = false;
-    if (response && response.length > 0) {
-      isCached = await addResultJsonToCache(s3, cacheKey, response, log);
-      log.info(`Athena result JSON to S3 cache (${cacheKey}) successful: ${isCached}`);
-    }
+    const summary = response?.length ? response[0] : null;
 
-    if (isCached) {
-      // even though file is saved 503 are possible in short time window,
-      // verifying file is reachable before returning
-      const verifiedSignedUrl = await getSignedUrlWithRetries(s3, cacheKey, log, 5);
-      if (verifiedSignedUrl != null) {
-        log.debug(`Successfully verified file existence, returning signedUrl from key: ${isCached}.  Request ID: ${requestId}`);
-        return found(
-          verifiedSignedUrl,
-        );
-      }
-    }
-
-    log.warn(`Failed to return cache key ${cacheKey}. Returning response directly. Request ID: ${requestId}`);
-    return ok(response, {
+    return ok(summary, {
       'content-encoding': 'gzip',
     });
   }
