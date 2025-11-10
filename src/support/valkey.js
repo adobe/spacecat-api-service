@@ -11,6 +11,7 @@
  */
 
 import { createClient } from 'redis';
+import { brotliCompressSync, brotliDecompressSync, zlibConstants } from 'zlib';
 
 // Cache TTL in seconds (2 hours by default)
 const CACHE_TTL_SECONDS = 2 * 60 * 60;
@@ -111,7 +112,10 @@ class ValkeyCache {
 
       if (cachedData) {
         this.log.info(`Cache HIT for key: ${cacheKey}`);
-        return JSON.parse(cachedData);
+        // Decompress Brotli data and parse JSON
+        const buffer = Buffer.from(cachedData, 'base64');
+        const decompressed = brotliDecompressSync(buffer);
+        return JSON.parse(decompressed.toString('utf8'));
       }
 
       this.log.info(`Cache MISS for key: ${cacheKey}`);
@@ -141,10 +145,19 @@ class ValkeyCache {
       const cacheKey = ValkeyCache.getCacheKey(filePath);
       this.log.info(`Setting Valkey cache for key: ${cacheKey} with TTL: ${ttl}s`);
 
+      // Compress data with Brotli before storing
       const serializedData = JSON.stringify(data);
-      await this.client.setEx(cacheKey, ttl, serializedData);
+      const compressed = brotliCompressSync(Buffer.from(serializedData), {
+        params: {
+          // the default quality is too complex for the lambda and can lead to 503s
+          [zlibConstants.BROTLI_PARAM_QUALITY]: 4,
+        },
+      });
+      const base64Data = compressed.toString('base64');
 
-      this.log.info(`Successfully cached data for key: ${cacheKey}`);
+      await this.client.setEx(cacheKey, ttl, base64Data);
+
+      this.log.info(`Successfully cached data for key: ${cacheKey} (compressed)`);
       return true;
     } catch (error) {
       this.log.error(`Error setting Valkey cache: ${error.message}`);
