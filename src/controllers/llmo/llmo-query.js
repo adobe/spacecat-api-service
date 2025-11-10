@@ -13,7 +13,7 @@
 import { ok, badRequest } from '@adobe/spacecat-shared-http-utils';
 import { SPACECAT_USER_AGENT, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 import {
-  applyFilters, applyInclusions, applySort,
+  applyFilters, applyInclusions, applySort, applyPagination,
 } from './llmo-utils.js';
 
 export default class LlmoQuery {
@@ -26,25 +26,17 @@ export default class LlmoQuery {
    * @private
    */
   // eslint-disable-next-line class-methods-use-this
-  async fetchSingleFile(context, filePath, llmoConfig, queryParams = {}) {
+  async fetchSingleFile(context, filePath, llmoConfig) {
     const { log, env, valkey } = context;
-    const { sheet, limit, offset } = queryParams;
+    const { sheet } = context.data;
 
     // Get cache from context (initialized by valkeyClientWrapper)
     const cache = valkey?.cache;
 
-    // Construct cache key (includes dataFolder, filePath,
-    // and all query params that affect the result)
-    const cacheKeyParts = [`${llmoConfig.dataFolder}/${filePath}`];
-    const queryParamsForCache = [];
-
-    if (sheet) queryParamsForCache.push(`sheet=${sheet}`);
-    if (limit) queryParamsForCache.push(`limit=${limit}`);
-    if (offset) queryParamsForCache.push(`offset=${offset}`);
-
-    const cacheFilePath = queryParamsForCache.length > 0
-      ? `${cacheKeyParts[0]}?${queryParamsForCache.join('&')}`
-      : cacheKeyParts[0];
+    // Construct cache key (includes dataFolder and filePath, optionally sheet)
+    const cacheFilePath = sheet
+      ? `${llmoConfig.dataFolder}/${filePath}?sheet=${sheet}`
+      : `${llmoConfig.dataFolder}/${filePath}`;
 
     // Try to get from cache first
     const cacheStartTime = Date.now();
@@ -65,13 +57,10 @@ export default class LlmoQuery {
     const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
     const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${llmoConfig.dataFolder}/${filePath}`);
 
-    // Add limit and offset parameters to the URL if provided
-    if (limit) {
-      url.searchParams.set('limit', limit);
-    }
-    if (offset) {
-      url.searchParams.set('offset', offset);
-    }
+    // Use a large limit to fetch all data from the source
+    // Pagination will be applied after sorting and filtering
+    url.searchParams.set('limit', '1000000');
+
     // allow fetching a specific sheet from the sheet data source
     if (sheet) {
       url.searchParams.set('sheet', sheet);
@@ -135,14 +124,14 @@ export default class LlmoQuery {
      * Fetches multiple files from the external endpoint
      * @private
      */
-  async fetchMultipleFiles(context, files, llmoConfig, queryParams) {
+  async fetchMultipleFiles(context, files, llmoConfig) {
     const { log } = context;
     const results = [];
 
     // Fetch all files in parallel
     const fetchPromises = files.map(async (filePath) => {
       try {
-        const { data } = await this.fetchSingleFile(context, filePath, llmoConfig, queryParams);
+        const { data } = await this.fetchSingleFile(context, filePath, llmoConfig);
         return {
           path: filePath,
           status: 'success',
@@ -221,8 +210,14 @@ export default class LlmoQuery {
       processedData = applySort(processedData, { field, order: sortOrder });
     }
 
-    // Note: limit and offset are now applied at the API level (in fetchSingleFile)
-    // rather than here, so pagination happens before data is cached
+    // Apply pagination (limit and offset) as the final step
+    // This ensures pagination is applied after all filtering and sorting
+    if (queryParams.limit || queryParams.offset) {
+      const limit = queryParams.limit ? parseInt(queryParams.limit, 10) : undefined;
+      const offset = queryParams.offset ? parseInt(queryParams.offset, 10) : 0;
+
+      processedData = applyPagination(processedData, { limit, offset });
+    }
 
     return processedData;
   }
@@ -242,7 +237,7 @@ export default class LlmoQuery {
         const files = Array.isArray(file) ? file : [file];
         log.info(`Fetching multiple files for siteId: ${siteId}, files: ${files.join(', ')}`);
 
-        const results = await this.fetchMultipleFiles(context, files, llmoConfig, queryParams);
+        const results = await this.fetchMultipleFiles(context, files, llmoConfig);
 
         // Apply filters and inclusions to each file's data
         const processedResults = results.map((result) => {
@@ -269,8 +264,7 @@ export default class LlmoQuery {
       }
 
       log.info(`Fetching single file for siteId: ${siteId}, path: ${filePath}`);
-      const singleFile = await this.fetchSingleFile(context, filePath, llmoConfig, queryParams);
-      const { data, headers } = singleFile;
+      const { data, headers } = await this.fetchSingleFile(context, filePath, llmoConfig);
 
       // Apply filters and inclusions to the data
       const processedData = LlmoQuery.processData(data, queryParams);
