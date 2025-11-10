@@ -17,7 +17,7 @@ import {
   badRequest,
 } from '@adobe/spacecat-shared-http-utils';
 import {
-  AWSAthenaClient, getPTASummaryQuery, PTASummaryResponseDto,
+  AWSAthenaClient, getPTASummaryWithTrendQuery, PTASummaryWithTrendResponseDto,
 } from '@adobe/spacecat-shared-athena-client';
 import crypto from 'crypto';
 import AccessControlUtil from '../../support/access-control-util.js';
@@ -113,7 +113,7 @@ function PTA2Controller(context, log, env) {
     const description = `fetch PTA2 Weekly Summary data db: ${rumMetricsDatabase}| siteKey: ${siteId} | year: ${year} | month: ${month} | week: ${week} } `;
 
     // build query
-    const query = getPTASummaryQuery({
+    const query = getPTASummaryWithTrendQuery({
       year: yearInt,
       week: weekInt,
       month: monthInt,
@@ -122,13 +122,11 @@ function PTA2Controller(context, log, env) {
     });
 
     const outPrefix = getOutPrefix(query);
-
-    // if not cached, query Athena
     const resultLocation = `${ATHENA_TEMP_FOLDER}/${outPrefix}`;
     const athenaClient = AWSAthenaClient.fromContext(context, resultLocation);
 
     const results = await athenaClient.query(query, rumMetricsDatabase, description);
-    const response = results.map((row) => PTASummaryResponseDto.toJSON(row));
+    const response = results.map((row) => PTASummaryWithTrendResponseDto.toJSON(row));
 
     const summary = response?.length ? response[0] : null;
 

@@ -82,7 +82,6 @@ describe('PTA2Controller', () => {
     lastPutObject = undefined;
     mockS3.send.callsFake((cmd) => {
       if (cmd.constructor && cmd.constructor.name === 'HeadObjectCommand' && cmd.input.Key.includes(`${SITE_ID}/`)) {
-        // Default: Simulate cache miss
         const err = new Error('not found');
         err.name = 'NotFound';
         return Promise.reject(err);
@@ -174,49 +173,23 @@ describe('PTA2Controller', () => {
       expect(body.message).to.equal('Month must be a valid number');
     });
 
-    it('queries Athena and returns 200 with fresh data on cache miss', async () => {
-      const mockAthenaResults = [
+    it('queries Athena and returns 200 with requested data', async () => {
+      const mockAthenaResults = [[
         {
-          year: 2024,
-          week: 23,
-          pageviews: 1000,
-          sessions: 800,
+          period: 'current',
+          total_pageviews: 1000,
+          click_rate: 0.45,
+          engagement_rate: 0.75,
+          bounce_rate: 0.25,
         },
-      ];
-      mockAthenaQuery.resolves(mockAthenaResults);
-
-      const controller = PTA2Controller(mockContext, mockLog, mockEnv);
-      const res = await controller.getPTAWeeklySummary();
-      expect(res.status).to.equal(200);
-      expect(mockAthenaQuery).to.have.been.calledOnce;
-    });
-
-    it('bypasses cache when noCache is true', async () => {
-      mockContext.data.noCache = true;
-      const mockAthenaResults = [
         {
-          year: 2024,
-          week: 23,
-          pageviews: 1000,
+          period: 'previous',
+          total_pageviews: 950,
+          click_rate: 0.44,
+          engagement_rate: 0.74,
+          bounce_rate: 0.26,
         },
-      ];
-      mockAthenaQuery.resolves(mockAthenaResults);
-
-      const controller = PTA2Controller(mockContext, mockLog, mockEnv);
-      const res = await controller.getPTAWeeklySummary();
-      expect(res.status).to.equal(200);
-      expect(mockAthenaQuery).to.have.been.calledOnce;
-    });
-
-    it('bypasses cache when noCache is string "true"', async () => {
-      mockContext.data.noCache = 'true';
-      const mockAthenaResults = [
-        {
-          year: 2024,
-          week: 23,
-          pageviews: 1000,
-        },
-      ];
+      ]];
       mockAthenaQuery.resolves(mockAthenaResults);
 
       const controller = PTA2Controller(mockContext, mockLog, mockEnv);
@@ -230,7 +203,6 @@ describe('PTA2Controller', () => {
       const controller = PTA2Controller(mockContext, mockLog, mockEnv);
       const res = await controller.getPTAWeeklySummary();
       expect(res.status).to.equal(200);
-      // Empty results should not be cached
       expect(lastPutObject).to.not.exist;
       const gzippedBuffer = Buffer.from(await res.arrayBuffer());
       const decompressed = await gunzipAsync(gzippedBuffer);
@@ -242,13 +214,22 @@ describe('PTA2Controller', () => {
       delete mockContext.data.week;
       mockContext.data.month = 12;
 
-      const mockAthenaResults = [
+      const mockAthenaResults = [[
         {
-          year: 2024,
-          month: 12,
-          pageviews: 1000,
+          period: 'current',
+          total_pageviews: 1000,
+          click_rate: 0.45,
+          engagement_rate: 0.75,
+          bounce_rate: 0.25,
         },
-      ];
+        {
+          period: 'previous',
+          total_pageviews: 950,
+          click_rate: 0.44,
+          engagement_rate: 0.74,
+          bounce_rate: 0.26,
+        },
+      ]];
       mockAthenaQuery.resolves(mockAthenaResults);
 
       const controller = PTA2Controller(mockContext, mockLog, mockEnv);
@@ -265,14 +246,22 @@ describe('PTA2Controller', () => {
       mockContext.data.week = 23;
       mockContext.data.month = 6;
 
-      const mockAthenaResults = [
+      const mockAthenaResults = [[
         {
-          year: 2024,
-          week: 23,
-          month: 6,
-          pageviews: 1000,
+          period: 'current',
+          total_pageviews: 1000,
+          click_rate: 0.45,
+          engagement_rate: 0.75,
+          bounce_rate: 0.25,
         },
-      ];
+        {
+          period: 'previous',
+          total_pageviews: 950,
+          click_rate: 0.44,
+          engagement_rate: 0.74,
+          bounce_rate: 0.26,
+        },
+      ]];
       mockAthenaQuery.resolves(mockAthenaResults);
 
       const controller = PTA2Controller(mockContext, mockLog, mockEnv);
@@ -303,13 +292,22 @@ describe('PTA2Controller', () => {
       mockContext.data.year = '2024';
       mockContext.data.week = '23';
 
-      const mockAthenaResults = [
+      const mockAthenaResults = [[
         {
-          year: 2024,
-          week: 23,
-          pageviews: 1000,
+          period: 'current',
+          total_pageviews: 1000,
+          click_rate: 0.45,
+          engagement_rate: 0.75,
+          bounce_rate: 0.25,
         },
-      ];
+        {
+          period: 'previous',
+          total_pageviews: 950,
+          click_rate: 0.44,
+          engagement_rate: 0.74,
+          bounce_rate: 0.26,
+        },
+      ]];
       mockAthenaQuery.resolves(mockAthenaResults);
 
       const controller = PTA2Controller(mockContext, mockLog, mockEnv);
@@ -319,13 +317,22 @@ describe('PTA2Controller', () => {
     });
 
     it('uses correct database and table names from env', async () => {
-      const mockAthenaResults = [
+      const mockAthenaResults = [[
         {
-          year: 2024,
-          week: 23,
-          pageviews: 1000,
+          period: 'current',
+          total_pageviews: 1000,
+          click_rate: 0.45,
+          engagement_rate: 0.75,
+          bounce_rate: 0.25,
         },
-      ];
+        {
+          period: 'previous',
+          total_pageviews: 950,
+          click_rate: 0.44,
+          engagement_rate: 0.74,
+          bounce_rate: 0.26,
+        },
+      ]];
       mockAthenaQuery.resolves(mockAthenaResults);
 
       const controller = PTA2Controller(mockContext, mockLog, mockEnv);
@@ -340,6 +347,73 @@ describe('PTA2Controller', () => {
       const description = mockAthenaQuery.args[0][2];
       expect(description).to.include('test-db');
       expect(description).to.include(SITE_ID);
+    });
+
+    it('returns 200 with data when trends are null (only one period)', async () => {
+      const mockAthenaResults = [[
+        {
+          period: 'current',
+          total_pageviews: 1000,
+          click_rate: 0.45,
+          engagement_rate: 0.75,
+          bounce_rate: 0.25,
+        },
+      ]];
+      mockAthenaQuery.resolves(mockAthenaResults);
+
+      const controller = PTA2Controller(mockContext, mockLog, mockEnv);
+      const res = await controller.getPTAWeeklySummary();
+      expect(res.status).to.equal(200);
+
+      const gzippedBuffer = Buffer.from(await res.arrayBuffer());
+      const decompressed = await gunzipAsync(gzippedBuffer);
+      const body = JSON.parse(decompressed.toString());
+
+      expect(body).to.have.property('pageviews', 1000);
+      expect(body).to.have.property('click_rate', 0.45);
+      expect(body).to.have.property('engagement_rate', 0.75);
+      expect(body).to.have.property('bounce_rate', 0.25);
+      expect(body).to.have.property('trends');
+      expect(body.trends).to.be.null;
+    });
+
+    it('returns 200 with complete data including trends', async () => {
+      const mockAthenaResults = [[
+        {
+          period: 'current',
+          total_pageviews: 1000,
+          click_rate: 0.45,
+          engagement_rate: 0.75,
+          bounce_rate: 0.25,
+        },
+        {
+          period: 'previous',
+          total_pageviews: 950,
+          click_rate: 0.44,
+          engagement_rate: 0.74,
+          bounce_rate: 0.26,
+        },
+      ]];
+      mockAthenaQuery.resolves(mockAthenaResults);
+
+      const controller = PTA2Controller(mockContext, mockLog, mockEnv);
+      const res = await controller.getPTAWeeklySummary();
+      expect(res.status).to.equal(200);
+
+      const gzippedBuffer = Buffer.from(await res.arrayBuffer());
+      const decompressed = await gunzipAsync(gzippedBuffer);
+      const body = JSON.parse(decompressed.toString());
+
+      expect(body).to.have.property('pageviews', 1000);
+      expect(body).to.have.property('click_rate', 0.45);
+      expect(body).to.have.property('engagement_rate', 0.75);
+      expect(body).to.have.property('bounce_rate', 0.25);
+      expect(body).to.have.property('trends');
+      expect(body.trends).to.not.be.null;
+      expect(body.trends).to.have.property('pageviews');
+      expect(body.trends).to.have.property('click_rate');
+      expect(body.trends).to.have.property('engagement_rate');
+      expect(body.trends).to.have.property('bounce_rate');
     });
   });
 });
