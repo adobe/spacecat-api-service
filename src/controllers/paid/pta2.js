@@ -126,11 +126,9 @@ function PTA2Controller(context, log, env) {
     const athenaClient = AWSAthenaClient.fromContext(context, resultLocation);
 
     const results = await athenaClient.query(query, rumMetricsDatabase, description);
-    const response = results.map((row) => PTASummaryWithTrendResponseDto.toJSON(row));
+    const response = PTASummaryWithTrendResponseDto.toJSON(results);
 
-    const summary = response?.length ? response[0] : null;
-
-    return ok(summary, {
+    return ok(response, {
       'content-encoding': 'gzip',
     });
   }

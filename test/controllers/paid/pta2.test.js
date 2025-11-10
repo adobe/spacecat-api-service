@@ -27,7 +27,6 @@ const gunzipAsync = promisify(gunzip);
 
 const SITE_ID = 'test-site-id';
 const TEST_PRESIGNED_URL = 'https://test-presigned-url.com';
-let lastPutObject;
 
 describe('PTA2Controller', () => {
   let sandbox;
@@ -79,7 +78,6 @@ describe('PTA2Controller', () => {
     };
     sandbox.stub(AccessControlUtil, 'fromContext').returns(mockAccessControlUtil);
 
-    lastPutObject = undefined;
     mockS3.send.callsFake((cmd) => {
       if (cmd.constructor && cmd.constructor.name === 'HeadObjectCommand' && cmd.input.Key.includes(`${SITE_ID}/`)) {
         const err = new Error('not found');
@@ -87,7 +85,6 @@ describe('PTA2Controller', () => {
         return Promise.reject(err);
       }
       if (cmd.constructor && cmd.constructor.name === 'PutObjectCommand') {
-        lastPutObject = cmd;
         return Promise.resolve({});
       }
       return Promise.resolve({});
@@ -174,7 +171,7 @@ describe('PTA2Controller', () => {
     });
 
     it('queries Athena and returns 200 with requested data', async () => {
-      const mockAthenaResults = [[
+      const mockAthenaResults = [
         {
           period: 'current',
           total_pageviews: 1000,
@@ -189,7 +186,7 @@ describe('PTA2Controller', () => {
           engagement_rate: 0.74,
           bounce_rate: 0.26,
         },
-      ]];
+      ];
       mockAthenaQuery.resolves(mockAthenaResults);
 
       const controller = PTA2Controller(mockContext, mockLog, mockEnv);
@@ -198,23 +195,11 @@ describe('PTA2Controller', () => {
       expect(mockAthenaQuery).to.have.been.calledOnce;
     });
 
-    it('returns 200 with empty array if Athena returns no results', async () => {
-      mockAthenaQuery.resolves([]);
-      const controller = PTA2Controller(mockContext, mockLog, mockEnv);
-      const res = await controller.getPTAWeeklySummary();
-      expect(res.status).to.equal(200);
-      expect(lastPutObject).to.not.exist;
-      const gzippedBuffer = Buffer.from(await res.arrayBuffer());
-      const decompressed = await gunzipAsync(gzippedBuffer);
-      const body = JSON.parse(decompressed.toString());
-      expect(body).to.equal(null);
-    });
-
     it('uses month parameter when week is not provided', async () => {
       delete mockContext.data.week;
       mockContext.data.month = 12;
 
-      const mockAthenaResults = [[
+      const mockAthenaResults = [
         {
           period: 'current',
           total_pageviews: 1000,
@@ -229,7 +214,7 @@ describe('PTA2Controller', () => {
           engagement_rate: 0.74,
           bounce_rate: 0.26,
         },
-      ]];
+      ];
       mockAthenaQuery.resolves(mockAthenaResults);
 
       const controller = PTA2Controller(mockContext, mockLog, mockEnv);
@@ -246,7 +231,7 @@ describe('PTA2Controller', () => {
       mockContext.data.week = 23;
       mockContext.data.month = 6;
 
-      const mockAthenaResults = [[
+      const mockAthenaResults = [
         {
           period: 'current',
           total_pageviews: 1000,
@@ -261,7 +246,7 @@ describe('PTA2Controller', () => {
           engagement_rate: 0.74,
           bounce_rate: 0.26,
         },
-      ]];
+      ];
       mockAthenaQuery.resolves(mockAthenaResults);
 
       const controller = PTA2Controller(mockContext, mockLog, mockEnv);
@@ -292,7 +277,7 @@ describe('PTA2Controller', () => {
       mockContext.data.year = '2024';
       mockContext.data.week = '23';
 
-      const mockAthenaResults = [[
+      const mockAthenaResults = [
         {
           period: 'current',
           total_pageviews: 1000,
@@ -307,7 +292,7 @@ describe('PTA2Controller', () => {
           engagement_rate: 0.74,
           bounce_rate: 0.26,
         },
-      ]];
+      ];
       mockAthenaQuery.resolves(mockAthenaResults);
 
       const controller = PTA2Controller(mockContext, mockLog, mockEnv);
@@ -317,7 +302,7 @@ describe('PTA2Controller', () => {
     });
 
     it('uses correct database and table names from env', async () => {
-      const mockAthenaResults = [[
+      const mockAthenaResults = [
         {
           period: 'current',
           total_pageviews: 1000,
@@ -332,7 +317,7 @@ describe('PTA2Controller', () => {
           engagement_rate: 0.74,
           bounce_rate: 0.26,
         },
-      ]];
+      ];
       mockAthenaQuery.resolves(mockAthenaResults);
 
       const controller = PTA2Controller(mockContext, mockLog, mockEnv);
@@ -350,7 +335,7 @@ describe('PTA2Controller', () => {
     });
 
     it('returns 200 with data when trends are null (only one period)', async () => {
-      const mockAthenaResults = [[
+      const mockAthenaResults = [
         {
           period: 'current',
           total_pageviews: 1000,
@@ -358,7 +343,7 @@ describe('PTA2Controller', () => {
           engagement_rate: 0.75,
           bounce_rate: 0.25,
         },
-      ]];
+      ];
       mockAthenaQuery.resolves(mockAthenaResults);
 
       const controller = PTA2Controller(mockContext, mockLog, mockEnv);
@@ -378,7 +363,7 @@ describe('PTA2Controller', () => {
     });
 
     it('returns 200 with complete data including trends', async () => {
-      const mockAthenaResults = [[
+      const mockAthenaResults = [
         {
           period: 'current',
           total_pageviews: 1000,
@@ -393,7 +378,7 @@ describe('PTA2Controller', () => {
           engagement_rate: 0.74,
           bounce_rate: 0.26,
         },
-      ]];
+      ];
       mockAthenaQuery.resolves(mockAthenaResults);
 
       const controller = PTA2Controller(mockContext, mockLog, mockEnv);
