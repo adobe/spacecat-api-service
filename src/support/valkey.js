@@ -258,7 +258,6 @@ export function valkeyClientWrapper(fn) {
     if (!context.valkey) {
       const { env, log } = context;
 
-      // Create Valkey cache instance (connection is lazy - happens on first use)
       const cache = new ValkeyCache(env, log);
 
       context.valkey = {
