@@ -166,31 +166,6 @@ class ValkeyCache {
   }
 
   /**
-   * Delete cached data for a file
-   * @param {string} filePath - The file path to use as cache key
-   * @returns {Promise<boolean>} - True if successfully deleted, false otherwise
-   */
-  async delete(filePath) {
-    // Lazy connect on first use
-    await this.connect();
-    if (!this.isConnected || !this.client) {
-      this.log.warn('Valkey not connected, skipping cache delete');
-      return false;
-    }
-
-    try {
-      const cacheKey = ValkeyCache.getCacheKey(filePath);
-      this.log.info(`Deleting Valkey cache for key: ${cacheKey}`);
-
-      await this.client.del(cacheKey);
-      return true;
-    } catch (error) {
-      this.log.error(`Error deleting from Valkey cache: ${error.message}`);
-      return false;
-    }
-  }
-
-  /**
    * Clear all cached data matching the LLMO cache pattern
    * Uses SCAN to safely iterate through keys without blocking Redis
    * @returns {Promise<{success: boolean, deletedCount: number}>} -
