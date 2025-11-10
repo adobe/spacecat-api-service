@@ -160,6 +160,7 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/config/cdn-logs': sitesController.updateCdnLogsConfig,
     'DELETE /sites/:siteId': sitesController.removeSite,
     'GET /sites/:siteId/audits': auditsController.getAllForSite,
+    'GET /sites/:siteId/updated-by': sitesController.getUpdatedBy,
     'GET /sites/:siteId/audits/latest': auditsController.getAllLatestForSite,
     'GET /sites/:siteId/audits/:auditType': auditsController.getAllForSite,
     'GET /sites/:siteId/audits/:auditType/:auditedAt': sitesController.getAuditForSite,

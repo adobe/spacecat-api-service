@@ -161,6 +161,7 @@ describe('Sites Controller', () => {
     'removeKeyEvent',
     'getSiteMetricsBySource',
     'getPageMetricsBySource',
+    'getUpdatedBy',
   ];
 
   let mockDataAccess;

@@ -757,6 +757,30 @@ function SitesController(ctx, log, env) {
     return ok(topPages);
   };
 
+  const getUpdatedBy = async (context) => {
+    const siteId = context.params?.siteId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view its updated by');
+    }
+
+    let user = site.getUpdatedBy();
+    if (site.getUpdatedBy() !== 'system') {
+      user = await context.imsClient.getImsAdminProfile(site.getUpdatedBy());
+    }
+
+    return ok(user);
+  };
+
   return {
     createSite,
     getAll,
@@ -781,6 +805,7 @@ function SitesController(ctx, log, env) {
     getSiteMetricsBySource,
     getPageMetricsBySource,
     getLatestSiteMetrics,
+    getUpdatedBy,
   };
 }
 
