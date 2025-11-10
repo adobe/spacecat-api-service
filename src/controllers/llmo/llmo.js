@@ -40,7 +40,7 @@ import {
   performLlmoOnboarding,
   performLlmoOffboarding,
 } from './llmo-onboarding.js';
-import LlmoQuery from './llmo-query.js';
+import LlmoQuerySpecificCache from './llmo-query-specific.js';
 
 const { readConfig, writeConfig } = llmo;
 const { llmoConfig: llmoConfigSchema } = schemas;
@@ -923,8 +923,13 @@ function LlmoController(ctx) {
     }
   };
 
-  const query = async (context) => {
-    const llmoQuery = new LlmoQuery(getSiteAndValidateLlmo);
+  const queryFile = async (context) => {
+    const llmoQuery = new LlmoQuerySpecificCache(getSiteAndValidateLlmo);
+    return llmoQuery.query(context);
+  };
+
+  const querySpecific = async (context) => {
+    const llmoQuery = new LlmoQuerySpecificCache(getSiteAndValidateLlmo);
     return llmoQuery.query(context);
   };
 
@@ -987,7 +992,8 @@ function LlmoController(ctx) {
     updateLlmoConfig,
     onboardCustomer,
     offboardCustomer,
-    query,
+    queryFile,
+    querySpecific,
     clearCache,
   };
 }

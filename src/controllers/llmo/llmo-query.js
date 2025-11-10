@@ -16,7 +16,7 @@ import {
   applyFilters, applyInclusions, applySort, applyPagination,
 } from './llmo-utils.js';
 
-export default class LlmoQuery {
+export default class LlmoQueryFileCache {
   constructor(getSiteAndValidateLlmo) {
     this.getSiteAndValidateLlmo = getSiteAndValidateLlmo;
   }
@@ -237,18 +237,24 @@ export default class LlmoQuery {
         const files = Array.isArray(file) ? file : [file];
         log.info(`Fetching multiple files for siteId: ${siteId}, files: ${files.join(', ')}`);
 
+        const fetchStartTime = Date.now();
         const results = await this.fetchMultipleFiles(context, files, llmoConfig);
+        const fetchDuration = Date.now() - fetchStartTime;
+        log.info(`✓ fetchMultipleFiles completed in ${fetchDuration}ms for ${files.length} file(s)`);
 
         // Apply filters and inclusions to each file's data
+        const processingStartTime = Date.now();
         const processedResults = results.map((result) => {
           if (result.status === 'success' && result.data) {
             return {
               ...result,
-              data: LlmoQuery.processData(result.data, queryParams),
+              data: LlmoQueryFileCache.processData(result.data, queryParams),
             };
           }
           return result;
         });
+        const processingDuration = Date.now() - processingStartTime;
+        log.info(`✓ Processing completed in ${processingDuration}ms for ${results.length} file(s)`);
 
         return ok({ files: processedResults }, { 'Content-Encoding': 'br' });
       }
@@ -267,7 +273,7 @@ export default class LlmoQuery {
       const { data, headers } = await this.fetchSingleFile(context, filePath, llmoConfig);
 
       // Apply filters and inclusions to the data
-      const processedData = LlmoQuery.processData(data, queryParams);
+      const processedData = LlmoQueryFileCache.processData(data, queryParams);
 
       // Return the processed data, pass through any compression headers from upstream
       return ok(processedData, headers);

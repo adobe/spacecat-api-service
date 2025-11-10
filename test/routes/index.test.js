@@ -461,7 +461,8 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/sheet-data/:dataSource',
       'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource',
       'POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource',
-      'GET /sites/:siteId/llmo/query',
+      'GET /sites/:siteId/llmo/query-file',
+      'GET /sites/:siteId/llmo/query-specific',
       'GET /sites/:siteId/llmo/config',
       'PATCH /sites/:siteId/llmo/config',
       'POST /sites/:siteId/llmo/config',
@@ -597,8 +598,10 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'dataSource']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource'].handler).to.equal(mockLlmoController.getLlmoSheetData);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'week', 'dataSource']);
-    expect(dynamicRoutes['GET /sites/:siteId/llmo/query'].handler).to.equal(mockLlmoController.query);
-    expect(dynamicRoutes['GET /sites/:siteId/llmo/query'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/query-file'].handler).to.equal(mockLlmoController.queryFile);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/query-file'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/query-specific'].handler).to.equal(mockLlmoController.querySpecific);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/query-specific'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/config'].handler).to.equal(mockLlmoController.getLlmoConfig);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/config'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/questions'].handler).to.equal(mockLlmoController.getLlmoQuestions);
