@@ -1,3 +1,10 @@
+## [1.225.7](https://github.com/adobe/spacecat-api-service/compare/v1.225.6...v1.225.7) (2025-11-10)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-athena-client to v1.5.0 ([#1464](https://github.com/adobe/spacecat-api-service/issues/1464)) ([0c624bc](https://github.com/adobe/spacecat-api-service/commit/0c624bc5932b27479cde1641bf4122f031dbae45))
+
 ## [1.225.6](https://github.com/adobe/spacecat-api-service/compare/v1.225.5...v1.225.6) (2025-11-10)
 
 
