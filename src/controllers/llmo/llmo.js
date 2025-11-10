@@ -387,6 +387,69 @@ function LlmoController(ctx) {
     }
   };
 
+  /**
+   * Checks if config changes are only AI-origin categorization updates.
+   * Returns true if all new/modified categories and topics contain only AI-origin prompts.
+   */
+  const areChangesAICategorizationOnly = (oldConfig, newConfig) => {
+    if (!oldConfig) return false;
+
+    const oldCategories = oldConfig?.categories || {};
+    const newCategories = newConfig?.categories || {};
+    const oldTopics = oldConfig?.topics || {};
+    const newTopics = newConfig?.topics || {};
+
+    // Get new category IDs
+    const newCategoryIds = Object.keys(newCategories).filter((id) => !oldCategories[id]);
+
+    // Get new or modified topic IDs
+    const changedTopicIds = Object.keys(newTopics).filter((id) => {
+      if (!oldTopics[id]) return true; // New topic
+      // Check if prompts changed
+      const oldPrompts = oldTopics[id]?.prompts || [];
+      const newPrompts = newTopics[id]?.prompts || [];
+      return JSON.stringify(oldPrompts) !== JSON.stringify(newPrompts);
+    });
+
+    // If no category or topic changes, return false (other changes present)
+    if (newCategoryIds.length === 0 && changedTopicIds.length === 0) {
+      return false;
+    }
+
+    // Check if new categories are only referenced by topics with AI-origin prompts
+    const topicsReferencingNewCategories = Object.values(newTopics).filter(
+      (topic) => newCategoryIds.includes(topic.category),
+    );
+
+    for (const topic of topicsReferencingNewCategories) {
+      const prompts = topic.prompts || [];
+      // If any prompt is not AI-origin, return false
+      if (prompts.some((p) => p.origin !== 'ai')) {
+        return false;
+      }
+    }
+
+    // Check changed topics - ensure all new/modified prompts are AI-origin
+    for (const topicId of changedTopicIds) {
+      const newTopic = newTopics[topicId];
+      const oldTopic = oldTopics[topicId];
+      const newPrompts = newTopic?.prompts || [];
+      const oldPrompts = oldTopic?.prompts || [];
+
+      // Get prompts that are new (not in old config)
+      const oldPromptTexts = new Set(oldPrompts.map((p) => p.prompt));
+      const addedPrompts = newPrompts.filter((p) => !oldPromptTexts.has(p.prompt));
+
+      // If any added prompt is not AI-origin, return false
+      if (addedPrompts.some((p) => p.origin !== 'ai')) {
+        return false;
+      }
+    }
+
+    // All changes are AI-origin only
+    return true;
+  };
+
   async function updateLlmoConfig(context) {
     const { log, s3, data } = context;
     const { siteId } = context.params;
@@ -427,15 +490,19 @@ function LlmoController(ctx) {
         { s3Bucket: s3.s3Bucket },
       );
 
-      // Trigger llmo-customer-analysis after config is updated
-      await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
-        type: 'llmo-customer-analysis',
-        siteId,
-        auditContext: {
-          configVersion: version,
-          previousConfigVersion: prevConfig.exists ? prevConfig.version : /* c8 ignore next */ null,
-        },
-      });
+      if (!areChangesAICategorizationOnly(prevConfig?.config, parsedConfig)) {
+        // Trigger llmo-customer-analysis after config is updated
+        await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
+          type: 'llmo-customer-analysis',
+          siteId,
+          auditContext: {
+            configVersion: version,
+            previousConfigVersion: prevConfig.exists
+              ? prevConfig.version
+              : /* c8 ignore next */ null,
+          },
+        });
+      }
 
       // Calculate config summary
       const numCategories = Object.keys(parsedConfig.categories || {}).length;

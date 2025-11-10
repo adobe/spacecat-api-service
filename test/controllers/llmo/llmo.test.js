@@ -1280,6 +1280,420 @@ describe('LlmoController', () => {
         sinon.match(/0 prompts/),
       );
     });
+
+    describe('areChangesAICategorizationOnly (via updateLlmoConfig)', () => {
+      const aiCategoryId = 'ai-category-123';
+      const aiTopicId = 'ai-topic-456';
+
+      it('should NOT skip audit when there are no config changes', async () => {
+        readConfigStub.resolves({
+          config: llmoConfig.defaultConfig(),
+          exists: true,
+          version: 'v0',
+        });
+        mockContext.data = llmoConfig.defaultConfig();
+        llmoConfigSchemaStub.safeParse.returns({ success: true, data: llmoConfig.defaultConfig() });
+
+        await controller.updateLlmoConfig(mockContext);
+
+        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
+      });
+
+      it('should NOT skip audit when adding new category with human prompts', async () => {
+        readConfigStub.resolves({
+          config: llmoConfig.defaultConfig(),
+          exists: true,
+          version: 'v0',
+        });
+
+        const newConfig = {
+          ...llmoConfig.defaultConfig(),
+          categories: {
+            [aiCategoryId]: { name: 'Human Category', region: ['us'] },
+          },
+          topics: {
+            [aiTopicId]: {
+              name: 'Human Topic',
+              category: aiCategoryId,
+              prompts: [{
+                prompt: 'What is this?',
+                regions: ['us'],
+                origin: 'human', // Human origin
+                source: 'config',
+              }],
+            },
+          },
+        };
+
+        mockContext.data = newConfig;
+        llmoConfigSchemaStub.safeParse.returns({ success: true, data: newConfig });
+
+        await controller.updateLlmoConfig(mockContext);
+
+        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
+        const sqsCall = mockContext.sqs.sendMessage.getCall(0);
+        expect(sqsCall.args[1].auditContext.skipBrandPresenceTrigger).to.be.undefined;
+      });
+
+      it('should skip audit when adding new category with ONLY AI prompts', async () => {
+        readConfigStub.resolves({
+          config: llmoConfig.defaultConfig(),
+          exists: true,
+          version: 'v0',
+        });
+
+        const newConfig = {
+          ...llmoConfig.defaultConfig(),
+          categories: {
+            [aiCategoryId]: { name: 'AI Category', region: ['us'] },
+          },
+          topics: {
+            [aiTopicId]: {
+              name: 'AI Topic',
+              category: aiCategoryId,
+              prompts: [{
+                prompt: 'AI generated prompt',
+                regions: ['us'],
+                origin: 'ai', // AI origin
+                source: 'mystique',
+              }],
+            },
+          },
+        };
+
+        mockContext.data = newConfig;
+        llmoConfigSchemaStub.safeParse.returns({ success: true, data: newConfig });
+
+        await controller.updateLlmoConfig(mockContext);
+
+        expect(mockContext.sqs.sendMessage).to.not.have.been.called;
+      });
+
+      it('should NOT skip audit when adding multiple prompts with mixed origins', async () => {
+        readConfigStub.resolves({
+          config: llmoConfig.defaultConfig(),
+          exists: true,
+          version: 'v0',
+        });
+
+        const newConfig = {
+          ...llmoConfig.defaultConfig(),
+          categories: {
+            [aiCategoryId]: { name: 'Mixed Category', region: ['us'] },
+          },
+          topics: {
+            [aiTopicId]: {
+              name: 'Mixed Topic',
+              category: aiCategoryId,
+              prompts: [
+                {
+                  prompt: 'AI prompt 1',
+                  regions: ['us'],
+                  origin: 'ai',
+                  source: 'mystique',
+                },
+                {
+                  prompt: 'Human prompt',
+                  regions: ['us'],
+                  origin: 'human', // Mixed with human
+                  source: 'config',
+                },
+              ],
+            },
+          },
+        };
+
+        mockContext.data = newConfig;
+        llmoConfigSchemaStub.safeParse.returns({ success: true, data: newConfig });
+
+        await controller.updateLlmoConfig(mockContext);
+
+        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
+      });
+
+      it('should skip audit when modifying existing topic by adding ONLY AI prompts', async () => {
+        const existingConfig = {
+          ...llmoConfig.defaultConfig(),
+          categories: {
+            [CATEGORY_ID]: { name: 'Existing Category', region: ['us'] },
+          },
+          topics: {
+            [TOPIC_ID]: {
+              name: 'Existing Topic',
+              category: CATEGORY_ID,
+              prompts: [{
+                prompt: 'Original prompt',
+                regions: ['us'],
+                origin: 'human',
+                source: 'config',
+              }],
+            },
+          },
+        };
+
+        readConfigStub.resolves({
+          config: existingConfig,
+          exists: true,
+          version: 'v0',
+        });
+
+        const updatedConfig = {
+          ...existingConfig,
+          topics: {
+            [TOPIC_ID]: {
+              name: 'Existing Topic',
+              category: CATEGORY_ID,
+              prompts: [
+                {
+                  prompt: 'Original prompt',
+                  regions: ['us'],
+                  origin: 'human',
+                  source: 'config',
+                },
+                {
+                  prompt: 'New AI prompt',
+                  regions: ['us'],
+                  origin: 'ai', // Only adding AI prompts
+                  source: 'mystique',
+                },
+              ],
+            },
+          },
+        };
+
+        mockContext.data = updatedConfig;
+        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
+
+        await controller.updateLlmoConfig(mockContext);
+
+        expect(mockContext.sqs.sendMessage).to.not.have.been.called;
+      });
+
+      it('should NOT skip audit when modifying existing topic by adding human prompts', async () => {
+        const existingConfig = {
+          ...llmoConfig.defaultConfig(),
+          categories: {
+            [CATEGORY_ID]: { name: 'Existing Category', region: ['us'] },
+          },
+          topics: {
+            [TOPIC_ID]: {
+              name: 'Existing Topic',
+              category: CATEGORY_ID,
+              prompts: [{
+                prompt: 'Original prompt',
+                regions: ['us'],
+                origin: 'human',
+                source: 'config',
+              }],
+            },
+          },
+        };
+
+        readConfigStub.resolves({
+          config: existingConfig,
+          exists: true,
+          version: 'v0',
+        });
+
+        const updatedConfig = {
+          ...existingConfig,
+          topics: {
+            [TOPIC_ID]: {
+              name: 'Existing Topic',
+              category: CATEGORY_ID,
+              prompts: [
+                {
+                  prompt: 'Original prompt',
+                  regions: ['us'],
+                  origin: 'human',
+                  source: 'config',
+                },
+                {
+                  prompt: 'New human prompt',
+                  regions: ['us'],
+                  origin: 'human', // Adding human prompts
+                  source: 'config',
+                },
+              ],
+            },
+          },
+        };
+
+        mockContext.data = updatedConfig;
+        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
+
+        await controller.updateLlmoConfig(mockContext);
+
+        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
+      });
+
+      it('should NOT skip audit when there is no previous config (first-time onboarding)', async () => {
+        readConfigStub.resolves({
+          config: llmoConfig.defaultConfig(),
+          exists: false,
+          version: null,
+        });
+
+        const newConfig = {
+          ...llmoConfig.defaultConfig(),
+          categories: {
+            [aiCategoryId]: { name: 'AI Category', region: ['us'] },
+          },
+          topics: {
+            [aiTopicId]: {
+              name: 'AI Topic',
+              category: aiCategoryId,
+              prompts: [{
+                prompt: 'AI generated prompt',
+                regions: ['us'],
+                origin: 'ai',
+                source: 'mystique',
+              }],
+            },
+          },
+        };
+
+        mockContext.data = newConfig;
+        llmoConfigSchemaStub.safeParse.returns({ success: true, data: newConfig });
+
+        await controller.updateLlmoConfig(mockContext);
+
+        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
+      });
+
+      it('should NOT skip audit when brands or competitors are modified', async () => {
+        const existingConfig = {
+          ...llmoConfig.defaultConfig(),
+          categories: {
+            [CATEGORY_ID]: { name: 'Category', region: ['us'] },
+          },
+          brands: {
+            aliases: [{ aliases: ['brand1'], category: CATEGORY_ID, region: ['us'] }],
+          },
+        };
+
+        readConfigStub.resolves({
+          config: existingConfig,
+          exists: true,
+          version: 'v0',
+        });
+
+        const updatedConfig = {
+          ...existingConfig,
+          brands: {
+            aliases: [
+              { aliases: ['brand1'], category: CATEGORY_ID, region: ['us'] },
+              { aliases: ['brand2'], category: CATEGORY_ID, region: ['us'] }, // New brand
+            ],
+          },
+        };
+
+        mockContext.data = updatedConfig;
+        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
+
+        await controller.updateLlmoConfig(mockContext);
+
+        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
+      });
+
+      it('should skip audit when multiple categories and topics with ONLY AI prompts are added', async () => {
+        readConfigStub.resolves({
+          config: llmoConfig.defaultConfig(),
+          exists: true,
+          version: 'v0',
+        });
+
+        const newConfig = {
+          ...llmoConfig.defaultConfig(),
+          categories: {
+            'ai-cat-1': { name: 'AI Category 1', region: ['us'] },
+            'ai-cat-2': { name: 'AI Category 2', region: ['eu'] },
+          },
+          topics: {
+            'ai-topic-1': {
+              name: 'AI Topic 1',
+              category: 'ai-cat-1',
+              prompts: [
+                {
+                  prompt: 'AI prompt 1', regions: ['us'], origin: 'ai', source: 'mystique',
+                },
+                {
+                  prompt: 'AI prompt 2', regions: ['us'], origin: 'ai', source: 'mystique',
+                },
+              ],
+            },
+            'ai-topic-2': {
+              name: 'AI Topic 2',
+              category: 'ai-cat-2',
+              prompts: [
+                {
+                  prompt: 'AI prompt 3', regions: ['eu'], origin: 'ai', source: 'mystique',
+                },
+              ],
+            },
+          },
+        };
+
+        mockContext.data = newConfig;
+        llmoConfigSchemaStub.safeParse.returns({ success: true, data: newConfig });
+
+        await controller.updateLlmoConfig(mockContext);
+
+        expect(mockContext.sqs.sendMessage).to.not.have.been.called;
+      });
+
+      it('should NOT skip audit when existing topic prompts are modified but no new prompts added', async () => {
+        const existingConfig = {
+          ...llmoConfig.defaultConfig(),
+          categories: {
+            [CATEGORY_ID]: { name: 'Existing Category', region: ['us'] },
+          },
+          topics: {
+            [TOPIC_ID]: {
+              name: 'Existing Topic',
+              category: CATEGORY_ID,
+              prompts: [{
+                prompt: 'Original prompt',
+                regions: ['us'],
+                origin: 'human',
+                source: 'config',
+              }],
+            },
+          },
+        };
+
+        readConfigStub.resolves({
+          config: existingConfig,
+          exists: true,
+          version: 'v0',
+        });
+
+        // Prompts array changes but no new prompts actually added (same prompt text)
+        const updatedConfig = {
+          ...existingConfig,
+          topics: {
+            [TOPIC_ID]: {
+              name: 'Existing Topic',
+              category: CATEGORY_ID,
+              prompts: [{
+                prompt: 'Original prompt',
+                regions: ['eu'], // Only region changed
+                origin: 'human',
+                source: 'config',
+              }],
+            },
+          },
+        };
+
+        mockContext.data = updatedConfig;
+        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
+
+        await controller.updateLlmoConfig(mockContext);
+
+        // Should skip since the JSON changed but no new prompt texts were added
+        expect(mockContext.sqs.sendMessage).to.not.have.been.called;
+      });
+    });
   });
 
   describe('getLlmoQuestions', () => {
