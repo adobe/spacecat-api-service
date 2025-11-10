@@ -11,7 +11,7 @@
  */
 
 import { createClient } from 'redis';
-import { brotliCompressSync, brotliDecompressSync, zlibConstants } from 'zlib';
+import { brotliCompressSync, brotliDecompressSync, constants as zlibConstants } from 'zlib';
 
 // Cache TTL in seconds (2 hours by default)
 const CACHE_TTL_SECONDS = 2 * 60 * 60;
