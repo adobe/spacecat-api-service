@@ -1,3 +1,10 @@
+# [1.226.0](https://github.com/adobe/spacecat-api-service/compare/v1.225.7...v1.226.0) (2025-11-10)
+
+
+### Features
+
+* endpoint for PTAv2 summary ([#1457](https://github.com/adobe/spacecat-api-service/issues/1457)) ([7ad1f13](https://github.com/adobe/spacecat-api-service/commit/7ad1f13e2071d6d94d6616f7879c50edbd379f1f))
+
 ## [1.225.7](https://github.com/adobe/spacecat-api-service/compare/v1.225.6...v1.225.7) (2025-11-10)
 
 
