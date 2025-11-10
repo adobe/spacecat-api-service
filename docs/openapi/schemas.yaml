@@ -3461,6 +3461,27 @@ PaidSiteTopPageList:
   items:
     $ref: './schemas.yaml#/PaidSiteTopPage'
 
+PTAWeeklySummary:
+  type: object
+  description: Aggregated paid traffic analysis metrics for a specific week or month
+  properties:
+    pageviews:
+      type: string
+      description: Total number of pageviews
+      example: '885800'
+    click_rate:
+      type: string
+      description: Click-through rate as a decimal value
+      example: '0.40438022126890943'
+    engagement_rate:
+      type: string
+      description: Engagement rate as a decimal value
+      example: '0.4856626778053737'
+    bounce_rate:
+      type: string
+      description: Bounce rate as a decimal value
+      example: '0.5143373221946264'
+
 LlmoQuestion:
   type: object
   required:
