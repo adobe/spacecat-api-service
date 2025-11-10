@@ -214,7 +214,6 @@ class ValkeyCache {
           keysToDelete.push(...keys);
         }
       } while (cursor !== 0);
-      /* eslint-enable no-await-in-loop */
 
       // Delete all found keys
       if (keysToDelete.length > 0) {
@@ -222,11 +221,17 @@ class ValkeyCache {
         keysToDelete.forEach((key) => {
           this.log.info(`Deleting key: ${key}`);
         });
+
+        for (const key of keysToDelete) {
+          await this.client.del(key);
+          deletedCount += 1;
+        }
         // await this.client.del(keysToDelete);
         // deletedCount = keysToDelete.length;
 
         deletedCount = 0;
       }
+      /* eslint-enable no-await-in-loop */
 
       this.log.info(`Successfully cleared ${deletedCount} cache entries`);
       return { success: true, deletedCount };
