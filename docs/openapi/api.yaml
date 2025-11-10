@@ -248,6 +248,8 @@ paths:
     $ref: './site-paid.yaml#/site-traffic-paid-type-campaign'
   /sites/{siteId}/traffic/paid/type:
     $ref: './site-paid.yaml#/site-traffic-paid-type'
+  /sites/{siteId}/traffic/paid/pta2/weekly-summary:
+    $ref: './site-paid.yaml#/site-traffic-paid-pta2-weekly-summary'
   /sites/{siteId}/metrics/{metric}/{source}:
     $ref: './site-metrics-api.yaml#/site-metrics-by-source'
   /sites/{siteId}/metrics/{metric}/{source}/by-url/{base64PageUrl}:

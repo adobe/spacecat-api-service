@@ -78,6 +78,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} entitlementController - The entitlement controller.
  * @param {Object} sandboxAuditController - The sandbox audit controller.
  * @param {Object} reportsController - The reports controller.
+ * @param {Object} pta2Controller - The PTA2 controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -112,6 +113,7 @@ export default function getRouteHandlers(
   entitlementController,
   sandboxAuditController,
   reportsController,
+  pta2Controller,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -220,6 +222,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/traffic/paid/type-channel': trafficController.getPaidTrafficByTypeChannel,
     'GET /sites/:siteId/traffic/paid/type-campaign': trafficController.getPaidTrafficByTypeCampaign,
     'GET /sites/:siteId/traffic/paid/type': trafficController.getPaidTrafficByType,
+    'GET /sites/:siteId/traffic/paid/pta2/weekly-summary': pta2Controller.getPTAWeeklySummary,
     'GET /sites/:siteId/brand-guidelines': brandsController.getBrandGuidelinesForSite,
     'GET /sites/:siteId/top-pages': sitesController.getTopPages,
     'GET /sites/:siteId/top-pages/:source': sitesController.getTopPages,
