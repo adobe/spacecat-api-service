@@ -3481,6 +3481,26 @@ PTAWeeklySummary:
       type: string
       description: Bounce rate as a decimal value
       example: '0.5143373221946264'
+    trends:
+      type: object
+      description: Trend analysis showing percentage changes for each metric
+      properties:
+        pageviews:
+          type: number
+          description: Percentage change in pageviews
+          example: 7.084139264990329
+        click_rate:
+          type: number
+          description: Percentage change in click rate
+          example: -14.884651645383743
+        engagement_rate:
+          type: number
+          description: Percentage change in engagement rate
+          example: -9.782131803142791
+        bounce_rate:
+          type: number
+          description: Percentage change in bounce rate
+          example: 11.40608350861348
 
 LlmoQuestion:
   type: object
