@@ -73,7 +73,7 @@ describe('BackfillLlmoCommand', () => {
   });
 
   describe('Handle Execution Method', () => {
-    it('triggers cdn-analysis backfill with default days', async () => {
+    it('triggers cdn-logs-analysis backfill with default days', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(siteStub);
       const command = BackfillLlmoCommand(context);
 
@@ -135,7 +135,7 @@ describe('BackfillLlmoCommand', () => {
       expect(sqsStub.sendMessage.callCount).to.equal(2);
     });
 
-    it('triggers cdn-analysis backfill with custom days', async () => {
+    it('triggers cdn-logs-analysis backfill with custom days', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(siteStub);
       const command = BackfillLlmoCommand(context);
 
@@ -177,7 +177,7 @@ describe('BackfillLlmoCommand', () => {
       expect(message.auditContext).to.have.property('weekOffset', 0);
     });
 
-    it('sends correct SQS message structure for cdn-analysis', async () => {
+    it('sends correct SQS message structure for cdn-logs-analysis', async () => {
       dataAccessStub.Site.findByBaseURL.resolves(siteStub);
       const command = BackfillLlmoCommand(context);
 
@@ -233,7 +233,7 @@ describe('BackfillLlmoCommand', () => {
     it('responds with error for invalid site url', async () => {
       const command = BackfillLlmoCommand(context);
 
-      await command.handleExecution(['baseurl=invalid-url', 'audit=cdn-analysis'], slackContext);
+      await command.handleExecution(['baseurl=invalid-url', 'audit=cdn-logs-analysis'], slackContext);
 
       expect(slackContext.say.calledWith(':warning: Invalid URL provided')).to.be.true;
     });
