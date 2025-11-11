@@ -15,7 +15,6 @@ import {
   applyFilters,
   applyInclusions,
   applySort,
-  applyPagination,
   LLMO_SHEETDATA_SOURCE_URL,
 } from './llmo-utils.js';
 
@@ -90,14 +89,6 @@ const processData = (data, queryParams) => {
     processedData = applySort(processedData, { field, order: sortOrder });
   }
 
-  // Apply pagination (limit and offset) as the final step
-  // This ensures pagination is applied after all filtering and sorting
-  if (queryParams.limit || queryParams.offset) {
-    const limit = queryParams.limit ? parseInt(queryParams.limit, 10) : undefined;
-    const offset = queryParams.offset ? parseInt(queryParams.offset, 10) : 0;
-
-    processedData = applyPagination(processedData, { limit, offset });
-  }
   return processedData;
 };
 
@@ -129,9 +120,12 @@ const fetchAndProcessSingleFile = async (context, llmoConfig, filePath, queryPar
 
   const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${llmoConfig.dataFolder}/${filePath}`);
 
-  // Use a large limit to fetch all data from the source
-  // Pagination will be applied after sorting and filtering
-  url.searchParams.set('limit', '10000000');
+  // Apply pagination parameters when calling the source URL
+  const limit = queryParams.limit ? parseInt(queryParams.limit, 10) : 10000000;
+  const offset = queryParams.offset ? parseInt(queryParams.offset, 10) : 0;
+
+  url.searchParams.set('limit', limit.toString());
+  url.searchParams.set('offset', offset.toString());
 
   // allow fetching a specific sheet from the sheet data source
   if (sheet) {
