@@ -130,7 +130,7 @@ function GetLlmoOpportunityUsageCommand(context) {
   const countLlmoOpportunities = async (siteId) => {
     const opportunities = await Opportunity.allBySiteId(siteId);
 
-    // Filter opportunities that have 'isElmo' tag
+    // Filter opportunities that have 'isElmo' tag or are prerender or llm-blocked types
     const llmoOpportunities = opportunities.filter((opportunity) => {
       const tags = opportunity.getTags() || [];
       const type = opportunity.getType() || '';
@@ -253,9 +253,9 @@ function GetLlmoOpportunityUsageCommand(context) {
           { id: 'organizationId', title: 'Organization ID' },
           { id: 'imsOrgName', title: 'IMS Org Name' },
           { id: 'imsOrgId', title: 'IMS Org ID' },
-          { id: 'containsGeo403', title: 'Contains Technical GEO 403' },
-          { id: 'containsGeo404', title: 'Contains Technical GEO 404' },
-          { id: 'containsGeo5xx', title: 'Contains Technical GEO 5xx' },
+          { id: 'containsGeo403', title: 'Has Tech GEO 403' },
+          { id: 'containsGeo404', title: 'Has Tech GEO 404' },
+          { id: 'containsGeo5xx', title: 'Has Tech GEO 5xx' },
           { id: 'totalOpportunities', title: 'Total Spacecat LLMO Opportunities' },
           { id: 'socialOpportunities', title: 'Social Opportunities' },
           { id: 'thirdPartyOpportunities', title: 'Third Party Opportunities' },
