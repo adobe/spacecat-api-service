@@ -217,27 +217,3 @@ export const applySort = (rawData, sortConfig) => {
 
   return data;
 };
-
-// Apply pagination (limit and offset) to data arrays
-export const applyPagination = (rawData, paginationConfig) => {
-  const data = { ...rawData };
-  const { limit, offset = 0 } = paginationConfig;
-
-  const paginateArray = (array) => {
-    const start = offset;
-    const end = limit ? start + limit : array.length;
-    return array.slice(start, end);
-  };
-
-  if (data[':type'] === 'sheet' && data.data) {
-    data.data = paginateArray(data.data);
-  } else if (data[':type'] === 'multi-sheet') {
-    Object.keys(data).forEach((key) => {
-      if (key !== ':type' && data[key]?.data) {
-        data[key].data = paginateArray(data[key].data);
-      }
-    });
-  }
-
-  return data;
-};

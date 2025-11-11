@@ -162,7 +162,6 @@ describe('llmo-cache-handler', () => {
       const fetchUrl = getFetchUrl();
       expect(fetchUrl).to.include(TEST_DATA_FOLDER);
       expect(fetchUrl).to.include(TEST_DATA_SOURCE);
-      expect(fetchUrl).to.include('limit=10000000');
     });
 
     it('should construct correct URL with sheetType and week', async () => {
@@ -342,24 +341,6 @@ describe('llmo-cache-handler', () => {
       expect(result.data.data[2].name).to.equal('Charlie');
     });
 
-    it('should handle offset without limit', async () => {
-      const rawData = createSheetData([
-        { id: 1, name: 'Item 1' },
-        { id: 2, name: 'Item 2' },
-        { id: 3, name: 'Item 3' },
-        { id: 4, name: 'Item 4' },
-      ]);
-
-      setupFetchTest(rawData);
-      mockContext.data = { offset: '2' };
-
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
-
-      expect(result.data.data).to.have.length(2);
-      expect(result.data.data[0].id).to.equal(3);
-      expect(result.data.data[1].id).to.equal(4);
-    });
-
     it('should apply filters to data', async () => {
       const rawData = createSheetData([
         { id: 1, name: 'Item 1', status: 'active' },
@@ -519,49 +500,34 @@ describe('llmo-cache-handler', () => {
       expect(nullOrUndefinedCount).to.equal(4);
     });
 
-    it('should apply pagination with limit', async () => {
-      const rawData = {
-        ':type': 'sheet',
-        data: [
-          { id: 1, name: 'Item 1' },
-          { id: 2, name: 'Item 2' },
-          { id: 3, name: 'Item 3' },
-          { id: 4, name: 'Item 4' },
-        ],
-      };
+    it('should handle offset parameter', async () => {
+      const rawData = createSheetData([
+        { id: 1, name: 'Item 1' },
+        { id: 2, name: 'Item 2' },
+      ]);
 
-      tracingFetchStub.resolves(createMockResponse(rawData));
-      mockContext.data = {
-        limit: '2',
-      };
+      setupFetchTest(rawData);
+      mockContext.data = { offset: '5' };
 
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      await queryLlmoWithCache(mockContext, mockLlmoConfig);
 
-      expect(result.data.data).to.have.length(2);
+      const fetchUrl = getFetchUrl();
+      expect(fetchUrl).to.include('offset=5');
     });
 
-    it('should apply pagination with limit and offset', async () => {
-      const rawData = {
-        ':type': 'sheet',
-        data: [
-          { id: 1, name: 'Item 1' },
-          { id: 2, name: 'Item 2' },
-          { id: 3, name: 'Item 3' },
-          { id: 4, name: 'Item 4' },
-        ],
-      };
+    it('should handle limit parameter', async () => {
+      const rawData = createSheetData([
+        { id: 1, name: 'Item 1' },
+        { id: 2, name: 'Item 2' },
+      ]);
 
-      tracingFetchStub.resolves(createMockResponse(rawData));
-      mockContext.data = {
-        limit: '2',
-        offset: '2',
-      };
+      setupFetchTest(rawData);
+      mockContext.data = { limit: '50' };
 
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      await queryLlmoWithCache(mockContext, mockLlmoConfig);
 
-      expect(result.data.data).to.have.length(2);
-      expect(result.data.data[0].id).to.equal(3);
-      expect(result.data.data[1].id).to.equal(4);
+      const fetchUrl = getFetchUrl();
+      expect(fetchUrl).to.include('limit=50');
     });
 
     it('should combine multiple query parameters', async () => {
@@ -588,14 +554,14 @@ describe('llmo-cache-handler', () => {
         'filter.status': 'active',
         include: 'id,name',
         sort: 'name:desc',
-        limit: '2',
       };
 
       const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
 
-      expect(result.data.data).to.have.length(2);
+      expect(result.data.data).to.have.length(3);
       expect(result.data.data[0].name).to.equal('Dave');
       expect(result.data.data[1].name).to.equal('Bob');
+      expect(result.data.data[2].name).to.equal('Alice');
       expect(result.data.data[0]).to.have.keys(['id', 'name']);
       expect(result.data.data[0]).to.not.have.keys(['status', 'extra']);
     });
@@ -690,39 +656,6 @@ describe('llmo-cache-handler', () => {
       expect(result.data.sheet2.data[0].name).to.equal('Dave');
       expect(result.data.sheet2.data[1].name).to.equal('Eve');
       expect(result.data.sheet2.data[2].name).to.equal('Frank');
-    });
-
-    it('should apply pagination to multi-sheet data', async () => {
-      const rawData = createMultiSheetData({
-        sheet1: {
-          data: [
-            { id: 1, name: 'Item 1' },
-            { id: 2, name: 'Item 2' },
-            { id: 3, name: 'Item 3' },
-            { id: 4, name: 'Item 4' },
-          ],
-        },
-        sheet2: {
-          data: [
-            { id: 5, name: 'Item 5' },
-            { id: 6, name: 'Item 6' },
-            { id: 7, name: 'Item 7' },
-            { id: 8, name: 'Item 8' },
-          ],
-        },
-      });
-
-      setupFetchTest(rawData);
-      mockContext.data = { limit: '2', offset: '1' };
-
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
-
-      expect(result.data.sheet1.data).to.have.length(2);
-      expect(result.data.sheet1.data[0].id).to.equal(2);
-      expect(result.data.sheet1.data[1].id).to.equal(3);
-      expect(result.data.sheet2.data).to.have.length(2);
-      expect(result.data.sheet2.data[0].id).to.equal(6);
-      expect(result.data.sheet2.data[1].id).to.equal(7);
     });
   });
 
