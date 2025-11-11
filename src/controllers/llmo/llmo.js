@@ -442,7 +442,7 @@ function LlmoController(ctx) {
     for (const topic of topicsReferencingNewCategories) {
       const prompts = topic.prompts || [];
       // If any prompt is not AI-origin, return false
-      if (prompts.some((p) => p.origin !== 'ai')) {
+      if (prompts.some((p) => p.origin.toLowerCase() !== 'ai')) {
         return false;
       }
     }
