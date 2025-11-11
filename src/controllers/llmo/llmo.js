@@ -509,8 +509,15 @@ function LlmoController(ctx) {
       );
 
       const previousConfig = prevConfig?.exists ? prevConfig.config : null;
-      if (!areChangesAICategorizationOnly(previousConfig, parsedConfig)) {
-        // Trigger llmo-customer-analysis after config is updated
+      if (areChangesAICategorizationOnly(previousConfig, parsedConfig)) {
+        await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
+          type: 'geo-brand-presence-trigger-refresh',
+          siteId,
+          auditContext: {
+            configVersion: version,
+          },
+        });
+      } else {
         await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
           type: 'llmo-customer-analysis',
           siteId,

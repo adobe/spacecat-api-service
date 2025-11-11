@@ -1366,7 +1366,17 @@ describe('LlmoController', () => {
 
         await controller.updateLlmoConfig(mockContext);
 
-        expect(mockContext.sqs.sendMessage).to.not.have.been.called;
+        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
+        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
+          mockContext.env.AUDIT_JOBS_QUEUE_URL,
+          {
+            type: 'geo-brand-presence-trigger-refresh',
+            siteId: mockSite.getId(),
+            auditContext: {
+              configVersion: 'v1',
+            },
+          },
+        );
       });
 
       it('should NOT skip audit when adding multiple prompts with mixed origins', async () => {
@@ -1466,7 +1476,17 @@ describe('LlmoController', () => {
 
         await controller.updateLlmoConfig(mockContext);
 
-        expect(mockContext.sqs.sendMessage).to.not.have.been.called;
+        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
+        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
+          mockContext.env.AUDIT_JOBS_QUEUE_URL,
+          {
+            type: 'geo-brand-presence-trigger-refresh',
+            siteId: mockSite.getId(),
+            auditContext: {
+              configVersion: 'v1',
+            },
+          },
+        );
       });
 
       it('should NOT skip audit when modifying existing topic by adding human prompts', async () => {
@@ -1639,7 +1659,17 @@ describe('LlmoController', () => {
 
         await controller.updateLlmoConfig(mockContext);
 
-        expect(mockContext.sqs.sendMessage).to.not.have.been.called;
+        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
+        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
+          mockContext.env.AUDIT_JOBS_QUEUE_URL,
+          {
+            type: 'geo-brand-presence-trigger-refresh',
+            siteId: mockSite.getId(),
+            auditContext: {
+              configVersion: 'v1',
+            },
+          },
+        );
       });
 
       it('should NOT skip audit when existing topic prompts are modified but no new prompts added', async () => {
@@ -1690,8 +1720,18 @@ describe('LlmoController', () => {
 
         await controller.updateLlmoConfig(mockContext);
 
-        // Should skip since the JSON changed but no new prompt texts were added
-        expect(mockContext.sqs.sendMessage).to.not.have.been.called;
+        // Should trigger brand presence refresh since only regions changed
+        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
+        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
+          mockContext.env.AUDIT_JOBS_QUEUE_URL,
+          {
+            type: 'geo-brand-presence-trigger-refresh',
+            siteId: mockSite.getId(),
+            auditContext: {
+              configVersion: 'v1',
+            },
+          },
+        );
       });
 
       it('should NOT skip audit when prompt order changes but prompts are identical', async () => {
@@ -1798,8 +1838,18 @@ describe('LlmoController', () => {
 
         await controller.updateLlmoConfig(mockContext);
 
-        // Should skip since only region order changed (AI-only)
-        expect(mockContext.sqs.sendMessage).to.not.have.been.called;
+        // Should trigger brand presence refresh since only region order changed (AI-only)
+        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
+        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
+          mockContext.env.AUDIT_JOBS_QUEUE_URL,
+          {
+            type: 'geo-brand-presence-trigger-refresh',
+            siteId: mockSite.getId(),
+            auditContext: {
+              configVersion: 'v1',
+            },
+          },
+        );
       });
     });
   });
