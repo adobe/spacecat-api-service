@@ -133,7 +133,8 @@ function GetLlmoOpportunityUsageCommand(context) {
     // Filter opportunities that have 'isElmo' tag
     const llmoOpportunities = opportunities.filter((opportunity) => {
       const tags = opportunity.getTags() || [];
-      return tags.includes('isElmo');
+      const type = opportunity.getType() || '';
+      return tags.includes('isElmo') || type === 'prerender' || type === 'llm-blocked';
     });
 
     return llmoOpportunities.length;

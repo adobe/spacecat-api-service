@@ -158,7 +158,7 @@ describe('GetLlmoOpportunityUsageCommand', () => {
         getName: () => 'Test Org',
       });
       context.dataAccess.Opportunity.allBySiteId.resolves([
-        { getTags: () => ['isElmo'] },
+        { getTags: () => ['isElmo'], getType: () => 'readability' },
       ]);
 
       // Mock query index
@@ -310,8 +310,8 @@ describe('GetLlmoOpportunityUsageCommand', () => {
         getName: () => 'Test Org',
       });
       context.dataAccess.Opportunity.allBySiteId.resolves([
-        { getTags: () => null },
-        { getTags: () => ['isElmo'] },
+        { getTags: () => null, getType: () => 'other' },
+        { getTags: () => ['isElmo'], getType: () => 'readability' },
       ]);
       fetchStub.resolves({ ok: false });
 
@@ -319,6 +319,150 @@ describe('GetLlmoOpportunityUsageCommand', () => {
       await command.handleExecution([], slackContext);
 
       expect(sendFileStub.called).to.be.true;
+    });
+
+    it('counts opportunities with prerender type', async () => {
+      const mockSite = {
+        getId: () => 'site-1',
+        getBaseURL: () => 'https://test.com',
+        getOrganizationId: () => 'org-1',
+        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'test-folder' }) }),
+      };
+
+      context.dataAccess.Site.all.resolves([mockSite]);
+      context.dataAccess.Organization.findById.resolves({
+        getImsOrgId: () => 'valid@AdobeOrg',
+        getName: () => 'Test Org',
+      });
+      context.dataAccess.Opportunity.allBySiteId.resolves([
+        { getTags: () => [], getType: () => 'prerender' },
+        { getTags: () => ['isElmo'], getType: () => 'readability' },
+      ]);
+      fetchStub.resolves({ ok: false });
+
+      const command = GetLlmoOpportunityUsageCommand(context);
+      await command.handleExecution([], slackContext);
+
+      expect(sendFileStub.called).to.be.true;
+      const csvContent = sendFileStub.firstCall.args[1].toString();
+      // Should count both: 1 prerender + 1 isElmo = 2
+      expect(csvContent).to.include(',2,');
+    });
+
+    it('counts opportunities with llm-blocked type', async () => {
+      const mockSite = {
+        getId: () => 'site-1',
+        getBaseURL: () => 'https://test.com',
+        getOrganizationId: () => 'org-1',
+        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'test-folder' }) }),
+      };
+
+      context.dataAccess.Site.all.resolves([mockSite]);
+      context.dataAccess.Organization.findById.resolves({
+        getImsOrgId: () => 'valid@AdobeOrg',
+        getName: () => 'Test Org',
+      });
+      context.dataAccess.Opportunity.allBySiteId.resolves([
+        { getTags: () => [], getType: () => 'llm-blocked' },
+        { getTags: () => ['isElmo'], getType: () => 'readability' },
+      ]);
+      fetchStub.resolves({ ok: false });
+
+      const command = GetLlmoOpportunityUsageCommand(context);
+      await command.handleExecution([], slackContext);
+
+      expect(sendFileStub.called).to.be.true;
+      const csvContent = sendFileStub.firstCall.args[1].toString();
+      // Should count both: 1 llm-blocked + 1 isElmo = 2
+      expect(csvContent).to.include(',2,');
+    });
+
+    it('counts opportunities with both isElmo tag and prerender type', async () => {
+      const mockSite = {
+        getId: () => 'site-1',
+        getBaseURL: () => 'https://test.com',
+        getOrganizationId: () => 'org-1',
+        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'test-folder' }) }),
+      };
+
+      context.dataAccess.Site.all.resolves([mockSite]);
+      context.dataAccess.Organization.findById.resolves({
+        getImsOrgId: () => 'valid@AdobeOrg',
+        getName: () => 'Test Org',
+      });
+      context.dataAccess.Opportunity.allBySiteId.resolves([
+        { getTags: () => ['isElmo'], getType: () => 'prerender' },
+      ]);
+      fetchStub.resolves({ ok: false });
+
+      const command = GetLlmoOpportunityUsageCommand(context);
+      await command.handleExecution([], slackContext);
+
+      expect(sendFileStub.called).to.be.true;
+      const csvContent = sendFileStub.firstCall.args[1].toString();
+      // Should count once (not double-counted): 1
+      expect(csvContent).to.include(',1,');
+    });
+
+    it('counts mixed opportunity types correctly', async () => {
+      const mockSite = {
+        getId: () => 'site-1',
+        getBaseURL: () => 'https://test.com',
+        getOrganizationId: () => 'org-1',
+        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'test-folder' }) }),
+      };
+
+      context.dataAccess.Site.all.resolves([mockSite]);
+      context.dataAccess.Organization.findById.resolves({
+        getImsOrgId: () => 'valid@AdobeOrg',
+        getName: () => 'Test Org',
+      });
+      context.dataAccess.Opportunity.allBySiteId.resolves([
+        { getTags: () => ['isElmo'], getType: () => 'readability' }, // counted
+        { getTags: () => [], getType: () => 'prerender' }, // counted
+        { getTags: () => [], getType: () => 'llm-blocked' }, // counted
+        { getTags: () => ['isElmo'], getType: () => 'prerender' }, // counted (once)
+        { getTags: () => [], getType: () => 'other' }, // not counted
+        { getTags: () => ['otherTag'], getType: () => 'readability' }, // not counted
+      ]);
+      fetchStub.resolves({ ok: false });
+
+      const command = GetLlmoOpportunityUsageCommand(context);
+      await command.handleExecution([], slackContext);
+
+      expect(sendFileStub.called).to.be.true;
+      const csvContent = sendFileStub.firstCall.args[1].toString();
+      // Should count 4 opportunities total
+      expect(csvContent).to.include(',4,');
+    });
+
+    it('handles opportunities with null or undefined type', async () => {
+      const mockSite = {
+        getId: () => 'site-1',
+        getBaseURL: () => 'https://test.com',
+        getOrganizationId: () => 'org-1',
+        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'test-folder' }) }),
+      };
+
+      context.dataAccess.Site.all.resolves([mockSite]);
+      context.dataAccess.Organization.findById.resolves({
+        getImsOrgId: () => 'valid@AdobeOrg',
+        getName: () => 'Test Org',
+      });
+      context.dataAccess.Opportunity.allBySiteId.resolves([
+        { getTags: () => ['isElmo'], getType: () => null }, // counted (has isElmo)
+        { getTags: () => [], getType: () => undefined }, // not counted
+        { getTags: () => null, getType: () => null }, // not counted
+      ]);
+      fetchStub.resolves({ ok: false });
+
+      const command = GetLlmoOpportunityUsageCommand(context);
+      await command.handleExecution([], slackContext);
+
+      expect(sendFileStub.called).to.be.true;
+      const csvContent = sendFileStub.firstCall.args[1].toString();
+      // Should count only 1 (the one with isElmo tag)
+      expect(csvContent).to.include(',1,');
     });
 
     it('sanitizes org names with special characters', async () => {
@@ -777,7 +921,7 @@ describe('GetLlmoOpportunityUsageCommand', () => {
         getName: () => 'Test Org',
       });
       context.dataAccess.Opportunity.allBySiteId.resolves([
-        { getTags: () => ['isElmo'] },
+        { getTags: () => ['isElmo'], getType: () => 'readability' },
       ]);
 
       fetchStub.callsFake((url) => {
@@ -833,8 +977,8 @@ describe('GetLlmoOpportunityUsageCommand', () => {
         getName: () => 'Test Org',
       });
       context.dataAccess.Opportunity.allBySiteId.resolves([
-        { getTags: () => ['isElmo'] },
-        { getTags: () => ['isElmo'] },
+        { getTags: () => ['isElmo'], getType: () => 'readability' },
+        { getTags: () => ['isElmo'], getType: () => 'other' },
       ]);
 
       fetchStub.callsFake((url) => {
@@ -875,9 +1019,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
         getName: () => 'Test Org',
       });
       context.dataAccess.Opportunity.allBySiteId.resolves([
-        { getTags: () => ['isElmo'] },
-        { getTags: () => ['isElmo'] },
-        { getTags: () => ['isElmo'] },
+        { getTags: () => ['isElmo'], getType: () => 'readability' },
+        { getTags: () => ['isElmo'], getType: () => 'other' },
+        { getTags: () => ['isElmo'], getType: () => 'content' },
       ]);
 
       fetchStub.callsFake((url) => {
@@ -963,7 +1107,7 @@ describe('GetLlmoOpportunityUsageCommand', () => {
         getName: () => 'Test Org',
       });
       context.dataAccess.Opportunity.allBySiteId.resolves([
-        { getTags: () => ['isElmo'] },
+        { getTags: () => ['isElmo'], getType: () => 'readability' },
       ]);
 
       fetchStub.callsFake((url) => {
