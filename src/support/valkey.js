@@ -46,11 +46,11 @@ class ValkeyCache {
         socket: {
           host,
           port: parseInt(port, 10),
-          connectTimeout: 10000, // 10 seconds timeout
+          connectTimeout: 300, // Valkey should connect very quickly
           tls: true, // Enable TLS for ElastiCache connections
           rejectUnauthorized: false, // AWS certificates are self-signed
           reconnectStrategy: (retries) => {
-            if (retries > 3) {
+            if (retries > 1) { // Only one retry is allowed
               this.log.error('Max Valkey reconnection attempts reached');
               return false; // Stop reconnecting
             }
