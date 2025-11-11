@@ -32,6 +32,7 @@ import {
   applyExclusions,
   applyGroups,
   applyMappings,
+  LLMO_SHEETDATA_SOURCE_URL,
 } from './llmo-utils.js';
 import { LLMO_SHEET_MAPPINGS } from './llmo-mappings.js';
 import {
@@ -40,18 +41,15 @@ import {
   performLlmoOnboarding,
   performLlmoOffboarding,
 } from './llmo-onboarding.js';
-import LlmoQuerySpecificCache from './llmo-query-specific.js';
-import LlmoQueryFileCache from './llmo-query.js';
+import { queryLlmoWithCache } from './llmo-cache-handler.js';
 
 const { readConfig, writeConfig } = llmo;
 const { llmoConfig: llmoConfigSchema } = schemas;
 
-const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
-
 function LlmoController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
-  // Helper function to get site and validate LLMO confign
+  // Helper function to get site and validate LLMO config
   const getSiteAndValidateLlmo = async (context) => {
     const { siteId } = context.params;
     const { dataAccess } = context;
@@ -869,53 +867,15 @@ function LlmoController(ctx) {
     }
   };
 
-  const queryFile = async (context) => {
-    const llmoQuery = new LlmoQueryFileCache(getSiteAndValidateLlmo);
-    return llmoQuery.query(context);
-  };
-
-  const querySpecific = async (context) => {
-    const llmoQuery = new LlmoQuerySpecificCache(getSiteAndValidateLlmo);
-    return llmoQuery.query(context);
-  };
-
-  /**
-   * Clears all LLMO cache entries from Valkey.
-   * This endpoint handles DELETE requests to clear the entire cache.
-   * @param {object} context - The request context.
-   * @returns {Promise<Response>} The cache clear response.
-   */
-  const clearCache = async (context) => {
+  const queryWithCache = async (context) => {
     const { log } = context;
-
+    const { siteId } = context.params;
     try {
-      // Validate LLMO access
-      await getSiteAndValidateLlmo(context);
-
-      // Check if Valkey cache is available
-      if (!context.valkey || !context.valkey.cache) {
-        return badRequest('Cache is not configured for this environment');
-      }
-
-      log.info('Starting cache clear operation');
-
-      // Clear all cache entries
-      const result = await context.valkey.cache.clearAll();
-
-      if (!result.success) {
-        log.error('Failed to clear cache');
-        return badRequest('Failed to clear cache');
-      }
-
-      log.info(`Successfully cleared ${result.deletedCount} cache entries`);
-
-      return ok({
-        message: 'Cache cleared successfully',
-        deletedCount: result.deletedCount,
-        clearedAt: new Date().toISOString(),
-      });
+      const { llmoConfig } = await getSiteAndValidateLlmo(context);
+      const { data, headers } = await queryLlmoWithCache(context, llmoConfig);
+      return ok(data, headers);
     } catch (error) {
-      log.error(`Error clearing cache: ${error.message}`);
+      log.error(`Error during LLMO cached query for site ${siteId}: ${error.message}`);
       return badRequest(error.message);
     }
   };
@@ -938,9 +898,7 @@ function LlmoController(ctx) {
     updateLlmoConfig,
     onboardCustomer,
     offboardCustomer,
-    queryFile,
-    querySpecific,
-    clearCache,
+    queryWithCache,
   };
 }
 

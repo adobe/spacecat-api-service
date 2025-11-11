@@ -10,6 +10,9 @@
  * governing permissions and limitations under the License.
  */
 
+// LLMO constants
+export const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
+
 // Apply filters to data arrays with case-insensitive exact matching
 export const applyFilters = (rawData, filterFields) => {
   const data = { ...rawData };

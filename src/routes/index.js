@@ -270,8 +270,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/sheet-data/:dataSource': llmoController.getLlmoSheetData,
     'GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': llmoController.getLlmoSheetData,
     'GET /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource': llmoController.getLlmoSheetData,
-    'GET /sites/:siteId/llmo/query-file': llmoController.queryFile,
-    'GET /sites/:siteId/llmo/query-specific': llmoController.querySpecific,
+    'GET /sites/:siteId/llmo/cache': llmoController.queryWithCache,
     'POST /sites/:siteId/llmo/sheet-data/:dataSource': llmoController.queryLlmoSheetData,
     'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': llmoController.queryLlmoSheetData,
     'POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource': llmoController.queryLlmoSheetData,
@@ -289,7 +288,6 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/llmo/cdn-logs-filter': llmoController.patchLlmoCdnLogsFilter,
     'PATCH /sites/:siteId/llmo/cdn-logs-bucket-config': llmoController.patchLlmoCdnBucketConfig,
     'GET /sites/:siteId/llmo/global-sheet-data/:configName': llmoController.getLlmoGlobalSheetData,
-    'DELETE /sites/:siteId/llmo/cache': llmoController.clearCache,
     'POST /llmo/onboard': llmoController.onboardCustomer,
     'POST /sites/:siteId/llmo/offboard': llmoController.offboardCustomer,
 

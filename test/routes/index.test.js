@@ -207,6 +207,7 @@ describe('getRouteHandlers', () => {
     patchLlmoCdnLogsFilter: () => null,
     patchLlmoCdnBucketConfig: () => null,
     onboardCustomer: () => null,
+    queryWithCache: () => null,
     offboardCustomer: () => null,
     query: () => null,
     queryLlmoSheetData: () => null,
@@ -461,8 +462,7 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/sheet-data/:dataSource',
       'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource',
       'POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource',
-      'GET /sites/:siteId/llmo/query-file',
-      'GET /sites/:siteId/llmo/query-specific',
+      'GET /sites/:siteId/llmo/cache',
       'GET /sites/:siteId/llmo/config',
       'PATCH /sites/:siteId/llmo/config',
       'POST /sites/:siteId/llmo/config',
@@ -474,7 +474,6 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/customer-intent',
       'DELETE /sites/:siteId/llmo/customer-intent/:intentKey',
       'PATCH /sites/:siteId/llmo/customer-intent/:intentKey',
-      'DELETE /sites/:siteId/llmo/cache',
       'POST /sites/:siteId/llmo/offboard',
       'GET /consent-banner/:jobId',
       'PATCH /sites/:siteId/llmo/cdn-logs-filter',
@@ -598,10 +597,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'dataSource']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource'].handler).to.equal(mockLlmoController.getLlmoSheetData);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'week', 'dataSource']);
-    expect(dynamicRoutes['GET /sites/:siteId/llmo/query-file'].handler).to.equal(mockLlmoController.queryFile);
-    expect(dynamicRoutes['GET /sites/:siteId/llmo/query-file'].paramNames).to.deep.equal(['siteId']);
-    expect(dynamicRoutes['GET /sites/:siteId/llmo/query-specific'].handler).to.equal(mockLlmoController.querySpecific);
-    expect(dynamicRoutes['GET /sites/:siteId/llmo/query-specific'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/cache'].handler).to.equal(mockLlmoController.queryWithCache);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/cache'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/config'].handler).to.equal(mockLlmoController.getLlmoConfig);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/config'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/questions'].handler).to.equal(mockLlmoController.getLlmoQuestions);
@@ -620,8 +617,6 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['DELETE /sites/:siteId/llmo/customer-intent/:intentKey'].paramNames).to.deep.equal(['siteId', 'intentKey']);
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/customer-intent/:intentKey'].handler).to.equal(mockLlmoController.patchLlmoCustomerIntent);
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/customer-intent/:intentKey'].paramNames).to.deep.equal(['siteId', 'intentKey']);
-    expect(dynamicRoutes['DELETE /sites/:siteId/llmo/cache'].handler).to.equal(mockLlmoController.clearCache);
-    expect(dynamicRoutes['DELETE /sites/:siteId/llmo/cache'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/offboard'].handler).to.equal(mockLlmoController.offboardCustomer);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/offboard'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /consent-banner/:jobId'].handler).to.equal(mockConsentBannerController.getScreenshots);
