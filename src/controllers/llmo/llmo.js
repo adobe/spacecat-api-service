@@ -388,6 +388,24 @@ function LlmoController(ctx) {
   };
 
   /**
+   * Compares two arrays of prompts for equality, regardless of original order.
+   * Returns true if promptsarrays have the same items.
+   */
+  const arePromptArraysEqual = (prompts1, prompts2) => {
+    if (prompts1.length !== prompts2.length) return false;
+
+    const sortedPrompts1 = JSON.stringify(
+      prompts1.sort((a, b) => a.prompt.localeCompare(b.prompt)),
+    );
+
+    const sortedPrompts2 = JSON.stringify(
+      prompts2.sort((a, b) => a.prompt.localeCompare(b.prompt)),
+    );
+
+    return sortedPrompts1 === sortedPrompts2;
+  };
+
+  /**
    * Checks if config changes are only AI-origin categorization updates.
    * Returns true if all new/modified categories and topics contain only AI-origin prompts.
    */
@@ -408,7 +426,7 @@ function LlmoController(ctx) {
       // Check if prompts changed
       const oldPrompts = oldTopics[id]?.prompts || [];
       const newPrompts = newTopics[id]?.prompts || [];
-      return JSON.stringify(oldPrompts) !== JSON.stringify(newPrompts);
+      return !arePromptArraysEqual(oldPrompts, newPrompts);
     });
 
     // If no category or topic changes, return false (other changes present)
@@ -490,7 +508,8 @@ function LlmoController(ctx) {
         { s3Bucket: s3.s3Bucket },
       );
 
-      if (!areChangesAICategorizationOnly(prevConfig?.config, parsedConfig)) {
+      const previousConfig = prevConfig?.exists ? prevConfig.config : null;
+      if (!areChangesAICategorizationOnly(previousConfig, parsedConfig)) {
         // Trigger llmo-customer-analysis after config is updated
         await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
           type: 'llmo-customer-analysis',

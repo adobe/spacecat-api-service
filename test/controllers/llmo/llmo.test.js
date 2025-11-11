@@ -1693,6 +1693,114 @@ describe('LlmoController', () => {
         // Should skip since the JSON changed but no new prompt texts were added
         expect(mockContext.sqs.sendMessage).to.not.have.been.called;
       });
+
+      it('should NOT skip audit when prompt order changes but prompts are identical', async () => {
+        const existingConfig = {
+          ...llmoConfig.defaultConfig(),
+          categories: {
+            [CATEGORY_ID]: { name: 'Existing Category', region: ['us'] },
+          },
+          topics: {
+            [TOPIC_ID]: {
+              name: 'Existing Topic',
+              category: CATEGORY_ID,
+              prompts: [
+                {
+                  prompt: 'Prompt A', regions: ['us'], origin: 'human', source: 'config',
+                },
+                {
+                  prompt: 'Prompt B', regions: ['us'], origin: 'human', source: 'config',
+                },
+              ],
+            },
+          },
+        };
+
+        readConfigStub.resolves({
+          config: existingConfig,
+          exists: true,
+          version: 'v0',
+        });
+
+        // Same prompts but in different order
+        const updatedConfig = {
+          ...existingConfig,
+          topics: {
+            [TOPIC_ID]: {
+              name: 'Existing Topic',
+              category: CATEGORY_ID,
+              prompts: [
+                {
+                  prompt: 'Prompt B', regions: ['us'], origin: 'human', source: 'config',
+                },
+                {
+                  prompt: 'Prompt A', regions: ['us'], origin: 'human', source: 'config',
+                },
+              ],
+            },
+          },
+        };
+
+        mockContext.data = updatedConfig;
+        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
+
+        await controller.updateLlmoConfig(mockContext);
+
+        // Should NOT send message since prompts are identical (just reordered)
+        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
+      });
+
+      it('should handle prompts with regions in different order as equal', async () => {
+        const existingConfig = {
+          ...llmoConfig.defaultConfig(),
+          categories: {
+            [CATEGORY_ID]: { name: 'Existing Category', region: ['us'] },
+          },
+          topics: {
+            [TOPIC_ID]: {
+              name: 'Existing Topic',
+              category: CATEGORY_ID,
+              prompts: [{
+                prompt: 'Multi-region prompt',
+                regions: ['us', 'eu', 'asia'],
+                origin: 'ai',
+                source: 'mystique',
+              }],
+            },
+          },
+        };
+
+        readConfigStub.resolves({
+          config: existingConfig,
+          exists: true,
+          version: 'v0',
+        });
+
+        // Same prompt but regions in different order
+        const updatedConfig = {
+          ...existingConfig,
+          topics: {
+            [TOPIC_ID]: {
+              name: 'Existing Topic',
+              category: CATEGORY_ID,
+              prompts: [{
+                prompt: 'Multi-region prompt',
+                regions: ['asia', 'us', 'eu'], // Different order
+                origin: 'ai',
+                source: 'mystique',
+              }],
+            },
+          },
+        };
+
+        mockContext.data = updatedConfig;
+        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
+
+        await controller.updateLlmoConfig(mockContext);
+
+        // Should skip since only region order changed (AI-only)
+        expect(mockContext.sqs.sendMessage).to.not.have.been.called;
+      });
     });
   });
 
