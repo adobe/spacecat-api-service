@@ -274,6 +274,7 @@ describe('getRouteHandlers', () => {
       mockSandboxAuditController,
       mockReportsController,
       mockPTA2Controller,
+      mockPTA2Controller,
     );
 
     expect(staticRoutes).to.have.all.keys(

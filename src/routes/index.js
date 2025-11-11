@@ -79,6 +79,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} sandboxAuditController - The sandbox audit controller.
  * @param {Object} reportsController - The reports controller.
  * @param {Object} pta2Controller - The PTA2 controller.
+ * @param {Object} pta2Controller - The PTA2 controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
