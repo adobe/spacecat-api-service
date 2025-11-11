@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { parse } from 'tldts';
 import { ok, badRequest } from '@adobe/spacecat-shared-http-utils';
 import { SPACECAT_USER_AGENT, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 import {
@@ -48,7 +49,7 @@ export default class LlmoQuerySpecificCache {
    * Processes data by applying filters and inclusions based on query parameters
    * @private
    */
-  static processData(data, queryParams) {
+  static processData(filePath, data, queryParams) {
     let processedData = data;
 
     // Apply sheet filtering if provided (e.g., ?sheets=sheet1,sheet2)
@@ -110,6 +111,7 @@ export default class LlmoQuerySpecificCache {
       processedData = applyPagination(processedData, { limit, offset });
     }
 
+    processedData = this.extractData(filePath, processedData, 'https://adobe.com');
     return processedData;
   }
 
@@ -148,7 +150,7 @@ export default class LlmoQuerySpecificCache {
 
     // Use a large limit to fetch all data from the source
     // Pagination will be applied after sorting and filtering
-    url.searchParams.set('limit', '1000000');
+    url.searchParams.set('limit', '10000000');
 
     // allow fetching a specific sheet from the sheet data source
     if (sheet) {
@@ -190,7 +192,7 @@ export default class LlmoQuerySpecificCache {
 
       // Process the data with all query parameters
       const processStartTime = Date.now();
-      const processedData = LlmoQuerySpecificCache.processData(rawData, queryParams);
+      const processedData = LlmoQuerySpecificCache.processData(filePath, rawData, queryParams);
       const processTime = Date.now() - processStartTime;
 
       log.info(`✓ Data processing completed in ${processTime}ms`);
@@ -301,6 +303,294 @@ export default class LlmoQuerySpecificCache {
     } catch (error) {
       log.error(`Error proxying data for siteId: ${siteId}, error: ${error.message}`);
       return badRequest(error.message);
+    }
+  }
+
+  /**
+   * @private
+   */
+  static extractData(filePath, weekData, siteBaseUrl) {
+    let allSheetRecords = [];
+    let competitorsRecords = [];
+
+    // filePath contains something like brandpresence-all-W45-2025.json
+    // so build an object with the week and year from the filePath
+    // but watch out, the filePath contains a lot of characters before
+    // so do it with a regex
+    const weekAndYear = filePath.match(/brandpresence-all-w(\d{2})-(\d{4})/);
+    const week = weekAndYear[1];
+    const year = weekAndYear[2];
+
+    // Get week information from weekData
+    const weekInfo = { week, year };
+    const weekString = `${weekInfo.year}-W${weekInfo.week.toString().padStart(2, '0')}`;
+    Object.entries(weekData).forEach(([sheetName, sheetContent]) => {
+      // Extract from 'all' sheet
+      if (sheetName.includes('all')) {
+        const records = Array.isArray(sheetContent.data) ? sheetContent.data : [];
+
+        // Enrich records in place so weekly trend calculations see the updated data
+        records.forEach((record) => {
+          // Add week information
+          // eslint-disable-next-line no-param-reassign
+          record.Week = weekString;
+          // eslint-disable-next-line no-param-reassign
+          record.week = weekString;
+
+          // Parse sources field and create SourcesDetail
+          const { Prompt: prompt } = record;
+          if (prompt) {
+            // Parse semicolon-separated URLs from sources field
+            const sources = record.sources || record.Sources || '';
+            const urls = LlmoQuerySpecificCache.parseSourcesUrls(sources);
+
+            // Get competitor domains for content type determination
+            const competitorDomains = LlmoQuerySpecificCache.extractCompetitorDomains(record);
+
+            // Create citations for each URL
+            const sourcesDetail = urls.map((url) => {
+              const contentType = siteBaseUrl
+                ? LlmoQuerySpecificCache.determineContentType(url, siteBaseUrl, competitorDomains)
+                : 'earned';
+
+              const brand = LlmoQuerySpecificCache.extractDomain(url) || '';
+
+              return {
+                url,
+                brand,
+                numTimesCited: 1, // Each occurrence counts as 1 citation
+                contentType,
+                week: weekString,
+                weekNumber: weekInfo.week,
+                year: weekInfo.year,
+              };
+            });
+
+            // eslint-disable-next-line no-param-reassign
+            record.SourcesDetail = sourcesDetail;
+
+            // Set sources_contain_branddomain based on whether any source is 'owned'
+            const hasOwnedSource = sourcesDetail.some((source) => source.contentType === 'owned');
+
+            // Always set the field based on our analysis (modifying in place!)
+            // eslint-disable-next-line no-param-reassign
+            record.sources_contain_branddomain = hasOwnedSource ? 'true' : 'false';
+            // eslint-disable-next-line no-param-reassign
+            record['Sources Contain Brand Domain'] = hasOwnedSource ? 'true' : 'false';
+          }
+        });
+
+        // Also collect them for the return value
+        allSheetRecords = allSheetRecords.concat(records);
+      }
+
+      // Extract from 'brand_vs_competitors' sheet
+      if (sheetName.includes('brand_vs_competitors')) {
+        const records = Array.isArray(sheetContent.data) ? sheetContent.data : [];
+        // Add week information to each record (modifying in place)
+        records.forEach((record) => {
+          // eslint-disable-next-line no-param-reassign
+          record.Week = weekString;
+          // eslint-disable-next-line no-param-reassign
+          record.week = weekString;
+        });
+        competitorsRecords = competitorsRecords.concat(records);
+      }
+    });
+
+    // eslint-disable-next-line no-param-reassign
+    weekData.all.data = allSheetRecords;
+    // eslint-disable-next-line no-param-reassign
+    weekData.brand_vs_competitors.data = competitorsRecords;
+    return weekData;
+  }
+
+  /**
+   * @private
+   */
+  static parseSourcesUrls(sources) {
+    if (!sources || typeof sources !== 'string') return [];
+
+    return sources
+      .split(';')
+      .map((url) => url.trim())
+      .filter((url) => url.length > 0)
+      .map((url) => LlmoQuerySpecificCache.normalizeUrl(url));
+  }
+
+  /**
+   * @private
+   */
+  static extractCompetitorDomains(record) {
+    const competitors = [];
+
+    // Extract from Business Competitors field only (semicolon separated)
+    if (record['Business Competitors'] || record.businessCompetitors) {
+      const businessCompetitors = record['Business Competitors'] || record.businessCompetitors;
+      if (typeof businessCompetitors === 'string') {
+        competitors.push(...businessCompetitors.split(';').map((c) => c.trim()).filter((c) => c.length > 0));
+      }
+    }
+
+    // Deduplicate
+    return [...new Set(competitors)];
+  }
+
+  /**
+   * @private
+   */
+  static determineContentType(url, siteBaseUrl, competitorNames) {
+    // Priority 1: Check if owned
+    if (LlmoQuerySpecificCache.isOwnedUrl(url, siteBaseUrl)) {
+      return 'owned';
+    }
+
+    // Priority 2: Check if competitor/others
+    if (competitorNames && LlmoQuerySpecificCache.isCompetitorUrl(url, competitorNames)) {
+      return 'others';
+    }
+
+    // Priority 3: Check if social media
+    if (LlmoQuerySpecificCache.isSocialMediaUrl(url)) {
+      return 'social';
+    }
+
+    // Default: earned (third-party content)
+    return 'earned';
+  }
+
+  /**
+   * @private
+   */
+  static extractDomain(url) {
+    try {
+      const urlObj = new URL(url);
+      return urlObj.hostname.replace(/^www\./, '');
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * @private
+   */
+  static normalizeUrl(url) {
+    if (!url || typeof url !== 'string') return url;
+
+    let normalized = url.trim();
+
+    // Check if this is a path (starts with /) or a full URL
+    const isPath = normalized.startsWith('/');
+
+    if (isPath) {
+      // For paths, just strip query params with regex (preserve fragments)
+      normalized = normalized.replace(/\?[^#]*/, '');
+    } else {
+      // For full URLs, use URL object for proper parsing
+      try {
+        const urlObj = new URL(normalized.startsWith('http') ? normalized : `https://${normalized}`);
+
+        // Clear all search params but keep hash/fragment
+        urlObj.search = '';
+
+        // Add www. to bare domains (not subdomains like helpx.adobe.com)
+        const { subdomain } = parse(urlObj.hostname);
+        if (!subdomain && !urlObj.hostname.startsWith('www.')) {
+          urlObj.hostname = `www.${urlObj.hostname}`;
+        }
+
+        normalized = urlObj.toString();
+      } catch {
+        // If URL parsing fails, use fallback approach
+        // Remove query params: everything between ? and # (or end of string if no #)
+        normalized = normalized.replace(/\?[^#]*/, '');
+      }
+    }
+
+    // Remove trailing slash, except for root paths
+    if (normalized.length > 1 && normalized.endsWith('/')) {
+      normalized = normalized.slice(0, -1);
+    }
+
+    // Normalize protocol to lowercase (only for full URLs)
+    if (!isPath) {
+      if (normalized.startsWith('HTTP://')) {
+        normalized = `http://${normalized.slice(7)}`;
+      } else if (normalized.startsWith('HTTPS://')) {
+        normalized = `https://${normalized.slice(8)}`;
+      }
+    }
+
+    return normalized;
+  }
+
+  /**
+   * @private
+   */
+  static isOwnedUrl(url, siteBaseUrl) {
+    try {
+      const urlObj = new URL(url.startsWith('http') ? url : `https://${url}`);
+      const siteObj = new URL(siteBaseUrl);
+
+      const urlHostname = urlObj.hostname.replace(/^www\./, '').toLowerCase();
+      const siteHostname = siteObj.hostname.replace(/^www\./, '').toLowerCase();
+
+      // Check if URL hostname matches or is a subdomain of site hostname
+      return urlHostname === siteHostname || urlHostname.endsWith(`.${siteHostname}`);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * @private
+   */
+  static isCompetitorUrl(url, competitorNames) {
+    if (!competitorNames || competitorNames.length === 0) return false;
+
+    try {
+      const urlObj = new URL(url.startsWith('http') ? url : `https://${url}`);
+      const urlHostname = urlObj.hostname.replace(/^www\./, '').toLowerCase();
+
+      // Check if any competitor name appears in the domain
+      return competitorNames.some((competitorName) => {
+        const nameLower = competitorName.toLowerCase().trim();
+        return urlHostname.includes(nameLower);
+      });
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * @private
+   */
+  static isSocialMediaUrl(url) {
+    const SOCIAL_MEDIA_DOMAINS = [
+      'twitter.com',
+      'x.com',
+      'facebook.com',
+      'linkedin.com',
+      'instagram.com',
+      'youtube.com',
+      'tiktok.com',
+      'reddit.com',
+      'pinterest.com',
+      'snapchat.com',
+      'discord.com',
+      'twitch.tv',
+      'medium.com',
+      'quora.com',
+      'tumblr.com',
+      'vimeo.com',
+    ];
+
+    try {
+      const urlObj = new URL(url.startsWith('http') ? url : `https://${url}`);
+      const hostname = urlObj.hostname.replace(/^www\./, '').toLowerCase();
+      return SOCIAL_MEDIA_DOMAINS.some((d) => hostname === d || hostname.endsWith(`.${d}`));
+    } catch {
+      return false;
     }
   }
 }
