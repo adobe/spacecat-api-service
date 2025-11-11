@@ -10,13 +10,70 @@
  * governing permissions and limitations under the License.
  */
 
-import { isValidUrl } from '@adobe/spacecat-shared-utils';
+import { isValidUrl, SPACECAT_USER_AGENT, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 import { sendFile, extractURLFromSlackInput } from '../../../utils/slack/base.js';
 import { createObjectCsvStringifier } from '../../../utils/slack/csvHelper.cjs';
 import BaseCommand from './base.js';
 
 const PHRASES = ['get-llmo-opportunity-usage'];
 const EXCLUDED_IMS_ORGS = ['9E1005A551ED61CA0A490D45@AdobeOrg'];
+const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
+
+/**
+ * Fetches LLMO sheet data for a given site and data source path.
+ * Returns null if the site doesn't have LLMO enabled or the fetch fails.
+ * @returns {Promise<Object>} The fetched sheet data
+ */
+async function fetchLlmoSheetData(site, dataSourcePath, env) {
+  try {
+    const llmoConfig = site.getConfig()?.getLlmoConfig();
+
+    if (!llmoConfig) {
+      return null;
+    }
+
+    const { dataFolder } = llmoConfig;
+    if (!dataFolder) {
+      return null;
+    }
+
+    // Construct the full URL
+    const sheetURL = `${dataFolder}/${dataSourcePath}`;
+    const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
+
+    // Fetch data from the external endpoint
+    const response = await fetch(url.toString(), {
+      headers: {
+        Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
+        'User-Agent': SPACECAT_USER_AGENT,
+        'Accept-Encoding': 'br',
+      },
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    return null;
+  }
+}
+
+/**
+ * Get the count of technical GEO 404 opportunities for a given site
+ * @param {string} site - The site object to get the technical GEO 404 opportunities for
+ * @param {Object} env - The environment object
+ * @returns {Promise<number>} The count of technical GEO 404 opportunities
+ */
+async function getTechnicalGEO404Opportunities(site, env) {
+  const data = await fetchLlmoSheetData(site, 'agentic-traffic/agentictraffic-errors-403-w43-2025.json?limit=100', env);
+  if (!data) {
+    return null;
+  }
+  return data?.data?.length || 0;
+}
 
 function GetLlmoOpportunityUsageCommand(context) {
   const baseCommand = BaseCommand({
@@ -75,7 +132,9 @@ function GetLlmoOpportunityUsageCommand(context) {
 
       const sitePromises = sites.map(async (site) => {
         try {
+          const { env } = context;
           const totalOpportunities = await countLlmoOpportunities(site.getId());
+          const geo404Opportunities = await getTechnicalGEO404Opportunities(site, env);
 
           const organization = await Organization.findById(site.getOrganizationId());
           const imsOrgId = organization?.getImsOrgId();
@@ -99,6 +158,7 @@ function GetLlmoOpportunityUsageCommand(context) {
             imsOrgName,
             imsOrgId,
             totalOpportunities,
+            geo404Opportunities,
           };
         } catch (siteError) {
           log.warn(`Failed to process site ${site.getId()}: ${siteError.message}`);
@@ -126,6 +186,7 @@ function GetLlmoOpportunityUsageCommand(context) {
           { id: 'imsOrgName', title: 'IMS Org Name' },
           { id: 'imsOrgId', title: 'IMS Org ID' },
           { id: 'totalOpportunities', title: 'Total LLMO Opportunities' },
+          { id: 'geo404Opportunities', title: 'Technical GEO 404 Opportunities' },
         ],
       });
 
@@ -149,4 +210,5 @@ function GetLlmoOpportunityUsageCommand(context) {
   };
 }
 
+export { fetchLlmoSheetData };
 export default GetLlmoOpportunityUsageCommand;

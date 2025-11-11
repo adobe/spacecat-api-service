@@ -304,4 +304,326 @@ describe('GetLlmoOpportunityUsageCommand', () => {
     expect(context.log.warn.calledWith(sinon.match('Failed to process site'))).to.be.true;
     expect(slackContext.say.calledWith('No LLMO opportunities found.')).to.be.true;
   });
+
+  describe('fetchLlmoSheetData', () => {
+    let fetchStub;
+    let fetchLlmoSheetData;
+
+    beforeEach(async () => {
+      fetchStub = sinon.stub();
+
+      const module = await esmock(
+        '../../../../src/support/slack/commands/get-llmo-opportunity-usage.js',
+        {
+          '../../../../src/utils/slack/base.js': { sendFile: sinon.stub() },
+          '@adobe/spacecat-shared-utils': {
+            isValidUrl: (url) => url && url.startsWith('http'),
+            SPACECAT_USER_AGENT: 'TestAgent',
+            tracingFetch: fetchStub,
+          },
+        },
+      );
+
+      fetchLlmoSheetData = module.fetchLlmoSheetData;
+    });
+
+    it('successfully fetches sheet data', async () => {
+      const mockSite = {
+        getId: () => 'site-1',
+        getConfig: () => ({
+          getLlmoConfig: () => ({ dataFolder: 'test-folder' }),
+        }),
+      };
+
+      const mockData = { data: [{ id: 1, name: 'test' }] };
+      fetchStub.resolves({
+        ok: true,
+        json: sinon.stub().resolves(mockData),
+      });
+
+      const env = { LLMO_HLX_API_KEY: 'test-key' };
+      const result = await fetchLlmoSheetData(mockSite, 'opportunities.json', env);
+
+      expect(result).to.deep.equal(mockData);
+      expect(fetchStub.calledOnce).to.be.true;
+      expect(fetchStub.firstCall.args[0]).to.include('test-folder/opportunities.json');
+    });
+
+    it('returns null when site has no LLMO config', async () => {
+      const mockSite = {
+        getId: () => 'site-1',
+        getConfig: () => ({ getLlmoConfig: () => null }),
+      };
+
+      const env = { LLMO_HLX_API_KEY: 'test-key' };
+      const result = await fetchLlmoSheetData(mockSite, 'opportunities.json', env);
+
+      expect(result).to.be.null;
+      expect(fetchStub.called).to.be.false;
+    });
+
+    it('returns null when site config is missing', async () => {
+      const mockSite = {
+        getId: () => 'site-1',
+        getConfig: () => null,
+      };
+
+      const env = { LLMO_HLX_API_KEY: 'test-key' };
+      const result = await fetchLlmoSheetData(mockSite, 'opportunities.json', env);
+
+      expect(result).to.be.null;
+      expect(fetchStub.called).to.be.false;
+    });
+
+    it('returns null when dataFolder is missing', async () => {
+      const mockSite = {
+        getId: () => 'site-1',
+        getConfig: () => ({
+          getLlmoConfig: () => ({ dataFolder: null }),
+        }),
+      };
+
+      const env = { LLMO_HLX_API_KEY: 'test-key' };
+      const result = await fetchLlmoSheetData(mockSite, 'opportunities.json', env);
+
+      expect(result).to.be.null;
+      expect(fetchStub.called).to.be.false;
+    });
+
+    it('returns null when fetch fails', async () => {
+      const mockSite = {
+        getId: () => 'site-1',
+        getConfig: () => ({
+          getLlmoConfig: () => ({ dataFolder: 'test-folder' }),
+        }),
+      };
+
+      fetchStub.resolves({
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+      });
+
+      const env = { LLMO_HLX_API_KEY: 'test-key' };
+      const result = await fetchLlmoSheetData(mockSite, 'opportunities.json', env);
+
+      expect(result).to.be.null;
+    });
+
+    it('returns null when fetch throws an error', async () => {
+      const mockSite = {
+        getId: () => 'site-1',
+        getConfig: () => ({
+          getLlmoConfig: () => ({ dataFolder: 'test-folder' }),
+        }),
+      };
+
+      fetchStub.rejects(new Error('Network error'));
+
+      const env = { LLMO_HLX_API_KEY: 'test-key' };
+      const result = await fetchLlmoSheetData(mockSite, 'opportunities.json', env);
+
+      expect(result).to.be.null;
+    });
+
+    it('uses correct authorization header', async () => {
+      const mockSite = {
+        getId: () => 'site-1',
+        getConfig: () => ({
+          getLlmoConfig: () => ({ dataFolder: 'test-folder' }),
+        }),
+      };
+
+      fetchStub.resolves({
+        ok: true,
+        json: sinon.stub().resolves({ data: [] }),
+      });
+
+      const env = { LLMO_HLX_API_KEY: 'secret-key-123' };
+      await fetchLlmoSheetData(mockSite, 'opportunities.json', env);
+
+      const fetchArgs = fetchStub.firstCall.args[1];
+      expect(fetchArgs.headers.Authorization).to.equal('token secret-key-123');
+    });
+
+    it('constructs correct URL with nested path', async () => {
+      const mockSite = {
+        getId: () => 'site-1',
+        getConfig: () => ({
+          getLlmoConfig: () => ({ dataFolder: 'test-folder' }),
+        }),
+      };
+
+      fetchStub.resolves({
+        ok: true,
+        json: sinon.stub().resolves({ data: [] }),
+      });
+
+      const env = { LLMO_HLX_API_KEY: 'test-key' };
+      await fetchLlmoSheetData(mockSite, 'agentic-traffic/errors.json', env);
+
+      expect(fetchStub.firstCall.args[0]).to.include('test-folder/agentic-traffic/errors.json');
+    });
+
+    it('uses fallback authorization when LLMO_HLX_API_KEY is missing', async () => {
+      const mockSite = {
+        getId: () => 'site-1',
+        getConfig: () => ({
+          getLlmoConfig: () => ({ dataFolder: 'test-folder' }),
+        }),
+      };
+
+      fetchStub.resolves({
+        ok: true,
+        json: sinon.stub().resolves({ data: [] }),
+      });
+
+      const env = {}; // No LLMO_HLX_API_KEY
+      await fetchLlmoSheetData(mockSite, 'opportunities.json', env);
+
+      const fetchArgs = fetchStub.firstCall.args[1];
+      expect(fetchArgs.headers.Authorization).to.equal('token hlx_api_key_missing');
+    });
+  });
+
+  describe('getTechnicalGEO404Opportunities', () => {
+    let fetchStub;
+    let GetLlmoOpportunityUsageCommandMocked;
+
+    beforeEach(async () => {
+      fetchStub = sinon.stub();
+
+      GetLlmoOpportunityUsageCommandMocked = await esmock(
+        '../../../../src/support/slack/commands/get-llmo-opportunity-usage.js',
+        {
+          '../../../../src/utils/slack/base.js': { sendFile: sendFileStub },
+          '@adobe/spacecat-shared-utils': {
+            isValidUrl: (url) => url && url.startsWith('http'),
+            SPACECAT_USER_AGENT: 'TestAgent',
+            tracingFetch: fetchStub,
+          },
+        },
+      );
+
+      // getTechnicalGEO404Opportunities is not exported,
+      // so we test it indirectly through command execution
+    });
+
+    it('includes technical GEO 404 opportunities in CSV output', async () => {
+      const mockSite = {
+        getId: () => 'site-1',
+        getBaseURL: () => 'https://test.com',
+        getOrganizationId: () => 'org-1',
+        getConfig: () => ({
+          getLlmoConfig: () => ({ dataFolder: 'test-folder' }),
+        }),
+      };
+
+      const mockData = {
+        data: [
+          { url: '/page1', status: 404 },
+          { url: '/page2', status: 404 },
+          { url: '/page3', status: 404 },
+        ],
+      };
+
+      fetchStub.resolves({
+        ok: true,
+        json: sinon.stub().resolves(mockData),
+      });
+
+      const env = { LLMO_HLX_API_KEY: 'test-key' };
+
+      // Test through the command execution since getTechnicalGEO404Opportunities
+      // is not directly exported
+      const mockSites = [mockSite];
+      context.dataAccess.Site.all.resolves(mockSites);
+      context.dataAccess.Organization.findById.resolves({
+        getImsOrgId: () => 'valid@AdobeOrg',
+        getName: () => 'Test Org',
+      });
+      context.dataAccess.Opportunity.allBySiteId.resolves([
+        { getTags: () => ['isElmo'] },
+      ]);
+      context.env = env;
+
+      const command = GetLlmoOpportunityUsageCommandMocked(context);
+      await command.handleExecution([], slackContext);
+
+      // Verify the fetch was called for the technical GEO 404 opportunities
+      const fetchCalls = fetchStub.getCalls();
+      const geo404Call = fetchCalls.find((call) => call.args[0] && call.args[0].includes('agentictraffic-errors-403'));
+      expect(geo404Call).to.exist;
+      expect(sendFileStub.called).to.be.true;
+    });
+
+    it('handles unavailable sheet data gracefully', async () => {
+      const mockSite = {
+        getId: () => 'site-1',
+        getBaseURL: () => 'https://test.com',
+        getOrganizationId: () => 'org-1',
+        getConfig: () => ({
+          getLlmoConfig: () => ({ dataFolder: 'test-folder' }),
+        }),
+      };
+
+      // Mock fetch to fail for sheet data
+      fetchStub.resolves({
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+      });
+
+      const env = { LLMO_HLX_API_KEY: 'test-key' };
+
+      context.dataAccess.Site.all.resolves([mockSite]);
+      context.dataAccess.Organization.findById.resolves({
+        getImsOrgId: () => 'valid@AdobeOrg',
+        getName: () => 'Test Org',
+      });
+      context.dataAccess.Opportunity.allBySiteId.resolves([
+        { getTags: () => ['isElmo'] },
+      ]);
+      context.env = env;
+
+      const command = GetLlmoOpportunityUsageCommandMocked(context);
+      await command.handleExecution([], slackContext);
+
+      // Should still complete without crashing and generate CSV with null geo404 data
+      expect(sendFileStub.called).to.be.true;
+    });
+
+    it('handles empty data array gracefully', async () => {
+      const mockSite = {
+        getId: () => 'site-1',
+        getBaseURL: () => 'https://test.com',
+        getOrganizationId: () => 'org-1',
+        getConfig: () => ({
+          getLlmoConfig: () => ({ dataFolder: 'test-folder' }),
+        }),
+      };
+
+      fetchStub.resolves({
+        ok: true,
+        json: sinon.stub().resolves({ data: [] }),
+      });
+
+      const env = { LLMO_HLX_API_KEY: 'test-key' };
+
+      context.dataAccess.Site.all.resolves([mockSite]);
+      context.dataAccess.Organization.findById.resolves({
+        getImsOrgId: () => 'valid@AdobeOrg',
+        getName: () => 'Test Org',
+      });
+      context.dataAccess.Opportunity.allBySiteId.resolves([
+        { getTags: () => ['isElmo'] },
+      ]);
+      context.env = env;
+
+      const command = GetLlmoOpportunityUsageCommandMocked(context);
+      await command.handleExecution([], slackContext);
+
+      expect(sendFileStub.called).to.be.true;
+    });
+  });
 });
