@@ -62,17 +62,50 @@ async function fetchLlmoSheetData(site, dataSourcePath, env) {
 }
 
 /**
- * Get the count of technical GEO 404 opportunities for a given site
- * @param {string} site - The site object to get the technical GEO 404 opportunities for
+ * get the query index for a given site
+ * @param {Object} site - The site object to get the query index for
  * @param {Object} env - The environment object
- * @returns {Promise<number>} The count of technical GEO 404 opportunities
+ * @returns {Promise<Object>} The query index
  */
-async function getTechnicalGEO404Opportunities(site, env) {
-  const data = await fetchLlmoSheetData(site, 'agentic-traffic/agentictraffic-errors-403-w43-2025.json?limit=100', env);
+async function getQueryIndex(site, env) {
+  const data = await fetchLlmoSheetData(site, 'query-index.json?limit=1000', env);
   if (!data) {
     return null;
   }
-  return data?.data?.length || 0;
+  return data;
+}
+
+/**
+ * get the total number of social opportunities for a given site
+ * @param {Object} queryIndex - The query index object
+ * @param {Object} site - The site object
+ * @param {Object} env - The environment
+ * @returns {Promise<number>} The total number of social opportunities
+ */
+async function getTotalSocialOpportunities(queryIndex, site, env) {
+  if (!queryIndex) {
+    return 0;
+  }
+  const allSocialPaths = queryIndex?.data?.filter((item) => item.path.includes('brandpresence-social')) || [];
+  // for each social path, fetch the data from the external endpoint
+  const socialData = await Promise.all(allSocialPaths.map(async (item) => {
+    const data = await fetchLlmoSheetData(site, `${item.path}?limit=1000`, env);
+    return data?.data?.length ?? 0;
+  }));
+  return socialData.reduce((acc, curr) => acc + curr, 0);
+}
+
+async function getThirdPartyOpportunities(queryIndex, site, env) {
+  if (!queryIndex) {
+    return 0;
+  }
+  const all3rdPartyPaths = queryIndex?.data?.filter((item) => item.path.includes('brandpresence-3rdparty')) || [];
+  // for each social path, fetch the data from the external endpoint
+  const thirdPartyData = await Promise.all(all3rdPartyPaths.map(async (item) => {
+    const data = await fetchLlmoSheetData(site, `${item.path}?limit=1000`, env);
+    return data?.data?.length ?? 0;
+  }));
+  return thirdPartyData.reduce((acc, curr) => acc + curr, 0);
 }
 
 function GetLlmoOpportunityUsageCommand(context) {
@@ -134,7 +167,7 @@ function GetLlmoOpportunityUsageCommand(context) {
         try {
           const { env } = context;
           const totalOpportunities = await countLlmoOpportunities(site.getId());
-          const geo404Opportunities = await getTechnicalGEO404Opportunities(site, env);
+          const queryIndex = await getQueryIndex(site, env);
 
           const organization = await Organization.findById(site.getOrganizationId());
           const imsOrgId = organization?.getImsOrgId();
@@ -150,6 +183,11 @@ function GetLlmoOpportunityUsageCommand(context) {
             log.info(`Skipping excluded IMS org: ${imsOrgId} for site: ${site.getBaseURL()}`);
             return null;
           }
+          const containsGeo403 = queryIndex?.data?.some((item) => item.path.includes('agentic-traffic/agentictraffic-errors-403'));
+          const containsGeo404 = queryIndex?.data?.some((item) => item.path.includes('agentic-traffic/agentictraffic-errors-404'));
+          const containsGeo5xx = queryIndex?.data?.some((item) => item.path.includes('agentic-traffic/agentictraffic-errors-5xx'));
+          const socialOpportunities = await getTotalSocialOpportunities(queryIndex, site, env);
+          const thirdPartyOpportunities = await getThirdPartyOpportunities(queryIndex, site, env);
 
           return {
             baseURL: site.getBaseURL(),
@@ -158,7 +196,11 @@ function GetLlmoOpportunityUsageCommand(context) {
             imsOrgName,
             imsOrgId,
             totalOpportunities,
-            geo404Opportunities,
+            containsGeo403,
+            containsGeo404,
+            containsGeo5xx,
+            socialOpportunities,
+            thirdPartyOpportunities,
           };
         } catch (siteError) {
           log.warn(`Failed to process site ${site.getId()}: ${siteError.message}`);
@@ -185,8 +227,12 @@ function GetLlmoOpportunityUsageCommand(context) {
           { id: 'organizationId', title: 'Organization ID' },
           { id: 'imsOrgName', title: 'IMS Org Name' },
           { id: 'imsOrgId', title: 'IMS Org ID' },
-          { id: 'totalOpportunities', title: 'Total LLMO Opportunities' },
-          { id: 'geo404Opportunities', title: 'Technical GEO 404 Opportunities' },
+          { id: 'containsGeo403', title: 'Contains Technical GEO 403' },
+          { id: 'containsGeo404', title: 'Contains Technical GEO 404' },
+          { id: 'containsGeo5xx', title: 'Contains Technical GEO 5xx' },
+          { id: 'totalOpportunities', title: 'Total Spacecat LLMO Opportunities' },
+          { id: 'socialOpportunities', title: 'Social Opportunities' },
+          { id: 'thirdPartyOpportunities', title: 'Third Party Opportunities' },
         ],
       });
 
@@ -210,5 +256,10 @@ function GetLlmoOpportunityUsageCommand(context) {
   };
 }
 
-export { fetchLlmoSheetData };
+export {
+  fetchLlmoSheetData,
+  getQueryIndex,
+  getTotalSocialOpportunities,
+  getThirdPartyOpportunities,
+};
 export default GetLlmoOpportunityUsageCommand;
