@@ -459,7 +459,7 @@ function LlmoController(ctx) {
       const addedPrompts = newPrompts.filter((p) => !oldPromptTexts.has(p.prompt));
 
       // If any added prompt is not AI-origin, return false
-      if (addedPrompts.some((p) => p.origin !== 'ai')) {
+      if (addedPrompts.some((p) => p.origin.toLowerCase() !== 'ai')) {
         return false;
       }
     }
