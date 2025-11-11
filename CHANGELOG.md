@@ -1,3 +1,10 @@
+## [1.227.2](https://github.com/adobe/spacecat-api-service/compare/v1.227.1...v1.227.2) (2025-11-11)
+
+
+### Bug Fixes
+
+* audit name to use latest cdn logs analysis ([#1469](https://github.com/adobe/spacecat-api-service/issues/1469)) ([89020ae](https://github.com/adobe/spacecat-api-service/commit/89020aec670da554b83220e1517e6402a1d328b2))
+
 ## [1.227.1](https://github.com/adobe/spacecat-api-service/compare/v1.227.0...v1.227.1) (2025-11-10)
 
 
