@@ -53,8 +53,7 @@ function HomepageController(ctx) {
    * @returns {Promise<Response>} Homepage data response.
    */
   const getHomepageData = async (context) => {
-    const { query } = context.data;
-    const { organizationId, imsOrg, siteId } = query;
+    const { organizationId, imsOrg, siteId } = context.data;
     const { pathInfo } = context;
     const productCode = pathInfo.headers['x-product'];
 

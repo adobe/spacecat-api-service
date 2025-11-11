@@ -153,9 +153,7 @@ describe('Homepage Controller', () => {
         },
         suffix: '/homepage',
       },
-      data: {
-        query: {},
-      },
+      data: {},
     };
   });
 
@@ -190,7 +188,7 @@ describe('Homepage Controller', () => {
     });
 
     it('should skip invalid siteId and return forbidden when no other params', async () => {
-      context.data.query = { siteId: 'invalid-uuid' };
+      context.data = { ...context.data, siteId: 'invalid-uuid' };
 
       const controller = HomepageController(context);
       const response = await controller.getHomepageData(context);
@@ -201,7 +199,7 @@ describe('Homepage Controller', () => {
     });
 
     it('should return forbidden if site does not exist and no fallback provided', async () => {
-      context.data.query = { siteId };
+      context.data = { ...context.data, siteId };
       mockSite.findById.resolves(null);
 
       const controller = HomepageController(context);
@@ -212,7 +210,7 @@ describe('Homepage Controller', () => {
     });
 
     it('should return forbidden if user has no access to site and no fallback provided', async () => {
-      context.data.query = { siteId };
+      context.data = { ...context.data, siteId };
       mockSite.findById.resolves(site);
       mockOrganization.findById.resolves(organization);
       hasAccessStub.resolves(false);
@@ -225,7 +223,7 @@ describe('Homepage Controller', () => {
     });
 
     it('should return homepage data for valid siteId', async () => {
-      context.data.query = { siteId };
+      context.data = { ...context.data, siteId };
       mockSite.findById.resolves(site);
       mockOrganization.findById.resolves(organization);
       mockSiteEnrollment.allBySiteId.resolves([{
@@ -245,7 +243,7 @@ describe('Homepage Controller', () => {
     });
 
     it('should skip invalid organizationId and return forbidden when no other params', async () => {
-      context.data.query = { organizationId: 'invalid-uuid' };
+      context.data = { ...context.data, organizationId: 'invalid-uuid' };
 
       const controller = HomepageController(context);
       const response = await controller.getHomepageData(context);
@@ -256,7 +254,7 @@ describe('Homepage Controller', () => {
     });
 
     it('should return forbidden if organization does not exist and no fallback provided', async () => {
-      context.data.query = { organizationId: orgId };
+      context.data = { ...context.data, organizationId: orgId };
       mockOrganization.findById.resolves(null);
 
       const controller = HomepageController(context);
@@ -267,7 +265,7 @@ describe('Homepage Controller', () => {
     });
 
     it('should return forbidden if user has no access to organization and no fallback provided', async () => {
-      context.data.query = { organizationId: orgId };
+      context.data = { ...context.data, organizationId: orgId };
       mockOrganization.findById.resolves(organization);
       hasAccessStub.resolves(false);
 
@@ -279,7 +277,7 @@ describe('Homepage Controller', () => {
     });
 
     it('should return homepage data for valid organizationId with enrolled sites', async () => {
-      context.data.query = { organizationId: orgId };
+      context.data = { ...context.data, organizationId: orgId };
       mockOrganization.findById.resolves(organization);
       mockSite.findById.resolves(site);
       mockSiteEnrollment.allByEntitlementId.resolves([{ getId: () => 'enrollment-1', getSiteId: () => siteId }]);
@@ -295,7 +293,7 @@ describe('Homepage Controller', () => {
     });
 
     it('should return forbidden for non-existent imsOrg', async () => {
-      context.data.query = { imsOrg: 'nonexistent@AdobeOrg' };
+      context.data = { ...context.data, imsOrg: 'nonexistent@AdobeOrg' };
       mockOrganization.findByImsOrgId.resolves(null);
 
       const controller = HomepageController(context);
@@ -306,7 +304,7 @@ describe('Homepage Controller', () => {
     });
 
     it('should return forbidden if user has no access via imsOrg and no fallback', async () => {
-      context.data.query = { imsOrg: imsOrgId };
+      context.data = { ...context.data, imsOrg: imsOrgId };
       mockOrganization.findByImsOrgId.resolves(organization);
       hasAccessStub.resolves(false);
 
@@ -318,7 +316,7 @@ describe('Homepage Controller', () => {
     });
 
     it('should return homepage data for valid imsOrg with enrolled sites', async () => {
-      context.data.query = { imsOrg: imsOrgId };
+      context.data = { ...context.data, imsOrg: imsOrgId };
       mockOrganization.findByImsOrgId.resolves(organization);
       mockSite.findById.resolves(site);
 
@@ -355,7 +353,7 @@ describe('Homepage Controller', () => {
         console,
       );
 
-      context.data.query = { organizationId: orgId };
+      context.data = { ...context.data, organizationId: orgId };
       mockOrganization.findById.resolves(organization);
       mockSite.findById.resolves(site);
       mockSiteEnrollment.allByEntitlementId.resolves([{ getId: () => 'enrollment-1', getSiteId: () => siteId }]);
@@ -370,7 +368,7 @@ describe('Homepage Controller', () => {
     });
 
     it('should handle errors gracefully', async () => {
-      context.data.query = { siteId };
+      context.data = { ...context.data, siteId };
       mockSite.findById.rejects(new Error('Database error'));
 
       const controller = HomepageController(context);
@@ -382,7 +380,7 @@ describe('Homepage Controller', () => {
     });
 
     it('should fallback to organizationId when siteId has no access', async () => {
-      context.data.query = { siteId, organizationId: orgId };
+      context.data = { ...context.data, siteId, organizationId: orgId };
       mockSite.findById.resolves(site);
       mockOrganization.findById.resolves(organization);
       mockSite.allByOrganizationId.resolves([site]);
@@ -402,7 +400,9 @@ describe('Homepage Controller', () => {
     });
 
     it('should fallback to imsOrg when siteId and organizationId have no access', async () => {
-      context.data.query = { siteId, organizationId: orgId, imsOrg: imsOrgId };
+      context.data = {
+        ...context.data, siteId, organizationId: orgId, imsOrg: imsOrgId,
+      };
       mockSite.findById.resolves(site);
       mockOrganization.findById.resolves(organization);
       mockOrganization.findByImsOrgId.resolves(organization);
@@ -424,7 +424,7 @@ describe('Homepage Controller', () => {
     });
 
     it('should fallback to imsOrg when siteId is not found but imsOrg works', async () => {
-      context.data.query = { siteId, imsOrg: imsOrgId };
+      context.data = { ...context.data, siteId, imsOrg: imsOrgId };
       mockSite.findById.onFirstCall().resolves(null);
       mockSite.findById.onSecondCall().resolves(site);
       mockOrganization.findByImsOrgId.resolves(organization);
@@ -440,7 +440,7 @@ describe('Homepage Controller', () => {
     });
 
     it('should return forbidden when organization has no enrolled sites', async () => {
-      context.data.query = { organizationId: orgId };
+      context.data = { ...context.data, organizationId: orgId };
       mockOrganization.findById.resolves(organization);
       mockSiteEnrollment.allByEntitlementId.resolves([]); // No enrollments
 
