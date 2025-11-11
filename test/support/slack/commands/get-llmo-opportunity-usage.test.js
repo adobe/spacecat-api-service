@@ -815,8 +815,8 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       expect(sendFileStub.called).to.be.true;
       const csvContent = sendFileStub.firstCall.args[1].toString();
-      // Total should be 3 (GEO types) + 2 (social) + 3 (third-party) = 8
-      expect(csvContent).to.include('8');
+      // Total should be 1 (Spacecat) + 3 (GEO types) + 2 (social) + 3 (third-party) = 9
+      expect(csvContent).to.include('9');
     });
 
     it('calculates totalOpportunitiesCount with only GEO errors', async () => {
@@ -832,7 +832,10 @@ describe('GetLlmoOpportunityUsageCommand', () => {
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => 'Test Org',
       });
-      context.dataAccess.Opportunity.allBySiteId.resolves([]);
+      context.dataAccess.Opportunity.allBySiteId.resolves([
+        { getTags: () => ['isElmo'] },
+        { getTags: () => ['isElmo'] },
+      ]);
 
       fetchStub.callsFake((url) => {
         if (url.includes('query-index.json')) {
@@ -854,8 +857,8 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       expect(sendFileStub.called).to.be.true;
       const csvContent = sendFileStub.firstCall.args[1].toString();
-      // Total should be 2 (only 403 and 404)
-      expect(csvContent).to.include(',2\n');
+      // Total should be 2 (Spacecat) + 2 (403 and 404) = 4
+      expect(csvContent).to.include(',4\n');
     });
 
     it('calculates totalOpportunitiesCount with only social opportunities', async () => {
@@ -871,7 +874,11 @@ describe('GetLlmoOpportunityUsageCommand', () => {
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => 'Test Org',
       });
-      context.dataAccess.Opportunity.allBySiteId.resolves([]);
+      context.dataAccess.Opportunity.allBySiteId.resolves([
+        { getTags: () => ['isElmo'] },
+        { getTags: () => ['isElmo'] },
+        { getTags: () => ['isElmo'] },
+      ]);
 
       fetchStub.callsFake((url) => {
         if (url.includes('query-index.json')) {
@@ -900,8 +907,8 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       expect(sendFileStub.called).to.be.true;
       const csvContent = sendFileStub.firstCall.args[1].toString();
-      // Total should be 5 (only social)
-      expect(csvContent).to.include(',5\n');
+      // Total should be 3 (Spacecat) + 5 (social) = 8
+      expect(csvContent).to.include(',8\n');
     });
 
     it('calculates totalOpportunitiesCount as 0 when no opportunities exist', async () => {
@@ -938,7 +945,7 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       expect(sendFileStub.called).to.be.true;
       const csvContent = sendFileStub.firstCall.args[1].toString();
-      // Total should be 0
+      // Total should be 0 (no Spacecat opportunities and no GEO/social/third-party)
       expect(csvContent).to.include(',0\n');
     });
 
@@ -955,7 +962,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => 'Test Org',
       });
-      context.dataAccess.Opportunity.allBySiteId.resolves([]);
+      context.dataAccess.Opportunity.allBySiteId.resolves([
+        { getTags: () => ['isElmo'] },
+      ]);
 
       fetchStub.callsFake((url) => {
         if (url.includes('query-index.json')) {
@@ -990,8 +999,8 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       expect(sendFileStub.called).to.be.true;
       const csvContent = sendFileStub.firstCall.args[1].toString();
-      // Total should be 1 (5xx) + 1 (social) + 2 (third-party) = 4
-      expect(csvContent).to.include(',4\n');
+      // Total should be 1 (Spacecat) + 1 (5xx) + 1 (social) + 2 (third-party) = 5
+      expect(csvContent).to.include(',5\n');
     });
 
     it('includes totalOpportunitiesCount in CSV header', async () => {

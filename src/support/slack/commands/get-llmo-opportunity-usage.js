@@ -190,13 +190,13 @@ function GetLlmoOpportunityUsageCommand(context) {
             log.info(`Skipping excluded IMS org: ${imsOrgId} for site: ${site.getBaseURL()}`);
             return null;
           }
-          const containsGeo403 = queryIndex?.data?.some((item) => item.path.includes('agentic-traffic/agentictraffic-errors-403'));
-          const containsGeo404 = queryIndex?.data?.some((item) => item.path.includes('agentic-traffic/agentictraffic-errors-404'));
-          const containsGeo5xx = queryIndex?.data?.some((item) => item.path.includes('agentic-traffic/agentictraffic-errors-5xx'));
+          const containsGeo403 = queryIndex?.data?.some((item) => item.path.includes('agentic-traffic/agentictraffic-errors-403')) || false;
+          const containsGeo404 = queryIndex?.data?.some((item) => item.path.includes('agentic-traffic/agentictraffic-errors-404')) || false;
+          const containsGeo5xx = queryIndex?.data?.some((item) => item.path.includes('agentic-traffic/agentictraffic-errors-5xx')) || false;
           const socialOpportunities = await getTotalSocialOpportunities(queryIndex, site, env);
           const thirdPartyOpportunities = await getThirdPartyOpportunities(queryIndex, site, env);
 
-          let totalOpportunitiesCount = 0;
+          let totalOpportunitiesCount = totalOpportunities;
           if (containsGeo403) {
             totalOpportunitiesCount += 1;
           }
