@@ -153,6 +153,97 @@ describe('UpdateSitesAuditsCommand', () => {
     ).to.be.true;
   });
 
+  it('enable all audits for a site using "all" keyword', async () => {
+    dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
+
+    const command = ToggleSiteAuditCommand(contextMock);
+    const args = ['enable', 'https://site0.com', 'all'];
+    await command.handleExecution(args, slackContextMock);
+
+    expect(
+      dataAccessMock.Site.findByBaseURL.calledWith('https://site0.com'),
+      'Expected dataAccess.getSiteByBaseURL to be called with "https://site0.com", but it was not',
+    ).to.be.true;
+    expect(
+      configurationMock.save.called,
+      'Expected configuration.save to be called, but it was not',
+    ).to.be.true;
+    expect(
+      configurationMock.enableHandlerForSite.calledWith('some_audit', site),
+      'Expected configuration.enableHandlerForSite to be called with "some_audit" and site, but it was not',
+    ).to.be.true;
+    expect(
+      configurationMock.enableHandlerForSite.calledWith('cwv', site),
+      'Expected configuration.enableHandlerForSite to be called with "cwv" and site, but it was not',
+    ).to.be.true;
+    expect(
+      configurationMock.enableHandlerForSite.callCount,
+      'Expected enableHandlerForSite to be called for each audit type (2 in test handlers)',
+    ).to.equal(2);
+    expect(
+      slackContextMock.say.calledWith(':information_source: Processing all 2 audits: some_audit, cwv'),
+      'Expected informational message about processing all audits, but it was not sent',
+    ).to.be.true;
+    expect(
+      slackContextMock.say.calledWith(`${SUCCESS_MESSAGE_PREFIX}All 2 audits have been *enabled* for "https://site0.com".`),
+      'Expected Slack message confirming all audits were enabled, but it was not sent',
+    ).to.be.true;
+  });
+
+  it('disable all audits for a site using "all" keyword', async () => {
+    dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
+
+    const command = ToggleSiteAuditCommand(contextMock);
+    const args = ['disable', 'https://site0.com', 'all'];
+    await command.handleExecution(args, slackContextMock);
+
+    expect(
+      dataAccessMock.Site.findByBaseURL.calledWith('https://site0.com'),
+      'Expected dataAccess.getSiteByBaseURL to be called with "https://site0.com", but it was not',
+    ).to.be.true;
+    expect(
+      configurationMock.save.called,
+      'Expected configuration.save to be called, but it was not',
+    ).to.be.true;
+    expect(
+      configurationMock.disableHandlerForSite.calledWith('some_audit', site),
+      'Expected configuration.disableHandlerForSite to be called with "some_audit" and site, but it was not',
+    ).to.be.true;
+    expect(
+      configurationMock.disableHandlerForSite.calledWith('cwv', site),
+      'Expected configuration.disableHandlerForSite to be called with "cwv" and site, but it was not',
+    ).to.be.true;
+    expect(
+      configurationMock.disableHandlerForSite.callCount,
+      'Expected disableHandlerForSite to be called for each audit type (2 in test handlers)',
+    ).to.equal(2);
+    expect(
+      slackContextMock.say.calledWith(':information_source: Processing all 2 audits: some_audit, cwv'),
+      'Expected informational message about processing all audits, but it was not sent',
+    ).to.be.true;
+    expect(
+      slackContextMock.say.calledWith(`${SUCCESS_MESSAGE_PREFIX}All 2 audits have been *disabled* for "https://site0.com".`),
+      'Expected Slack message confirming all audits were disabled, but it was not sent',
+    ).to.be.true;
+  });
+
+  it('should handle "all" keyword case-insensitively', async () => {
+    dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
+
+    const command = ToggleSiteAuditCommand(contextMock);
+    const args = ['enable', 'https://site0.com', 'ALL'];
+    await command.handleExecution(args, slackContextMock);
+
+    expect(
+      configurationMock.enableHandlerForSite.callCount,
+      'Expected enableHandlerForSite to be called for each audit type (2 in test handlers)',
+    ).to.equal(2);
+    expect(
+      slackContextMock.say.calledWith(sinon.match('Processing all 2 audits')),
+      'Expected informational message about processing all audits, but it was not sent',
+    ).to.be.true;
+  });
+
   it('if site base URL without scheme should be added "https://"', async () => {
     dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
 

@@ -210,51 +210,69 @@ export default (context) => {
           }
 
           const registeredAudits = configuration.getHandlers();
-          if (!registeredAudits[singleAuditType]) {
-            await say(`${ERROR_MESSAGE_PREFIX}The "${singleAuditType}" is not present in the configuration.\nList of allowed audits:\n${Object.keys(registeredAudits).join('\n')}.`);
-            return;
+
+          // Handle "all" keyword to enable/disable all audits
+          let auditTypes;
+          if (singleAuditType.toLowerCase() === 'all') {
+            auditTypes = Object.keys(registeredAudits);
+            await say(`:information_source: Processing all ${auditTypes.length} audits: ${auditTypes.join(', ')}`);
+          } else {
+            if (!registeredAudits[singleAuditType]) {
+              await say(`${ERROR_MESSAGE_PREFIX}The "${singleAuditType}" is not present in the configuration.\nList of allowed audits:\n${Object.keys(registeredAudits).join('\n')}.`);
+              return;
+            }
+            auditTypes = [singleAuditType];
           }
 
-          if (isEnableAudit) {
-            if (singleAuditType === 'preflight') {
-              const authoringType = site.getAuthoringType();
-              const deliveryConfig = site.getDeliveryConfig();
-              const helixConfig = site.getHlxConfig();
+          // Process each audit type
+          for (const auditType of auditTypes) {
+            if (isEnableAudit) {
+              if (auditType === 'preflight') {
+                const authoringType = site.getAuthoringType();
+                const deliveryConfig = site.getDeliveryConfig();
+                const helixConfig = site.getHlxConfig();
 
-              let configMissing = false;
+                let configMissing = false;
 
-              if (!authoringType) {
-                configMissing = true;
-              } else if (authoringType === 'documentauthoring' || authoringType === 'ue') {
-                // Document authoring and UE require helix config
-                const hasHelixConfig = helixConfig
-                  && helixConfig.rso && Object.keys(helixConfig.rso).length > 0;
-                if (!hasHelixConfig) {
+                if (!authoringType) {
                   configMissing = true;
+                } else if (authoringType === 'documentauthoring' || authoringType === 'ue') {
+                  // Document authoring and UE require helix config
+                  const hasHelixConfig = helixConfig
+                    && helixConfig.rso && Object.keys(helixConfig.rso).length > 0;
+                  if (!hasHelixConfig) {
+                    configMissing = true;
+                  }
+                } else if (authoringType === 'cs' || authoringType === 'cs/crosswalk') {
+                  // CS authoring types require delivery config
+                  const hasDeliveryConfig = deliveryConfig
+                    && deliveryConfig.programId && deliveryConfig.environmentId;
+                  if (!hasDeliveryConfig) {
+                    configMissing = true;
+                  }
                 }
-              } else if (authoringType === 'cs' || authoringType === 'cs/crosswalk') {
-                // CS authoring types require delivery config
-                const hasDeliveryConfig = deliveryConfig
-                  && deliveryConfig.programId && deliveryConfig.environmentId;
-                if (!hasDeliveryConfig) {
-                  configMissing = true;
+
+                if (configMissing) {
+                  // Prompt user to configure missing requirements
+                  // eslint-disable-next-line no-await-in-loop
+                  await promptPreflightConfig(slackContext, site, auditType);
+                  return;
                 }
               }
 
-              if (configMissing) {
-                // Prompt user to configure missing requirements
-                await promptPreflightConfig(slackContext, site, singleAuditType);
-                return;
-              }
+              configuration.enableHandlerForSite(auditType, site);
+            } else {
+              configuration.disableHandlerForSite(auditType, site);
             }
-
-            configuration.enableHandlerForSite(singleAuditType, site);
-          } else {
-            configuration.disableHandlerForSite(singleAuditType, site);
           }
 
           await configuration.save();
-          await say(`${SUCCESS_MESSAGE_PREFIX}The audit "${singleAuditType}" has been *${enableAudit}d* for "${site.getBaseURL()}".`);
+
+          if (auditTypes.length === 1) {
+            await say(`${SUCCESS_MESSAGE_PREFIX}The audit "${auditTypes[0]}" has been *${enableAudit}d* for "${site.getBaseURL()}".`);
+          } else {
+            await say(`${SUCCESS_MESSAGE_PREFIX}All ${auditTypes.length} audits have been *${enableAudit}d* for "${site.getBaseURL()}".`);
+          }
         } catch (error) {
           log.error(error);
           await say(`${ERROR_MESSAGE_PREFIX}An error occurred while trying to enable or disable audits: ${error.message}`);
