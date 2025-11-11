@@ -109,7 +109,8 @@ function GetLlmoOpportunityUsageCommand(context) {
       const siteResults = await Promise.allSettled(sitePromises);
       const results = siteResults
         .map((result) => (result.status === 'fulfilled' ? result.value : null))
-        .filter(Boolean);
+        .filter(Boolean)
+        .sort((a, b) => a.baseURL.localeCompare(b.baseURL));
 
       if (results.length === 0) {
         await say('No LLMO opportunities found.');
