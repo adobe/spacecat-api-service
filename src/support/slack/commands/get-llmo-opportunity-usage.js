@@ -37,8 +37,12 @@ async function fetchLlmoSheetData(site, dataSourcePath, env) {
       return null;
     }
 
+    // remove the dataFolder prefix from the dataSourcePath
+    // for example /a/b/c/d.json becomes c/d.json (removes leading / and first folder)
+    const cleanDataSourcePath = dataSourcePath.split('/').slice(2).join('/');
+
     // Construct the full URL
-    const sheetURL = `${dataFolder}/${dataSourcePath}`;
+    const sheetURL = `${dataFolder}/${cleanDataSourcePath}`;
     const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
 
     // Fetch data from the external endpoint
@@ -68,7 +72,10 @@ async function fetchLlmoSheetData(site, dataSourcePath, env) {
  * @returns {Promise<Object>} The query index
  */
 async function getQueryIndex(site, env) {
-  const data = await fetchLlmoSheetData(site, 'query-index.json?limit=1000', env);
+  const llmoConfig = site.getConfig()?.getLlmoConfig();
+  const dataFolder = llmoConfig?.dataFolder || '';
+  // Add dummy prefix matching the dataFolder so it gets stripped correctly
+  const data = await fetchLlmoSheetData(site, `/${dataFolder}/query-index.json?limit=1000`, env);
   if (!data) {
     return null;
   }
@@ -189,6 +196,23 @@ function GetLlmoOpportunityUsageCommand(context) {
           const socialOpportunities = await getTotalSocialOpportunities(queryIndex, site, env);
           const thirdPartyOpportunities = await getThirdPartyOpportunities(queryIndex, site, env);
 
+          let totalOpportunitiesCount = 0;
+          if (containsGeo403) {
+            totalOpportunitiesCount += 1;
+          }
+          if (containsGeo404) {
+            totalOpportunitiesCount += 1;
+          }
+          if (containsGeo5xx) {
+            totalOpportunitiesCount += 1;
+          }
+          if (socialOpportunities) {
+            totalOpportunitiesCount += socialOpportunities;
+          }
+          if (thirdPartyOpportunities) {
+            totalOpportunitiesCount += thirdPartyOpportunities;
+          }
+
           return {
             baseURL: site.getBaseURL(),
             siteId: site.getId(),
@@ -201,6 +225,7 @@ function GetLlmoOpportunityUsageCommand(context) {
             containsGeo5xx,
             socialOpportunities,
             thirdPartyOpportunities,
+            totalOpportunitiesCount,
           };
         } catch (siteError) {
           log.warn(`Failed to process site ${site.getId()}: ${siteError.message}`);
@@ -233,6 +258,7 @@ function GetLlmoOpportunityUsageCommand(context) {
           { id: 'totalOpportunities', title: 'Total Spacecat LLMO Opportunities' },
           { id: 'socialOpportunities', title: 'Social Opportunities' },
           { id: 'thirdPartyOpportunities', title: 'Third Party Opportunities' },
+          { id: 'totalOpportunitiesCount', title: 'Total Count' },
         ],
       });
 

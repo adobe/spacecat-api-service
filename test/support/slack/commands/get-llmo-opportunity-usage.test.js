@@ -28,6 +28,7 @@ describe('GetLlmoOpportunityUsageCommand', () => {
   let fetchLlmoSheetData;
   let getTotalSocialOpportunities;
   let getThirdPartyOpportunities;
+  let getQueryIndex;
 
   beforeEach(async () => {
     sendFileStub = sinon.stub().resolves();
@@ -52,6 +53,7 @@ describe('GetLlmoOpportunityUsageCommand', () => {
     fetchLlmoSheetData = module.fetchLlmoSheetData;
     getTotalSocialOpportunities = module.getTotalSocialOpportunities;
     getThirdPartyOpportunities = module.getThirdPartyOpportunities;
+    getQueryIndex = module.getQueryIndex;
 
     context = {
       dataAccess: {
@@ -681,6 +683,339 @@ describe('GetLlmoOpportunityUsageCommand', () => {
       const queryIndex = { data: [] };
       const result = await getThirdPartyOpportunities(queryIndex, mockSite, context.env);
       expect(result).to.equal(0);
+    });
+
+    it('getTotalSocialOpportunities correctly handles paths with dataFolder prefix', async () => {
+      const mockSite = {
+        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'adobe' }) }),
+      };
+      const queryIndex = {
+        data: [
+          { path: '/adobe/brandpresence-social-w28-2025.json' },
+        ],
+      };
+
+      fetchStub.callsFake((url) => {
+        // Verify the URL is constructed correctly without double adobe prefix
+        if (url.includes('adobe/brandpresence-social-w28-2025.json')) {
+          const urlStr = url.toString();
+          // Should not have adobe/adobe
+          expect(urlStr).to.not.include('adobe/adobe');
+          return Promise.resolve({
+            ok: true,
+            json: sinon.stub().resolves({ data: [{ id: 1 }, { id: 2 }] }),
+          });
+        }
+        return Promise.resolve({ ok: false });
+      });
+
+      const result = await getTotalSocialOpportunities(queryIndex, mockSite, context.env);
+      expect(result).to.equal(2);
+    });
+
+    it('getThirdPartyOpportunities correctly handles paths with dataFolder prefix', async () => {
+      const mockSite = {
+        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'adobe' }) }),
+      };
+      const queryIndex = {
+        data: [
+          { path: '/adobe/brandpresence-3rdparty.json' },
+        ],
+      };
+
+      fetchStub.callsFake((url) => {
+        if (url.includes('adobe/brandpresence-3rdparty.json')) {
+          const urlStr = url.toString();
+          expect(urlStr).to.not.include('adobe/adobe');
+          return Promise.resolve({
+            ok: true,
+            json: sinon.stub().resolves({ data: [{ id: 1 }, { id: 2 }, { id: 3 }] }),
+          });
+        }
+        return Promise.resolve({ ok: false });
+      });
+
+      const result = await getThirdPartyOpportunities(queryIndex, mockSite, context.env);
+      expect(result).to.equal(3);
+    });
+
+    it('getQueryIndex handles missing dataFolder gracefully', async () => {
+      const mockSite = {
+        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: undefined }) }),
+      };
+
+      fetchStub.resolves({ ok: false });
+
+      const result = await getQueryIndex(mockSite, context.env);
+      expect(result).to.be.null;
+    });
+
+    it('getQueryIndex handles null dataFolder gracefully', async () => {
+      const mockSite = {
+        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: null }) }),
+      };
+
+      fetchStub.resolves({ ok: false });
+
+      const result = await getQueryIndex(mockSite, context.env);
+      expect(result).to.be.null;
+    });
+  });
+
+  describe('Total Opportunities Count Calculation', () => {
+    it('calculates totalOpportunitiesCount with all opportunity types present', async () => {
+      const mockSite = {
+        getId: () => 'site-1',
+        getBaseURL: () => 'https://test.com',
+        getOrganizationId: () => 'org-1',
+        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'adobe' }) }),
+      };
+
+      context.dataAccess.Site.all.resolves([mockSite]);
+      context.dataAccess.Organization.findById.resolves({
+        getImsOrgId: () => 'valid@AdobeOrg',
+        getName: () => 'Test Org',
+      });
+      context.dataAccess.Opportunity.allBySiteId.resolves([
+        { getTags: () => ['isElmo'] },
+      ]);
+
+      fetchStub.callsFake((url) => {
+        if (url.includes('query-index.json')) {
+          return Promise.resolve({
+            ok: true,
+            json: sinon.stub().resolves({
+              data: [
+                { path: '/adobe/agentic-traffic/agentictraffic-errors-403-w01.json' },
+                { path: '/adobe/agentic-traffic/agentictraffic-errors-404-w01.json' },
+                { path: '/adobe/agentic-traffic/agentictraffic-errors-5xx-w01.json' },
+                { path: '/adobe/brandpresence-social-w01.json' },
+                { path: '/adobe/brandpresence-3rdparty.json' },
+              ],
+            }),
+          });
+        }
+        if (url.includes('brandpresence-social')) {
+          return Promise.resolve({
+            ok: true,
+            json: sinon.stub().resolves({ data: [{ id: 1 }, { id: 2 }] }),
+          });
+        }
+        if (url.includes('brandpresence-3rdparty')) {
+          return Promise.resolve({
+            ok: true,
+            json: sinon.stub().resolves({ data: [{ id: 1 }, { id: 2 }, { id: 3 }] }),
+          });
+        }
+        return Promise.resolve({ ok: false });
+      });
+
+      const command = GetLlmoOpportunityUsageCommand(context);
+      await command.handleExecution([], slackContext);
+
+      expect(sendFileStub.called).to.be.true;
+      const csvContent = sendFileStub.firstCall.args[1].toString();
+      // Total should be 3 (GEO types) + 2 (social) + 3 (third-party) = 8
+      expect(csvContent).to.include('8');
+    });
+
+    it('calculates totalOpportunitiesCount with only GEO errors', async () => {
+      const mockSite = {
+        getId: () => 'site-1',
+        getBaseURL: () => 'https://test.com',
+        getOrganizationId: () => 'org-1',
+        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'adobe' }) }),
+      };
+
+      context.dataAccess.Site.all.resolves([mockSite]);
+      context.dataAccess.Organization.findById.resolves({
+        getImsOrgId: () => 'valid@AdobeOrg',
+        getName: () => 'Test Org',
+      });
+      context.dataAccess.Opportunity.allBySiteId.resolves([]);
+
+      fetchStub.callsFake((url) => {
+        if (url.includes('query-index.json')) {
+          return Promise.resolve({
+            ok: true,
+            json: sinon.stub().resolves({
+              data: [
+                { path: '/adobe/agentic-traffic/agentictraffic-errors-403-w01.json' },
+                { path: '/adobe/agentic-traffic/agentictraffic-errors-404-w01.json' },
+              ],
+            }),
+          });
+        }
+        return Promise.resolve({ ok: false });
+      });
+
+      const command = GetLlmoOpportunityUsageCommand(context);
+      await command.handleExecution([], slackContext);
+
+      expect(sendFileStub.called).to.be.true;
+      const csvContent = sendFileStub.firstCall.args[1].toString();
+      // Total should be 2 (only 403 and 404)
+      expect(csvContent).to.include(',2\n');
+    });
+
+    it('calculates totalOpportunitiesCount with only social opportunities', async () => {
+      const mockSite = {
+        getId: () => 'site-1',
+        getBaseURL: () => 'https://test.com',
+        getOrganizationId: () => 'org-1',
+        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'adobe' }) }),
+      };
+
+      context.dataAccess.Site.all.resolves([mockSite]);
+      context.dataAccess.Organization.findById.resolves({
+        getImsOrgId: () => 'valid@AdobeOrg',
+        getName: () => 'Test Org',
+      });
+      context.dataAccess.Opportunity.allBySiteId.resolves([]);
+
+      fetchStub.callsFake((url) => {
+        if (url.includes('query-index.json')) {
+          return Promise.resolve({
+            ok: true,
+            json: sinon.stub().resolves({
+              data: [
+                { path: '/adobe/brandpresence-social-w01.json' },
+              ],
+            }),
+          });
+        }
+        if (url.includes('brandpresence-social')) {
+          return Promise.resolve({
+            ok: true,
+            json: sinon.stub().resolves({
+              data: [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }],
+            }),
+          });
+        }
+        return Promise.resolve({ ok: false });
+      });
+
+      const command = GetLlmoOpportunityUsageCommand(context);
+      await command.handleExecution([], slackContext);
+
+      expect(sendFileStub.called).to.be.true;
+      const csvContent = sendFileStub.firstCall.args[1].toString();
+      // Total should be 5 (only social)
+      expect(csvContent).to.include(',5\n');
+    });
+
+    it('calculates totalOpportunitiesCount as 0 when no opportunities exist', async () => {
+      const mockSite = {
+        getId: () => 'site-1',
+        getBaseURL: () => 'https://test.com',
+        getOrganizationId: () => 'org-1',
+        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'adobe' }) }),
+      };
+
+      context.dataAccess.Site.all.resolves([mockSite]);
+      context.dataAccess.Organization.findById.resolves({
+        getImsOrgId: () => 'valid@AdobeOrg',
+        getName: () => 'Test Org',
+      });
+      context.dataAccess.Opportunity.allBySiteId.resolves([]);
+
+      fetchStub.callsFake((url) => {
+        if (url.includes('query-index.json')) {
+          return Promise.resolve({
+            ok: true,
+            json: sinon.stub().resolves({
+              data: [
+                { path: '/adobe/other-data.json' },
+              ],
+            }),
+          });
+        }
+        return Promise.resolve({ ok: false });
+      });
+
+      const command = GetLlmoOpportunityUsageCommand(context);
+      await command.handleExecution([], slackContext);
+
+      expect(sendFileStub.called).to.be.true;
+      const csvContent = sendFileStub.firstCall.args[1].toString();
+      // Total should be 0
+      expect(csvContent).to.include(',0\n');
+    });
+
+    it('calculates totalOpportunitiesCount with mixed GEO and social/third-party', async () => {
+      const mockSite = {
+        getId: () => 'site-1',
+        getBaseURL: () => 'https://test.com',
+        getOrganizationId: () => 'org-1',
+        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'adobe' }) }),
+      };
+
+      context.dataAccess.Site.all.resolves([mockSite]);
+      context.dataAccess.Organization.findById.resolves({
+        getImsOrgId: () => 'valid@AdobeOrg',
+        getName: () => 'Test Org',
+      });
+      context.dataAccess.Opportunity.allBySiteId.resolves([]);
+
+      fetchStub.callsFake((url) => {
+        if (url.includes('query-index.json')) {
+          return Promise.resolve({
+            ok: true,
+            json: sinon.stub().resolves({
+              data: [
+                { path: '/adobe/agentic-traffic/agentictraffic-errors-5xx-w01.json' },
+                { path: '/adobe/brandpresence-social-w01.json' },
+                { path: '/adobe/brandpresence-3rdparty.json' },
+              ],
+            }),
+          });
+        }
+        if (url.includes('brandpresence-social')) {
+          return Promise.resolve({
+            ok: true,
+            json: sinon.stub().resolves({ data: [{ id: 1 }] }),
+          });
+        }
+        if (url.includes('brandpresence-3rdparty')) {
+          return Promise.resolve({
+            ok: true,
+            json: sinon.stub().resolves({ data: [{ id: 1 }, { id: 2 }] }),
+          });
+        }
+        return Promise.resolve({ ok: false });
+      });
+
+      const command = GetLlmoOpportunityUsageCommand(context);
+      await command.handleExecution([], slackContext);
+
+      expect(sendFileStub.called).to.be.true;
+      const csvContent = sendFileStub.firstCall.args[1].toString();
+      // Total should be 1 (5xx) + 1 (social) + 2 (third-party) = 4
+      expect(csvContent).to.include(',4\n');
+    });
+
+    it('includes totalOpportunitiesCount in CSV header', async () => {
+      const mockSite = {
+        getId: () => 'site-1',
+        getBaseURL: () => 'https://test.com',
+        getOrganizationId: () => 'org-1',
+        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'adobe' }) }),
+      };
+
+      context.dataAccess.Site.all.resolves([mockSite]);
+      context.dataAccess.Organization.findById.resolves({
+        getImsOrgId: () => 'valid@AdobeOrg',
+        getName: () => 'Test Org',
+      });
+      context.dataAccess.Opportunity.allBySiteId.resolves([]);
+      fetchStub.resolves({ ok: false });
+
+      const command = GetLlmoOpportunityUsageCommand(context);
+      await command.handleExecution([], slackContext);
+
+      expect(sendFileStub.called).to.be.true;
+      const csvContent = sendFileStub.firstCall.args[1].toString();
+      expect(csvContent).to.include('Total Count');
     });
   });
 });
