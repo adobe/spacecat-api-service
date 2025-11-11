@@ -236,6 +236,10 @@ describe('getRouteHandlers', () => {
     deleteReport: sinon.stub(),
   };
 
+  const mockHomepageController = {
+    getHomepageData: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -269,6 +273,7 @@ describe('getRouteHandlers', () => {
       mockEntitlementController,
       mockSandboxAuditController,
       mockReportsController,
+      mockHomepageController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -297,6 +302,7 @@ describe('getRouteHandlers', () => {
       'POST /tools/scrape/jobs',
       'POST /consent-banner',
       'POST /llmo/onboard',
+      'GET /homepage',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
@@ -316,6 +322,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['POST /consent-banner']).to.equal(mockConsentBannerController.takeScreenshots);
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
     expect(staticRoutes['POST /llmo/onboard']).to.equal(mockLlmoController.onboardCustomer);
+    expect(staticRoutes['GET /homepage']).to.equal(mockHomepageController.getHomepageData);
 
     expect(dynamicRoutes).to.have.all.keys(
       'GET /audits/latest/:auditType',
