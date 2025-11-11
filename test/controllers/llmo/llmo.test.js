@@ -1851,6 +1851,233 @@ describe('LlmoController', () => {
           },
         );
       });
+
+      it('should NOT skip audit when prompts array has different length', async () => {
+        const existingConfig = {
+          ...llmoConfig.defaultConfig(),
+          categories: {
+            [CATEGORY_ID]: { name: 'Existing Category', region: ['us'] },
+          },
+          topics: {
+            [TOPIC_ID]: {
+              name: 'Existing Topic',
+              category: CATEGORY_ID,
+              prompts: [{
+                prompt: 'AI prompt 1',
+                regions: ['us'],
+                origin: 'ai',
+                source: 'mystique',
+              }],
+            },
+          },
+        };
+
+        readConfigStub.resolves({
+          config: existingConfig,
+          exists: true,
+          version: 'v0',
+        });
+
+        // Add a second AI prompt (different length array)
+        const updatedConfig = {
+          ...existingConfig,
+          topics: {
+            [TOPIC_ID]: {
+              name: 'Existing Topic',
+              category: CATEGORY_ID,
+              prompts: [
+                {
+                  prompt: 'AI prompt 1',
+                  regions: ['us'],
+                  origin: 'ai',
+                  source: 'mystique',
+                },
+                {
+                  prompt: 'AI prompt 2',
+                  regions: ['us'],
+                  origin: 'ai',
+                  source: 'mystique',
+                },
+              ],
+            },
+          },
+        };
+
+        mockContext.data = updatedConfig;
+        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
+
+        await controller.updateLlmoConfig(mockContext);
+
+        // Should trigger brand presence refresh since only AI prompts added
+        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
+        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
+          mockContext.env.AUDIT_JOBS_QUEUE_URL,
+          {
+            type: 'geo-brand-presence-trigger-refresh',
+            siteId: mockSite.getId(),
+            auditContext: {
+              configVersion: 'v1',
+            },
+          },
+        );
+      });
+
+      it('should handle topics without prompts property', async () => {
+        const existingConfig = {
+          ...llmoConfig.defaultConfig(),
+          categories: {
+            [CATEGORY_ID]: { name: 'Existing Category', region: ['us'] },
+          },
+          topics: {
+            [TOPIC_ID]: {
+              name: 'Existing Topic',
+              category: CATEGORY_ID,
+              // No prompts property
+            },
+          },
+        };
+
+        readConfigStub.resolves({
+          config: existingConfig,
+          exists: true,
+          version: 'v0',
+        });
+
+        // Add a topic with prompts
+        const updatedConfig = {
+          ...existingConfig,
+          topics: {
+            [TOPIC_ID]: {
+              name: 'Existing Topic',
+              category: CATEGORY_ID,
+              prompts: [{
+                prompt: 'AI prompt 1',
+                regions: ['us'],
+                origin: 'ai',
+                source: 'mystique',
+              }],
+            },
+          },
+        };
+
+        mockContext.data = updatedConfig;
+        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
+
+        await controller.updateLlmoConfig(mockContext);
+
+        // Should trigger brand presence refresh since only AI prompts added
+        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
+        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
+          mockContext.env.AUDIT_JOBS_QUEUE_URL,
+          {
+            type: 'geo-brand-presence-trigger-refresh',
+            siteId: mockSite.getId(),
+            auditContext: {
+              configVersion: 'v1',
+            },
+          },
+        );
+      });
+
+      it('should handle new category with topic missing prompts property', async () => {
+        readConfigStub.resolves({
+          config: llmoConfig.defaultConfig(),
+          exists: true,
+          version: 'v0',
+        });
+
+        const newCategoryId = 'new-category';
+        const newTopicId = 'new-topic';
+
+        const newConfig = {
+          ...llmoConfig.defaultConfig(),
+          categories: {
+            [newCategoryId]: { name: 'New Category', region: ['us'] },
+          },
+          topics: {
+            [newTopicId]: {
+              name: 'New Topic',
+              category: newCategoryId,
+              // No prompts property - should be treated as empty array
+            },
+          },
+        };
+
+        mockContext.data = newConfig;
+        llmoConfigSchemaStub.safeParse.returns({ success: true, data: newConfig });
+
+        await controller.updateLlmoConfig(mockContext);
+
+        // Should trigger brand presence refresh (empty prompts array means no non-AI prompts)
+        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
+        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
+          mockContext.env.AUDIT_JOBS_QUEUE_URL,
+          {
+            type: 'geo-brand-presence-trigger-refresh',
+            siteId: mockSite.getId(),
+            auditContext: {
+              configVersion: 'v1',
+            },
+          },
+        );
+      });
+
+      it('should handle changed topic with new topic missing prompts property', async () => {
+        const existingConfig = {
+          ...llmoConfig.defaultConfig(),
+          categories: {
+            [CATEGORY_ID]: { name: 'Existing Category', region: ['us'] },
+          },
+          topics: {
+            [TOPIC_ID]: {
+              name: 'Existing Topic',
+              category: CATEGORY_ID,
+              prompts: [{
+                prompt: 'Original prompt',
+                regions: ['us'],
+                origin: 'ai',
+                source: 'mystique',
+              }],
+            },
+          },
+        };
+
+        readConfigStub.resolves({
+          config: existingConfig,
+          exists: true,
+          version: 'v0',
+        });
+
+        // Update with topic that has no prompts property
+        const updatedConfig = {
+          ...existingConfig,
+          topics: {
+            [TOPIC_ID]: {
+              name: 'Updated Topic',
+              category: CATEGORY_ID,
+              // No prompts property
+            },
+          },
+        };
+
+        mockContext.data = updatedConfig;
+        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
+
+        await controller.updateLlmoConfig(mockContext);
+
+        // Should trigger brand presence refresh (no new prompts added, all removed are AI)
+        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
+        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
+          mockContext.env.AUDIT_JOBS_QUEUE_URL,
+          {
+            type: 'geo-brand-presence-trigger-refresh',
+            siteId: mockSite.getId(),
+            auditContext: {
+              configVersion: 'v1',
+            },
+          },
+        );
+      });
     });
   });
 
