@@ -1,3 +1,10 @@
+## [1.230.1](https://github.com/adobe/spacecat-api-service/compare/v1.230.0...v1.230.1) (2025-11-11)
+
+
+### Bug Fixes
+
+* **src/controlles/llmo/llmo.js:** do not trigger geo-brand-presence i… ([#1467](https://github.com/adobe/spacecat-api-service/issues/1467)) ([3e01699](https://github.com/adobe/spacecat-api-service/commit/3e01699aad87168874dc9b639399482092170932))
+
 # [1.230.0](https://github.com/adobe/spacecat-api-service/compare/v1.229.0...v1.230.0) (2025-11-11)
 
 
