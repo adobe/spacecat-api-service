@@ -627,6 +627,15 @@ describe('Paid TrafficController', async () => {
         { method: 'getPaidTrafficByPageTypePlatform', dimensions: 'page_type, trf_platform', defaultFilter: 'paid' },
         { method: 'getPaidTrafficByPageTypePlatformDevice', dimensions: 'page_type, trf_platform, device', defaultFilter: 'paid' },
         { method: 'getPaidTrafficByPageTypePlatformCampaign', dimensions: 'page_type, trf_platform, utm_campaign', defaultFilter: 'paid' },
+
+        { method: 'getPaidTrafficByTypeDevice', dimensions: 'trf_type, device', defaultFilter: 'none' },
+        { method: 'getPaidTrafficByTypeDeviceChannel', dimensions: 'trf_type, device, trf_channel', defaultFilter: 'none' },
+        { method: 'getPaidTrafficByChannel', dimensions: 'trf_channel', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByChannelDevice', dimensions: 'trf_channel, device', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficBySocialPlatform', dimensions: 'trf_channel', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficBySearchPlatform', dimensions: 'trf_channel', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByDisplayPlatform', dimensions: 'trf_channel', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByVideoPlatform', dimensions: 'trf_channel', defaultFilter: 'paid' },
       ];
 
       mockAthenaQuery.resolves(mockResponse);
@@ -634,6 +643,23 @@ describe('Paid TrafficController', async () => {
 
       for (const endpoint of endpointsWithDimensions) {
         mockAthenaQuery.resetHistory();
+
+        switch (endpoint.method) {
+          case 'getPaidTrafficBySocialPlatform':
+            mockAthenaQuery.resolves([{ ...mockResponse[0], trf_channel: 'social' }]);
+            break;
+          case 'getPaidTrafficBySearchPlatform':
+            mockAthenaQuery.resolves([{ ...mockResponse[0], trf_channel: 'search' }]);
+            break;
+          case 'getPaidTrafficByDisplayPlatform':
+            mockAthenaQuery.resolves([{ ...mockResponse[0], trf_channel: 'display' }]);
+            break;
+          case 'getPaidTrafficByVideoPlatform':
+            mockAthenaQuery.resolves([{ ...mockResponse[0], trf_channel: 'video' }]);
+            break;
+          default:
+            mockAthenaQuery.resolves(mockResponse);
+        }
 
         // Test default behavior
         // eslint-disable-next-line no-await-in-loop

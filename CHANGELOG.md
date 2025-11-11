@@ -1,3 +1,10 @@
+# [1.229.0](https://github.com/adobe/spacecat-api-service/compare/v1.228.2...v1.229.0) (2025-11-11)
+
+
+### Features
+
+* PTR - additional endoints ([#1475](https://github.com/adobe/spacecat-api-service/issues/1475)) ([734a281](https://github.com/adobe/spacecat-api-service/commit/734a281fc19fdab1edf35abf03f5180ac6e347ce))
+
 ## [1.228.2](https://github.com/adobe/spacecat-api-service/compare/v1.228.1...v1.228.2) (2025-11-11)
 
 

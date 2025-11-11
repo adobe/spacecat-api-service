@@ -112,7 +112,7 @@ function TrafficController(context, log, env) {
     return { cachedResultUrl: null, cacheKey, outPrefix };
   }
 
-  async function fetchPaidTrafficData(dimensions, mapper) {
+  async function fetchPaidTrafficData(dimensions, mapper, filterFunction = null) {
     /* c8 ignore next 1 */
     const requestId = context.invocation?.requestId;
     const siteId = context.params?.siteId;
@@ -204,7 +204,8 @@ function TrafficController(context, log, env) {
     const athenaClient = AWSAthenaClient.fromContext(context, resultLocation);
 
     const results = await athenaClient.query(query, rumMetricsDatabase, description);
-    const response = results.map((row) => mapper.toJSON(row, thresholdConfig, baseURL));
+    const filteredResults = filterFunction ? filterFunction(results) : results;
+    const response = filteredResults.map((row) => mapper.toJSON(row, thresholdConfig, baseURL));
 
     // add to cache
     let isCached = false;
@@ -229,6 +230,10 @@ function TrafficController(context, log, env) {
     return ok(response, {
       'content-encoding': 'gzip',
     });
+  }
+
+  async function getPaidTrafficBySpecificPlatform(channel) {
+    return fetchPaidTrafficData(['trf_channel', 'device'], TrafficDataResponseDto, (results) => results.filter((item) => item.trf_channel === channel));
   }
 
   return {
@@ -256,6 +261,15 @@ function TrafficController(context, log, env) {
     getPaidTrafficByPageTypePlatformDevice: async () => fetchPaidTrafficData(['page_type', 'trf_platform', 'device'], TrafficDataWithCWVDto),
     getPaidTrafficByPageTypePlatformCampaign: async () => fetchPaidTrafficData(['page_type', 'trf_platform', 'utm_campaign'], TrafficDataWithCWVDto),
     getPaidTrafficByUrlPageType: async () => fetchPaidTrafficData(['path', 'page_type'], TrafficDataWithCWVDto),
+    // new PTA2 endpoints
+    getPaidTrafficByTypeDevice: async () => fetchPaidTrafficData(['trf_type', 'device'], TrafficDataResponseDto),
+    getPaidTrafficByTypeDeviceChannel: async () => fetchPaidTrafficData(['trf_type', 'device', 'trf_channel'], TrafficDataResponseDto),
+    getPaidTrafficByChannel: async () => fetchPaidTrafficData(['trf_channel'], TrafficDataResponseDto),
+    getPaidTrafficByChannelDevice: async () => fetchPaidTrafficData(['trf_channel', 'device'], TrafficDataResponseDto),
+    getPaidTrafficBySocialPlatform: async () => getPaidTrafficBySpecificPlatform('social'),
+    getPaidTrafficBySearchPlatform: async () => getPaidTrafficBySpecificPlatform('search'),
+    getPaidTrafficByDisplayPlatform: async () => getPaidTrafficBySpecificPlatform('display'),
+    getPaidTrafficByVideoPlatform: async () => getPaidTrafficBySpecificPlatform('video'),
   };
 }
 
