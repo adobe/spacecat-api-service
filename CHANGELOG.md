@@ -1,3 +1,10 @@
+# [1.228.0](https://github.com/adobe/spacecat-api-service/compare/v1.227.2...v1.228.0) (2025-11-11)
+
+
+### Features
+
+* **COMOPT-880:** register product-metatags-auto-fix audit in onboarding profiles ([#1472](https://github.com/adobe/spacecat-api-service/issues/1472)) ([acdac2f](https://github.com/adobe/spacecat-api-service/commit/acdac2f2230a98b4f5e79863c1f4da104a9ae3cc))
+
 ## [1.227.2](https://github.com/adobe/spacecat-api-service/compare/v1.227.1...v1.227.2) (2025-11-11)
 
 
