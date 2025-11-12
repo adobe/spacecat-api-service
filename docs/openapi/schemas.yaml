@@ -165,9 +165,6 @@ Config:
     cdnLogsConfig:
       description: Optional. The CDN logs configuration
       $ref: '#/CdnLogsConfig'
-    aiTopics:
-      description: Optional. The AI Topics configuration with topics and prompts
-      $ref: '#/AiTopicsConfig'
 ContentAiConfig:
   type: object
   properties:
@@ -4100,77 +4097,6 @@ LlmoPrompt:
         - type: string
           description: Custom source type
           minLength: 1
-      example: "config"
-  additionalProperties: true
-
-AiTopicsConfig:
-  type: object
-  description: AI Topics configuration with topics keyed by UUID
-  additionalProperties:
-    $ref: '#/AiTopic'
-  example:
-    "456e7890-e89b-12d3-a456-426614174001":
-      name: "AI/ML"
-      category: "Technology"
-      prompts:
-        - prompt: "What are the latest AI trends?"
-          regions: ["us", "eu"]
-          origin: "human"
-          source: "config"
-
-AiTopic:
-  type: object
-  description: A topic in the AI Topics configuration with nested prompts
-  required:
-    - name
-    - prompts
-  properties:
-    name:
-      type: string
-      description: The name of the topic
-      minLength: 1
-      example: "AI/ML"
-    prompts:
-      type: array
-      description: Array of prompts for this topic
-      minItems: 1
-      items:
-        $ref: '#/AiPrompt'
-    category:
-      type: string
-      description: Category name or reference
-      minLength: 1
-      example: "Technology"
-  additionalProperties: true
-
-AiPrompt:
-  type: object
-  description: A prompt configuration within an AI topic
-  required:
-    - prompt
-    - regions
-  properties:
-    prompt:
-      type: string
-      description: The prompt text
-      minLength: 1
-      example: "What are the latest AI trends?"
-    regions:
-      type: array
-      description: Array of two-letter region codes
-      items:
-        type: string
-        pattern: '^[a-z][a-z]$'
-      example: ["us", "eu"]
-    origin:
-      type: string
-      enum: ["human", "ai", ""]
-      description: Origin of the prompt (human, ai, or empty)
-      example: "human"
-    source:
-      type: string
-      enum: ["config", "api", ""]
-      description: Source of the prompt (config, api, or empty)
       example: "config"
   additionalProperties: true
 
