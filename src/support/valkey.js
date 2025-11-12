@@ -180,6 +180,63 @@ export class ValkeyCache {
     this.isConnected = false;
     this.client = null;
   }
+
+  /**
+   * Clears the cache for all files
+   */
+  async clearAll() {
+    // Lazy connect on first use
+    await this.connect();
+
+    try {
+      const pattern = 'llmo:file:*';
+      this.log.info(`Clearing all Valkey cache entries matching pattern: ${pattern}`);
+
+      let cursor = 0;
+      let deletedCount = 0;
+      const keysToDelete = [];
+
+      // Use SCAN to iterate through keys matching the pattern
+      /* eslint-disable no-await-in-loop */
+      do {
+        const result = await this.client.scan(cursor, {
+          MATCH: pattern,
+          COUNT: 100, // Scan 100 keys at a time
+        });
+
+        cursor = result.cursor;
+        const { keys } = result;
+
+        if (keys.length > 0) {
+          keysToDelete.push(...keys);
+        }
+      } while (cursor !== 0);
+
+      // Delete all found keys
+      if (keysToDelete.length > 0) {
+        this.log.info(`Found ${keysToDelete.length} keys to delete`);
+        keysToDelete.forEach((key) => {
+          this.log.info(`Deleting key: ${key}`);
+        });
+
+        for (const key of keysToDelete) {
+          await this.client.del(key);
+          deletedCount += 1;
+        }
+        // await this.client.del(keysToDelete);
+        // deletedCount = keysToDelete.length;
+
+        deletedCount = 0;
+      }
+      /* eslint-enable no-await-in-loop */
+
+      this.log.info(`Successfully cleared ${deletedCount} cache entries`);
+      return { success: true, deletedCount };
+    } catch (error) {
+      this.log.error(`Error clearing Valkey cache: ${error.message}`);
+      return { success: false, deletedCount: 0 };
+    }
+  }
 }
 
 /**

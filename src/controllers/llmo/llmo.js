@@ -973,6 +973,41 @@ function LlmoController(ctx) {
     }
   };
 
+  const clearCache = async (context) => {
+    const { log } = context;
+
+    try {
+      // Validate LLMO access
+      await getSiteAndValidateLlmo(context);
+
+      // Check if Valkey cache is available
+      if (!context.valkey || !context.valkey.cache) {
+        return badRequest('Cache is not configured for this environment');
+      }
+
+      log.info('Starting cache clear operation');
+
+      // Clear all cache entries
+      const result = await context.valkey.cache.clearAll();
+
+      if (!result.success) {
+        log.error('Failed to clear cache');
+        return badRequest('Failed to clear cache');
+      }
+
+      log.info(`Successfully cleared ${result.deletedCount} cache entries`);
+
+      return ok({
+        message: 'Cache cleared successfully',
+        deletedCount: result.deletedCount,
+        clearedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      log.error(`Error clearing cache: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -992,6 +1027,7 @@ function LlmoController(ctx) {
     onboardCustomer,
     offboardCustomer,
     queryWithCache,
+    clearCache,
   };
 }
 

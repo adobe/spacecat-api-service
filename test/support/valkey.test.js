@@ -447,5 +447,47 @@ describe('Valkey cache tests', () => {
         expect(cache.isConnected).to.be.false;
       });
     });
+
+    describe('clearAll', () => {
+      beforeEach(() => {
+        // Add scan and del methods to mockRedisClient
+        mockRedisClient.scan = sandbox.stub();
+        mockRedisClient.del = sandbox.stub().resolves(1);
+      });
+
+      it('should clear all cache entries successfully', async () => {
+        const keys = ['llmo:file:test1.json', 'llmo:file:test2.json', 'llmo:file:test3.json'];
+
+        // Mock scan to return keys on first call, then return cursor 0 to stop
+        mockRedisClient.scan
+          .onFirstCall().resolves({ cursor: 0, keys })
+          .onSecondCall().resolves({ cursor: 0, keys: [] });
+
+        await cache.connect();
+        const result = await cache.clearAll();
+
+        expect(result.success).to.be.true;
+        expect(result.deletedCount).to.equal(0);
+        expect(mockRedisClient.scan).to.have.been.calledWith(0, {
+          MATCH: 'llmo:file:*',
+          COUNT: 100,
+        });
+        expect(mockRedisClient.del).to.have.been.calledThrice;
+        expect(mockLog.info).to.have.been.calledWithMatch(/Clearing all Valkey cache entries/);
+      });
+
+      it('should handle deletion errors gracefully', async () => {
+        const keys = ['llmo:file:test1.json', 'llmo:file:test2.json'];
+        mockRedisClient.scan.resolves({ cursor: 0, keys });
+        mockRedisClient.del.rejects(new Error('Delete failed'));
+
+        await cache.connect();
+        const result = await cache.clearAll();
+
+        expect(result.success).to.be.false;
+        expect(result.deletedCount).to.equal(0);
+        expect(mockLog.error).to.have.been.calledWithMatch(/Error clearing Valkey cache/);
+      });
+    });
   });
 });
