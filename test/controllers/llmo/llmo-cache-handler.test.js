@@ -670,6 +670,8 @@ describe('llmo-cache-handler', () => {
         .onSecondCall()
         .resolves(createMockResponse(file2Data));
 
+      // Remove dataSource to enable multi-file mode
+      mockContext.params = { siteId: TEST_SITE_ID };
       mockContext.data = { file: ['file1.json', 'file2.json'] };
 
       const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
@@ -690,6 +692,8 @@ describe('llmo-cache-handler', () => {
       mockCache.get.resolves(null);
       tracingFetchStub.resolves(createMockResponse(fileData));
 
+      // Remove dataSource to enable multi-file mode
+      mockContext.params = { siteId: TEST_SITE_ID };
       mockContext.data = { file: 'file1.json' };
 
       const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
@@ -708,6 +712,8 @@ describe('llmo-cache-handler', () => {
         .onSecondCall()
         .rejects(new Error('Network error'));
 
+      // Remove dataSource to enable multi-file mode
+      mockContext.params = { siteId: TEST_SITE_ID };
       mockContext.data = { file: ['file1.json', 'file2.json'] };
 
       const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
@@ -737,6 +743,8 @@ describe('llmo-cache-handler', () => {
         .onSecondCall()
         .resolves(createMockResponse(file2Data));
 
+      // Remove dataSource to enable multi-file mode
+      mockContext.params = { siteId: TEST_SITE_ID };
       mockContext.data = {
         file: ['file1.json', 'file2.json'],
         'filter.status': 'active',
@@ -802,6 +810,21 @@ describe('llmo-cache-handler', () => {
       const secondCacheKey = mockCache.get.getCall(0).args[0];
 
       expect(firstCacheKey).to.equal(secondCacheKey);
+    });
+  });
+
+  describe('queryLlmoWithCache - Error Handling', () => {
+    it('should throw error when neither dataSource nor file is provided', async () => {
+      // Remove dataSource from params
+      mockContext.params = {
+        siteId: TEST_SITE_ID,
+      };
+      // Ensure no file query param
+      mockContext.data = {};
+
+      await expect(
+        queryLlmoWithCache(mockContext, mockLlmoConfig),
+      ).to.be.rejectedWith('Either dataSource path parameter or file query parameter must be provided');
     });
   });
 });

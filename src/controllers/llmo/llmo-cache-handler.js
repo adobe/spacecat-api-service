@@ -233,7 +233,27 @@ export const queryLlmoWithCache = async (context, llmoConfig) => {
   } = context.params;
   const { file, ...queryParams } = context.data;
 
-  // Multi-file mode: if 'file' query param exists
+  // Single-file mode: prioritize path parameters if dataSource is present
+  if (dataSource) {
+    let filePath;
+    if (sheetType && week) {
+      filePath = `${sheetType}/${week}/${dataSource}`;
+    } else if (sheetType) {
+      filePath = `${sheetType}/${dataSource}`;
+    } else {
+      filePath = dataSource;
+    }
+
+    log.info(`Fetching and processing single file for siteId: ${siteId}, path: ${filePath}`);
+    return fetchAndProcessSingleFile(
+      context,
+      llmoConfig,
+      filePath,
+      queryParams,
+    );
+  }
+
+  // Multi-file mode: fallback to 'file' query param if no path parameters
   if (file) {
     const files = Array.isArray(file) ? file : [file];
     log.info(`Fetching and processing multiple files for siteId: ${siteId}, files: ${files.join(', ')}`);
@@ -248,21 +268,6 @@ export const queryLlmoWithCache = async (context, llmoConfig) => {
     return { data: results, headers: { 'Content-Encoding': 'br' } };
   }
 
-  // Single-file mode: construct the sheet URL based on path parameters
-  let filePath;
-  if (sheetType && week) {
-    filePath = `${sheetType}/${week}/${dataSource}`;
-  } else if (sheetType) {
-    filePath = `${sheetType}/${dataSource}`;
-  } else {
-    filePath = dataSource;
-  }
-
-  log.info(`Fetching and processing single file for siteId: ${siteId}, path: ${filePath}`);
-  return fetchAndProcessSingleFile(
-    context,
-    llmoConfig,
-    filePath,
-    queryParams,
-  );
+  // If neither path parameters nor file query param exist, throw an error
+  throw new Error('Either dataSource path parameter or file query parameter must be provided');
 };

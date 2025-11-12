@@ -463,6 +463,9 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource',
       'POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource',
       'GET /sites/:siteId/llmo/cache',
+      'GET /sites/:siteId/llmo/cache/:dataSource',
+      'GET /sites/:siteId/llmo/cache/:sheetType/:dataSource',
+      'GET /sites/:siteId/llmo/cache/:sheetType/:week/:dataSource',
       'GET /sites/:siteId/llmo/config',
       'PATCH /sites/:siteId/llmo/config',
       'POST /sites/:siteId/llmo/config',
@@ -599,6 +602,12 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'week', 'dataSource']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/cache'].handler).to.equal(mockLlmoController.queryWithCache);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/cache'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/cache/:dataSource'].handler).to.equal(mockLlmoController.queryWithCache);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/cache/:dataSource'].paramNames).to.deep.equal(['siteId', 'dataSource']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/cache/:sheetType/:dataSource'].handler).to.equal(mockLlmoController.queryWithCache);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/cache/:sheetType/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'dataSource']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/cache/:sheetType/:week/:dataSource'].handler).to.equal(mockLlmoController.queryWithCache);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/cache/:sheetType/:week/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'week', 'dataSource']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/config'].handler).to.equal(mockLlmoController.getLlmoConfig);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/config'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/questions'].handler).to.equal(mockLlmoController.getLlmoQuestions);
