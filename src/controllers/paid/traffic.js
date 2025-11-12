@@ -232,8 +232,16 @@ function TrafficController(context, log, env) {
     });
   }
 
-  async function getPaidTrafficBySpecificPlatform(channel) {
-    return fetchPaidTrafficData(['trf_channel', 'trf_platform', 'device'], TrafficDataResponseDto, (results) => results.filter((item) => item.trf_channel === channel));
+  async function getPaidTrafficBySpecificPlatform(channel, withDevice = false) {
+    const dimensions = ['trf_channel', 'trf_platform'];
+    if (withDevice) {
+      dimensions.push('device');
+    }
+    return fetchPaidTrafficData(
+      dimensions,
+      TrafficDataResponseDto,
+      (results) => results.filter((item) => item.trf_channel === channel),
+    );
   }
 
   return {
@@ -266,10 +274,15 @@ function TrafficController(context, log, env) {
     getPaidTrafficByTypeDeviceChannel: async () => fetchPaidTrafficData(['trf_type', 'device', 'trf_channel'], TrafficDataResponseDto),
     getPaidTrafficByChannel: async () => fetchPaidTrafficData(['trf_channel'], TrafficDataResponseDto),
     getPaidTrafficByChannelDevice: async () => fetchPaidTrafficData(['trf_channel', 'device'], TrafficDataResponseDto),
+
     getPaidTrafficBySocialPlatform: async () => getPaidTrafficBySpecificPlatform('social'),
+    getPaidTrafficBySocialPlatformDevice: async () => getPaidTrafficBySpecificPlatform('social', true),
     getPaidTrafficBySearchPlatform: async () => getPaidTrafficBySpecificPlatform('search'),
+    getPaidTrafficBySearchPlatformDevice: async () => getPaidTrafficBySpecificPlatform('search', true),
     getPaidTrafficByDisplayPlatform: async () => getPaidTrafficBySpecificPlatform('display'),
+    getPaidTrafficByDisplayPlatformDevice: async () => getPaidTrafficBySpecificPlatform('display', true),
     getPaidTrafficByVideoPlatform: async () => getPaidTrafficBySpecificPlatform('video'),
+    getPaidTrafficByVideoPlatformDevice: async () => getPaidTrafficBySpecificPlatform('video', true),
   };
 }
 
