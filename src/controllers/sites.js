@@ -608,18 +608,20 @@ function SitesController(ctx, log, env) {
     const domain = wwwUrlResolver(site);
 
     try {
-      const current = await rumAPIClient.query(TOTAL_METRICS, {
-        domain,
-        interval: MONTH_DAYS,
-      });
-      const total = await rumAPIClient.query(TOTAL_METRICS, {
-        domain,
-        interval: 2 * MONTH_DAYS,
-      });
-      const organicTraffic = await getStoredMetrics(
-        { siteId, metric: ORGANIC_TRAFFIC, source: AHREFS },
-        context,
-      );
+      const [current, total, organicTraffic] = await Promise.all([
+        rumAPIClient.query(TOTAL_METRICS, {
+          domain,
+          interval: MONTH_DAYS,
+        }),
+        rumAPIClient.query(TOTAL_METRICS, {
+          domain,
+          interval: 2 * MONTH_DAYS,
+        }),
+        getStoredMetrics(
+          { siteId, metric: ORGANIC_TRAFFIC, source: AHREFS },
+          context,
+        ),
+      ]);
 
       const previousPageViews = total.totalPageViews - current.totalPageViews;
       const previousCTR = (total.totalClicks - current.totalClicks) / previousPageViews;
