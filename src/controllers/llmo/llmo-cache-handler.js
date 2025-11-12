@@ -135,9 +135,11 @@ const fetchAndProcessSingleFile = async (context, llmoConfig, filePath, queryPar
   const urlAsString = url.toString();
   log.info(`Fetching single file with path: ${urlAsString}`);
 
-  // Create an AbortController with a 60-second timeout for large data fetches
+  // Create an AbortController with a 15-second timeout
+  // to prevent large data fetches keeping the Lambda running for too long
+  const TIMEOUT_MS = 15000;
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 seconds
+  const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS); // 15 seconds
 
   // Start timing the source fetch
   const sourceFetchStartTime = Date.now();
@@ -186,8 +188,8 @@ const fetchAndProcessSingleFile = async (context, llmoConfig, filePath, queryPar
   } catch (error) {
     clearTimeout(timeoutId);
     if (error.name === 'AbortError') {
-      log.error(`Request timeout after 60000ms for file: ${filePath}`);
-      throw new Error('Request timeout after 60000ms');
+      log.error(`Request timeout after ${TIMEOUT_MS}ms for file: ${filePath}`);
+      throw new Error(`Request timeout after ${TIMEOUT_MS}ms`);
     }
     throw error;
   }

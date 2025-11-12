@@ -232,9 +232,9 @@ describe('llmo-cache-handler', () => {
 
       await expect(
         queryLlmoWithCache(mockContext, mockLlmoConfig),
-      ).to.be.rejectedWith('Request timeout after 60000ms');
+      ).to.be.rejectedWith('Request timeout after 15000ms');
       expect(mockLog.error).to.have.been.calledWith(
-        sinon.match(/Request timeout after 60000ms/),
+        sinon.match(/Request timeout after 15000ms/),
       );
     });
 
