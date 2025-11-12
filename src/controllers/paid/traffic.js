@@ -233,7 +233,7 @@ function TrafficController(context, log, env) {
   }
 
   async function getPaidTrafficBySpecificPlatform(channel) {
-    return fetchPaidTrafficData(['trf_channel', 'device'], TrafficDataResponseDto, (results) => results.filter((item) => item.trf_channel === channel));
+    return fetchPaidTrafficData(['trf_channel', 'trf_platform', 'device'], TrafficDataResponseDto, (results) => results.filter((item) => item.trf_channel === channel));
   }
 
   return {
