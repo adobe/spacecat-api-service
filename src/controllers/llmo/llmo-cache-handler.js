@@ -111,7 +111,7 @@ const fetchAndProcessSingleFile = async (context, llmoConfig, filePath, queryPar
     log.info(`✓ Processed result cache HIT for: ${cacheKey} (fetch time: ${cacheFetchTime}ms)`);
     return {
       data: cachedResult,
-      headers: {},
+      headers: { 'Content-Encoding': 'br' },
     };
   }
 
