@@ -79,6 +79,8 @@ function isStaticRoute(routePattern) {
  * @param {Object} sandboxAuditController - The sandbox audit controller.
  * @param {Object} reportsController - The reports controller.
  * @param {Object} homepageController - The homepage controller.
+ * @param {Object} pta2Controller - The PTA2 controller.
+ * @param {Object} pta2Controller - The PTA2 controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -114,6 +116,7 @@ export default function getRouteHandlers(
   sandboxAuditController,
   reportsController,
   homepageController,
+  pta2Controller,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -222,6 +225,15 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/traffic/paid/type-channel': trafficController.getPaidTrafficByTypeChannel,
     'GET /sites/:siteId/traffic/paid/type-campaign': trafficController.getPaidTrafficByTypeCampaign,
     'GET /sites/:siteId/traffic/paid/type': trafficController.getPaidTrafficByType,
+    'GET /sites/:siteId/traffic/paid/pta2/weekly-summary': pta2Controller.getPTAWeeklySummary,
+    'GET /sites/:siteId/traffic/paid/type-device': trafficController.getPaidTrafficByTypeDevice,
+    'GET /sites/:siteId/traffic/paid/type-device-channel': trafficController.getPaidTrafficByTypeDeviceChannel,
+    'GET /sites/:siteId/traffic/paid/channel': trafficController.getPaidTrafficByChannel,
+    'GET /sites/:siteId/traffic/paid/channel-device': trafficController.getPaidTrafficByChannelDevice,
+    'GET /sites/:siteId/traffic/paid/social-platform': trafficController.getPaidTrafficBySocialPlatform,
+    'GET /sites/:siteId/traffic/paid/search-platform': trafficController.getPaidTrafficBySearchPlatform,
+    'GET /sites/:siteId/traffic/paid/display-platform': trafficController.getPaidTrafficByDisplayPlatform,
+    'GET /sites/:siteId/traffic/paid/video-platform': trafficController.getPaidTrafficByVideoPlatform,
     'GET /sites/:siteId/brand-guidelines': brandsController.getBrandGuidelinesForSite,
     'GET /sites/:siteId/top-pages': sitesController.getTopPages,
     'GET /sites/:siteId/top-pages/:source': sitesController.getTopPages,

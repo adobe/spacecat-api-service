@@ -19,6 +19,7 @@ import {
   tracingFetch as fetch,
   isValidUrl,
   isObject,
+  isNonEmptyObject,
   resolveCanonicalUrl, isValidIMSOrgId,
   detectAEMVersion,
   detectLocale,
@@ -1132,20 +1133,22 @@ export const onboardSingleSite = async (
  */
 export const filterSitesForProductCode = async (context, organization, sites, productCode) => {
   // for every site we will create tier client and will check valid entitlement and enrollment
-  const filteredSites = [];
   const { SiteEnrollment } = context.dataAccess;
   const tierClient = TierClient.createForOrg(context, organization, productCode);
   const { entitlement } = await tierClient.checkValidEntitlement();
-  for (const site of sites) {
-    /* eslint-disable no-await-in-loop */
-    const siteEnrollments = await SiteEnrollment.allBySiteId(site.getId());
-    /* eslint-disable no-await-in-loop, max-len */
-    const validSiteEnrollment = siteEnrollments.find((se) => se.getEntitlementId() === entitlement?.getId());
-    if (validSiteEnrollment) {
-      filteredSites.push(site);
-    }
+
+  if (!isNonEmptyObject(entitlement)) {
+    return [];
   }
-  return filteredSites;
+
+  // Get all enrollments for this entitlement in one query
+  const siteEnrollments = await SiteEnrollment.allByEntitlementId(entitlement.getId());
+
+  // Create a Set of enrolled site IDs for efficient lookup
+  const enrolledSiteIds = new Set(siteEnrollments.map((se) => se.getSiteId()));
+
+  // Filter sites based on enrollment
+  return sites.filter((site) => enrolledSiteIds.has(site.getId()));
 };
 
 /**
@@ -1209,14 +1212,16 @@ export const fetchSiteByOrganizationEntitlement = async (context, organization, 
 };
 
 /**
- * Fetches a site by siteId and validates it has an enrollment matching the organization's entitlement.
+ * Fetches a site by siteId and validates it has an enrollment matching
+ * the organization's entitlement.
  *
  * @param {Object} context - The context object containing dataAccess and log.
  * @param {Object} organization - The organization object.
  * @param {string} siteId - The site ID to fetch and validate.
  * @param {string} productCode - The product code (e.g., 'ASO').
  * @returns {Promise<{site: Object|null, entitlement: Object|null, enrollment: Object|null}>}
- *          An object containing the site, entitlement, and enrollment, or null values if not found/invalid.
+ *          An object containing the site, entitlement, and enrollment,
+ *  or null values if not found/invalid.
  */
 export const fetchSiteByOrganizationEntitlementBySiteId = async (
   context,
