@@ -13,7 +13,7 @@
 import {
   badRequest,
   ok,
-  forbidden,
+  notFound,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   hasText,
@@ -135,7 +135,7 @@ function HomepageController(ctx) {
         }
       }
 
-      return forbidden('Access denied or resources not found for the provided parameters');
+      return notFound('No site found for the provided parameters');
     } catch (error) {
       const { log } = ctx;
       log.error(`Error fetching homepage data: ${error.message}`);

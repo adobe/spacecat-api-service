@@ -182,9 +182,9 @@ describe('Homepage Controller', () => {
       const controller = HomepageController(context);
       const response = await controller.getHomepageData(context);
 
-      expect(response.status).to.equal(403);
+      expect(response.status).to.equal(404);
       const body = await response.json();
-      expect(body.message).to.include('Access denied or resources not found');
+      expect(body.message).to.include('No site found for the provided parameters');
     });
 
     it('should skip invalid siteId and return forbidden when no other params', async () => {
@@ -193,9 +193,9 @@ describe('Homepage Controller', () => {
       const controller = HomepageController(context);
       const response = await controller.getHomepageData(context);
 
-      expect(response.status).to.equal(403);
+      expect(response.status).to.equal(404);
       const body = await response.json();
-      expect(body.message).to.include('Access denied or resources not found');
+      expect(body.message).to.include('No site found for the provided parameters');
     });
 
     it('should return forbidden if site does not exist and no fallback provided', async () => {
@@ -205,7 +205,7 @@ describe('Homepage Controller', () => {
       const controller = HomepageController(context);
       const response = await controller.getHomepageData(context);
 
-      expect(response.status).to.equal(403);
+      expect(response.status).to.equal(404);
       expect(mockSite.findById).to.have.been.calledWith(siteId);
     });
 
@@ -218,7 +218,7 @@ describe('Homepage Controller', () => {
       const controller = HomepageController(context);
       const response = await controller.getHomepageData(context);
 
-      expect(response.status).to.equal(403);
+      expect(response.status).to.equal(404);
       expect(hasAccessStub).to.have.been.called;
     });
 
@@ -248,9 +248,9 @@ describe('Homepage Controller', () => {
       const controller = HomepageController(context);
       const response = await controller.getHomepageData(context);
 
-      expect(response.status).to.equal(403);
+      expect(response.status).to.equal(404);
       const body = await response.json();
-      expect(body.message).to.include('Access denied or resources not found');
+      expect(body.message).to.include('No site found for the provided parameters');
     });
 
     it('should return forbidden if organization does not exist and no fallback provided', async () => {
@@ -260,7 +260,7 @@ describe('Homepage Controller', () => {
       const controller = HomepageController(context);
       const response = await controller.getHomepageData(context);
 
-      expect(response.status).to.equal(403);
+      expect(response.status).to.equal(404);
       expect(mockOrganization.findById).to.have.been.calledWith(orgId);
     });
 
@@ -272,7 +272,7 @@ describe('Homepage Controller', () => {
       const controller = HomepageController(context);
       const response = await controller.getHomepageData(context);
 
-      expect(response.status).to.equal(403);
+      expect(response.status).to.equal(404);
       expect(hasAccessStub).to.have.been.called;
     });
 
@@ -299,7 +299,7 @@ describe('Homepage Controller', () => {
       const controller = HomepageController(context);
       const response = await controller.getHomepageData(context);
 
-      expect(response.status).to.equal(403);
+      expect(response.status).to.equal(404);
       expect(mockOrganization.findByImsOrgId).to.have.been.calledWith('nonexistent@AdobeOrg');
     });
 
@@ -311,7 +311,7 @@ describe('Homepage Controller', () => {
       const controller = HomepageController(context);
       const response = await controller.getHomepageData(context);
 
-      expect(response.status).to.equal(403);
+      expect(response.status).to.equal(404);
       expect(hasAccessStub).to.have.been.called;
     });
 
@@ -447,9 +447,9 @@ describe('Homepage Controller', () => {
       const controller = HomepageController(context);
       const response = await controller.getHomepageData(context);
 
-      expect(response.status).to.equal(403);
+      expect(response.status).to.equal(404);
       const body = await response.json();
-      expect(body.message).to.include('Access denied or resources not found');
+      expect(body.message).to.include('No site found for the provided parameters');
     });
   });
 
