@@ -2570,7 +2570,7 @@ SuggestionStatus:
     - 'ERROR'
     - 'IN_PROGRESS'
     - 'OUTDATED'
-    - 'NOT_VALIDATED'
+    - 'PENDING_VALIDATION'
   example: 'NEW'
 SuggestionType:
   description: |
