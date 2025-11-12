@@ -728,6 +728,11 @@ describe('Sites Controller', () => {
       ctrChange: -5.553712152633755,
       pageViewsChange: 6.156954020464625,
       projectedTrafficValue: 0.3078477010232313,
+      timing: {
+        rumAPIQueries: metrics.timing.rumAPIQueries,
+        storedMetrics: metrics.timing.storedMetrics,
+        total: metrics.timing.total,
+      },
     });
   });
 
@@ -763,6 +768,11 @@ describe('Sites Controller', () => {
       ctrChange: -5.553712152633755,
       pageViewsChange: 6.156954020464625,
       projectedTrafficValue: 0,
+      timing: {
+        rumAPIQueries: metrics.timing.rumAPIQueries,
+        storedMetrics: metrics.timing.storedMetrics,
+        total: metrics.timing.total,
+      },
     });
   });
 
