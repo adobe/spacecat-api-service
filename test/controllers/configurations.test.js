@@ -105,6 +105,7 @@ describe('Configurations Controller', () => {
       registerAudit: sandbox.stub(),
       unregisterAudit: sandbox.stub(),
       save: sandbox.stub().resolves(),
+      setUpdatedBy: sandbox.stub(),
     },
   ];
 
@@ -149,7 +150,7 @@ describe('Configurations Controller', () => {
         authInfo: new AuthInfo()
           .withType('jwt')
           .withScopes([{ name: 'admin' }])
-          .withProfile({ is_admin: true })
+          .withProfile({ is_admin: true, email: 'test@example.com' })
           .withAuthenticated(true),
       },
     };
@@ -395,7 +396,10 @@ describe('Configurations Controller', () => {
     mockDataAccess.Configuration.findLatest.resolves(latestConfig);
     mockDataAccess.Configuration.findByVersion.resolves(configurations[0]);
 
-    const result = await configurationsController.restoreVersion({ params: { version: '1' } });
+    const result = await configurationsController.restoreVersion({
+      params: { version: '1' },
+      attributes: context.attributes,
+    });
     const response = await result.json();
 
     expect(mockDataAccess.Configuration.findByVersion).to.have.been.calledOnceWith(1);
@@ -420,7 +424,10 @@ describe('Configurations Controller', () => {
     mockDataAccess.Configuration.findLatest.resolves(latestConfig);
     mockDataAccess.Configuration.findByVersion.resolves(configurations[0]);
 
-    const result = await configurationsController.restoreVersion({ params: { version: '2376' } });
+    const result = await configurationsController.restoreVersion({
+      params: { version: '2376' },
+      attributes: context.attributes,
+    });
     const response = await result.json();
 
     expect(mockDataAccess.Configuration.findByVersion).to.have.been.calledOnceWith(2376);
@@ -499,7 +506,10 @@ describe('Configurations Controller', () => {
     mockDataAccess.Configuration.findLatest.resolves(latestConfig);
     mockDataAccess.Configuration.findByVersion.resolves(oldConfigWithoutSlackRoles);
 
-    const result = await configurationsController.restoreVersion({ params: { version: '1' } });
+    const result = await configurationsController.restoreVersion({
+      params: { version: '1' },
+      attributes: context.attributes,
+    });
 
     expect(mockSetSlackRoles).to.not.have.been.called;
     expect(mockSave).to.have.been.calledOnce;
@@ -516,7 +526,10 @@ describe('Configurations Controller', () => {
     mockDataAccess.Configuration.findLatest.resolves(latestConfig);
     mockDataAccess.Configuration.findByVersion.resolves(configurations[0]);
 
-    const result = await configurationsController.restoreVersion({ params: { version: '1' } });
+    const result = await configurationsController.restoreVersion({
+      params: { version: '1' },
+      attributes: context.attributes,
+    });
     const error = await result.json();
 
     expect(result.status).to.equal(400);
@@ -536,7 +549,10 @@ describe('Configurations Controller', () => {
     mockDataAccess.Configuration.findLatest.resolves(latestConfig);
     mockDataAccess.Configuration.findByVersion.resolves(configurations[0]);
 
-    const result = await configurationsController.restoreVersion({ params: { version: '1' } });
+    const result = await configurationsController.restoreVersion({
+      params: { version: '1' },
+      attributes: context.attributes,
+    });
     const error = await result.json();
 
     expect(result.status).to.equal(400);
@@ -554,7 +570,10 @@ describe('Configurations Controller', () => {
     mockDataAccess.Configuration.findLatest.resolves(latestConfig);
     mockDataAccess.Configuration.findByVersion.resolves(configurations[0]);
 
-    const result = await configurationsController.restoreVersion({ params: { version: '1' } });
+    const result = await configurationsController.restoreVersion({
+      params: { version: '1' },
+      attributes: context.attributes,
+    });
     const error = await result.json();
 
     expect(result.status).to.equal(400);
@@ -569,6 +588,7 @@ describe('Configurations Controller', () => {
         interval: 'weekly',
         productCodes: ['LLMO'],
       },
+      attributes: context.attributes,
     });
     const response = await result.json();
     expect(result.status).to.equal(201);
@@ -604,7 +624,10 @@ describe('Configurations Controller', () => {
   });
 
   it('unregisters an audit', async () => {
-    const result = await configurationsController.unregisterAudit({ params: { auditType: 'cwv' } });
+    const result = await configurationsController.unregisterAudit({
+      params: { auditType: 'cwv' },
+      attributes: context.attributes,
+    });
     const response = await result.json();
     expect(result.status).to.equal(200);
     expect(response).to.have.property('message', 'Audit type "cwv" has been successfully unregistered');
@@ -645,12 +668,45 @@ describe('Configurations Controller', () => {
         updateQueues,
       });
 
-      const result = await configurationsController.updateQueues({ data: queues });
+      const result = await configurationsController.updateQueues({
+        data: queues,
+        attributes: context.attributes,
+      });
       const configuration = await result.json();
 
       expect(result.status).to.equal(200);
       expect(updateQueues).to.have.been.calledOnceWith(queues);
       expect(configuration).to.be.an('object');
+    });
+
+    it('updates queue configuration when email is missing in profile', async () => {
+      const queues = { audits: 'sqs://new-audit-queue' };
+      const updateQueues = sandbox.stub();
+      const setUpdatedBy = sandbox.stub();
+      mockDataAccess.Configuration.findLatest.resolves({
+        ...configurations[1],
+        updateQueues,
+        setUpdatedBy,
+      });
+
+      // Create context with profile but no email
+      const contextWithoutEmail = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'admin' }])
+            .withProfile({ is_admin: true }) // No email field
+            .withAuthenticated(true),
+        },
+      };
+
+      const result = await configurationsController.updateQueues({
+        data: queues,
+        attributes: contextWithoutEmail.attributes,
+      });
+
+      expect(result.status).to.equal(200);
+      expect(setUpdatedBy).to.have.been.calledOnceWith('system');
     });
 
     it('returns 403 if user is not an admin', async () => {
@@ -711,6 +767,7 @@ describe('Configurations Controller', () => {
       const result = await configurationsController.updateJob({
         params: { jobType: 'cwv' },
         data: { interval: 'weekly', group: 'audits' },
+        attributes: context.attributes,
       });
       const configuration = await result.json();
 
@@ -794,6 +851,7 @@ describe('Configurations Controller', () => {
       const result = await configurationsController.updateHandler({
         params: { handlerType: 'cwv' },
         data: { enabledByDefault: true, productCodes: ['SPACECAT_CORE'] },
+        attributes: context.attributes,
       });
       const configuration = await result.json();
 
@@ -886,7 +944,10 @@ describe('Configurations Controller', () => {
         },
       };
 
-      const result = await configurationsController.updateConfiguration({ data: configData });
+      const result = await configurationsController.updateConfiguration({
+        data: configData,
+        attributes: context.attributes,
+      });
       const configuration = await result.json();
 
       expect(result.status).to.equal(200);
@@ -907,7 +968,10 @@ describe('Configurations Controller', () => {
         ],
       };
 
-      const result = await configurationsController.updateConfiguration({ data: configData });
+      const result = await configurationsController.updateConfiguration({
+        data: configData,
+        attributes: context.attributes,
+      });
 
       expect(result.status).to.equal(200);
       expect(updateConfiguration).to.have.been.calledOnceWith(configData);
@@ -926,7 +990,10 @@ describe('Configurations Controller', () => {
         },
       };
 
-      const result = await configurationsController.updateConfiguration({ data: configData });
+      const result = await configurationsController.updateConfiguration({
+        data: configData,
+        attributes: context.attributes,
+      });
 
       expect(result.status).to.equal(200);
       expect(updateConfiguration).to.have.been.calledOnceWith(configData);
@@ -945,7 +1012,10 @@ describe('Configurations Controller', () => {
         queues: { audits: 'sqs://audit-queue' },
       };
 
-      const result = await configurationsController.updateConfiguration({ data: configData });
+      const result = await configurationsController.updateConfiguration({
+        data: configData,
+        attributes: context.attributes,
+      });
 
       expect(result.status).to.equal(200);
       expect(updateConfiguration).to.have.been.calledOnceWith(configData);
@@ -983,7 +1053,15 @@ describe('Configurations Controller', () => {
     it('returns 404 if configuration not found', async () => {
       mockDataAccess.Configuration.findLatest.resolves(null);
       const result = await configurationsController.updateConfiguration({
-        data: { handlers: {} },
+        data: {
+          handlers: {
+            cwv: {
+              enabledByDefault: true,
+              productCodes: ['SPACECAT_CORE'],
+            },
+          },
+        },
+        attributes: context.attributes,
       });
       const error = await result.json();
 
@@ -992,19 +1070,28 @@ describe('Configurations Controller', () => {
     });
 
     it('returns 400 if updateConfiguration throws an error', async () => {
-      const updateConfiguration = sandbox.stub().throws(new Error('Handlers must be a non-empty object'));
+      const updateConfiguration = sandbox.stub().throws(new Error('Invalid configuration data'));
       mockDataAccess.Configuration.findLatest.resolves({
         ...configurations[1],
         updateConfiguration,
+        setUpdatedBy: sandbox.stub(),
       });
 
       const result = await configurationsController.updateConfiguration({
-        data: { handlers: {} },
+        data: {
+          handlers: {
+            cwv: {
+              enabledByDefault: true,
+              productCodes: ['SPACECAT_CORE'],
+            },
+          },
+        },
+        attributes: context.attributes,
       });
       const error = await result.json();
 
       expect(result.status).to.equal(400);
-      expect(error).to.have.property('message', 'Handlers must be a non-empty object');
+      expect(error).to.have.property('message', 'Invalid configuration data');
     });
   });
 });

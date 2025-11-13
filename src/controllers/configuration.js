@@ -20,6 +20,7 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import {
   isInteger,
+  isNonEmptyArray,
   isNonEmptyObject,
 } from '@adobe/spacecat-shared-utils';
 import { checkConfiguration } from '@adobe/spacecat-shared-data-access';
@@ -39,6 +40,16 @@ function ConfigurationController(ctx) {
   const { Configuration } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
+
+  /**
+   * Helper function to set updatedBy field from the authenticated user's profile.
+   * @param {object} configuration - The configuration entity to update.
+   * @param {object} context - The request context containing authInfo.
+   */
+  const setUpdatedBy = (configuration, context) => {
+    const { authInfo: { profile } } = context.attributes;
+    configuration.setUpdatedBy(profile.email || 'system');
+  };
 
   /**
    * Retrieves all configurations (all versions).
@@ -116,6 +127,7 @@ function ConfigurationController(ctx) {
     try {
       const configuration = await Configuration.findLatest();
       configuration.registerAudit(auditType, enabledByDefault, interval, productCodes);
+      setUpdatedBy(configuration, context);
       await configuration.save();
       return created({
         message: `Audit type "${auditType}" has been successfully registered`,
@@ -136,6 +148,7 @@ function ConfigurationController(ctx) {
     try {
       const configuration = await Configuration.findLatest();
       configuration.unregisterAudit(auditType);
+      setUpdatedBy(configuration, context);
       await configuration.save();
       return ok({
         message: `Audit type "${auditType}" has been successfully unregistered`,
@@ -169,6 +182,7 @@ function ConfigurationController(ctx) {
       }
 
       configuration.updateQueues(queues);
+      setUpdatedBy(configuration, context);
       await configuration.save();
 
       return ok(ConfigurationDto.toJSON(configuration));
@@ -205,6 +219,7 @@ function ConfigurationController(ctx) {
       }
 
       configuration.updateJob(jobType, properties);
+      setUpdatedBy(configuration, context);
       await configuration.save();
 
       return ok(ConfigurationDto.toJSON(configuration));
@@ -241,6 +256,7 @@ function ConfigurationController(ctx) {
       }
 
       configuration.updateHandlerProperties(handlerType, properties);
+      setUpdatedBy(configuration, context);
       await configuration.save();
 
       return ok(ConfigurationDto.toJSON(configuration));
@@ -266,9 +282,9 @@ function ConfigurationController(ctx) {
       return badRequest('Configuration data is required and cannot be empty');
     }
 
-    const hasHandlers = configData.handlers !== undefined;
-    const hasJobs = configData.jobs !== undefined;
-    const hasQueues = configData.queues !== undefined;
+    const hasHandlers = isNonEmptyObject(configData.handlers);
+    const hasJobs = isNonEmptyArray(configData.jobs);
+    const hasQueues = isNonEmptyObject(configData.queues);
 
     if (!hasHandlers && !hasJobs && !hasQueues) {
       return badRequest('At least one of handlers, jobs, or queues must be provided');
@@ -281,6 +297,7 @@ function ConfigurationController(ctx) {
       }
 
       configuration.updateConfiguration(configData);
+      setUpdatedBy(configuration, context);
 
       await configuration.save();
 
@@ -335,6 +352,7 @@ function ConfigurationController(ctx) {
         latestConfiguration.setSlackRoles(oldSlackRoles);
       }
 
+      setUpdatedBy(latestConfiguration, context);
       await latestConfiguration.save();
 
       return ok({

@@ -17,7 +17,7 @@ import {
   internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import {
-  isValidUrl, isNonEmptyObject, isString,
+  hasText, isValidUrl, isNonEmptyObject,
 } from '@adobe/spacecat-shared-utils';
 import AccessControlUtil from '../support/access-control-util.js';
 
@@ -41,8 +41,8 @@ export default (ctx) => {
   const validateInput = ({
     baseURL, organizationId, auditType, enable,
   }) => {
-    const hasBaseURL = isString(baseURL) && baseURL.length > 0;
-    const hasOrgId = isString(organizationId) && organizationId.length > 0;
+    const hasBaseURL = hasText(baseURL);
+    const hasOrgId = hasText(organizationId);
 
     if (!hasBaseURL && !hasOrgId) {
       throw new Error('Either Site URL (baseURL) or Organization ID (organizationId) is required.');
@@ -56,7 +56,7 @@ export default (ctx) => {
       throw new Error(`Invalid Site URL format: "${baseURL}".`);
     }
 
-    if (isString(auditType) === false || auditType.length === 0) {
+    if (!hasText(auditType)) {
       throw new Error('Audit type is required.');
     }
 
@@ -104,7 +104,7 @@ export default (ctx) => {
             };
           }
 
-          const isSiteOperation = baseURL !== undefined;
+          const isSiteOperation = hasText(baseURL);
           let entity;
           let entityDescription;
 
