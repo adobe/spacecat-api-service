@@ -130,6 +130,37 @@ site-traffic-paid-type:
     security:
       - api_key: []
 
+site-traffic-paid-pta2-weekly-summary:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+  get:
+    tags:
+      - site
+      - paid
+    summary: Get PTA2 weekly summary for paid traffic
+    description: Returns aggregated paid traffic analysis metrics for a site for a specific week or month and year.
+    operationId: getPTA2WeeklySummary
+    responses:
+      '200':
+        description: PTA2 weekly summary data
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/PTAWeeklySummary'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
 site-traffic-paid-top-pages:
   parameters:
     - $ref: './parameters.yaml#/siteId'
