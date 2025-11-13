@@ -1,6 +1,6 @@
 {
   "name": "@adobe/spacecat-api-service",
-  "version": "1.234.0",
+  "version": "1.234.1",
   "description": "SpaceCat API Service",
   "main": "src/index.js",
   "type": "module",
@@ -82,7 +82,7 @@
     "@adobe/spacecat-shared-scrape-client": "2.3.1",
     "@adobe/spacecat-shared-slack-client": "1.5.29",
     "@adobe/spacecat-shared-tier-client": "1.2.3",
-    "@adobe/spacecat-shared-tokowaka-client": "https://gitpkg.now.sh/adobe/spacecat-shared/packages/spacecat-shared-tokowaka-client?faq-edge",
+    "@adobe/spacecat-shared-tokowaka-client": "1.0.3",
     "@adobe/spacecat-shared-utils": "1.72.0",
     "@aws-sdk/client-s3": "3.927.0",
     "@aws-sdk/client-sfn": "3.927.0",
