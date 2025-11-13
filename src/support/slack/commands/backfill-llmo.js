@@ -21,7 +21,7 @@ import BaseCommand from './base.js';
 const PHRASES = ['backfill-llmo'];
 
 const AUDIT_TYPES = {
-  CDN_ANALYSIS: 'cdn-analysis',
+  CDN_LOGS_ANALYSIS: 'cdn-logs-analysis',
   CDN_LOGS_REPORT: 'cdn-logs-report',
   LLMO_REFERRAL_TRAFFIC: 'llmo-referral-traffic',
 };
@@ -43,7 +43,7 @@ async function triggerBackfill(context, configuration, siteId, auditType, timeVa
   const { sqs } = context;
 
   switch (auditType) {
-    case AUDIT_TYPES.CDN_ANALYSIS: {
+    case AUDIT_TYPES.CDN_LOGS_ANALYSIS: {
       const days = timeValue;
       const now = new Date();
 
@@ -135,7 +135,7 @@ function BackfillLlmoCommand(context) {
       if (!parsed.baseurl || !parsed.audit) {
         await say(':warning: Required: baseurl={baseURL} audit={auditType}');
         await say('Examples:');
-        await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_ANALYSIS} days=3\``);
+        await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS} days=3\``);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_REPORT} weeks=2\``);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_REPORT} weeks=0\` (current week)`);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC} weeks=2\``);
@@ -154,7 +154,7 @@ function BackfillLlmoCommand(context) {
       let timeDesc;
 
       switch (auditType) {
-        case AUDIT_TYPES.CDN_ANALYSIS:
+        case AUDIT_TYPES.CDN_LOGS_ANALYSIS:
           timeValue = parseInt(parsed.days, 10) || 1;
           timeDesc = `${timeValue} days`;
           break;
@@ -179,11 +179,16 @@ function BackfillLlmoCommand(context) {
           timeValue = parseInt(parsed.weeks, 10);
           if (Number.isNaN(timeValue)) timeValue = 1;
 
+          if (timeValue > 10) {
+            await say(`:warning: Max 10 weeks for ${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC}`);
+            return;
+          }
+
           timeDesc = `${timeValue} previous ${timeValue === 1 ? 'week' : 'weeks'}`;
           break;
 
         default:
-          await say(`:warning: Supported audits: ${AUDIT_TYPES.CDN_ANALYSIS}, ${AUDIT_TYPES.CDN_LOGS_REPORT}, ${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC}`);
+          await say(`:warning: Supported audits: ${AUDIT_TYPES.CDN_LOGS_ANALYSIS}, ${AUDIT_TYPES.CDN_LOGS_REPORT}, ${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC}`);
           return;
       }
 
@@ -200,7 +205,7 @@ function BackfillLlmoCommand(context) {
 
       let totalMessages;
       switch (auditType) {
-        case AUDIT_TYPES.CDN_ANALYSIS:
+        case AUDIT_TYPES.CDN_LOGS_ANALYSIS:
           totalMessages = timeValue;
           break;
         case AUDIT_TYPES.CDN_LOGS_REPORT:
