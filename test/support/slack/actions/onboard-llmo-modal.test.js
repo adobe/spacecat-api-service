@@ -413,7 +413,6 @@ describe('onboard-llmo-modal', () => {
       expect(config.enableHandlerForSite).to.have.been.calledWith('llmo-referral-traffic', mockSite);
       expect(config.enableHandlerForSite).to.have.been.calledWith('geo-brand-presence', mockSite);
       expect(config.disableHandlerForSite).to.have.been.calledWith('geo-brand-presence-daily', mockSite);
-      expect(config.enableHandlerForSite).to.have.been.calledWith('cdn-logs-analysis', mockSite);
       expect(config.enableHandlerForSite).to.have.been.calledWith('cdn-logs-report', mockSite);
       expect(config.enableHandlerForSite).to.have.been.calledWith('llmo-customer-analysis', mockSite);
       expect(config.enableHandlerForSite).to.have.been.calledWith('headings', mockSite);
