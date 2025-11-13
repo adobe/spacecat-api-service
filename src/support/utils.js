@@ -1171,18 +1171,15 @@ export const fetchSiteByOrganizationEntitlement = async (context, organization, 
     // Step 1: Fetch entitlement for the organization
     const tierClient = TierClient.createForOrg(context, organization, productCode);
     const { entitlement } = await tierClient.checkValidEntitlement();
-
     if (!entitlement) {
       log.info(`No valid entitlement found for organization ${organizationId} with product code ${productCode}`);
       return { site: null, entitlement: null, enrollment: null };
     }
-
     log.info(`Found entitlement: ${entitlement.getId()} for organization ${organizationId}`);
 
     // Step 2: Fetch enrollments by entitlementId
     const entitlementId = entitlement.getId();
     const enrollments = await SiteEnrollment.allByEntitlementId(entitlementId);
-
     if (!enrollments || enrollments.length === 0) {
       log.info(`No enrollments found for entitlement ${entitlementId}`);
       return { site: null, entitlement, enrollment: null };

@@ -318,7 +318,7 @@ export default function getRouteHandlers(
     'DELETE /sites/:siteId/reports/:reportId': reportsController.deleteReport,
 
     // ASO Home
-    'GET /organizations/aso-home': organizationsController.getAsoHome,
+    'GET /sites/resolve': sitesController.resolveSite,
   };
 
   // Initialization of static and dynamic routes
