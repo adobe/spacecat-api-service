@@ -179,6 +179,11 @@ function BackfillLlmoCommand(context) {
           timeValue = parseInt(parsed.weeks, 10);
           if (Number.isNaN(timeValue)) timeValue = 1;
 
+          if (timeValue > 10) {
+            await say(`:warning: Max 10 weeks for ${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC}`);
+            return;
+          }
+
           timeDesc = `${timeValue} previous ${timeValue === 1 ? 'week' : 'weeks'}`;
           break;
 
