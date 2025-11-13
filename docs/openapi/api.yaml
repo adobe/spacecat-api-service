@@ -156,6 +156,8 @@ paths:
     $ref: './consent-banner-api.yaml#/consent-banner'
   /sites:
     $ref: './sites-api.yaml#/sites'
+  /sites/resolve:
+    $ref: './sites-api.yaml#/sites-resolve'
   /sites/by-delivery-type/{deliveryType}:
     $ref: './sites-api.yaml#/sites-by-delivery-type'
   /sites/by-base-url/{base64BaseUrl}:
