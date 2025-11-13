@@ -28,7 +28,11 @@ import { OrganizationDto } from '../dto/organization.js';
 import { ProjectDto } from '../dto/project.js';
 import { SiteDto } from '../dto/site.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { filterSitesForProductCode } from '../support/utils.js';
+import {
+  filterSitesForProductCode,
+  fetchSiteByOrganizationEntitlement,
+  fetchSiteByOrganizationEntitlementBySiteId,
+} from '../support/utils.js';
 /**
  * Organizations controller. Provides methods to create, read, update and delete organizations.
  * @param {object} ctx - Context of the request.
@@ -367,6 +371,113 @@ function OrganizationsController(ctx, env) {
     return ok(sites.map((site) => SiteDto.toJSON(site)));
   };
 
+  /**
+   * Gets ASO Home data based on query parameters.
+   * Tries siteId first, then checks either organizationId or imsOrg (mutually exclusive).
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} ASO Home data response.
+   */
+  const getAsoHome = async (context) => {
+    const { organizationId, imsOrg, siteId } = context.data;
+    const { pathInfo } = context;
+    const productCode = pathInfo.headers[X_PRODUCT_HEADER];
+
+    if (!hasText(productCode)) {
+      return badRequest('Product code required in x-product header');
+    }
+
+    // Ensure at least one of organizationId or imsOrg is provided
+    if (!hasText(organizationId) && !hasText(imsOrg)) {
+      return badRequest('Either organizationId or imsOrg must be provided');
+    }
+
+    let organization;
+    let site;
+
+    try {
+      if (hasText(siteId) && isValidUUID(siteId)) {
+        site = await Site.findById(siteId);
+        if (site) {
+          const orgId = site.getOrganizationId();
+          if (orgId) {
+            organization = await Organization.findById(orgId);
+            if (organization) {
+              if (hasText(organizationId) && organization.getId() !== organizationId) {
+                organization = null;
+              } else if (hasText(imsOrg) && organization.getImsOrgId() !== imsOrg) {
+                organization = null;
+              }
+            }
+            if (organization && await accessControlUtil.hasAccess(organization)) {
+              const {
+                site: enrolledSite,
+                enrollment,
+              } = await fetchSiteByOrganizationEntitlementBySiteId(
+                context,
+                organization,
+                siteId,
+                productCode,
+              );
+
+              if (enrolledSite && enrollment) {
+                const data = {
+                  organization: OrganizationDto.toJSON(organization),
+                  site: SiteDto.toJSON(enrolledSite),
+                };
+
+                return ok({ data });
+              }
+            }
+          }
+        }
+      }
+
+      if (hasText(organizationId) && isValidUUID(organizationId)) {
+        organization = await Organization.findById(organizationId);
+        if (organization && await accessControlUtil.hasAccess(organization)) {
+          const { site: enrolledSite } = await fetchSiteByOrganizationEntitlement(
+            context,
+            organization,
+            productCode,
+          );
+
+          if (enrolledSite) {
+            const data = {
+              organization: OrganizationDto.toJSON(organization),
+              site: SiteDto.toJSON(enrolledSite),
+            };
+
+            return ok({ data });
+          }
+        }
+      } else if (hasText(imsOrg)) {
+        organization = await Organization.findByImsOrgId(imsOrg);
+        if (organization && await accessControlUtil.hasAccess(organization)) {
+          const { site: enrolledSite } = await fetchSiteByOrganizationEntitlement(
+            context,
+            organization,
+            productCode,
+          );
+
+          if (enrolledSite) {
+            const data = {
+              organization: OrganizationDto.toJSON(organization),
+              site: SiteDto.toJSON(enrolledSite),
+            };
+
+            return ok({ data });
+          }
+        }
+      }
+
+      return notFound('No site found for the provided parameters');
+    } catch (error) {
+      const { log } = context;
+      log.error(`Error fetching ASO Home data: ${error.message}`);
+      return badRequest('Failed to fetch ASO Home data');
+    }
+  };
+
   return {
     createOrganization,
     getAll,
@@ -379,6 +490,7 @@ function OrganizationsController(ctx, env) {
     getSitesByProjectNameAndOrganizationId,
     removeOrganization,
     updateOrganization,
+    getAsoHome,
   };
 }
 

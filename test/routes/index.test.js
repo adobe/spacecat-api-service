@@ -58,6 +58,7 @@ describe('getRouteHandlers', () => {
     getSitesForOrganization: sinon.stub(),
     getByImsOrgID: sinon.stub(),
     getSlackConfigByImsOrgID: sinon.stub(),
+    getAsoHome: sinon.stub(),
   };
 
   const mockProjectsController = {
@@ -240,10 +241,6 @@ describe('getRouteHandlers', () => {
     deleteReport: sinon.stub(),
   };
 
-  const mockHomepageController = {
-    getHomepageData: sinon.stub(),
-  };
-
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -277,8 +274,6 @@ describe('getRouteHandlers', () => {
       mockEntitlementController,
       mockSandboxAuditController,
       mockReportsController,
-      mockHomepageController,
-      mockPTA2Controller,
       mockPTA2Controller,
     );
 
@@ -308,7 +303,7 @@ describe('getRouteHandlers', () => {
       'POST /tools/scrape/jobs',
       'POST /consent-banner',
       'POST /llmo/onboard',
-      'GET /homepage',
+      'GET /organizations/aso-home',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
@@ -328,7 +323,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['POST /consent-banner']).to.equal(mockConsentBannerController.takeScreenshots);
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
     expect(staticRoutes['POST /llmo/onboard']).to.equal(mockLlmoController.onboardCustomer);
-    expect(staticRoutes['GET /homepage']).to.equal(mockHomepageController.getHomepageData);
+    expect(staticRoutes['GET /organizations/aso-home']).to.equal(mockOrganizationsController.getAsoHome);
 
     expect(dynamicRoutes).to.have.all.keys(
       'GET /audits/latest/:auditType',

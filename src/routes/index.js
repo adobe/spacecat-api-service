@@ -78,8 +78,6 @@ function isStaticRoute(routePattern) {
  * @param {Object} entitlementController - The entitlement controller.
  * @param {Object} sandboxAuditController - The sandbox audit controller.
  * @param {Object} reportsController - The reports controller.
- * @param {Object} homepageController - The homepage controller.
- * @param {Object} pta2Controller - The PTA2 controller.
  * @param {Object} pta2Controller - The PTA2 controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
@@ -115,7 +113,6 @@ export default function getRouteHandlers(
   entitlementController,
   sandboxAuditController,
   reportsController,
-  homepageController,
   pta2Controller,
 ) {
   const staticRoutes = {};
@@ -320,8 +317,8 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/reports/:reportId': reportsController.patchReport,
     'DELETE /sites/:siteId/reports/:reportId': reportsController.deleteReport,
 
-    // Homepage
-    'GET /homepage': homepageController.getHomepageData,
+    // ASO Home
+    'GET /organizations/aso-home': organizationsController.getAsoHome,
   };
 
   // Initialization of static and dynamic routes

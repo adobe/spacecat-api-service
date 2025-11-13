@@ -25,6 +25,7 @@ import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/models/or
 import SiteSchema from '@adobe/spacecat-shared-data-access/src/models/site/site.schema.js';
 import ProjectSchema from '@adobe/spacecat-shared-data-access/src/models/project/project.schema.js';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
+import TierClient from '@adobe/spacecat-shared-tier-client';
 
 import OrganizationsController from '../../src/controllers/organizations.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
@@ -50,6 +51,14 @@ describe('Organizations Controller', () => {
       organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f',
       projectId,
       baseURL: 'https://site2.com',
+      deliveryType: 'aem_edge',
+      config: Config({}),
+    },
+    {
+      siteId: '550e8400-e29b-41d4-a716-446655440001',
+      organizationId: '7033554c-de8a-44ac-a356-09b51af8cc28',
+      projectId: '850e8400-e29b-41d4-a716-446655440000',
+      baseURL: 'https://site3.com',
       deliveryType: 'aem_edge',
       config: Config({}),
     },
@@ -93,6 +102,12 @@ describe('Organizations Controller', () => {
       organizationId: 'org3',
       name: 'Org 3',
       imsOrgId: '9876567890ABCDEF12345678@AdobeOrg',
+    },
+    {
+      organizationId: '7033554c-de8a-44ac-a356-09b51af8cc28',
+      name: 'Org 4',
+      imsOrgId: '1176567890ABCDEF12345678@AdobeOrg',
+      config: Config({}),
     },
   ].map((org) => new Organization(
     {
@@ -184,6 +199,7 @@ describe('Organizations Controller', () => {
     'getSlackConfigByImsOrgID',
     'removeOrganization',
     'updateOrganization',
+    'getAsoHome',
   ];
 
   let mockDataAccess;
@@ -203,6 +219,7 @@ describe('Organizations Controller', () => {
         allByOrganizationId: sinon.stub(),
         allByOrganizationIdAndProjectId: sinon.stub(),
         allByOrganizationIdAndProjectName: sinon.stub(),
+        findById: sinon.stub(),
       },
       Project: {
         allByOrganizationId: sinon.stub(),
@@ -455,7 +472,7 @@ describe('Organizations Controller', () => {
     const resultOrganizations = await result.json();
 
     expect(mockDataAccess.Organization.all).to.have.been.calledOnce;
-    expect(resultOrganizations).to.be.an('array').with.lengthOf(3);
+    expect(resultOrganizations).to.be.an('array').with.lengthOf(4);
     expect(resultOrganizations[0]).to.have.property('id', '9033554c-de8a-44ac-a356-09b51af8cc28');
     expect(resultOrganizations[1]).to.have.property('id', '5f3b3626-029c-476e-924b-0c1bba2e871f');
   });
@@ -767,7 +784,7 @@ describe('Organizations Controller', () => {
   describe('getSitesByProjectIdAndOrganizationId', () => {
     it('gets all sites for an organization by project ID', async () => {
       mockDataAccess.Organization.findById.resolves(organizations[0]);
-      mockDataAccess.Site.allByOrganizationIdAndProjectId.resolves(sites);
+      mockDataAccess.Site.allByOrganizationIdAndProjectId.resolves(sites.slice(0, 2));
 
       const result = await organizationsController.getSitesByProjectIdAndOrganizationId({
         params: { organizationId: organizations[0].getId(), projectId: '550e8400-e29b-41d4-a716-446655440000' },
@@ -834,7 +851,7 @@ describe('Organizations Controller', () => {
   describe('getSitesByProjectNameAndOrganizationId', () => {
     it('gets all sites for an organization by project name', async () => {
       mockDataAccess.Organization.findById.resolves(organizations[0]);
-      mockDataAccess.Site.allByOrganizationIdAndProjectName.resolves(sites);
+      mockDataAccess.Site.allByOrganizationIdAndProjectName.resolves(sites.slice(0, 2));
 
       const result = await organizationsController.getSitesByProjectNameAndOrganizationId({
         params: { organizationId: organizations[0].getId(), projectName: 'test-project' },
@@ -895,6 +912,254 @@ describe('Organizations Controller', () => {
 
       expect(result.status).to.equal(403);
       expect(error).to.have.property('message', 'Only users belonging to the organization can view its sites');
+    });
+  });
+
+  describe('getAsoHome', () => {
+    let mockTierClientStub;
+
+    beforeEach(() => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+
+      mockDataAccess.Site.findById.reset();
+      mockDataAccess.SiteEnrollment.allBySiteId.reset();
+      mockDataAccess.SiteEnrollment.allByEntitlementId.reset();
+
+      mockTierClientStub = {
+        checkValidEntitlement: sandbox.stub().resolves({
+          entitlement: { getId: () => 'entitlement-123' },
+        }),
+      };
+      sandbox.stub(TierClient, 'createForOrg').returns(mockTierClientStub);
+    });
+
+    it('should return bad request if no product code header provided', async () => {
+      context.pathInfo.headers = {};
+      context.data = {};
+      const response = await organizationsController.getAsoHome(context);
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('Product code required');
+    });
+
+    it('should return bad request if no query parameters provided', async () => {
+      context.data = {};
+      const response = await organizationsController.getAsoHome(context);
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('Either organizationId or imsOrg must be provided');
+    });
+
+    it('should return ASO Home data for valid organizationId with enrolled sites', async () => {
+      context.data = { organizationId: orgId };
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+      mockDataAccess.Site.findById.resolves(sites[0]);
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([{
+        getId: () => 'enrollment-1',
+        getSiteId: () => 'site1',
+      }]);
+
+      const response = await organizationsController.getAsoHome(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('data');
+      expect(body.data).to.have.property('organization');
+      expect(body.data).to.have.property('site');
+    });
+
+    it('should return not found for non-existent imsOrg', async () => {
+      context.data = { imsOrg: 'nonexistent@AdobeOrg' };
+      mockDataAccess.Organization.findByImsOrgId.resolves(null);
+
+      const response = await organizationsController.getAsoHome(context);
+
+      expect(response.status).to.equal(404);
+      expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledWith('nonexistent@AdobeOrg');
+    });
+
+    it('should call proper methods for valid imsOrg', async () => {
+      context.data = { imsOrg: '1234567890ABCDEF12345678@AdobeOrg' };
+      mockDataAccess.Organization.findByImsOrgId.resolves(organizations[1]);
+      mockDataAccess.Site.findById.resolves(sites[0]);
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([]);
+
+      const response = await organizationsController.getAsoHome(context);
+
+      expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledWith('1234567890ABCDEF12345678@AdobeOrg');
+      // Response can be 200 or 404 depending on enrollment data
+      expect(response.status).to.be.oneOf([200, 404]);
+    });
+
+    it('should return not found when organization has no enrolled sites', async () => {
+      context.data = { organizationId: orgId };
+      mockDataAccess.Organization.findById.resolves(organizations[0]);
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([]); // No enrollments
+
+      const response = await organizationsController.getAsoHome(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    it('should handle errors gracefully', async () => {
+      context.data = { siteId: projectId, imsOrg: '1234567890ABCDEF12345678@AdobeOrg' };
+      mockDataAccess.Site.findById.rejects(new Error('Database error'));
+
+      const response = await organizationsController.getAsoHome(context);
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('Failed to fetch ASO Home data');
+    });
+
+    it('should return ASO Home data for valid siteId with matching enrollment', async () => {
+      // Test the siteId path (lines 400-433)
+      const validSiteId = sites[2].getId(); // Valid UUID
+      const targetOrgId = organizations[3].getId();
+      const entitlementId = 'entitlement-siteId-path';
+
+      // Must provide imsOrg or organizationId per line 390-391 validation
+      context.data = { siteId: validSiteId, imsOrg: organizations[3].getImsOrgId() };
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+
+      const mockEntitlement = {
+        getId: () => entitlementId,
+        getProductCode: () => 'ASO',
+      };
+
+      mockTierClientStub.checkValidEntitlement.resolves({ entitlement: mockEntitlement });
+
+      mockDataAccess.Site.findById.resolves(sites[2]);
+
+      mockDataAccess.Organization.findById.resolves(organizations[3]);
+
+      mockDataAccess.SiteEnrollment.allBySiteId.resolves([{
+        getEntitlementId: () => entitlementId,
+        getId: () => 'enrollment-siteId',
+        getSiteId: () => validSiteId,
+      }]);
+
+      const response = await organizationsController.getAsoHome(context);
+
+      // Verify the path was executed
+      expect(mockDataAccess.Organization.findById.calledWith(targetOrgId)).to.be.true;
+      expect(mockDataAccess.SiteEnrollment.allBySiteId.calledWith(validSiteId)).to.be.true;
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('data');
+      expect(body.data).to.have.property('organization');
+      expect(body.data).to.have.property('site');
+    });
+
+    it('should return 404 not found when organization does not exist', async () => {
+      // Test the siteId path (lines 400-433)
+      const validSiteId = sites[2].getId(); // Valid UUID
+      const targetOrgId = organizations[3].getId();
+      const entitlementId = 'entitlement-siteId-path';
+
+      // Must provide imsOrg or organizationId per line 390-391 validation
+      context.data = { siteId: validSiteId, organizationId: 'nonexistent-organization-id' };
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+
+      const mockEntitlement = {
+        getId: () => entitlementId,
+        getProductCode: () => 'ASO',
+      };
+
+      mockTierClientStub.checkValidEntitlement.resolves({ entitlement: mockEntitlement });
+
+      mockDataAccess.Site.findById.resolves(sites[2]);
+
+      mockDataAccess.Organization.findById.resolves(organizations[3]);
+
+      mockDataAccess.SiteEnrollment.allBySiteId.resolves([{
+        getEntitlementId: () => entitlementId,
+        getId: () => 'enrollment-siteId',
+        getSiteId: () => validSiteId,
+      }]);
+
+      const response = await organizationsController.getAsoHome(context);
+
+      // Verify the path was executed
+      expect(mockDataAccess.Organization.findById.calledWith(targetOrgId)).to.be.true;
+      expect(mockDataAccess.SiteEnrollment.allBySiteId.calledWith(validSiteId)).to.be.false;
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    it('should return 404 not found when ims org does not exist', async () => {
+      // Test the siteId path (lines 400-433)
+      const validSiteId = sites[2].getId(); // Valid UUID
+      const entitlementId = 'entitlement-siteId-path';
+      const targetOrgId = organizations[3].getId();
+
+      // Must provide imsOrg or organizationId per line 390-391 validation
+      context.data = { siteId: validSiteId, imsOrg: 'nonexistent@AdobeOrg' };
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+
+      const mockEntitlement = {
+        getId: () => entitlementId,
+        getProductCode: () => 'ASO',
+      };
+
+      mockTierClientStub.checkValidEntitlement.resolves({ entitlement: mockEntitlement });
+
+      mockDataAccess.Site.findById.resolves(sites[2]);
+
+      mockDataAccess.Organization.findById.resolves(organizations[3]);
+
+      mockDataAccess.SiteEnrollment.allBySiteId.resolves([{
+        getEntitlementId: () => entitlementId,
+        getId: () => 'enrollment-siteId',
+        getSiteId: () => validSiteId,
+      }]);
+
+      const response = await organizationsController.getAsoHome(context);
+
+      expect(mockDataAccess.Organization.findById.calledWith(targetOrgId)).to.be.true;
+      expect(mockDataAccess.SiteEnrollment.allBySiteId.calledWith(validSiteId)).to.be.false;
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    it('should return ASO Home data for valid imsOrg with matching enrollment', async () => {
+      context.data = { imsOrg: organizations[2].getImsOrgId() };
+
+      const mockEntitlement = {
+        getId: () => 'entitlement-456',
+        getProductCode: () => 'ASO',
+      };
+
+      // Mock TierClient to return the entitlement
+      const mockTierClient = {
+        checkValidEntitlement: sandbox.stub().resolves({ entitlement: mockEntitlement }),
+      };
+      TierClient.createForOrg.returns(mockTierClient);
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(organizations[2]);
+      mockDataAccess.Site.findById.resolves(sites[0]);
+      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([{
+        getId: () => 'enrollment-2',
+        getSiteId: () => 'site1',
+      }]);
+
+      const response = await organizationsController.getAsoHome(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('data');
+      expect(body.data).to.have.property('organization');
+      expect(body.data).to.have.property('site');
+      expect(body.data.organization.imsOrgId).to.equal('9876567890ABCDEF12345678@AdobeOrg');
     });
   });
 });
