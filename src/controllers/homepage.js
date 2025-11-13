@@ -48,7 +48,7 @@ function HomepageController(ctx) {
 
   /**
    * Gets homepage data based on query parameters.
-   * Tries siteId first, then falls back to organizationId, then imsOrg.
+   * Tries siteId first, then checks either organizationId or imsOrg (mutually exclusive).
    * @param {object} context - Context of the request.
    * @returns {Promise<Response>} Homepage data response.
    */
@@ -61,6 +61,11 @@ function HomepageController(ctx) {
       return badRequest('Product code required in x-product header');
     }
 
+    // Ensure at least one of organizationId or imsOrg is provided
+    if (!hasText(organizationId) && !hasText(imsOrg)) {
+      return badRequest('Either organizationId or imsOrg must be provided');
+    }
+
     let organization;
     let site;
 
@@ -71,6 +76,14 @@ function HomepageController(ctx) {
           const orgId = site.getOrganizationId();
           if (orgId) {
             organization = await Organization.findById(orgId);
+            if (organization) {
+              if (hasText(organizationId) && organization.getId() !== organizationId) {
+                organization = null;
+              } else if (hasText(imsOrg) && organization.getImsOrgId() !== imsOrg) {
+                organization = null;
+              }
+            }
+
             if (organization && await accessControlUtil.hasAccess(organization)) {
               const {
                 site: enrolledSite,
@@ -113,9 +126,7 @@ function HomepageController(ctx) {
             return ok({ data });
           }
         }
-      }
-
-      if (hasText(imsOrg)) {
+      } else if (hasText(imsOrg)) {
         organization = await Organization.findByImsOrgId(imsOrg);
         if (organization && await accessControlUtil.hasAccess(organization)) {
           const { site: enrolledSite } = await fetchSiteByOrganizationEntitlement(
