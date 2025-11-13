@@ -186,6 +186,51 @@ describe('Preflight Controller', () => {
       );
     });
 
+    it('creates a preflight job successfully for AMS', async () => {
+      const context = {
+        data: {
+          urls: ['http://author.adobecqms.net/path'],
+          step: 'identify',
+          siteId: 'test-site-123',
+        },
+      };
+      mockDataAccess.Site.findById = sandbox.stub().resolves(mockSite);
+
+      const response = await preflightController.createPreflightJob(context);
+      expect(response.status).to.equal(202);
+
+      const result = await response.json();
+      expect(result).to.deep.equal({
+        jobId,
+        status: 'IN_PROGRESS',
+        createdAt: '2024-03-20T10:00:00Z',
+        pollUrl: `https://spacecat.experiencecloud.live/api/v1/preflight/jobs/${jobId}`,
+      });
+
+      expect(mockDataAccess.AsyncJob.create).to.have.been.calledWith({
+        status: 'IN_PROGRESS',
+        metadata: {
+          payload: {
+            siteId: 'test-site-123',
+            urls: ['http://author.adobecqms.net/path'],
+            step: 'identify',
+            enableAuthentication: true,
+          },
+          jobType: 'preflight',
+          tags: ['preflight'],
+        },
+      });
+
+      expect(mockSqs.sendMessage).to.have.been.calledWith(
+        'https://sqs.test.amazonaws.com/audit-queue',
+        {
+          jobId,
+          type: 'preflight',
+          siteId: 'test-site-123',
+        },
+      );
+    });
+
     it('creates a preflight job successfully in production environment with authentication enabled', async () => {
       if (fetchStub && fetchStub.restore) {
         fetchStub.restore();
@@ -472,7 +517,7 @@ describe('Preflight Controller', () => {
       const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
         '../../src/support/utils.js': {
           ...utils,
-          getCSPromiseToken: async () => mockPromiseToken,
+          getIMSPromiseToken: async () => mockPromiseToken,
           ErrorWithStatusCode: utils.ErrorWithStatusCode,
         },
       });
@@ -516,7 +561,7 @@ describe('Preflight Controller', () => {
       const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
         '../../src/support/utils.js': {
           ...utils,
-          getCSPromiseToken: async () => { throw new utils.ErrorWithStatusCode('Missing Authorization header', 400); },
+          getIMSPromiseToken: async () => { throw new utils.ErrorWithStatusCode('Missing Authorization header', 400); },
           ErrorWithStatusCode: utils.ErrorWithStatusCode,
         },
       });
@@ -555,7 +600,7 @@ describe('Preflight Controller', () => {
       const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
         '../../src/support/utils.js': {
           ...utils,
-          getCSPromiseToken: async () => { throw new Error('Generic error'); },
+          getIMSPromiseToken: async () => { throw new Error('Generic error'); },
           ErrorWithStatusCode: utils.ErrorWithStatusCode,
         },
       });

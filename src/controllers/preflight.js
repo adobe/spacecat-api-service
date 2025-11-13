@@ -17,7 +17,7 @@ import {
   badRequest, internalServerError, notFound, ok, accepted,
 } from '@adobe/spacecat-shared-http-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
-import { getCSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
+import { getIMSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
 
 export const AUDIT_STEP_IDENTIFY = 'identify';
 export const AUDIT_STEP_SUGGEST = 'suggest';
@@ -90,6 +90,7 @@ function PreflightController(ctx, log, env) {
    * @param {Object} context.data - The request data
    * @param {string[]} context.data.urls - Array of URLs to process
    * @param {string} context.data.step - The audit step
+   * @param {string} context.data.siteId - The siteId, if it's an AMS site
    * @returns {Promise<Object>} The HTTP response object
    */
   const createPreflightJob = async (context) => {
@@ -105,10 +106,20 @@ function PreflightController(ctx, log, env) {
     try {
       const isDev = env.AWS_ENV === 'dev';
       const step = data.step.toLowerCase();
-
+      let site;
       const url = new URL(data.urls[0]);
       const previewBaseURL = `${url.protocol}//${url.hostname}`;
-      const site = await dataAccess.Site.findByPreviewURL(previewBaseURL);
+      if (url.hostname.endsWith('adobecqms.net')) {
+        // AMS
+        site = await dataAccess.Site.findById(data.siteId);
+      } else {
+        // EDS and CS
+        site = await dataAccess.Site.findByPreviewURL(previewBaseURL);
+      }
+
+      if (!site) {
+        throw new Error(`No site found for preview URL: ${previewBaseURL}`);
+      }
       let enableAuthentication = false;
       // check head request for preview url
       const headResponse = await fetch(`${previewBaseURL}`, {
@@ -121,14 +132,10 @@ function PreflightController(ctx, log, env) {
         enableAuthentication = true;
       }
 
-      if (!site) {
-        throw new Error(`No site found for preview URL: ${previewBaseURL}`);
-      }
-
       let promiseTokenResponse;
       if (CS_TYPES.includes(site.getAuthoringType())) {
         try {
-          promiseTokenResponse = await getCSPromiseToken(context);
+          promiseTokenResponse = await getIMSPromiseToken(context);
         } catch (e) {
           log.error(`Failed to get promise token: ${e.message}`);
           if (e instanceof ErrorWithStatusCode) {

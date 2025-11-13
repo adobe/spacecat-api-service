@@ -73,7 +73,7 @@ site-opportunities-by-status:
         type: string
   get:
     operationId: getSiteOpportunitiesByStatus
-    summary: |      
+    summary: |
       Retrieve opportunities for a specific site filtered by status
     tags:
       - opportunities
@@ -105,7 +105,7 @@ site-opportunity:
     - $ref: './parameters.yaml#/opportunityId'
   get:
     operationId: getSiteOpportunity
-    summary: |      
+    summary: |
       Retrieve details of a specific opportunity
     tags:
       - opportunities
@@ -134,7 +134,7 @@ site-opportunity:
 
   patch:
     operationId: updateSiteOpportunity
-    summary: |      
+    summary: |
       Update specific attributes of an existing opportunity
     tags:
       - opportunities
@@ -197,7 +197,7 @@ site-opportunity-suggestions:
     - $ref: './parameters.yaml#/opportunityId'
   get:
     operationId: getSiteOpportunitySuggestions
-    summary: |     
+    summary: |
       Retrieve a list of all suggestions for a specific opportunity
     tags:
       - opportunity-suggestions
@@ -223,7 +223,7 @@ site-opportunity-suggestions:
 
   post:
     operationId: createSiteOpportunitySuggestions
-    summary: |     
+    summary: |
       Create and add a list of one or more suggestions to an opportunity in one transaction
     tags:
       - opportunity-suggestions
@@ -239,7 +239,7 @@ site-opportunity-suggestions:
     responses:
       '207':
         description: |
-          A list of suggestions created and added to the opportunity, 
+          A list of suggestions created and added to the opportunity,
           or the status code and error message for the ones failed.
         content:
           application/json:
@@ -288,6 +288,158 @@ site-opportunity-suggestions-by-status:
     security:
       - ims_key: [ ]
 
+site-opportunity-suggestions-paged:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+    - $ref: './parameters.yaml#/limit'
+  get:
+    operationId: getSiteOpportunitySuggestionsPaged
+    summary: |
+      Retrieve a paginated list of suggestions for a specific opportunity
+    description: |
+      Returns suggestions in pages with pagination metadata. Use the cursor from the response to fetch subsequent pages.
+    tags:
+      - opportunity-suggestions
+    responses:
+      '200':
+        description: A paginated list of suggestions
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SuggestionPagedResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+site-opportunity-suggestions-paged-with-cursor:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+    - $ref: './parameters.yaml#/limit'
+    - $ref: './parameters.yaml#/cursor'
+  get:
+    operationId: getSiteOpportunitySuggestionsPagedWithCursor
+    summary: |
+      Retrieve a paginated list of suggestions for a specific opportunity using a cursor
+    description: |
+      Returns suggestions in pages with pagination metadata. Provide the cursor from a previous response to fetch the next page.
+    tags:
+      - opportunity-suggestions
+    responses:
+      '200':
+        description: A paginated list of suggestions
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SuggestionPagedResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+site-opportunity-suggestions-by-status-paged:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+    - name: status
+      in: path
+      required: true
+      schema:
+        type: string
+    - $ref: './parameters.yaml#/limit'
+  get:
+    operationId: getSiteOpportunitySuggestionsByStatusPaged
+    summary: |
+      Retrieve a paginated list of suggestions for a specific opportunity filtered by status
+    description: |
+      Returns suggestions filtered by status in pages with pagination metadata. Use the cursor from the response to fetch subsequent pages.
+    tags:
+      - opportunity-suggestions
+    responses:
+      '200':
+        description: A paginated list of suggestions filtered by status
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SuggestionPagedResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+site-opportunity-suggestions-by-status-paged-with-cursor:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+    - name: status
+      in: path
+      required: true
+      schema:
+        type: string
+    - $ref: './parameters.yaml#/limit'
+    - $ref: './parameters.yaml#/cursor'
+  get:
+    operationId: getSiteOpportunitySuggestionsByStatusPagedWithCursor
+    summary: |
+      Retrieve a paginated list of suggestions for a specific opportunity filtered by status using a cursor
+    description: |
+      Returns suggestions filtered by status in pages with pagination metadata. Provide the cursor from a previous response to fetch the next page.
+    tags:
+      - opportunity-suggestions
+    responses:
+      '200':
+        description: A paginated list of suggestions filtered by status
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SuggestionPagedResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
 site-opportunity-suggestions-status:
   parameters:
     - $ref: './parameters.yaml#/siteId'
@@ -310,7 +462,7 @@ site-opportunity-suggestions-status:
     responses:
       '207':
         description: |
-          A list of suggestions updated, 
+          A list of suggestions updated,
           or the status code and error message for the ones failed.
         content:
           application/json:
@@ -343,13 +495,15 @@ site-opportunity-suggestions-auto-fix:
                   type: array
                   items:
                     $ref: './schemas.yaml#/Id'
+                customData:
+                  description: Additional custom data to forward to the autofix worker
               required:
                 - suggestionIds
 
     responses:
       '207':
         description: |
-          A list of suggestions that are sent to autofix, 
+          A list of suggestions that are sent to autofix,
           or the status code and error message for the ones failed.
         content:
           application/json:
@@ -396,7 +550,7 @@ site-opportunity-suggestion:
       - ims_key: [ ]
   patch:
     operationId: updateSiteOpportunitySuggestion
-    summary: |     
+    summary: |
       Update specific attributes of an existing suggestion
     tags:
       - opportunity-suggestions

@@ -7,7 +7,7 @@ info:
     The SpaceCat API is used to manage edge delivery site directory and obtain audit information.
 
     ## Authentication
-    <SecurityDefinitions />
+    <SecurityDefinitions></SecurityDefinitions>
 
   termsOfService: 'https://www.adobe.com/go/experiencecloudterms'
   contact:
@@ -158,6 +158,8 @@ paths:
     $ref: './scrape-api.yaml#/get-scrape-jobs-by-base-url'
   /tools/scrape/jobs/by-base-url/{base64BaseUrl}/by-processingtype/{processingType}:
     $ref: './scrape-api.yaml#/get-scrape-jobs-by-base-url-and-processing-type'
+  /tools/scrape/jobs/by-url/{base64Url}/{processingType}:
+    $ref: './scrape-api.yaml#/get-scrape-urls-by-url-and-processing-type'
   /consent-banner:
     $ref: './consent-banner-api.yaml#/consent-banner'
   /sites:
@@ -196,8 +198,16 @@ paths:
     $ref: './site-opportunities.yaml#/site-opportunity'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions'
+  /sites/{siteId}/opportunities/{opportunityId}/suggestions/paged/{limit}:
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestions-paged'
+  /sites/{siteId}/opportunities/{opportunityId}/suggestions/paged/{limit}/{cursor}:
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestions-paged-with-cursor'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/by-status/{status}:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-by-status'
+  /sites/{siteId}/opportunities/{opportunityId}/suggestions/by-status/{status}/paged/{limit}:
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestions-by-status-paged'
+  /sites/{siteId}/opportunities/{opportunityId}/suggestions/by-status/{status}/paged/{limit}/{cursor}:
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestions-by-status-paged-with-cursor'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/{suggestionId}:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestion'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/status:
@@ -246,6 +256,8 @@ paths:
     $ref: './site-paid.yaml#/site-traffic-paid-type-campaign'
   /sites/{siteId}/traffic/paid/type:
     $ref: './site-paid.yaml#/site-traffic-paid-type'
+  /sites/{siteId}/traffic/paid/pta2/weekly-summary:
+    $ref: './site-paid.yaml#/site-traffic-paid-pta2-weekly-summary'
   /sites/{siteId}/metrics/{metric}/{source}:
     $ref: './site-metrics-api.yaml#/site-metrics-by-source'
   /sites/{siteId}/metrics/{metric}/{source}/by-url/{base64PageUrl}:
@@ -282,6 +294,8 @@ paths:
     $ref: './llmo-api.yaml#/llmo-sheet-data'
   /sites/{siteId}/llmo/sheet-data/{sheetType}/{dataSource}:
     $ref: './llmo-api.yaml#/llmo-sheet-data-with-type'
+  /sites/{siteId}/llmo/sheet-data/{sheetType}/{week}/{dataSource}:
+    $ref: './llmo-api.yaml#/llmo-sheet-data-with-type-and-week'
   /sites/{siteId}/llmo/global-sheet-data/{configName}:
     $ref: './llmo-api.yaml#/llmo-global-sheet-data'
   /sites/{siteId}/llmo/config:
