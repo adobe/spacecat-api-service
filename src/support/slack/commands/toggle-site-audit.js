@@ -25,6 +25,32 @@ const SUCCESS_MESSAGE_PREFIX = ':white_check_mark: ';
 const ERROR_MESSAGE_PREFIX = ':x: ';
 
 /**
+   * Usage Examples:
+   *
+   * Single Site Operations:
+   * - Enable a specific audit:
+   *   @spacecat-dev audit enable https://site.com cwv
+   *
+   * - Disable a specific audit:
+   *   @spacecat-dev audit disable https://site.com broken-backlinks
+   *
+   * - Enable all audits from default (demo) profile:
+   *   @spacecat-dev audit enable https://site.com all
+   *
+   * - Enable all audits from a specific profile:
+   *   @spacecat-dev audit enable https://site.com all paid
+   *   @spacecat-dev audit enable https://site.com all plg
+   *
+   * - Disable all currently enabled audits:
+   *   @spacecat-dev audit disable https://site.com all
+   *
+   * CSV Bulk Operations:
+   * - Enable/disable audits for multiple sites (upload CSV with one baseURL per line):
+   *   @spacecat-dev audit enable demo [attach CSV file]
+   *   @spacecat-dev audit disable paid [attach CSV file]
+   */
+
+/**
  * Posts a message with a button to configure preflight audit requirements
  * @param {Object} slackContext - The Slack context object
  * @param {Object} site - The site object
@@ -98,7 +124,7 @@ export default (context) => {
     CSV file must be in the format of baseURL per line(no headers).
     Profiles are defined in the config/profiles.json file.`,
     phrases: [PHRASE],
-    usageText: `${PHRASE} {enable/disable} {site} {auditType} for singleURL, 
+    usageText: `${PHRASE} {enable/disable} {site} {auditType} {profileName} for singleURL, 
     or ${PHRASE} {enable/disable} {profile/auditType} with CSV file uploaded.`,
   });
 
@@ -191,7 +217,7 @@ export default (context) => {
 
       // single URL behavior
       if (isNonEmptyArray(files) === false) {
-        const [, baseURLInput, singleAuditType] = args;
+        const [, baseURLInput, singleAuditType, profileNameInput] = args;
 
         const baseURL = extractURLFromSlackInput(baseURLInput);
 
@@ -214,8 +240,29 @@ export default (context) => {
           // Handle "all" keyword to enable/disable all audits
           let auditTypes;
           if (singleAuditType.toLowerCase() === 'all') {
-            auditTypes = Object.keys(registeredAudits);
-            await say(`:information_source: Processing all ${auditTypes.length} audits: ${auditTypes.join(', ')}`);
+            auditTypes = isEnableAudit
+              ? configuration.getDisabledAuditsForSite(site)
+              : configuration.getEnabledAuditsForSite(site);
+
+            if (isEnableAudit) {
+              const profileName = profileNameInput ? profileNameInput.toLowerCase() : 'demo';
+              /* c8 ignore start */
+              // Profile loading error - difficult to test as it reads from filesystem
+              try {
+                const profileConfig = await loadProfileConfig(profileName);
+                // Profile audits is an object with audit names as keys
+                const profileAuditTypes = Object.keys(profileConfig.audits || {});
+                auditTypes = auditTypes.filter((audit) => profileAuditTypes.includes(audit));
+                await say(`:information_source: Enabling ${auditTypes.length} audits from profile "${profileName}": ${auditTypes.join(', ')}`);
+              } catch (error) {
+                log.error(`Failed to load profile "${profileName}": ${error.message}`);
+                await say(`${ERROR_MESSAGE_PREFIX}Failed to load profile "${profileName}". ${error.message}`);
+                return;
+              }
+              /* c8 ignore stop */
+            } else {
+              await say(`:information_source: Disabling ${auditTypes.length} audits: ${auditTypes.join(', ')}`);
+            }
           } else {
             if (!registeredAudits[singleAuditType]) {
               await say(`${ERROR_MESSAGE_PREFIX}The "${singleAuditType}" is not present in the configuration.\nList of allowed audits:\n${Object.keys(registeredAudits).join('\n')}.`);

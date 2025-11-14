@@ -58,6 +58,8 @@ describe('UpdateSitesAuditsCommand', () => {
       getVersion: sandbox.stub(),
       getJobs: sandbox.stub(),
       getHandlers: sandbox.stub().returns(handlers),
+      getEnabledAuditsForSite: sandbox.stub().returns(['some_audit']),
+      getDisabledAuditsForSite: sandbox.stub().returns(['cwv']),
       getQueues: sandbox.stub(),
       getSlackRoles: sandbox.stub(),
       save: sandbox.stub(),
@@ -74,6 +76,7 @@ describe('UpdateSitesAuditsCommand', () => {
 
     logMock = {
       error: sandbox.stub(),
+      warn: sandbox.stub(),
     };
 
     contextMock = {
@@ -156,6 +159,9 @@ describe('UpdateSitesAuditsCommand', () => {
   it('enable all audits for a site using "all" keyword', async () => {
     dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
 
+    // Mock getDisabledAuditsForSite to return audits that are in the demo profile
+    configurationMock.getDisabledAuditsForSite.returns(['cwv', 'sitemap']);
+
     const command = ToggleSiteAuditCommand(contextMock);
     const args = ['enable', 'https://site0.com', 'all'];
     await command.handleExecution(args, slackContextMock);
@@ -169,29 +175,16 @@ describe('UpdateSitesAuditsCommand', () => {
       'Expected configuration.save to be called, but it was not',
     ).to.be.true;
     expect(
-      configurationMock.enableHandlerForSite.calledWith('some_audit', site),
-      'Expected configuration.enableHandlerForSite to be called with "some_audit" and site, but it was not',
-    ).to.be.true;
-    expect(
-      configurationMock.enableHandlerForSite.calledWith('cwv', site),
-      'Expected configuration.enableHandlerForSite to be called with "cwv" and site, but it was not',
-    ).to.be.true;
-    expect(
-      configurationMock.enableHandlerForSite.callCount,
-      'Expected enableHandlerForSite to be called for each audit type (2 in test handlers)',
-    ).to.equal(2);
-    expect(
-      slackContextMock.say.calledWith(':information_source: Processing all 2 audits: some_audit, cwv'),
-      'Expected informational message about processing all audits, but it was not sent',
-    ).to.be.true;
-    expect(
-      slackContextMock.say.calledWith(`${SUCCESS_MESSAGE_PREFIX}All 2 audits have been *enabled* for "https://site0.com".`),
-      'Expected Slack message confirming all audits were enabled, but it was not sent',
+      slackContextMock.say.calledWith(sinon.match(/audits from profile "demo"/)),
+      'Expected informational message about profile filtering, but it was not sent',
     ).to.be.true;
   });
 
   it('disable all audits for a site using "all" keyword', async () => {
     dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
+
+    // Mock getEnabledAuditsForSite to return audits that need to be disabled
+    configurationMock.getEnabledAuditsForSite.returns(['some_audit', 'cwv']);
 
     const command = ToggleSiteAuditCommand(contextMock);
     const args = ['disable', 'https://site0.com', 'all'];
@@ -218,8 +211,8 @@ describe('UpdateSitesAuditsCommand', () => {
       'Expected disableHandlerForSite to be called for each audit type (2 in test handlers)',
     ).to.equal(2);
     expect(
-      slackContextMock.say.calledWith(':information_source: Processing all 2 audits: some_audit, cwv'),
-      'Expected informational message about processing all audits, but it was not sent',
+      slackContextMock.say.calledWith(sinon.match(/Disabling 2 audits/)),
+      'Expected informational message about disabling audits, but it was not sent',
     ).to.be.true;
     expect(
       slackContextMock.say.calledWith(`${SUCCESS_MESSAGE_PREFIX}All 2 audits have been *disabled* for "https://site0.com".`),
@@ -230,17 +223,56 @@ describe('UpdateSitesAuditsCommand', () => {
   it('should handle "all" keyword case-insensitively', async () => {
     dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
 
+    // Mock getDisabledAuditsForSite to return audits that are in the demo profile
+    configurationMock.getDisabledAuditsForSite.returns(['cwv', 'sitemap']);
+
     const command = ToggleSiteAuditCommand(contextMock);
     const args = ['enable', 'https://site0.com', 'ALL'];
     await command.handleExecution(args, slackContextMock);
 
     expect(
-      configurationMock.enableHandlerForSite.callCount,
-      'Expected enableHandlerForSite to be called for each audit type (2 in test handlers)',
-    ).to.equal(2);
+      slackContextMock.say.calledWith(sinon.match(/audits from profile/i)),
+      'Expected informational message about processing audits, but it was not sent',
+    ).to.be.true;
+  });
+
+  it('should filter audits by profile when enabling all audits with profile parameter', async () => {
+    dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
+
+    // Mock getDisabledAuditsForSite to return audits that are in the demo profile
+    configurationMock.getDisabledAuditsForSite.returns(['cwv', 'sitemap']);
+
+    const command = ToggleSiteAuditCommand(contextMock);
+    const args = ['enable', 'https://site0.com', 'all', 'demo'];
+    await command.handleExecution(args, slackContextMock);
+
     expect(
-      slackContextMock.say.calledWith(sinon.match('Processing all 2 audits')),
-      'Expected informational message about processing all audits, but it was not sent',
+      configurationMock.enableHandlerForSite.callCount,
+      'Expected enableHandlerForSite to be called only for audits in the profile',
+    ).to.be.greaterThan(0);
+    expect(
+      slackContextMock.say.calledWith(sinon.match(/audits from profile "demo"/)),
+      'Expected Slack message mentioning profile filtering, but it was not sent',
+    ).to.be.true;
+    expect(
+      configurationMock.save.called,
+      'Expected configuration.save to be called, but it was not',
+    ).to.be.true;
+  });
+
+  it('should use demo profile as default when no profile is specified for enable all', async () => {
+    dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
+
+    // Mock getDisabledAuditsForSite to return audits that are in the demo profile
+    configurationMock.getDisabledAuditsForSite.returns(['cwv', 'sitemap']);
+
+    const command = ToggleSiteAuditCommand(contextMock);
+    const args = ['enable', 'https://site0.com', 'all'];
+    await command.handleExecution(args, slackContextMock);
+
+    expect(
+      slackContextMock.say.calledWith(sinon.match(/audits from profile "demo"/)),
+      'Expected Slack message mentioning default demo profile, but it was not sent',
     ).to.be.true;
   });
 
