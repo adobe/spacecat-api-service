@@ -1675,6 +1675,12 @@ AuditUrl:
       type: number
       nullable: true
       example: 50000
+    platformType:
+      description: Platform type classification (primary-site, wikipedia, youtube-channel, etc.)
+      type: string
+      default: primary-site
+      enum: [primary-site, wikipedia, youtube-channel, reddit-community, facebook-page, twitter-profile, linkedin-company, instagram-account, tiktok-account, github-org, medium-publication]
+      example: primary-site
     createdAt:
       description: ISO 8601 timestamp when created
       $ref: '#/DateTime'
@@ -1696,6 +1702,7 @@ AuditUrl:
     audits: ['accessibility', 'broken-backlinks']
     rank: 1
     traffic: 50000
+    platformType: 'primary-site'
     createdAt: '2025-10-10T12:00:00Z'
     updatedAt: '2025-10-10T15:30:00Z'
     createdBy: 'user-alice'
@@ -1729,12 +1736,19 @@ AuditUrlInput:
       type: number
       nullable: true
       example: 50000
+    platformType:
+      description: Platform type classification (optional, defaults to "primary-site")
+      type: string
+      default: primary-site
+      enum: [primary-site, wikipedia, youtube-channel, reddit-community, facebook-page, twitter-profile, linkedin-company, instagram-account, tiktok-account, github-org, medium-publication]
+      example: primary-site
   example:
     url: 'https://example.com/page1.html'
     source: 'manual'
     audits: ['accessibility', 'broken-backlinks']
     rank: 1
     traffic: 50000
+    platformType: 'primary-site'
 AuditUrlUpdate:
   type: object
   required:
@@ -1760,11 +1774,17 @@ AuditUrlUpdate:
       type: number
       nullable: true
       example: 75000
+    platformType:
+      description: Platform type classification (optional, updates if provided)
+      type: string
+      enum: [primary-site, wikipedia, youtube-channel, reddit-community, facebook-page, twitter-profile, linkedin-company, instagram-account, tiktok-account, github-org, medium-publication]
+      example: youtube-channel
   example:
     url: 'https://example.com/page1.html'
     audits: ['accessibility']
     rank: 2
     traffic: 75000
+    platformType: 'youtube-channel'
 AuditUrlListResponse:
   type: object
   required:

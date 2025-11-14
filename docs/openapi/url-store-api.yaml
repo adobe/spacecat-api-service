@@ -197,6 +197,139 @@ url-store-by-audit:
     security:
       - api_key: [ ]
 
+url-store-by-platform:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: platformType
+      in: path
+      required: true
+      schema:
+        type: string
+        enum: [primary-site, wikipedia, youtube-channel, reddit-community, facebook-page, twitter-profile, linkedin-company, instagram-account, tiktok-account, github-org, medium-publication]
+      description: Platform type to filter by (e.g., "youtube-channel", "wikipedia")
+    - name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 100
+      description: Number of items to return per page
+    - name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Pagination cursor from previous response
+    - name: sortBy
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [rank, traffic, url, createdAt, updatedAt]
+      description: Field to sort by
+    - name: sortOrder
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [asc, desc]
+        default: asc
+      description: Sort order (ascending or descending)
+  get:
+    tags:
+      - site
+      - url store
+    summary: List URLs by platform type
+    description: |
+      Retrieves URLs filtered by platform type (e.g., social media platforms, Wikipedia, etc.).
+      Results are paginated and sortable.
+    operationId: listUrlsByPlatform
+    responses:
+      '200':
+        description: A paginated list of audit URLs for the specified platform type
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AuditUrlListResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+url-store-offsite:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 100
+        description: Number of items to return per page
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Pagination cursor from previous response
+      - name: sortBy
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [rank, traffic, url, createdAt, updatedAt]
+        description: Field to sort by
+      - name: sortOrder
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [asc, desc]
+          default: asc
+        description: Sort order (ascending or descending)
+    tags:
+      - site
+      - url store
+    summary: List all offsite platform URLs
+    description: |
+      Retrieves all offsite URLs (excludes primary-site URLs).
+      This includes social media profiles, Wikipedia pages, and other external brand presence URLs.
+      Results are paginated and sortable.
+    operationId: listOffsiteUrls
+    responses:
+      '200':
+        description: A paginated list of offsite audit URLs
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AuditUrlListResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 url-store-get:
   parameters:
     - $ref: './parameters.yaml#/siteId'

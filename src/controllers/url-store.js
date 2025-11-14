@@ -25,12 +25,14 @@ import {
   isNonEmptyObject,
   isArray,
 } from '@adobe/spacecat-shared-utils';
+import { PLATFORM_TYPES } from '@adobe/spacecat-shared-data-access';
 
 import AccessControlUtil from '../support/access-control-util.js';
 
 const MAX_URLS_PER_REQUEST = 100;
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
+const VALID_PLATFORM_TYPES = Object.values(PLATFORM_TYPES);
 
 /**
  * Canonicalizes a URL by removing trailing slashes, converting to lowercase domain, etc.
@@ -282,6 +284,129 @@ function UrlStoreController(ctx, log) {
   };
 
   /**
+   * List URLs by platform type with pagination and sorting.
+   * GET /sites/{siteId}/url-store/by-platform/{platformType}
+   */
+  const listUrlsByPlatform = async (context) => {
+    const { siteId, platformType } = context.params;
+    const {
+      limit = DEFAULT_LIMIT,
+      cursor,
+      sortBy,
+      sortOrder = 'asc',
+    } = context.data || {};
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!hasText(platformType)) {
+      return badRequest('Platform type required');
+    }
+
+    // Validate platformType
+    if (!VALID_PLATFORM_TYPES.includes(platformType)) {
+      return badRequest(`Invalid platform type. Must be one of: ${VALID_PLATFORM_TYPES.join(', ')}`);
+    }
+
+    // Validate sortBy field
+    const validSortFields = ['rank', 'traffic', 'url', 'createdAt', 'updatedAt'];
+    if (sortBy && !validSortFields.includes(sortBy)) {
+      return badRequest(`Invalid sortBy field. Must be one of: ${validSortFields.join(', ')}`);
+    }
+
+    // Validate sortOrder
+    if (sortOrder && !['asc', 'desc'].includes(sortOrder)) {
+      return badRequest('Invalid sortOrder. Must be "asc" or "desc"');
+    }
+
+    const parsedLimit = Math.min(parseInt(limit, 10) || DEFAULT_LIMIT, MAX_LIMIT);
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view URLs');
+    }
+
+    try {
+      const result = await AuditUrl.allBySiteIdAndPlatform(siteId, platformType, {
+        limit: parsedLimit,
+        cursor,
+        sortBy,
+        sortOrder,
+      });
+
+      return ok({
+        items: result.items || [],
+        cursor: result.cursor,
+      });
+    } catch (error) {
+      log.error(`Error listing URLs by platform type for site ${siteId}: ${error.message}`);
+      return internalServerError('Failed to list URLs by platform type');
+    }
+  };
+
+  /**
+   * List all offsite platform URLs (excludes primary-site).
+   * GET /sites/{siteId}/url-store/offsite
+   */
+  const listOffsiteUrls = async (context) => {
+    const { siteId } = context.params;
+    const {
+      limit = DEFAULT_LIMIT,
+      cursor,
+      sortBy,
+      sortOrder = 'asc',
+    } = context.data || {};
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    // Validate sortBy field
+    const validSortFields = ['rank', 'traffic', 'url', 'createdAt', 'updatedAt'];
+    if (sortBy && !validSortFields.includes(sortBy)) {
+      return badRequest(`Invalid sortBy field. Must be one of: ${validSortFields.join(', ')}`);
+    }
+
+    // Validate sortOrder
+    if (sortOrder && !['asc', 'desc'].includes(sortOrder)) {
+      return badRequest('Invalid sortOrder. Must be "asc" or "desc"');
+    }
+
+    const parsedLimit = Math.min(parseInt(limit, 10) || DEFAULT_LIMIT, MAX_LIMIT);
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view URLs');
+    }
+
+    try {
+      const result = await AuditUrl.allOffsiteUrls(siteId, {
+        limit: parsedLimit,
+        cursor,
+        sortBy,
+        sortOrder,
+      });
+
+      return ok({
+        items: result.items || [],
+        cursor: result.cursor,
+      });
+    } catch (error) {
+      log.error(`Error listing offsite URLs for site ${siteId}: ${error.message}`);
+      return internalServerError('Failed to list offsite URLs');
+    }
+  };
+
+  /**
    * Get a specific URL by base64 encoded URL.
    * GET /sites/{siteId}/url-store/{base64Url}
    */
@@ -374,6 +499,16 @@ function UrlStoreController(ctx, log) {
         const rank = urlData.rank !== undefined ? urlData.rank : null;
         const traffic = urlData.traffic !== undefined ? urlData.traffic : null;
 
+        // Extract and validate platformType if provided
+        const platformType = urlData.platformType || PLATFORM_TYPES.PRIMARY_SITE;
+        if (platformType && !VALID_PLATFORM_TYPES.includes(platformType)) {
+          return {
+            success: false,
+            url: urlData.url,
+            reason: `Invalid platformType. Must be one of: ${VALID_PLATFORM_TYPES.join(', ')}`,
+          };
+        }
+
         // Check if URL already exists (idempotent)
         let existingUrl = await AuditUrl.findBySiteIdAndUrl(siteId, canonicalUrl);
 
@@ -384,6 +519,7 @@ function UrlStoreController(ctx, log) {
             existingUrl.setAudits(audits);
             if (rank !== null) existingUrl.setRank(rank);
             if (traffic !== null) existingUrl.setTraffic(traffic);
+            if (platformType) existingUrl.setPlatformType(platformType);
             existingUrl.setUpdatedBy(userId);
             existingUrl = await existingUrl.save();
           }
@@ -398,6 +534,7 @@ function UrlStoreController(ctx, log) {
           audits,
           rank,
           traffic,
+          platformType,
           createdBy: userId,
           updatedBy: userId,
         });
@@ -518,6 +655,18 @@ function UrlStoreController(ctx, log) {
         // Update traffic if provided
         if ('traffic' in update) {
           auditUrl.setTraffic(update.traffic);
+        }
+
+        // Update platformType if provided
+        if ('platformType' in update) {
+          if (update.platformType && !VALID_PLATFORM_TYPES.includes(update.platformType)) {
+            return {
+              success: false,
+              url: update.url,
+              reason: `Invalid platformType. Must be one of: ${VALID_PLATFORM_TYPES.join(', ')}`,
+            };
+          }
+          auditUrl.setPlatformType(update.platformType);
         }
 
         auditUrl.setUpdatedBy(userId);
@@ -675,6 +824,8 @@ function UrlStoreController(ctx, log) {
     listUrls,
     listUrlsBySource,
     listUrlsByAuditType,
+    listUrlsByPlatform,
+    listOffsiteUrls,
     getUrl,
     addUrls,
     updateUrls,

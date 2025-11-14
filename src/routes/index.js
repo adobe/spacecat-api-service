@@ -246,6 +246,8 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/url-store': urlStoreController.listUrls,
     'GET /sites/:siteId/url-store/by-source/:source': urlStoreController.listUrlsBySource,
     'GET /sites/:siteId/url-store/by-audit/:auditType': urlStoreController.listUrlsByAuditType,
+    'GET /sites/:siteId/url-store/by-platform/:platformType': urlStoreController.listUrlsByPlatform,
+    'GET /sites/:siteId/url-store/offsite': urlStoreController.listOffsiteUrls,
     'GET /sites/:siteId/url-store/:base64Url': urlStoreController.getUrl,
     'POST /sites/:siteId/url-store': urlStoreController.addUrls,
     'PATCH /sites/:siteId/url-store': urlStoreController.updateUrls,
