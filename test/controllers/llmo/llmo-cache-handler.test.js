@@ -672,11 +672,11 @@ describe('llmo-cache-handler', () => {
 
       // Remove dataSource to enable multi-file mode
       mockContext.params = { siteId: TEST_SITE_ID };
-      mockContext.data = { file: ['file1.json', 'file2.json'] };
+      mockContext.data = { file: ['file1.json', 'file2.json', 'file1.json', 'file2.json', 'file1.json', 'file2.json', 'file1.json', 'file2.json', 'file1.json', 'file2.json', 'file1.json', 'file2.json'] };
 
       const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
 
-      expect(result.data).to.be.an('array').with.length(2);
+      expect(result.data).to.be.an('array').with.length(12);
       expect(result.data[0].status).to.equal('success');
       expect(result.data[0].path).to.equal('file1.json');
       expect(result.data[0].data).to.deep.equal(file1Data);

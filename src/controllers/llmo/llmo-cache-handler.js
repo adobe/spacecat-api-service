@@ -195,35 +195,71 @@ const fetchAndProcessSingleFile = async (context, llmoConfig, filePath, queryPar
   }
 };
 
+/**
+ * Process promises in batches with controlled concurrency
+ * @param {Array} items - Items to process
+ * @param {Function} fn - Async function to process each item
+ * @param {number} concurrency - Maximum number of concurrent operations
+ * @returns {Promise<Array>} - Results array
+ */
+const processBatch = async (items, fn, concurrency) => {
+  const results = [];
+  const executing = [];
+
+  for (const item of items) {
+    const promise = fn(item).then((result) => {
+      executing.splice(executing.indexOf(promise), 1);
+      return result;
+    });
+
+    results.push(promise);
+    executing.push(promise);
+
+    if (executing.length >= concurrency) {
+      // eslint-disable-next-line no-await-in-loop
+      await Promise.race(executing);
+    }
+  }
+
+  return Promise.all(results);
+};
+
 const fetchAndProcessMultipleFiles = async (context, llmoConfig, files, queryParams) => {
   const { log } = context;
 
-  // Fetch and process all files in parallel
-  const fetchPromises = files.map(async (filePath) => {
-    try {
-      const { data } = await fetchAndProcessSingleFile(
-        context,
-        llmoConfig,
-        filePath,
-        queryParams,
-      );
-      return {
-        path: filePath,
-        status: 'success',
-        data,
-      };
-    } catch (error) {
-      log.error(`Error fetching and processing file ${filePath}: ${error.message}`);
-      return {
-        path: filePath,
-        status: 'error',
-        error: error.message,
-      };
-    }
-  });
+  // Limit concurrent fetches to prevent resource contention and timeouts
+  // This prevents all requests from competing for bandwidth/resources
+  const MAX_CONCURRENT_FETCHES = 7;
 
-  // Wait for all parallel fetches to complete
-  const results = await Promise.all(fetchPromises);
+  log.info(`Fetching ${files.length} files with max concurrency of ${MAX_CONCURRENT_FETCHES}`);
+
+  // Fetch and process files with controlled concurrency
+  const results = await processBatch(
+    files,
+    async (filePath) => {
+      try {
+        const { data } = await fetchAndProcessSingleFile(
+          context,
+          llmoConfig,
+          filePath,
+          queryParams,
+        );
+        return {
+          path: filePath,
+          status: 'success',
+          data,
+        };
+      } catch (error) {
+        log.error(`Error fetching and processing file ${filePath}: ${error.message}`);
+        return {
+          path: filePath,
+          status: 'error',
+          error: error.message,
+        };
+      }
+    },
+    MAX_CONCURRENT_FETCHES,
+  );
 
   return results;
 };
