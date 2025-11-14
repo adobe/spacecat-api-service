@@ -2,9 +2,10 @@ configurations-sites-audits-toggle:
   patch:
     tags:
       - configuration
-    summary: Enable or disable audits for sites
+    summary: Enable or disable audits for sites or organizations
     description: |
-      Use this endpoint to enable or disable specific audit types for your sites.
+      Use this endpoint to enable or disable specific audit types for your sites or entire organizations.
+      You can specify either a site (via baseURL) or an organization (via organizationId), but not both.
     operationId: update
     requestBody:
       required: true
@@ -17,6 +18,12 @@ configurations-sites-audits-toggle:
               properties:
                 baseURL:
                   $ref: './schemas.yaml#/URL'
+                  description: Site URL (use this OR organizationId, not both)
+                organizationId:
+                  type: string
+                  format: uuid
+                  description: Organization ID (use this OR baseURL, not both)
+                  example: "550e8400-e29b-41d4-a716-446655440000"
                 auditType:
                   type: string
                   description: The type of audit to be enabled or disabled.
@@ -28,18 +35,50 @@ configurations-sites-audits-toggle:
                   type: boolean
                   description: Set to true to enable the audit, or false to disable it.
               required:
-                - baseURL
                 - auditType
                 - enable
+              oneOf:
+                - required: [baseURL]
+                - required: [organizationId]
+          examples:
+            site-level:
+              summary: Enable audit for a specific site
+              value:
+                - baseURL: "https://example.com"
+                  auditType: "cwv"
+                  enable: true
+            org-level:
+              summary: Enable audit for entire organization
+              value:
+                - organizationId: "550e8400-e29b-41d4-a716-446655440000"
+                  auditType: "cwv"
+                  enable: true
+            mixed:
+              summary: Mixed site and org operations
+              value:
+                - baseURL: "https://example.com"
+                  auditType: "cwv"
+                  enable: true
+                - organizationId: "550e8400-e29b-41d4-a716-446655440000"
+                  auditType: "lhs-mobile"
+                  enable: true
     responses:
       '207':
-        description: A list of baseURL, the status of the update, and the corresponding site if successful, or the error message if failed.
+        description: Multi-status response with results for each operation
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/ConfigurationSitesAuditsUpdateResult'
+              type: array
+              items:
+                $ref: './schemas.yaml#/ConfigurationSitesAuditsUpdateResult'
+      '400':
+        $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        description: Site, organization, or audit type not found
       '500':
         $ref: './responses.yaml#/500'
     security:

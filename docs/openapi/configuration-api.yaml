@@ -19,6 +19,173 @@ latest-configuration:
         description: Latest configuration not found.
       '500':
         $ref: './responses.yaml#/500'
+  patch:
+    tags:
+      - configuration
+    summary: Partially update configuration sections
+    description: |
+      Partially updates one or more sections of the configuration (handlers, jobs, queues).
+      This endpoint merges the provided data with existing configuration rather than replacing it.
+      Only the sections specified in the request body will be updated.
+      Creates a new version automatically.
+      Note: Version and slackRoles fields are excluded from updates.
+    operationId: updateConfiguration
+    security:
+      - admin_key: [ ]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            description: Configuration sections to update
+            properties:
+              handlers:
+                type: object
+                description: Handlers configuration (merges with existing handlers - adds new, updates existing)
+                additionalProperties:
+                  type: object
+                  properties:
+                    enabledByDefault:
+                      type: boolean
+                    enabled:
+                      type: object
+                      properties:
+                        sites:
+                          type: array
+                          items:
+                            type: string
+                        orgs:
+                          type: array
+                          items:
+                            type: string
+                    disabled:
+                      type: object
+                      properties:
+                        sites:
+                          type: array
+                          items:
+                            type: string
+                        orgs:
+                          type: array
+                          items:
+                            type: string
+                    dependencies:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          handler:
+                            type: string
+                          actions:
+                            type: array
+                            items:
+                              type: string
+                    productCodes:
+                      type: array
+                      items:
+                        type: string
+                      minItems: 1
+                      description: Required, must be non-empty
+                    movingAvgThreshold:
+                      type: number
+                      minimum: 1
+                    percentageChangeThreshold:
+                      type: number
+                      minimum: 1
+              jobs:
+                type: array
+                description: Jobs configuration (merges with existing jobs - updates matching jobs by type and group)
+                items:
+                  type: object
+                  properties:
+                    group:
+                      type: string
+                      enum: [audits, imports, reports, scrapes]
+                    type:
+                      type: string
+                    interval:
+                      type: string
+                      enum: [never, every-hour, daily, weekly, every-saturday, every-sunday, fortnightly, fortnightly-saturday, fortnightly-sunday, monthly]
+              queues:
+                type: object
+                description: Queue URLs configuration (merges with existing queues - updates only specified queue URLs)
+                properties:
+                  audits:
+                    type: string
+                    format: uri
+                  imports:
+                    type: string
+                    format: uri
+                  reports:
+                    type: string
+                    format: uri
+                  scrapes:
+                    type: string
+                    format: uri
+          examples:
+            update-queues-only:
+              summary: Update only queue URLs
+              value:
+                queues:
+                  audits: "sqs://account/new-audit-queue"
+                  imports: "sqs://account/new-import-queue"
+                  reports: "sqs://account/new-report-queue"
+                  scrapes: "sqs://account/new-scrape-queue"
+            update-jobs-only:
+              summary: Update only job schedules
+              value:
+                jobs:
+                  - group: "audits"
+                    type: "cwv"
+                    interval: "weekly"
+                  - group: "audits"
+                    type: "404"
+                    interval: "daily"
+            update-handlers-only:
+              summary: Update only handlers
+              value:
+                handlers:
+                  cwv:
+                    enabledByDefault: true
+                    enabled:
+                      sites: []
+                      orgs: []
+                    disabled:
+                      sites: []
+                      orgs: []
+                    dependencies: []
+                    productCodes: ["SPACECAT_CORE"]
+            update-multiple-sections:
+              summary: Update handlers and jobs together
+              value:
+                handlers:
+                  cwv:
+                    enabledByDefault: true
+                    productCodes: ["SPACECAT_CORE"]
+                jobs:
+                  - group: "audits"
+                    type: "cwv"
+                    interval: "weekly"
+                queues:
+                  audits: "sqs://account/audit-queue"
+    responses:
+      '200':
+        description: Configuration updated successfully.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Configuration'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        description: Configuration not found.
+      '500':
+        $ref: './responses.yaml#/500'
 configuration:
   get:
     tags:
@@ -44,6 +211,83 @@ configuration:
         $ref: './responses.yaml#/401'
       '404':
         $ref: './responses.yaml#/404-configuration-not-found-with-version'
+      '500':
+        $ref: './responses.yaml#/500'
+configuration-restore:
+  post:
+    tags:
+      - configuration
+    summary: Restore configuration to a specific version
+    description: |
+      Restores the configuration to a specific version by creating a new version
+      with the data (handlers, jobs, queues, slackRoles) from the specified version.
+      This creates a new configuration version, preserving the complete version history.
+      Only administrators can restore configurations.
+    operationId: restoreConfigurationVersion
+    security:
+      - admin_key: [ ]
+    parameters:
+      - name: version
+        in: path
+        required: true
+        description: The version number to restore from
+        schema:
+          type: integer
+          minimum: 1
+        example: 2376
+    responses:
+      '200':
+        description: Configuration successfully restored
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: './schemas.yaml#/Configuration'
+                - type: object
+                  properties:
+                    restoredFrom:
+                      type: integer
+                      description: The version number that was restored from
+                      example: 2376
+                    message:
+                      type: string
+                      description: Success message
+                      example: "Configuration successfully restored from version 2376"
+            examples:
+              restore-success:
+                summary: Successful restore example
+                value:
+                  version: 2501
+                  handlers:
+                    404:
+                      enabledByDefault: true
+                      productCodes: ["ASO"]
+                      dependencies: []
+                      enabled:
+                        sites: []
+                        orgs: []
+                      disabled:
+                        sites: []
+                        orgs: []
+                  jobs:
+                    - type: "404"
+                      group: "audits"
+                      interval: "daily"
+                  queues:
+                    audits: "https://sqs.us-east-1.amazonaws.com/1234/audits"
+                    imports: "https://sqs.us-east-1.amazonaws.com/1234/imports"
+                  slackRoles:
+                    admin: ["user1", "user2"]
+                  restoredFrom: 2376
+                  message: "Configuration successfully restored from version 2376"
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
       '500':
         $ref: './responses.yaml#/500'
 configuration-audits:
@@ -87,6 +331,25 @@ configuration-audits:
     responses:
       '201':
         description: Audit type registered successfully.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Success message including the audit type that was registered
+                  example: "Audit type \"cwv\" has been successfully registered"
+                version:
+                  type: string
+                  description: The new configuration version after registering
+                  example: "2379"
+            examples:
+              register-success:
+                summary: Successful register example
+                value:
+                  message: "Audit type \"cwv\" has been successfully registered"
+                  version: "2379"
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -112,13 +375,281 @@ configuration-audit:
         description: The type of audit to unregister
         example: "cwv"
     responses:
-      '204':
+      '200':
         description: Audit type unregistered successfully.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Success message including the audit type that was unregistered
+                  example: "Audit type \"cwv\" has been successfully unregistered"
+                version:
+                  type: string
+                  description: The new configuration version after unregistering
+                  example: "2378"
+            examples:
+              unregister-success:
+                summary: Successful unregister example
+                value:
+                  message: "Audit type \"cwv\" has been successfully unregistered"
+                  version: "2378"
       '400':
         $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
       '403':
         $ref: './responses.yaml#/403'
+      '500':
+        $ref: './responses.yaml#/500'
+configuration-queues:
+  put:
+    tags:
+      - configuration
+    summary: Update queue URLs in the configuration
+    operationId: updateQueues
+    security:
+      - admin_key: [ ]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            description: Queue URLs configuration object
+            properties:
+              audits:
+                type: string
+                format: uri
+                description: SQS queue URL for audit jobs
+                example: "sqs://aws-account-id/spacecat-services-audit-jobs"
+              imports:
+                type: string
+                format: uri
+                description: SQS queue URL for import jobs
+                example: "sqs://aws-account-id/spacecat-services-import-jobs"
+              reports:
+                type: string
+                format: uri
+                description: SQS queue URL for report jobs
+                example: "sqs://aws-account-id/spacecat-services-report-jobs"
+              scrapes:
+                type: string
+                format: uri
+                description: SQS queue URL for scrape jobs
+                example: "sqs://aws-account-id/spacecat-services-scrape-jobs"
+            example:
+              audits: "sqs://123456789/spacecat-services-audit-jobs"
+              imports: "sqs://123456789/spacecat-services-import-jobs"
+              reports: "sqs://123456789/spacecat-services-report-jobs"
+              scrapes: "sqs://123456789/spacecat-services-scrape-jobs"
+    responses:
+      '200':
+        description: Queue URLs updated successfully.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Configuration'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        description: Configuration not found.
+      '500':
+        $ref: './responses.yaml#/500'
+configuration-job:
+  patch:
+    tags:
+      - configuration
+    summary: Update a job's schedule and properties
+    operationId: updateJob
+    security:
+      - admin_key: [ ]
+    parameters:
+      - name: jobType
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The type of job to update
+        example: "cwv"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            description: Job properties to update
+            properties:
+              interval:
+                type: string
+                description: Job execution interval
+                enum:
+                  - never
+                  - every-hour
+                  - daily
+                  - weekly
+                  - every-saturday
+                  - every-sunday
+                  - fortnightly
+                  - fortnightly-saturday
+                  - fortnightly-sunday
+                  - monthly
+                example: "weekly"
+              group:
+                type: string
+                description: Job group/category
+                enum:
+                  - audits
+                  - imports
+                  - reports
+                  - scrapes
+                example: "audits"
+            example:
+              interval: "weekly"
+              group: "audits"
+    responses:
+      '200':
+        description: Job updated successfully.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Configuration'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        description: Configuration or job not found.
+      '500':
+        $ref: './responses.yaml#/500'
+configuration-handler:
+  patch:
+    tags:
+      - configuration
+    summary: Update a handler's properties
+    operationId: updateHandler
+    security:
+      - admin_key: [ ]
+    parameters:
+      - name: handlerType
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The type of handler to update
+        example: "cwv"
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            description: Handler properties to update
+            properties:
+              enabledByDefault:
+                type: boolean
+                description: Whether the handler is enabled by default for all sites
+                example: true
+              enabled:
+                type: object
+                description: Explicitly enabled sites and organizations
+                properties:
+                  sites:
+                    type: array
+                    items:
+                      type: string
+                    description: Array of site IDs where handler is enabled
+                    example: ["site-uuid-1", "site-uuid-2"]
+                  orgs:
+                    type: array
+                    items:
+                      type: string
+                    description: Array of organization IDs where handler is enabled
+                    example: ["org-uuid-1"]
+              disabled:
+                type: object
+                description: Explicitly disabled sites and organizations
+                properties:
+                  sites:
+                    type: array
+                    items:
+                      type: string
+                    description: Array of site IDs where handler is disabled
+                    example: ["site-uuid-3"]
+                  orgs:
+                    type: array
+                    items:
+                      type: string
+                    description: Array of organization IDs where handler is disabled
+                    example: ["org-uuid-2"]
+              dependencies:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    handler:
+                      type: string
+                      description: Handler that must be enabled first
+                      example: "sitemap"
+                    actions:
+                      type: array
+                      items:
+                        type: string
+                      description: Actions required from the dependency
+                      example: ["run"]
+                description: Array of handler dependencies
+              productCodes:
+                type: array
+                items:
+                  type: string
+                description: Required product codes (must be non-empty if provided)
+                example: ["SPACECAT_CORE", "SPACECAT_PREMIUM"]
+              movingAvgThreshold:
+                type: number
+                minimum: 1
+                description: Moving average threshold for alerts
+                example: 10
+              percentageChangeThreshold:
+                type: number
+                minimum: 1
+                description: Percentage change threshold for alerts
+                example: 20
+            example:
+              enabledByDefault: true
+              enabled:
+                sites: []
+                orgs: ["org-uuid-1"]
+              disabled:
+                sites: ["site-uuid-1"]
+                orgs: []
+              dependencies:
+                - handler: "sitemap"
+                  actions: ["run"]
+              productCodes: ["SPACECAT_CORE"]
+              movingAvgThreshold: 15
+              percentageChangeThreshold: 25
+    responses:
+      '200':
+        description: Handler updated successfully.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Configuration'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        description: Configuration or handler not found.
       '500':
         $ref: './responses.yaml#/500'
