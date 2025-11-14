@@ -159,8 +159,9 @@ describe('UpdateSitesAuditsCommand', () => {
   it('enable all audits for a site using "all" keyword', async () => {
     dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
 
-    // Mock getDisabledAuditsForSite to return audits that are in the demo profile
-    configurationMock.getDisabledAuditsForSite.returns(['cwv', 'sitemap']);
+    // Mock getEnabledAuditsForSite to return currently enabled audits
+    // Demo profile has cwv and sitemap, only sitemap is not enabled yet
+    configurationMock.getEnabledAuditsForSite.returns(['cwv']);
 
     const command = ToggleSiteAuditCommand(contextMock);
     const args = ['enable', 'https://site0.com', 'all'];
@@ -223,8 +224,8 @@ describe('UpdateSitesAuditsCommand', () => {
   it('should handle "all" keyword case-insensitively', async () => {
     dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
 
-    // Mock getDisabledAuditsForSite to return audits that are in the demo profile
-    configurationMock.getDisabledAuditsForSite.returns(['cwv', 'sitemap']);
+    // Mock getEnabledAuditsForSite to return currently enabled audits
+    configurationMock.getEnabledAuditsForSite.returns(['cwv']);
 
     const command = ToggleSiteAuditCommand(contextMock);
     const args = ['enable', 'https://site0.com', 'ALL'];
@@ -239,8 +240,8 @@ describe('UpdateSitesAuditsCommand', () => {
   it('should filter audits by profile when enabling all audits with profile parameter', async () => {
     dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
 
-    // Mock getDisabledAuditsForSite to return audits that are in the demo profile
-    configurationMock.getDisabledAuditsForSite.returns(['cwv', 'sitemap']);
+    // Mock getEnabledAuditsForSite to return currently enabled audits
+    configurationMock.getEnabledAuditsForSite.returns(['cwv']);
 
     const command = ToggleSiteAuditCommand(contextMock);
     const args = ['enable', 'https://site0.com', 'all', 'demo'];
@@ -263,8 +264,8 @@ describe('UpdateSitesAuditsCommand', () => {
   it('should use demo profile as default when no profile is specified for enable all', async () => {
     dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
 
-    // Mock getDisabledAuditsForSite to return audits that are in the demo profile
-    configurationMock.getDisabledAuditsForSite.returns(['cwv', 'sitemap']);
+    // Mock getEnabledAuditsForSite to return currently enabled audits
+    configurationMock.getEnabledAuditsForSite.returns(['cwv']);
 
     const command = ToggleSiteAuditCommand(contextMock);
     const args = ['enable', 'https://site0.com', 'all'];

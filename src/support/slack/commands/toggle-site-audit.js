@@ -240,9 +240,7 @@ export default (context) => {
           // Handle "all" keyword to enable/disable all audits
           let auditTypes;
           if (singleAuditType.toLowerCase() === 'all') {
-            auditTypes = isEnableAudit
-              ? configuration.getDisabledAuditsForSite(site)
-              : configuration.getEnabledAuditsForSite(site);
+            const enabledAudits = configuration.getEnabledAuditsForSite(site);
 
             if (isEnableAudit) {
               const profileName = profileNameInput ? profileNameInput.toLowerCase() : 'demo';
@@ -252,7 +250,8 @@ export default (context) => {
                 const profileConfig = await loadProfileConfig(profileName);
                 // Profile audits is an object with audit names as keys
                 const profileAuditTypes = Object.keys(profileConfig.audits || {});
-                auditTypes = auditTypes.filter((audit) => profileAuditTypes.includes(audit));
+                // Delta: profile audits minus already enabled audits
+                auditTypes = profileAuditTypes.filter((audit) => !enabledAudits.includes(audit));
                 await say(`:information_source: Enabling ${auditTypes.length} audits from profile "${profileName}": ${auditTypes.join(', ')}`);
               } catch (error) {
                 log.error(`Failed to load profile "${profileName}": ${error.message}`);
@@ -261,6 +260,8 @@ export default (context) => {
               }
               /* c8 ignore stop */
             } else {
+              // Disable all currently enabled audits
+              auditTypes = enabledAudits;
               await say(`:information_source: Disabling ${auditTypes.length} audits: ${auditTypes.join(', ')}`);
             }
           } else {
