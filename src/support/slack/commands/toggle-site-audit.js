@@ -47,7 +47,7 @@ const promptPreflightConfig = async (slackContext, site, auditType) => {
     if (!hasHelixConfig) {
       missingItems.push('Helix Preview URL');
     }
-  } else if (currentAuthoringType === 'cs' || currentAuthoringType === 'cs/crosswalk') {
+  } else if (currentAuthoringType === 'cs' || currentAuthoringType === 'cs/crosswalk' || currentAuthoringType === 'ams') {
     // CS authoring types require delivery config
     const hasDeliveryConfig = currentDeliveryConfig.programId
       && currentDeliveryConfig.environmentId;
@@ -232,7 +232,7 @@ export default (context) => {
                 if (!hasHelixConfig) {
                   configMissing = true;
                 }
-              } else if (authoringType === 'cs' || authoringType === 'cs/crosswalk') {
+              } else if (authoringType === 'cs' || authoringType === 'cs/crosswalk' || authoringType === 'ams') {
                 // CS authoring types require delivery config
                 const hasDeliveryConfig = deliveryConfig
                   && deliveryConfig.programId && deliveryConfig.environmentId;

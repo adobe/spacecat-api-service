@@ -117,6 +117,10 @@ export default function openPreflightConfig(lambdaContext) {
                   text: { type: 'plain_text', text: 'Cloud Service/Crosswalk' },
                   value: 'cs/crosswalk',
                 },
+                {
+                  text: { type: 'plain_text', text: 'Adobe Managed Services (AMS)' },
+                  value: 'ams',
+                },
               ],
               initial_option: currentAuthoringType ? {
                 text: {
@@ -124,6 +128,7 @@ export default function openPreflightConfig(lambdaContext) {
                   text: (() => {
                     if (currentAuthoringType === 'cs') return 'Cloud Service';
                     if (currentAuthoringType === 'cs/crosswalk') return 'Cloud Service/Crosswalk';
+                    if (currentAuthoringType === 'ams') return 'Adobe Managed Services';
                     return 'Document Authoring';
                   })(),
                 },
@@ -143,7 +148,7 @@ export default function openPreflightConfig(lambdaContext) {
               action_id: 'preview_url',
               placeholder: {
                 type: 'plain_text',
-                text: 'AEM CS or EDS URL',
+                text: 'AEM CS or AMS or EDS URL',
               },
               initial_value: currentDeliveryConfig.authorURL || '',
             },
@@ -153,7 +158,7 @@ export default function openPreflightConfig(lambdaContext) {
             },
             hint: {
               type: 'plain_text',
-              text: 'Document Authoring: main--site--owner.aem.live. CS/CS-Crosswalk: AEM CS URL (author-p12345-e67890.adobeaemcloud.com).',
+              text: 'Document Authoring: main--site--owner.aem.live. CS/CS-Crosswalk/AMS: AEM CS URL (author-p12345-e67890.adobeaemcloud.com).',
             },
           },
         ],

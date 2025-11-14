@@ -89,7 +89,7 @@ export function preflightConfigModal(lambdaContext) {
       let deliveryConfigFromPreview = null;
       let helixConfigFromPreview = null;
 
-      if (authoringType === 'cs' || authoringType === 'cs/crosswalk') {
+      if (authoringType === 'cs' || authoringType === 'cs/crosswalk' || authoringType === 'ams') {
         // For AEM CS authoring types, expect AEM CS preview URL
         deliveryConfigFromPreview = extractDeliveryConfigFromPreviewUrl(previewUrl, null);
         if (!deliveryConfigFromPreview) {

@@ -529,6 +529,13 @@ export function startOnboarding(lambdaContext) {
                     },
                     value: 'cs/crosswalk',
                   },
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'Adobe Managed Services (AMS)',
+                    },
+                    value: 'ams',
+                  },
                 ],
               },
               label: {

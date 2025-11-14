@@ -95,7 +95,11 @@ function PreflightController(ctx, log, env) {
    */
   const createPreflightJob = async (context) => {
     const { data } = context;
-    const CS_TYPES = [SiteModel.AUTHORING_TYPES.CS, SiteModel.AUTHORING_TYPES.CS_CW];
+    const CS_TYPES = [
+      SiteModel.AUTHORING_TYPES.CS,
+      SiteModel.AUTHORING_TYPES.CS_CW,
+      SiteModel.AUTHORING_TYPES.AMS,
+    ];
     try {
       validateRequestData(data);
     } catch (error) {
