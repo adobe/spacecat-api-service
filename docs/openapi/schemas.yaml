@@ -1665,6 +1665,16 @@ AuditUrl:
       items:
         type: string
       example: ['accessibility', 'broken-backlinks']
+    rank:
+      description: Rank or position of the URL (e.g., for sorting high-value pages)
+      type: number
+      nullable: true
+      example: 1
+    traffic:
+      description: Traffic metric for the URL (e.g., page views, visitors)
+      type: number
+      nullable: true
+      example: 50000
     createdAt:
       description: ISO 8601 timestamp when created
       $ref: '#/DateTime'
@@ -1684,6 +1694,8 @@ AuditUrl:
     url: 'https://example.com/documents/report.pdf'
     source: 'manual'
     audits: ['accessibility', 'broken-backlinks']
+    rank: 1
+    traffic: 50000
     createdAt: '2025-10-10T12:00:00Z'
     updatedAt: '2025-10-10T15:30:00Z'
     createdBy: 'user-alice'
@@ -1707,10 +1719,22 @@ AuditUrlInput:
       items:
         type: string
       example: ['accessibility', 'broken-backlinks']
+    rank:
+      description: Rank or position of the URL (optional, for sorting high-value pages)
+      type: number
+      nullable: true
+      example: 1
+    traffic:
+      description: Traffic metric for the URL (optional, e.g., page views, visitors)
+      type: number
+      nullable: true
+      example: 50000
   example:
     url: 'https://example.com/page1.html'
     source: 'manual'
     audits: ['accessibility', 'broken-backlinks']
+    rank: 1
+    traffic: 50000
 AuditUrlUpdate:
   type: object
   required:
@@ -1726,9 +1750,21 @@ AuditUrlUpdate:
       items:
         type: string
       example: ['accessibility']
+    rank:
+      description: Rank or position of the URL (optional, updates if provided)
+      type: number
+      nullable: true
+      example: 2
+    traffic:
+      description: Traffic metric for the URL (optional, updates if provided)
+      type: number
+      nullable: true
+      example: 75000
   example:
     url: 'https://example.com/page1.html'
     audits: ['accessibility']
+    rank: 2
+    traffic: 75000
 AuditUrlListResponse:
   type: object
   required:

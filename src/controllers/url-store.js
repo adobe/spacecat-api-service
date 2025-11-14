@@ -55,17 +55,6 @@ function canonicalizeUrl(url) {
 }
 
 /**
- * Encodes a URL to URL-safe base64 without padding (RFC 4648 §5)
- * @param {string} url - The URL to encode
- * @returns {string} - Base64 encoded URL
- */
-function encodeUrlToBase64(url) {
-  const base64 = Buffer.from(url).toString('base64');
-  // Convert to URL-safe base64 and remove padding
-  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-}
-
-/**
  * Decodes a URL-safe base64 string to a URL
  * @param {string} base64Url - The base64 encoded URL
  * @returns {string} - Decoded URL
@@ -114,15 +103,31 @@ function UrlStoreController(ctx, log) {
   }
 
   /**
-   * List all URLs for a site with pagination.
+   * List all URLs for a site with pagination and sorting.
    * GET /sites/{siteId}/url-store
    */
   const listUrls = async (context) => {
     const { siteId } = context.params;
-    const { limit = DEFAULT_LIMIT, cursor } = context.data || {};
+    const {
+      limit = DEFAULT_LIMIT,
+      cursor,
+      sortBy,
+      sortOrder = 'asc',
+    } = context.data || {};
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
+    }
+
+    // Validate sortBy field
+    const validSortFields = ['rank', 'traffic', 'url', 'createdAt', 'updatedAt'];
+    if (sortBy && !validSortFields.includes(sortBy)) {
+      return badRequest(`Invalid sortBy field. Must be one of: ${validSortFields.join(', ')}`);
+    }
+
+    // Validate sortOrder
+    if (sortOrder && !['asc', 'desc'].includes(sortOrder)) {
+      return badRequest('Invalid sortOrder. Must be "asc" or "desc"');
     }
 
     const parsedLimit = Math.min(parseInt(limit, 10) || DEFAULT_LIMIT, MAX_LIMIT);
@@ -137,9 +142,11 @@ function UrlStoreController(ctx, log) {
     }
 
     try {
-      const result = await AuditUrl.allBySiteId(siteId, {
+      const result = await AuditUrl.allBySiteIdSorted(siteId, {
         limit: parsedLimit,
         cursor,
+        sortBy,
+        sortOrder,
       });
 
       return ok({
@@ -153,12 +160,17 @@ function UrlStoreController(ctx, log) {
   };
 
   /**
-   * List URLs by source with pagination.
+   * List URLs by source with pagination and sorting.
    * GET /sites/{siteId}/url-store/by-source/{source}
    */
   const listUrlsBySource = async (context) => {
     const { siteId, source } = context.params;
-    const { limit = DEFAULT_LIMIT, cursor } = context.data || {};
+    const {
+      limit = DEFAULT_LIMIT,
+      cursor,
+      sortBy,
+      sortOrder = 'asc',
+    } = context.data || {};
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -166,6 +178,17 @@ function UrlStoreController(ctx, log) {
 
     if (!hasText(source)) {
       return badRequest('Source required');
+    }
+
+    // Validate sortBy field
+    const validSortFields = ['rank', 'traffic', 'url', 'createdAt', 'updatedAt'];
+    if (sortBy && !validSortFields.includes(sortBy)) {
+      return badRequest(`Invalid sortBy field. Must be one of: ${validSortFields.join(', ')}`);
+    }
+
+    // Validate sortOrder
+    if (sortOrder && !['asc', 'desc'].includes(sortOrder)) {
+      return badRequest('Invalid sortOrder. Must be "asc" or "desc"');
     }
 
     const parsedLimit = Math.min(parseInt(limit, 10) || DEFAULT_LIMIT, MAX_LIMIT);
@@ -180,9 +203,11 @@ function UrlStoreController(ctx, log) {
     }
 
     try {
-      const result = await AuditUrl.allBySiteIdAndSource(siteId, source, {
+      const result = await AuditUrl.allBySiteIdAndSourceSorted(siteId, source, {
         limit: parsedLimit,
         cursor,
+        sortBy,
+        sortOrder,
       });
 
       return ok({
@@ -196,12 +221,17 @@ function UrlStoreController(ctx, log) {
   };
 
   /**
-   * List URLs by audit type with pagination.
+   * List URLs by audit type with pagination and sorting.
    * GET /sites/{siteId}/url-store/by-audit/{auditType}
    */
   const listUrlsByAuditType = async (context) => {
     const { siteId, auditType } = context.params;
-    const { limit = DEFAULT_LIMIT, cursor } = context.data || {};
+    const {
+      limit = DEFAULT_LIMIT,
+      cursor,
+      sortBy,
+      sortOrder = 'asc',
+    } = context.data || {};
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -209,6 +239,17 @@ function UrlStoreController(ctx, log) {
 
     if (!hasText(auditType)) {
       return badRequest('Audit type required');
+    }
+
+    // Validate sortBy field
+    const validSortFields = ['rank', 'traffic', 'url', 'createdAt', 'updatedAt'];
+    if (sortBy && !validSortFields.includes(sortBy)) {
+      return badRequest(`Invalid sortBy field. Must be one of: ${validSortFields.join(', ')}`);
+    }
+
+    // Validate sortOrder
+    if (sortOrder && !['asc', 'desc'].includes(sortOrder)) {
+      return badRequest('Invalid sortOrder. Must be "asc" or "desc"');
     }
 
     const parsedLimit = Math.min(parseInt(limit, 10) || DEFAULT_LIMIT, MAX_LIMIT);
@@ -226,11 +267,13 @@ function UrlStoreController(ctx, log) {
       const result = await AuditUrl.allBySiteIdAndAuditType(siteId, auditType, {
         limit: parsedLimit,
         cursor,
+        sortBy,
+        sortOrder,
       });
 
       return ok({
-        items: result.items || [],
-        cursor: result.cursor,
+        items: result || [],
+        cursor: undefined,
       });
     } catch (error) {
       log.error(`Error listing URLs by audit type for site ${siteId}: ${error.message}`);
@@ -308,26 +351,28 @@ function UrlStoreController(ctx, log) {
     }
 
     const userId = getUserIdentifier(context);
-    const results = [];
-    const failures = [];
-    let successCount = 0;
 
-    for (const urlData of urls) {
+    // Process all URLs in parallel using Promise.allSettled
+    const urlProcessingPromises = urls.map(async (urlData) => {
+      // Validate URL
+      if (!hasText(urlData.url) || !isValidUrl(urlData.url)) {
+        return {
+          success: false,
+          url: urlData.url || 'undefined',
+          reason: 'Invalid URL format',
+        };
+      }
+
       try {
-        // Validate URL
-        if (!hasText(urlData.url) || !isValidUrl(urlData.url)) {
-          failures.push({
-            url: urlData.url || 'undefined',
-            reason: 'Invalid URL format',
-          });
-          continue;
-        }
-
         // Canonicalize URL
         const canonicalUrl = canonicalizeUrl(urlData.url);
 
         // Validate audits array
         const audits = isArray(urlData.audits) ? urlData.audits : [];
+
+        // Extract rank and traffic if provided
+        const rank = urlData.rank !== undefined ? urlData.rank : null;
+        const traffic = urlData.traffic !== undefined ? urlData.traffic : null;
 
         // Check if URL already exists (idempotent)
         let existingUrl = await AuditUrl.findBySiteIdAndUrl(siteId, canonicalUrl);
@@ -337,32 +382,57 @@ function UrlStoreController(ctx, log) {
           if (urlData.source === 'manual' || !existingUrl.getSource || existingUrl.getSource() !== 'manual') {
             existingUrl.setSource('manual');
             existingUrl.setAudits(audits);
+            if (rank !== null) existingUrl.setRank(rank);
+            if (traffic !== null) existingUrl.setTraffic(traffic);
             existingUrl.setUpdatedBy(userId);
             existingUrl = await existingUrl.save();
           }
-          results.push(existingUrl);
-          successCount += 1;
-        } else {
-          // Create new URL
-          const newUrl = await AuditUrl.create({
-            siteId,
-            url: canonicalUrl,
-            source: urlData.source || 'manual',
-            audits,
-            createdBy: userId,
-            updatedBy: userId,
-          });
-          results.push(newUrl);
-          successCount += 1;
+          return { success: true, data: existingUrl };
         }
+
+        // Create new URL
+        const newUrl = await AuditUrl.create({
+          siteId,
+          url: canonicalUrl,
+          source: urlData.source || 'manual',
+          audits,
+          rank,
+          traffic,
+          createdBy: userId,
+          updatedBy: userId,
+        });
+        return { success: true, data: newUrl };
       } catch (error) {
         log.error(`Error adding URL ${urlData.url}: ${error.message}`);
-        failures.push({
+        return {
+          success: false,
           url: urlData.url,
           reason: error.message || 'Internal error',
-        });
+        };
       }
-    }
+    });
+
+    // Wait for all promises to settle
+    const settledResults = await Promise.allSettled(urlProcessingPromises);
+
+    // Process results
+    const results = [];
+    const failures = [];
+    let successCount = 0;
+
+    settledResults.forEach((settled) => {
+      if (settled.status === 'fulfilled') {
+        const result = settled.value;
+        if (result.success) {
+          results.push(result.data);
+          successCount += 1;
+        } else {
+          failures.push({ url: result.url, reason: result.reason });
+        }
+      } else {
+        failures.push({ url: 'unknown', reason: settled.reason?.message || 'Promise rejected' });
+      }
+    });
 
     return createResponse({
       metadata: {
@@ -405,54 +475,86 @@ function UrlStoreController(ctx, log) {
     }
 
     const userId = getUserIdentifier(context);
-    const results = [];
-    const failures = [];
-    let successCount = 0;
 
-    for (const update of updates) {
+    // Process all updates in parallel using Promise.allSettled
+    const updateProcessingPromises = updates.map(async (update) => {
+      // Validate URL
+      if (!hasText(update.url)) {
+        return {
+          success: false,
+          url: 'undefined',
+          reason: 'URL required',
+        };
+      }
+
+      if (!isArray(update.audits)) {
+        return {
+          success: false,
+          url: update.url,
+          reason: 'Audits array required',
+        };
+      }
+
       try {
-        if (!hasText(update.url)) {
-          failures.push({
-            url: 'undefined',
-            reason: 'URL required',
-          });
-          continue;
-        }
-
-        if (!isArray(update.audits)) {
-          failures.push({
-            url: update.url,
-            reason: 'Audits array required',
-          });
-          continue;
-        }
-
         const canonicalUrl = canonicalizeUrl(update.url);
         let auditUrl = await AuditUrl.findBySiteIdAndUrl(siteId, canonicalUrl);
 
         if (!auditUrl) {
-          failures.push({
+          return {
+            success: false,
             url: update.url,
             reason: 'URL not found',
-          });
-          continue;
+          };
         }
 
         // Update audits (overrides existing)
         auditUrl.setAudits(update.audits);
+
+        // Update rank if provided
+        if ('rank' in update) {
+          auditUrl.setRank(update.rank);
+        }
+
+        // Update traffic if provided
+        if ('traffic' in update) {
+          auditUrl.setTraffic(update.traffic);
+        }
+
         auditUrl.setUpdatedBy(userId);
         auditUrl = await auditUrl.save();
 
-        results.push(auditUrl);
-        successCount += 1;
+        return { success: true, data: auditUrl };
       } catch (error) {
         log.error(`Error updating URL ${update.url}: ${error.message}`);
-        failures.push({
+        return {
+          success: false,
           url: update.url,
           reason: error.message || 'Internal error',
-        });
+        };
       }
-    }
+    });
+
+    // Wait for all promises to settle
+    const settledResults = await Promise.allSettled(updateProcessingPromises);
+
+    // Process results
+    const results = [];
+    const failures = [];
+    let successCount = 0;
+
+    settledResults.forEach((settled) => {
+      if (settled.status === 'fulfilled') {
+        const result = settled.value;
+        if (result.success) {
+          results.push(result.data);
+          successCount += 1;
+        } else {
+          failures.push({ url: result.url, reason: result.reason });
+        }
+      } else {
+        failures.push({ url: 'unknown', reason: settled.reason?.message || 'Promise rejected' });
+      }
+    });
 
     return ok({
       metadata: {
@@ -494,50 +596,70 @@ function UrlStoreController(ctx, log) {
       return forbidden('Only users belonging to the organization can delete URLs');
     }
 
-    const failures = [];
-    let successCount = 0;
+    // Process all deletions in parallel using Promise.allSettled
+    const deleteProcessingPromises = urls.map(async (url) => {
+      // Validate URL
+      if (!hasText(url)) {
+        return {
+          success: false,
+          url: 'undefined',
+          reason: 'URL required',
+        };
+      }
 
-    for (const url of urls) {
       try {
-        if (!hasText(url)) {
-          failures.push({
-            url: 'undefined',
-            reason: 'URL required',
-          });
-          continue;
-        }
-
         const canonicalUrl = canonicalizeUrl(url);
         const auditUrl = await AuditUrl.findBySiteIdAndUrl(siteId, canonicalUrl);
 
         if (!auditUrl) {
-          failures.push({
+          return {
+            success: false,
             url,
             reason: 'URL not found',
-          });
-          continue;
+          };
         }
 
         // Check if source is manual
         const source = auditUrl.getSource ? auditUrl.getSource() : auditUrl.source;
         if (source !== 'manual') {
-          failures.push({
+          return {
+            success: false,
             url,
             reason: 'Can only delete URLs with source: manual',
-          });
-          continue;
+          };
         }
 
         await auditUrl.remove();
-        successCount += 1;
+        return { success: true };
       } catch (error) {
         log.error(`Error deleting URL ${url}: ${error.message}`);
-        failures.push({
+        return {
+          success: false,
           url,
           reason: error.message || 'Internal error',
-        });
+        };
       }
-    }
+    });
+
+    // Wait for all promises to settle
+    const settledResults = await Promise.allSettled(deleteProcessingPromises);
+
+    // Process results
+    const failures = [];
+    let successCount = 0;
+
+    settledResults.forEach((settled) => {
+      if (settled.status === 'fulfilled') {
+        const result = settled.value;
+        if (result.success) {
+          successCount += 1;
+        } else {
+          failures.push({ url: result.url, reason: result.reason });
+        }
+      } else {
+        failures.push({ url: 'unknown', reason: settled.reason?.message || 'Promise rejected' });
+      }
+    });
 
     return ok({
       metadata: {
@@ -561,4 +683,3 @@ function UrlStoreController(ctx, log) {
 }
 
 export default UrlStoreController;
-

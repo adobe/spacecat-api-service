@@ -18,6 +18,21 @@ url-store-list:
         schema:
           type: string
         description: Pagination cursor from previous response
+      - name: sortBy
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [rank, traffic, url, createdAt, updatedAt]
+        description: Field to sort by
+      - name: sortOrder
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [asc, desc]
+          default: asc
+        description: Sort order (ascending or descending)
     tags:
       - site
       - url store
@@ -70,6 +85,21 @@ url-store-by-source:
       schema:
         type: string
       description: Pagination cursor from previous response
+    - name: sortBy
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [rank, traffic, url, createdAt, updatedAt]
+      description: Field to sort by
+    - name: sortOrder
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [asc, desc]
+        default: asc
+      description: Sort order (ascending or descending)
   get:
     tags:
       - site
@@ -123,6 +153,21 @@ url-store-by-audit:
       schema:
         type: string
       description: Pagination cursor from previous response
+    - name: sortBy
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [rank, traffic, url, createdAt, updatedAt]
+      description: Field to sort by
+    - name: sortOrder
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [asc, desc]
+        default: asc
+      description: Sort order (ascending or descending)
   get:
     tags:
       - site
