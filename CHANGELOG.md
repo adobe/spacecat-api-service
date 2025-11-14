@@ -1,3 +1,10 @@
+# [1.235.0](https://github.com/adobe/spacecat-api-service/compare/v1.234.5...v1.235.0) (2025-11-14)
+
+
+### Features
+
+* add llmo tier in the slack opportunity usage command ([#1492](https://github.com/adobe/spacecat-api-service/issues/1492)) ([305988f](https://github.com/adobe/spacecat-api-service/commit/305988f257582b89f7f47976bee7e74d15e39d1f))
+
 ## [1.234.5](https://github.com/adobe/spacecat-api-service/compare/v1.234.4...v1.234.5) (2025-11-13)
 
 
