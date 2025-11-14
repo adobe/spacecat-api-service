@@ -44,6 +44,10 @@ describe('getRouteHandlers', () => {
     getByBaseURL: sinon.stub(),
   };
 
+  const mockPTA2Controller = {
+    getPTAWeeklySummary: sinon.stub(),
+  };
+
   const mockExperimentsController = {
     getExperiments: sinon.stub(),
   };
@@ -93,6 +97,7 @@ describe('getRouteHandlers', () => {
     getScrapeJobResult: sinon.stub(),
     getScrapeJobProgress: sinon.stub(),
     getScrapeJobsByDateRange: sinon.stub(),
+    getScrapeUrlByProcessingType: sinon.stub(),
   };
 
   const mockApiKeyController = {
@@ -116,6 +121,7 @@ describe('getRouteHandlers', () => {
 
   const mockSuggestionsController = {
     getAllForOpportunity: sinon.stub(),
+    getPagedForOpportunity: sinon.stub(),
     getByStatus: sinon.stub(),
     getByID: sinon.stub(),
     createSuggestions: sinon.stub(),
@@ -168,6 +174,14 @@ describe('getRouteHandlers', () => {
     getPaidTrafficByPageTypeCampaign: sinon.stub(),
     getPaidTrafficByPageTypePlatform: sinon.stub(),
     getPaidTrafficByPageTypePlatformDevice: sinon.stub(),
+    getPaidTrafficBySocialPlatformDevice: sinon.stub(),
+    getPaidTrafficBySearchPlatformDevice: sinon.stub(),
+    getPaidTrafficByDisplayPlatformDevice: sinon.stub(),
+    getPaidTrafficByVideoPlatformDevice: sinon.stub(),
+    getPaidTrafficBySocialPlatform: sinon.stub(),
+    getPaidTrafficBySearchPlatform: sinon.stub(),
+    getPaidTrafficByDisplayPlatform: sinon.stub(),
+    getPaidTrafficByVideoPlatform: sinon.stub(),
   };
 
   const mockFixesController = {
@@ -267,6 +281,8 @@ describe('getRouteHandlers', () => {
       mockEntitlementController,
       mockSandboxAuditController,
       mockReportsController,
+      mockPTA2Controller,
+      mockPTA2Controller,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -379,13 +395,18 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/opportunities/:opportunityId',
       'DELETE /sites/:siteId/opportunities/:opportunityId',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions',
+      'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit/:cursor',
+      'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix',
+      'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status',
+      'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit/:cursor',
+      'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions',
+      'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
       'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
-      'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes',
       'GET /sites/:siteId/scraped-content/:type',
       'GET /sites/:siteId/top-pages',
@@ -426,6 +447,19 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/traffic/paid/url-page-type-platform',
       'GET /sites/:siteId/traffic/paid/url-page-type-campaign-platform',
       'GET /sites/:siteId/traffic/paid/url-page-type-platform-device',
+      'GET /sites/:siteId/traffic/paid/pta2/weekly-summary',
+      'GET /sites/:siteId/traffic/paid/type-device',
+      'GET /sites/:siteId/traffic/paid/type-device-channel',
+      'GET /sites/:siteId/traffic/paid/channel',
+      'GET /sites/:siteId/traffic/paid/channel-device',
+      'GET /sites/:siteId/traffic/paid/social-platform',
+      'GET /sites/:siteId/traffic/paid/social-platform-device',
+      'GET /sites/:siteId/traffic/paid/search-platform',
+      'GET /sites/:siteId/traffic/paid/search-platform-device',
+      'GET /sites/:siteId/traffic/paid/display-platform',
+      'GET /sites/:siteId/traffic/paid/display-platform-device',
+      'GET /sites/:siteId/traffic/paid/video-platform',
+      'GET /sites/:siteId/traffic/paid/video-platform-device',
       'GET /tools/scrape/jobs/:jobId',
       'GET /tools/scrape/jobs/:jobId/results',
       'GET /tools/scrape/jobs/by-date-range/:startDate/:endDate/all-jobs',
@@ -436,11 +470,15 @@ describe('getRouteHandlers', () => {
       'DELETE /sites/:siteId/reports/:reportId',
       'GET /tools/scrape/jobs/by-base-url/:baseURL',
       'GET /tools/scrape/jobs/by-base-url/:baseURL/by-processingtype/:processingType',
+      'GET /tools/scrape/jobs/by-url/:url/:processingType',
+      'GET /tools/scrape/jobs/by-url/:url',
       'PATCH /sites/:siteId/config/cdn-logs',
       'GET /sites/:siteId/llmo/sheet-data/:dataSource',
       'GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource',
+      'GET /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource',
       'POST /sites/:siteId/llmo/sheet-data/:dataSource',
       'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource',
+      'POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource',
       'GET /sites/:siteId/llmo/config',
       'PATCH /sites/:siteId/llmo/config',
       'POST /sites/:siteId/llmo/config',
@@ -506,9 +544,17 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['DELETE /sites/:siteId/opportunities/:opportunityId'].handler).to.equal(mockOpportunitiesController.removeOpportunity);
     expect(dynamicRoutes['DELETE /sites/:siteId/opportunities/:opportunityId'].paramNames).to.deep.equal(['siteId', 'opportunityId']);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions'].handler).to.equal(mockSuggestionsController.getAllForOpportunity);
+    expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit/:cursor'].handler).to.equal(mockSuggestionsController.getAllForOpportunityPaged);
+    expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit/:cursor'].paramNames).to.deep.equal(['siteId', 'opportunityId', 'limit', 'cursor']);
+    expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit'].handler).to.equal(mockSuggestionsController.getAllForOpportunityPaged);
+    expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit'].paramNames).to.deep.equal(['siteId', 'opportunityId', 'limit']);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions'].paramNames).to.deep.equal(['siteId', 'opportunityId']);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status'].handler).to.equal(mockSuggestionsController.getByStatus);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status'].paramNames).to.deep.equal(['siteId', 'opportunityId', 'status']);
+    expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit/:cursor'].handler).to.equal(mockSuggestionsController.getByStatusPaged);
+    expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit/:cursor'].paramNames).to.deep.equal(['siteId', 'opportunityId', 'status', 'limit', 'cursor']);
+    expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit'].handler).to.equal(mockSuggestionsController.getByStatusPaged);
+    expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit'].paramNames).to.deep.equal(['siteId', 'opportunityId', 'status', 'limit']);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId'].handler).to.equal(mockSuggestionsController.getByID);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId'].paramNames).to.deep.equal(['siteId', 'opportunityId', 'suggestionId']);
     expect(dynamicRoutes['POST /sites/:siteId/opportunities/:opportunityId/suggestions'].handler).to.equal(mockSuggestionsController.createSuggestions);
@@ -538,6 +584,19 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/type-campaign'].handler).to.equal(mockTrafficController.getPaidTrafficByTypeCampaign);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/type-channel'].handler).to.equal(mockTrafficController.getPaidTrafficByTypeChannel);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/type-channel-campaign'].handler).to.equal(mockTrafficController.getPaidTrafficByTypeChannelCampaign);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/pta2/weekly-summary'].handler).to.equal(mockPTA2Controller.getPTAWeeklySummary);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/type-device'].handler).to.equal(mockTrafficController.getPaidTrafficByTypeDevice);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/type-device-channel'].handler).to.equal(mockTrafficController.getPaidTrafficByTypeDeviceChannel);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/channel'].handler).to.equal(mockTrafficController.getPaidTrafficByChannel);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/channel-device'].handler).to.equal(mockTrafficController.getPaidTrafficByChannelDevice);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/social-platform'].handler).to.equal(mockTrafficController.getPaidTrafficBySocialPlatform);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/social-platform-device'].handler).to.equal(mockTrafficController.getPaidTrafficBySocialPlatformDevice);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/search-platform'].handler).to.equal(mockTrafficController.getPaidTrafficBySearchPlatform);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/search-platform-device'].handler).to.equal(mockTrafficController.getPaidTrafficBySearchPlatformDevice);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/display-platform'].handler).to.equal(mockTrafficController.getPaidTrafficByDisplayPlatform);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/display-platform-device'].handler).to.equal(mockTrafficController.getPaidTrafficByDisplayPlatformDevice);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/video-platform'].handler).to.equal(mockTrafficController.getPaidTrafficByVideoPlatform);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/video-platform-device'].handler).to.equal(mockTrafficController.getPaidTrafficByVideoPlatformDevice);
     expect(dynamicRoutes['GET /sites/:siteId/files'].handler).to.equal(mockScrapeController.getFileByKey);
     expect(dynamicRoutes['GET /sites/:siteId/files'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /tools/scrape/jobs/:jobId'].handler).to.equal(mockScrapeJobController.getScrapeJobStatus);
@@ -564,6 +623,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/llmo/sheet-data/:dataSource'].paramNames).to.deep.equal(['siteId', 'dataSource']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource'].handler).to.equal(mockLlmoController.getLlmoSheetData);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'dataSource']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource'].handler).to.equal(mockLlmoController.getLlmoSheetData);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'week', 'dataSource']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/config'].handler).to.equal(mockLlmoController.getLlmoConfig);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/config'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/questions'].handler).to.equal(mockLlmoController.getLlmoQuestions);
@@ -600,5 +661,7 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:dataSource'].paramNames).to.deep.equal(['siteId', 'dataSource']);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource'].handler).to.equal(mockLlmoController.queryLlmoSheetData);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'dataSource']);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource'].handler).to.equal(mockLlmoController.queryLlmoSheetData);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'week', 'dataSource']);
   });
 });

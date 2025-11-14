@@ -24,6 +24,7 @@ const SHAREPOINT_URL = 'https://adobe.sharepoint.com/:x:/r/sites/HelixProjects/S
 
 // These audits don't depend on any additonal data being configured
 export const BASIC_AUDITS = [
+  'scrape-top-pages',
   'headings',
   'llm-blocked',
   'canonical',
@@ -632,7 +633,7 @@ export async function removeLlmoConfig(site, config, context) {
     'llmo-customer-analysis',
     'llm-blocked',
     'llm-error-pages',
-    'cdn-analysis',
+    'cdn-logs-analysis',
     'cdn-logs-report',
     'geo-brand-presence',
   ];
@@ -782,7 +783,7 @@ export async function performLlmoOnboarding(params, context) {
     await site.save();
 
     // Trigger audits
-    await triggerAudits([...BASIC_AUDITS], context, site);
+    await triggerAudits([...BASIC_AUDITS, 'llmo-customer-analysis'], context, site);
 
     return {
       siteId: site.getId(),
