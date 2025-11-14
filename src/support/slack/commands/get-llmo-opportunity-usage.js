@@ -125,9 +125,7 @@ function GetLlmoOpportunityUsageCommand(context) {
   });
 
   const { dataAccess, log } = context;
-  const {
-    Site, Organization, Opportunity, Entitlement,
-  } = dataAccess;
+  const { Site, Organization, Opportunity } = dataAccess;
 
   const countLlmoOpportunities = async (siteId) => {
     const opportunities = await Opportunity.allBySiteId(siteId);
@@ -193,18 +191,6 @@ function GetLlmoOpportunityUsageCommand(context) {
             log.info(`Skipping excluded IMS org: ${imsOrgId} for site: ${site.getBaseURL()}`);
             return null;
           }
-
-          // Get tier from entitlements
-          let tier = 'N/A';
-          if (organization) {
-            const entitlements = await Entitlement.allByOrganizationId(organization.getId());
-            if (entitlements && entitlements.length > 0) {
-              const llmoEntitlement = entitlements.find((e) => e.getProductCode() === 'LLMO');
-              if (llmoEntitlement) {
-                tier = llmoEntitlement.getTier();
-              }
-            }
-          }
           const containsGeo403 = queryIndex?.data?.some((item) => item.path.includes('agentic-traffic/agentictraffic-errors-403')) || false;
           const containsGeo404 = queryIndex?.data?.some((item) => item.path.includes('agentic-traffic/agentictraffic-errors-404')) || false;
           const containsGeo5xx = queryIndex?.data?.some((item) => item.path.includes('agentic-traffic/agentictraffic-errors-5xx')) || false;
@@ -234,7 +220,6 @@ function GetLlmoOpportunityUsageCommand(context) {
             organizationId: site.getOrganizationId(),
             imsOrgName,
             imsOrgId,
-            tier,
             totalOpportunities,
             containsGeo403,
             containsGeo404,
@@ -268,7 +253,6 @@ function GetLlmoOpportunityUsageCommand(context) {
           { id: 'organizationId', title: 'Organization ID' },
           { id: 'imsOrgName', title: 'IMS Org Name' },
           { id: 'imsOrgId', title: 'IMS Org ID' },
-          { id: 'tier', title: 'Tier' },
           { id: 'containsGeo403', title: 'Has Tech GEO 403' },
           { id: 'containsGeo404', title: 'Has Tech GEO 404' },
           { id: 'containsGeo5xx', title: 'Has Tech GEO 5xx' },
