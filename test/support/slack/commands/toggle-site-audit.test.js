@@ -603,6 +603,20 @@ describe('UpdateSitesAuditsCommand', () => {
       expect(configurationMock.enableHandlerForSite.called).to.be.false;
     });
 
+    it('should prompt for configuration when ams type missing delivery config', async () => {
+      preflightSiteMock.getAuthoringType.returns('ams');
+      preflightSiteMock.getDeliveryConfig.returns({ }); // missing author url
+      preflightSiteMock.getHlxConfig.returns({});
+
+      const command = ToggleSiteAuditCommand(contextMock);
+      await command.handleExecution(['enable', 'https://example.com', 'preflight'], slackContextMock);
+
+      expect(slackContextMock.say.calledWith({
+        text: ':warning: Preflight audit requires additional configuration for `https://example.com`',
+        blocks: sinon.match.array,
+      }));
+    });
+
     it('should show correct missing items for documentauthoring with missing helix config', async () => {
       preflightSiteMock.getAuthoringType.returns('documentauthoring');
       preflightSiteMock.getDeliveryConfig.returns(null);

@@ -94,6 +94,19 @@ describe('onboard-modal', () => {
       expect(returnedImsOrgId).to.equal(imsOrgId);
     });
 
+    it('should validate valid AMS preview URLs', async () => {
+      const previewURL = 'https://author.adobecqms.net';
+
+      const {
+        authorURL,
+        preferContentApi,
+        imsOrgId,
+      } = extractDeliveryConfigFromPreviewUrl(previewURL);
+      expect(authorURL).to.equal('https://author.adobecqms.net');
+      expect(preferContentApi).to.equal(true);
+      expect(imsOrgId).to.equal(null);
+    });
+
     it('should reject invalid preview URLs', async () => {
       const invalidUrl = 'https://invalid-url.com';
       expect(extractDeliveryConfigFromPreviewUrl(invalidUrl, null)).to.be.null;
