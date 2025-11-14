@@ -30,8 +30,8 @@ import {
   getSignedUrlWithRetries,
 } from './caching-helper.js';
 
-function getCacheKey(siteId, query, cacheLocation) {
-  const outPrefix = crypto.createHash('md5').update(query).digest('hex');
+function getCacheKey(siteId, query, cacheLocation, filter = null) {
+  const outPrefix = crypto.createHash('md5').update(`${query}${filter ? filter.filterKey : ''}`).digest('hex');
   const cacheKey = `${cacheLocation}/${siteId}/${outPrefix}.json`;
   return { cacheKey, outPrefix };
 }
@@ -97,8 +97,8 @@ function TrafficController(context, log, env) {
   const ATHENA_TEMP_FOLDER = `s3://${bucketName}/rum-metrics-compact/temp/out`;
   const CACHE_LOCATION = `s3://${bucketName}/rum-metrics-compact/cache`;
 
-  async function tryGetCacheResult(siteId, query, noCache) {
-    const { cacheKey, outPrefix } = getCacheKey(siteId, query, CACHE_LOCATION);
+  async function tryGetCacheResult(siteId, query, noCache, filter = null) {
+    const { cacheKey, outPrefix } = getCacheKey(siteId, query, CACHE_LOCATION, filter);
     if (isTrue(noCache)) {
       return { cachedResultUrl: null, cacheKey, outPrefix };
     }
@@ -112,7 +112,7 @@ function TrafficController(context, log, env) {
     return { cachedResultUrl: null, cacheKey, outPrefix };
   }
 
-  async function fetchPaidTrafficData(dimensions, mapper, filterFunction = null) {
+  async function fetchPaidTrafficData(dimensions, mapper, filter = null) {
     /* c8 ignore next 1 */
     const requestId = context.invocation?.requestId;
     const siteId = context.params?.siteId;
@@ -179,6 +179,7 @@ function TrafficController(context, log, env) {
       siteId,
       query,
       noCache,
+      filter,
     );
     let thresholdConfig = {};
     if (env.CWV_THRESHOLDS) {
@@ -204,7 +205,7 @@ function TrafficController(context, log, env) {
     const athenaClient = AWSAthenaClient.fromContext(context, resultLocation);
 
     const results = await athenaClient.query(query, rumMetricsDatabase, description);
-    const filteredResults = filterFunction ? filterFunction(results) : results;
+    const filteredResults = filter?.filterFunction ? filter.filterFunction(results) : results;
     const response = filteredResults.map((row) => mapper.toJSON(row, thresholdConfig, baseURL));
 
     // add to cache
@@ -232,8 +233,19 @@ function TrafficController(context, log, env) {
     });
   }
 
-  async function getPaidTrafficBySpecificPlatform(channel) {
-    return fetchPaidTrafficData(['trf_channel', 'device'], TrafficDataResponseDto, (results) => results.filter((item) => item.trf_channel === channel));
+  async function getPaidTrafficBySpecificPlatform(channel, withDevice = false) {
+    const dimensions = ['trf_channel', 'trf_platform'];
+    if (withDevice) {
+      dimensions.push('device');
+    }
+    return fetchPaidTrafficData(
+      dimensions,
+      TrafficDataResponseDto,
+      {
+        filterKey: channel,
+        filterFunction: (results) => results.filter((item) => item.trf_channel === channel),
+      },
+    );
   }
 
   return {
@@ -266,10 +278,15 @@ function TrafficController(context, log, env) {
     getPaidTrafficByTypeDeviceChannel: async () => fetchPaidTrafficData(['trf_type', 'device', 'trf_channel'], TrafficDataResponseDto),
     getPaidTrafficByChannel: async () => fetchPaidTrafficData(['trf_channel'], TrafficDataResponseDto),
     getPaidTrafficByChannelDevice: async () => fetchPaidTrafficData(['trf_channel', 'device'], TrafficDataResponseDto),
+
     getPaidTrafficBySocialPlatform: async () => getPaidTrafficBySpecificPlatform('social'),
+    getPaidTrafficBySocialPlatformDevice: async () => getPaidTrafficBySpecificPlatform('social', true),
     getPaidTrafficBySearchPlatform: async () => getPaidTrafficBySpecificPlatform('search'),
+    getPaidTrafficBySearchPlatformDevice: async () => getPaidTrafficBySpecificPlatform('search', true),
     getPaidTrafficByDisplayPlatform: async () => getPaidTrafficBySpecificPlatform('display'),
+    getPaidTrafficByDisplayPlatformDevice: async () => getPaidTrafficBySpecificPlatform('display', true),
     getPaidTrafficByVideoPlatform: async () => getPaidTrafficBySpecificPlatform('video'),
+    getPaidTrafficByVideoPlatformDevice: async () => getPaidTrafficBySpecificPlatform('video', true),
   };
 }
 
