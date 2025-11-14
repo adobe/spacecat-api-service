@@ -642,7 +642,7 @@ describe('onboard-modal', () => {
 
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
         channel: 'C12345',
-        text: ':white_check_mark: *Onboarding completed successfully by test-user!*\n'
+        text: ':white_check_mark: *Onboarding triggered successfully by test-user!*\n'
           + '\n'
           + ':ims: *IMS Org ID:* 1234567894ABCDEF12345678@AdobeOrg\n'
           + ':groups: *Project ID:* project123\n'
@@ -753,7 +753,7 @@ describe('onboard-modal', () => {
 
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
         channel: 'C12345',
-        text: ':white_check_mark: *Onboarding completed successfully by test-user!*\n'
+        text: ':white_check_mark: *Onboarding triggered successfully by test-user!*\n'
           + '\n'
           + ':ims: *IMS Org ID:* 1234567894ABCDEF12345678@AdobeOrg\n'
           + ':groups: *Project ID:* project123\n'
