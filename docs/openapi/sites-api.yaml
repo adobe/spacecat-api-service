@@ -168,3 +168,123 @@ sites-by-organization-and-project-name:
       - api_key: [ ]
       - ims_key: [ ]
       - scoped_api_key: [ ]
+
+sites-resolve:
+  get:
+    tags:
+      - site
+    summary: Resolve site and organization data
+    description: |
+      This endpoint resolves site and organization data based on flexible query parameters.
+      It supports resolution by organization ID, IMS organization ID, or specific site ID.
+      The endpoint validates entitlements and enrollments for the specified product code.
+      
+      **Resolution Logic:**
+      1. If `siteId` is provided, validates the site against the organization
+      2. Otherwise, resolves by `organizationId` or `imsOrg`
+      3. Returns the first enrolled site with matching entitlement
+      
+      **Required Header:**
+      - `x-product`: Product code for entitlement validation
+    operationId: resolveSite
+    parameters:
+      - name: x-product
+        in: header
+        required: true
+        description: Product code for entitlement validation
+        schema:
+          type: string
+          example: 'ASO'
+      - name: organizationId
+        in: query
+        required: false
+        description: UUID of the organization (mutually exclusive with imsOrg)
+        schema:
+          $ref: './schemas.yaml#/Id'
+      - name: imsOrg
+        in: query
+        required: false
+        description: IMS Organization ID (mutually exclusive with organizationId)
+        schema:
+          $ref: './schemas.yaml#/ImsOrganizationId'
+      - name: siteId
+        in: query
+        required: false
+        description: UUID of a specific site to validate against the organization
+        schema:
+          $ref: './schemas.yaml#/Id'
+    responses:
+      '200':
+        description: Successfully resolved site and organization data
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  type: object
+                  properties:
+                    organization:
+                      $ref: './schemas.yaml#/Organization'
+                    site:
+                      $ref: './schemas.yaml#/Site'
+              example:
+                data:
+                  organization:
+                    id: '9033554c-de8a-44ac-a356-09b51af8cc28'
+                    name: 'Example Organization'
+                    imsOrgId: '1234567890ABCDEF12345678@AdobeOrg'
+                    config: {}
+                  site:
+                    id: '0b4dcf79-fe5f-410b-b11f-641f0bf56da3'
+                    baseURL: 'https://example.com'
+                    organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28'
+                    deliveryType: 'aem_edge'
+                    isLive: true
+      '400':
+        description: Bad request - missing required parameters or invalid input
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+            examples:
+              missing-product-code:
+                summary: Missing x-product header
+                value:
+                  message: 'Product code required in x-product header'
+              missing-org-params:
+                summary: Missing organization parameters
+                value:
+                  message: 'Either organizationId or imsOrg must be provided'
+              resolution-failed:
+                summary: Failed to resolve site
+                value:
+                  message: 'Failed to resolve site'
+      '404':
+        description: Not found - no site found for the provided parameters
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+            example:
+              message: 'No site found for the provided parameters'
+      '500':
+        description: Internal server error
+        headers:
+          X-Error:
+            $ref: './headers.yaml#/xError'
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
