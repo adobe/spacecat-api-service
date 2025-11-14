@@ -2568,6 +2568,9 @@ SuggestionStatus:
     - 'SKIPPED'
     - 'FIXED'
     - 'ERROR'
+    - 'IN_PROGRESS'
+    - 'OUTDATED'
+    - 'PENDING_VALIDATION'
   example: 'NEW'
 SuggestionType:
   description: |
