@@ -1,3 +1,53 @@
+## [1.234.5](https://github.com/adobe/spacecat-api-service/compare/v1.234.4...v1.234.5) (2025-11-13)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#1490](https://github.com/adobe/spacecat-api-service/issues/1490)) ([05691f7](https://github.com/adobe/spacecat-api-service/commit/05691f7273d802a0687c7c838080df19b96bc5d4))
+
+## [1.234.4](https://github.com/adobe/spacecat-api-service/compare/v1.234.3...v1.234.4) (2025-11-13)
+
+
+### Bug Fixes
+
+* edge-deploy API handling for faq opportunity ([#1485](https://github.com/adobe/spacecat-api-service/issues/1485)) ([9c27794](https://github.com/adobe/spacecat-api-service/commit/9c27794191152e6893fbae430233bb5fef5c9d73))
+* enable only when customer selected cdn ([#1489](https://github.com/adobe/spacecat-api-service/issues/1489)) ([f78337d](https://github.com/adobe/spacecat-api-service/commit/f78337d9c6ef5e4dbb0c53f0e2d3e01221bc3d6b))
+
+## [1.234.3](https://github.com/adobe/spacecat-api-service/compare/v1.234.2...v1.234.3) (2025-11-13)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tokowaka-client to v1.0.3 ([#1487](https://github.com/adobe/spacecat-api-service/issues/1487)) ([c7974ca](https://github.com/adobe/spacecat-api-service/commit/c7974cacffaeb5d9f5fef53748d24edb93cd27ab))
+
+## [1.234.2](https://github.com/adobe/spacecat-api-service/compare/v1.234.1...v1.234.2) (2025-11-13)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.72.1 ([#1486](https://github.com/adobe/spacecat-api-service/issues/1486)) ([4e0e3c1](https://github.com/adobe/spacecat-api-service/commit/4e0e3c1bf0a5484276bfa7f8b679525beed0c757))
+
+## [1.234.1](https://github.com/adobe/spacecat-api-service/compare/v1.234.0...v1.234.1) (2025-11-13)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.82.0 ([#1484](https://github.com/adobe/spacecat-api-service/issues/1484)) ([7d1bace](https://github.com/adobe/spacecat-api-service/commit/7d1bace6fee62f3386e59dfc231ef3a0d68167e3))
+
+# [1.234.0](https://github.com/adobe/spacecat-api-service/compare/v1.233.3...v1.234.0) (2025-11-13)
+
+
+### Features
+
+* **slack/backfill-llmo:** add limit to llmo-referral-traffic backfill ([#1483](https://github.com/adobe/spacecat-api-service/issues/1483)) ([b02da52](https://github.com/adobe/spacecat-api-service/commit/b02da5261deffd914be7bb641c1d59378debbcda))
+
+## [1.233.3](https://github.com/adobe/spacecat-api-service/compare/v1.233.2...v1.233.3) (2025-11-12)
+
+
+### Bug Fixes
+
+* **docs/openapi/schemas.yaml:** revert schema changes because llmo co… ([#1482](https://github.com/adobe/spacecat-api-service/issues/1482)) ([4a281e0](https://github.com/adobe/spacecat-api-service/commit/4a281e09463754ae4d09bef39e7356141352af35))
+
 ## [1.233.2](https://github.com/adobe/spacecat-api-service/compare/v1.233.1...v1.233.2) (2025-11-12)
 
 
