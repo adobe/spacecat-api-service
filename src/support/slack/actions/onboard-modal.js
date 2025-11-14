@@ -644,9 +644,9 @@ export function onboardSiteModal(lambdaContext) {
         }
       }
 
+      const configuration = await Configuration.findLatest();
       await ack();
 
-      const configuration = await Configuration.findLatest();
       const additionalParams = {};
       if (deliveryType && deliveryType !== 'auto') {
         additionalParams.deliveryType = deliveryType;
@@ -715,7 +715,7 @@ export function onboardSiteModal(lambdaContext) {
           ? `\n:globe_with_meridians: *Preview Environment:* Configured with Program ${deliveryConfigFromPreview.programId}, Environment ${deliveryConfigFromPreview.environmentId}`
           : '';
 
-        const message = `:white_check_mark: *Onboarding completed successfully by ${user.name}!*
+        const message = `:white_check_mark: *Onboarding triggered successfully by ${user.name}!*
 
 :ims: *IMS Org ID:* ${reportLine.imsOrgId || 'n/a'}
 :groups: *Project ID:* ${reportLine.projectId || 'n/a'}
