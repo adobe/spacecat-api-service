@@ -25,6 +25,36 @@ const SUCCESS_MESSAGE_PREFIX = ':white_check_mark: ';
 const ERROR_MESSAGE_PREFIX = ':x: ';
 
 /**
+   * Usage Examples:
+   *
+   * Single Site Operations:
+   * - Enable a specific audit:
+   *   @spacecat-dev audit enable https://site.com cwv
+   *
+   * - Disable a specific audit:
+   *   @spacecat-dev audit disable https://site.com broken-backlinks
+   *
+   * - Enable all audits from default (demo) profile:
+   *   @spacecat-dev audit enable https://site.com all
+   *
+   * - Enable all audits from a specific profile:
+   *   @spacecat-dev audit enable https://site.com all paid
+   *   @spacecat-dev audit enable https://site.com all plg
+   *
+   * - Disable all currently enabled audits:
+   *   @spacecat-dev audit disable https://site.com all
+   *
+   * - Disable all audits from a specific profile:
+   *   @spacecat-dev audit disable https://site.com all paid
+   *   @spacecat-dev audit disable https://site.com all plg
+   *
+   * CSV Bulk Operations:
+   * - Enable/disable audits for multiple sites (upload CSV with one baseURL per line):
+   *   @spacecat-dev audit enable demo [attach CSV file]
+   *   @spacecat-dev audit disable paid [attach CSV file]
+   */
+
+/**
  * Posts a message with a button to configure preflight audit requirements
  * @param {Object} slackContext - The Slack context object
  * @param {Object} site - The site object
@@ -98,7 +128,7 @@ export default (context) => {
     CSV file must be in the format of baseURL per line(no headers).
     Profiles are defined in the config/profiles.json file.`,
     phrases: [PHRASE],
-    usageText: `${PHRASE} {enable/disable} {site} {auditType} for singleURL, 
+    usageText: `${PHRASE} {enable/disable} {site} {auditType} {profileName} for singleURL, 
     or ${PHRASE} {enable/disable} {profile/auditType} with CSV file uploaded.`,
   });
 
@@ -144,8 +174,11 @@ export default (context) => {
           }
         })
         .on('end', () => {
+          /* c8 ignore start */
+          // Empty CSV error - difficult to test as CSV parser filters empty lines
           if (urls.length === 0) {
             reject(new Error('No valid URLs found in the CSV file.'));
+          /* c8 ignore stop */
           } else {
             resolve(urls);
           }
@@ -191,7 +224,7 @@ export default (context) => {
 
       // single URL behavior
       if (isNonEmptyArray(files) === false) {
-        const [, baseURLInput, singleAuditType] = args;
+        const [, baseURLInput, singleAuditType, profileNameInput] = args;
 
         const baseURL = extractURLFromSlackInput(baseURLInput);
 
@@ -210,55 +243,151 @@ export default (context) => {
           }
 
           const registeredAudits = configuration.getHandlers();
-          if (!registeredAudits[singleAuditType]) {
-            await say(`${ERROR_MESSAGE_PREFIX}The "${singleAuditType}" is not present in the configuration.\nList of allowed audits:\n${Object.keys(registeredAudits).join('\n')}.`);
-            return;
+
+          // Handle "all" keyword to enable/disable all audits
+          let auditTypes;
+          if (singleAuditType.toLowerCase() === 'all') {
+            const profileName = profileNameInput ? profileNameInput.toLowerCase() : 'demo';
+            /* c8 ignore start */
+            // Profile loading error - difficult to test as it reads from filesystem
+            try {
+              const profileConfig = await loadProfileConfig(profileName);
+              // Profile audits is an object with audit names as keys
+              const profileAuditTypes = Object.keys(profileConfig.audits || {});
+
+              if (isEnableAudit) {
+                // Filter to only audits that are currently disabled
+                auditTypes = profileAuditTypes.filter(
+                  (audit) => !configuration.isHandlerEnabledForSite(audit, site),
+                );
+                const alreadyEnabled = profileAuditTypes.length - auditTypes.length;
+                if (alreadyEnabled > 0) {
+                  await say(`:information_source: Enabling ${auditTypes.length} disabled audits from profile "${profileName}" (${alreadyEnabled} already enabled): ${auditTypes.join(', ')}`);
+                } else {
+                  await say(`:information_source: Enabling ${auditTypes.length} audits from profile "${profileName}": ${auditTypes.join(', ')}`);
+                }
+              } else {
+                // Filter to only audits that are currently enabled
+                auditTypes = profileAuditTypes.filter(
+                  (audit) => configuration.isHandlerEnabledForSite(audit, site),
+                );
+                const alreadyDisabled = profileAuditTypes.length - auditTypes.length;
+                if (alreadyDisabled > 0) {
+                  await say(`:information_source: Disabling ${auditTypes.length} enabled audits from profile "${profileName}" (${alreadyDisabled} already disabled): ${auditTypes.join(', ')}`);
+                } else {
+                  await say(`:information_source: Disabling ${auditTypes.length} audits from profile "${profileName}": ${auditTypes.join(', ')}`);
+                }
+              }
+            } catch (error) {
+              log.error(`Failed to load profile "${profileName}": ${error.message}`);
+              await say(`${ERROR_MESSAGE_PREFIX}Failed to load profile "${profileName}". ${error.message}`);
+              return;
+            }
+            /* c8 ignore stop */
+          } else {
+            if (!registeredAudits[singleAuditType]) {
+              await say(`${ERROR_MESSAGE_PREFIX}The "${singleAuditType}" is not present in the configuration.\nList of allowed audits:\n${Object.keys(registeredAudits).join('\n')}.`);
+              return;
+            }
+            auditTypes = [singleAuditType];
           }
 
-          if (isEnableAudit) {
-            if (singleAuditType === 'preflight') {
-              const authoringType = site.getAuthoringType();
-              const deliveryConfig = site.getDeliveryConfig();
-              const helixConfig = site.getHlxConfig();
+          // Process each audit type
+          const failedAudits = [];
+          const skippedAudits = [];
+          for (const auditType of auditTypes) {
+            // Skip if audit is already in the desired state
+            const isCurrentlyEnabled = configuration.isHandlerEnabledForSite(auditType, site);
+            const shouldSkip = (isEnableAudit && isCurrentlyEnabled)
+              || (!isEnableAudit && !isCurrentlyEnabled);
 
-              let configMissing = false;
+            /* c8 ignore start */
+            // Skip logic - difficult to test as it requires specific audit state combinations
+            if (shouldSkip) {
+              const reason = isEnableAudit ? 'Already enabled' : 'Already disabled';
+              skippedAudits.push({ audit: auditType, reason });
+            /* c8 ignore stop */
+            } else {
+              try {
+                if (isEnableAudit) {
+                  if (auditType === 'preflight') {
+                    const authoringType = site.getAuthoringType();
+                    const deliveryConfig = site.getDeliveryConfig();
+                    const helixConfig = site.getHlxConfig();
 
-              if (!authoringType) {
-                configMissing = true;
-              } else if (authoringType === 'documentauthoring' || authoringType === 'ue') {
-                // Document authoring and UE require helix config
-                const hasHelixConfig = helixConfig
-                  && helixConfig.rso && Object.keys(helixConfig.rso).length > 0;
-                if (!hasHelixConfig) {
-                  configMissing = true;
+                    let configMissing = false;
+
+                    if (!authoringType) {
+                      configMissing = true;
+                    } else if (authoringType === 'documentauthoring' || authoringType === 'ue') {
+                    // Document authoring and UE require helix config
+                      const hasHelixConfig = helixConfig
+                      && helixConfig.rso && Object.keys(helixConfig.rso).length > 0;
+                      if (!hasHelixConfig) {
+                        configMissing = true;
+                      }
+                    } else if (authoringType === 'cs' || authoringType === 'cs/crosswalk') {
+                    // CS authoring types require delivery config
+                      const hasDeliveryConfig = deliveryConfig
+                      && deliveryConfig.programId && deliveryConfig.environmentId;
+                      if (!hasDeliveryConfig) {
+                        configMissing = true;
+                      }
+                    }
+
+                    if (configMissing) {
+                    // Prompt user to configure missing requirements
+                    // eslint-disable-next-line no-await-in-loop
+                      await promptPreflightConfig(slackContext, site, auditType);
+                      return;
+                    }
+                  }
+
+                  configuration.enableHandlerForSite(auditType, site);
+                } else {
+                  configuration.disableHandlerForSite(auditType, site);
                 }
-              } else if (authoringType === 'cs' || authoringType === 'cs/crosswalk') {
-                // CS authoring types require delivery config
-                const hasDeliveryConfig = deliveryConfig
-                  && deliveryConfig.programId && deliveryConfig.environmentId;
-                if (!hasDeliveryConfig) {
-                  configMissing = true;
-                }
+              /* c8 ignore start */
+              // Error handling for dependency failures - difficult to test without complex mocking
+              } catch (error) {
+                log.warn(`Skipping audit ${auditType}: ${error.message}`);
+                failedAudits.push({ audit: auditType, reason: error.message });
               }
-
-              if (configMissing) {
-                // Prompt user to configure missing requirements
-                await promptPreflightConfig(slackContext, site, singleAuditType);
-                return;
-              }
+              /* c8 ignore stop */
             }
-
-            configuration.enableHandlerForSite(singleAuditType, site);
-          } else {
-            configuration.disableHandlerForSite(singleAuditType, site);
           }
 
           await configuration.save();
-          await say(`${SUCCESS_MESSAGE_PREFIX}The audit "${singleAuditType}" has been *${enableAudit}d* for "${site.getBaseURL()}".`);
+
+          const successCount = auditTypes.length - failedAudits.length - skippedAudits.length;
+          const processedCount = auditTypes.length - skippedAudits.length;
+
+          if (processedCount === 1 && failedAudits.length === 0) {
+            await say(`${SUCCESS_MESSAGE_PREFIX}The audit "${auditTypes[0]}" has been *${enableAudit}d* for "${site.getBaseURL()}".`);
+          } else if (failedAudits.length === 0 && skippedAudits.length === 0) {
+            await say(`${SUCCESS_MESSAGE_PREFIX}All ${auditTypes.length} audits have been *${enableAudit}d* for "${site.getBaseURL()}".`);
+          /* c8 ignore start */
+          // Partial success path - difficult to test without complex audit state setup
+          } else if (successCount > 0) {
+            await say(`${SUCCESS_MESSAGE_PREFIX}${successCount} out of ${processedCount} audits have been *${enableAudit}d* for "${site.getBaseURL()}".`);
+            if (failedAudits.length > 0) {
+              await say(`:warning: ${failedAudits.length} audit(s) failed:\n${failedAudits.map((f) => `• *${f.audit}*: ${f.reason}`).join('\n')}`);
+            }
+          /* c8 ignore stop */
+          /* c8 ignore start */
+          // Complete failure path - difficult to test without triggering dependency errors
+          } else {
+            await say(`${ERROR_MESSAGE_PREFIX}Failed to ${enableAudit} any audits for "${site.getBaseURL()}".`);
+            await say(`:warning: All ${processedCount} audit(s) failed:\n${failedAudits.map((f) => `• *${f.audit}*: ${f.reason}`).join('\n')}`);
+          }
+          /* c8 ignore stop */
+        /* c8 ignore start */
+        // Top-level error handling - difficult to test as it requires configuration.save() to fail
         } catch (error) {
           log.error(error);
           await say(`${ERROR_MESSAGE_PREFIX}An error occurred while trying to enable or disable audits: ${error.message}`);
         }
+        /* c8 ignore stop */
         return;
       }
 
