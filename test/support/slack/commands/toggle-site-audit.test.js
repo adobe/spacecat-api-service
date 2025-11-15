@@ -58,6 +58,9 @@ describe('UpdateSitesAuditsCommand', () => {
       getVersion: sandbox.stub(),
       getJobs: sandbox.stub(),
       getHandlers: sandbox.stub().returns(handlers),
+      getEnabledAuditsForSite: sandbox.stub().returns(['some_audit']),
+      getDisabledAuditsForSite: sandbox.stub().returns(['cwv']),
+      isHandlerEnabledForSite: sandbox.stub().callsFake((auditType) => auditType === 'some_audit'),
       getQueues: sandbox.stub(),
       getSlackRoles: sandbox.stub(),
       save: sandbox.stub(),
@@ -74,6 +77,7 @@ describe('UpdateSitesAuditsCommand', () => {
 
     logMock = {
       error: sandbox.stub(),
+      warn: sandbox.stub(),
     };
 
     contextMock = {
@@ -92,9 +96,48 @@ describe('UpdateSitesAuditsCommand', () => {
       ok: true,
       text: () => Promise.resolve('https://site1.com\nhttps://site2.com'),
     });
+
+    const loadProfileConfigStub = sinon.stub().callsFake((profileName) => {
+      if (profileName === 'demo') {
+        return {
+          audits: {
+            cwv: { enabled: true },
+            sitemap: { enabled: true },
+          },
+        };
+      }
+      throw new Error(`Profile "${profileName}" not found`);
+    });
+
+    const extractURLFromSlackInputStub = (input) => {
+      // Normalize URL: add https:// if no scheme is present
+      if (input && !input.startsWith('http://') && !input.startsWith('https://')) {
+        return `https://${input}`;
+      }
+      return input;
+    };
+
+    const isValidUrlStub = (url) => {
+      // Validate URL has proper format with TLD
+      try {
+        const urlObj = new URL(url);
+        // Check if hostname has at least one dot (indicating a TLD)
+        return urlObj.hostname.includes('.');
+      } catch {
+        return false;
+      }
+    };
+
     ToggleSiteAuditCommand = await esmock('../../../../src/support/slack/commands/toggle-site-audit.js', {
       '@adobe/spacecat-shared-utils': {
         tracingFetch: fetchStub,
+        isValidUrl: isValidUrlStub,
+        hasText: (str) => typeof str === 'string' && str.trim().length > 0,
+        isNonEmptyArray: (arr) => Array.isArray(arr) && arr.length > 0,
+      },
+      '../../../../src/utils/slack/base.js': {
+        extractURLFromSlackInput: extractURLFromSlackInputStub,
+        loadProfileConfig: loadProfileConfigStub,
       },
     });
   });
@@ -107,7 +150,7 @@ describe('UpdateSitesAuditsCommand', () => {
     dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
 
     const command = ToggleSiteAuditCommand(contextMock);
-    const args = ['enable', 'https://site0.com', 'some_audit'];
+    const args = ['enable', 'https://site0.com', 'cwv'];
     await command.handleExecution(args, slackContextMock);
 
     expect(
@@ -119,12 +162,12 @@ describe('UpdateSitesAuditsCommand', () => {
       'Expected configuration.save to be called, but it was not',
     ).to.be.true;
     expect(
-      configurationMock.enableHandlerForSite.calledWith('some_audit', site),
-      'Expected configuration.enableHandlerForSite to be called with "some_audit" and site, but it was not',
+      configurationMock.enableHandlerForSite.calledWith('cwv', site),
+      'Expected configuration.enableHandlerForSite to be called with "cwv" and site, but it was not',
     ).to.be.true;
     expect(
-      slackContextMock.say.calledWith(`${SUCCESS_MESSAGE_PREFIX}The audit "some_audit" has been *enabled* for "https://site0.com".`),
-      'Expected Slack message to be sent confirming "some_audit" was enabled for "https://site0.com", but it was not',
+      slackContextMock.say.calledWith(`${SUCCESS_MESSAGE_PREFIX}The audit "cwv" has been *enabled* for "https://site0.com".`),
+      'Expected Slack message to be sent confirming "cwv" was enabled for "https://site0.com", but it was not',
     ).to.be.true;
   });
 
@@ -153,6 +196,132 @@ describe('UpdateSitesAuditsCommand', () => {
     ).to.be.true;
   });
 
+  it('enable all audits for a site using "all" keyword', async () => {
+    dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
+
+    // Mock isHandlerEnabledForSite: cwv is enabled, sitemap is disabled
+    configurationMock.isHandlerEnabledForSite = sandbox.stub().callsFake((auditType) => auditType === 'cwv');
+
+    const command = ToggleSiteAuditCommand(contextMock);
+    const args = ['enable', 'https://site0.com', 'all'];
+    await command.handleExecution(args, slackContextMock);
+
+    expect(
+      dataAccessMock.Site.findByBaseURL.calledWith('https://site0.com'),
+      'Expected dataAccess.getSiteByBaseURL to be called with "https://site0.com", but it was not',
+    ).to.be.true;
+    expect(
+      configurationMock.save.called,
+      'Expected configuration.save to be called, but it was not',
+    ).to.be.true;
+    expect(
+      slackContextMock.say.calledWith(sinon.match(/Enabling 1 disabled audits from profile "demo"/)),
+      'Expected informational message about profile filtering with already enabled count, but it was not sent',
+    ).to.be.true;
+    expect(
+      configurationMock.enableHandlerForSite.calledWith('sitemap', site),
+      'Expected configuration.enableHandlerForSite to be called with "sitemap" and site, but it was not',
+    ).to.be.true;
+  });
+
+  it('disable all audits for a site using "all" keyword', async () => {
+    dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
+
+    // Mock isHandlerEnabledForSite: both cwv and sitemap are enabled
+    configurationMock.isHandlerEnabledForSite = sandbox.stub().callsFake(
+      (auditType) => auditType === 'cwv' || auditType === 'sitemap',
+    );
+
+    const command = ToggleSiteAuditCommand(contextMock);
+    const args = ['disable', 'https://site0.com', 'all'];
+    await command.handleExecution(args, slackContextMock);
+
+    expect(
+      dataAccessMock.Site.findByBaseURL.calledWith('https://site0.com'),
+      'Expected dataAccess.getSiteByBaseURL to be called with "https://site0.com", but it was not',
+    ).to.be.true;
+    expect(
+      configurationMock.save.called,
+      'Expected configuration.save to be called, but it was not',
+    ).to.be.true;
+    expect(
+      configurationMock.disableHandlerForSite.calledWith('cwv', site),
+      'Expected configuration.disableHandlerForSite to be called with "cwv" and site, but it was not',
+    ).to.be.true;
+    expect(
+      configurationMock.disableHandlerForSite.calledWith('sitemap', site),
+      'Expected configuration.disableHandlerForSite to be called with "sitemap" and site, but it was not',
+    ).to.be.true;
+    expect(
+      configurationMock.disableHandlerForSite.callCount,
+      'Expected disableHandlerForSite to be called for each audit type (2 in demo profile)',
+    ).to.equal(2);
+    expect(
+      slackContextMock.say.calledWith(sinon.match(/Disabling 2 audits from profile "demo"/)),
+      'Expected informational message about disabling audits from profile, but it was not sent',
+    ).to.be.true;
+    expect(
+      slackContextMock.say.calledWith(`${SUCCESS_MESSAGE_PREFIX}All 2 audits have been *disabled* for "https://site0.com".`),
+      'Expected Slack message confirming all audits were disabled, but it was not sent',
+    ).to.be.true;
+  });
+
+  it('should handle "all" keyword case-insensitively', async () => {
+    dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
+
+    // Mock getEnabledAuditsForSite to return currently enabled audits
+    configurationMock.getEnabledAuditsForSite.returns(['cwv']);
+
+    const command = ToggleSiteAuditCommand(contextMock);
+    const args = ['enable', 'https://site0.com', 'ALL'];
+    await command.handleExecution(args, slackContextMock);
+
+    expect(
+      slackContextMock.say.calledWith(sinon.match(/audits from profile/i)),
+      'Expected informational message about processing audits, but it was not sent',
+    ).to.be.true;
+  });
+
+  it('should filter audits by profile when enabling all audits with profile parameter', async () => {
+    dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
+
+    // Mock getEnabledAuditsForSite to return currently enabled audits
+    configurationMock.getEnabledAuditsForSite.returns(['cwv']);
+
+    const command = ToggleSiteAuditCommand(contextMock);
+    const args = ['enable', 'https://site0.com', 'all', 'demo'];
+    await command.handleExecution(args, slackContextMock);
+
+    expect(
+      configurationMock.enableHandlerForSite.callCount,
+      'Expected enableHandlerForSite to be called only for audits in the profile',
+    ).to.be.greaterThan(0);
+    expect(
+      slackContextMock.say.calledWith(sinon.match(/audits from profile "demo"/)),
+      'Expected Slack message mentioning profile filtering, but it was not sent',
+    ).to.be.true;
+    expect(
+      configurationMock.save.called,
+      'Expected configuration.save to be called, but it was not',
+    ).to.be.true;
+  });
+
+  it('should use demo profile as default when no profile is specified for enable all', async () => {
+    dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
+
+    // Mock getEnabledAuditsForSite to return currently enabled audits
+    configurationMock.getEnabledAuditsForSite.returns(['cwv']);
+
+    const command = ToggleSiteAuditCommand(contextMock);
+    const args = ['enable', 'https://site0.com', 'all'];
+    await command.handleExecution(args, slackContextMock);
+
+    expect(
+      slackContextMock.say.calledWith(sinon.match(/audits from profile "demo"/)),
+      'Expected Slack message mentioning default demo profile, but it was not sent',
+    ).to.be.true;
+  });
+
   it('if site base URL without scheme should be added "https://"', async () => {
     dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
 
@@ -168,10 +337,13 @@ describe('UpdateSitesAuditsCommand', () => {
 
   describe('Internal errors', () => {
     it('error during execution', async () => {
-      dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
+      dataAccessMock.Site.findByBaseURL.withArgs('http://site0.com').resolves(site);
 
       const error = new Error('Test error');
       configurationMock.save.rejects(error);
+
+      // Mock isHandlerEnabledForSite to return false so the audit will be processed
+      configurationMock.isHandlerEnabledForSite = sandbox.stub().returns(false);
 
       const command = ToggleSiteAuditCommand(contextMock);
       const args = ['enable', 'http://site0.com', 'some_audit'];
@@ -298,10 +470,13 @@ describe('UpdateSitesAuditsCommand', () => {
       dataAccessMock.Site.findByBaseURL.withArgs('https://site1.com').resolves(site);
       dataAccessMock.Site.findByBaseURL.withArgs('https://site2.com').resolves(site);
 
+      // Mock isHandlerEnabledForSite: nothing is enabled
+      configurationMock.isHandlerEnabledForSite = sandbox.stub().returns(false);
+
       await command.handleExecution(args, slackContextMock);
 
       expect(configurationMock.enableHandlerForSite.callCount)
-        .to.equal(46); // 23 audits in demo profile × 2 sites
+        .to.equal(4); // 2 audits in demo profile × 2 sites
       expect(configurationMock.save.calledOnce).to.be.true;
       expect(slackContextMock.say.calledWith(sinon.match('Successfully'))).to.be.true;
     });
@@ -317,10 +492,13 @@ describe('UpdateSitesAuditsCommand', () => {
       dataAccessMock.Site.findByBaseURL.withArgs('https://site1.com').resolves(site);
       dataAccessMock.Site.findByBaseURL.withArgs('https://site2.com').resolves(site);
 
+      // Mock isHandlerEnabledForSite: all audits are enabled
+      configurationMock.isHandlerEnabledForSite = sandbox.stub().returns(true);
+
       await command.handleExecution(args, slackContextMock);
 
       expect(configurationMock.disableHandlerForSite.callCount)
-        .to.equal(46); // 23 audits in demo profile × 2 sites
+        .to.equal(4); // 2 audits in demo profile × 2 sites
       expect(configurationMock.save.calledOnce).to.be.true;
       expect(slackContextMock.say.calledWith(sinon.match('Successfully'))).to.be.true;
     });
@@ -385,7 +563,7 @@ describe('UpdateSitesAuditsCommand', () => {
       const command = ToggleSiteAuditCommand(contextMock);
       await command.handleExecution(['enable', 'cwv'], slackContextMock);
 
-      expect(slackContextMock.say.calledWith(sinon.match(':x: No valid URLs found in the CSV file.'))).to.be.true;
+      expect(slackContextMock.say.calledWith(sinon.match(':x: The CSV file is empty.'))).to.be.true;
     });
 
     it('should handle empty CSV file', async () => {
