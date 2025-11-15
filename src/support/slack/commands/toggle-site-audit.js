@@ -44,6 +44,10 @@ const ERROR_MESSAGE_PREFIX = ':x: ';
    * - Disable all currently enabled audits:
    *   @spacecat-dev audit disable https://site.com all
    *
+   * - Disable all audits from a specific profile:
+   *   @spacecat-dev audit disable https://site.com all paid
+   *   @spacecat-dev audit disable https://site.com all plg
+   *
    * CSV Bulk Operations:
    * - Enable/disable audits for multiple sites (upload CSV with one baseURL per line):
    *   @spacecat-dev audit enable demo [attach CSV file]
