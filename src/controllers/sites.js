@@ -33,16 +33,13 @@ import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
+import TierClient from '@adobe/spacecat-shared-tier-client';
 import { SiteDto } from '../dto/site.js';
 import { OrganizationDto } from '../dto/organization.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
 import { KeyEventDto } from '../dto/key-event.js';
-import {
-  wwwUrlResolver,
-  fetchSiteByOrganizationEntitlement,
-  fetchSiteByOrganizationEntitlementBySiteId,
-} from '../support/utils.js';
+import { wwwUrlResolver } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 
 /**
@@ -802,20 +799,13 @@ function SitesController(ctx, log, env) {
               }
             }
             if (organization && await accessControlUtil.hasAccess(organization)) {
-              const {
-                site: enrolledSite,
-                enrollment,
-              } = await fetchSiteByOrganizationEntitlementBySiteId(
-                context,
-                organization,
-                siteId,
-                productCode,
-              );
+              const tierClient = await TierClient.createForSite(context, site, productCode);
+              const { entitlement, enrollments } = await tierClient.getAllEnrollment();
 
-              if (enrolledSite && enrollment) {
+              if (entitlement && enrollments?.length) {
                 const data = {
                   organization: OrganizationDto.toJSON(organization),
-                  site: SiteDto.toJSON(enrolledSite),
+                  site: SiteDto.toJSON(site),
                 };
 
                 return ok({ data });
@@ -828,11 +818,8 @@ function SitesController(ctx, log, env) {
       if (hasText(organizationId) && isValidUUID(organizationId)) {
         organization = await Organization.findById(organizationId);
         if (organization && await accessControlUtil.hasAccess(organization)) {
-          const { site: enrolledSite } = await fetchSiteByOrganizationEntitlement(
-            context,
-            organization,
-            productCode,
-          );
+          const tierClient = TierClient.createForOrg(context, organization, productCode);
+          const { site: enrolledSite } = await tierClient.getFirstEnrollment();
 
           if (enrolledSite) {
             const data = {
@@ -846,11 +833,8 @@ function SitesController(ctx, log, env) {
       } else if (hasText(imsOrg)) {
         organization = await Organization.findByImsOrgId(imsOrg);
         if (organization && await accessControlUtil.hasAccess(organization)) {
-          const { site: enrolledSite } = await fetchSiteByOrganizationEntitlement(
-            context,
-            organization,
-            productCode,
-          );
+          const tierClient = TierClient.createForOrg(context, organization, productCode);
+          const { site: enrolledSite } = await tierClient.getFirstEnrollment();
 
           if (enrolledSite) {
             const data = {

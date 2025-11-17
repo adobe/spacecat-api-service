@@ -2426,8 +2426,18 @@ describe('Sites Controller', () => {
         checkValidEntitlement: sandbox.stub().resolves({
           entitlement: { getId: () => 'entitlement-123' },
         }),
+        getFirstEnrollment: sandbox.stub().resolves({
+          entitlement: { getId: () => 'entitlement-123' },
+          enrollment: { getId: () => 'enrollment-123', getSiteId: () => SITE_IDS[0] },
+          site: testSites[0],
+        }),
+        getAllEnrollment: sandbox.stub().resolves({
+          entitlement: { getId: () => 'entitlement-123' },
+          enrollments: [{ getId: () => 'enrollment-123', getSiteId: () => SITE_IDS[0] }],
+        }),
       };
       tierClientStub = sandbox.stub(TierClient, 'createForOrg').returns(mockTierClientStub);
+      sandbox.stub(TierClient, 'createForSite').returns(mockTierClientStub);
     });
 
     afterEach(() => {
@@ -2462,10 +2472,12 @@ describe('Sites Controller', () => {
       context.data = { organizationId: testOrganizations[0].getId() };
       mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
       mockDataAccess.Site.findById.resolves(testSites[0]);
-      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([{
-        getId: () => 'enrollment-1',
-        getSiteId: () => SITE_IDS[0],
-      }]);
+
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: { getId: () => 'entitlement-123' },
+        enrollment: { getId: () => 'enrollment-1', getSiteId: () => SITE_IDS[0] },
+        site: testSites[0],
+      });
 
       const response = await sitesController.resolveSite(context);
 
@@ -2490,7 +2502,12 @@ describe('Sites Controller', () => {
       context.data = { imsOrg: testOrganizations[0].getImsOrgId() };
       mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[0]);
       mockDataAccess.Site.findById.resolves(testSites[0]);
-      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([]);
+
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: null,
+        enrollment: null,
+        site: null,
+      });
 
       const response = await sitesController.resolveSite(context);
 
@@ -2504,7 +2521,12 @@ describe('Sites Controller', () => {
     it('should return not found when organization has no enrolled sites', async () => {
       context.data = { organizationId: testOrganizations[0].getId() };
       mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
-      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([]); // No enrollments
+
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: null,
+        enrollment: null,
+        site: null,
+      });
 
       const response = await sitesController.resolveSite(context);
 
@@ -2537,22 +2559,22 @@ describe('Sites Controller', () => {
         getProductCode: () => 'ASO',
       };
 
-      mockTierClientStub.checkValidEntitlement.resolves({ entitlement: mockEntitlement });
+      mockTierClientStub.getAllEnrollment.resolves({
+        entitlement: mockEntitlement,
+        enrollments: [{
+          getEntitlementId: () => entitlementId,
+          getId: () => 'enrollment-siteId',
+          getSiteId: () => validSiteId,
+        }],
+      });
 
       mockDataAccess.Site.findById.resolves(testSites[1]);
 
       mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
 
-      mockDataAccess.SiteEnrollment.allBySiteId.resolves([{
-        getEntitlementId: () => entitlementId,
-        getId: () => 'enrollment-siteId',
-        getSiteId: () => validSiteId,
-      }]);
-
       const response = await sitesController.resolveSite(context);
 
       expect(mockDataAccess.Organization.findById.calledWith(targetOrgId)).to.be.true;
-      expect(mockDataAccess.SiteEnrollment.allBySiteId.calledWith(validSiteId)).to.be.true;
 
       expect(response.status).to.equal(200);
       const body = await response.json();
@@ -2574,22 +2596,22 @@ describe('Sites Controller', () => {
         getProductCode: () => 'ASO',
       };
 
-      mockTierClientStub.checkValidEntitlement.resolves({ entitlement: mockEntitlement });
+      mockTierClientStub.getAllEnrollment.resolves({
+        entitlement: mockEntitlement,
+        enrollments: [{
+          getEntitlementId: () => entitlementId,
+          getId: () => 'enrollment-siteId',
+          getSiteId: () => validSiteId,
+        }],
+      });
 
       mockDataAccess.Site.findById.resolves(testSites[1]);
 
       mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
 
-      mockDataAccess.SiteEnrollment.allBySiteId.resolves([{
-        getEntitlementId: () => entitlementId,
-        getId: () => 'enrollment-siteId',
-        getSiteId: () => validSiteId,
-      }]);
-
       const response = await sitesController.resolveSite(context);
 
       expect(mockDataAccess.Organization.findById.calledWith(targetOrgId)).to.be.true;
-      expect(mockDataAccess.SiteEnrollment.allBySiteId.calledWith(validSiteId)).to.be.false;
 
       expect(response.status).to.equal(404);
       const body = await response.json();
@@ -2609,22 +2631,22 @@ describe('Sites Controller', () => {
         getProductCode: () => 'ASO',
       };
 
-      mockTierClientStub.checkValidEntitlement.resolves({ entitlement: mockEntitlement });
+      mockTierClientStub.getAllEnrollment.resolves({
+        entitlement: mockEntitlement,
+        enrollments: [{
+          getEntitlementId: () => entitlementId,
+          getId: () => 'enrollment-siteId',
+          getSiteId: () => validSiteId,
+        }],
+      });
 
       mockDataAccess.Site.findById.resolves(testSites[1]);
 
       mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
 
-      mockDataAccess.SiteEnrollment.allBySiteId.resolves([{
-        getEntitlementId: () => entitlementId,
-        getId: () => 'enrollment-siteId',
-        getSiteId: () => validSiteId,
-      }]);
-
       const response = await sitesController.resolveSite(context);
 
       expect(mockDataAccess.Organization.findById.calledWith(targetOrgId)).to.be.true;
-      expect(mockDataAccess.SiteEnrollment.allBySiteId.calledWith(validSiteId)).to.be.false;
 
       expect(response.status).to.equal(404);
       const body = await response.json();
@@ -2640,16 +2662,16 @@ describe('Sites Controller', () => {
       };
 
       const mockTierClient = {
-        checkValidEntitlement: sandbox.stub().resolves({ entitlement: mockEntitlement }),
+        getFirstEnrollment: sandbox.stub().resolves({
+          entitlement: mockEntitlement,
+          enrollment: { getId: () => 'enrollment-2', getSiteId: () => SITE_IDS[0] },
+          site: testSites[0],
+        }),
       };
       TierClient.createForOrg.returns(mockTierClient);
 
       mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[2]);
       mockDataAccess.Site.findById.resolves(testSites[0]);
-      mockDataAccess.SiteEnrollment.allByEntitlementId.resolves([{
-        getId: () => 'enrollment-2',
-        getSiteId: () => SITE_IDS[0],
-      }]);
 
       const response = await sitesController.resolveSite(context);
 
