@@ -94,6 +94,19 @@ describe('onboard-modal', () => {
       expect(returnedImsOrgId).to.equal(imsOrgId);
     });
 
+    it('should validate valid AMS preview URLs', async () => {
+      const previewURL = 'https://author.adobecqms.net';
+
+      const {
+        authorURL,
+        preferContentApi,
+        imsOrgId,
+      } = extractDeliveryConfigFromPreviewUrl(previewURL);
+      expect(authorURL).to.equal('https://author.adobecqms.net');
+      expect(preferContentApi).to.equal(true);
+      expect(imsOrgId).to.equal(null);
+    });
+
     it('should reject invalid preview URLs', async () => {
       const invalidUrl = 'https://invalid-url.com';
       expect(extractDeliveryConfigFromPreviewUrl(invalidUrl, null)).to.be.null;
@@ -642,7 +655,7 @@ describe('onboard-modal', () => {
 
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
         channel: 'C12345',
-        text: ':white_check_mark: *Onboarding completed successfully by test-user!*\n'
+        text: ':white_check_mark: *Onboarding triggered successfully by test-user!*\n'
           + '\n'
           + ':ims: *IMS Org ID:* 1234567894ABCDEF12345678@AdobeOrg\n'
           + ':groups: *Project ID:* project123\n'
@@ -753,7 +766,7 @@ describe('onboard-modal', () => {
 
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
         channel: 'C12345',
-        text: ':white_check_mark: *Onboarding completed successfully by test-user!*\n'
+        text: ':white_check_mark: *Onboarding triggered successfully by test-user!*\n'
           + '\n'
           + ':ims: *IMS Org ID:* 1234567894ABCDEF12345678@AdobeOrg\n'
           + ':groups: *Project ID:* project123\n'
@@ -1015,7 +1028,7 @@ describe('onboard-modal', () => {
       expect(ackMock).to.have.been.called;
 
       const postMessageCalls = clientMock.chat.postMessage.getCalls();
-      const successMessages = postMessageCalls.filter((call) => call.args[0].text.includes(':white_check_mark: *Onboarding completed successfully'));
+      const successMessages = postMessageCalls.filter((call) => call.args[0].text.includes(':white_check_mark: *Onboarding triggered successfully'));
       expect(successMessages.length).to.be.greaterThan(0);
 
       const hasDeliveryConfigWithProgramId = successMessages.some((call) => call.args[0].text.includes(':gear: *Delivery Config:* Program 12345'));
@@ -1039,7 +1052,7 @@ describe('onboard-modal', () => {
       expect(ackMock).to.have.been.called;
 
       const postMessageCalls = clientMock.chat.postMessage.getCalls();
-      const successMessages = postMessageCalls.filter((call) => call.args[0].text.includes(':white_check_mark: *Onboarding completed successfully'));
+      const successMessages = postMessageCalls.filter((call) => call.args[0].text.includes(':white_check_mark: *Onboarding triggered successfully'));
       expect(successMessages.length).to.be.greaterThan(0);
 
       const hasTierInput = successMessages.some((call) => call.args[0].text.includes(':paid: *Entitlement Tier:* free_trial'));

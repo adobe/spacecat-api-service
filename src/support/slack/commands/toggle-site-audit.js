@@ -54,6 +54,8 @@ const promptPreflightConfig = async (slackContext, site, auditType) => {
     if (!hasDeliveryConfig) {
       missingItems.push('AEM CS Preview URL');
     }
+  } else if (currentAuthoringType === 'ams' && !currentDeliveryConfig.authorURL) {
+    missingItems.push('AMS URL');
   }
 
   return say({
@@ -239,6 +241,8 @@ export default (context) => {
                 if (!hasDeliveryConfig) {
                   configMissing = true;
                 }
+              } else if (authoringType === 'ams' && !deliveryConfig?.authorURL) {
+                configMissing = true;
               }
 
               if (configMissing) {

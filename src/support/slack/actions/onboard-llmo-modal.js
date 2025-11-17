@@ -25,7 +25,6 @@ import {
 
 const REFERRAL_TRAFFIC_AUDIT = 'llmo-referral-traffic';
 const REFERRAL_TRAFFIC_IMPORT = 'traffic-analysis';
-const AGENTIC_TRAFFIC_ANALYSIS_AUDIT = 'cdn-logs-analysis';
 const AGENTIC_TRAFFIC_REPORT_AUDIT = 'cdn-logs-report';
 const GEO_BRAND_PRESENCE_WEEKLY = 'geo-brand-presence';
 const GEO_BRAND_PRESENCE_DAILY = 'geo-brand-presence-daily';
@@ -505,7 +504,6 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
     // enable all necessary handlers
     const configuration = await Configuration.findLatest();
     configuration.enableHandlerForSite(REFERRAL_TRAFFIC_AUDIT, site);
-    configuration.enableHandlerForSite(AGENTIC_TRAFFIC_ANALYSIS_AUDIT, site);
 
     // Enable the selected cadence and disable the other
     if (brandPresenceCadence === 'daily') {
