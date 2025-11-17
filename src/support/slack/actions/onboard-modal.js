@@ -486,7 +486,7 @@ export function startOnboarding(lambdaContext) {
               type: 'section',
               text: {
                 type: 'mrkdwn',
-                text: '*Preview Environment Configuration (Optional)*\nConfigure preview environment for preflight and auto-optimize. Only needed for AEM Cloud Service and AMS URLs.',
+                text: '*Preview Environment Configuration (Optional)*\nConfigure preview environment for preflight and auto-optimize.',
               },
             },
             {
@@ -541,7 +541,7 @@ export function startOnboarding(lambdaContext) {
                   {
                     text: {
                       type: 'plain_text',
-                      text: 'AMS',
+                      text: 'Adobe Managed Services',
                     },
                     value: 'ams',
                   },
