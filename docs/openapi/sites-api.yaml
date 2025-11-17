@@ -184,8 +184,6 @@ sites-resolve:
       2. Otherwise, resolves by `organizationId` or `imsOrg`
       3. Returns the first enrolled site with matching entitlement
       
-      **Required Header:**
-      - `x-product`: Product code for entitlement validation
     operationId: resolveSite
     parameters:
       - name: x-product
