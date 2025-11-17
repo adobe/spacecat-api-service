@@ -64,7 +64,6 @@ describe('GetLlmoOpportunityUsageCommand', () => {
         },
         Organization: { findById: sinon.stub() },
         Opportunity: { allBySiteId: sinon.stub() },
-        Entitlement: { allByOrganizationId: sinon.stub() },
       },
       log: { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() },
       env: { LLMO_HLX_API_KEY: 'test-key' },
@@ -155,11 +154,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       context.dataAccess.Site.findByBaseURL.resolves(mockSite);
       context.dataAccess.Organization.findById.resolves({
-        getId: () => 'org-1',
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => 'Test Org',
       });
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
       context.dataAccess.Opportunity.allBySiteId.resolves([
         { getTags: () => ['isElmo'], getType: () => 'readability' },
       ]);
@@ -205,11 +202,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       context.dataAccess.Site.findById.resolves(mockSite);
       context.dataAccess.Organization.findById.resolves({
-        getId: () => 'org-1',
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => 'Test Org',
       });
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
       context.dataAccess.Opportunity.allBySiteId.resolves([]);
 
       fetchStub.resolves({ ok: false });
@@ -239,11 +234,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       context.dataAccess.Site.all.resolves([mockSite]);
       context.dataAccess.Organization.findById.resolves({
-        getId: () => 'org-1',
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => 'Test Org',
       });
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
       context.dataAccess.Opportunity.allBySiteId.resolves([]);
       fetchStub.resolves({ ok: false });
 
@@ -275,11 +268,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       context.dataAccess.Site.all.resolves([mockSite]);
       context.dataAccess.Organization.findById.resolves({
-        getId: () => 'org-1',
         getImsOrgId: () => '9E1005A551ED61CA0A490D45@AdobeOrg', // Excluded org
         getName: () => 'Excluded Org',
       });
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
       context.dataAccess.Opportunity.allBySiteId.resolves([]);
       fetchStub.resolves({ ok: false });
 
@@ -315,11 +306,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       context.dataAccess.Site.all.resolves([mockSite]);
       context.dataAccess.Organization.findById.resolves({
-        getId: () => 'org-1',
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => 'Test Org',
       });
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
       context.dataAccess.Opportunity.allBySiteId.resolves([
         { getTags: () => null, getType: () => 'other' },
         { getTags: () => ['isElmo'], getType: () => 'readability' },
@@ -342,11 +331,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       context.dataAccess.Site.all.resolves([mockSite]);
       context.dataAccess.Organization.findById.resolves({
-        getId: () => 'org-1',
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => 'Test Org',
       });
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
       context.dataAccess.Opportunity.allBySiteId.resolves([
         { getTags: () => [], getType: () => 'prerender' },
         { getTags: () => ['isElmo'], getType: () => 'readability' },
@@ -372,11 +359,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       context.dataAccess.Site.all.resolves([mockSite]);
       context.dataAccess.Organization.findById.resolves({
-        getId: () => 'org-1',
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => 'Test Org',
       });
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
       context.dataAccess.Opportunity.allBySiteId.resolves([
         { getTags: () => [], getType: () => 'llm-blocked' },
         { getTags: () => ['isElmo'], getType: () => 'readability' },
@@ -402,11 +387,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       context.dataAccess.Site.all.resolves([mockSite]);
       context.dataAccess.Organization.findById.resolves({
-        getId: () => 'org-1',
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => 'Test Org',
       });
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
       context.dataAccess.Opportunity.allBySiteId.resolves([
         { getTags: () => ['isElmo'], getType: () => 'prerender' },
       ]);
@@ -431,11 +414,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       context.dataAccess.Site.all.resolves([mockSite]);
       context.dataAccess.Organization.findById.resolves({
-        getId: () => 'org-1',
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => 'Test Org',
       });
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
       context.dataAccess.Opportunity.allBySiteId.resolves([
         { getTags: () => ['isElmo'], getType: () => 'readability' }, // counted
         { getTags: () => [], getType: () => 'prerender' }, // counted
@@ -465,11 +446,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       context.dataAccess.Site.all.resolves([mockSite]);
       context.dataAccess.Organization.findById.resolves({
-        getId: () => 'org-1',
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => 'Test Org',
       });
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
       context.dataAccess.Opportunity.allBySiteId.resolves([
         { getTags: () => ['isElmo'], getType: () => null }, // counted (has isElmo)
         { getTags: () => [], getType: () => undefined }, // not counted
@@ -496,11 +475,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       context.dataAccess.Site.all.resolves([mockSite]);
       context.dataAccess.Organization.findById.resolves({
-        getId: () => 'org-1',
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => ' Org\nWith\tSpecial\rChars  ',
       });
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
       context.dataAccess.Opportunity.allBySiteId.resolves([]);
       fetchStub.resolves({ ok: false });
 
@@ -520,11 +497,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       context.dataAccess.Site.all.resolves([mockSite]);
       context.dataAccess.Organization.findById.resolves({
-        getId: () => 'org-1',
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => null,
       });
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
       context.dataAccess.Opportunity.allBySiteId.resolves([]);
       fetchStub.resolves({ ok: false });
 
@@ -544,11 +519,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       context.dataAccess.Site.all.resolves([mockSite]);
       context.dataAccess.Organization.findById.resolves({
-        getId: () => 'org-1',
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => 'Test Org',
       });
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
       context.dataAccess.Opportunity.allBySiteId.resolves([]);
       fetchStub.resolves({ ok: false });
 
@@ -583,11 +556,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       context.dataAccess.Site.all.resolves([mockSite1, mockSite2]);
       context.dataAccess.Organization.findById.resolves({
-        getId: () => 'org-1',
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => 'Test Org',
       });
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
       context.dataAccess.Opportunity.allBySiteId.resolves([]);
       fetchStub.resolves({ ok: false });
 
@@ -608,11 +579,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       context.dataAccess.Site.all.resolves([mockSite]);
       context.dataAccess.Organization.findById.resolves({
-        getId: () => 'org-1',
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => 'Test Org',
       });
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
       context.dataAccess.Opportunity.allBySiteId.resolves([]);
 
       // Return query index with null data
@@ -642,11 +611,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       context.dataAccess.Site.all.resolves([mockSite]);
       context.dataAccess.Organization.findById.resolves({
-        getId: () => 'org-1',
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => 'Test Org',
       });
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
       context.dataAccess.Opportunity.allBySiteId.resolves([]);
 
       // Return query index without data property
@@ -676,11 +643,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       context.dataAccess.Site.all.resolves([mockSite]);
       context.dataAccess.Organization.findById.resolves({
-        getId: () => 'org-1',
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => 'Test Org',
       });
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
       context.dataAccess.Opportunity.allBySiteId.resolves([]);
 
       fetchStub.callsFake((url) => {
@@ -715,11 +680,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       context.dataAccess.Site.all.resolves([mockSite]);
       context.dataAccess.Organization.findById.resolves({
-        getId: () => 'org-1',
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => 'Test Org',
       });
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
       context.dataAccess.Opportunity.allBySiteId.resolves([]);
 
       fetchStub.callsFake((url) => {
@@ -760,11 +723,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       context.dataAccess.Site.all.resolves([mockSite]);
       context.dataAccess.Organization.findById.resolves({
-        getId: () => 'org-1',
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => 'Test Org',
       });
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
       context.dataAccess.Opportunity.allBySiteId.resolves([]);
 
       fetchStub.callsFake((url) => {
@@ -805,11 +766,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       context.dataAccess.Site.all.resolves([mockSite]);
       context.dataAccess.Organization.findById.resolves({
-        getId: () => 'org-1',
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => 'Test Org',
       });
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
       context.dataAccess.Opportunity.allBySiteId.resolves([]);
 
       let callCount = 0;
@@ -945,120 +904,6 @@ describe('GetLlmoOpportunityUsageCommand', () => {
       const result = await getQueryIndex(mockSite, context.env);
       expect(result).to.be.null;
     });
-
-    it('getTotalSocialOpportunities handles filter returning undefined/null', async () => {
-      const mockSite = {
-        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'test' }) }),
-      };
-      const queryIndex = { data: undefined };
-      const result = await getTotalSocialOpportunities(queryIndex, mockSite, context.env);
-      expect(result).to.equal(0);
-    });
-
-    it('getThirdPartyOpportunities handles filter returning undefined/null', async () => {
-      const mockSite = {
-        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'test' }) }),
-      };
-      const queryIndex = { data: undefined };
-      const result = await getThirdPartyOpportunities(queryIndex, mockSite, context.env);
-      expect(result).to.equal(0);
-    });
-
-    it('getTotalSocialOpportunities handles data with undefined length', async () => {
-      const mockSite = {
-        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'adobe' }) }),
-      };
-      const queryIndex = {
-        data: [
-          { path: '/adobe/brandpresence-social-w01.json' },
-        ],
-      };
-
-      fetchStub.callsFake((url) => {
-        if (url.includes('brandpresence-social')) {
-          return Promise.resolve({
-            ok: true,
-            json: sinon.stub().resolves({ data: undefined }),
-          });
-        }
-        return Promise.resolve({ ok: false });
-      });
-
-      const result = await getTotalSocialOpportunities(queryIndex, mockSite, context.env);
-      expect(result).to.equal(0);
-    });
-
-    it('getThirdPartyOpportunities handles data with undefined length', async () => {
-      const mockSite = {
-        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'adobe' }) }),
-      };
-      const queryIndex = {
-        data: [
-          { path: '/adobe/brandpresence-3rdparty.json' },
-        ],
-      };
-
-      fetchStub.callsFake((url) => {
-        if (url.includes('brandpresence-3rdparty')) {
-          return Promise.resolve({
-            ok: true,
-            json: sinon.stub().resolves({ data: undefined }),
-          });
-        }
-        return Promise.resolve({ ok: false });
-      });
-
-      const result = await getThirdPartyOpportunities(queryIndex, mockSite, context.env);
-      expect(result).to.equal(0);
-    });
-
-    it('getTotalSocialOpportunities handles data.data being null', async () => {
-      const mockSite = {
-        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'adobe' }) }),
-      };
-      const queryIndex = {
-        data: [
-          { path: '/adobe/brandpresence-social-w01.json' },
-        ],
-      };
-
-      fetchStub.callsFake((url) => {
-        if (url.includes('brandpresence-social')) {
-          return Promise.resolve({
-            ok: true,
-            json: sinon.stub().resolves({ data: { length: undefined } }),
-          });
-        }
-        return Promise.resolve({ ok: false });
-      });
-
-      const result = await getTotalSocialOpportunities(queryIndex, mockSite, context.env);
-      expect(result).to.equal(0);
-    });
-
-    it('getThirdPartyOpportunities handles data.data being null', async () => {
-      const mockSite = {
-        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'adobe' }) }),
-      };
-      const queryIndex = {
-        data: [
-          { path: '/adobe/brandpresence-3rdparty.json' },
-        ],
-      };
-
-      fetchStub.callsFake((url) => {
-        if (url.includes('brandpresence-3rdparty')) {
-          return Promise.resolve({
-            ok: true,
-            json: sinon.stub().resolves({ data: { length: undefined } }),
-          });
-        }
-        return Promise.resolve({ ok: false });
-      });
-
-      const result = await getThirdPartyOpportunities(queryIndex, mockSite, context.env);
-      expect(result).to.equal(0);
-    });
   });
 
   describe('Total Opportunities Count Calculation', () => {
@@ -1072,11 +917,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       context.dataAccess.Site.all.resolves([mockSite]);
       context.dataAccess.Organization.findById.resolves({
-        getId: () => 'org-1',
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => 'Test Org',
       });
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
       context.dataAccess.Opportunity.allBySiteId.resolves([
         { getTags: () => ['isElmo'], getType: () => 'readability' },
       ]);
@@ -1130,11 +973,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       context.dataAccess.Site.all.resolves([mockSite]);
       context.dataAccess.Organization.findById.resolves({
-        getId: () => 'org-1',
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => 'Test Org',
       });
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
       context.dataAccess.Opportunity.allBySiteId.resolves([
         { getTags: () => ['isElmo'], getType: () => 'readability' },
         { getTags: () => ['isElmo'], getType: () => 'other' },
@@ -1174,11 +1015,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       context.dataAccess.Site.all.resolves([mockSite]);
       context.dataAccess.Organization.findById.resolves({
-        getId: () => 'org-1',
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => 'Test Org',
       });
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
       context.dataAccess.Opportunity.allBySiteId.resolves([
         { getTags: () => ['isElmo'], getType: () => 'readability' },
         { getTags: () => ['isElmo'], getType: () => 'other' },
@@ -1226,11 +1065,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       context.dataAccess.Site.all.resolves([mockSite]);
       context.dataAccess.Organization.findById.resolves({
-        getId: () => 'org-1',
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => 'Test Org',
       });
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
       context.dataAccess.Opportunity.allBySiteId.resolves([]);
 
       fetchStub.callsFake((url) => {
@@ -1266,11 +1103,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       context.dataAccess.Site.all.resolves([mockSite]);
       context.dataAccess.Organization.findById.resolves({
-        getId: () => 'org-1',
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => 'Test Org',
       });
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
       context.dataAccess.Opportunity.allBySiteId.resolves([
         { getTags: () => ['isElmo'], getType: () => 'readability' },
       ]);
@@ -1322,11 +1157,9 @@ describe('GetLlmoOpportunityUsageCommand', () => {
 
       context.dataAccess.Site.all.resolves([mockSite]);
       context.dataAccess.Organization.findById.resolves({
-        getId: () => 'org-1',
         getImsOrgId: () => 'valid@AdobeOrg',
         getName: () => 'Test Org',
       });
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
       context.dataAccess.Opportunity.allBySiteId.resolves([]);
       fetchStub.resolves({ ok: false });
 
@@ -1336,313 +1169,6 @@ describe('GetLlmoOpportunityUsageCommand', () => {
       expect(sendFileStub.called).to.be.true;
       const csvContent = sendFileStub.firstCall.args[1].toString();
       expect(csvContent).to.include('Total Count');
-    });
-  });
-
-  describe('Tier Information', () => {
-    it('includes tier information when LLMO entitlement exists', async () => {
-      const mockSite = {
-        getId: () => 'site-1',
-        getBaseURL: () => 'https://test.com',
-        getOrganizationId: () => 'org-1',
-        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'test-folder' }) }),
-      };
-
-      const mockOrganization = {
-        getId: () => 'org-1',
-        getImsOrgId: () => 'valid@AdobeOrg',
-        getName: () => 'Test Org',
-      };
-
-      const mockEntitlement = {
-        getProductCode: () => 'LLMO',
-        getTier: () => 'ENTERPRISE',
-      };
-
-      context.dataAccess.Site.all.resolves([mockSite]);
-      context.dataAccess.Organization.findById.resolves(mockOrganization);
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([mockEntitlement]);
-      context.dataAccess.Opportunity.allBySiteId.resolves([]);
-      fetchStub.resolves({ ok: false });
-
-      const command = GetLlmoOpportunityUsageCommand(context);
-      await command.handleExecution([], slackContext);
-
-      expect(sendFileStub.called).to.be.true;
-      expect(context.dataAccess.Entitlement.allByOrganizationId.calledWith('org-1')).to.be.true;
-
-      const csvContent = sendFileStub.firstCall.args[1].toString();
-      expect(csvContent).to.include('ENTERPRISE');
-      expect(csvContent).to.include('Tier');
-    });
-
-    it('defaults tier to N/A when no entitlements exist', async () => {
-      const mockSite = {
-        getId: () => 'site-1',
-        getBaseURL: () => 'https://test.com',
-        getOrganizationId: () => 'org-1',
-        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'test-folder' }) }),
-      };
-
-      const mockOrganization = {
-        getId: () => 'org-1',
-        getImsOrgId: () => 'valid@AdobeOrg',
-        getName: () => 'Test Org',
-      };
-
-      context.dataAccess.Site.all.resolves([mockSite]);
-      context.dataAccess.Organization.findById.resolves(mockOrganization);
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([]);
-      context.dataAccess.Opportunity.allBySiteId.resolves([]);
-      fetchStub.resolves({ ok: false });
-
-      const command = GetLlmoOpportunityUsageCommand(context);
-      await command.handleExecution([], slackContext);
-
-      expect(sendFileStub.called).to.be.true;
-      const csvContent = sendFileStub.firstCall.args[1].toString();
-      expect(csvContent).to.include('N/A');
-    });
-
-    it('defaults tier to N/A when entitlements array is null', async () => {
-      const mockSite = {
-        getId: () => 'site-1',
-        getBaseURL: () => 'https://test.com',
-        getOrganizationId: () => 'org-1',
-        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'test-folder' }) }),
-      };
-
-      const mockOrganization = {
-        getId: () => 'org-1',
-        getImsOrgId: () => 'valid@AdobeOrg',
-        getName: () => 'Test Org',
-      };
-
-      context.dataAccess.Site.all.resolves([mockSite]);
-      context.dataAccess.Organization.findById.resolves(mockOrganization);
-      context.dataAccess.Entitlement.allByOrganizationId.resolves(null);
-      context.dataAccess.Opportunity.allBySiteId.resolves([]);
-      fetchStub.resolves({ ok: false });
-
-      const command = GetLlmoOpportunityUsageCommand(context);
-      await command.handleExecution([], slackContext);
-
-      expect(sendFileStub.called).to.be.true;
-      const csvContent = sendFileStub.firstCall.args[1].toString();
-      expect(csvContent).to.include('N/A');
-    });
-
-    it('defaults tier to N/A when no LLMO entitlement exists', async () => {
-      const mockSite = {
-        getId: () => 'site-1',
-        getBaseURL: () => 'https://test.com',
-        getOrganizationId: () => 'org-1',
-        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'test-folder' }) }),
-      };
-
-      const mockOrganization = {
-        getId: () => 'org-1',
-        getImsOrgId: () => 'valid@AdobeOrg',
-        getName: () => 'Test Org',
-      };
-
-      const mockOtherEntitlement = {
-        getProductCode: () => 'OTHER_PRODUCT',
-        getTier: () => 'PREMIUM',
-      };
-
-      context.dataAccess.Site.all.resolves([mockSite]);
-      context.dataAccess.Organization.findById.resolves(mockOrganization);
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([mockOtherEntitlement]);
-      context.dataAccess.Opportunity.allBySiteId.resolves([]);
-      fetchStub.resolves({ ok: false });
-
-      const command = GetLlmoOpportunityUsageCommand(context);
-      await command.handleExecution([], slackContext);
-
-      expect(sendFileStub.called).to.be.true;
-      const csvContent = sendFileStub.firstCall.args[1].toString();
-      expect(csvContent).to.include('N/A');
-      expect(csvContent).to.not.include('PREMIUM');
-    });
-
-    it('defaults tier to N/A when organization is null', async () => {
-      const mockSite = {
-        getId: () => 'site-1',
-        getBaseURL: () => 'https://test.com',
-        getOrganizationId: () => 'org-1',
-        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'test-folder' }) }),
-      };
-
-      context.dataAccess.Site.all.resolves([mockSite]);
-      context.dataAccess.Organization.findById.resolves(null);
-      context.dataAccess.Opportunity.allBySiteId.resolves([]);
-      fetchStub.resolves({ ok: false });
-
-      const command = GetLlmoOpportunityUsageCommand(context);
-      await command.handleExecution([], slackContext);
-
-      expect(context.dataAccess.Entitlement.allByOrganizationId.called).to.be.false;
-      expect(sendFileStub.called).to.be.true;
-      const csvContent = sendFileStub.firstCall.args[1].toString();
-      expect(csvContent).to.include('N/A');
-    });
-
-    it('handles different tier values correctly', async () => {
-      const tiers = ['FREE_TRIAL', 'STANDARD', 'PREMIUM', 'ENTERPRISE'];
-
-      for (const tier of tiers) {
-        const mockSite = {
-          getId: () => 'site-1',
-          getBaseURL: () => `https://test-${tier}.com`,
-          getOrganizationId: () => 'org-1',
-          getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'test-folder' }) }),
-        };
-
-        const mockOrganization = {
-          getId: () => 'org-1',
-          getImsOrgId: () => 'valid@AdobeOrg',
-          getName: () => 'Test Org',
-        };
-
-        const mockEntitlement = {
-          getProductCode: () => 'LLMO',
-          getTier: () => tier,
-        };
-
-        context.dataAccess.Site.all.resolves([mockSite]);
-        context.dataAccess.Organization.findById.resolves(mockOrganization);
-        context.dataAccess.Entitlement.allByOrganizationId.resolves([mockEntitlement]);
-        context.dataAccess.Opportunity.allBySiteId.resolves([]);
-        fetchStub.resolves({ ok: false });
-
-        sendFileStub.resetHistory();
-
-        const command = GetLlmoOpportunityUsageCommand(context);
-        // eslint-disable-next-line no-await-in-loop
-        await command.handleExecution([], slackContext);
-
-        expect(sendFileStub.called).to.be.true;
-        const csvContent = sendFileStub.firstCall.args[1].toString();
-        expect(csvContent).to.include(tier);
-      }
-    });
-
-    it('includes tier in CSV with correct column position', async () => {
-      const mockSite = {
-        getId: () => 'site-1',
-        getBaseURL: () => 'https://test.com',
-        getOrganizationId: () => 'org-1',
-        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'test-folder' }) }),
-      };
-
-      const mockOrganization = {
-        getId: () => 'org-1',
-        getImsOrgId: () => 'ims123@AdobeOrg',
-        getName: () => 'Test Org Name',
-      };
-
-      const mockEntitlement = {
-        getProductCode: () => 'LLMO',
-        getTier: () => 'FREE_TRIAL',
-      };
-
-      context.dataAccess.Site.all.resolves([mockSite]);
-      context.dataAccess.Organization.findById.resolves(mockOrganization);
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([mockEntitlement]);
-      context.dataAccess.Opportunity.allBySiteId.resolves([]);
-      fetchStub.resolves({ ok: false });
-
-      const command = GetLlmoOpportunityUsageCommand(context);
-      await command.handleExecution([], slackContext);
-
-      expect(sendFileStub.called).to.be.true;
-      const csvContent = sendFileStub.firstCall.args[1].toString();
-      const lines = csvContent.split('\n');
-      const header = lines[0];
-      const dataRow = lines[1];
-
-      // Check header includes Tier
-      expect(header).to.include('Tier');
-
-      // Check tier is between IMS Org ID and Has Tech GEO 403
-      const headerCols = header.split(',');
-      const tierIndex = headerCols.indexOf('Tier');
-      const imsOrgIdIndex = headerCols.indexOf('IMS Org ID');
-
-      expect(tierIndex).to.be.greaterThan(imsOrgIdIndex);
-      expect(tierIndex).to.be.greaterThan(-1);
-
-      // Check data row has tier value
-      expect(dataRow).to.include('FREE_TRIAL');
-    });
-
-    it('handles multiple LLMO entitlements by using the first one', async () => {
-      const mockSite = {
-        getId: () => 'site-1',
-        getBaseURL: () => 'https://test.com',
-        getOrganizationId: () => 'org-1',
-        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'test-folder' }) }),
-      };
-
-      const mockOrganization = {
-        getId: () => 'org-1',
-        getImsOrgId: () => 'valid@AdobeOrg',
-        getName: () => 'Test Org',
-      };
-
-      const mockEntitlement1 = {
-        getProductCode: () => 'LLMO',
-        getTier: () => 'ENTERPRISE',
-      };
-
-      const mockEntitlement2 = {
-        getProductCode: () => 'LLMO',
-        getTier: () => 'STANDARD',
-      };
-
-      context.dataAccess.Site.all.resolves([mockSite]);
-      context.dataAccess.Organization.findById.resolves(mockOrganization);
-      context.dataAccess.Entitlement.allByOrganizationId.resolves([
-        mockEntitlement1,
-        mockEntitlement2,
-      ]);
-      context.dataAccess.Opportunity.allBySiteId.resolves([]);
-      fetchStub.resolves({ ok: false });
-
-      const command = GetLlmoOpportunityUsageCommand(context);
-      await command.handleExecution([], slackContext);
-
-      expect(sendFileStub.called).to.be.true;
-      const csvContent = sendFileStub.firstCall.args[1].toString();
-      expect(csvContent).to.include('ENTERPRISE');
-      expect(csvContent).to.not.include('STANDARD');
-    });
-
-    it('handles entitlement fetch errors gracefully', async () => {
-      const mockSite = {
-        getId: () => 'site-1',
-        getBaseURL: () => 'https://test.com',
-        getOrganizationId: () => 'org-1',
-        getConfig: () => ({ getLlmoConfig: () => ({ dataFolder: 'test-folder' }) }),
-      };
-
-      const mockOrganization = {
-        getId: () => 'org-1',
-        getImsOrgId: () => 'valid@AdobeOrg',
-        getName: () => 'Test Org',
-      };
-
-      context.dataAccess.Site.all.resolves([mockSite]);
-      context.dataAccess.Organization.findById.resolves(mockOrganization);
-      context.dataAccess.Entitlement.allByOrganizationId.rejects(new Error('Entitlement fetch failed'));
-      context.dataAccess.Opportunity.allBySiteId.resolves([]);
-      fetchStub.resolves({ ok: false });
-
-      const command = GetLlmoOpportunityUsageCommand(context);
-      await command.handleExecution([], slackContext);
-
-      expect(context.log.warn.called).to.be.true;
     });
   });
 });
