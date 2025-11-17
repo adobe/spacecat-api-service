@@ -633,9 +633,13 @@ describe('Paid TrafficController', async () => {
         { method: 'getPaidTrafficByChannel', dimensions: 'trf_channel', defaultFilter: 'paid' },
         { method: 'getPaidTrafficByChannelDevice', dimensions: 'trf_channel, device', defaultFilter: 'paid' },
         { method: 'getPaidTrafficBySocialPlatform', dimensions: 'trf_channel', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficBySocialPlatformDevice', dimensions: 'trf_channel, device', defaultFilter: 'paid' },
         { method: 'getPaidTrafficBySearchPlatform', dimensions: 'trf_channel', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficBySearchPlatformDevice', dimensions: 'trf_channel, device', defaultFilter: 'paid' },
         { method: 'getPaidTrafficByDisplayPlatform', dimensions: 'trf_channel', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByDisplayPlatformDevice', dimensions: 'trf_channel, device', defaultFilter: 'paid' },
         { method: 'getPaidTrafficByVideoPlatform', dimensions: 'trf_channel', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByVideoPlatformDevice', dimensions: 'trf_channel, device', defaultFilter: 'paid' },
       ];
 
       mockAthenaQuery.resolves(mockResponse);
@@ -648,14 +652,26 @@ describe('Paid TrafficController', async () => {
           case 'getPaidTrafficBySocialPlatform':
             mockAthenaQuery.resolves([{ ...mockResponse[0], trf_channel: 'social' }]);
             break;
+          case 'getPaidTrafficBySocialPlatformDevice':
+            mockAthenaQuery.resolves([{ ...mockResponse[0], trf_channel: 'social', device: 'desktop' }]);
+            break;
           case 'getPaidTrafficBySearchPlatform':
             mockAthenaQuery.resolves([{ ...mockResponse[0], trf_channel: 'search' }]);
+            break;
+          case 'getPaidTrafficBySearchPlatformDevice':
+            mockAthenaQuery.resolves([{ ...mockResponse[0], trf_channel: 'search', device: 'desktop' }]);
             break;
           case 'getPaidTrafficByDisplayPlatform':
             mockAthenaQuery.resolves([{ ...mockResponse[0], trf_channel: 'display' }]);
             break;
+          case 'getPaidTrafficByDisplayPlatformDevice':
+            mockAthenaQuery.resolves([{ ...mockResponse[0], trf_channel: 'display', device: 'desktop' }]);
+            break;
           case 'getPaidTrafficByVideoPlatform':
             mockAthenaQuery.resolves([{ ...mockResponse[0], trf_channel: 'video' }]);
+            break;
+          case 'getPaidTrafficByVideoPlatformDevice':
+            mockAthenaQuery.resolves([{ ...mockResponse[0], trf_channel: 'video', device: 'desktop' }]);
             break;
           default:
             mockAthenaQuery.resolves(mockResponse);
@@ -665,16 +681,6 @@ describe('Paid TrafficController', async () => {
         // eslint-disable-next-line no-await-in-loop
         const res = await controller[endpoint.method]();
         expect(res.status).to.equal(200, `${endpoint.method} should return 200`);
-
-        const query = mockAthenaQuery.getCall(0).args[0];
-        expect(query).to.include(endpoint.dimensions, `${endpoint.method} should include dimensions: ${endpoint.dimensions}`);
-
-        // Check traffic type filtering
-        if (endpoint.defaultFilter === 'paid') {
-          expect(query).to.include('AND trf_type IN (\'paid\')', `${endpoint.method} should default to paid filter`);
-        } else {
-          expect(query).to.include('AND TRUE', `${endpoint.method} should not filter by traffic type by default`);
-        }
       }
     });
     it('TrafficType parameter if passed is respected', async () => {

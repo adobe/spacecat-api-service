@@ -1,3 +1,24 @@
+## [1.233.1](https://github.com/adobe/spacecat-api-service/compare/v1.233.0...v1.233.1) (2025-11-12)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-ims-client to v1.10.0 ([#1480](https://github.com/adobe/spacecat-api-service/issues/1480)) ([fe4765c](https://github.com/adobe/spacecat-api-service/commit/fe4765c23f6676cc8707159bd9285f9f8fb43c37))
+
+# [1.233.0](https://github.com/adobe/spacecat-api-service/compare/v1.232.0...v1.233.0) (2025-11-12)
+
+
+### Features
+
+* Additional PTR endpoint ([#1479](https://github.com/adobe/spacecat-api-service/issues/1479)) ([4de5877](https://github.com/adobe/spacecat-api-service/commit/4de58774968b19eb7a927abeefd0855438e1892b))
+
+# [1.232.0](https://github.com/adobe/spacecat-api-service/compare/v1.231.0...v1.232.0) (2025-11-12)
+
+
+### Features
+
+* updated athena package for PTR endpoints ([#1477](https://github.com/adobe/spacecat-api-service/issues/1477)) ([74f5804](https://github.com/adobe/spacecat-api-service/commit/74f5804fbddc7d759ac1f1f4bab928bf032906e3))
+
 # [1.231.0](https://github.com/adobe/spacecat-api-service/compare/v1.230.2...v1.231.0) (2025-11-12)
 
 

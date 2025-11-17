@@ -175,6 +175,14 @@ describe('getRouteHandlers', () => {
     getPaidTrafficByPageTypeCampaign: sinon.stub(),
     getPaidTrafficByPageTypePlatform: sinon.stub(),
     getPaidTrafficByPageTypePlatformDevice: sinon.stub(),
+    getPaidTrafficBySocialPlatformDevice: sinon.stub(),
+    getPaidTrafficBySearchPlatformDevice: sinon.stub(),
+    getPaidTrafficByDisplayPlatformDevice: sinon.stub(),
+    getPaidTrafficByVideoPlatformDevice: sinon.stub(),
+    getPaidTrafficBySocialPlatform: sinon.stub(),
+    getPaidTrafficBySearchPlatform: sinon.stub(),
+    getPaidTrafficByDisplayPlatform: sinon.stub(),
+    getPaidTrafficByVideoPlatform: sinon.stub(),
   };
 
   const mockFixesController = {
@@ -447,9 +455,13 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/traffic/paid/channel',
       'GET /sites/:siteId/traffic/paid/channel-device',
       'GET /sites/:siteId/traffic/paid/social-platform',
+      'GET /sites/:siteId/traffic/paid/social-platform-device',
       'GET /sites/:siteId/traffic/paid/search-platform',
+      'GET /sites/:siteId/traffic/paid/search-platform-device',
       'GET /sites/:siteId/traffic/paid/display-platform',
+      'GET /sites/:siteId/traffic/paid/display-platform-device',
       'GET /sites/:siteId/traffic/paid/video-platform',
+      'GET /sites/:siteId/traffic/paid/video-platform-device',
       'GET /tools/scrape/jobs/:jobId',
       'GET /tools/scrape/jobs/:jobId/results',
       'GET /tools/scrape/jobs/by-date-range/:startDate/:endDate/all-jobs',
@@ -580,9 +592,13 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/channel'].handler).to.equal(mockTrafficController.getPaidTrafficByChannel);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/channel-device'].handler).to.equal(mockTrafficController.getPaidTrafficByChannelDevice);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/social-platform'].handler).to.equal(mockTrafficController.getPaidTrafficBySocialPlatform);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/social-platform-device'].handler).to.equal(mockTrafficController.getPaidTrafficBySocialPlatformDevice);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/search-platform'].handler).to.equal(mockTrafficController.getPaidTrafficBySearchPlatform);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/search-platform-device'].handler).to.equal(mockTrafficController.getPaidTrafficBySearchPlatformDevice);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/display-platform'].handler).to.equal(mockTrafficController.getPaidTrafficByDisplayPlatform);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/display-platform-device'].handler).to.equal(mockTrafficController.getPaidTrafficByDisplayPlatformDevice);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/video-platform'].handler).to.equal(mockTrafficController.getPaidTrafficByVideoPlatform);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/video-platform-device'].handler).to.equal(mockTrafficController.getPaidTrafficByVideoPlatformDevice);
     expect(dynamicRoutes['GET /sites/:siteId/files'].handler).to.equal(mockScrapeController.getFileByKey);
     expect(dynamicRoutes['GET /sites/:siteId/files'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /tools/scrape/jobs/:jobId'].handler).to.equal(mockScrapeJobController.getScrapeJobStatus);
