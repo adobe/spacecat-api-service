@@ -18,24 +18,6 @@ import {
   LLMO_SHEETDATA_SOURCE_URL,
 } from './llmo-utils.js';
 
-const generateCacheKey = (llmoConfig, filePath, queryParams) => {
-  const { dataFolder } = llmoConfig;
-
-  // Sort query params to ensure consistent cache keys
-  const sortedParams = {};
-  Object.keys(queryParams)
-    .sort()
-    .forEach((key) => {
-      sortedParams[key] = queryParams[key];
-    });
-
-  // Create a string representation of the query params
-  const paramsString = JSON.stringify(sortedParams);
-
-  // Combine dataFolder, filePath, and query params into a single cache key
-  return `${dataFolder}/${filePath}:${paramsString}`;
-};
-
 const processData = (data, queryParams) => {
   let processedData = data;
 
@@ -93,30 +75,8 @@ const processData = (data, queryParams) => {
 };
 
 const fetchAndProcessSingleFile = async (context, llmoConfig, filePath, queryParams) => {
-  const { log, env, valkey } = context;
+  const { log, env } = context;
   const { sheet } = context.data;
-
-  // Get cache from context (initialized by valkeyClientWrapper)
-  const cache = valkey?.cache;
-
-  // Generate cache key that includes all query parameters
-  const cacheKey = generateCacheKey(llmoConfig, filePath, { ...queryParams, sheet });
-
-  // Try to get processed result from cache first
-  const cacheStartTime = Date.now();
-  const cachedResult = cache ? await cache.get(cacheKey) : null;
-  const cacheFetchTime = Date.now() - cacheStartTime;
-
-  if (cachedResult) {
-    log.info(`✓ Processed result cache HIT for: ${cacheKey} (fetch time: ${cacheFetchTime}ms)`);
-    return {
-      data: cachedResult,
-      headers: { 'Content-Encoding': 'br' },
-    };
-  }
-
-  // Cache miss - fetch raw data and process it
-  log.info(`✗ Processed result cache MISS for: ${cacheKey} (cache check time: ${cacheFetchTime}ms), fetching and processing`);
 
   const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${llmoConfig.dataFolder}/${filePath}`);
 
@@ -173,13 +133,6 @@ const fetchAndProcessSingleFile = async (context, llmoConfig, filePath, queryPar
     const processTime = Date.now() - processStartTime;
 
     log.info(`✓ Data processing completed in ${processTime}ms`);
-
-    // Cache the processed result (async, don't wait for it)
-    if (cache) {
-      cache.set(cacheKey, processedData).catch((error) => {
-        log.error(`Failed to cache processed data for ${cacheKey}: ${error.message}`);
-      });
-    }
 
     return {
       data: processedData,
@@ -264,7 +217,7 @@ const fetchAndProcessMultipleFiles = async (context, llmoConfig, files, queryPar
   return results;
 };
 
-export const queryLlmoWithCache = async (context, llmoConfig) => {
+export const queryLlmoFiles = async (context, llmoConfig) => {
   const { log } = context;
   const {
     siteId, dataSource, sheetType, week,

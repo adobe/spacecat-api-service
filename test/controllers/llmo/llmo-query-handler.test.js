@@ -18,13 +18,12 @@ import esmock from 'esmock';
 
 use(sinonChai);
 
-describe('llmo-cache-handler', () => {
-  let queryLlmoWithCache;
+describe('llmo-query-handler', () => {
+  let queryLlmoFiles;
   let tracingFetchStub;
   let mockContext;
   let mockLlmoConfig;
   let mockLog;
-  let mockCache;
 
   const TEST_SITE_ID = 'test-site-id';
   const TEST_DATA_FOLDER = 'test-data-folder';
@@ -50,9 +49,8 @@ describe('llmo-cache-handler', () => {
     headers: new Map([['content-type', 'application/json']]),
   });
 
-  // Helper to setup cache miss and fetch stub
+  // Helper to setup fetch stub
   const setupFetchTest = (data) => {
-    mockCache.get.resolves(null);
     tracingFetchStub.resolves(createMockResponse(data));
   };
 
@@ -70,11 +68,6 @@ describe('llmo-cache-handler', () => {
       debug: sinon.stub(),
     };
 
-    mockCache = {
-      get: sinon.stub().resolves(null),
-      set: sinon.stub().resolves(true),
-    };
-
     mockLlmoConfig = {
       dataFolder: TEST_DATA_FOLDER,
     };
@@ -89,66 +82,41 @@ describe('llmo-cache-handler', () => {
         dataSource: TEST_DATA_SOURCE,
       },
       data: {},
-      valkey: {
-        cache: mockCache,
-      },
     };
 
     tracingFetchStub = sinon.stub();
 
-    const module = await esmock('../../../src/controllers/llmo/llmo-cache-handler.js', {
+    const module = await esmock('../../../src/controllers/llmo/llmo-query-handler.js', {
       '@adobe/spacecat-shared-utils': {
         SPACECAT_USER_AGENT: 'test-user-agent',
         tracingFetch: tracingFetchStub,
       },
     });
 
-    queryLlmoWithCache = module.queryLlmoWithCache;
+    queryLlmoFiles = module.queryLlmoFiles;
   });
 
   afterEach(() => {
     sinon.restore();
   });
 
-  describe('queryLlmoWithCache - Single File Mode', () => {
-    it('should return cached data when cache hit occurs', async () => {
-      const cachedData = {
+  describe('queryLlmoFiles - Single File Mode', () => {
+    it('should return files data', async () => {
+      const filesData = {
         ':type': 'sheet',
         data: [
-          { id: 1, name: 'Cached Item 1' },
-          { id: 2, name: 'Cached Item 2' },
+          { id: 1, name: 'Item 1' },
+          { id: 2, name: 'Item 2' },
         ],
       };
 
-      mockCache.get.resolves(cachedData);
+      setupFetchTest(filesData);
 
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      const result = await queryLlmoFiles(mockContext, mockLlmoConfig);
 
-      expect(result.data).to.deep.equal(cachedData);
+      expect(result.data).to.deep.equal(filesData);
       expect(result.headers).to.be.an('object');
-      expect(mockCache.get).to.have.been.calledOnce;
-      expect(tracingFetchStub).to.not.have.been.called;
-      expect(mockLog.info).to.have.been.calledWith(
-        sinon.match(/Processed result cache HIT/),
-      );
-    });
-
-    it('should fetch and process data when cache miss occurs', async () => {
-      const rawData = createSheetData([
-        { id: 1, name: 'Fetched Item 1' },
-        { id: 2, name: 'Fetched Item 2' },
-      ]);
-
-      setupFetchTest(rawData);
-
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
-
-      expect(result.data).to.deep.equal(rawData);
       expect(tracingFetchStub).to.have.been.calledOnce;
-      expect(mockCache.set).to.have.been.calledOnce;
-      expect(mockLog.info).to.have.been.calledWith(
-        sinon.match(/Processed result cache MISS/),
-      );
       expect(mockLog.info).to.have.been.calledWith(
         sinon.match(/Fetch from HELIX/),
       );
@@ -157,7 +125,7 @@ describe('llmo-cache-handler', () => {
     it('should construct correct URL for single file', async () => {
       setupFetchTest(createSheetData([]));
 
-      await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       const fetchUrl = getFetchUrl();
       expect(fetchUrl).to.include(TEST_DATA_FOLDER);
@@ -173,7 +141,7 @@ describe('llmo-cache-handler', () => {
         week: '2025-W01',
       };
 
-      await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       expect(getFetchUrl()).to.include('weekly/2025-W01/test-data-source');
     });
@@ -186,7 +154,7 @@ describe('llmo-cache-handler', () => {
         sheetType: 'monthly',
       };
 
-      await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       expect(getFetchUrl()).to.include('monthly/test-data-source');
     });
@@ -198,26 +166,24 @@ describe('llmo-cache-handler', () => {
         sheet: 'products',
       };
 
-      await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       expect(getFetchUrl()).to.include('sheet=products');
     });
 
     it('should handle fetch errors gracefully', async () => {
-      mockCache.get.resolves(null);
       tracingFetchStub.rejects(new Error('Network error'));
 
       await expect(
-        queryLlmoWithCache(mockContext, mockLlmoConfig),
+        queryLlmoFiles(mockContext, mockLlmoConfig),
       ).to.be.rejectedWith('Network error');
     });
 
     it('should handle non-OK HTTP responses', async () => {
-      mockCache.get.resolves(null);
       tracingFetchStub.resolves(createMockResponse({}, false, 500));
 
       await expect(
-        queryLlmoWithCache(mockContext, mockLlmoConfig),
+        queryLlmoFiles(mockContext, mockLlmoConfig),
       ).to.be.rejectedWith('External API returned 500');
       expect(mockLog.error).to.have.been.calledWith(
         sinon.match(/Failed to fetch data from external endpoint/),
@@ -225,47 +191,22 @@ describe('llmo-cache-handler', () => {
     });
 
     it('should handle timeout errors', async () => {
-      mockCache.get.resolves(null);
       const abortError = new Error('The operation was aborted');
       abortError.name = 'AbortError';
       tracingFetchStub.rejects(abortError);
 
       await expect(
-        queryLlmoWithCache(mockContext, mockLlmoConfig),
+        queryLlmoFiles(mockContext, mockLlmoConfig),
       ).to.be.rejectedWith('Request timeout after 15000ms');
       expect(mockLog.error).to.have.been.calledWith(
         sinon.match(/Request timeout after 15000ms/),
       );
     });
 
-    it('should work without cache (valkey not available)', async () => {
-      const rawData = createSheetData([{ id: 1, name: 'Item 1' }]);
-
-      mockContext.valkey = null;
-      tracingFetchStub.resolves(createMockResponse(rawData));
-
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
-
-      expect(result.data).to.deep.equal(rawData);
-      expect(tracingFetchStub).to.have.been.calledOnce;
-    });
-
-    it('should handle cache.set errors gracefully', async () => {
-      const rawData = createSheetData([]);
-      mockCache.get.resolves(null);
-      mockCache.set.rejects(new Error('Cache set failed'));
-      tracingFetchStub.resolves(createMockResponse(rawData));
-
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
-
-      expect(result.data).to.deep.equal(rawData);
-      // The function should not throw - cache.set errors are logged but not propagated
-    });
-
     it('should include Authorization header with API key', async () => {
       setupFetchTest(createSheetData([]));
 
-      await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       expect(getFetchOptions().headers.Authorization).to.equal(`token ${TEST_LLMO_API_KEY}`);
     });
@@ -274,14 +215,13 @@ describe('llmo-cache-handler', () => {
       setupFetchTest(createSheetData([]));
       mockContext.env.LLMO_HLX_API_KEY = undefined;
 
-      await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       expect(getFetchOptions().headers.Authorization).to.equal('token hlx_api_key_missing');
     });
 
     it('should handle response without headers', async () => {
       const rawData = createSheetData([{ id: 1 }]);
-      mockCache.get.resolves(null);
 
       const responseWithoutHeaders = {
         ok: true,
@@ -293,18 +233,14 @@ describe('llmo-cache-handler', () => {
 
       tracingFetchStub.resolves(responseWithoutHeaders);
 
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      const result = await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       expect(result.data).to.deep.equal(rawData);
       expect(result.headers).to.deep.equal({});
     });
   });
 
-  describe('queryLlmoWithCache - Query Parameters', () => {
-    beforeEach(() => {
-      mockCache.get.resolves(null);
-    });
-
+  describe('queryLlmoFiles - Query Parameters', () => {
     it('should handle include parameter as array', async () => {
       const rawData = createSheetData([
         {
@@ -318,7 +254,7 @@ describe('llmo-cache-handler', () => {
       setupFetchTest(rawData);
       mockContext.data = { include: ['id', 'name'] };
 
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      const result = await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       expect(result.data.data[0]).to.have.keys(['id', 'name']);
       expect(result.data.data[0]).to.not.have.keys(['status', 'extra']);
@@ -334,7 +270,7 @@ describe('llmo-cache-handler', () => {
       setupFetchTest(rawData);
       mockContext.data = { sort: ['name:asc', 'id:desc'] };
 
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      const result = await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       expect(result.data.data[0].name).to.equal('Alice');
       expect(result.data.data[1].name).to.equal('Bob');
@@ -351,7 +287,7 @@ describe('llmo-cache-handler', () => {
       setupFetchTest(rawData);
       mockContext.data = { 'filter.status': 'active' };
 
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      const result = await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       expect(result.data.data).to.have.length(2);
       expect(result.data.data.every((item) => item.status === 'active')).to.be.true;
@@ -375,7 +311,7 @@ describe('llmo-cache-handler', () => {
         include: 'id,name',
       };
 
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      const result = await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       expect(result.data.data[0]).to.have.keys(['id', 'name']);
       expect(result.data.data[0]).to.not.have.keys(['status', 'extra']);
@@ -396,7 +332,7 @@ describe('llmo-cache-handler', () => {
         sort: 'name:asc',
       };
 
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      const result = await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       expect(result.data.data[0].name).to.equal('Alice');
       expect(result.data.data[1].name).to.equal('Bob');
@@ -418,7 +354,7 @@ describe('llmo-cache-handler', () => {
         sort: 'name:desc',
       };
 
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      const result = await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       expect(result.data.data[0].name).to.equal('Charlie');
       expect(result.data.data[1].name).to.equal('Bob');
@@ -440,7 +376,7 @@ describe('llmo-cache-handler', () => {
         sort: 'score:asc',
       };
 
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      const result = await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       expect(result.data.data[0].score).to.equal('50');
       expect(result.data.data[1].score).to.equal('75');
@@ -462,7 +398,7 @@ describe('llmo-cache-handler', () => {
         sort: 'score:desc',
       };
 
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      const result = await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       expect(result.data.data[0].score).to.equal('100');
       expect(result.data.data[1].score).to.equal('75');
@@ -488,7 +424,7 @@ describe('llmo-cache-handler', () => {
         sort: 'score:asc',
       };
 
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      const result = await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       // Non-null values should be sorted first
       expect(result.data.data[0].score).to.equal('50');
@@ -509,7 +445,7 @@ describe('llmo-cache-handler', () => {
       setupFetchTest(rawData);
       mockContext.data = { offset: '5' };
 
-      await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       const fetchUrl = getFetchUrl();
       expect(fetchUrl).to.include('offset=5');
@@ -524,7 +460,7 @@ describe('llmo-cache-handler', () => {
       setupFetchTest(rawData);
       mockContext.data = { limit: '50' };
 
-      await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       const fetchUrl = getFetchUrl();
       expect(fetchUrl).to.include('limit=50');
@@ -556,7 +492,7 @@ describe('llmo-cache-handler', () => {
         sort: 'name:desc',
       };
 
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      const result = await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       expect(result.data.data).to.have.length(3);
       expect(result.data.data[0].name).to.equal('Dave');
@@ -567,7 +503,7 @@ describe('llmo-cache-handler', () => {
     });
   });
 
-  describe('queryLlmoWithCache - Multi-Sheet Data', () => {
+  describe('queryLlmoFiles - Multi-Sheet Data', () => {
     it('should filter multi-sheet data by sheet names', async () => {
       const rawData = createMultiSheetData({
         sheet1: { data: [{ id: 1 }] },
@@ -578,7 +514,7 @@ describe('llmo-cache-handler', () => {
       setupFetchTest(rawData);
       mockContext.data = { sheets: 'sheet1,sheet3' };
 
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      const result = await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       expect(result.data).to.have.property('sheet1');
       expect(result.data).to.have.property('sheet3');
@@ -594,7 +530,7 @@ describe('llmo-cache-handler', () => {
       setupFetchTest(rawData);
       mockContext.data = { sheets: ['sheet1'] };
 
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      const result = await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       expect(result.data).to.have.property('sheet1');
       expect(result.data).to.not.have.property('sheet2');
@@ -619,7 +555,7 @@ describe('llmo-cache-handler', () => {
       setupFetchTest(rawData);
       mockContext.data = { 'filter.status': 'active' };
 
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      const result = await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       expect(result.data.sheet1.data).to.have.length(1);
       expect(result.data.sheet1.data[0].id).to.equal(1);
@@ -648,7 +584,7 @@ describe('llmo-cache-handler', () => {
       setupFetchTest(rawData);
       mockContext.data = { sort: 'name:asc' };
 
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      const result = await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       expect(result.data.sheet1.data[0].name).to.equal('Alice');
       expect(result.data.sheet1.data[1].name).to.equal('Bob');
@@ -659,12 +595,11 @@ describe('llmo-cache-handler', () => {
     });
   });
 
-  describe('queryLlmoWithCache - Multi-File Mode', () => {
+  describe('queryLlmoFiles - Multi-File Mode', () => {
     it('should fetch and process multiple files', async () => {
       const file1Data = createSheetData([{ id: 1, name: 'File 1' }]);
       const file2Data = createSheetData([{ id: 2, name: 'File 2' }]);
 
-      mockCache.get.resolves(null);
       tracingFetchStub
         .onFirstCall().resolves(createMockResponse(file1Data))
         .onSecondCall()
@@ -674,7 +609,7 @@ describe('llmo-cache-handler', () => {
       mockContext.params = { siteId: TEST_SITE_ID };
       mockContext.data = { file: ['file1.json', 'file2.json', 'file1.json', 'file2.json', 'file1.json', 'file2.json', 'file1.json', 'file2.json', 'file1.json', 'file2.json', 'file1.json', 'file2.json'] };
 
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      const result = await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       expect(result.data).to.be.an('array').with.length(12);
       expect(result.data[0].status).to.equal('success');
@@ -689,14 +624,13 @@ describe('llmo-cache-handler', () => {
     it('should handle single file as string in multi-file mode', async () => {
       const fileData = createSheetData([{ id: 1, name: 'File 1' }]);
 
-      mockCache.get.resolves(null);
       tracingFetchStub.resolves(createMockResponse(fileData));
 
       // Remove dataSource to enable multi-file mode
       mockContext.params = { siteId: TEST_SITE_ID };
       mockContext.data = { file: 'file1.json' };
 
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      const result = await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       expect(result.data).to.be.an('array').with.length(1);
       expect(result.data[0].status).to.equal('success');
@@ -706,7 +640,6 @@ describe('llmo-cache-handler', () => {
     it('should handle file fetch errors in multi-file mode', async () => {
       const file1Data = createSheetData([{ id: 1, name: 'File 1' }]);
 
-      mockCache.get.resolves(null);
       tracingFetchStub
         .onFirstCall().resolves(createMockResponse(file1Data))
         .onSecondCall()
@@ -716,7 +649,7 @@ describe('llmo-cache-handler', () => {
       mockContext.params = { siteId: TEST_SITE_ID };
       mockContext.data = { file: ['file1.json', 'file2.json'] };
 
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      const result = await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       expect(result.data).to.be.an('array').with.length(2);
       expect(result.data[0].status).to.equal('success');
@@ -737,7 +670,6 @@ describe('llmo-cache-handler', () => {
         { id: 4, name: 'Item 4', status: 'inactive' },
       ]);
 
-      mockCache.get.resolves(null);
       tracingFetchStub
         .onFirstCall().resolves(createMockResponse(file1Data))
         .onSecondCall()
@@ -750,7 +682,7 @@ describe('llmo-cache-handler', () => {
         'filter.status': 'active',
       };
 
-      const result = await queryLlmoWithCache(mockContext, mockLlmoConfig);
+      const result = await queryLlmoFiles(mockContext, mockLlmoConfig);
 
       expect(result.data[0].data.data).to.have.length(1);
       expect(result.data[0].data.data[0].id).to.equal(1);
@@ -759,61 +691,7 @@ describe('llmo-cache-handler', () => {
     });
   });
 
-  describe('queryLlmoWithCache - Cache Key Generation', () => {
-    it('should generate different cache keys for different query params', async () => {
-      const rawData = createSheetData([]);
-      setupFetchTest(rawData);
-
-      // First call with filter
-      mockContext.data = { 'filter.status': 'active' };
-      await queryLlmoWithCache(mockContext, mockLlmoConfig);
-
-      const firstCacheKey = mockCache.get.getCall(0).args[0];
-
-      // Reset mocks
-      mockCache.get.resetHistory();
-      mockCache.set.resetHistory();
-
-      // Second call with different filter
-      mockContext.data = { 'filter.status': 'inactive' };
-      tracingFetchStub.resolves(createMockResponse(rawData));
-      await queryLlmoWithCache(mockContext, mockLlmoConfig);
-
-      const secondCacheKey = mockCache.get.getCall(0).args[0];
-
-      expect(firstCacheKey).to.not.equal(secondCacheKey);
-    });
-
-    it('should generate the same cache key for the same query params', async () => {
-      const rawData = createSheetData([]);
-      tracingFetchStub.resolves(createMockResponse(rawData));
-
-      mockContext.data = {
-        'filter.status': 'active',
-        limit: '10',
-      };
-
-      await queryLlmoWithCache(mockContext, mockLlmoConfig);
-      const firstCacheKey = mockCache.get.getCall(0).args[0];
-
-      // Reset mocks
-      mockCache.get.resetHistory();
-      mockCache.set.resetHistory();
-
-      // Second call with same params (but potentially in different order in object)
-      mockContext.data = {
-        limit: '10',
-        'filter.status': 'active',
-      };
-
-      await queryLlmoWithCache(mockContext, mockLlmoConfig);
-      const secondCacheKey = mockCache.get.getCall(0).args[0];
-
-      expect(firstCacheKey).to.equal(secondCacheKey);
-    });
-  });
-
-  describe('queryLlmoWithCache - Error Handling', () => {
+  describe('queryLlmoFiles - Error Handling', () => {
     it('should throw error when neither dataSource nor file is provided', async () => {
       // Remove dataSource from params
       mockContext.params = {
@@ -823,7 +701,7 @@ describe('llmo-cache-handler', () => {
       mockContext.data = {};
 
       await expect(
-        queryLlmoWithCache(mockContext, mockLlmoConfig),
+        queryLlmoFiles(mockContext, mockLlmoConfig),
       ).to.be.rejectedWith('Either dataSource path parameter or file query parameter must be provided');
     });
   });

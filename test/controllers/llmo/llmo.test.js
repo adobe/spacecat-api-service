@@ -3078,27 +3078,27 @@ describe('LlmoController', () => {
     });
   });
 
-  describe('queryWithCache', () => {
+  describe('queryFiles', () => {
     const createControllerWithCacheStub = async (mockData) => {
-      const queryLlmoWithCacheStub = sinon.stub().resolves({
+      const queryLlmoFilesStub = sinon.stub().resolves({
         data: mockData,
         headers: {},
       });
 
       const LlmoControllerWithCache = await esmock('../../../src/controllers/llmo/llmo.js', {
-        '../../../src/controllers/llmo/llmo-cache-handler.js': {
-          queryLlmoWithCache: queryLlmoWithCacheStub,
+        '../../../src/controllers/llmo/llmo-query-handler.js': {
+          queryLlmoFiles: queryLlmoFilesStub,
         },
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
       });
 
       return {
         controller: LlmoControllerWithCache(mockContext),
-        stub: queryLlmoWithCacheStub,
+        stub: queryLlmoFilesStub,
       };
     };
 
-    it('should successfully fetch and return cached data', async () => {
+    it('should successfully fetch and return files data', async () => {
       const mockSingleSheetData = {
         ':type': 'sheet',
         data: [
@@ -3109,7 +3109,7 @@ describe('LlmoController', () => {
       const { controller: cacheController, stub } = await createControllerWithCacheStub(
         mockSingleSheetData,
       );
-      const result = await cacheController.queryWithCache(mockContext);
+      const result = await cacheController.queryFiles(mockContext);
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
@@ -3119,17 +3119,17 @@ describe('LlmoController', () => {
     });
 
     it('should handle errors and return bad request', async () => {
-      const queryLlmoWithCacheStub = sinon.stub().rejects(new Error('Cache query failed'));
+      const queryLlmoFilesStub = sinon.stub().rejects(new Error('Cache query failed'));
 
       const LlmoControllerWithCache = await esmock('../../../src/controllers/llmo/llmo.js', {
-        '../../../src/controllers/llmo/llmo-cache-handler.js': {
-          queryLlmoWithCache: queryLlmoWithCacheStub,
+        '../../../src/controllers/llmo/llmo-query-handler.js': {
+          queryLlmoFiles: queryLlmoFilesStub,
         },
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
       });
 
       const errorController = LlmoControllerWithCache(mockContext);
-      const result = await errorController.queryWithCache(mockContext);
+      const result = await errorController.queryFiles(mockContext);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
@@ -3137,106 +3137,6 @@ describe('LlmoController', () => {
       expect(mockLog.error).to.have.been.calledWith(
         `Error during LLMO cached query for site ${TEST_SITE_ID}: Cache query failed`,
       );
-    });
-  });
-
-  describe('clearCache', () => {
-    let mockValkeyCache;
-
-    beforeEach(() => {
-      mockValkeyCache = {
-        clearAll: sinon.stub().resolves({ success: true, deletedCount: 5 }),
-      };
-      mockContext.valkey = {
-        cache: mockValkeyCache,
-      };
-    });
-
-    it('should successfully clear cache and return deleted count', async () => {
-      const result = await controller.clearCache(mockContext);
-
-      expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal('Cache cleared successfully');
-      expect(responseBody.deletedCount).to.equal(5);
-      expect(responseBody.clearedAt).to.be.a('string');
-      expect(mockValkeyCache.clearAll).to.have.been.calledOnce;
-      expect(mockLog.info).to.have.been.calledWith('Starting cache clear operation');
-      expect(mockLog.info).to.have.been.calledWith('Successfully cleared 5 cache entries');
-    });
-
-    it('should return bad request when cache is not configured', async () => {
-      delete mockContext.valkey;
-
-      const result = await controller.clearCache(mockContext);
-
-      expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal('Cache is not configured for this environment');
-    });
-
-    it('should return bad request when cache object is missing', async () => {
-      mockContext.valkey = {};
-
-      const result = await controller.clearCache(mockContext);
-
-      expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal('Cache is not configured for this environment');
-    });
-
-    it('should return bad request when clearAll fails', async () => {
-      mockValkeyCache.clearAll.resolves({ success: false, deletedCount: 0 });
-
-      const result = await controller.clearCache(mockContext);
-
-      expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal('Failed to clear cache');
-      expect(mockLog.error).to.have.been.calledWith('Failed to clear cache');
-    });
-
-    it('should handle errors during cache clearing', async () => {
-      mockValkeyCache.clearAll.rejects(new Error('Cache clear failed'));
-
-      const result = await controller.clearCache(mockContext);
-
-      expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal('Cache clear failed');
-      expect(mockLog.error).to.have.been.calledWith('Error clearing cache: Cache clear failed');
-    });
-
-    it('should clear cache even when no entries are present', async () => {
-      mockValkeyCache.clearAll.resolves({ success: true, deletedCount: 0 });
-
-      const result = await controller.clearCache(mockContext);
-
-      expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal('Cache cleared successfully');
-      expect(responseBody.deletedCount).to.equal(0);
-      expect(mockLog.info).to.have.been.calledWith('Successfully cleared 0 cache entries');
-    });
-
-    it('should validate LLMO access before clearing cache', async () => {
-      mockConfig.getLlmoConfig.returns(null);
-
-      const result = await controller.clearCache(mockContext);
-
-      expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.include('LLM Optimizer is not enabled for this site');
-    });
-
-    it('should return bad request when user does not have LLMO access', async () => {
-      const deniedController = controllerWithAccessDenied(mockContext);
-
-      const result = await deniedController.clearCache(mockContext);
-
-      expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
     });
   });
 });

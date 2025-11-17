@@ -41,7 +41,7 @@ import {
   performLlmoOnboarding,
   performLlmoOffboarding,
 } from './llmo-onboarding.js';
-import { queryLlmoWithCache } from './llmo-cache-handler.js';
+import { queryLlmoFiles } from './llmo-query-handler.js';
 
 const { readConfig, writeConfig } = llmo;
 const { llmoConfig: llmoConfigSchema } = schemas;
@@ -960,50 +960,15 @@ function LlmoController(ctx) {
     }
   };
 
-  const queryWithCache = async (context) => {
+  const queryFiles = async (context) => {
     const { log } = context;
     const { siteId } = context.params;
     try {
       const { llmoConfig } = await getSiteAndValidateLlmo(context);
-      const { data, headers } = await queryLlmoWithCache(context, llmoConfig);
+      const { data, headers } = await queryLlmoFiles(context, llmoConfig);
       return ok(data, headers);
     } catch (error) {
       log.error(`Error during LLMO cached query for site ${siteId}: ${error.message}`);
-      return badRequest(error.message);
-    }
-  };
-
-  const clearCache = async (context) => {
-    const { log } = context;
-
-    try {
-      // Validate LLMO access
-      await getSiteAndValidateLlmo(context);
-
-      // Check if Valkey cache is available
-      if (!context.valkey || !context.valkey.cache) {
-        return badRequest('Cache is not configured for this environment');
-      }
-
-      log.info('Starting cache clear operation');
-
-      // Clear all cache entries
-      const result = await context.valkey.cache.clearAll();
-
-      if (!result.success) {
-        log.error('Failed to clear cache');
-        return badRequest('Failed to clear cache');
-      }
-
-      log.info(`Successfully cleared ${result.deletedCount} cache entries`);
-
-      return ok({
-        message: 'Cache cleared successfully',
-        deletedCount: result.deletedCount,
-        clearedAt: new Date().toISOString(),
-      });
-    } catch (error) {
-      log.error(`Error clearing cache: ${error.message}`);
       return badRequest(error.message);
     }
   };
@@ -1026,8 +991,7 @@ function LlmoController(ctx) {
     updateLlmoConfig,
     onboardCustomer,
     offboardCustomer,
-    queryWithCache,
-    clearCache,
+    queryFiles,
   };
 }
 
