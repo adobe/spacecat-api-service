@@ -165,6 +165,10 @@ Config:
     cdnLogsConfig:
       description: Optional. The CDN logs configuration
       $ref: '#/CdnLogsConfig'
+    brandProfile:
+      description: Optional. The Brand Profile determined during on-boarding.
+      type: object
+      additionalProperties: true
 ContentAiConfig:
   type: object
   properties:
