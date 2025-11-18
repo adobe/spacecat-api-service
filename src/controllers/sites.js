@@ -40,7 +40,7 @@ import { SiteDto } from '../dto/site.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
 import { KeyEventDto } from '../dto/key-event.js';
-import { wwwUrlResolver, getLastTwoSundaysNoonToNoon } from '../support/utils.js';
+import { wwwUrlResolver, getLastTwoCompleteWeeks } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 
@@ -652,6 +652,92 @@ function SitesController(ctx, log, env) {
     return ok(metrics);
   };
 
+  /**
+   * Handler to aggregate site-wide metrics from RUM bundles
+   * @param {Array} bundles - RUM bundles to process
+   * @returns {Object} Aggregated metrics including pageviews, LCP, and engagement
+   */
+  const aggregateSiteMetricsFromBundles = (bundles) => {
+    let totalPageviews = 0;
+    let totalEngagedSessions = 0;
+    let lcpSum = 0;
+    let lcpCount = 0;
+
+    bundles.forEach((bundle) => {
+      totalPageviews += bundle.weight;
+
+      // LCP calculation (weighted average)
+      const lcpEvent = bundle.events.find((e) => e.checkpoint === 'cwv-lcp');
+      if (lcpEvent?.value) {
+        lcpSum += lcpEvent.value * bundle.weight;
+        lcpCount += bundle.weight;
+      }
+
+      // Engagement calculation
+      const hasClick = bundle.events.some((e) => e.checkpoint === 'click');
+      const hasViewContent = bundle.events.filter(
+        (e) => e.checkpoint === 'viewmedia' || e.checkpoint === 'viewblock',
+      ).length > 3;
+
+      if (hasClick || hasViewContent) {
+        totalEngagedSessions += bundle.weight;
+      }
+    });
+
+    const avgLCP = lcpCount > 0 ? lcpSum / lcpCount : null;
+    const avgEngagement = totalPageviews > 0
+      ? (totalEngagedSessions / totalPageviews) * 100
+      : null;
+
+    return {
+      pageviews: totalPageviews,
+      siteSpeed: avgLCP, // LCP in milliseconds
+      avgEngagement,
+    };
+  };
+
+  /**
+   * Fetches and processes metrics for a single date range
+   * @param {Object} params - Parameters for fetching metrics
+   * @returns {Object} Weekly metrics with label, dates, pageviews, speed, engagement
+   */
+  const fetchWeeklyMetrics = async ({
+    domain, domainKey, dateRange, logger,
+  }) => {
+    const options = {
+      domain,
+      domainkey: domainKey,
+      startTime: dateRange.startTime,
+      endTime: dateRange.endTime,
+      granularity: 'DAILY',
+      checkpoints: ['cwv-lcp', 'click', 'viewmedia', 'viewblock'],
+    };
+
+    logger.info(
+      `Fetching bundles for ${dateRange.label}: `
+      + `${dateRange.startTime} to ${dateRange.endTime}`,
+    );
+
+    const bundles = await fetchBundles(options, logger);
+    logger.info(`Retrieved ${bundles.length} bundles for ${dateRange.label}`);
+
+    const metrics = aggregateSiteMetricsFromBundles(bundles);
+
+    logger.info(
+      `Aggregated metrics for ${dateRange.label}: `
+      + `pageviews=${metrics.pageviews}, `
+      + `LCP=${metrics.siteSpeed?.toFixed(2)}ms, `
+      + `engagement=${metrics.avgEngagement?.toFixed(2)}%`,
+    );
+
+    return {
+      label: dateRange.label,
+      startTime: dateRange.startTime,
+      endTime: dateRange.endTime,
+      ...metrics,
+    };
+  };
+
   const getLatestSiteMetrics = async (context) => {
     const siteId = context.params?.siteId;
 
@@ -678,85 +764,39 @@ function SitesController(ctx, log, env) {
       const domainKey = await rumAPIClient.retrieveDomainkey(domain);
       log.info(`Domain key retrieved successfully for domain: ${domain}`);
 
-      // Get last two Sundays at noon
-      const sundayRanges = getLastTwoSundaysNoonToNoon();
+      // Get last two complete weeks (Monday to Sunday)
+      const weekRanges = getLastTwoCompleteWeeks();
 
-      log.info(`Fetching latest metrics for ${sundayRanges.length} Sunday periods for site ${siteId}`);
-      log.info(`Sunday ranges: ${JSON.stringify(sundayRanges.map((r) => ({ label: r.label, start: r.startTime, end: r.endTime })))}`);
+      log.info(
+        `Fetching latest metrics for ${weekRanges.length} complete weeks `
+        + `for site ${siteId}`,
+      );
+      log.info(
+        `Week ranges: ${JSON.stringify(weekRanges.map((r) => ({
+          label: r.label,
+          start: r.startTime,
+          end: r.endTime,
+        })))}`,
+      );
 
-      // Fetch bundles for both Sunday periods in parallel (optimized - no per-URL objects!)
+      // Fetch bundles for both weeks in parallel
       const weeklyMetrics = await Promise.all(
-        sundayRanges.map(async (dateRange) => {
-          const options = {
-            domain,
-            domainkey: domainKey,
-            startTime: dateRange.startTime,
-            endTime: dateRange.endTime,
-            granularity: 'HOURLY',
-            checkpoints: ['cwv-lcp', 'click', 'viewmedia', 'viewblock'],
-          };
-
-          log.info(`Fetching bundles for ${dateRange.label}: ${dateRange.startTime} to ${dateRange.endTime}`);
-
-          // Fetch bundles directly (no per-URL grouping!)
-          const bundles = await fetchBundles(options, log);
-
-          log.info(`Retrieved ${bundles.length} bundles for ${dateRange.label}`);
-
-          // Aggregate metrics directly from bundles
-          let totalPageviews = 0;
-          let totalEngagedSessions = 0;
-          let lcpSum = 0;
-          let lcpCount = 0;
-
-          bundles.forEach((bundle) => {
-            totalPageviews += bundle.weight;
-
-            // LCP calculation (weighted average)
-            const lcpEvent = bundle.events.find((e) => e.checkpoint === 'cwv-lcp');
-            if (lcpEvent?.value) {
-              lcpSum += lcpEvent.value * bundle.weight;
-              lcpCount += bundle.weight;
-            }
-
-            // Engagement calculation
-            const hasClick = bundle.events.some((e) => e.checkpoint === 'click');
-            const hasViewContent = bundle.events.filter(
-              (e) => e.checkpoint === 'viewmedia' || e.checkpoint === 'viewblock',
-            ).length > 3;
-
-            if (hasClick || hasViewContent) {
-              totalEngagedSessions += bundle.weight;
-            }
-          });
-
-          const avgLCP = lcpCount > 0 ? lcpSum / lcpCount : null;
-          const avgEngagement = totalPageviews > 0
-            ? (totalEngagedSessions / totalPageviews) * 100
-            : null;
-
-          log.info(
-            `Aggregated metrics for ${dateRange.label}: `
-            + `pageviews=${totalPageviews}, LCP=${avgLCP?.toFixed(2)}ms, `
-            + `engagement=${avgEngagement?.toFixed(2)}%`,
-          );
-
-          return {
-            label: dateRange.label,
-            startTime: dateRange.startTime,
-            endTime: dateRange.endTime,
-            pageviews: totalPageviews,
-            siteSpeed: avgLCP, // LCP in milliseconds
-            avgEngagement,
-          };
-        }),
+        weekRanges.map((dateRange) => fetchWeeklyMetrics({
+          domain,
+          domainKey,
+          dateRange,
+          logger: log,
+        })),
       );
 
       // Get current and previous week data
       const currentWeek = weeklyMetrics[0];
       const previousWeek = weeklyMetrics[1];
 
-      log.info(`Processing metrics for site ${siteId} - Current: ${currentWeek.label}, Previous: ${previousWeek.label}`);
+      log.info(
+        `Processing metrics for site ${siteId} - `
+        + `Current: ${currentWeek.label}, Previous: ${previousWeek.label}`,
+      );
 
       // Calculate percentage changes
       const calculateChange = (current, previous) => {
@@ -764,7 +804,10 @@ function SitesController(ctx, log, env) {
         return ((current - previous) / previous) * 100;
       };
 
-      const pageviewsChange = calculateChange(currentWeek.pageviews, previousWeek.pageviews);
+      const pageviewsChange = calculateChange(
+        currentWeek.pageviews,
+        previousWeek.pageviews,
+      );
       const lcpChange = calculateChange(currentWeek.siteSpeed, previousWeek.siteSpeed);
       const engagementChange = calculateChange(
         currentWeek.avgEngagement,

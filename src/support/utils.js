@@ -503,6 +503,51 @@ export function getTodayAndLastTwoSundaysDateRanges() {
 }
 
 /**
+ * Get last two complete weeks (Monday 00:00 to Sunday 23:59 UTC)
+ * Always returns last two COMPLETE weeks, excluding any partial current week
+ * @returns {Array} - Array of date ranges with label, startTime, and endTime
+ */
+export function getLastTwoCompleteWeeks() {
+  const now = new Date();
+  const dayOfWeek = now.getUTCDay(); // 0=Sunday, 1=Monday, ... 6=Saturday
+
+  // Calculate days since last Monday
+  // If today is Sunday (0), it's 6 days since Monday
+  // If today is Monday (1), it's 0 days since Monday (but we want last week's Monday)
+  const daysSinceMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+
+  // Last complete week's Monday at 00:00:00.000 UTC (going back 7 days from most recent Monday)
+  const lastMonday = new Date(now);
+  lastMonday.setUTCDate(now.getUTCDate() - daysSinceMonday - 7);
+  lastMonday.setUTCHours(0, 0, 0, 0);
+
+  // Last complete week's Sunday at 23:59:59.999 UTC
+  const lastSunday = new Date(lastMonday);
+  lastSunday.setUTCDate(lastMonday.getUTCDate() + 6);
+  lastSunday.setUTCHours(23, 59, 59, 999);
+
+  // Week before that
+  const prevMonday = new Date(lastMonday);
+  prevMonday.setUTCDate(lastMonday.getUTCDate() - 7);
+
+  const prevSunday = new Date(lastSunday);
+  prevSunday.setUTCDate(lastSunday.getUTCDate() - 7);
+
+  return [
+    {
+      label: getStringDate(lastSunday),
+      startTime: lastMonday.toISOString(),
+      endTime: lastSunday.toISOString(),
+    },
+    {
+      label: getStringDate(prevSunday),
+      startTime: prevMonday.toISOString(),
+      endTime: prevSunday.toISOString(),
+    },
+  ];
+}
+
+/**
  * Get last two Sundays at noon (Sunday noon to Sunday noon periods)
  * If today is Sunday and past noon, includes today's week
  * @returns {Array} - Array of date ranges with label, startTime, and endTime
