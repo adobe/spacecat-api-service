@@ -3152,4 +3152,66 @@ describe('LlmoController', () => {
       );
     });
   });
+
+  describe('queryFiles', () => {
+    const createControllerWithCacheStub = async (mockData) => {
+      const queryLlmoFilesStub = sinon.stub().resolves({
+        data: mockData,
+        headers: {},
+      });
+
+      const LlmoControllerWithCache = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-query-handler.js': {
+          queryLlmoFiles: queryLlmoFilesStub,
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+      });
+
+      return {
+        controller: LlmoControllerWithCache(mockContext),
+        stub: queryLlmoFilesStub,
+      };
+    };
+
+    it('should successfully fetch and return files data', async () => {
+      const mockSingleSheetData = {
+        ':type': 'sheet',
+        data: [
+          { id: 1, name: 'Test Item 1' },
+          { id: 2, name: 'Test Item 2' },
+        ],
+      };
+      const { controller: cacheController, stub } = await createControllerWithCacheStub(
+        mockSingleSheetData,
+      );
+      const result = await cacheController.queryFiles(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockSingleSheetData);
+      expect(stub).to.have.been.calledOnce;
+      expect(stub).to.have.been.calledWith(mockContext, mockLlmoConfig);
+    });
+
+    it('should handle errors and return bad request', async () => {
+      const queryLlmoFilesStub = sinon.stub().rejects(new Error('Cache query failed'));
+
+      const LlmoControllerWithCache = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-query-handler.js': {
+          queryLlmoFiles: queryLlmoFilesStub,
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+      });
+
+      const errorController = LlmoControllerWithCache(mockContext);
+      const result = await errorController.queryFiles(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Cache query failed');
+      expect(mockLog.error).to.have.been.calledWith(
+        `Error during LLMO cached query for site ${TEST_SITE_ID}: Cache query failed`,
+      );
+    });
+  });
 });

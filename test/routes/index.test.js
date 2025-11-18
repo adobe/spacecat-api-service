@@ -223,6 +223,7 @@ describe('getRouteHandlers', () => {
     patchLlmoCdnBucketConfig: () => null,
     onboardCustomer: () => null,
     offboardCustomer: () => null,
+    queryFiles: () => null,
   };
 
   const mockSandboxAuditController = {
@@ -495,6 +496,10 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/sheet-data/:dataSource',
       'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource',
       'POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource',
+      'GET /sites/:siteId/llmo/data',
+      'GET /sites/:siteId/llmo/data/:dataSource',
+      'GET /sites/:siteId/llmo/data/:sheetType/:dataSource',
+      'GET /sites/:siteId/llmo/data/:sheetType/:week/:dataSource',
       'GET /sites/:siteId/llmo/config',
       'PATCH /sites/:siteId/llmo/config',
       'POST /sites/:siteId/llmo/config',
@@ -686,5 +691,13 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'dataSource']);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource'].handler).to.equal(mockLlmoController.queryLlmoSheetData);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'week', 'dataSource']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/data'].handler).to.equal(mockLlmoController.queryFiles);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/data'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/data/:dataSource'].handler).to.equal(mockLlmoController.queryFiles);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/data/:dataSource'].paramNames).to.deep.equal(['siteId', 'dataSource']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/data/:sheetType/:dataSource'].handler).to.equal(mockLlmoController.queryFiles);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/data/:sheetType/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'dataSource']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/data/:sheetType/:week/:dataSource'].handler).to.equal(mockLlmoController.queryFiles);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/data/:sheetType/:week/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'week', 'dataSource']);
   });
 });
