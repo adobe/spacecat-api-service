@@ -41,6 +41,7 @@ function isValidDate(dateString) {
 function filterByDateRange(items, dateGetter, startDate, endDate) {
   return items.filter((item) => {
     const itemDate = dateGetter(item);
+    /* c8 ignore next - Defensive check; ElectroDB entities always have date fields */
     if (!itemDate) return false;
 
     // Extract date portion (YYYY-MM-DD) from ISO timestamp
@@ -150,10 +151,12 @@ If only startDate provided, shows metrics from that date to today.`,
 
         // Fetch audits for the site using existing API
         const auditsResult = await Audit.query.bySite({ siteId }).go();
+        /* c8 ignore next - ElectroDB always returns .data, but defensive fallback */
         const allAudits = auditsResult.data || [];
 
         // Fetch opportunities for the site using existing API
         const opportunitiesResult = await Opportunity.query.bySite({ siteId }).go();
+        /* c8 ignore next - ElectroDB always returns .data, but defensive fallback */
         const allOpportunities = opportunitiesResult.data || [];
 
         // Fetch suggestions for each opportunity using existing API
@@ -164,6 +167,7 @@ If only startDate provided, shows metrics from that date to today.`,
           const suggestionsResult = await Suggestion.query
             .byOpportunity({ opportunityId: opportunity.getId() })
             .go();
+          /* c8 ignore next - ElectroDB always returns .data, but defensive fallback */
           allSuggestions.push(...(suggestionsResult.data || []));
         }
 
