@@ -707,7 +707,6 @@ function SitesController(ctx, log, env) {
 
       log.info(`Metrics for site ${siteId} - current:`, current);
       log.info(`Metrics for site ${siteId} - previous:`, previous);
-      log.info(`Metrics for site ${siteId} - organicTraffic:`, organicTraffic);
 
       const previousPageViews = previous.totalPageViews;
       const previousCTR = previous.totalCTR;
@@ -720,6 +719,7 @@ function SitesController(ctx, log, env) {
       if (organicTraffic.length > 0) {
         const metric = organicTraffic[organicTraffic.length - 1];
         cpc = metric.cost / metric.value;
+        log.info(`Metrics for site ${siteId} - organicTraffic:`, metric);
       }
 
       const projectedTrafficValue = pageViewsChange * cpc;
