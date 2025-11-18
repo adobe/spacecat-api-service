@@ -2351,32 +2351,6 @@ describe('Sites Controller', () => {
     });
   });
 
-  const createControllerWithWorkflowStub = async (startAgentWorkflowStub, options = {}) => {
-    const moduleMocks = {
-      [AGENT_WORKFLOW_MODULE]: {
-        startAgentWorkflow: startAgentWorkflowStub,
-      },
-    };
-
-    if (options.accessControl) {
-      moduleMocks[ACCESS_CONTROL_MODULE] = options.accessControl;
-    }
-
-    const sitesControllerMock = await esmock('../../src/controllers/sites.js', {}, moduleMocks);
-    return sitesControllerMock.default(context, context.log, context.env);
-  };
-
-  const buildAccessControlMock = (hasAccessValue) => ({
-    default: class {
-      static fromContext() {
-        return {
-          hasAdminAccess: () => true,
-          hasAccess: async () => hasAccessValue,
-        };
-      }
-    },
-  });
-
   describe('getBrandProfile', () => {
     it('returns 400 when siteId is invalid', async () => {
       const response = await sitesController.getBrandProfile({ params: { siteId: 'abc' } });
@@ -2435,17 +2409,61 @@ describe('Sites Controller', () => {
   });
 
   describe('triggerBrandProfile', () => {
+    let controllerFactory;
+    let workflowStub;
+    let setWorkflowImpl;
+    let setHasAccess;
+
+    before(async () => {
+      let workflowImpl = async () => {
+        throw new Error('workflow stub not set');
+      };
+      let hasAccess = true;
+
+      const moduleMocks = {
+        [AGENT_WORKFLOW_MODULE]: {
+          startAgentWorkflow: (...args) => workflowImpl(...args),
+        },
+        [ACCESS_CONTROL_MODULE]: {
+          default: class {
+            static fromContext() {
+              return {
+                hasAdminAccess: () => true,
+                hasAccess: async () => hasAccess,
+              };
+            }
+          },
+        },
+      };
+
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {}, moduleMocks);
+      controllerFactory = () => sitesControllerMock.default(context, context.log, context.env);
+      setWorkflowImpl = (impl) => {
+        workflowImpl = impl;
+      };
+      setHasAccess = (value) => {
+        hasAccess = value;
+      };
+    });
+
+    beforeEach(() => {
+      workflowStub = sinon.stub().resolves('exec-123');
+      setWorkflowImpl(workflowStub);
+      setHasAccess(true);
+    });
+
     it('returns 400 when siteId is invalid', async () => {
-      const controller = await createControllerWithWorkflowStub(sinon.stub());
+      const controller = controllerFactory();
       const response = await controller.triggerBrandProfile({ params: { siteId: 'xyz' } });
       const error = await response.json();
 
       expect(response.status).to.equal(400);
       expect(error.message).to.equal('Site ID required');
+      expect(workflowStub).to.not.have.been.called;
     });
 
     it('returns 404 when site is not found', async () => {
-      const controller = await createControllerWithWorkflowStub(sinon.stub());
+      const controller = controllerFactory();
       mockDataAccess.Site.findById.resolves(null);
 
       const response = await controller.triggerBrandProfile({ params: { siteId: SITE_IDS[0] } });
@@ -2458,9 +2476,8 @@ describe('Sites Controller', () => {
     });
 
     it('returns 403 when user lacks access', async () => {
-      const controller = await createControllerWithWorkflowStub(sinon.stub(), {
-        accessControl: buildAccessControlMock(false),
-      });
+      setHasAccess(false);
+      const controller = controllerFactory();
 
       const response = await controller.triggerBrandProfile({ params: { siteId: SITE_IDS[0] } });
       const error = await response.json();
@@ -2470,8 +2487,9 @@ describe('Sites Controller', () => {
     });
 
     it('returns 202 and triggers workflow with provided idempotencyKey', async () => {
-      const startAgentWorkflowStub = sandbox.stub().resolves('exec-123');
-      const controller = await createControllerWithWorkflowStub(startAgentWorkflowStub);
+      workflowStub = sinon.stub().resolves('exec-123');
+      setWorkflowImpl(workflowStub);
+      const controller = controllerFactory();
 
       const response = await controller.triggerBrandProfile({
         params: { siteId: SITE_IDS[0] },
@@ -2484,8 +2502,8 @@ describe('Sites Controller', () => {
         executionName: 'exec-123',
         siteId: SITE_IDS[0],
       });
-      expect(startAgentWorkflowStub).to.have.been.calledOnce;
-      expect(startAgentWorkflowStub.firstCall.args[1]).to.deep.equal({
+      expect(workflowStub).to.have.been.calledOnce;
+      expect(workflowStub.firstCall.args[1]).to.deep.equal({
         agentId: 'brand-profile',
         siteId: SITE_IDS[0],
         context: {
@@ -2493,27 +2511,29 @@ describe('Sites Controller', () => {
         },
         idempotencyKey: 'manual-key',
       });
-      expect(startAgentWorkflowStub.firstCall.args[2]).to.deep.equal({
+      expect(workflowStub.firstCall.args[2]).to.deep.equal({
         executionName: `brand-profile-${SITE_IDS[0]}`,
       });
     });
 
     it('generates an idempotency key when one is not provided', async () => {
-      const startAgentWorkflowStub = sandbox.stub().resolves('exec-456');
-      const controller = await createControllerWithWorkflowStub(startAgentWorkflowStub);
+      workflowStub = sinon.stub().resolves('exec-456');
+      setWorkflowImpl(workflowStub);
+      const controller = controllerFactory();
 
       const response = await controller.triggerBrandProfile({
         params: { siteId: SITE_IDS[0] },
       });
 
       expect(response.status).to.equal(202);
-      const workflowPayload = startAgentWorkflowStub.firstCall.args[1];
+      const workflowPayload = workflowStub.firstCall.args[1];
       expect(workflowPayload.idempotencyKey).to.match(new RegExp(`^brand-profile-${SITE_IDS[0]}-\\d+$`));
     });
 
     it('returns 500 when workflow invocation fails', async () => {
-      const startAgentWorkflowStub = sandbox.stub().rejects(new Error('boom'));
-      const controller = await createControllerWithWorkflowStub(startAgentWorkflowStub);
+      workflowStub = sinon.stub().rejects(new Error('boom'));
+      setWorkflowImpl(workflowStub);
+      const controller = controllerFactory();
 
       const response = await controller.triggerBrandProfile({
         params: { siteId: SITE_IDS[0] },
@@ -2522,7 +2542,7 @@ describe('Sites Controller', () => {
 
       expect(response.status).to.equal(500);
       expect(error.message).to.equal('Failed to trigger brand profile agent');
-      expect(startAgentWorkflowStub).to.have.been.calledOnce;
+      expect(workflowStub).to.have.been.calledOnce;
     });
   });
 });
