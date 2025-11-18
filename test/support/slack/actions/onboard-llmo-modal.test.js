@@ -32,6 +32,7 @@ describe('onboard-llmo-modal', () => {
   let sharedConfigMock;
   let sharedSharepointMock;
   let sharedSlackMock;
+  let triggerBrandProfileAgentStub;
 
   // Default mocks that can be reused across tests
   const createDefaultMockSite = (sinonSandbox) => {
@@ -165,6 +166,8 @@ describe('onboard-llmo-modal', () => {
 
   const createDefaultMockSlackCtx = (sinonSandbox) => ({
     say: sinonSandbox.stub(),
+    channelId: 'C12345',
+    threadTs: '1234567890.123456',
   });
 
   const createDefaultMockFetch = (sinonSandbox) => sinonSandbox.stub().resolves({
@@ -208,6 +211,9 @@ describe('onboard-llmo-modal', () => {
       },
       '../../../../src/utils/slack/base.js': sharedSlackMock,
       '../../../../src/controllers/llmo/llmo-onboarding.js': updatedMockedLLMOOnboarding,
+      '../../../../src/support/brand-profile-trigger.js': {
+        triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+      },
     });
 
     return testMockedModule;
@@ -290,6 +296,8 @@ describe('onboard-llmo-modal', () => {
     });
 
     // Mock the ES modules that can't be stubbed directly
+    triggerBrandProfileAgentStub = sinon.stub().resolves('exec-llmo');
+
     mockedModule = await esmock('../../../../src/support/slack/actions/onboard-llmo-modal.js', {
       '@adobe/spacecat-shared-data-access/src/models/site/config.js': sharedConfigMock,
       '@adobe/spacecat-helix-content-sdk': sharedSharepointMock,
@@ -301,6 +309,9 @@ describe('onboard-llmo-modal', () => {
       },
       '../../../../src/utils/slack/base.js': sharedSlackMock,
       '../../../../src/controllers/llmo/llmo-onboarding.js': mockedLLMOOnboarding,
+      '../../../../src/support/brand-profile-trigger.js': {
+        triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+      },
     });
 
     onboardSite = mockedModule.onboardSite;
@@ -319,6 +330,8 @@ describe('onboard-llmo-modal', () => {
     // Reset TierClient mock completely for each test
     tierClientMock.createForSite.resetHistory();
     tierClientMock.createForSite.resetBehavior();
+
+    triggerBrandProfileAgentStub.resetHistory();
 
     // Create a fresh mock instance for each test with sandbox stubs
     const freshCreateEntitlementStub = sandbox.stub().resolves({
@@ -435,6 +448,11 @@ describe('onboard-llmo-modal', () => {
         content: sinon.match.string,
         sha: 'test-sha-123',
       });
+
+      expect(triggerBrandProfileAgentStub).to.have.been.calledOnce;
+      expect(triggerBrandProfileAgentStub.firstCall.args[0]).to.deep.include({
+        reason: 'llmo-slack',
+      });
     });
 
     it('should not add new line to yaml if it already ends with a newline', async () => {
@@ -496,6 +514,9 @@ describe('onboard-llmo-modal', () => {
         },
         '../../../../src/utils/slack/base.js': sharedSlackMock,
         '../../../../src/controllers/llmo/llmo-onboarding.js': updatedMockedLLMOOnboarding,
+        '../../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
       });
 
       onboardSite = mockedModule.onboardSite;
@@ -1061,6 +1082,9 @@ describe('onboard-llmo-modal', () => {
         },
         '../../../../src/utils/slack/base.js': sharedSlackMock,
         '../../../../src/controllers/llmo/llmo-onboarding.js': updatedMockedLLMOOnboarding,
+        '../../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
       });
 
       onboardSite = mockedModule.onboardSite;
@@ -1149,6 +1173,9 @@ example-com:
         },
         '../../../../src/utils/slack/base.js': sharedSlackMock,
         '../../../../src/controllers/llmo/llmo-onboarding.js': updatedMockedLLMOOnboarding,
+        '../../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
       });
 
       onboardSite = mockedModule.onboardSite;
