@@ -21,6 +21,9 @@ const sfnClient = new SFNClient();
  * (see https://docs.aws.amazon.com/step-functions/latest/apireference/API_StartExecution.html).
  * This helper enforces those constraints and falls back to a timestamped name
  * when input is missing or becomes empty after sanitization.
+ *
+ * @param {string} value - The execution name to sanitize.
+ * @returns {string} The sanitized execution name.
  */
 export const sanitizeExecutionName = (value) => {
   const sanitizedInput = (value || `agent-${Date.now()}`).replace(/[^A-Za-z0-9-_]/g, '');
