@@ -2413,7 +2413,8 @@ describe('Sites Controller', () => {
     let helperStub;
     let setHasAccess;
 
-    before(async () => {
+    before(async function beforeTriggerBrandProfile() {
+      this.timeout(5000);
       helperStub = sinon.stub().resolves('exec-123');
       let hasAccess = true;
       const moduleMocks = {
@@ -2421,12 +2422,19 @@ describe('Sites Controller', () => {
           triggerBrandProfileAgent: (...args) => helperStub(...args),
         },
         [ACCESS_CONTROL_MODULE]: {
-          default: class {
+          default: class MockAccessControlUtil {
             static fromContext() {
-              return {
-                hasAdminAccess: () => true,
-                hasAccess: async () => hasAccess,
-              };
+              return new MockAccessControlUtil();
+            }
+
+            // eslint-disable-next-line class-methods-use-this
+            hasAdminAccess() {
+              return true;
+            }
+
+            // eslint-disable-next-line class-methods-use-this
+            async hasAccess() {
+              return hasAccess;
             }
           },
         },
@@ -2469,8 +2477,8 @@ describe('Sites Controller', () => {
     });
 
     it('returns 403 when user lacks access', async () => {
-      const controller = controllerFactory();
       setHasAccess(false);
+      const controller = controllerFactory();
 
       const response = await controller.triggerBrandProfile({ params: { siteId: SITE_IDS[0] } });
       const error = await response.json();
