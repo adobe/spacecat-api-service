@@ -164,6 +164,8 @@ export default (ctx) => {
       );
 
       if (hasUpdates === true) {
+        const { authInfo: { profile } } = context.attributes;
+        configuration.setUpdatedBy(profile.email || 'system');
         await configuration.save();
       }
 

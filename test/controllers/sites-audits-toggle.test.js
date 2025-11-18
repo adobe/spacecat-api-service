@@ -65,6 +65,7 @@ describe('Sites Audits Controller', () => {
       getHandlers: sandbox.stub().returns(handlers),
       getQueues: sandbox.stub(),
       getSlackRoles: sandbox.stub(),
+      setUpdatedBy: sandbox.stub(),
       save: sandbox.stub(),
     };
 
@@ -89,7 +90,7 @@ describe('Sites Audits Controller', () => {
         authInfo: new AuthInfo()
           .withType('jwt')
           .withScopes([{ name: 'admin' }])
-          .withProfile({ is_admin: true })
+          .withProfile({ is_admin: true, email: 'test@example.com' })
           .withAuthenticated(true),
       },
     };
@@ -118,6 +119,7 @@ describe('Sites Audits Controller', () => {
     const response = await sitesAuditsToggleController.execute({
       data: requestData,
       log: logMock,
+      attributes: contextMock.attributes,
     });
     const patchResponse = await response.json();
 
@@ -228,6 +230,7 @@ describe('Sites Audits Controller', () => {
       const response = await sitesAuditsToggleController.execute({
         data: requestData,
         log: logMock,
+        attributes: contextMock.attributes,
       });
       const error = await response.json();
 
@@ -270,7 +273,10 @@ describe('Sites Audits Controller', () => {
         { baseURL: 'https://site1.com', auditType: '404', enable: true },
       ];
 
-      const response = await sitesAuditsToggleController.execute({ data: requestData });
+      const response = await sitesAuditsToggleController.execute({
+        data: requestData,
+        attributes: contextMock.attributes,
+      });
       const patchResponse = await response.json();
 
       expect(
@@ -306,7 +312,10 @@ describe('Sites Audits Controller', () => {
         { baseURL: '', auditType: 'cwv', enable: true },
         { baseURL: 'https://site1.com', auditType: '404', enable: true },
       ];
-      const response = await sitesAuditsToggleController.execute({ data: requestData });
+      const response = await sitesAuditsToggleController.execute({
+        data: requestData,
+        attributes: contextMock.attributes,
+      });
       const patchResponse = await response.json();
 
       expect(
@@ -342,7 +351,10 @@ describe('Sites Audits Controller', () => {
         { baseURL: 'wrong_format', auditType: 'cwv', enable: true },
         { baseURL: 'https://site1.com', auditType: '404', enable: true },
       ];
-      const response = await sitesAuditsToggleController.execute({ data: requestData });
+      const response = await sitesAuditsToggleController.execute({
+        data: requestData,
+        attributes: contextMock.attributes,
+      });
       const patchResponse = await response.json();
 
       expect(
@@ -380,7 +392,10 @@ describe('Sites Audits Controller', () => {
         { baseURL: 'https://site0.com', auditType: [], enable: true },
         { baseURL: 'https://site1.com', auditType: '404', enable: true },
       ];
-      const response = await sitesAuditsToggleController.execute({ data: requestData });
+      const response = await sitesAuditsToggleController.execute({
+        data: requestData,
+        attributes: contextMock.attributes,
+      });
       const patchResponse = await response.json();
 
       expect(
@@ -418,7 +433,10 @@ describe('Sites Audits Controller', () => {
         { baseURL: 'https://site0.com', auditType: 'cwv' },
         { baseURL: 'https://site1.com', auditType: '404', enable: true },
       ];
-      const response = await sitesAuditsToggleController.execute({ data: requestData });
+      const response = await sitesAuditsToggleController.execute({
+        data: requestData,
+        attributes: contextMock.attributes,
+      });
       const patchResponse = await response.json();
 
       expect(
@@ -456,7 +474,10 @@ describe('Sites Audits Controller', () => {
         { baseURL: 'https://site0.com', auditType: 'cwv', enable: 'not_boolean' },
         { baseURL: 'https://site1.com', auditType: '404', enable: true },
       ];
-      const response = await sitesAuditsToggleController.execute({ data: requestData });
+      const response = await sitesAuditsToggleController.execute({
+        data: requestData,
+        attributes: contextMock.attributes,
+      });
       const patchResponse = await response.json();
 
       expect(
@@ -494,7 +515,10 @@ describe('Sites Audits Controller', () => {
         { baseURL: 'https://site0.com', auditType: 'cwv', enable: true },
         { baseURL: 'https://site1.com', auditType: '404', enable: true },
       ];
-      const response = await sitesAuditsToggleController.execute({ data: requestData });
+      const response = await sitesAuditsToggleController.execute({
+        data: requestData,
+        attributes: contextMock.attributes,
+      });
       const patchResponse = await response.json();
 
       expect(
@@ -534,7 +558,10 @@ describe('Sites Audits Controller', () => {
         { baseURL: 'https://site0.com', auditType, enable: true },
         { baseURL: 'https://site1.com', auditType: '404', enable: true },
       ];
-      const response = await sitesAuditsToggleController.execute({ data: requestData });
+      const response = await sitesAuditsToggleController.execute({
+        data: requestData,
+        attributes: contextMock.attributes,
+      });
       const patchResponse = await response.json();
 
       expect(
@@ -620,6 +647,7 @@ describe('Sites Audits Controller', () => {
       const response = await sitesAuditsToggleController.execute({
         data: requestData,
         log: logMock,
+        attributes: contextMock.attributes,
       });
       const patchResponse = await response.json();
 
@@ -647,6 +675,7 @@ describe('Sites Audits Controller', () => {
       const response = await sitesAuditsToggleController.execute({
         data: requestData,
         log: logMock,
+        attributes: contextMock.attributes,
       });
       const patchResponse = await response.json();
 
@@ -674,6 +703,7 @@ describe('Sites Audits Controller', () => {
       const response = await sitesAuditsToggleController.execute({
         data: requestData,
         log: logMock,
+        attributes: contextMock.attributes,
       });
       const patchResponse = await response.json();
 
@@ -703,6 +733,7 @@ describe('Sites Audits Controller', () => {
       const response = await sitesAuditsToggleController.execute({
         data: requestData,
         log: logMock,
+        attributes: contextMock.attributes,
       });
       const patchResponse = await response.json();
 
@@ -738,6 +769,7 @@ describe('Sites Audits Controller', () => {
       const response = await sitesAuditsToggleController.execute({
         data: requestData,
         log: logMock,
+        attributes: contextMock.attributes,
       });
       const responses = await response.json();
 
@@ -755,6 +787,7 @@ describe('Sites Audits Controller', () => {
       const response = await sitesAuditsToggleController.execute({
         data: requestData,
         log: logMock,
+        attributes: contextMock.attributes,
       });
       const responses = await response.json();
 
@@ -775,6 +808,7 @@ describe('Sites Audits Controller', () => {
       const response = await sitesAuditsToggleController.execute({
         data: requestData,
         log: logMock,
+        attributes: contextMock.attributes,
       });
       const patchResponse = await response.json();
 
@@ -797,6 +831,7 @@ describe('Sites Audits Controller', () => {
       const response = await sitesAuditsToggleController.execute({
         data: requestData,
         log: logMock,
+        attributes: contextMock.attributes,
       });
       const patchResponse = await response.json();
 
@@ -812,6 +847,43 @@ describe('Sites Audits Controller', () => {
         status: 200,
         message: 'The audit "cwv" has been disabled for the organization "org1".',
       });
+    });
+
+    it('calls setUpdatedBy with "system" when profile.email is missing', async () => {
+      // Create a context without email in the profile
+      const contextWithoutEmail = {
+        dataAccess: dataAccessMock,
+        pathInfo: {
+          headers: { 'x-product': 'abcd' },
+        },
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'admin' }])
+            .withProfile({ is_admin: true }) // No email field
+            .withAuthenticated(true),
+        },
+      };
+
+      const controllerWithoutEmail = SitesAuditsToggleController(contextWithoutEmail);
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(sites[0]);
+
+      const requestData = [
+        { baseURL: 'https://site0.com', auditType: 'cwv', enable: true },
+      ];
+      const response = await controllerWithoutEmail.execute({
+        data: requestData,
+        log: logMock,
+        attributes: contextWithoutEmail.attributes,
+      });
+
+      const patchResponse = await response.json();
+      expect(patchResponse[0]).to.deep.equal({
+        status: 200,
+        message: 'The audit "cwv" has been enabled for the site "https://site0.com".',
+      });
+      expect(configurationMock.setUpdatedBy).to.have.been.calledOnceWith('system');
+      expect(configurationMock.save.called).to.be.true;
     });
   });
 
