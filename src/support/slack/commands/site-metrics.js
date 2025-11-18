@@ -149,26 +149,20 @@ If only startDate provided, shows metrics from that date to today.`,
 
         const siteId = site.getId();
 
-        // Fetch audits for the site using existing API
-        const auditsResult = await Audit.query.bySite({ siteId }).go();
-        /* c8 ignore next - ElectroDB always returns .data, but defensive fallback */
-        const allAudits = auditsResult.data || [];
+        // Fetch audits for the site using existing API (same as auditsController)
+        // Order by auditedAt descending to get most recent first
+        const allAudits = await Audit.allBySiteId(siteId, { order: 'desc' });
 
-        // Fetch opportunities for the site using existing API
-        const opportunitiesResult = await Opportunity.query.bySite({ siteId }).go();
-        /* c8 ignore next - ElectroDB always returns .data, but defensive fallback */
-        const allOpportunities = opportunitiesResult.data || [];
+        // Fetch opportunities for the site using existing API (same as opportunitiesController)
+        const allOpportunities = await Opportunity.allBySiteId(siteId);
 
-        // Fetch suggestions for each opportunity using existing API
+        // Fetch suggestions for each opportunity using existing API (same as suggestionsController)
         const allSuggestions = [];
         // eslint-disable-next-line no-restricted-syntax
         for (const opportunity of allOpportunities) {
           // eslint-disable-next-line no-await-in-loop
-          const suggestionsResult = await Suggestion.query
-            .byOpportunity({ opportunityId: opportunity.getId() })
-            .go();
-          /* c8 ignore next - ElectroDB always returns .data, but defensive fallback */
-          allSuggestions.push(...(suggestionsResult.data || []));
+          const suggestions = await Suggestion.allByOpportunityId(opportunity.getId());
+          allSuggestions.push(...suggestions);
         }
 
         // Filter by date range

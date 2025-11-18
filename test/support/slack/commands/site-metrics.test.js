@@ -83,25 +83,13 @@ describe('SiteMetricsCommand', () => {
         findByBaseURL: sinon.stub().resolves(siteMock),
       },
       Audit: {
-        query: {
-          bySite: sinon.stub().returns({
-            go: sinon.stub().resolves({ data: mockAudits }),
-          }),
-        },
+        allBySiteId: sinon.stub().resolves(mockAudits),
       },
       Opportunity: {
-        query: {
-          bySite: sinon.stub().returns({
-            go: sinon.stub().resolves({ data: mockOpportunities }),
-          }),
-        },
+        allBySiteId: sinon.stub().resolves(mockOpportunities),
       },
       Suggestion: {
-        query: {
-          byOpportunity: sinon.stub().returns({
-            go: sinon.stub().resolves({ data: mockSuggestions }),
-          }),
-        },
+        allByOpportunityId: sinon.stub().resolves(mockSuggestions),
       },
     };
 
@@ -259,12 +247,8 @@ describe('SiteMetricsCommand', () => {
 
   describe('Empty Results Handling', () => {
     it('should handle site with no data', async () => {
-      dataAccessMock.Audit.query.bySite.returns({
-        go: sinon.stub().resolves({ data: [] }),
-      });
-      dataAccessMock.Opportunity.query.bySite.returns({
-        go: sinon.stub().resolves({ data: [] }),
-      });
+      dataAccessMock.Audit.allBySiteId.resolves([]);
+      dataAccessMock.Opportunity.allBySiteId.resolves([]);
 
       const command = SiteMetricsCommand(contextMock);
       await command.handleExecution(['https://example.com'], slackContextMock);
@@ -278,7 +262,7 @@ describe('SiteMetricsCommand', () => {
   describe('Error Handling', () => {
     it('should handle errors during metrics fetching', async () => {
       const error = new Error('Database connection failed');
-      dataAccessMock.Audit.query.bySite.throws(error);
+      dataAccessMock.Audit.allBySiteId.rejects(error);
 
       const command = SiteMetricsCommand(contextMock);
       await command.handleExecution(['https://example.com'], slackContextMock);
