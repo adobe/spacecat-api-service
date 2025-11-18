@@ -182,6 +182,10 @@ describe('getRouteHandlers', () => {
     getPaidTrafficBySearchPlatform: sinon.stub(),
     getPaidTrafficByDisplayPlatform: sinon.stub(),
     getPaidTrafficByVideoPlatform: sinon.stub(),
+    getPaidTrafficByUrl: sinon.stub(),
+    getPaidTrafficByUrlChannel: sinon.stub(),
+    getPaidTrafficByUrlChannelDevice: sinon.stub(),
+    getPaidTrafficByUrlChannelPlatformDevice: sinon.stub(),
   };
 
   const mockFixesController = {
@@ -462,6 +466,10 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/traffic/paid/display-platform-device',
       'GET /sites/:siteId/traffic/paid/video-platform',
       'GET /sites/:siteId/traffic/paid/video-platform-device',
+      'GET /sites/:siteId/traffic/paid/url',
+      'GET /sites/:siteId/traffic/paid/url-channel',
+      'GET /sites/:siteId/traffic/paid/url-channel-device',
+      'GET /sites/:siteId/traffic/paid/url-channel-platform-device',
       'GET /tools/scrape/jobs/:jobId',
       'GET /tools/scrape/jobs/:jobId/results',
       'GET /tools/scrape/jobs/by-date-range/:startDate/:endDate/all-jobs',
@@ -599,6 +607,10 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/display-platform-device'].handler).to.equal(mockTrafficController.getPaidTrafficByDisplayPlatformDevice);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/video-platform'].handler).to.equal(mockTrafficController.getPaidTrafficByVideoPlatform);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/video-platform-device'].handler).to.equal(mockTrafficController.getPaidTrafficByVideoPlatformDevice);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/url'].handler).to.equal(mockTrafficController.getPaidTrafficByUrl);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/url-channel'].handler).to.equal(mockTrafficController.getPaidTrafficByUrlChannel);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/url-channel-device'].handler).to.equal(mockTrafficController.getPaidTrafficByUrlChannelDevice);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/url-channel-platform-device'].handler).to.equal(mockTrafficController.getPaidTrafficByUrlChannelPlatformDevice);
     expect(dynamicRoutes['GET /sites/:siteId/files'].handler).to.equal(mockScrapeController.getFileByKey);
     expect(dynamicRoutes['GET /sites/:siteId/files'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /tools/scrape/jobs/:jobId'].handler).to.equal(mockScrapeJobController.getScrapeJobStatus);

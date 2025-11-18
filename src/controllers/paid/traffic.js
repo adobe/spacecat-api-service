@@ -287,6 +287,12 @@ function TrafficController(context, log, env) {
     getPaidTrafficByDisplayPlatformDevice: async () => getPaidTrafficBySpecificPlatform('display', true),
     getPaidTrafficByVideoPlatform: async () => getPaidTrafficBySpecificPlatform('video'),
     getPaidTrafficByVideoPlatformDevice: async () => getPaidTrafficBySpecificPlatform('video', true),
+
+    // Page Performance endpoints
+    getPaidTrafficByUrl: async () => fetchPaidTrafficData(['path'], TrafficDataWithCWVDto),
+    getPaidTrafficByUrlChannel: async () => fetchPaidTrafficData(['path', 'trf_channel'], TrafficDataWithCWVDto),
+    getPaidTrafficByUrlChannelDevice: async () => fetchPaidTrafficData(['path', 'trf_channel', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByUrlChannelPlatformDevice: async () => fetchPaidTrafficData(['path', 'trf_channel', 'trf_platform', 'device'], TrafficDataWithCWVDto),
   };
 }
 
