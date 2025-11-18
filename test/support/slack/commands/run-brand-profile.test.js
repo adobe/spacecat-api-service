@@ -122,33 +122,6 @@ describe('RunBrandProfileCommand', () => {
     expect(postErrorMessageStub).to.have.been.calledOnce;
   });
 
-  it('queues the agent for all sites', async () => {
-    const sites = [
-      buildSite('site-1', 'https://one.com'),
-      buildSite('site-2', 'https://two.com'),
-    ];
-    context.dataAccess.Site.all.resolves(sites);
-    const command = RunBrandProfileCommand(context);
-    await command.handleExecution(['all'], slackContext);
-    expect(startAgentWorkflowStub).to.have.been.calledTwice;
-    expect(slackContext.say).to.have.been.calledWithMatch(':white_check_mark:');
-  });
-
-  it('reports failures when running across all sites', async () => {
-    const sites = [
-      buildSite('site-1', 'https://ok.com'),
-      buildSite('site-2', 'https://fail.com'),
-    ];
-    context.dataAccess.Site.all.resolves(sites);
-    startAgentWorkflowStub.onSecondCall().rejects(new Error('nope'));
-    const command = RunBrandProfileCommand(context);
-    await command.handleExecution(['all'], slackContext);
-    const warningCall = slackContext.say.getCalls().find((call) => call.args[0].includes(':warning:'));
-    expect(warningCall).to.not.be.undefined;
-    expect(warningCall.args[0]).to.include('failed to start');
-    expect(warningCall.args[0]).to.include('https://fail.com');
-  });
-
   it('warns when the workflow ARN is not configured', async () => {
     context.env = {};
     const command = RunBrandProfileCommand(context);
@@ -179,11 +152,10 @@ describe('RunBrandProfileCommand', () => {
     expect(payload.slackContext).to.be.undefined;
   });
 
-  it('warns when running for all sites but none are found', async () => {
-    context.dataAccess.Site.all.resolves([]);
+  it('treats the keyword "all" as invalid input', async () => {
     const command = RunBrandProfileCommand(context);
     await command.handleExecution(['all'], slackContext);
-    expect(slackContext.say).to.have.been.calledWith(':warning: No sites found to run the brand-profile agent.');
+    expect(slackContext.say).to.have.been.calledWithMatch('Usage:');
     expect(startAgentWorkflowStub).to.not.have.been.called;
   });
 });

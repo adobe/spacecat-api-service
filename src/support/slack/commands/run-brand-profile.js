@@ -25,18 +25,13 @@ const COMMAND_ID = 'run-brand-profile';
 const AGENT_ID = 'brand-profile';
 const PHRASES = ['brand profile', 'run brand profile'];
 
-const normalizeAllArgument = (arg = '') => {
-  const normalized = arg.trim().toLowerCase();
-  return normalized === 'all' || normalized === 'all-sites' || normalized === 'allsites';
-};
-
 function RunBrandProfileCommand(context) {
   const baseCommand = BaseCommand({
     id: COMMAND_ID,
     name: 'Brand Profile Agent',
-    description: 'Trigger the brand-profile agent for a specific site or for all known sites.',
+    description: 'Trigger the brand-profile agent for a specific site.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {baseURL|all}`,
+    usageText: `${PHRASES[0]} {baseURL}`,
   });
 
   const { dataAccess, log, env } = context;
@@ -98,42 +93,6 @@ function RunBrandProfileCommand(context) {
     }
   };
 
-  const handleAllSites = async (slackContext) => {
-    const { say } = slackContext;
-    const sites = await Site.all();
-    if (!sites?.length) {
-      await say(':warning: No sites found to run the brand-profile agent.');
-      return;
-    }
-
-    await say(`:adobe-run: Triggering brand-profile agent for ${sites.length} site(s). This may take a few moments.`);
-    const failures = [];
-
-    // Run sequentially to avoid overwhelming Step Functions with a burst of executions.
-    // eslint-disable-next-line no-restricted-syntax
-    for (const site of sites) {
-      const baseURL = site.getBaseURL();
-      try {
-        // eslint-disable-next-line no-await-in-loop
-        await triggerAgentForSite(site, slackContext);
-      } catch (error) {
-        log.error(`brand-profile command: failed for site ${baseURL}`, error);
-        failures.push({ baseURL, error: error.message });
-      }
-    }
-
-    if (failures.length > 0) {
-      const preview = failures
-        .slice(0, 5)
-        .map((failure) => `• ${failure.baseURL} (${failure.error})`)
-        .join('\n');
-      await say(`:warning: Brand-profile agent failed to start for ${failures.length} site(s).\n${preview}`);
-      return;
-    }
-
-    await say(':white_check_mark: Brand-profile agent queued for all sites.');
-  };
-
   const handleExecution = async (args, slackContext) => {
     const { say } = slackContext;
     if (!(await ensureWorkflowConfigured(say))) {
@@ -146,11 +105,6 @@ function RunBrandProfileCommand(context) {
     }
 
     try {
-      if (normalizeAllArgument(args[0])) {
-        await handleAllSites(slackContext);
-        return;
-      }
-
       await handleSingleSite(args, slackContext);
     } catch (error) {
       log.error('brand-profile command encountered an error', error);
