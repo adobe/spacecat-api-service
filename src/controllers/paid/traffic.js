@@ -297,6 +297,7 @@ function TrafficController(context, log, env) {
     // Campaign Performance endpoints
     // getPaidTrafficByCampaign (see above)
     getPaidTrafficByCampaignChannelDevice: async () => fetchPaidTrafficData(['utm_campaign', 'trf_channel', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByCampaignChannelPlatform: async () => fetchPaidTrafficData(['utm_campaign', 'trf_channel', 'trf_platform'], TrafficDataWithCWVDto),
     getPaidTrafficByCampaignChannelPlatformDevice: async () => fetchPaidTrafficData(['utm_campaign', 'trf_channel', 'trf_platform', 'device'], TrafficDataWithCWVDto),
   };
 }

@@ -241,6 +241,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/traffic/paid/url-channel-device': trafficController.getPaidTrafficByUrlChannelDevice,
     'GET /sites/:siteId/traffic/paid/url-channel-platform-device': trafficController.getPaidTrafficByUrlChannelPlatformDevice,
     'GET /sites/:siteId/traffic/paid/campaign-channel-device': trafficController.getPaidTrafficByCampaignChannelDevice,
+    'GET /sites/:siteId/traffic/paid/campaign-channel-platform': trafficController.getPaidTrafficByCampaignChannelPlatform,
     'GET /sites/:siteId/traffic/paid/campaign-channel-platform-device': trafficController.getPaidTrafficByCampaignChannelPlatformDevice,
     'GET /sites/:siteId/brand-guidelines': brandsController.getBrandGuidelinesForSite,
     'GET /sites/:siteId/brand-profile': sitesController.getBrandProfile,
