@@ -1,3 +1,10 @@
+# [1.241.0](https://github.com/adobe/spacecat-api-service/compare/v1.240.0...v1.241.0) (2025-11-18)
+
+
+### Features
+
+* additional ptr url endpoints ([#1510](https://github.com/adobe/spacecat-api-service/issues/1510)) ([a30d5ab](https://github.com/adobe/spacecat-api-service/commit/a30d5ab800d58d6f01c195f369dd647b4dc489e9))
+
 # [1.240.0](https://github.com/adobe/spacecat-api-service/compare/v1.239.0...v1.240.0) (2025-11-18)
 
 
