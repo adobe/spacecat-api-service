@@ -293,6 +293,11 @@ function TrafficController(context, log, env) {
     getPaidTrafficByUrlChannel: async () => fetchPaidTrafficData(['path', 'trf_channel'], TrafficDataWithCWVDto),
     getPaidTrafficByUrlChannelDevice: async () => fetchPaidTrafficData(['path', 'trf_channel', 'device'], TrafficDataWithCWVDto),
     getPaidTrafficByUrlChannelPlatformDevice: async () => fetchPaidTrafficData(['path', 'trf_channel', 'trf_platform', 'device'], TrafficDataWithCWVDto),
+
+    // Campaign Performance endpoints
+    // getPaidTrafficByCampaign (see above)
+    getPaidTrafficByCampaignChannelDevice: async () => fetchPaidTrafficData(['utm_campaign', 'trf_channel', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByCampaignChannelPlatformDevice: async () => fetchPaidTrafficData(['utm_campaign', 'trf_channel', 'trf_platform', 'device'], TrafficDataWithCWVDto),
   };
 }
 
