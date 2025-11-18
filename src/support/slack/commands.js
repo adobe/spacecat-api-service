@@ -36,6 +36,7 @@ import getPromptUsage from './commands/get-prompt-usage.js';
 import getLlmoConfigSummary from './commands/get-llmo-config-summary.js';
 import getLlmoOpportunityUsage from './commands/get-llmo-opportunity-usage.js';
 import runBrandProfile from './commands/run-brand-profile.js';
+import siteMetrics from './commands/site-metrics.js';
 
 /**
  * Returns all commands.
@@ -70,4 +71,5 @@ export default (context) => [
   getLlmoConfigSummary(context),
   getLlmoOpportunityUsage(context),
   runBrandProfile(context),
+  siteMetrics(context),
 ];
