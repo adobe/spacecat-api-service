@@ -321,7 +321,6 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/reports/:reportId': reportsController.patchReport,
     'DELETE /sites/:siteId/reports/:reportId': reportsController.deleteReport,
 
-    // ASO Home
     'GET /sites/resolve': sitesController.resolveSite,
   };
 
