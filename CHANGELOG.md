@@ -1,3 +1,10 @@
+## [1.238.1](https://github.com/adobe/spacecat-api-service/compare/v1.238.0...v1.238.1) (2025-11-18)
+
+
+### Bug Fixes
+
+* include promise token in preflight request for AMS ([#1507](https://github.com/adobe/spacecat-api-service/issues/1507)) ([417a5ad](https://github.com/adobe/spacecat-api-service/commit/417a5ad2cecdeabe6c91950d273cd2b27f46ab94))
+
 # [1.238.0](https://github.com/adobe/spacecat-api-service/compare/v1.237.2...v1.238.0) (2025-11-17)
 
 
