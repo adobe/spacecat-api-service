@@ -257,13 +257,6 @@ sites-resolve:
       
     operationId: resolveSite
     parameters:
-      - name: x-product
-        in: header
-        required: true
-        description: Product code for entitlement validation
-        schema:
-          type: string
-          example: 'ASO'
       - name: organizationId
         in: query
         required: false
