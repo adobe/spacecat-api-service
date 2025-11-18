@@ -39,7 +39,7 @@ import { SiteDto } from '../dto/site.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
 import { KeyEventDto } from '../dto/key-event.js';
-import { wwwUrlResolver } from '../support/utils.js';
+import { wwwUrlResolver, getLastTwoSundaysNoonToNoon } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 
@@ -50,10 +50,6 @@ import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
  * @constructor
  */
 
-const AHREFS = 'ahrefs';
-const ORGANIC_TRAFFIC = 'organic-traffic';
-const MONTH_DAYS = 30;
-const TOTAL_METRICS = 'totalMetrics';
 const BRAND_PROFILE_AGENT_ID = 'brand-profile';
 
 /**
@@ -674,49 +670,166 @@ function SitesController(ctx, log, env) {
     const rumAPIClient = RUMAPIClient.createFrom(context);
     const domain = wwwUrlResolver(site);
 
+    log.info(`Starting getLatestSiteMetrics for siteId: ${siteId}, domain: ${domain}`);
+
     try {
-      const current = await rumAPIClient.query(TOTAL_METRICS, {
-        domain,
-        interval: MONTH_DAYS,
-      });
-      const total = await rumAPIClient.query(TOTAL_METRICS, {
-        domain,
-        interval: 2 * MONTH_DAYS,
-      });
-      const organicTraffic = await getStoredMetrics(
-        { siteId, metric: ORGANIC_TRAFFIC, source: AHREFS },
-        context,
+      log.info(`Retrieving domain key for domain: ${domain}`);
+      const domainKey = await rumAPIClient.retrieveDomainkey(domain);
+      log.info(`Domain key retrieved successfully for domain: ${domain}`);
+
+      // Get last two Sundays at noon
+      const sundayRanges = getLastTwoSundaysNoonToNoon();
+
+      log.info(`Fetching latest metrics for ${sundayRanges.length} Sunday periods for site ${siteId}`);
+      log.info(`Sunday ranges: ${JSON.stringify(sundayRanges.map((r) => ({ label: r.label, start: r.startTime, end: r.endTime })))}`);
+
+      // Fetch data for both Sunday periods in parallel
+      const weeklyMetrics = await Promise.all(
+        sundayRanges.map(async (dateRange) => {
+          const options = {
+            domain,
+            domainkey: domainKey,
+            startTime: dateRange.startTime,
+            endTime: dateRange.endTime,
+            granularity: 'hourly',
+          };
+
+          log.info(`Fetching metrics for ${dateRange.label}: ${dateRange.startTime} to ${dateRange.endTime}`);
+
+          // Fetch CWV and user engagement data in parallel
+          const [cwvData, userEngagementData] = await Promise.all([
+            rumAPIClient.query('cwv', options),
+            rumAPIClient.query('user-engagement', options),
+          ]);
+
+          log.info(`Retrieved data for ${dateRange.label}: ${cwvData.length} CWV pages, ${userEngagementData.length} engagement pages`);
+
+          return {
+            label: dateRange.label,
+            startTime: dateRange.startTime,
+            endTime: dateRange.endTime,
+            cwv: cwvData,
+            userEngagement: userEngagementData,
+          };
+        }),
       );
 
-      const previousPageViews = total.totalPageViews - current.totalPageViews;
-      const previousCTR = (total.totalClicks - current.totalClicks) / previousPageViews;
-      const pageViewsChange = ((current.totalPageViews - previousPageViews)
-        / previousPageViews) * 100;
-      const ctrChange = ((current.totalCTR - previousCTR) / previousCTR) * 100;
+      // Helper functions (same as mapper)
+      const calculatePageLCP = (page) => {
+        if (!page.metrics || page.metrics.length === 0) return null;
 
-      let cpc = 0;
+        const desktopMetric = page.metrics.find((m) => m.deviceType === 'desktop');
+        const mobileMetric = page.metrics.find((m) => m.deviceType === 'mobile');
 
-      if (organicTraffic.length > 0) {
-        const metric = organicTraffic[organicTraffic.length - 1];
-        cpc = metric.cost / metric.value;
-      }
+        const desktopPageviews = desktopMetric?.pageviews || 0;
+        const mobilePageviews = mobileMetric?.pageviews || 0;
+        const totalPageviews = desktopPageviews + mobilePageviews;
 
-      const projectedTrafficValue = pageViewsChange * cpc;
+        if (totalPageviews === 0) return null;
+
+        const desktopLCP = desktopMetric?.lcp || 0;
+        const mobileLCP = mobileMetric?.lcp || 0;
+
+        return (desktopLCP * desktopPageviews + mobileLCP * mobilePageviews) / totalPageviews;
+      };
+
+      const calculateSiteWideLCP = (cwvData) => {
+        if (!cwvData || cwvData.length === 0) return null;
+
+        let totalWeightedLCP = 0;
+        let totalPageviews = 0;
+
+        cwvData.forEach((page) => {
+          const pageLCP = calculatePageLCP(page);
+          const pageviews = page.pageviews || 0;
+
+          if (pageLCP && pageviews) {
+            totalWeightedLCP += pageLCP * pageviews;
+            totalPageviews += pageviews;
+          }
+        });
+
+        return totalPageviews > 0 ? totalWeightedLCP / totalPageviews : null;
+      };
+
+      const calculateAvgEngagement = (engagementData) => {
+        if (!engagementData || engagementData.length === 0) return null;
+
+        let totalEngagementTraffic = 0;
+        let totalTraffic = 0;
+
+        engagementData.forEach((page) => {
+          totalEngagementTraffic += page.engagementTraffic || 0;
+          totalTraffic += page.totalTraffic || 0;
+        });
+
+        return totalTraffic > 0 ? (totalEngagementTraffic / totalTraffic) * 100 : null;
+      };
+
+      const calculateTotalPageviews = (cwvData) => {
+        if (!cwvData || cwvData.length === 0) return 0;
+        return cwvData.reduce((sum, page) => sum + (page.pageviews || 0), 0);
+      };
+
+      // Get current and previous week data
+      const currentWeek = weeklyMetrics[0];
+      const previousWeek = weeklyMetrics[1];
+
+      log.info(`Processing metrics for site ${siteId} - Current: ${currentWeek.label}, Previous: ${previousWeek.label}`);
+
+      // Calculate metrics for both weeks
+      const currentPageviews = calculateTotalPageviews(currentWeek.cwv);
+      const currentLCP = calculateSiteWideLCP(currentWeek.cwv);
+      const currentEngagement = calculateAvgEngagement(currentWeek.userEngagement);
+
+      log.info(`Current week (${currentWeek.label}): pageviews=${currentPageviews}, LCP=${currentLCP?.toFixed(2)}ms, engagement=${currentEngagement?.toFixed(2)}%`);
+
+      const previousPageviews = calculateTotalPageviews(previousWeek.cwv);
+      const previousLCP = calculateSiteWideLCP(previousWeek.cwv);
+      const previousEngagement = calculateAvgEngagement(previousWeek.userEngagement);
+
+      log.info(`Previous week (${previousWeek.label}): pageviews=${previousPageviews}, LCP=${previousLCP?.toFixed(2)}ms, engagement=${previousEngagement?.toFixed(2)}%`);
+
+      // Calculate percentage changes
+      const calculateChange = (current, previous) => {
+        if (!previous || previous === 0) return 0;
+        return ((current - previous) / previous) * 100;
+      };
+
+      const pageviewsChange = calculateChange(currentPageviews, previousPageviews);
+      const lcpChange = calculateChange(currentLCP, previousLCP);
+      const engagementChange = calculateChange(currentEngagement, previousEngagement);
+
+      log.info(`Changes for site ${siteId}: pageviews=${pageviewsChange.toFixed(2)}%, LCP=${lcpChange.toFixed(2)}%, engagement=${engagementChange.toFixed(2)}%`);
 
       return ok({
-        pageViewsChange,
-        ctrChange,
-        projectedTrafficValue,
+        currentWeek: {
+          label: currentWeek.label,
+          pageviews: currentPageviews,
+          avgEngagement: currentEngagement,
+          siteSpeed: currentLCP, // LCP in milliseconds
+        },
+        previousWeek: {
+          label: previousWeek.label,
+          pageviews: previousPageviews,
+          avgEngagement: previousEngagement,
+          siteSpeed: previousLCP, // LCP in milliseconds
+        },
+        changes: {
+          pageviews: pageviewsChange,
+          avgEngagement: engagementChange,
+          siteSpeed: lcpChange,
+        },
       });
     } catch (error) {
-      log.error(`Error getting RUM metrics for site ${siteId}: ${error.message}`);
+      log.error(`Error getting latest metrics for site ${siteId}: ${error.message}`, error);
+      log.info(`Returning null metrics due to error for siteId: ${siteId}`);
+      return ok({
+        currentWeek: null,
+        previousWeek: null,
+        changes: null,
+      });
     }
-
-    return ok({
-      pageViewsChange: 0,
-      ctrChange: 0,
-      projectedTrafficValue: 0,
-    });
   };
 
   const getPageMetricsBySource = async (context) => {
