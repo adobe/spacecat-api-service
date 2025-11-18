@@ -35,6 +35,7 @@ import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
+import { fetchBundles } from '@adobe/spacecat-shared-rum-api-client/src/common/rum-bundler-client.js';
 import { SiteDto } from '../dto/site.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
@@ -683,7 +684,7 @@ function SitesController(ctx, log, env) {
       log.info(`Fetching latest metrics for ${sundayRanges.length} Sunday periods for site ${siteId}`);
       log.info(`Sunday ranges: ${JSON.stringify(sundayRanges.map((r) => ({ label: r.label, start: r.startTime, end: r.endTime })))}`);
 
-      // Fetch data for both Sunday periods in parallel
+      // Fetch bundles for both Sunday periods in parallel (optimized - no per-URL objects!)
       const weeklyMetrics = await Promise.all(
         sundayRanges.map(async (dateRange) => {
           const options = {
@@ -691,85 +692,65 @@ function SitesController(ctx, log, env) {
             domainkey: domainKey,
             startTime: dateRange.startTime,
             endTime: dateRange.endTime,
-            granularity: 'hourly',
+            granularity: 'HOURLY',
+            checkpoints: ['cwv-lcp', 'click', 'viewmedia', 'viewblock'],
           };
 
-          log.info(`Fetching metrics for ${dateRange.label}: ${dateRange.startTime} to ${dateRange.endTime}`);
+          log.info(`Fetching bundles for ${dateRange.label}: ${dateRange.startTime} to ${dateRange.endTime}`);
 
-          // Fetch CWV and user engagement data in parallel
-          const [cwvData, userEngagementData] = await Promise.all([
-            rumAPIClient.query('cwv', options),
-            rumAPIClient.query('user-engagement', options),
-          ]);
+          // Fetch bundles directly (no per-URL grouping!)
+          const bundles = await fetchBundles(options, log);
 
-          log.info(`Retrieved data for ${dateRange.label}: ${cwvData.length} CWV pages, ${userEngagementData.length} engagement pages`);
+          log.info(`Retrieved ${bundles.length} bundles for ${dateRange.label}`);
+
+          // Aggregate metrics directly from bundles
+          let totalPageviews = 0;
+          let totalEngagedSessions = 0;
+          let lcpSum = 0;
+          let lcpCount = 0;
+
+          bundles.forEach((bundle) => {
+            totalPageviews += bundle.weight;
+
+            // LCP calculation (weighted average)
+            const lcpEvent = bundle.events.find((e) => e.checkpoint === 'cwv-lcp');
+            if (lcpEvent?.value) {
+              lcpSum += lcpEvent.value * bundle.weight;
+              lcpCount += bundle.weight;
+            }
+
+            // Engagement calculation
+            const hasClick = bundle.events.some((e) => e.checkpoint === 'click');
+            const hasViewContent = bundle.events.filter(
+              (e) => e.checkpoint === 'viewmedia' || e.checkpoint === 'viewblock',
+            ).length > 3;
+
+            if (hasClick || hasViewContent) {
+              totalEngagedSessions += bundle.weight;
+            }
+          });
+
+          const avgLCP = lcpCount > 0 ? lcpSum / lcpCount : null;
+          const avgEngagement = totalPageviews > 0
+            ? (totalEngagedSessions / totalPageviews) * 100
+            : null;
+
+          log.info(
+            `Aggregated metrics for ${dateRange.label}: `
+            + `pageviews=${totalPageviews}, LCP=${avgLCP?.toFixed(2)}ms, `
+            + `engagement=${avgEngagement?.toFixed(2)}%`,
+          );
 
           return {
             label: dateRange.label,
             startTime: dateRange.startTime,
             endTime: dateRange.endTime,
-            cwv: cwvData,
-            userEngagement: userEngagementData,
+            pageviews: totalPageviews,
+            siteSpeed: avgLCP, // LCP in milliseconds
+            avgEngagement,
           };
         }),
       );
-
-      // Helper functions (same as mapper)
-      const calculatePageLCP = (page) => {
-        if (!page.metrics || page.metrics.length === 0) return null;
-
-        const desktopMetric = page.metrics.find((m) => m.deviceType === 'desktop');
-        const mobileMetric = page.metrics.find((m) => m.deviceType === 'mobile');
-
-        const desktopPageviews = desktopMetric?.pageviews || 0;
-        const mobilePageviews = mobileMetric?.pageviews || 0;
-        const totalPageviews = desktopPageviews + mobilePageviews;
-
-        if (totalPageviews === 0) return null;
-
-        const desktopLCP = desktopMetric?.lcp || 0;
-        const mobileLCP = mobileMetric?.lcp || 0;
-
-        return (desktopLCP * desktopPageviews + mobileLCP * mobilePageviews) / totalPageviews;
-      };
-
-      const calculateSiteWideLCP = (cwvData) => {
-        if (!cwvData || cwvData.length === 0) return null;
-
-        let totalWeightedLCP = 0;
-        let totalPageviews = 0;
-
-        cwvData.forEach((page) => {
-          const pageLCP = calculatePageLCP(page);
-          const pageviews = page.pageviews || 0;
-
-          if (pageLCP && pageviews) {
-            totalWeightedLCP += pageLCP * pageviews;
-            totalPageviews += pageviews;
-          }
-        });
-
-        return totalPageviews > 0 ? totalWeightedLCP / totalPageviews : null;
-      };
-
-      const calculateAvgEngagement = (engagementData) => {
-        if (!engagementData || engagementData.length === 0) return null;
-
-        let totalEngagementTraffic = 0;
-        let totalTraffic = 0;
-
-        engagementData.forEach((page) => {
-          totalEngagementTraffic += page.engagementTraffic || 0;
-          totalTraffic += page.totalTraffic || 0;
-        });
-
-        return totalTraffic > 0 ? (totalEngagementTraffic / totalTraffic) * 100 : null;
-      };
-
-      const calculateTotalPageviews = (cwvData) => {
-        if (!cwvData || cwvData.length === 0) return 0;
-        return cwvData.reduce((sum, page) => sum + (page.pageviews || 0), 0);
-      };
 
       // Get current and previous week data
       const currentWeek = weeklyMetrics[0];
@@ -777,43 +758,38 @@ function SitesController(ctx, log, env) {
 
       log.info(`Processing metrics for site ${siteId} - Current: ${currentWeek.label}, Previous: ${previousWeek.label}`);
 
-      // Calculate metrics for both weeks
-      const currentPageviews = calculateTotalPageviews(currentWeek.cwv);
-      const currentLCP = calculateSiteWideLCP(currentWeek.cwv);
-      const currentEngagement = calculateAvgEngagement(currentWeek.userEngagement);
-
-      log.info(`Current week (${currentWeek.label}): pageviews=${currentPageviews}, LCP=${currentLCP?.toFixed(2)}ms, engagement=${currentEngagement?.toFixed(2)}%`);
-
-      const previousPageviews = calculateTotalPageviews(previousWeek.cwv);
-      const previousLCP = calculateSiteWideLCP(previousWeek.cwv);
-      const previousEngagement = calculateAvgEngagement(previousWeek.userEngagement);
-
-      log.info(`Previous week (${previousWeek.label}): pageviews=${previousPageviews}, LCP=${previousLCP?.toFixed(2)}ms, engagement=${previousEngagement?.toFixed(2)}%`);
-
       // Calculate percentage changes
       const calculateChange = (current, previous) => {
         if (!previous || previous === 0) return 0;
         return ((current - previous) / previous) * 100;
       };
 
-      const pageviewsChange = calculateChange(currentPageviews, previousPageviews);
-      const lcpChange = calculateChange(currentLCP, previousLCP);
-      const engagementChange = calculateChange(currentEngagement, previousEngagement);
+      const pageviewsChange = calculateChange(currentWeek.pageviews, previousWeek.pageviews);
+      const lcpChange = calculateChange(currentWeek.siteSpeed, previousWeek.siteSpeed);
+      const engagementChange = calculateChange(
+        currentWeek.avgEngagement,
+        previousWeek.avgEngagement,
+      );
 
-      log.info(`Changes for site ${siteId}: pageviews=${pageviewsChange.toFixed(2)}%, LCP=${lcpChange.toFixed(2)}%, engagement=${engagementChange.toFixed(2)}%`);
+      log.info(
+        `Changes for site ${siteId}: `
+        + `pageviews=${pageviewsChange.toFixed(2)}%, `
+        + `LCP=${lcpChange.toFixed(2)}%, `
+        + `engagement=${engagementChange.toFixed(2)}%`,
+      );
 
       return ok({
         currentWeek: {
           label: currentWeek.label,
-          pageviews: currentPageviews,
-          avgEngagement: currentEngagement,
-          siteSpeed: currentLCP, // LCP in milliseconds
+          pageviews: currentWeek.pageviews,
+          avgEngagement: currentWeek.avgEngagement,
+          siteSpeed: currentWeek.siteSpeed, // LCP in milliseconds
         },
         previousWeek: {
           label: previousWeek.label,
-          pageviews: previousPageviews,
-          avgEngagement: previousEngagement,
-          siteSpeed: previousLCP, // LCP in milliseconds
+          pageviews: previousWeek.pageviews,
+          avgEngagement: previousWeek.avgEngagement,
+          siteSpeed: previousWeek.siteSpeed, // LCP in milliseconds
         },
         changes: {
           pageviews: pageviewsChange,
