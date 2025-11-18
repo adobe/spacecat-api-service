@@ -26,12 +26,15 @@ use(sinonChai);
 let startOnboarding;
 let onboardSiteModal;
 let extractDeliveryConfigFromPreviewUrl;
+let triggerBrandProfileAgentStub;
 
 describe('onboard-modal', () => {
   let sandbox;
 
   before(async () => {
     // Mock the network-dependent modules before importing
+    triggerBrandProfileAgentStub = sinon.stub().resolves('exec-123');
+
     const mockedModule = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
       '../../../../src/utils/slack/base.js': {
         loadProfileConfig: sinon.stub().resolves({
@@ -58,6 +61,9 @@ describe('onboard-modal', () => {
           region: 'US',
         }),
       },
+      '../../../../src/support/brand-profile-trigger.js': {
+        triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+      },
     });
 
     ({ startOnboarding, onboardSiteModal, extractDeliveryConfigFromPreviewUrl } = mockedModule);
@@ -67,6 +73,7 @@ describe('onboard-modal', () => {
     // Block all network requests
     nock.disableNetConnect();
     sandbox = sinon.createSandbox();
+    triggerBrandProfileAgentStub.resetHistory();
   });
 
   afterEach(() => {
@@ -675,6 +682,11 @@ describe('onboard-modal', () => {
           + ':inbox_tray: *Imports:* organic-traffic, top-pages, organic-keywords, all-traffic\n'
           + '        ',
         thread_ts: '1234567890.123456',
+      });
+
+      expect(triggerBrandProfileAgentStub).to.have.been.calledOnce;
+      expect(triggerBrandProfileAgentStub.firstCall.args[0]).to.include({
+        reason: 'aso-slack',
       });
     });
 

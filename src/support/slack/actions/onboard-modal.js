@@ -13,6 +13,7 @@
 import { isValidUrl } from '@adobe/spacecat-shared-utils';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import { onboardSingleSite as sharedOnboardSingleSite } from '../../utils.js';
+import { triggerBrandProfileAgent } from '../../brand-profile-trigger.js';
 import { loadProfileConfig } from '../../../utils/slack/base.js';
 
 export const AEM_CS_HOST = /^author-p(\d+)-e(\d+)/i;
@@ -755,6 +756,15 @@ ${deliveryConfigInfo}${previewConfigInfo}
           text: message,
           thread_ts: responseThreadTs,
         });
+
+        if (site) {
+          await triggerBrandProfileAgent({
+            context: lambdaContext,
+            site,
+            slackContext,
+            reason: 'aso-slack',
+          });
+        }
       }
 
       log.debug(`Onboard site modal processed for user ${user.id}, site ${siteUrl}`);

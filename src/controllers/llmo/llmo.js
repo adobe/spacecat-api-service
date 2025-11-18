@@ -26,6 +26,7 @@ import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/confi
 import crypto from 'crypto';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import {
   applyFilters,
   applyInclusions,
@@ -904,6 +905,20 @@ function LlmoController(ctx) {
         context,
       );
 
+      let brandProfileExecutionName = null;
+      try {
+        const site = await context.dataAccess?.Site?.findById(result.siteId);
+        if (site) {
+          brandProfileExecutionName = await triggerBrandProfileAgent({
+            context,
+            site,
+            reason: 'llmo-http',
+          });
+        }
+      } catch (hookError) {
+        log.warn(`LLMO onboarding: failed to trigger brand-profile workflow for site ${result.siteId}`, hookError);
+      }
+
       log.info(`LLMO onboarding completed successfully for domain ${domain}`);
 
       return ok({
@@ -917,6 +932,7 @@ function LlmoController(ctx) {
         siteId: result.siteId,
         status: 'completed',
         createdAt: new Date().toISOString(),
+        brandProfileExecutionName,
       });
     } catch (error) {
       log.error(`Error during LLMO onboarding: ${error.message}`);

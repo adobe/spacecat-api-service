@@ -1,3 +1,74 @@
+site-brand-profile:
+  parameters:
+    - name: siteId
+      in: path
+      required: true
+      description: ID of the site whose brand profile should be fetched or updated
+      schema:
+        $ref: './schemas.yaml#/Id'
+  get:
+    tags:
+      - site
+    summary: Get the brand profile for a site
+    operationId: getBrandProfile
+    responses:
+      '200':
+        description: Brand profile found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                brandProfile:
+                  $ref: './schemas.yaml#/BrandProfile'
+      '204':
+        description: Site exists but no brand profile has been generated yet
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+      - ims_key: [ ]
+      - scoped_api_key: [ ]
+  post:
+    tags:
+      - site
+    summary: Trigger a brand-profile agent run for a site
+    operationId: triggerBrandProfileUpdate
+    description: |
+      Starts the asynchronous brand-profile agent workflow for the specified site. The caller receives a 202 response containing the Step Functions execution name.
+    responses:
+      '202':
+        description: Request accepted and queued.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                executionName:
+                  type: string
+                  description: Name of the Step Functions execution
+                siteId:
+                  $ref: './schemas.yaml#/Id'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
 sites:
   post:
     tags:

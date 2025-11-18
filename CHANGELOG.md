@@ -1,3 +1,31 @@
+# [1.240.0](https://github.com/adobe/spacecat-api-service/compare/v1.239.0...v1.240.0) (2025-11-18)
+
+
+### Features
+
+* endpoints for url for page performance ([#1509](https://github.com/adobe/spacecat-api-service/issues/1509)) ([5c406fb](https://github.com/adobe/spacecat-api-service/commit/5c406fba4565b7c6e7fa11ae64841e9c2256f2f8))
+
+# [1.239.0](https://github.com/adobe/spacecat-api-service/compare/v1.238.2...v1.239.0) (2025-11-18)
+
+
+### Features
+
+* brand profile slack command ([#1503](https://github.com/adobe/spacecat-api-service/issues/1503)) ([0c827d0](https://github.com/adobe/spacecat-api-service/commit/0c827d051306fa1db86a9ff26f67ecf0a5ff6230))
+
+## [1.238.2](https://github.com/adobe/spacecat-api-service/compare/v1.238.1...v1.238.2) (2025-11-18)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tier-client to v1.2.5 ([#1508](https://github.com/adobe/spacecat-api-service/issues/1508)) ([5f3769a](https://github.com/adobe/spacecat-api-service/commit/5f3769addc39bfc61e8b5646b0afe05889d9a7df))
+
+## [1.238.1](https://github.com/adobe/spacecat-api-service/compare/v1.238.0...v1.238.1) (2025-11-18)
+
+
+### Bug Fixes
+
+* include promise token in preflight request for AMS ([#1507](https://github.com/adobe/spacecat-api-service/issues/1507)) ([417a5ad](https://github.com/adobe/spacecat-api-service/commit/417a5ad2cecdeabe6c91950d273cd2b27f46ab94))
+
 # [1.238.0](https://github.com/adobe/spacecat-api-service/compare/v1.237.2...v1.238.0) (2025-11-17)
 
 
