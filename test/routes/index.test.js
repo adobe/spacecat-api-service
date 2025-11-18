@@ -388,6 +388,8 @@ describe('getRouteHandlers', () => {
       'GET /tools/import/jobs/by-date-range/:startDate/:endDate/all-jobs',
       'DELETE /tools/import/jobs/:jobId',
       'GET /sites/:siteId/brand-guidelines',
+      'GET /sites/:siteId/brand-profile',
+      'POST /sites/:siteId/brand-profile',
       'GET /sites/:siteId/opportunities',
       'GET /sites/:siteId/opportunities/by-status/:status',
       'GET /sites/:siteId/opportunities/:opportunityId',

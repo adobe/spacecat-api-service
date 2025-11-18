@@ -11,13 +11,15 @@
  */
 
 import {
+  accepted,
+  badRequest,
   createResponse,
   created,
-  badRequest,
+  forbidden,
+  internalServerError,
   noContent,
   notFound,
   ok,
-  forbidden,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   hasText,
@@ -39,6 +41,7 @@ import { validateRepoUrl } from '../utils/validations.js';
 import { KeyEventDto } from '../dto/key-event.js';
 import { wwwUrlResolver } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 
 /**
  * Sites controller. Provides methods to create, read, update and delete sites.
@@ -51,6 +54,7 @@ const AHREFS = 'ahrefs';
 const ORGANIC_TRAFFIC = 'organic-traffic';
 const MONTH_DAYS = 30;
 const TOTAL_METRICS = 'totalMetrics';
+const BRAND_PROFILE_AGENT_ID = 'brand-profile';
 
 /**
  * Validates that pageTypes array contains valid regex patterns
@@ -262,6 +266,69 @@ function SitesController(ctx, log, env) {
     }
 
     return ok(SiteDto.toJSON(site));
+  };
+
+  const getBrandProfile = async (context) => {
+    const siteId = context.params?.siteId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view its sites');
+    }
+
+    const config = site.getConfig();
+    const profile = config?.getBrandProfile?.();
+    if (!isNonEmptyObject(profile)) {
+      return noContent();
+    }
+
+    return ok({ brandProfile: profile });
+  };
+
+  const triggerBrandProfile = async (context) => {
+    const siteId = context.params?.siteId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view its sites');
+    }
+
+    try {
+      const executionName = await triggerBrandProfileAgent({
+        context: ctx,
+        site,
+        slackContext: context.data?.slackContext,
+        reason: 'sites-http',
+      });
+
+      if (!executionName) {
+        throw new Error('brand profile trigger returned empty execution name');
+      }
+
+      return accepted({
+        executionName,
+        siteId,
+      });
+    } catch (error) {
+      log.error(`Failed to trigger ${BRAND_PROFILE_AGENT_ID} agent for site ${siteId}`, error);
+      return internalServerError('Failed to trigger brand profile agent');
+    }
   };
 
   /**
@@ -771,6 +838,8 @@ function SitesController(ctx, log, env) {
     updateSite,
     updateCdnLogsConfig,
     getTopPages,
+    getBrandProfile,
+    triggerBrandProfile,
 
     // key events
     createKeyEvent,
