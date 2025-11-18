@@ -22,6 +22,7 @@ import {
   BASIC_AUDITS,
   triggerAudits,
 } from '../../../controllers/llmo/llmo-onboarding.js';
+import { triggerBrandProfileAgent } from '../../brand-profile-trigger.js';
 
 const REFERRAL_TRAFFIC_AUDIT = 'llmo-referral-traffic';
 const REFERRAL_TRAFFIC_IMPORT = 'traffic-analysis';
@@ -556,6 +557,16 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
 The LLMO Customer Analysis handler has been triggered. It will take a few minutes to complete.`;
 
       await say(message);
+
+      await triggerBrandProfileAgent({
+        context: lambdaCtx,
+        site,
+        slackContext: {
+          channelId: slackCtx.channelId,
+          threadTs: slackCtx.threadTs,
+        },
+        reason: 'llmo-slack',
+      });
     } catch (error) {
       log.error(`Error saving LLMO config for site ${siteId}: ${error.message}`);
       await say(`:x: Failed to save LLMO configuration: ${error.message}`);

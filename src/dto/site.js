@@ -10,8 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
-
+import { ConfigDto } from './config.js';
 import { AuditDto } from './audit.js';
 
 /**
@@ -48,7 +47,7 @@ export const SiteDto = {
     isLiveToggledAt: site.getIsLiveToggledAt(),
     createdAt: site.getCreatedAt(),
     updatedAt: site.getUpdatedAt(),
-    config: Config.toDynamoItem(site.getConfig()),
+    config: ConfigDto.toJSON(site.getConfig()),
     pageTypes: site.getPageTypes(),
     projectId: site.getProjectId(),
     isPrimaryLocale: site.getIsPrimaryLocale(),

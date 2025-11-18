@@ -65,8 +65,11 @@ describe('LlmoController', () => {
   let readConfigStub;
   let writeConfigStub;
   let llmoConfigSchemaStub;
+  let triggerBrandProfileAgentStub;
 
   before(async () => {
+    triggerBrandProfileAgentStub = sinon.stub().resolves('exec-123');
+
     // Set up esmock once for all tests
     LlmoController = await esmock('../../../src/controllers/llmo/llmo.js', {
       '@adobe/spacecat-shared-utils': {
@@ -83,6 +86,9 @@ describe('LlmoController', () => {
         hasText: (str) => typeof str === 'string' && str.trim().length > 0,
         isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
         composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+      },
+      '../../../src/support/brand-profile-trigger.js': {
+        triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
       },
       '../../../src/support/access-control-util.js': {
         default: class MockAccessControlUtil {
@@ -110,11 +116,15 @@ describe('LlmoController', () => {
       '../../../src/support/access-control-util.js': {
         default: createMockAccessControlUtil(false),
       },
+      '../../../src/support/brand-profile-trigger.js': {
+        triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+      },
     });
     controllerWithAccessDenied = LlmoControllerDenied;
   });
 
   beforeEach(async () => {
+    triggerBrandProfileAgentStub.resetHistory();
     mockLlmoConfig = {
       dataFolder: TEST_FOLDER,
       brand: TEST_BRAND,
@@ -2877,6 +2887,9 @@ describe('LlmoController', () => {
           schemas: {},
           composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
         },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
       });
       const testController = LlmoControllerOnboard(mockContext);
 
@@ -2885,8 +2898,10 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
       expect(responseBody.status).to.equal('completed');
+      expect(responseBody.brandProfileExecutionName).to.equal('exec-123');
       expect(validateSiteNotOnboardedStub).to.have.been.calledOnce;
       expect(performLlmoOnboardingStub).to.have.been.calledOnce;
+      expect(triggerBrandProfileAgentStub).to.have.been.calledOnce;
     });
 
     ['data', 'domain', 'brandName', 'authInfo', 'profile', 'tenants', 'tenant ID'].forEach((field) => {
@@ -2964,6 +2979,9 @@ describe('LlmoController', () => {
           schemas: {},
           composeBaseURL: (domain) => `https://${domain}`,
         },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
       });
       const testController = LlmoControllerOnboard(mockContext);
 
@@ -2995,6 +3013,9 @@ describe('LlmoController', () => {
           schemas: {},
           composeBaseURL: (domain) => `https://${domain}`,
         },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
       });
       const testController = LlmoControllerOnboard(mockContext);
 
@@ -3002,6 +3023,54 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(400);
       expect(mockLog.error).to.have.been.calledWith('Error during LLMO onboarding: Validation error');
+    });
+
+    it('should log warning when brand profile trigger fails but still return success', async () => {
+      const brandProfileError = new Error('brand profile failed');
+      triggerBrandProfileAgentStub.rejects(brandProfileError);
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+          performLlmoOnboarding: performLlmoOnboardingStub,
+          generateDataFolder: (baseURL, env) => {
+            const url = new URL(baseURL);
+            const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+            return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+          },
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: tracingFetchStub,
+          hasText: (text) => text && text.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object',
+          llmoConfig,
+          schemas: {},
+          composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+        },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+      });
+      const testController = LlmoControllerOnboard(mockContext);
+
+      try {
+        const result = await testController.onboardCustomer(onboardingContext);
+
+        expect(result.status).to.equal(200);
+        const responseBody = await result.json();
+        expect(responseBody.brandProfileExecutionName).to.be.null;
+        expect(mockLog.warn).to.have.been.calledWith(
+          'LLMO onboarding: failed to trigger brand-profile workflow for site new-site-id',
+          brandProfileError,
+        );
+      } finally {
+        triggerBrandProfileAgentStub.resetBehavior();
+        triggerBrandProfileAgentStub.resolves('exec-123');
+      }
     });
   });
 
@@ -3040,6 +3109,9 @@ describe('LlmoController', () => {
           performLlmoOffboarding: performLlmoOffboardingStub,
         },
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
       });
       const testController = LlmoControllerOffboard(mockContext);
 
@@ -3066,6 +3138,9 @@ describe('LlmoController', () => {
           performLlmoOffboarding: performLlmoOffboardingStub,
         },
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
       });
       const testController = LlmoControllerOffboard(mockContext);
 

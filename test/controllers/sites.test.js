@@ -11,7 +11,6 @@
  */
 
 /* eslint-env mocha */
-
 import { KeyEvent, Site } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import KeyEventSchema from '@adobe/spacecat-shared-data-access/src/models/key-event/key-event.schema.js';
@@ -43,6 +42,8 @@ describe('Sites Controller', () => {
   };
 
   const SITE_IDS = ['0b4dcf79-fe5f-410b-b11f-641f0bf56da3', 'c4420c67-b4e8-443d-b7ab-0099cfd5da20'];
+  const BRAND_PROFILE_TRIGGER_MODULE = new URL('../../src/support/brand-profile-trigger.js', import.meta.url).pathname;
+  const ACCESS_CONTROL_MODULE = new URL('../../src/support/access-control-util.js', import.meta.url).pathname;
 
   const defaultAuthAttributes = {
     attributes: {
@@ -64,14 +65,14 @@ describe('Sites Controller', () => {
     },
   };
 
-  const sites = [
+  const buildSites = () => ([
     {
       siteId: SITE_IDS[0], baseURL: 'https://site1.com', deliveryType: 'aem_edge', authoringType: 'cs/crosswalk', deliveryConfig: {}, config: Config({}), hlxConfig: {}, isSandbox: false, code: null,
     },
     {
       siteId: SITE_IDS[1], baseURL: 'https://site2.com', deliveryType: 'aem_edge', authoringType: 'cs/crosswalk', config: Config({}), hlxConfig: {}, isSandbox: false, code: null,
     },
-  ].map((site) => new Site(
+  ]).map((site) => new Site(
     {
       entities: {
         site: {
@@ -113,11 +114,11 @@ describe('Sites Controller', () => {
     loggerStub,
   ));
 
-  const keyEvents = [{
-    keyEventId: 'k1', siteId: sites[0].getId(), name: 'some-key-event', type: KeyEvent.KEY_EVENT_TYPES.CODE, time: new Date().toISOString(),
+  const buildKeyEvents = (siteList) => [{
+    keyEventId: 'k1', siteId: siteList[0].getId(), name: 'some-key-event', type: KeyEvent.KEY_EVENT_TYPES.CODE, time: new Date().toISOString(),
   },
   {
-    keyEventId: 'k2', siteId: sites[0].getId(), name: 'other-key-event', type: KeyEvent.KEY_EVENT_TYPES.SEO, time: new Date().toISOString(),
+    keyEventId: 'k2', siteId: siteList[0].getId(), name: 'other-key-event', type: KeyEvent.KEY_EVENT_TYPES.SEO, time: new Date().toISOString(),
   },
   ].map((keyEvent) => new KeyEvent(
     {
@@ -141,6 +142,9 @@ describe('Sites Controller', () => {
     loggerStub,
   ));
 
+  let sites;
+  let keyEvents;
+
   const siteFunctions = [
     'createSite',
     'getAll',
@@ -152,6 +156,7 @@ describe('Sites Controller', () => {
     'getAuditForSite',
     'getByBaseURL',
     'getByID',
+    'getBrandProfile',
     'removeSite',
     'updateSite',
     'updateCdnLogsConfig',
@@ -161,6 +166,7 @@ describe('Sites Controller', () => {
     'removeKeyEvent',
     'getSiteMetricsBySource',
     'getPageMetricsBySource',
+    'triggerBrandProfile',
   ];
 
   let mockDataAccess;
@@ -168,6 +174,9 @@ describe('Sites Controller', () => {
   let context;
 
   beforeEach(() => {
+    sites = buildSites();
+    keyEvents = buildKeyEvents(sites);
+
     mockDataAccess = {
       Audit: {
         findBySiteIdAndAuditTypeAndAuditedAt: sandbox.stub().resolves({
@@ -210,6 +219,7 @@ describe('Sites Controller', () => {
       log: loggerStub,
       env: {
         DEFAULT_ORGANIZATION_ID: 'default',
+        AGENT_WORKFLOW_STATE_MACHINE_ARN: 'arn:aws:states:us-east-1:123456789012:stateMachine:agent-workflow',
       },
       dataAccess: mockDataAccess,
       pathInfo: {
@@ -532,7 +542,7 @@ describe('Sites Controller', () => {
     expect(mockDataAccess.Site.allByDeliveryType).to.have.been.calledOnce;
     expect(resultSites).to.be.an('array').with.lengthOf(2);
     expect(resultSites[0]).to.have.property('id', SITE_IDS[0]);
-    expect(resultSites[0]).to.have.property('deliveryType', 'other');
+    expect(resultSites[0]).to.have.property('deliveryType', 'aem_edge');
   });
 
   it('gets all sites by delivery type for a non-admin user', async () => {
@@ -574,6 +584,20 @@ describe('Sites Controller', () => {
   });
 
   it('gets all sites with latest audit with ascending true', async () => {
+    const audit = {
+      getAuditedAt: () => '2021-01-01T00:00:00.000Z',
+      getAuditResult: () => ({}),
+      getAuditType: () => 'lhs-mobile',
+      getFullAuditRef: () => '',
+      getIsError: () => false,
+      getIsLive: () => true,
+      getSiteId: () => SITE_IDS[0],
+      getInvocationId: () => 'invocation-id',
+    };
+    sites.forEach((site) => {
+      // eslint-disable-next-line no-param-reassign
+      site.getLatestAuditByAuditType = sandbox.stub().resolves(audit);
+    });
     await sitesController.getAllWithLatestAudit({ params: { auditType: 'lhs-mobile', ascending: 'true' } });
 
     expect(mockDataAccess.Site.allWithLatestAudit).to.have.been.calledWith('lhs-mobile', 'asc');
@@ -590,6 +614,20 @@ describe('Sites Controller', () => {
   });
 
   it('gets all sites with latest audit with ascending false', async () => {
+    const audit = {
+      getAuditedAt: () => '2021-01-01T00:00:00.000Z',
+      getAuditResult: () => ({}),
+      getAuditType: () => 'lhs-mobile',
+      getFullAuditRef: () => '',
+      getIsError: () => false,
+      getIsLive: () => true,
+      getSiteId: () => SITE_IDS[0],
+      getInvocationId: () => 'invocation-id',
+    };
+    sites.forEach((site) => {
+      // eslint-disable-next-line no-param-reassign
+      site.getLatestAuditByAuditType = sandbox.stub().resolves(audit);
+    });
     await sitesController.getAllWithLatestAudit({ params: { auditType: 'lhs-mobile', ascending: 'false' } });
 
     expect(mockDataAccess.Site.allWithLatestAudit).to.have.been.calledWith('lhs-mobile', 'desc');
@@ -2310,6 +2348,205 @@ describe('Sites Controller', () => {
       expect(result.status).to.equal(200);
       expect(response).to.be.an('array');
       expect(mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo).to.have.been.calledWith(SITE_IDS[0], 'ahrefs', 'US');
+    });
+  });
+
+  describe('getBrandProfile', () => {
+    it('returns 400 when siteId is invalid', async () => {
+      const response = await sitesController.getBrandProfile({ params: { siteId: 'abc' } });
+      const error = await response.json();
+
+      expect(response.status).to.equal(400);
+      expect(error.message).to.equal('Site ID required');
+    });
+
+    it('returns 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const response = await sitesController.getBrandProfile({ params: { siteId: SITE_IDS[0] } });
+      const error = await response.json();
+
+      expect(response.status).to.equal(404);
+      expect(error.message).to.equal('Site not found');
+
+      mockDataAccess.Site.findById.resolves(sites[0]);
+    });
+
+    it('returns 403 when user lacks access', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
+
+      const response = await sitesController.getBrandProfile({ params: { siteId: SITE_IDS[0] } });
+      const error = await response.json();
+
+      expect(response.status).to.equal(403);
+      expect(error.message).to.equal('Only users belonging to the organization can view its sites');
+    });
+
+    it('returns 204 when no brand profile is stored', async () => {
+      const site = sites[0];
+      sandbox.stub(site, 'getConfig').returns({
+        getBrandProfile: () => null,
+      });
+
+      const response = await sitesController.getBrandProfile({ params: { siteId: SITE_IDS[0] } });
+
+      expect(response.status).to.equal(204);
+    });
+
+    it('returns the stored brand profile', async () => {
+      const site = sites[0];
+      const profile = { version: 2, summary: 'test profile' };
+      sandbox.stub(site, 'getConfig').returns({
+        getBrandProfile: () => profile,
+      });
+
+      const response = await sitesController.getBrandProfile({ params: { siteId: SITE_IDS[0] } });
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body).to.deep.equal({ brandProfile: profile });
+    });
+  });
+
+  describe('triggerBrandProfile', () => {
+    let controllerFactory;
+    let helperStub;
+    let setHasAccess;
+
+    before(async function beforeTriggerBrandProfile() {
+      this.timeout(5000);
+      helperStub = sinon.stub().resolves('exec-123');
+      let hasAccess = true;
+      const moduleMocks = {
+        [BRAND_PROFILE_TRIGGER_MODULE]: {
+          triggerBrandProfileAgent: (...args) => helperStub(...args),
+        },
+        [ACCESS_CONTROL_MODULE]: {
+          default: class MockAccessControlUtil {
+            static fromContext() {
+              return new MockAccessControlUtil();
+            }
+
+            // eslint-disable-next-line class-methods-use-this
+            hasAdminAccess() {
+              return true;
+            }
+
+            // eslint-disable-next-line class-methods-use-this
+            async hasAccess() {
+              return hasAccess;
+            }
+          },
+        },
+      };
+      const controllerModule = await esmock('../../src/controllers/sites.js', {}, moduleMocks);
+      controllerFactory = () => controllerModule.default(context, context.log, context.env);
+      setHasAccess = (value) => {
+        hasAccess = value;
+      };
+    });
+
+    beforeEach(() => {
+      helperStub.resetHistory();
+      helperStub.resolves('exec-123');
+      setHasAccess(true);
+    });
+
+    it('returns 400 when siteId is invalid', async () => {
+      const controller = controllerFactory();
+      const response = await controller.triggerBrandProfile({ params: { siteId: 'xyz' } });
+      const error = await response.json();
+
+      expect(response.status).to.equal(400);
+      expect(error.message).to.equal('Site ID required');
+      expect(helperStub).to.not.have.been.called;
+    });
+
+    it('returns 404 when site is not found', async () => {
+      const controller = controllerFactory();
+      mockDataAccess.Site.findById.resolves(null);
+
+      const response = await controller.triggerBrandProfile({ params: { siteId: SITE_IDS[0] } });
+      const error = await response.json();
+
+      expect(response.status).to.equal(404);
+      expect(error.message).to.equal('Site not found');
+      expect(helperStub).to.not.have.been.called;
+
+      mockDataAccess.Site.findById.resolves(sites[0]);
+    });
+
+    it('returns 403 when user lacks access', async () => {
+      setHasAccess(false);
+      const controller = controllerFactory();
+
+      const response = await controller.triggerBrandProfile({ params: { siteId: SITE_IDS[0] } });
+      const error = await response.json();
+
+      expect(response.status).to.equal(403);
+      expect(error.message).to.equal('Only users belonging to the organization can view its sites');
+      expect(helperStub).to.not.have.been.called;
+    });
+
+    it('returns 202 and triggers workflow with provided idempotencyKey', async () => {
+      const controller = controllerFactory();
+
+      const response = await controller.triggerBrandProfile({
+        params: { siteId: SITE_IDS[0] },
+        data: { idempotencyKey: 'manual-key' },
+      });
+      const payload = await response.json();
+
+      expect(response.status).to.equal(202);
+      expect(payload).to.deep.equal({
+        executionName: 'exec-123',
+        siteId: SITE_IDS[0],
+      });
+      expect(helperStub).to.have.been.calledOnce;
+      const args = helperStub.firstCall.args[0];
+      expect(args).to.include({
+        context,
+        site: sites[0],
+        reason: 'sites-http',
+      });
+    });
+
+    it('generates an idempotency key when one is not provided', async () => {
+      helperStub.resolves('exec-456');
+      const controller = controllerFactory();
+
+      const response = await controller.triggerBrandProfile({
+        params: { siteId: SITE_IDS[0] },
+      });
+
+      expect(response.status).to.equal(202);
+      expect(helperStub).to.have.been.calledOnce;
+    });
+
+    it('returns 500 when helper invocation fails', async () => {
+      helperStub.rejects(new Error('boom'));
+      const controller = controllerFactory();
+
+      const response = await controller.triggerBrandProfile({
+        params: { siteId: SITE_IDS[0] },
+      });
+      const error = await response.json();
+
+      expect(response.status).to.equal(500);
+      expect(error.message).to.equal('Failed to trigger brand profile agent');
+    });
+
+    it('returns 500 when helper resolves null', async () => {
+      helperStub.resolves(null);
+      const controller = controllerFactory();
+
+      const response = await controller.triggerBrandProfile({
+        params: { siteId: SITE_IDS[0] },
+      });
+      const error = await response.json();
+
+      expect(response.status).to.equal(500);
+      expect(error.message).to.equal('Failed to trigger brand profile agent');
     });
   });
 });
