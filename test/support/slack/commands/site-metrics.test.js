@@ -30,19 +30,19 @@ describe('SiteMetricsCommand', () => {
       getId: () => 'audit-1',
       getAuditType: () => 'cwv',
       getAuditedAt: () => '2025-01-15T10:00:00Z',
-      isError: () => false,
+      getIsError: () => false,
     },
     {
       getId: () => 'audit-2',
       getAuditType: () => 'cwv',
       getAuditedAt: () => '2025-01-16T10:00:00Z',
-      isError: () => true,
+      getIsError: () => true,
     },
     {
       getId: () => 'audit-3',
       getAuditType: () => 'broken-backlinks',
       getAuditedAt: () => '2025-01-17T10:00:00Z',
-      isError: () => false,
+      getIsError: () => false,
     },
   ];
 

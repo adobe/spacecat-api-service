@@ -187,9 +187,9 @@ If only startDate provided, shows metrics from that date to today.`,
           endDate,
         );
 
-        // Calculate audit metrics
+        // Calculate audit metrics (using getter methods from AuditDto pattern)
         const totalAudits = filteredAudits.length;
-        const successfulAudits = filteredAudits.filter((audit) => !audit.isError()).length;
+        const successfulAudits = filteredAudits.filter((audit) => !audit.getIsError()).length;
         const failedAudits = totalAudits - successfulAudits;
         const successRate = totalAudits > 0 ? ((successfulAudits / totalAudits) * 100).toFixed(1) : '0.0';
 
@@ -201,7 +201,7 @@ If only startDate provided, shows metrics from that date to today.`,
             auditsByType[type] = { total: 0, successful: 0, failed: 0 };
           }
           auditsByType[type].total += 1;
-          if (audit.isError()) {
+          if (audit.getIsError()) {
             auditsByType[type].failed += 1;
           } else {
             auditsByType[type].successful += 1;
