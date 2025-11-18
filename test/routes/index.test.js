@@ -311,7 +311,7 @@ describe('getRouteHandlers', () => {
       'POST /tools/scrape/jobs',
       'POST /consent-banner',
       'POST /llmo/onboard',
-      'GET /sites/resolve',
+      'GET /sites-resolve',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
