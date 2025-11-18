@@ -768,9 +768,7 @@ function SitesController(ctx, log, env) {
    * @returns {Promise<Response>} Resolved site and organization data response.
    */
   const resolveSite = async (context) => {
-    const {
-      organizationId, imsOrg, siteId, testA, testB,
-    } = context.data;
+    const { organizationId, imsOrg, siteId } = context.data;
     const { pathInfo } = context;
     const X_PRODUCT_HEADER = 'x-product';
     const productCode = pathInfo.headers[X_PRODUCT_HEADER];
@@ -800,18 +798,9 @@ function SitesController(ctx, log, env) {
                 organization = null;
               }
             }
-            /* c8 ignore next 3 */
-            if (testB) {
-              return ok({ organization, site });
-            }
             if (organization && await accessControlUtil.hasAccess(organization)) {
               const tierClient = await TierClient.createForSite(context, site, productCode);
               const { entitlement, enrollments } = await tierClient.getAllEnrollment();
-
-              /* c8 ignore next 3 */
-              if (testA) {
-                return ok({ entitlement, enrollments });
-              }
 
               if (entitlement && enrollments?.length) {
                 const data = {
