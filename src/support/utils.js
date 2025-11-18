@@ -1151,3 +1151,77 @@ export const filterSitesForProductCode = async (context, organization, sites, pr
   // Filter sites based on enrollment
   return sites.filter((site) => enrolledSiteIds.has(site.getId()));
 };
+
+const MILLISECONDS_IN_A_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Converts a date to string format YYYY-MM-DD.
+ * @param {Date} currentDate - The date to convert.
+ * @returns {string} Date string in YYYY-MM-DD format.
+ */
+export const getStringDate = (currentDate) => currentDate.toISOString().split('T')[0];
+
+/**
+ * Returns date ranges for today and the last two Sundays.
+ * If today is Sunday, returns today and last Sunday (2 ranges).
+ * If today is not Sunday, returns today, last Sunday, and the Sunday before that (3 ranges).
+ * Each range covers 7 days ending on the specified date.
+ *
+ * @returns {Array<{label: string, startTime: string, endTime: string}>}
+ * Array of date range objects with ISO string timestamps.
+ */
+export function getTodayAndLastTwoSundaysDateRanges() {
+  const now = new Date();
+  const isTodaySunday = now.getUTCDay() === 0;
+
+  const ranges = [];
+
+  if (isTodaySunday) {
+    // If today is Sunday, return today (which is Sunday) and last Sunday
+    const todayEnd = new Date(now);
+    const todayStart = new Date(now.getTime() - 7 * MILLISECONDS_IN_A_DAY);
+    ranges.push({
+      label: getStringDate(todayEnd),
+      startTime: todayStart.toISOString(),
+      endTime: todayEnd.toISOString(),
+    });
+
+    const lastSundayEnd = new Date(now.getTime() - 7 * MILLISECONDS_IN_A_DAY);
+    const lastSundayStart = new Date(lastSundayEnd.getTime() - 7 * MILLISECONDS_IN_A_DAY);
+    ranges.push({
+      label: getStringDate(lastSundayEnd),
+      startTime: lastSundayStart.toISOString(),
+      endTime: lastSundayEnd.toISOString(),
+    });
+  } else {
+    // If not Sunday, return today, last Sunday, and the Sunday before that
+    const todayEnd = new Date(now);
+    const todayStart = new Date(now.getTime() - 7 * MILLISECONDS_IN_A_DAY);
+    ranges.push({
+      label: getStringDate(todayEnd),
+      startTime: todayStart.toISOString(),
+      endTime: todayEnd.toISOString(),
+    });
+
+    const daysSinceLastSunday = now.getUTCDay();
+    const lastSundayEnd = new Date(now.getTime() - daysSinceLastSunday * MILLISECONDS_IN_A_DAY);
+    const lastSundayStart = new Date(lastSundayEnd.getTime() - 7 * MILLISECONDS_IN_A_DAY);
+    ranges.push({
+      label: getStringDate(lastSundayEnd),
+      startTime: lastSundayStart.toISOString(),
+      endTime: lastSundayEnd.toISOString(),
+    });
+
+    const sundayBeforeLastEnd = new Date(lastSundayEnd.getTime() - 7 * MILLISECONDS_IN_A_DAY);
+    const sundayBeforeLastStart = new Date(
+      sundayBeforeLastEnd.getTime() - 7 * MILLISECONDS_IN_A_DAY,
+    );
+    ranges.push({
+      label: getStringDate(sundayBeforeLastEnd),
+      startTime: sundayBeforeLastStart.toISOString(),
+      endTime: sundayBeforeLastEnd.toISOString(),
+    });
+  }
+
+  return ranges;
+}

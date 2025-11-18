@@ -39,7 +39,7 @@ import { SiteDto } from '../dto/site.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
 import { KeyEventDto } from '../dto/key-event.js';
-import { wwwUrlResolver } from '../support/utils.js';
+import { wwwUrlResolver, getTodayAndLastTwoSundaysDateRanges } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 
@@ -52,7 +52,6 @@ import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 
 const AHREFS = 'ahrefs';
 const ORGANIC_TRAFFIC = 'organic-traffic';
-const MONTH_DAYS = 30;
 const TOTAL_METRICS = 'totalMetrics';
 const BRAND_PROFILE_AGENT_ID = 'brand-profile';
 
@@ -675,21 +674,43 @@ function SitesController(ctx, log, env) {
     const domain = wwwUrlResolver(site);
 
     try {
+      const dateRanges = getTodayAndLastTwoSundaysDateRanges();
+      log.info(`Date ranges for site ${siteId}:`, dateRanges);
+
+      if (dateRanges.length < 2) {
+        log.error(`Not enough date ranges returned for site ${siteId}: ${dateRanges.length}`);
+        return ok({
+          pageViewsChange: 0,
+          ctrChange: 0,
+          projectedTrafficValue: 0,
+        });
+      }
+
+      // If 3 ranges, use last two (indices 1 and 2); if 2 ranges, use both (indices 0 and 1)
+      const currentIndex = dateRanges.length === 3 ? 1 : 0;
+      const previousIndex = dateRanges.length === 3 ? 2 : 1;
+
       const current = await rumAPIClient.query(TOTAL_METRICS, {
         domain,
-        interval: MONTH_DAYS,
+        startTime: dateRanges[currentIndex].startTime,
+        endTime: dateRanges[currentIndex].endTime,
       });
-      const total = await rumAPIClient.query(TOTAL_METRICS, {
+      const previous = await rumAPIClient.query(TOTAL_METRICS, {
         domain,
-        interval: 2 * MONTH_DAYS,
+        startTime: dateRanges[previousIndex].startTime,
+        endTime: dateRanges[previousIndex].endTime,
       });
       const organicTraffic = await getStoredMetrics(
         { siteId, metric: ORGANIC_TRAFFIC, source: AHREFS },
         context,
       );
 
-      const previousPageViews = total.totalPageViews - current.totalPageViews;
-      const previousCTR = (total.totalClicks - current.totalClicks) / previousPageViews;
+      log.info(`Metrics for site ${siteId} - current:`, current);
+      log.info(`Metrics for site ${siteId} - previous:`, previous);
+      log.info(`Metrics for site ${siteId} - organicTraffic:`, organicTraffic);
+
+      const previousPageViews = previous.totalPageViews;
+      const previousCTR = previous.totalCTR;
       const pageViewsChange = ((current.totalPageViews - previousPageViews)
         / previousPageViews) * 100;
       const ctrChange = ((current.totalCTR - previousCTR) / previousCTR) * 100;
