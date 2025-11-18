@@ -211,13 +211,13 @@ describe('llmo-query-handler', () => {
       expect(getFetchOptions().headers.Authorization).to.equal(`token ${TEST_LLMO_API_KEY}`);
     });
 
-    it('should handle missing API key', async () => {
+    it('should throw error when API key is missing', async () => {
       setupFetchTest(createSheetData([]));
       mockContext.env.LLMO_HLX_API_KEY = undefined;
 
-      await queryLlmoFiles(mockContext, mockLlmoConfig);
-
-      expect(getFetchOptions().headers.Authorization).to.equal('token hlx_api_key_missing');
+      await expect(
+        queryLlmoFiles(mockContext, mockLlmoConfig),
+      ).to.be.rejectedWith('LLMO_HLX_API_KEY environment variable is not configured');
     });
 
     it('should handle response without headers', async () => {

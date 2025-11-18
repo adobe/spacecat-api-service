@@ -37,7 +37,7 @@ const processData = (data, queryParams) => {
     processedData = filteredData;
   }
 
-  // Apply filters if provided (e.g., ?filter.status=active&filter.type=premium)
+  // Apply filters if provided (e.g., ?filter.status=active&filter.category=category1)
   const filterFields = {};
   Object.keys(queryParams).forEach((key) => {
     if (key.startsWith('filter.')) {
@@ -101,6 +101,12 @@ const fetchAndProcessSingleFile = async (context, llmoConfig, filePath, queryPar
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS); // 15 seconds
 
+  // Validate API key exists before making the request
+  if (!env.LLMO_HLX_API_KEY) {
+    clearTimeout(timeoutId);
+    throw new Error('LLMO_HLX_API_KEY environment variable is not configured');
+  }
+
   // Start timing the source fetch
   const sourceFetchStartTime = Date.now();
 
@@ -108,7 +114,7 @@ const fetchAndProcessSingleFile = async (context, llmoConfig, filePath, queryPar
     // Fetch data from the external endpoint using the dataFolder from config
     const response = await fetch(url.toString(), {
       headers: {
-        Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
+        Authorization: `token ${env.LLMO_HLX_API_KEY}`,
         'User-Agent': SPACECAT_USER_AGENT,
         'Accept-Encoding': 'br',
       },
