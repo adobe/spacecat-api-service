@@ -237,6 +237,8 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/traffic/paid/video-platform': trafficController.getPaidTrafficByVideoPlatform,
     'GET /sites/:siteId/traffic/paid/video-platform-device': trafficController.getPaidTrafficByVideoPlatformDevice,
     'GET /sites/:siteId/brand-guidelines': brandsController.getBrandGuidelinesForSite,
+    'GET /sites/:siteId/brand-profile': sitesController.getBrandProfile,
+    'POST /sites/:siteId/brand-profile': sitesController.triggerBrandProfile,
     'GET /sites/:siteId/top-pages': sitesController.getTopPages,
     'GET /sites/:siteId/top-pages/:source': sitesController.getTopPages,
     'GET /sites/:siteId/top-pages/:source/:geo': sitesController.getTopPages,
