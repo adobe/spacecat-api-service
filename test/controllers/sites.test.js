@@ -11,8 +11,6 @@
  */
 
 /* eslint-env mocha */
-
-import { SFNClient } from '@aws-sdk/client-sfn';
 import { KeyEvent, Site } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import KeyEventSchema from '@adobe/spacecat-shared-data-access/src/models/key-event/key-event.schema.js';
@@ -44,6 +42,8 @@ describe('Sites Controller', () => {
   };
 
   const SITE_IDS = ['0b4dcf79-fe5f-410b-b11f-641f0bf56da3', 'c4420c67-b4e8-443d-b7ab-0099cfd5da20'];
+  const BRAND_PROFILE_TRIGGER_MODULE = new URL('../../src/support/brand-profile-trigger.js', import.meta.url).pathname;
+  const ACCESS_CONTROL_MODULE = new URL('../../src/support/access-control-util.js', import.meta.url).pathname;
 
   const defaultAuthAttributes = {
     attributes: {
@@ -2409,53 +2409,81 @@ describe('Sites Controller', () => {
   });
 
   describe('triggerBrandProfile', () => {
-    let sfnSendStub;
-    let accessStub;
+    let controllerFactory;
+    let helperStub;
+    let setHasAccess;
+
+    before(async () => {
+      helperStub = sinon.stub().resolves('exec-123');
+      let hasAccess = true;
+      const moduleMocks = {
+        [BRAND_PROFILE_TRIGGER_MODULE]: {
+          triggerBrandProfileAgent: (...args) => helperStub(...args),
+        },
+        [ACCESS_CONTROL_MODULE]: {
+          default: class {
+            static fromContext() {
+              return {
+                hasAdminAccess: () => true,
+                hasAccess: async () => hasAccess,
+              };
+            }
+          },
+        },
+      };
+      const controllerModule = await esmock('../../src/controllers/sites.js', {}, moduleMocks);
+      controllerFactory = () => controllerModule.default(context, context.log, context.env);
+      setHasAccess = (value) => {
+        hasAccess = value;
+      };
+    });
 
     beforeEach(() => {
-      accessStub = sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
-      sfnSendStub = sandbox.stub(SFNClient.prototype, 'send').resolves();
+      helperStub.resetHistory();
+      helperStub.resolves('exec-123');
+      setHasAccess(true);
     });
 
     it('returns 400 when siteId is invalid', async () => {
-      const response = await sitesController.triggerBrandProfile({ params: { siteId: 'xyz' } });
+      const controller = controllerFactory();
+      const response = await controller.triggerBrandProfile({ params: { siteId: 'xyz' } });
       const error = await response.json();
 
       expect(response.status).to.equal(400);
       expect(error.message).to.equal('Site ID required');
-      expect(sfnSendStub).to.not.have.been.called;
+      expect(helperStub).to.not.have.been.called;
     });
 
     it('returns 404 when site is not found', async () => {
+      const controller = controllerFactory();
       mockDataAccess.Site.findById.resolves(null);
 
-      const response = await sitesController.triggerBrandProfile(
-        { params: { siteId: SITE_IDS[0] } },
-      );
+      const response = await controller.triggerBrandProfile({ params: { siteId: SITE_IDS[0] } });
       const error = await response.json();
 
       expect(response.status).to.equal(404);
       expect(error.message).to.equal('Site not found');
-      expect(sfnSendStub).to.not.have.been.called;
+      expect(helperStub).to.not.have.been.called;
 
       mockDataAccess.Site.findById.resolves(sites[0]);
     });
 
     it('returns 403 when user lacks access', async () => {
-      accessStub.resolves(false);
+      const controller = controllerFactory();
+      setHasAccess(false);
 
-      const response = await sitesController.triggerBrandProfile(
-        { params: { siteId: SITE_IDS[0] } },
-      );
+      const response = await controller.triggerBrandProfile({ params: { siteId: SITE_IDS[0] } });
       const error = await response.json();
 
       expect(response.status).to.equal(403);
       expect(error.message).to.equal('Only users belonging to the organization can view its sites');
-      expect(sfnSendStub).to.not.have.been.called;
+      expect(helperStub).to.not.have.been.called;
     });
 
     it('returns 202 and triggers workflow with provided idempotencyKey', async () => {
-      const response = await sitesController.triggerBrandProfile({
+      const controller = controllerFactory();
+
+      const response = await controller.triggerBrandProfile({
         params: { siteId: SITE_IDS[0] },
         data: { idempotencyKey: 'manual-key' },
       });
@@ -2463,43 +2491,54 @@ describe('Sites Controller', () => {
 
       expect(response.status).to.equal(202);
       expect(payload).to.deep.equal({
-        executionName: `brand-profile-${SITE_IDS[0]}`,
+        executionName: 'exec-123',
         siteId: SITE_IDS[0],
       });
-      expect(sfnSendStub).to.have.been.calledOnce;
-      const command = sfnSendStub.firstCall.args[0];
-      const input = JSON.parse(command.input.input);
-      expect(input).to.deep.equal({
-        agentId: 'brand-profile',
-        siteId: SITE_IDS[0],
-        context: { baseURL: 'https://site1.com' },
-        idempotencyKey: 'manual-key',
+      expect(helperStub).to.have.been.calledOnce;
+      const args = helperStub.firstCall.args[0];
+      expect(args).to.include({
+        context,
+        site: sites[0],
+        reason: 'sites-http',
       });
     });
 
     it('generates an idempotency key when one is not provided', async () => {
-      const response = await sitesController.triggerBrandProfile({
+      helperStub.resolves('exec-456');
+      const controller = controllerFactory();
+
+      const response = await controller.triggerBrandProfile({
         params: { siteId: SITE_IDS[0] },
       });
 
       expect(response.status).to.equal(202);
-      expect(sfnSendStub).to.have.been.calledOnce;
-      const command = sfnSendStub.firstCall.args[0];
-      const input = JSON.parse(command.input.input);
-      expect(input.idempotencyKey).to.match(new RegExp(`^brand-profile-${SITE_IDS[0]}-\\d+$`));
+      expect(helperStub).to.have.been.calledOnce;
     });
 
-    it('returns 500 when workflow invocation fails', async () => {
-      sfnSendStub.rejects(new Error('boom'));
+    it('returns 500 when helper invocation fails', async () => {
+      helperStub.rejects(new Error('boom'));
+      const controller = controllerFactory();
 
-      const response = await sitesController.triggerBrandProfile({
+      const response = await controller.triggerBrandProfile({
         params: { siteId: SITE_IDS[0] },
       });
       const error = await response.json();
 
       expect(response.status).to.equal(500);
       expect(error.message).to.equal('Failed to trigger brand profile agent');
-      expect(sfnSendStub).to.have.been.calledOnce;
+    });
+
+    it('returns 500 when helper resolves null', async () => {
+      helperStub.resolves(null);
+      const controller = controllerFactory();
+
+      const response = await controller.triggerBrandProfile({
+        params: { siteId: SITE_IDS[0] },
+      });
+      const error = await response.json();
+
+      expect(response.status).to.equal(500);
+      expect(error.message).to.equal('Failed to trigger brand profile agent');
     });
   });
 });

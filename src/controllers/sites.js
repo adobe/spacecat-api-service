@@ -41,7 +41,7 @@ import { validateRepoUrl } from '../utils/validations.js';
 import { KeyEventDto } from '../dto/key-event.js';
 import { wwwUrlResolver } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { startAgentWorkflow } from '../support/agent-workflow.js';
+import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 
 /**
  * Sites controller. Provides methods to create, read, update and delete sites.
@@ -309,21 +309,17 @@ function SitesController(ctx, log, env) {
       return forbidden('Only users belonging to the organization can view its sites');
     }
 
-    const idempotencyKey = hasText(context.data?.idempotencyKey)
-      ? context.data.idempotencyKey
-      : `${BRAND_PROFILE_AGENT_ID}-${siteId}-${Date.now()}`;
-
     try {
-      const executionName = await startAgentWorkflow(ctx, {
-        agentId: BRAND_PROFILE_AGENT_ID,
-        siteId,
-        context: {
-          baseURL: site.getBaseURL(),
-        },
-        idempotencyKey,
-      }, {
-        executionName: `${BRAND_PROFILE_AGENT_ID}-${siteId}`,
+      const executionName = await triggerBrandProfileAgent({
+        context: ctx,
+        site,
+        slackContext: context.data?.slackContext,
+        reason: 'sites-http',
       });
+
+      if (!executionName) {
+        throw new Error('brand profile trigger returned empty execution name');
+      }
 
       return accepted({
         executionName,

@@ -91,9 +91,7 @@ export const triggerBrandProfileAgent = async ({
     };
 
     const slackMeta = buildSlackContext(slackContext);
-    if (slackMeta) {
-      payload.slackContext = slackMeta;
-    }
+    payload.slackContext = slackMeta || {};
 
     const startedExecution = await startAgentWorkflow(context, payload, {
       executionName,

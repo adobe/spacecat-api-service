@@ -119,6 +119,18 @@ describe('brand-profile-trigger helper', () => {
     expect(options.executionName).to.match(/^brand-profile-site-123-test-reason/);
   });
 
+  it('defaults slack context to empty object when not provided', async () => {
+    await triggerBrandProfileAgent({
+      context,
+      site,
+      reason: 'no-slack',
+    });
+
+    expect(startAgentWorkflowStub).to.have.been.calledOnce;
+    const [, payload] = startAgentWorkflowStub.firstCall.args;
+    expect(payload.slackContext).to.deep.equal({});
+  });
+
   it('respects disable flag', async () => {
     context.env.ENABLE_BRAND_PROFILE_AUTORUN = 'false';
 
