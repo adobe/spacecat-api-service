@@ -286,6 +286,14 @@ paths:
     $ref: './tools-api.yaml#/import-job-progress'
   /tools/import/jobs/{jobId}/result:
     $ref: './tools-api.yaml#/import-job-result'
+  /sites/{siteId}/llmo/data:
+    $ref: './llmo-api.yaml#/llmo-data'
+  /sites/{siteId}/llmo/data/{dataSource}:
+    $ref: './llmo-api.yaml#/llmo-data-with-datasource'
+  /sites/{siteId}/llmo/data/{sheetType}/{dataSource}:
+    $ref: './llmo-api.yaml#/llmo-data-with-type'
+  /sites/{siteId}/llmo/data/{sheetType}/{week}/{dataSource}:
+    $ref: './llmo-api.yaml#/llmo-data-with-type-and-week'
   /sites/{siteId}/llmo/sheet-data/{dataSource}:
     $ref: './llmo-api.yaml#/llmo-sheet-data'
   /sites/{siteId}/llmo/sheet-data/{sheetType}/{dataSource}:

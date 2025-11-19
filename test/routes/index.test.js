@@ -187,6 +187,9 @@ describe('getRouteHandlers', () => {
     getPaidTrafficByUrlChannel: sinon.stub(),
     getPaidTrafficByUrlChannelDevice: sinon.stub(),
     getPaidTrafficByUrlChannelPlatformDevice: sinon.stub(),
+    getPaidTrafficByCampaignChannelDevice: sinon.stub(),
+    getPaidTrafficByCampaignChannelPlatform: sinon.stub(),
+    getPaidTrafficByCampaignChannelPlatformDevice: sinon.stub(),
   };
 
   const mockFixesController = {
@@ -221,6 +224,7 @@ describe('getRouteHandlers', () => {
     patchLlmoCdnBucketConfig: () => null,
     onboardCustomer: () => null,
     offboardCustomer: () => null,
+    queryFiles: () => null,
   };
 
   const mockSandboxAuditController = {
@@ -472,6 +476,9 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/traffic/paid/url-channel',
       'GET /sites/:siteId/traffic/paid/url-channel-device',
       'GET /sites/:siteId/traffic/paid/url-channel-platform-device',
+      'GET /sites/:siteId/traffic/paid/campaign-channel-device',
+      'GET /sites/:siteId/traffic/paid/campaign-channel-platform',
+      'GET /sites/:siteId/traffic/paid/campaign-channel-platform-device',
       'GET /tools/scrape/jobs/:jobId',
       'GET /tools/scrape/jobs/:jobId/results',
       'GET /tools/scrape/jobs/by-date-range/:startDate/:endDate/all-jobs',
@@ -491,6 +498,10 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/sheet-data/:dataSource',
       'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource',
       'POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource',
+      'GET /sites/:siteId/llmo/data',
+      'GET /sites/:siteId/llmo/data/:dataSource',
+      'GET /sites/:siteId/llmo/data/:sheetType/:dataSource',
+      'GET /sites/:siteId/llmo/data/:sheetType/:week/:dataSource',
       'GET /sites/:siteId/llmo/config',
       'PATCH /sites/:siteId/llmo/config',
       'POST /sites/:siteId/llmo/config',
@@ -613,6 +624,9 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/url-channel'].handler).to.equal(mockTrafficController.getPaidTrafficByUrlChannel);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/url-channel-device'].handler).to.equal(mockTrafficController.getPaidTrafficByUrlChannelDevice);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/url-channel-platform-device'].handler).to.equal(mockTrafficController.getPaidTrafficByUrlChannelPlatformDevice);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/campaign-channel-device'].handler).to.equal(mockTrafficController.getPaidTrafficByCampaignChannelDevice);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/campaign-channel-platform'].handler).to.equal(mockTrafficController.getPaidTrafficByCampaignChannelPlatform);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/campaign-channel-platform-device'].handler).to.equal(mockTrafficController.getPaidTrafficByCampaignChannelPlatformDevice);
     expect(dynamicRoutes['GET /sites/:siteId/files'].handler).to.equal(mockScrapeController.getFileByKey);
     expect(dynamicRoutes['GET /sites/:siteId/files'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /tools/scrape/jobs/:jobId'].handler).to.equal(mockScrapeJobController.getScrapeJobStatus);
@@ -679,5 +693,13 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'dataSource']);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource'].handler).to.equal(mockLlmoController.queryLlmoSheetData);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'week', 'dataSource']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/data'].handler).to.equal(mockLlmoController.queryFiles);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/data'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/data/:dataSource'].handler).to.equal(mockLlmoController.queryFiles);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/data/:dataSource'].paramNames).to.deep.equal(['siteId', 'dataSource']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/data/:sheetType/:dataSource'].handler).to.equal(mockLlmoController.queryFiles);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/data/:sheetType/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'dataSource']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/data/:sheetType/:week/:dataSource'].handler).to.equal(mockLlmoController.queryFiles);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/data/:sheetType/:week/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'week', 'dataSource']);
   });
 });
