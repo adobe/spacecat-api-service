@@ -122,11 +122,12 @@ If only startDate provided, shows metrics from that date to today.`,
 
         if (metrics.audits.total > 0) {
           message.push('');
-          message.push('   _Breakdown by Type:_');
+          message.push('   _Breakdown by Audit Type:_');
           Object.entries(metrics.audits.byType)
             .sort((a, b) => b[1].total - a[1].total)
             .forEach(([type, counts]) => {
-              message.push(`      • \`${type}\`: ${counts.total} (✅ ${counts.successful} | ❌ ${counts.failed})`);
+              const failedStr = counts.failed > 0 ? ` | ❌ ${counts.failed}` : '';
+              message.push(`      • \`${type}\`: (✅ ${counts.successful}${failedStr})`);
             });
         } else {
           message.push('');
@@ -141,11 +142,11 @@ If only startDate provided, shows metrics from that date to today.`,
 
         if (metrics.opportunities.total > 0) {
           message.push('');
-          message.push('   _Breakdown by Type:_');
+          message.push('   _Breakdown by Opportunity Type:_');
           Object.entries(metrics.opportunities.byType)
             .sort((a, b) => b[1] - a[1])
             .forEach(([type, count]) => {
-              message.push(`      • \`${type}\`: ${count}`);
+              message.push(`      • \`${type}\`: (✅ ${count})`);
             });
         } else {
           message.push('');
@@ -160,11 +161,11 @@ If only startDate provided, shows metrics from that date to today.`,
 
         if (metrics.suggestions.total > 0) {
           message.push('');
-          message.push('   _Breakdown by Status:_');
+          message.push('   _Breakdown by Suggestion Status:_');
           Object.entries(metrics.suggestions.byStatus)
             .sort((a, b) => b[1] - a[1])
             .forEach(([status, count]) => {
-              message.push(`      • \`${status}\`: ${count}`);
+              message.push(`      • \`${status}\`: (✅ ${count})`);
             });
         } else {
           message.push('');

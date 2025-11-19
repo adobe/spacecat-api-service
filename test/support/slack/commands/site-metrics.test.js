@@ -330,9 +330,9 @@ describe('SiteMetricsCommand', () => {
       const lastCall = calls[calls.length - 1];
       const message = lastCall.args[0];
 
-      expect(message).to.include('_Breakdown by Type:_');
-      expect(message).to.include('`cwv`');
-      expect(message).to.include('`broken-backlinks`');
+      expect(message).to.include('_Breakdown by Audit Type:_');
+      expect(message).to.include('`cwv`: (✅ 1 | ❌ 1)');
+      expect(message).to.include('`broken-backlinks`: (✅ 1)');
     });
 
     it('should display opportunity breakdown by type', async () => {
@@ -343,9 +343,9 @@ describe('SiteMetricsCommand', () => {
       const lastCall = calls[calls.length - 1];
       const message = lastCall.args[0];
 
-      expect(message).to.include('_Breakdown by Type:_');
-      expect(message).to.include('`seo-backlinks`');
-      expect(message).to.include('`cwv-lcp`');
+      expect(message).to.include('_Breakdown by Opportunity Type:_');
+      expect(message).to.include('`seo-backlinks`: (✅ 1)');
+      expect(message).to.include('`cwv-lcp`: (✅ 1)');
     });
 
     it('should display suggestion breakdown by status', async () => {
@@ -356,9 +356,9 @@ describe('SiteMetricsCommand', () => {
       const lastCall = calls[calls.length - 1];
       const message = lastCall.args[0];
 
-      expect(message).to.include('_Breakdown by Status:_');
-      expect(message).to.include('`NEW`');
-      expect(message).to.include('`APPROVED`');
+      expect(message).to.include('_Breakdown by Suggestion Status:_');
+      expect(message).to.include('`NEW`: (✅ 2)');
+      expect(message).to.include('`APPROVED`: (✅ 2)');
     });
 
     it('should calculate success rate correctly', async () => {
