@@ -81,8 +81,16 @@ paths:
     $ref: './configurations-api.yaml#/configurations'
   /configurations/latest:
     $ref: './configuration-api.yaml#/latest-configuration'
+  /configurations/latest/queues:
+    $ref: './configuration-api.yaml#/configuration-queues'
+  /configurations/latest/jobs/{jobType}:
+    $ref: './configuration-api.yaml#/configuration-job'
+  /configurations/latest/handlers/{handlerType}:
+    $ref: './configuration-api.yaml#/configuration-handler'
   /configurations/{version}:
     $ref: './configuration-api.yaml#/configuration'
+  /configurations/{version}/restore:
+    $ref: './configuration-api.yaml#/configuration-restore'
   /configurations/audits:
     $ref: './configuration-api.yaml#/configuration-audits'
   /configurations/audits/{auditType}:
@@ -156,6 +164,8 @@ paths:
     $ref: './consent-banner-api.yaml#/consent-banner'
   /sites:
     $ref: './sites-api.yaml#/sites'
+  /sites-resolve:
+    $ref: './sites-api.yaml#/sites-resolve'
   /sites/by-delivery-type/{deliveryType}:
     $ref: './sites-api.yaml#/sites-by-delivery-type'
   /sites/by-base-url/{base64BaseUrl}:
