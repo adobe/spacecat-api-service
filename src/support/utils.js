@@ -503,7 +503,7 @@ export function getTodayAndLastTwoSundaysDateRanges() {
 }
 
 /**
- * Get last two complete weeks (Monday 00:00 to Sunday 23:59 UTC)
+ * Get last two complete weeks (Monday 00:00 to Monday 00:00 UTC)
  * Always returns last two COMPLETE weeks, excluding any partial current week
  * @returns {Array} - Array of date ranges with label, startTime, and endTime
  */
@@ -527,15 +527,15 @@ export function getLastTwoCompleteWeeks() {
     0,
   ));
 
-  // Last complete week's Sunday at 23:59:59.999 UTC
-  const lastSunday = new Date(Date.UTC(
+  // Last complete week's end: next Monday at 00:00:00.000 UTC (7 days after start)
+  const lastMondayEnd = new Date(Date.UTC(
     lastMonday.getUTCFullYear(),
     lastMonday.getUTCMonth(),
-    lastMonday.getUTCDate() + 6,
-    23,
-    59,
-    59,
-    999,
+    lastMonday.getUTCDate() + 7,
+    0,
+    0,
+    0,
+    0,
   ));
 
   // Week before that - Monday
@@ -549,27 +549,27 @@ export function getLastTwoCompleteWeeks() {
     0,
   ));
 
-  // Week before that - Sunday
-  const prevSunday = new Date(Date.UTC(
+  // Week before that - end: next Monday at 00:00:00.000 UTC
+  const prevMondayEnd = new Date(Date.UTC(
     prevMonday.getUTCFullYear(),
     prevMonday.getUTCMonth(),
-    prevMonday.getUTCDate() + 6,
-    23,
-    59,
-    59,
-    999,
+    prevMonday.getUTCDate() + 7,
+    0,
+    0,
+    0,
+    0,
   ));
 
   return [
     {
-      label: getStringDate(lastSunday),
+      label: getStringDate(lastMondayEnd),
       startTime: lastMonday.toISOString(),
-      endTime: lastSunday.toISOString(),
+      endTime: lastMondayEnd.toISOString(),
     },
     {
-      label: getStringDate(prevSunday),
+      label: getStringDate(prevMondayEnd),
       startTime: prevMonday.toISOString(),
-      endTime: prevSunday.toISOString(),
+      endTime: prevMondayEnd.toISOString(),
     },
   ];
 }

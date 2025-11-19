@@ -667,7 +667,7 @@ function SitesController(ctx, log, env) {
       domain,
       startTime: dateRange.startTime,
       endTime: dateRange.endTime,
-      granularity: 'DAILY',
+      granularity: 'HOURLY',
     });
 
     return {
