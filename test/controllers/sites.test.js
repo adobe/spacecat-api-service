@@ -11,12 +11,15 @@
  */
 
 /* eslint-env mocha */
-import { KeyEvent, Site } from '@adobe/spacecat-shared-data-access';
+
+import { KeyEvent, Organization, Site } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import KeyEventSchema from '@adobe/spacecat-shared-data-access/src/models/key-event/key-event.schema.js';
+import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/models/organization/organization.schema.js';
 import SiteSchema from '@adobe/spacecat-shared-data-access/src/models/site/site.schema.js';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import { hasText } from '@adobe/spacecat-shared-utils';
+import TierClient from '@adobe/spacecat-shared-tier-client';
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
@@ -166,6 +169,7 @@ describe('Sites Controller', () => {
     'removeKeyEvent',
     'getSiteMetricsBySource',
     'getPageMetricsBySource',
+    'resolveSite',
     'triggerBrandProfile',
   ];
 
@@ -207,6 +211,14 @@ describe('Sites Controller', () => {
         allBySiteId: sandbox.stub().resolves([]),
         allBySiteIdAndSource: sandbox.stub().resolves([]),
         allBySiteIdAndSourceAndGeo: sandbox.stub().resolves([]),
+      },
+      Organization: {
+        findById: sandbox.stub().resolves(null),
+        findByImsOrgId: sandbox.stub().resolves(null),
+      },
+      SiteEnrollment: {
+        allByEntitlementId: sandbox.stub().resolves([]),
+        allBySiteId: sandbox.stub().resolves([]),
       },
     };
 
@@ -2707,6 +2719,366 @@ describe('Sites Controller', () => {
       expect(result.status).to.equal(200);
       expect(response).to.be.an('array');
       expect(mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo).to.have.been.calledWith(SITE_IDS[0], 'ahrefs', 'US');
+    });
+  });
+
+  describe('resolveSite', () => {
+    let mockTierClientStub;
+    let tierClientStub;
+    let accessControlStub;
+    let testOrganizations;
+    let testSites;
+
+    beforeEach(() => {
+      accessControlStub = sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      testOrganizations = [
+        {
+          organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28',
+          name: 'Org 1',
+          imsOrgId: '1234567890ABCDEF12345678@AdobeOrg',
+          config: Config({}),
+        },
+        {
+          organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f',
+          name: 'Org 2',
+          imsOrgId: '2234567890ABCDEF12345678@AdobeOrg',
+          config: Config({}),
+        },
+        {
+          organizationId: 'org3',
+          name: 'Org 3',
+          imsOrgId: '9876567890ABCDEF12345678@AdobeOrg',
+          config: Config({}),
+        },
+        {
+          organizationId: '7033554c-de8a-44ac-a356-09b51af8cc28',
+          name: 'Org 4',
+          imsOrgId: '1176567890ABCDEF12345678@AdobeOrg',
+          config: Config({}),
+        },
+      ].map((org) => new Organization(
+        {
+          entities: {
+            organization: {
+              model: {
+                indexes: {},
+                schema: {
+                  attributes: {
+                    organizationId: { type: 'string', get: (value) => value },
+                    config: { type: 'any', get: (value) => Config(value) },
+                    name: { type: 'string', get: (value) => value },
+                    imsOrgId: { type: 'string', get: (value) => value },
+                  },
+                },
+              },
+              patch: sinon.stub().returns({
+                composite: () => ({ go: () => {} }),
+                set: () => {},
+              }),
+            },
+          },
+        },
+        {
+          log: console,
+          getCollection: stub().returns({
+            schema: OrganizationSchema,
+            findById: stub(),
+          }),
+        },
+        OrganizationSchema,
+        org,
+        console,
+      ));
+
+      // Create test sites with organizationId
+      testSites = [
+        {
+          siteId: SITE_IDS[0],
+          organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28',
+          baseURL: 'https://test-site-1.com',
+          deliveryType: 'aem_edge',
+          config: Config({}),
+        },
+        {
+          siteId: SITE_IDS[1],
+          organizationId: '7033554c-de8a-44ac-a356-09b51af8cc28',
+          baseURL: 'https://test-site-2.com',
+          deliveryType: 'aem_edge',
+          config: Config({}),
+        },
+      ].map((site) => new Site(
+        { entities: { site: { model: {} } } },
+        {
+          log: console,
+          getCollection: stub().returns({
+            schema: SiteSchema,
+            findById: stub(),
+          }),
+        },
+        SiteSchema,
+        site,
+        console,
+      ));
+
+      mockTierClientStub = {
+        checkValidEntitlement: sandbox.stub().resolves({
+          entitlement: { getId: () => 'entitlement-123' },
+        }),
+        getFirstEnrollment: sandbox.stub().resolves({
+          entitlement: { getId: () => 'entitlement-123' },
+          enrollment: { getId: () => 'enrollment-123', getSiteId: () => SITE_IDS[0] },
+          site: testSites[0],
+        }),
+        getAllEnrollment: sandbox.stub().resolves({
+          entitlement: { getId: () => 'entitlement-123' },
+          enrollments: [{ getId: () => 'enrollment-123', getSiteId: () => SITE_IDS[0] }],
+        }),
+      };
+      tierClientStub = sandbox.stub(TierClient, 'createForOrg').returns(mockTierClientStub);
+      sandbox.stub(TierClient, 'createForSite').returns(mockTierClientStub);
+    });
+
+    afterEach(() => {
+      if (accessControlStub) {
+        accessControlStub.restore();
+      }
+      if (tierClientStub) {
+        tierClientStub.restore();
+      }
+    });
+
+    it('should return bad request if no product code header provided', async () => {
+      context.pathInfo.headers = {};
+      context.data = {};
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('Product code required');
+    });
+
+    it('should return bad request if no query parameters provided', async () => {
+      context.data = {};
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('Either organizationId or imsOrg must be provided');
+    });
+
+    it('should return site data for valid organizationId with enrolled sites', async () => {
+      context.data = { organizationId: testOrganizations[0].getId() };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+      mockDataAccess.Site.findById.resolves(testSites[0]);
+
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: { getId: () => 'entitlement-123' },
+        enrollment: { getId: () => 'enrollment-1', getSiteId: () => SITE_IDS[0] },
+        site: testSites[0],
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('data');
+      expect(body.data).to.have.property('organization');
+      expect(body.data).to.have.property('site');
+    });
+
+    it('should return not found for non-existent imsOrg', async () => {
+      context.data = { imsOrg: 'nonexistent@AdobeOrg' };
+      mockDataAccess.Organization.findByImsOrgId.resolves(null);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledWith('nonexistent@AdobeOrg');
+    });
+
+    it('should call proper methods for valid imsOrg', async () => {
+      context.data = { imsOrg: testOrganizations[0].getImsOrgId() };
+      mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[0]);
+      mockDataAccess.Site.findById.resolves(testSites[0]);
+
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: null,
+        enrollment: null,
+        site: null,
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledWith(
+        testOrganizations[0].getImsOrgId(),
+      );
+      // Response can be 200 or 404 depending on enrollment data
+      expect(response.status).to.be.oneOf([200, 404]);
+    });
+
+    it('should return not found when organization has no enrolled sites', async () => {
+      context.data = { organizationId: testOrganizations[0].getId() };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: null,
+        enrollment: null,
+        site: null,
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    it('should handle errors gracefully', async () => {
+      context.data = { siteId: SITE_IDS[0], imsOrg: testOrganizations[0].getImsOrgId() };
+      mockDataAccess.Site.findById.rejects(new Error('Database error'));
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('Failed to resolve site');
+    });
+
+    it('should return site data for valid siteId with matching enrollment', async () => {
+      const validSiteId = SITE_IDS[1];
+      const targetOrgId = testOrganizations[3].getId();
+      const entitlementId = 'entitlement-siteId-path';
+
+      context.data = { siteId: validSiteId, imsOrg: testOrganizations[3].getImsOrgId() };
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+
+      const mockEntitlement = {
+        getId: () => entitlementId,
+        getProductCode: () => 'ASO',
+      };
+
+      mockTierClientStub.getAllEnrollment.resolves({
+        entitlement: mockEntitlement,
+        enrollments: [{
+          getEntitlementId: () => entitlementId,
+          getId: () => 'enrollment-siteId',
+          getSiteId: () => validSiteId,
+        }],
+      });
+
+      mockDataAccess.Site.findById.resolves(testSites[1]);
+
+      mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(mockDataAccess.Organization.findById.calledWith(targetOrgId)).to.be.true;
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('data');
+      expect(body.data).to.have.property('organization');
+      expect(body.data).to.have.property('site');
+    });
+
+    it('should return 404 not found when organization does not exist', async () => {
+      const validSiteId = SITE_IDS[1];
+      const targetOrgId = testOrganizations[3].getId();
+      const entitlementId = 'entitlement-siteId-path';
+
+      context.data = { siteId: validSiteId, organizationId: 'nonexistent-organization-id' };
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+
+      const mockEntitlement = {
+        getId: () => entitlementId,
+        getProductCode: () => 'ASO',
+      };
+
+      mockTierClientStub.getAllEnrollment.resolves({
+        entitlement: mockEntitlement,
+        enrollments: [{
+          getEntitlementId: () => entitlementId,
+          getId: () => 'enrollment-siteId',
+          getSiteId: () => validSiteId,
+        }],
+      });
+
+      mockDataAccess.Site.findById.resolves(testSites[1]);
+
+      mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(mockDataAccess.Organization.findById.calledWith(targetOrgId)).to.be.true;
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    it('should return 404 not found when ims org does not exist', async () => {
+      const validSiteId = SITE_IDS[1];
+      const entitlementId = 'entitlement-siteId-path';
+      const targetOrgId = testOrganizations[3].getId();
+
+      context.data = { siteId: validSiteId, imsOrg: 'nonexistent@AdobeOrg' };
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+
+      const mockEntitlement = {
+        getId: () => entitlementId,
+        getProductCode: () => 'ASO',
+      };
+
+      mockTierClientStub.getAllEnrollment.resolves({
+        entitlement: mockEntitlement,
+        enrollments: [{
+          getEntitlementId: () => entitlementId,
+          getId: () => 'enrollment-siteId',
+          getSiteId: () => validSiteId,
+        }],
+      });
+
+      mockDataAccess.Site.findById.resolves(testSites[1]);
+
+      mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(mockDataAccess.Organization.findById.calledWith(targetOrgId)).to.be.true;
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    it('should return site data for valid imsOrg with matching enrollment', async () => {
+      context.data = { imsOrg: testOrganizations[2].getImsOrgId() };
+
+      const mockEntitlement = {
+        getId: () => 'entitlement-456',
+        getProductCode: () => 'ASO',
+      };
+
+      const mockTierClient = {
+        getFirstEnrollment: sandbox.stub().resolves({
+          entitlement: mockEntitlement,
+          enrollment: { getId: () => 'enrollment-2', getSiteId: () => SITE_IDS[0] },
+          site: testSites[0],
+        }),
+      };
+      TierClient.createForOrg.returns(mockTierClient);
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[2]);
+      mockDataAccess.Site.findById.resolves(testSites[0]);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('data');
+      expect(body.data).to.have.property('organization');
+      expect(body.data).to.have.property('site');
+      expect(body.data.organization.imsOrgId).to.equal('9876567890ABCDEF12345678@AdobeOrg');
     });
   });
 
