@@ -208,27 +208,7 @@ describe('Site Metrics Controller', () => {
 
       expect(response.status).to.equal(403);
       const body = await response.text();
-      expect(body).to.include('User does not have access');
-    });
-
-    it('should return forbidden when access control check fails', async () => {
-      AccessControlUtilStub.returns({
-        hasAccess: sinon.stub().rejects(new Error('Access control error')),
-      });
-
-      const controller = SiteMetricsController(contextMock);
-      const req = {
-        params: { siteId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' },
-        query: {},
-        authInfo: { userId: 'user-1' },
-      };
-
-      const response = await controller.getMetricsForSite(req);
-
-      expect(response.status).to.equal(403);
-      const body = await response.text();
-      expect(body).to.include('Access denied');
-      expect(logMock.error.calledOnce).to.be.true;
+      expect(body).to.include('Only users belonging to the organization can view its metrics');
     });
 
     it('should work with no query parameters', async () => {

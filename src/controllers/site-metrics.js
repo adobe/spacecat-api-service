@@ -71,15 +71,9 @@ function SiteMetricsController(ctx) {
     }
 
     // Check access control
-    try {
-      const accessControlUtil = AccessControlUtil(ctx);
-      const hasAccess = await accessControlUtil.hasAccess(req.authInfo, site);
-      if (!hasAccess) {
-        return forbidden(`User does not have access to site ${siteId}`);
-      }
-    } catch (error) {
-      log.error(`Access control check failed for site ${siteId}:`, error);
-      return forbidden(`Access denied to site ${siteId}`);
+    const accessControlUtil = AccessControlUtil(ctx);
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view its metrics');
     }
 
     // Fetch metrics
