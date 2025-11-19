@@ -234,6 +234,7 @@ function LlmoController(ctx) {
 
       // Fetch data from the external endpoint using the dataFolder from config
       const fetchStartTime = Date.now();
+      log.info(`LLMO POST endpoint: Fetching data from external endpoint: ${url.toString()}`);
       const response = await fetch(url.toString(), {
         headers: {
           Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
