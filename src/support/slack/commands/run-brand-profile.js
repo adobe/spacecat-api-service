@@ -10,7 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-import { randomUUID } from 'crypto';
 import { hasText, isValidUrl } from '@adobe/spacecat-shared-utils';
 
 import BaseCommand from './base.js';
@@ -19,11 +18,11 @@ import {
   postErrorMessage,
   postSiteNotFoundMessage,
 } from '../../../utils/slack/base.js';
-import { startAgentWorkflow } from '../../agent-workflow.js';
+import { triggerBrandProfileAgent } from '../../brand-profile-trigger.js';
 
 const COMMAND_ID = 'run-brand-profile';
-const AGENT_ID = 'brand-profile';
 const PHRASES = ['brand profile', 'run brand profile'];
+const BRAND_PROFILE_SLACK_REASON = 'brand-profile-slack';
 
 function RunBrandProfileCommand(context) {
   const baseCommand = BaseCommand({
@@ -51,22 +50,12 @@ function RunBrandProfileCommand(context) {
   } : undefined);
 
   const triggerAgentForSite = async (site, slackContext) => {
-    const siteId = site.getId();
-    const baseURL = site.getBaseURL();
-
-    const payload = {
-      agentId: AGENT_ID,
-      siteId,
-      context: {
-        baseURL,
-      },
+    await triggerBrandProfileAgent({
+      context,
+      site,
       slackContext: buildSlackContext(slackContext),
-      idempotencyKey: randomUUID(),
-    };
-
-    const executionName = `brand-${siteId}-${Date.now()}`;
-    await startAgentWorkflow(context, payload, { executionName });
-    return baseURL;
+      reason: BRAND_PROFILE_SLACK_REASON,
+    });
   };
 
   const handleSingleSite = async (args, slackContext) => {

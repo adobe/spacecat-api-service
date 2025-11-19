@@ -21,7 +21,7 @@ use(sinonChai);
 
 describe('RunBrandProfileCommand', () => {
   let RunBrandProfileCommand;
-  let startAgentWorkflowStub;
+  let triggerBrandProfileAgentStub;
   let postErrorMessageStub;
   let postSiteNotFoundMessageStub;
   let extractURLFromSlackInputStub;
@@ -34,7 +34,7 @@ describe('RunBrandProfileCommand', () => {
   });
 
   const loadModule = async () => {
-    startAgentWorkflowStub = sinon.stub().resolves('exec-123');
+    triggerBrandProfileAgentStub = sinon.stub().resolves('exec-123');
     postErrorMessageStub = sinon.stub().resolves();
     postSiteNotFoundMessageStub = sinon.stub().resolves();
     extractURLFromSlackInputStub = sinon.stub().callsFake((value) => value);
@@ -42,8 +42,8 @@ describe('RunBrandProfileCommand', () => {
     ({ default: RunBrandProfileCommand } = await esmock(
       '../../../../src/support/slack/commands/run-brand-profile.js',
       {
-        '../../../../src/support/agent-workflow.js': {
-          startAgentWorkflow: startAgentWorkflowStub,
+        '../../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
         },
         '../../../../src/utils/slack/base.js': {
           extractURLFromSlackInput: extractURLFromSlackInputStub,
@@ -90,7 +90,7 @@ describe('RunBrandProfileCommand', () => {
     const command = RunBrandProfileCommand(context);
     await command.handleExecution(['not-a-url'], slackContext);
     expect(slackContext.say).to.have.been.calledWithMatch('Usage:');
-    expect(startAgentWorkflowStub).to.not.have.been.called;
+    expect(triggerBrandProfileAgentStub).to.not.have.been.called;
   });
 
   it('notifies the user when the site cannot be found', async () => {
@@ -105,18 +105,22 @@ describe('RunBrandProfileCommand', () => {
     context.dataAccess.Site.findByBaseURL.resolves(site);
     const command = RunBrandProfileCommand(context);
     await command.handleExecution(['https://example.com'], slackContext);
-    expect(startAgentWorkflowStub).to.have.been.calledOnce;
-    const [, payload] = startAgentWorkflowStub.firstCall.args;
-    expect(payload.agentId).to.equal('brand-profile');
-    expect(payload.siteId).to.equal('site-1');
-    expect(payload.context.baseURL).to.equal('https://example.com');
+    expect(triggerBrandProfileAgentStub).to.have.been.calledOnce;
+    const [options] = triggerBrandProfileAgentStub.firstCall.args;
+    expect(options.site).to.equal(site);
+    expect(options.context).to.equal(context);
+    expect(options.reason).to.equal('brand-profile-slack');
+    expect(options.slackContext).to.deep.equal({
+      channelId: slackContext.channelId,
+      threadTs: slackContext.threadTs,
+    });
     expect(slackContext.say).to.have.been.calledWithMatch(':rocket:');
   });
 
-  it('handles errors from startAgentWorkflow for a single site', async () => {
+  it('handles errors from triggerBrandProfileAgent for a single site', async () => {
     const site = buildSite('site-2', 'https://boom.com');
     context.dataAccess.Site.findByBaseURL.resolves(site);
-    startAgentWorkflowStub.rejects(new Error('boom'));
+    triggerBrandProfileAgentStub.rejects(new Error('boom'));
     const command = RunBrandProfileCommand(context);
     await command.handleExecution(['https://boom.com'], slackContext);
     expect(postErrorMessageStub).to.have.been.calledOnce;
@@ -127,7 +131,7 @@ describe('RunBrandProfileCommand', () => {
     const command = RunBrandProfileCommand(context);
     await command.handleExecution(['https://example.com'], slackContext);
     expect(slackContext.say).to.have.been.calledWithMatch('Agent workflow ARN is not configured');
-    expect(startAgentWorkflowStub).to.not.have.been.called;
+    expect(triggerBrandProfileAgentStub).to.not.have.been.called;
   });
 
   it('logs and reports unexpected errors bubbling out of handleSingleSite', async () => {
@@ -148,14 +152,14 @@ describe('RunBrandProfileCommand', () => {
     };
     const command = RunBrandProfileCommand(context);
     await command.handleExecution(['https://nostack.com'], noChannelContext);
-    const [, payload] = startAgentWorkflowStub.firstCall.args;
-    expect(payload.slackContext).to.be.undefined;
+    const [options] = triggerBrandProfileAgentStub.firstCall.args;
+    expect(options.slackContext).to.be.undefined;
   });
 
   it('treats the keyword "all" as invalid input', async () => {
     const command = RunBrandProfileCommand(context);
     await command.handleExecution(['all'], slackContext);
     expect(slackContext.say).to.have.been.calledWithMatch('Usage:');
-    expect(startAgentWorkflowStub).to.not.have.been.called;
+    expect(triggerBrandProfileAgentStub).to.not.have.been.called;
   });
 });
