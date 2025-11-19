@@ -889,11 +889,15 @@ describe('Sites Controller', () => {
         avgEngagement: 45.2,
       });
       expect(metrics.mostRecentCompleteWeek.label).to.be.a('string');
+      expect(metrics.mostRecentCompleteWeek.start).to.be.a('string');
+      expect(metrics.mostRecentCompleteWeek.end).to.be.a('string');
       expect(metrics.previousCompleteWeek).to.deep.include({
         pageviews: 125000,
         siteSpeed: 1234,
         avgEngagement: 45.2,
       });
+      expect(metrics.previousCompleteWeek.start).to.be.a('string');
+      expect(metrics.previousCompleteWeek.end).to.be.a('string');
     });
 
     it('handles null metrics gracefully', async () => {
@@ -925,6 +929,22 @@ describe('Sites Controller', () => {
         siteSpeed: 1000,
         avgEngagement: null,
       });
+    });
+
+    it('returns 404 when domain has no RUM data', async () => {
+      context.rumApiClient.query.rejects(new Error('Query \'site-metrics\' failed. Reason: Error during fetching domainkey for domain \'www.site1.com using admin key. Status: 404'));
+
+      const result = await sitesController.getLatestSiteMetrics({
+        ...context,
+        params: { siteId: SITE_IDS[0] },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(404);
+      expect(error).to.have.property('message', 'No RUM data available for this site');
+      expect(context.log.info).to.have.been.calledWithMatch(
+        sinon.match(/No RUM data available for site/),
+      );
     });
 
     it('returns 500 when RUM API query fails', async () => {
@@ -1070,12 +1090,16 @@ describe('Sites Controller', () => {
         siteSpeed: 1000,
         avgEngagement: 50,
         label: '2025-11-17',
+        startTime: '2025-11-10T00:00:00.000Z',
+        endTime: '2025-11-16T23:59:59.999Z',
       });
       context.rumApiClient.query.onCall(1).resolves({
         pageviews: 200,
         siteSpeed: 2000,
         avgEngagement: 60,
         label: '2025-11-10',
+        startTime: '2025-11-03T00:00:00.000Z',
+        endTime: '2025-11-09T23:59:59.999Z',
       });
 
       const result = await sitesController.getLatestSiteMetrics({
@@ -1087,7 +1111,77 @@ describe('Sites Controller', () => {
       expect(result.status).to.equal(200);
       // Truthy labels should be preserved
       expect(metrics.mostRecentCompleteWeek.label).to.equal('2025-11-17');
+      expect(metrics.mostRecentCompleteWeek.start).to.equal('2025-11-10T00:00:00.000Z');
+      expect(metrics.mostRecentCompleteWeek.end).to.equal('2025-11-16T23:59:59.999Z');
       expect(metrics.previousCompleteWeek.label).to.equal('2025-11-10');
+      expect(metrics.previousCompleteWeek.start).to.equal('2025-11-03T00:00:00.000Z');
+      expect(metrics.previousCompleteWeek.end).to.equal('2025-11-09T23:59:59.999Z');
+    });
+
+    it('handles explicit null start/end times', async () => {
+      // Test with explicit null for start/end
+      context.rumApiClient.query.onCall(0).resolves({
+        pageviews: 100,
+        siteSpeed: 1000,
+        avgEngagement: 50,
+        startTime: null,
+        endTime: null,
+      });
+      context.rumApiClient.query.onCall(1).resolves({
+        pageviews: 200,
+        siteSpeed: 2000,
+        avgEngagement: 60,
+        startTime: null,
+        endTime: null,
+      });
+
+      const result = await sitesController.getLatestSiteMetrics({
+        ...context,
+        params: { siteId: SITE_IDS[0] },
+      });
+      const metrics = await result.json();
+
+      expect(result.status).to.equal(200);
+      // Explicit null should be converted to null
+      expect(metrics.mostRecentCompleteWeek.start).to.equal(null);
+      expect(metrics.mostRecentCompleteWeek.end).to.equal(null);
+      expect(metrics.previousCompleteWeek.start).to.equal(null);
+      expect(metrics.previousCompleteWeek.end).to.equal(null);
+    });
+
+    it('handles mixed truthy and null metrics from API', async () => {
+      // Test with mixed metrics where some properties are present and others null
+      context.rumApiClient.query.onCall(0).resolves({
+        pageviews: 100,
+        siteSpeed: null,
+        avgEngagement: 50,
+      });
+      context.rumApiClient.query.onCall(1).resolves({
+        pageviews: null,
+        siteSpeed: 2000,
+        avgEngagement: null,
+      });
+
+      const result = await sitesController.getLatestSiteMetrics({
+        ...context,
+        params: { siteId: SITE_IDS[0] },
+      });
+      const metrics = await result.json();
+
+      expect(result.status).to.equal(200);
+      // Mixed metrics for most recent week
+      expect(metrics.mostRecentCompleteWeek.pageviews).to.equal(100);
+      expect(metrics.mostRecentCompleteWeek.siteSpeed).to.equal(null);
+      expect(metrics.mostRecentCompleteWeek.avgEngagement).to.equal(50);
+      // Dates always present from getLastTwoCompleteWeeks()
+      expect(metrics.mostRecentCompleteWeek.start).to.be.a('string');
+      expect(metrics.mostRecentCompleteWeek.end).to.be.a('string');
+      // Mixed metrics for previous week
+      expect(metrics.previousCompleteWeek.pageviews).to.equal(null);
+      expect(metrics.previousCompleteWeek.siteSpeed).to.equal(2000);
+      expect(metrics.previousCompleteWeek.avgEngagement).to.equal(null);
+      expect(metrics.previousCompleteWeek.start).to.be.a('string');
+      expect(metrics.previousCompleteWeek.end).to.be.a('string');
     });
 
     it('handles completely missing metrics from API response', async () => {
@@ -1107,14 +1201,20 @@ describe('Sites Controller', () => {
       const metrics = await result.json();
 
       expect(result.status).to.equal(200);
-      // All metrics should be null when not returned
+      // All metrics should be null when not returned from API
       expect(metrics.mostRecentCompleteWeek.pageviews).to.equal(null);
       expect(metrics.mostRecentCompleteWeek.siteSpeed).to.equal(null);
       expect(metrics.mostRecentCompleteWeek.avgEngagement).to.equal(null);
+      // Start/end dates come from getLastTwoCompleteWeeks(), not API
+      expect(metrics.mostRecentCompleteWeek.start).to.be.a('string');
+      expect(metrics.mostRecentCompleteWeek.end).to.be.a('string');
       // Pageviews is present, others are null
       expect(metrics.previousCompleteWeek.pageviews).to.equal(100);
       expect(metrics.previousCompleteWeek.siteSpeed).to.equal(null);
       expect(metrics.previousCompleteWeek.avgEngagement).to.equal(null);
+      // Start/end dates come from getLastTwoCompleteWeeks()
+      expect(metrics.previousCompleteWeek.start).to.be.a('string');
+      expect(metrics.previousCompleteWeek.end).to.be.a('string');
     });
   });
 

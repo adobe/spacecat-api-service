@@ -710,18 +710,28 @@ function SitesController(ctx, log, env) {
       return ok({
         mostRecentCompleteWeek: {
           label: mostRecentCompleteWeek?.label ?? null,
+          start: mostRecentCompleteWeek?.startTime ?? null,
+          end: mostRecentCompleteWeek?.endTime ?? null,
           pageviews: mostRecentCompleteWeek?.pageviews ?? null,
           avgEngagement: mostRecentCompleteWeek?.avgEngagement ?? null,
           siteSpeed: mostRecentCompleteWeek?.siteSpeed ?? null,
         },
         previousCompleteWeek: {
           label: previousCompleteWeek?.label ?? null,
+          start: previousCompleteWeek?.startTime ?? null,
+          end: previousCompleteWeek?.endTime ?? null,
           pageviews: previousCompleteWeek?.pageviews ?? null,
           avgEngagement: previousCompleteWeek?.avgEngagement ?? null,
           siteSpeed: previousCompleteWeek?.siteSpeed ?? null,
         },
       });
     } catch (error) {
+      // Check if error is due to domain not having RUM data (404)
+      if (error.message && error.message.includes('Status: 404')) {
+        log.info(`No RUM data available for site ${siteId} (${domain})`);
+        return notFound('No RUM data available for this site');
+      }
+
       log.error(`Error getting latest metrics for site ${siteId}: ${error.message}`, error);
       return internalServerError(`Failed to fetch latest metrics: ${error.message}`);
     }
