@@ -1033,6 +1033,89 @@ describe('Sites Controller', () => {
       expect(secondCall.args[1]).to.have.property('domain', 'www.site1.com');
       expect(secondCall.args[1]).to.have.property('granularity', 'DAILY');
     });
+
+    it('handles nullish labels correctly', async () => {
+      // Test with null for first week
+      context.rumApiClient.query.onCall(0).resolves({
+        pageviews: 100,
+        siteSpeed: 1000,
+        avgEngagement: 50,
+        label: null,
+      });
+      // Test with explicit undefined label for second week
+      context.rumApiClient.query.onCall(1).resolves({
+        pageviews: 200,
+        siteSpeed: 2000,
+        avgEngagement: 60,
+        label: undefined,
+      });
+
+      const result = await sitesController.getLatestSiteMetrics({
+        ...context,
+        params: { siteId: SITE_IDS[0] },
+      });
+      const metrics = await result.json();
+
+      expect(result.status).to.equal(200);
+      // Null should be converted to null
+      expect(metrics.mostRecentCompleteWeek.label).to.equal(null);
+      // Undefined should be converted to null
+      expect(metrics.previousCompleteWeek.label).to.equal(null);
+    });
+
+    it('preserves truthy labels from API response', async () => {
+      // Test with truthy labels for both weeks
+      context.rumApiClient.query.onCall(0).resolves({
+        pageviews: 100,
+        siteSpeed: 1000,
+        avgEngagement: 50,
+        label: '2025-11-17',
+      });
+      context.rumApiClient.query.onCall(1).resolves({
+        pageviews: 200,
+        siteSpeed: 2000,
+        avgEngagement: 60,
+        label: '2025-11-10',
+      });
+
+      const result = await sitesController.getLatestSiteMetrics({
+        ...context,
+        params: { siteId: SITE_IDS[0] },
+      });
+      const metrics = await result.json();
+
+      expect(result.status).to.equal(200);
+      // Truthy labels should be preserved
+      expect(metrics.mostRecentCompleteWeek.label).to.equal('2025-11-17');
+      expect(metrics.previousCompleteWeek.label).to.equal('2025-11-10');
+    });
+
+    it('handles completely missing metrics from API response', async () => {
+      // Test with only some properties returned from API
+      context.rumApiClient.query.onCall(0).resolves({
+        // Missing pageviews, siteSpeed, avgEngagement
+      });
+      context.rumApiClient.query.onCall(1).resolves({
+        pageviews: 100,
+        // Missing siteSpeed, avgEngagement
+      });
+
+      const result = await sitesController.getLatestSiteMetrics({
+        ...context,
+        params: { siteId: SITE_IDS[0] },
+      });
+      const metrics = await result.json();
+
+      expect(result.status).to.equal(200);
+      // All metrics should be null when not returned
+      expect(metrics.mostRecentCompleteWeek.pageviews).to.equal(null);
+      expect(metrics.mostRecentCompleteWeek.siteSpeed).to.equal(null);
+      expect(metrics.mostRecentCompleteWeek.avgEngagement).to.equal(null);
+      // Pageviews is present, others are null
+      expect(metrics.previousCompleteWeek.pageviews).to.equal(100);
+      expect(metrics.previousCompleteWeek.siteSpeed).to.equal(null);
+      expect(metrics.previousCompleteWeek.avgEngagement).to.equal(null);
+    });
   });
 
   it('gets specific audit for a site', async () => {

@@ -709,13 +709,13 @@ function SitesController(ctx, log, env) {
 
       return ok({
         mostRecentCompleteWeek: {
-          label: mostRecentCompleteWeek?.label || null,
+          label: mostRecentCompleteWeek?.label ?? null,
           pageviews: mostRecentCompleteWeek?.pageviews ?? null,
           avgEngagement: mostRecentCompleteWeek?.avgEngagement ?? null,
           siteSpeed: mostRecentCompleteWeek?.siteSpeed ?? null,
         },
         previousCompleteWeek: {
-          label: previousCompleteWeek?.label || null,
+          label: previousCompleteWeek?.label ?? null,
           pageviews: previousCompleteWeek?.pageviews ?? null,
           avgEngagement: previousCompleteWeek?.avgEngagement ?? null,
           siteSpeed: previousCompleteWeek?.siteSpeed ?? null,
