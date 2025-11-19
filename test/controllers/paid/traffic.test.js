@@ -204,6 +204,22 @@ describe('Paid TrafficController', async () => {
       expect(query).to.include(String(threshold));
     });
 
+    it('sets pageViewThreshold to 0 when noThreshold parameter is true', async () => {
+      mockContext.data.noThreshold = true;
+      mockAthenaQuery.resolves([]);
+      const controller = TrafficController(
+        mockContext,
+        mockLog,
+        { ...mockEnv, PAID_DATA_THRESHOLD: 5000 },
+      );
+      const res = await controller.getPaidTrafficByTypeChannel();
+      expect(res.status).to.equal(200);
+      const query = mockAthenaQuery.args[0][0];
+      // Verify that the threshold is 0, not the env variable value
+      expect(query).to.include('HAVING SUM(pageviews) >= 0');
+      expect(query).not.to.include('5000');
+    });
+
     it('does not log error if cache file is missing (known exception)', async () => {
       mockAthenaQuery.resolves(trafficTypeMock);
       const controller = TrafficController(mockContext, mockLog, mockEnv);
