@@ -35,7 +35,9 @@ import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
+import TierClient from '@adobe/spacecat-shared-tier-client';
 import { SiteDto } from '../dto/site.js';
+import { OrganizationDto } from '../dto/organization.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
 import { KeyEventDto } from '../dto/key-event.js';
@@ -101,7 +103,9 @@ function SitesController(ctx, log, env) {
     throw new Error('Data access required');
   }
 
-  const { Audit, KeyEvent, Site } = dataAccess;
+  const {
+    Audit, KeyEvent, Organization, Site,
+  } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
@@ -824,6 +828,99 @@ function SitesController(ctx, log, env) {
     return ok(topPages);
   };
 
+  /**
+   * Resolves site and organization data based on query parameters.
+   * Tries siteId first, then checks either organizationId or imsOrg (mutually exclusive).
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Resolved site and organization data response.
+   */
+  const resolveSite = async (context) => {
+    const { organizationId, imsOrg, siteId } = context.data;
+    const { pathInfo } = context;
+    const X_PRODUCT_HEADER = 'x-product';
+    const productCode = pathInfo.headers[X_PRODUCT_HEADER];
+
+    if (!hasText(productCode)) {
+      return badRequest('Product code required in x-product header');
+    }
+
+    if (!hasText(organizationId) && !hasText(imsOrg)) {
+      return badRequest('Either organizationId or imsOrg must be provided');
+    }
+
+    let organization;
+    let site;
+
+    try {
+      if (hasText(siteId) && isValidUUID(siteId)) {
+        site = await Site.findById(siteId);
+        if (site) {
+          const orgId = site.getOrganizationId();
+          if (orgId) {
+            organization = await Organization.findById(orgId);
+            if (organization) {
+              if (hasText(organizationId) && organization.getId() !== organizationId) {
+                organization = null;
+              } else if (hasText(imsOrg) && organization.getImsOrgId() !== imsOrg) {
+                organization = null;
+              }
+            }
+            if (organization && await accessControlUtil.hasAccess(organization)) {
+              const tierClient = await TierClient.createForSite(context, site, productCode);
+              const { entitlement, enrollments } = await tierClient.getAllEnrollment();
+
+              if (entitlement && enrollments?.length) {
+                const data = {
+                  organization: OrganizationDto.toJSON(organization),
+                  site: SiteDto.toJSON(site),
+                };
+
+                return ok({ data });
+              }
+            }
+          }
+        }
+      }
+
+      if (hasText(organizationId) && isValidUUID(organizationId)) {
+        organization = await Organization.findById(organizationId);
+        if (organization && await accessControlUtil.hasAccess(organization)) {
+          const tierClient = TierClient.createForOrg(context, organization, productCode);
+          const { site: enrolledSite } = await tierClient.getFirstEnrollment();
+
+          if (enrolledSite) {
+            const data = {
+              organization: OrganizationDto.toJSON(organization),
+              site: SiteDto.toJSON(enrolledSite),
+            };
+
+            return ok({ data });
+          }
+        }
+      } else if (hasText(imsOrg)) {
+        organization = await Organization.findByImsOrgId(imsOrg);
+        if (organization && await accessControlUtil.hasAccess(organization)) {
+          const tierClient = TierClient.createForOrg(context, organization, productCode);
+          const { site: enrolledSite } = await tierClient.getFirstEnrollment();
+
+          if (enrolledSite) {
+            const data = {
+              organization: OrganizationDto.toJSON(organization),
+              site: SiteDto.toJSON(enrolledSite),
+            };
+
+            return ok({ data });
+          }
+        }
+      }
+
+      return notFound('No site found for the provided parameters');
+    } catch (error) {
+      log.error(`Error resolving site: ${error.message}`);
+      return badRequest('Failed to resolve site');
+    }
+  };
+
   return {
     createSite,
     getAll,
@@ -838,6 +935,7 @@ function SitesController(ctx, log, env) {
     updateSite,
     updateCdnLogsConfig,
     getTopPages,
+    resolveSite,
     getBrandProfile,
     triggerBrandProfile,
 
