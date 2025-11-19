@@ -115,56 +115,60 @@ If only startDate provided, shows metrics from that date to today.`,
         message.push('');
 
         // === AUDITS SECTION ===
-        message.push('*🔍 Audit Execution:*');
-        message.push(`• Total Audits: ${metrics.audits.total}`);
-        message.push(`• ✅ Successful: ${metrics.audits.successful} (${metrics.audits.successRate}%)`);
-        message.push(`• ❌ Failed: ${metrics.audits.failed}`);
-        message.push('');
+        message.push('*🔍 AUDIT EXECUTION*');
+        message.push(`   Total: *${metrics.audits.total}* audits run`);
+        message.push(`   ✅ Successful: *${metrics.audits.successful}* (${metrics.audits.successRate}%)`);
+        message.push(`   ❌ Failed: *${metrics.audits.failed}*`);
 
         if (metrics.audits.total > 0) {
-          message.push('*Breakdown by Audit Type:*');
+          message.push('');
+          message.push('   _Breakdown by Type:_');
           Object.entries(metrics.audits.byType)
             .sort((a, b) => b[1].total - a[1].total)
             .forEach(([type, counts]) => {
-              message.push(`• *${type}*: ${counts.total} total (✅ ${counts.successful}, ❌ ${counts.failed})`);
+              message.push(`      • \`${type}\`: ${counts.total} (✅ ${counts.successful} | ❌ ${counts.failed})`);
             });
-          message.push('');
         } else {
-          message.push('• _No audits found for this period_');
           message.push('');
+          message.push('   _No audits found for this period_');
         }
 
         // === OPPORTUNITIES SECTION ===
-        message.push('*💡 Opportunities Generated:*');
-        message.push(`• Total Opportunities: ${metrics.opportunities.total}`);
+        message.push('');
+        message.push('');
+        message.push('*💡 OPPORTUNITIES GENERATED*');
+        message.push(`   Total: *${metrics.opportunities.total}* opportunities`);
 
         if (metrics.opportunities.total > 0) {
           message.push('');
-          message.push('*Breakdown by Opportunity Type:*');
+          message.push('   _Breakdown by Type:_');
           Object.entries(metrics.opportunities.byType)
             .sort((a, b) => b[1] - a[1])
             .forEach(([type, count]) => {
-              message.push(`• *${type}*: ${count}`);
+              message.push(`      • \`${type}\`: ${count}`);
             });
         } else {
-          message.push('• _No opportunities found for this period_');
+          message.push('');
+          message.push('   _No opportunities found for this period_');
         }
-        message.push('');
 
         // === SUGGESTIONS SECTION ===
-        message.push('*💬 Suggestions Created:*');
-        message.push(`• Total Suggestions: ${metrics.suggestions.total}`);
+        message.push('');
+        message.push('');
+        message.push('*📝 SUGGESTIONS CREATED*');
+        message.push(`   Total: *${metrics.suggestions.total}* suggestions`);
 
         if (metrics.suggestions.total > 0) {
           message.push('');
-          message.push('*Breakdown by Status:*');
+          message.push('   _Breakdown by Status:_');
           Object.entries(metrics.suggestions.byStatus)
             .sort((a, b) => b[1] - a[1])
             .forEach(([status, count]) => {
-              message.push(`• *${status}*: ${count}`);
+              message.push(`      • \`${status}\`: ${count}`);
             });
         } else {
-          message.push('• _No suggestions found for this period_');
+          message.push('');
+          message.push('   _No suggestions found for this period_');
         }
 
         // Check if there's no data at all

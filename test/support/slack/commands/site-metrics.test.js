@@ -296,9 +296,9 @@ describe('SiteMetricsCommand', () => {
 
       expect(message).to.include('Metrics for Site: https://example.com');
       expect(message).to.include('Period:* All time');
-      expect(message).to.include('Total Audits: 3');
-      expect(message).to.include('Total Opportunities: 2');
-      expect(message).to.include('Total Suggestions: 4');
+      expect(message).to.include('Total: *3* audits run');
+      expect(message).to.include('Total: *2* opportunities');
+      expect(message).to.include('Total: *4* suggestions');
     });
 
     it('should fetch and display metrics for specific date range', async () => {
@@ -311,7 +311,7 @@ describe('SiteMetricsCommand', () => {
 
       expect(message).to.include('Period:* 2025-01-15 to 2025-01-16');
       // Should filter audits by date - only 2 audits in this range
-      expect(message).to.include('Total Audits: 2');
+      expect(message).to.include('Total: *2* audits run');
     });
 
     it('should handle URL without scheme', async () => {
@@ -330,9 +330,9 @@ describe('SiteMetricsCommand', () => {
       const lastCall = calls[calls.length - 1];
       const message = lastCall.args[0];
 
-      expect(message).to.include('Breakdown by Audit Type');
-      expect(message).to.include('*cwv*');
-      expect(message).to.include('*broken-backlinks*');
+      expect(message).to.include('_Breakdown by Type:_');
+      expect(message).to.include('`cwv`');
+      expect(message).to.include('`broken-backlinks`');
     });
 
     it('should display opportunity breakdown by type', async () => {
@@ -343,9 +343,9 @@ describe('SiteMetricsCommand', () => {
       const lastCall = calls[calls.length - 1];
       const message = lastCall.args[0];
 
-      expect(message).to.include('Breakdown by Opportunity Type');
-      expect(message).to.include('*seo-backlinks*');
-      expect(message).to.include('*cwv-lcp*');
+      expect(message).to.include('_Breakdown by Type:_');
+      expect(message).to.include('`seo-backlinks`');
+      expect(message).to.include('`cwv-lcp`');
     });
 
     it('should display suggestion breakdown by status', async () => {
@@ -356,9 +356,9 @@ describe('SiteMetricsCommand', () => {
       const lastCall = calls[calls.length - 1];
       const message = lastCall.args[0];
 
-      expect(message).to.include('Breakdown by Status');
-      expect(message).to.include('*NEW*');
-      expect(message).to.include('*APPROVED*');
+      expect(message).to.include('_Breakdown by Status:_');
+      expect(message).to.include('`NEW`');
+      expect(message).to.include('`APPROVED`');
     });
 
     it('should calculate success rate correctly', async () => {
