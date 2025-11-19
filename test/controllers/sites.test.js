@@ -859,6 +859,182 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Only users belonging to the organization can view its metrics');
   });
 
+  // New tests for updated getLatestSiteMetrics implementation
+  describe('getLatestSiteMetrics - updated implementation', () => {
+    it('successfully fetches metrics for last two complete weeks', async () => {
+      context.rumApiClient.query.resolves({
+        pageviews: 125000,
+        siteSpeed: 1234,
+        avgEngagement: 45.2,
+      });
+
+      const result = await sitesController.getLatestSiteMetrics({
+        ...context,
+        params: { siteId: SITE_IDS[0] },
+      });
+      const metrics = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(context.rumApiClient.query).to.have.been.calledTwice;
+      expect(context.rumApiClient.query).to.have.been.calledWith('site-metrics', sinon.match({
+        domain: 'www.site1.com',
+        granularity: 'DAILY',
+      }));
+
+      expect(metrics).to.have.property('mostRecentCompleteWeek');
+      expect(metrics).to.have.property('previousCompleteWeek');
+      expect(metrics.mostRecentCompleteWeek).to.deep.include({
+        pageviews: 125000,
+        siteSpeed: 1234,
+        avgEngagement: 45.2,
+      });
+      expect(metrics.mostRecentCompleteWeek.label).to.be.a('string');
+      expect(metrics.previousCompleteWeek).to.deep.include({
+        pageviews: 125000,
+        siteSpeed: 1234,
+        avgEngagement: 45.2,
+      });
+    });
+
+    it('handles null metrics gracefully', async () => {
+      context.rumApiClient.query.onCall(0).resolves({
+        pageviews: 100,
+        siteSpeed: null,
+        avgEngagement: null,
+      });
+      context.rumApiClient.query.onCall(1).resolves({
+        pageviews: null,
+        siteSpeed: 1000,
+        avgEngagement: null,
+      });
+
+      const result = await sitesController.getLatestSiteMetrics({
+        ...context,
+        params: { siteId: SITE_IDS[0] },
+      });
+      const metrics = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(metrics.mostRecentCompleteWeek).to.deep.include({
+        pageviews: 100,
+        siteSpeed: null,
+        avgEngagement: null,
+      });
+      expect(metrics.previousCompleteWeek).to.deep.include({
+        pageviews: null,
+        siteSpeed: 1000,
+        avgEngagement: null,
+      });
+    });
+
+    it('returns 500 when RUM API query fails', async () => {
+      context.rumApiClient.query.rejects(new Error('RUM API unavailable'));
+
+      const result = await sitesController.getLatestSiteMetrics({
+        ...context,
+        params: { siteId: SITE_IDS[0] },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(500);
+      expect(error).to.have.property('message').that.includes('Failed to fetch latest metrics');
+      expect(context.log.error).to.have.been.calledWithMatch(
+        sinon.match(/Error getting latest metrics for site/),
+        sinon.match.instanceOf(Error),
+      );
+    });
+
+    it('returns bad request when site ID is missing', async () => {
+      const result = await sitesController.getLatestSiteMetrics({
+        params: {},
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Site ID required');
+    });
+
+    it('returns bad request when site ID is invalid', async () => {
+      const result = await sitesController.getLatestSiteMetrics({
+        params: { siteId: 'invalid-uuid' },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'Site ID required');
+    });
+
+    it('returns not found when site does not exist', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const result = await sitesController.getLatestSiteMetrics({
+        params: { siteId: SITE_IDS[0] },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(404);
+      expect(error).to.have.property('message', 'Site not found');
+    });
+
+    it('returns forbidden for users without access', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+
+      const result = await sitesController.getLatestSiteMetrics({
+        params: { siteId: SITE_IDS[0] },
+      });
+      const error = await result.json();
+
+      expect(result.status).to.equal(403);
+      expect(error).to.have.property('message', 'Only users belonging to the organization can view its metrics');
+    });
+
+    it('handles zero values correctly (not treated as null)', async () => {
+      context.rumApiClient.query.resolves({
+        pageviews: 0,
+        siteSpeed: 0,
+        avgEngagement: 0,
+      });
+
+      const result = await sitesController.getLatestSiteMetrics({
+        ...context,
+        params: { siteId: SITE_IDS[0] },
+      });
+      const metrics = await result.json();
+
+      expect(result.status).to.equal(200);
+      expect(metrics.mostRecentCompleteWeek.pageviews).to.equal(0);
+      expect(metrics.mostRecentCompleteWeek.siteSpeed).to.equal(0);
+      expect(metrics.mostRecentCompleteWeek.avgEngagement).to.equal(0);
+    });
+
+    it('fetches metrics with correct date ranges for complete weeks', async () => {
+      context.rumApiClient.query.resolves({
+        pageviews: 100,
+        siteSpeed: 1000,
+        avgEngagement: 50,
+      });
+
+      await sitesController.getLatestSiteMetrics({
+        ...context,
+        params: { siteId: SITE_IDS[0] },
+      });
+
+      // Verify that query was called with correct parameters
+      const firstCall = context.rumApiClient.query.getCall(0);
+      const secondCall = context.rumApiClient.query.getCall(1);
+
+      expect(firstCall.args[0]).to.equal('site-metrics');
+      expect(firstCall.args[1]).to.have.property('domain', 'www.site1.com');
+      expect(firstCall.args[1]).to.have.property('granularity', 'DAILY');
+      expect(firstCall.args[1]).to.have.property('startTime');
+      expect(firstCall.args[1]).to.have.property('endTime');
+
+      expect(secondCall.args[0]).to.equal('site-metrics');
+      expect(secondCall.args[1]).to.have.property('domain', 'www.site1.com');
+      expect(secondCall.args[1]).to.have.property('granularity', 'DAILY');
+    });
+  });
+
   it('gets specific audit for a site', async () => {
     const result = await sitesController.getAuditForSite({
       params: {

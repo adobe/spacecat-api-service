@@ -35,7 +35,6 @@ import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
-import { fetchBundles } from '@adobe/spacecat-shared-rum-api-client/src/common/rum-bundler-client.js';
 import { SiteDto } from '../dto/site.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
@@ -653,82 +652,19 @@ function SitesController(ctx, log, env) {
   };
 
   /**
-   * Handler to aggregate site-wide metrics from RUM bundles
-   * @param {Array} bundles - RUM bundles to process
-   * @returns {Object} Aggregated metrics including pageviews, LCP, and engagement
-   */
-  const aggregateSiteMetricsFromBundles = (bundles) => {
-    let totalPageviews = 0;
-    let totalEngagedSessions = 0;
-    let lcpSum = 0;
-    let lcpCount = 0;
-
-    bundles.forEach((bundle) => {
-      totalPageviews += bundle.weight;
-
-      // LCP calculation (weighted average)
-      const lcpEvent = bundle.events.find((e) => e.checkpoint === 'cwv-lcp');
-      if (lcpEvent?.value) {
-        lcpSum += lcpEvent.value * bundle.weight;
-        lcpCount += bundle.weight;
-      }
-
-      // Engagement calculation
-      const hasClick = bundle.events.some((e) => e.checkpoint === 'click');
-      const hasViewContent = bundle.events.filter(
-        (e) => e.checkpoint === 'viewmedia' || e.checkpoint === 'viewblock',
-      ).length > 3;
-
-      if (hasClick || hasViewContent) {
-        totalEngagedSessions += bundle.weight;
-      }
-    });
-
-    const avgLCP = lcpCount > 0 ? lcpSum / lcpCount : null;
-    const avgEngagement = totalPageviews > 0
-      ? (totalEngagedSessions / totalPageviews) * 100
-      : null;
-
-    return {
-      pageviews: totalPageviews,
-      siteSpeed: avgLCP, // LCP in milliseconds
-      avgEngagement,
-    };
-  };
-
-  /**
-   * Fetches and processes metrics for a single date range
+   * Fetches and processes metrics for a single date range using the site-metrics handler
    * @param {Object} params - Parameters for fetching metrics
    * @returns {Object} Weekly metrics with label, dates, pageviews, speed, engagement
    */
   const fetchWeeklyMetrics = async ({
-    domain, domainKey, dateRange, logger,
+    rumAPIClient, domain, dateRange,
   }) => {
-    const options = {
+    const metrics = await rumAPIClient.query('site-metrics', {
       domain,
-      domainkey: domainKey,
       startTime: dateRange.startTime,
       endTime: dateRange.endTime,
       granularity: 'DAILY',
-      checkpoints: ['cwv-lcp', 'click', 'viewmedia', 'viewblock'],
-    };
-
-    logger.info(
-      `Fetching bundles for ${dateRange.label}: `
-      + `${dateRange.startTime} to ${dateRange.endTime}`,
-    );
-
-    const bundles = await fetchBundles(options, logger);
-    logger.info(`Retrieved ${bundles.length} bundles for ${dateRange.label}`);
-
-    const metrics = aggregateSiteMetricsFromBundles(bundles);
-
-    logger.info(
-      `Aggregated metrics for ${dateRange.label}: `
-      + `pageviews=${metrics.pageviews}, `
-      + `LCP=${metrics.siteSpeed?.toFixed(2)}ms, `
-      + `engagement=${metrics.avgEngagement?.toFixed(2)}%`,
-    );
+    });
 
     return {
       label: dateRange.label,
@@ -757,97 +693,37 @@ function SitesController(ctx, log, env) {
     const rumAPIClient = RUMAPIClient.createFrom(context);
     const domain = wwwUrlResolver(site);
 
-    log.info(`Starting getLatestSiteMetrics for siteId: ${siteId}, domain: ${domain}`);
-
     try {
-      log.info(`Retrieving domain key for domain: ${domain}`);
-      const domainKey = await rumAPIClient.retrieveDomainkey(domain);
-      log.info(`Domain key retrieved successfully for domain: ${domain}`);
-
-      // Get last two complete weeks (Monday to Sunday)
       const weekRanges = getLastTwoCompleteWeeks();
 
-      log.info(
-        `Fetching latest metrics for ${weekRanges.length} complete weeks `
-        + `for site ${siteId}`,
-      );
-      log.info(
-        `Week ranges: ${JSON.stringify(weekRanges.map((r) => ({
-          label: r.label,
-          start: r.startTime,
-          end: r.endTime,
-        })))}`,
-      );
-
-      // Fetch bundles for both weeks in parallel
       const weeklyMetrics = await Promise.all(
         weekRanges.map((dateRange) => fetchWeeklyMetrics({
+          rumAPIClient,
           domain,
-          domainKey,
           dateRange,
-          logger: log,
         })),
       );
 
-      // Get current and previous week data
-      const currentWeek = weeklyMetrics[0];
-      const previousWeek = weeklyMetrics[1];
-
-      log.info(
-        `Processing metrics for site ${siteId} - `
-        + `Current: ${currentWeek.label}, Previous: ${previousWeek.label}`,
-      );
-
-      // Calculate percentage changes
-      const calculateChange = (current, previous) => {
-        if (!previous || previous === 0) return 0;
-        return ((current - previous) / previous) * 100;
-      };
-
-      const pageviewsChange = calculateChange(
-        currentWeek.pageviews,
-        previousWeek.pageviews,
-      );
-      const lcpChange = calculateChange(currentWeek.siteSpeed, previousWeek.siteSpeed);
-      const engagementChange = calculateChange(
-        currentWeek.avgEngagement,
-        previousWeek.avgEngagement,
-      );
-
-      log.info(
-        `Changes for site ${siteId}: `
-        + `pageviews=${pageviewsChange.toFixed(2)}%, `
-        + `LCP=${lcpChange.toFixed(2)}%, `
-        + `engagement=${engagementChange.toFixed(2)}%`,
-      );
+      const mostRecentCompleteWeek = weeklyMetrics[0];
+      const previousCompleteWeek = weeklyMetrics[1];
 
       return ok({
-        currentWeek: {
-          label: currentWeek.label,
-          pageviews: currentWeek.pageviews,
-          avgEngagement: currentWeek.avgEngagement,
-          siteSpeed: currentWeek.siteSpeed, // LCP in milliseconds
+        mostRecentCompleteWeek: {
+          label: mostRecentCompleteWeek?.label || null,
+          pageviews: mostRecentCompleteWeek?.pageviews ?? null,
+          avgEngagement: mostRecentCompleteWeek?.avgEngagement ?? null,
+          siteSpeed: mostRecentCompleteWeek?.siteSpeed ?? null,
         },
-        previousWeek: {
-          label: previousWeek.label,
-          pageviews: previousWeek.pageviews,
-          avgEngagement: previousWeek.avgEngagement,
-          siteSpeed: previousWeek.siteSpeed, // LCP in milliseconds
-        },
-        changes: {
-          pageviews: pageviewsChange,
-          avgEngagement: engagementChange,
-          siteSpeed: lcpChange,
+        previousCompleteWeek: {
+          label: previousCompleteWeek?.label || null,
+          pageviews: previousCompleteWeek?.pageviews ?? null,
+          avgEngagement: previousCompleteWeek?.avgEngagement ?? null,
+          siteSpeed: previousCompleteWeek?.siteSpeed ?? null,
         },
       });
     } catch (error) {
       log.error(`Error getting latest metrics for site ${siteId}: ${error.message}`, error);
-      log.info(`Returning null metrics due to error for siteId: ${siteId}`);
-      return ok({
-        currentWeek: null,
-        previousWeek: null,
-        changes: null,
-      });
+      return internalServerError(`Failed to fetch latest metrics: ${error.message}`);
     }
   };
 

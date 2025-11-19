@@ -517,21 +517,48 @@ export function getLastTwoCompleteWeeks() {
   const daysSinceMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
 
   // Last complete week's Monday at 00:00:00.000 UTC (going back 7 days from most recent Monday)
-  const lastMonday = new Date(now);
-  lastMonday.setUTCDate(now.getUTCDate() - daysSinceMonday - 7);
-  lastMonday.setUTCHours(0, 0, 0, 0);
+  const lastMonday = new Date(Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate() - daysSinceMonday - 7,
+    0,
+    0,
+    0,
+    0,
+  ));
 
   // Last complete week's Sunday at 23:59:59.999 UTC
-  const lastSunday = new Date(lastMonday);
-  lastSunday.setUTCDate(lastMonday.getUTCDate() + 6);
-  lastSunday.setUTCHours(23, 59, 59, 999);
+  const lastSunday = new Date(Date.UTC(
+    lastMonday.getUTCFullYear(),
+    lastMonday.getUTCMonth(),
+    lastMonday.getUTCDate() + 6,
+    23,
+    59,
+    59,
+    999,
+  ));
 
-  // Week before that
-  const prevMonday = new Date(lastMonday);
-  prevMonday.setUTCDate(lastMonday.getUTCDate() - 7);
+  // Week before that - Monday
+  const prevMonday = new Date(Date.UTC(
+    lastMonday.getUTCFullYear(),
+    lastMonday.getUTCMonth(),
+    lastMonday.getUTCDate() - 7,
+    0,
+    0,
+    0,
+    0,
+  ));
 
-  const prevSunday = new Date(lastSunday);
-  prevSunday.setUTCDate(lastSunday.getUTCDate() - 7);
+  // Week before that - Sunday
+  const prevSunday = new Date(Date.UTC(
+    prevMonday.getUTCFullYear(),
+    prevMonday.getUTCMonth(),
+    prevMonday.getUTCDate() + 6,
+    23,
+    59,
+    59,
+    999,
+  ));
 
   return [
     {
