@@ -1,3 +1,10 @@
+# [1.243.0](https://github.com/adobe/spacecat-api-service/compare/v1.242.2...v1.243.0) (2025-11-19)
+
+
+### Features
+
+* add configuration management APIs and extend audit toggle to organizations ([#1408](https://github.com/adobe/spacecat-api-service/issues/1408)) ([9706db9](https://github.com/adobe/spacecat-api-service/commit/9706db9d3607d306cbf413c12a72cb13d695ace0))
+
 ## [1.242.2](https://github.com/adobe/spacecat-api-service/compare/v1.242.1...v1.242.2) (2025-11-19)
 
 

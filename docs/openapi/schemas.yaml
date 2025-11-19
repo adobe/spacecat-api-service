@@ -2930,6 +2930,14 @@ BrokenBacklinksRedirectData:
     traffic_domain:
       description: The estimated monthly organic traffic to the referring page
       type: number
+    aggregationKey:
+      description: |
+        Computed aggregation key for grouping related suggestions. 
+        Format varies by issue type granularity (e.g., url|type|selector|source for individual issues).
+        Used for bulk operations and tracking remediation across audit runs.
+      type: string
+      readOnly: true
+      example: "/page.html|color-contrast|div.button|lighthouse"
 BrokenInternalLinksSuggestionData:
   description: Data specific to redirect suggestion for broken internal links opportunity
   type: object
@@ -2961,6 +2969,14 @@ BrokenInternalLinksSuggestionData:
     priority:
       description: The priority of the broken internal link
       $ref: '#/Priority'
+    aggregationKey:
+      description: |
+        Computed aggregation key for grouping related suggestions. 
+        Format varies by issue type granularity (e.g., url|type|selector|source for individual issues).
+        Used for bulk operations and tracking remediation across audit runs.
+      type: string
+      readOnly: true
+      example: "/page.html|color-contrast|div.button|lighthouse"
 BrokenBacklinksKpiDeltas:
   description: KPI deltas specific to redirect suggestion for broken backlinks opportunity
   type: object
