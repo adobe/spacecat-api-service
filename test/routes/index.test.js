@@ -44,6 +44,10 @@ describe('getRouteHandlers', () => {
     getByBaseURL: sinon.stub(),
   };
 
+  const mockSiteMetricsController = {
+    getMetricsForSite: sinon.stub(),
+  };
+
   const mockPTA2Controller = {
     getPTAWeeklySummary: sinon.stub(),
   };
@@ -290,7 +294,7 @@ describe('getRouteHandlers', () => {
       mockSandboxAuditController,
       mockReportsController,
       mockPTA2Controller,
-      mockPTA2Controller,
+      mockSiteMetricsController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -379,6 +383,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/audits/latest',
       'GET /sites/:siteId/latest-audit/:auditType',
       'GET /sites/:siteId/latest-metrics',
+      'GET /sites/:siteId/metrics',
       'GET /sites/:siteId/experiments',
       'GET /sites/:siteId/key-events',
       'POST /sites/:siteId/key-events',

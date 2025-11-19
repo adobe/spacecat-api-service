@@ -13,42 +13,10 @@
 import { hasText } from '@adobe/spacecat-shared-utils';
 import BaseCommand from './base.js';
 import { extractURLFromSlackInput } from '../../../utils/slack/base.js';
+import { getSiteMetrics, validateAndNormalizeDates } from '../../site-metrics-service.js';
 
 const PHRASE = 'site-metrics';
 const ERROR_MESSAGE_PREFIX = ':x: ';
-
-/**
- * Validates if a date string is in YYYY-MM-DD format and is a valid date
- * @param {string} dateString - Date string to validate
- * @returns {boolean} True if valid date format
- */
-function isValidDate(dateString) {
-  const regex = /^\d{4}-\d{2}-\d{2}$/;
-  if (!regex.test(dateString)) return false;
-
-  const date = new Date(dateString);
-  return date instanceof Date && !Number.isNaN(date.getTime());
-}
-
-/**
- * Filters items by date range based on a date field
- * @param {Array} items - Items to filter
- * @param {Function} dateGetter - Function to get date from item
- * @param {string} startDate - Start date (YYYY-MM-DD)
- * @param {string} endDate - End date (YYYY-MM-DD)
- * @returns {Array} Filtered items
- */
-function filterByDateRange(items, dateGetter, startDate, endDate) {
-  return items.filter((item) => {
-    const itemDate = dateGetter(item);
-    /* c8 ignore next - Defensive check; ElectroDB entities always have date fields */
-    if (!itemDate) return false;
-
-    // Extract date portion (YYYY-MM-DD) from ISO timestamp
-    const dateOnly = itemDate.split('T')[0];
-    return dateOnly >= startDate && dateOnly <= endDate;
-  });
-}
 
 /**
  * Slack command to get metrics for a site including audits, opportunities, and suggestions.
@@ -69,11 +37,11 @@ export default (context) => {
     description: `Get comprehensive metrics for a site including audits, opportunities, and suggestions.
     
 Shows:
-  - Audit executions (total, successful, failed) with breakdown by type
-  - Opportunities created with breakdown by type  
-  - Suggestions created with breakdown by status
-  
-Optionally filter by date range.`,
+- Audit execution stats (total, successful, failed)
+- Opportunities generated (by type)
+- Suggestions created (by status)
+
+Supports optional date range filtering.`,
     phrases: [PHRASE],
     usageText: `${PHRASE} {siteURL} [startDate] [endDate]
 
@@ -88,9 +56,7 @@ If only startDate provided, shows metrics from that date to today.`,
   });
 
   const { log, dataAccess } = context;
-  const {
-    Site, Audit, Opportunity, Suggestion,
-  } = dataAccess;
+  const { Site } = dataAccess;
 
   return {
     ...baseCommand,
@@ -117,110 +83,22 @@ If only startDate provided, shows metrics from that date to today.`,
           return;
         }
 
-        // Parse and validate date range
-        const today = new Date().toISOString().split('T')[0];
-        let startDate = '2000-01-01'; // Default: beginning of time
-        let endDate = today; // Default: today
-
-        if (startDateInput) {
-          if (!isValidDate(startDateInput)) {
-            await say(`${ERROR_MESSAGE_PREFIX}Invalid start date format: "${startDateInput}"\n\nPlease use YYYY-MM-DD format (e.g., 2025-01-15)`);
-            return;
-          }
-          startDate = startDateInput;
-        }
-
-        if (endDateInput) {
-          if (!isValidDate(endDateInput)) {
-            await say(`${ERROR_MESSAGE_PREFIX}Invalid end date format: "${endDateInput}"\n\nPlease use YYYY-MM-DD format (e.g., 2025-01-31)`);
-            return;
-          }
-          endDate = endDateInput;
-        }
-
-        // Validate date range
-        if (startDate > endDate) {
-          await say(`${ERROR_MESSAGE_PREFIX}Start date (${startDate}) cannot be after end date (${endDate})`);
+        // Validate and normalize dates using shared service
+        const dateValidation = validateAndNormalizeDates(startDateInput, endDateInput);
+        if (dateValidation.error) {
+          await say(`${ERROR_MESSAGE_PREFIX}${dateValidation.error}`);
           return;
         }
+
+        const { startDate, endDate } = dateValidation;
 
         // Show loading indicator
         await say(':hourglass_flowing_sand: Fetching metrics for site...');
 
         const siteId = site.getId();
 
-        // Fetch audits for the site using existing API (same as auditsController)
-        // Order by auditedAt descending to get most recent first
-        const allAudits = await Audit.allBySiteId(siteId, { order: 'desc' });
-
-        // Fetch opportunities for the site using existing API (same as opportunitiesController)
-        const allOpportunities = await Opportunity.allBySiteId(siteId);
-
-        // Fetch suggestions for each opportunity using existing API (same as suggestionsController)
-        const allSuggestions = [];
-        // eslint-disable-next-line no-restricted-syntax
-        for (const opportunity of allOpportunities) {
-          // eslint-disable-next-line no-await-in-loop
-          const suggestions = await Suggestion.allByOpportunityId(opportunity.getId());
-          allSuggestions.push(...suggestions);
-        }
-
-        // Filter by date range
-        const filteredAudits = filterByDateRange(
-          allAudits,
-          (audit) => audit.getAuditedAt(),
-          startDate,
-          endDate,
-        );
-
-        const filteredOpportunities = filterByDateRange(
-          allOpportunities,
-          (opp) => opp.getCreatedAt(),
-          startDate,
-          endDate,
-        );
-
-        const filteredSuggestions = filterByDateRange(
-          allSuggestions,
-          (sugg) => sugg.getCreatedAt(),
-          startDate,
-          endDate,
-        );
-
-        // Calculate audit metrics (using getter methods from AuditDto pattern)
-        const totalAudits = filteredAudits.length;
-        const successfulAudits = filteredAudits.filter((audit) => !audit.getIsError()).length;
-        const failedAudits = totalAudits - successfulAudits;
-        const successRate = totalAudits > 0 ? ((successfulAudits / totalAudits) * 100).toFixed(1) : '0.0';
-
-        // Group audits by type
-        const auditsByType = {};
-        filteredAudits.forEach((audit) => {
-          const type = audit.getAuditType();
-          if (!auditsByType[type]) {
-            auditsByType[type] = { total: 0, successful: 0, failed: 0 };
-          }
-          auditsByType[type].total += 1;
-          if (audit.getIsError()) {
-            auditsByType[type].failed += 1;
-          } else {
-            auditsByType[type].successful += 1;
-          }
-        });
-
-        // Group opportunities by type
-        const opportunitiesByType = {};
-        filteredOpportunities.forEach((opp) => {
-          const type = opp.getType();
-          opportunitiesByType[type] = (opportunitiesByType[type] || 0) + 1;
-        });
-
-        // Group suggestions by status
-        const suggestionsByStatus = {};
-        filteredSuggestions.forEach((sugg) => {
-          const status = sugg.getStatus();
-          suggestionsByStatus[status] = (suggestionsByStatus[status] || 0) + 1;
-        });
+        // Fetch metrics using shared service
+        const metrics = await getSiteMetrics(context, siteId, startDate, endDate);
 
         // Build Slack message
         const message = [];
@@ -234,83 +112,78 @@ If only startDate provided, shows metrics from that date to today.`,
         } else {
           message.push('📅 *Period:* All time');
         }
-
         message.push('');
 
-        // Audit Execution Section
+        // === AUDITS SECTION ===
         message.push('*🔍 Audit Execution:*');
-        message.push(`• Total Audits: ${totalAudits}`);
+        message.push(`• Total Audits: ${metrics.audits.total}`);
+        message.push(`• ✅ Successful: ${metrics.audits.successful} (${metrics.audits.successRate}%)`);
+        message.push(`• ❌ Failed: ${metrics.audits.failed}`);
+        message.push('');
 
-        if (totalAudits > 0) {
-          message.push(`• ✅ Successful: ${successfulAudits} (${successRate}%)`);
-          message.push(`• ❌ Failed: ${failedAudits}`);
-          message.push('');
-
-          // Breakdown by audit type
+        if (metrics.audits.total > 0) {
           message.push('*Breakdown by Audit Type:*');
-          const sortedAuditTypes = Object.entries(auditsByType)
-            .sort((a, b) => b[1].total - a[1].total);
-
-          sortedAuditTypes.forEach(([type, counts]) => {
-            const typeSuccessRate = ((counts.successful / counts.total) * 100).toFixed(0);
-            message.push(`• *${type}*: ${counts.total} total (✅ ${counts.successful} / ❌ ${counts.failed}) - ${typeSuccessRate}% success`);
-          });
+          Object.entries(metrics.audits.byType)
+            .sort((a, b) => b[1].total - a[1].total)
+            .forEach(([type, counts]) => {
+              message.push(`• *${type}*: ${counts.total} total (✅ ${counts.successful}, ❌ ${counts.failed})`);
+            });
+          message.push('');
         } else {
           message.push('• _No audits found for this period_');
+          message.push('');
         }
 
-        message.push('');
-
-        // Opportunities Section
+        // === OPPORTUNITIES SECTION ===
         message.push('*💡 Opportunities Generated:*');
-        message.push(`• Total Opportunities: ${filteredOpportunities.length}`);
+        message.push(`• Total Opportunities: ${metrics.opportunities.total}`);
 
-        if (filteredOpportunities.length > 0) {
+        if (metrics.opportunities.total > 0) {
           message.push('');
           message.push('*Breakdown by Opportunity Type:*');
-          const sortedOppTypes = Object.entries(opportunitiesByType)
-            .sort((a, b) => b[1] - a[1]);
-
-          sortedOppTypes.forEach(([type, count]) => {
-            message.push(`• *${type}*: ${count}`);
-          });
+          Object.entries(metrics.opportunities.byType)
+            .sort((a, b) => b[1] - a[1])
+            .forEach(([type, count]) => {
+              message.push(`• *${type}*: ${count}`);
+            });
         } else {
           message.push('• _No opportunities found for this period_');
         }
-
         message.push('');
 
-        // Suggestions Section
+        // === SUGGESTIONS SECTION ===
         message.push('*💬 Suggestions Created:*');
-        message.push(`• Total Suggestions: ${filteredSuggestions.length}`);
+        message.push(`• Total Suggestions: ${metrics.suggestions.total}`);
 
-        if (filteredSuggestions.length > 0) {
+        if (metrics.suggestions.total > 0) {
           message.push('');
           message.push('*Breakdown by Status:*');
-          const sortedSuggStatuses = Object.entries(suggestionsByStatus)
-            .sort((a, b) => b[1] - a[1]);
-
-          sortedSuggStatuses.forEach(([status, count]) => {
-            message.push(`• *${status}*: ${count}`);
-          });
+          Object.entries(metrics.suggestions.byStatus)
+            .sort((a, b) => b[1] - a[1])
+            .forEach(([status, count]) => {
+              message.push(`• *${status}*: ${count}`);
+            });
         } else {
           message.push('• _No suggestions found for this period_');
         }
 
-        // Summary for empty results
-        const hasNoData = totalAudits === 0
-          && filteredOpportunities.length === 0
-          && filteredSuggestions.length === 0;
+        // Check if there's no data at all
+        const hasNoData = metrics.audits.total === 0
+          && metrics.opportunities.total === 0
+          && metrics.suggestions.total === 0;
+
         if (hasNoData) {
           message.push('');
           message.push(':information_source: No data found for this site in the specified date range.');
           message.push('');
           message.push('_This could mean:_');
           message.push('• The site was onboarded after the specified date range');
-          message.push('• No audits have been executed yet');
-          message.push('• The date range is outside the data retention period');
+          message.push('• No audits have been run yet');
+          message.push('• No opportunities or suggestions were generated');
+          message.push('• The date range is too restrictive');
         }
 
+        // Send the formatted message
         await say(message.join('\n'));
       } catch (error) {
         log.error('Error fetching site metrics:', error);

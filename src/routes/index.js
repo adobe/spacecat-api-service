@@ -115,6 +115,7 @@ export default function getRouteHandlers(
   sandboxAuditController,
   reportsController,
   pta2Controller,
+  siteMetricsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -166,6 +167,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/audits/latest': auditsController.getAllLatestForSite,
     'GET /sites/:siteId/audits/:auditType': auditsController.getAllForSite,
     'GET /sites/:siteId/audits/:auditType/:auditedAt': sitesController.getAuditForSite,
+    'GET /sites/:siteId/metrics': siteMetricsController.getMetricsForSite,
     'PATCH /sites/:siteId/:auditType': auditsController.patchAuditForSite,
     'GET /sites/:siteId/latest-audit/:auditType': auditsController.getLatestForSite,
     'GET /sites/:siteId/experiments': experimentsController.getExperiments,
