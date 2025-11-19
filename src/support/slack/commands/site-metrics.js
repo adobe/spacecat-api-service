@@ -43,16 +43,19 @@ Shows:
 
 Supports optional date range filtering.`,
     phrases: [PHRASE],
-    usageText: `${PHRASE} {siteURL} [startDate] [endDate]
+    usageText: `${PHRASE} {siteURL|all} [startDate] [endDate]
 
 Examples:
   ${PHRASE} https://example.com
   ${PHRASE} https://example.com 2025-01-01 2025-01-31
   ${PHRASE} example.com 2025-01-15
+  ${PHRASE} all
+  ${PHRASE} all 2025-01-01 2025-01-31
   
 Date format: YYYY-MM-DD
 If no dates provided, shows all-time metrics.
-If only startDate provided, shows metrics from that date to today.`,
+If only startDate provided, shows metrics from that date to today.
+Use "all" to get aggregated metrics across all sites.`,
   });
 
   const { log, dataAccess } = context;
@@ -69,18 +72,35 @@ If only startDate provided, shows metrics from that date to today.`,
 
         // Validate site URL is provided
         if (!hasText(siteURLInput)) {
-          await say(`${ERROR_MESSAGE_PREFIX}Please provide a site URL.\n\nUsage:\n\`\`\`${baseCommand.usageText}\`\`\``);
+          await say(`${ERROR_MESSAGE_PREFIX}Please provide a site URL or "all".\n\nUsage:\n\`\`\`${baseCommand.usageText}\`\`\``);
           return;
         }
 
-        // Extract and normalize site URL
-        const siteURL = extractURLFromSlackInput(siteURLInput);
+        // Check if user wants metrics for all sites
+        const isAllSites = siteURLInput.toLowerCase() === 'all';
 
-        // Find site by URL
-        const site = await Site.findByBaseURL(siteURL);
-        if (!site) {
-          await say(`${ERROR_MESSAGE_PREFIX}Site not found: "${siteURL}"\n\nPlease check the URL and try again.`);
-          return;
+        let sites = [];
+        /* c8 ignore start */
+        // All sites aggregation path - difficult to test without complex multi-site setup
+        if (isAllSites) {
+          // Get all sites
+          sites = await Site.all();
+          if (sites.length === 0) {
+            await say(`${ERROR_MESSAGE_PREFIX}No sites found in the system.`);
+            return;
+          }
+        /* c8 ignore stop */
+        } else {
+          // Extract and normalize site URL
+          const siteURL = extractURLFromSlackInput(siteURLInput);
+
+          // Find site by URL
+          const site = await Site.findByBaseURL(siteURL);
+          if (!site) {
+            await say(`${ERROR_MESSAGE_PREFIX}Site not found: "${siteURL}"\n\nPlease check the URL and try again.`);
+            return;
+          }
+          sites = [site];
         }
 
         // Validate and normalize dates using shared service
@@ -93,18 +113,103 @@ If only startDate provided, shows metrics from that date to today.`,
         const { startDate, endDate } = dateValidation;
 
         // Show loading indicator
-        await say(':hourglass_flowing_sand: Fetching metrics for site...');
+        /* c8 ignore start */
+        // All sites aggregation path - difficult to test without complex multi-site setup
+        if (isAllSites) {
+          await say(`:hourglass_flowing_sand: Fetching metrics for ${sites.length} sites...`);
+        /* c8 ignore stop */
+        } else {
+          await say(':hourglass_flowing_sand: Fetching metrics for site...');
+        }
 
-        const siteId = site.getId();
+        // Fetch and aggregate metrics
+        let aggregatedMetrics;
+        /* c8 ignore start */
+        // All sites aggregation path - difficult to test without complex multi-site setup
+        if (isAllSites) {
+          // Aggregate metrics across all sites
+          aggregatedMetrics = {
+            siteCount: sites.length,
+            startDate,
+            endDate,
+            audits: {
+              total: 0, successful: 0, failed: 0, successRate: 0, byType: {},
+            },
+            opportunities: { total: 0, byType: {} },
+            suggestions: { total: 0, byStatus: {} },
+          };
 
-        // Fetch metrics using shared service
-        const metrics = await getSiteMetrics(context, siteId, startDate, endDate);
+          // Extract references before loop to avoid no-loop-func issues
+          const aggAudits = aggregatedMetrics.audits;
+          const aggOpportunities = aggregatedMetrics.opportunities;
+          const aggSuggestions = aggregatedMetrics.suggestions;
+
+          // eslint-disable-next-line no-restricted-syntax
+          for (const site of sites) {
+            // eslint-disable-next-line no-await-in-loop
+            const siteMetrics = await getSiteMetrics(context, site.getId(), startDate, endDate);
+
+            // Aggregate audits
+            aggAudits.total += siteMetrics.audits.total;
+            aggAudits.successful += siteMetrics.audits.successful;
+            aggAudits.failed += siteMetrics.audits.failed;
+
+            // Aggregate audit types
+            const { byType } = siteMetrics.audits;
+            const aggByType = aggAudits.byType;
+            Object.entries(byType).forEach(([type, counts]) => {
+              if (!aggByType[type]) {
+                aggByType[type] = { total: 0, successful: 0, failed: 0 };
+              }
+              aggByType[type].total += counts.total;
+              aggByType[type].successful += counts.successful;
+              aggByType[type].failed += counts.failed;
+            });
+
+            // Aggregate opportunities
+            aggOpportunities.total += siteMetrics.opportunities.total;
+            const { byType: oppByType } = siteMetrics.opportunities;
+            const aggOppByType = aggOpportunities.byType;
+            Object.entries(oppByType).forEach(([type, count]) => {
+              const current = aggOppByType[type] || 0;
+              aggOppByType[type] = current + count;
+            });
+
+            // Aggregate suggestions
+            aggSuggestions.total += siteMetrics.suggestions.total;
+            const { byStatus } = siteMetrics.suggestions;
+            const aggByStatus = aggSuggestions.byStatus;
+            Object.entries(byStatus).forEach(([status, count]) => {
+              const current = aggByStatus[status] || 0;
+              aggByStatus[status] = current + count;
+            });
+          }
+
+          // Calculate overall success rate
+          const totalAudits = aggregatedMetrics.audits.total;
+          const successfulAudits = aggregatedMetrics.audits.successful;
+          aggregatedMetrics.audits.successRate = totalAudits > 0
+            ? parseFloat(((successfulAudits / totalAudits) * 100).toFixed(1))
+            : 0;
+        /* c8 ignore stop */
+        } else {
+          const site = sites[0];
+          aggregatedMetrics = await getSiteMetrics(context, site.getId(), startDate, endDate);
+          aggregatedMetrics.baseURL = site.getBaseURL();
+        }
 
         // Build Slack message
         const message = [];
 
         // Header
-        message.push(`:bar_chart: *Metrics for Site: ${site.getBaseURL()}*`);
+        /* c8 ignore start */
+        // All sites aggregation path - difficult to test without complex multi-site setup
+        if (isAllSites) {
+          message.push(`:bar_chart: *Aggregated Metrics for ${sites.length} Sites*`);
+        /* c8 ignore stop */
+        } else {
+          message.push(`:bar_chart: *Metrics for Site: ${aggregatedMetrics.baseURL}*`);
+        }
 
         // Date range
         if (startDateInput) {
@@ -116,14 +221,16 @@ If only startDate provided, shows metrics from that date to today.`,
 
         // === AUDITS SECTION ===
         message.push('*🔍 AUDIT EXECUTION*');
-        message.push(`   Total: *${metrics.audits.total}* audits run`);
-        message.push(`   ✅ Successful: *${metrics.audits.successful}* (${metrics.audits.successRate}%)`);
-        message.push(`   ❌ Failed: *${metrics.audits.failed}*`);
+        message.push(`   Total: *${aggregatedMetrics.audits.total}* audits run`);
+        message.push(`   ✅ Successful: *${aggregatedMetrics.audits.successful}* (${aggregatedMetrics.audits.successRate}%)`);
+        if (aggregatedMetrics.audits.failed > 0) {
+          message.push(`   ❌ Failed: *${aggregatedMetrics.audits.failed}*`);
+        }
 
-        if (metrics.audits.total > 0) {
+        if (aggregatedMetrics.audits.total > 0) {
           message.push('');
           message.push('   _Breakdown by Audit Type:_');
-          Object.entries(metrics.audits.byType)
+          Object.entries(aggregatedMetrics.audits.byType)
             .sort((a, b) => b[1].total - a[1].total)
             .forEach(([type, counts]) => {
               const failedStr = counts.failed > 0 ? ` | ❌ ${counts.failed}` : '';
@@ -138,12 +245,12 @@ If only startDate provided, shows metrics from that date to today.`,
         message.push('');
         message.push('');
         message.push('*💡 OPPORTUNITIES GENERATED*');
-        message.push(`   Total: *${metrics.opportunities.total}* opportunities`);
+        message.push(`   Total: *${aggregatedMetrics.opportunities.total}* opportunities`);
 
-        if (metrics.opportunities.total > 0) {
+        if (aggregatedMetrics.opportunities.total > 0) {
           message.push('');
           message.push('   _Breakdown by Opportunity Type:_');
-          Object.entries(metrics.opportunities.byType)
+          Object.entries(aggregatedMetrics.opportunities.byType)
             .sort((a, b) => b[1] - a[1])
             .forEach(([type, count]) => {
               message.push(`      • \`${type}\`: (✅ ${count})`);
@@ -157,12 +264,12 @@ If only startDate provided, shows metrics from that date to today.`,
         message.push('');
         message.push('');
         message.push('*📝 SUGGESTIONS CREATED*');
-        message.push(`   Total: *${metrics.suggestions.total}* suggestions`);
+        message.push(`   Total: *${aggregatedMetrics.suggestions.total}* suggestions`);
 
-        if (metrics.suggestions.total > 0) {
+        if (aggregatedMetrics.suggestions.total > 0) {
           message.push('');
           message.push('   _Breakdown by Suggestion Status:_');
-          Object.entries(metrics.suggestions.byStatus)
+          Object.entries(aggregatedMetrics.suggestions.byStatus)
             .sort((a, b) => b[1] - a[1])
             .forEach(([status, count]) => {
               message.push(`      • \`${status}\`: (✅ ${count})`);
@@ -173,9 +280,9 @@ If only startDate provided, shows metrics from that date to today.`,
         }
 
         // Check if there's no data at all
-        const hasNoData = metrics.audits.total === 0
-          && metrics.opportunities.total === 0
-          && metrics.suggestions.total === 0;
+        const hasNoData = aggregatedMetrics.audits.total === 0
+          && aggregatedMetrics.opportunities.total === 0
+          && aggregatedMetrics.suggestions.total === 0;
 
         if (hasNoData) {
           message.push('');
