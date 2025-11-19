@@ -1,3 +1,10 @@
+# [1.246.0](https://github.com/adobe/spacecat-api-service/compare/v1.245.0...v1.246.0) (2025-11-19)
+
+
+### Features
+
+* add support to fix failures of cdn-logs-analysis audit ([#1521](https://github.com/adobe/spacecat-api-service/issues/1521)) ([4f00886](https://github.com/adobe/spacecat-api-service/commit/4f008866fdcb7c9a785d38fbd48f64714de2c51f))
+
 # [1.245.0](https://github.com/adobe/spacecat-api-service/compare/v1.244.0...v1.245.0) (2025-11-19)
 
 
