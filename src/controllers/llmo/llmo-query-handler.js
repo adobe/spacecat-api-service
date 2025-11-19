@@ -112,6 +112,7 @@ const fetchAndProcessSingleFile = async (context, llmoConfig, filePath, queryPar
 
   try {
     // Fetch data from the external endpoint using the dataFolder from config
+    log.info(`LLMO query handler: Fetching data from external endpoint: ${url.toString()}`);
     const response = await fetch(url.toString(), {
       headers: {
         Authorization: `token ${env.LLMO_HLX_API_KEY}`,
