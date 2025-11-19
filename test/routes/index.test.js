@@ -58,6 +58,7 @@ describe('getRouteHandlers', () => {
     getSitesForOrganization: sinon.stub(),
     getByImsOrgID: sinon.stub(),
     getSlackConfigByImsOrgID: sinon.stub(),
+    getAsoHome: sinon.stub(),
   };
 
   const mockProjectsController = {
@@ -290,7 +291,6 @@ describe('getRouteHandlers', () => {
       mockSandboxAuditController,
       mockReportsController,
       mockPTA2Controller,
-      mockPTA2Controller,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -319,6 +319,7 @@ describe('getRouteHandlers', () => {
       'POST /tools/scrape/jobs',
       'POST /consent-banner',
       'POST /llmo/onboard',
+      'GET /sites-resolve',
     );
 
     expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
@@ -338,6 +339,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['POST /consent-banner']).to.equal(mockConsentBannerController.takeScreenshots);
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
     expect(staticRoutes['POST /llmo/onboard']).to.equal(mockLlmoController.onboardCustomer);
+    expect(staticRoutes['GET /sites/resolve']).to.equal(mockSitesController.resolveSite);
 
     expect(dynamicRoutes).to.have.all.keys(
       'GET /audits/latest/:auditType',
