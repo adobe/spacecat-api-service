@@ -79,7 +79,6 @@ function isStaticRoute(routePattern) {
  * @param {Object} sandboxAuditController - The sandbox audit controller.
  * @param {Object} reportsController - The reports controller.
  * @param {Object} pta2Controller - The PTA2 controller.
- * @param {Object} pta2Controller - The PTA2 controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -236,7 +235,16 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/traffic/paid/display-platform-device': trafficController.getPaidTrafficByDisplayPlatformDevice,
     'GET /sites/:siteId/traffic/paid/video-platform': trafficController.getPaidTrafficByVideoPlatform,
     'GET /sites/:siteId/traffic/paid/video-platform-device': trafficController.getPaidTrafficByVideoPlatformDevice,
+    'GET /sites/:siteId/traffic/paid/url': trafficController.getPaidTrafficByUrl,
+    'GET /sites/:siteId/traffic/paid/url-channel': trafficController.getPaidTrafficByUrlChannel,
+    'GET /sites/:siteId/traffic/paid/url-channel-device': trafficController.getPaidTrafficByUrlChannelDevice,
+    'GET /sites/:siteId/traffic/paid/url-channel-platform-device': trafficController.getPaidTrafficByUrlChannelPlatformDevice,
+    'GET /sites/:siteId/traffic/paid/campaign-channel-device': trafficController.getPaidTrafficByCampaignChannelDevice,
+    'GET /sites/:siteId/traffic/paid/campaign-channel-platform': trafficController.getPaidTrafficByCampaignChannelPlatform,
+    'GET /sites/:siteId/traffic/paid/campaign-channel-platform-device': trafficController.getPaidTrafficByCampaignChannelPlatformDevice,
     'GET /sites/:siteId/brand-guidelines': brandsController.getBrandGuidelinesForSite,
+    'GET /sites/:siteId/brand-profile': sitesController.getBrandProfile,
+    'POST /sites/:siteId/brand-profile': sitesController.triggerBrandProfile,
     'GET /sites/:siteId/top-pages': sitesController.getTopPages,
     'GET /sites/:siteId/top-pages/:source': sitesController.getTopPages,
     'GET /sites/:siteId/top-pages/:source/:geo': sitesController.getTopPages,
@@ -286,6 +294,10 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/llmo/sheet-data/:dataSource': llmoController.queryLlmoSheetData,
     'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': llmoController.queryLlmoSheetData,
     'POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource': llmoController.queryLlmoSheetData,
+    'GET /sites/:siteId/llmo/data': llmoController.queryFiles,
+    'GET /sites/:siteId/llmo/data/:dataSource': llmoController.queryFiles,
+    'GET /sites/:siteId/llmo/data/:sheetType/:dataSource': llmoController.queryFiles,
+    'GET /sites/:siteId/llmo/data/:sheetType/:week/:dataSource': llmoController.queryFiles,
     'GET /sites/:siteId/llmo/config': llmoController.getLlmoConfig,
     'PATCH /sites/:siteId/llmo/config': llmoController.updateLlmoConfig,
     'POST /sites/:siteId/llmo/config': llmoController.updateLlmoConfig,
@@ -321,6 +333,8 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/reports/:reportId': reportsController.getReport,
     'PATCH /sites/:siteId/reports/:reportId': reportsController.patchReport,
     'DELETE /sites/:siteId/reports/:reportId': reportsController.deleteReport,
+
+    'GET /sites-resolve': sitesController.resolveSite,
   };
 
   // Initialization of static and dynamic routes

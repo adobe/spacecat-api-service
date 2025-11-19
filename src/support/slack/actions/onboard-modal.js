@@ -13,9 +13,11 @@
 import { isValidUrl } from '@adobe/spacecat-shared-utils';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import { onboardSingleSite as sharedOnboardSingleSite } from '../../utils.js';
+import { triggerBrandProfileAgent } from '../../brand-profile-trigger.js';
 import { loadProfileConfig } from '../../../utils/slack/base.js';
 
 export const AEM_CS_HOST = /^author-p(\d+)-e(\d+)/i;
+const AMS_HOST = 'adobecqms.net';
 
 /**
  * Extracts program and environment ID from AEM Cloud Service preview URLs.
@@ -31,6 +33,14 @@ export function extractDeliveryConfigFromPreviewUrl(previewUrl, imsOrgId) {
     }
     const url = new URL(previewUrl);
     const { hostname } = url;
+
+    if (hostname.endsWith(AMS_HOST)) {
+      return {
+        authorURL: previewUrl,
+        preferContentApi: true,
+        imsOrgId: imsOrgId || null,
+      };
+    }
 
     const [, programId, envId] = AEM_CS_HOST.exec(hostname);
 
@@ -477,7 +487,7 @@ export function startOnboarding(lambdaContext) {
               type: 'section',
               text: {
                 type: 'mrkdwn',
-                text: '*Preview Environment Configuration (Optional)*\nConfigure preview environment for preflight and auto-optimize. Only needed for AEM Cloud Service URLs.',
+                text: '*Preview Environment Configuration (Optional)*\nConfigure preview environment for preflight and auto-optimize.',
               },
             },
             {
@@ -493,7 +503,7 @@ export function startOnboarding(lambdaContext) {
               },
               label: {
                 type: 'plain_text',
-                text: 'Preview URL (AEM Cloud Service)',
+                text: 'Preview URL (AEM Cloud Service or AMS)',
               },
               optional: true,
             },
@@ -528,6 +538,13 @@ export function startOnboarding(lambdaContext) {
                       text: 'Crosswalk (Universal Editor & EDS)',
                     },
                     value: 'cs/crosswalk',
+                  },
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'Adobe Managed Services',
+                    },
+                    value: 'ams',
                   },
                 ],
               },
@@ -644,9 +661,9 @@ export function onboardSiteModal(lambdaContext) {
         }
       }
 
+      const configuration = await Configuration.findLatest();
       await ack();
 
-      const configuration = await Configuration.findLatest();
       const additionalParams = {};
       if (deliveryType && deliveryType !== 'auto') {
         additionalParams.deliveryType = deliveryType;
@@ -715,7 +732,7 @@ export function onboardSiteModal(lambdaContext) {
           ? `\n:globe_with_meridians: *Preview Environment:* Configured with Program ${deliveryConfigFromPreview.programId}, Environment ${deliveryConfigFromPreview.environmentId}`
           : '';
 
-        const message = `:white_check_mark: *Onboarding completed successfully by ${user.name}!*
+        const message = `:white_check_mark: *Onboarding triggered successfully by ${user.name}!*
 
 :ims: *IMS Org ID:* ${reportLine.imsOrgId || 'n/a'}
 :groups: *Project ID:* ${reportLine.projectId || 'n/a'}
@@ -739,6 +756,15 @@ ${deliveryConfigInfo}${previewConfigInfo}
           text: message,
           thread_ts: responseThreadTs,
         });
+
+        if (site) {
+          await triggerBrandProfileAgent({
+            context: lambdaContext,
+            site,
+            slackContext,
+            reason: 'aso-slack',
+          });
+        }
       }
 
       log.debug(`Onboard site modal processed for user ${user.id}, site ${siteUrl}`);
