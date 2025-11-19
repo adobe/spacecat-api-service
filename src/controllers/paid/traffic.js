@@ -30,8 +30,8 @@ import {
   getSignedUrlWithRetries,
 } from './caching-helper.js';
 
-function getCacheKey(siteId, query, cacheLocation, filter = null) {
-  const outPrefix = crypto.createHash('md5').update(`${query}${filter ? filter.filterKey : ''}`).digest('hex');
+function getCacheKey(siteId, query, cacheLocation, pageViewThreshold, filter = null) {
+  const outPrefix = crypto.createHash('md5').update(`${query}_${pageViewThreshold}_${filter ? filter.filterKey : ''}`).digest('hex');
   const cacheKey = `${cacheLocation}/${siteId}/${outPrefix}.json`;
   return { cacheKey, outPrefix };
 }
@@ -81,7 +81,7 @@ function validateTemporalParams({ year, week, month }) {
   }
 }
 
-const isTrue = (value) => value === true || value === 'true';
+const isTrue = (value) => value === true || value === 'true' || value === '1' || value === 1;
 
 function TrafficController(context, log, env) {
   const { dataAccess, s3 } = context;
@@ -97,8 +97,14 @@ function TrafficController(context, log, env) {
   const ATHENA_TEMP_FOLDER = `s3://${bucketName}/rum-metrics-compact/temp/out`;
   const CACHE_LOCATION = `s3://${bucketName}/rum-metrics-compact/cache`;
 
-  async function tryGetCacheResult(siteId, query, noCache, filter = null) {
-    const { cacheKey, outPrefix } = getCacheKey(siteId, query, CACHE_LOCATION, filter);
+  async function tryGetCacheResult(siteId, query, noCache, pageViewThreshold, filter = null) {
+    const { cacheKey, outPrefix } = getCacheKey(
+      siteId,
+      query,
+      CACHE_LOCATION,
+      pageViewThreshold,
+      filter,
+    );
     if (isTrue(noCache)) {
       return { cachedResultUrl: null, cacheKey, outPrefix };
     }
@@ -128,13 +134,15 @@ function TrafficController(context, log, env) {
 
     // validate input params
     const {
-      year, week, month, noCache, trafficType,
+      year, week, month, noCache, trafficType, noThreshold,
     } = context.data;
 
     const temporal = validateTemporalParams({ year, week, month });
     if (!temporal.ok) {
       return badRequest(temporal.error);
     }
+
+    const disableThreshold = isTrue(noThreshold);
 
     const { yearInt, weekInt, monthInt } = temporal.values;
 
@@ -154,7 +162,10 @@ function TrafficController(context, log, env) {
     if (trafficType == null && !dimensions.includes('trf_type')) {
       trfTypes = ['paid'];
     }
-    const pageViewThreshold = env.PAID_DATA_THRESHOLD ?? 1000;
+    let pageViewThreshold = env.PAID_DATA_THRESHOLD ?? 1000;
+    if (disableThreshold) {
+      pageViewThreshold = 0;
+    }
 
     const quereyParams = getTrafficAnalysisQueryPlaceholdersFilled({
       week: weekInt,
@@ -179,6 +190,7 @@ function TrafficController(context, log, env) {
       siteId,
       query,
       noCache,
+      pageViewThreshold,
       filter,
     );
     let thresholdConfig = {};
