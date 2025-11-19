@@ -1,3 +1,10 @@
+# [1.245.0](https://github.com/adobe/spacecat-api-service/compare/v1.244.0...v1.245.0) (2025-11-19)
+
+
+### Features
+
+* add more internal orgs to the list of excluded IMS Orgs - get-prompt-usage command ([#1514](https://github.com/adobe/spacecat-api-service/issues/1514)) ([a1cbad1](https://github.com/adobe/spacecat-api-service/commit/a1cbad1dd5d08fe1488c1238c95f9340090648b9))
+
 # [1.244.0](https://github.com/adobe/spacecat-api-service/compare/v1.243.1...v1.244.0) (2025-11-19)
 
 
