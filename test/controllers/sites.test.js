@@ -873,7 +873,7 @@ describe('Sites Controller', () => {
 
   // New tests for updated getLatestSiteMetrics implementation
   describe('getLatestSiteMetrics - updated implementation', () => {
-    it.skip('successfully fetches metrics for last two complete weeks', async () => {
+    it('successfully fetches metrics for last two complete weeks', async () => {
       context.rumApiClient.query.resolves({
         pageviews: 125000,
         siteSpeed: 1234,
@@ -1039,7 +1039,7 @@ describe('Sites Controller', () => {
       expect(metrics.mostRecentCompleteWeek.avgEngagement).to.equal(0);
     });
 
-    it.skip('fetches metrics with correct date ranges for complete weeks', async () => {
+    it('fetches metrics with correct date ranges for complete weeks', async () => {
       context.rumApiClient.query.resolves({
         pageviews: 100,
         siteSpeed: 1000,
