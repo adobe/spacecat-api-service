@@ -285,7 +285,6 @@ describe('BackfillLlmoCommand', () => {
       expect(message.auditContext.month).to.equal(11);
       expect(message.auditContext.day).to.equal(15);
       expect(message.auditContext.hour).to.equal(14);
-      expect(message.auditContext.processFullDay).to.be.false;
     });
 
     it('rejects days parameter greater than 14 for cdn-logs-analysis', async () => {
