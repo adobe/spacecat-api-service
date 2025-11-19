@@ -84,9 +84,11 @@ describe('Site Metrics Controller', () => {
       error: null,
     });
 
-    AccessControlUtilStub = sinon.stub().returns({
-      hasAccess: sinon.stub().resolves(true),
-    });
+    AccessControlUtilStub = {
+      fromContext: sinon.stub().returns({
+        hasAccess: sinon.stub().resolves(true),
+      }),
+    };
 
     SiteMetricsController = await esmock(
       '../../src/controllers/site-metrics.js',
@@ -193,7 +195,7 @@ describe('Site Metrics Controller', () => {
     });
 
     it('should return forbidden when user does not have access', async () => {
-      AccessControlUtilStub.returns({
+      AccessControlUtilStub.fromContext = sinon.stub().returns({
         hasAccess: sinon.stub().resolves(false),
       });
 

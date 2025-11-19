@@ -71,7 +71,7 @@ function SiteMetricsController(ctx) {
     }
 
     // Check access control
-    const accessControlUtil = AccessControlUtil(ctx);
+    const accessControlUtil = AccessControlUtil.fromContext(ctx);
     if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('Only users belonging to the organization can view its metrics');
     }
