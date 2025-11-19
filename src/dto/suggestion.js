@@ -10,8 +10,10 @@
  * governing permissions and limitations under the License.
  */
 
+import { buildAggregationKeyFromSuggestion } from '@adobe/spacecat-shared-utils';
+
 /**
- * Data transfer object for Site.
+ * Data transfer object for Suggestion.
  */
 export const SuggestionDto = {
 
@@ -31,16 +33,23 @@ export const SuggestionDto = {
    *  updatedBy: string,
    * }} JSON object.
    */
-  toJSON: (suggestion) => ({
-    id: suggestion.getId(),
-    opportunityId: suggestion.getOpportunityId(),
-    type: suggestion.getType(),
-    rank: suggestion.getRank(),
-    status: suggestion.getStatus(),
-    data: suggestion.getData(),
-    kpiDeltas: suggestion.getKpiDeltas(),
-    createdAt: suggestion.getCreatedAt(),
-    updatedAt: suggestion.getUpdatedAt(),
-    updatedBy: suggestion.getUpdatedBy(),
-  }),
+  toJSON: (suggestion) => {
+    const data = suggestion.getData();
+    const aggregationKey = buildAggregationKeyFromSuggestion(data);
+    return {
+      id: suggestion.getId(),
+      opportunityId: suggestion.getOpportunityId(),
+      type: suggestion.getType(),
+      rank: suggestion.getRank(),
+      status: suggestion.getStatus(),
+      data: {
+        ...data,
+        aggregationKey,
+      },
+      kpiDeltas: suggestion.getKpiDeltas(),
+      createdAt: suggestion.getCreatedAt(),
+      updatedAt: suggestion.getUpdatedAt(),
+      updatedBy: suggestion.getUpdatedBy(),
+    };
+  },
 };

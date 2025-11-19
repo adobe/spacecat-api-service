@@ -1,3 +1,25 @@
+# [1.244.0](https://github.com/adobe/spacecat-api-service/compare/v1.243.1...v1.244.0) (2025-11-19)
+
+
+### Features
+
+* added noThreshold flag to paidTraffic endpoints ([#1519](https://github.com/adobe/spacecat-api-service/issues/1519)) ([844be0c](https://github.com/adobe/spacecat-api-service/commit/844be0c8715415c8f34df34b64f6a9c64fe3a6a9))
+
+## [1.243.1](https://github.com/adobe/spacecat-api-service/compare/v1.243.0...v1.243.1) (2025-11-19)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.75.0 ([#1515](https://github.com/adobe/spacecat-api-service/issues/1515)) ([b4505a5](https://github.com/adobe/spacecat-api-service/commit/b4505a58162c2a789fb88308074c88b60bc4fd1b))
+* execution name for agent executor ([#1518](https://github.com/adobe/spacecat-api-service/issues/1518)) ([7ae49ee](https://github.com/adobe/spacecat-api-service/commit/7ae49ee39b1e9a39701ee80f2d597ce132cf30f2))
+
+# [1.243.0](https://github.com/adobe/spacecat-api-service/compare/v1.242.2...v1.243.0) (2025-11-19)
+
+
+### Features
+
+* add configuration management APIs and extend audit toggle to organizations ([#1408](https://github.com/adobe/spacecat-api-service/issues/1408)) ([9706db9](https://github.com/adobe/spacecat-api-service/commit/9706db9d3607d306cbf413c12a72cb13d695ace0))
+
 ## [1.242.2](https://github.com/adobe/spacecat-api-service/compare/v1.242.1...v1.242.2) (2025-11-19)
 
 
