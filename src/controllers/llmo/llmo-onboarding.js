@@ -24,6 +24,7 @@ const SHAREPOINT_URL = 'https://adobe.sharepoint.com/:x:/r/sites/HelixProjects/S
 
 // These audits don't depend on any additonal data being configured
 export const BASIC_AUDITS = [
+  'scrape-top-pages',
   'headings',
   'llm-blocked',
   'canonical',
