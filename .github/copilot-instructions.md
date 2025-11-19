@@ -116,6 +116,12 @@ const routeDefinitions = {
 
 ---
 
+### 3.4 Use of shared utility functions
+
+Check that utility functions available here: https://github.com/adobe/spacecat-shared/blob/main/packages/spacecat-shared-utils/src/index.js are used where appropriate and instead of self-made checks.
+
+---
+
 ### 3.4 Required Tests
 
 For any non-trivial code change:
