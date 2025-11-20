@@ -1,3 +1,10 @@
+# [1.248.0](https://github.com/adobe/spacecat-api-service/compare/v1.247.1...v1.248.0) (2025-11-20)
+
+
+### Features
+
+* paid traffic - additional temporal series endpoints ([#1529](https://github.com/adobe/spacecat-api-service/issues/1529)) ([3470f39](https://github.com/adobe/spacecat-api-service/commit/3470f39b675540a5a987f84d0f6178212e62a214))
+
 ## [1.247.1](https://github.com/adobe/spacecat-api-service/compare/v1.247.0...v1.247.1) (2025-11-20)
 
 
