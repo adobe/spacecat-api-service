@@ -669,6 +669,8 @@ function SitesController(ctx, log, env) {
       endTime: dateRange.endTime,
       granularity: 'HOURLY',
       filterBotTraffic: false,
+      excludeStartDate: true,
+      excludeEndDate: true,
     });
 
     return {

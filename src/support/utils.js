@@ -538,6 +538,28 @@ export function getLastTwoCompleteWeeks() {
     999,
   ));
 
+  // Adjusted start: Sunday before Monday (for exclusive filtering)
+  const lastStartDate = new Date(Date.UTC(
+    lastMonday.getUTCFullYear(),
+    lastMonday.getUTCMonth(),
+    lastMonday.getUTCDate() - 1,
+    0,
+    0,
+    0,
+    0,
+  ));
+
+  // Adjusted end: Monday after Sunday (for exclusive filtering)
+  const lastEndDate = new Date(Date.UTC(
+    lastSunday.getUTCFullYear(),
+    lastSunday.getUTCMonth(),
+    lastSunday.getUTCDate() + 1,
+    23,
+    59,
+    59,
+    999,
+  ));
+
   // Week before that - Monday
   const prevMonday = new Date(Date.UTC(
     lastMonday.getUTCFullYear(),
@@ -560,16 +582,38 @@ export function getLastTwoCompleteWeeks() {
     999,
   ));
 
+  // Adjusted start: Sunday before Monday (for exclusive filtering)
+  const prevStartDate = new Date(Date.UTC(
+    prevMonday.getUTCFullYear(),
+    prevMonday.getUTCMonth(),
+    prevMonday.getUTCDate() - 1,
+    0,
+    0,
+    0,
+    0,
+  ));
+
+  // Adjusted end: Monday after Sunday (for exclusive filtering)
+  const prevEndDate = new Date(Date.UTC(
+    prevSunday.getUTCFullYear(),
+    prevSunday.getUTCMonth(),
+    prevSunday.getUTCDate() + 1,
+    23,
+    59,
+    59,
+    999,
+  ));
+
   return [
     {
       label: getStringDate(lastSunday),
-      startTime: lastMonday.toISOString(),
-      endTime: lastSunday.toISOString(),
+      startTime: lastStartDate.toISOString(),
+      endTime: lastEndDate.toISOString(),
     },
     {
       label: getStringDate(prevSunday),
-      startTime: prevMonday.toISOString(),
-      endTime: prevSunday.toISOString(),
+      startTime: prevStartDate.toISOString(),
+      endTime: prevEndDate.toISOString(),
     },
   ];
 }
