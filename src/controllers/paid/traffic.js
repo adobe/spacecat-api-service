@@ -118,7 +118,7 @@ function TrafficController(context, log, env) {
     return { cachedResultUrl: null, cacheKey, outPrefix };
   }
 
-  async function fetchPaidTrafficData(dimensions, mapper, filter = null) {
+  async function fetchPaidTrafficData(dimensions, mapper, filter = null, isWeekOverWeek = false) {
     /* c8 ignore next 1 */
     const requestId = context.invocation?.requestId;
     const siteId = context.params?.siteId;
@@ -178,6 +178,7 @@ function TrafficController(context, log, env) {
       pageTypeMatchColumn: 'path',
       trfTypes,
       pageViewThreshold,
+      numTemporalSeries: isWeekOverWeek ? 4 : 1,
     });
 
     const description = `fetch paid channel data db: ${rumMetricsDatabase}| siteKey: ${siteId} | year: ${year} | month: ${month} | week: ${week} } | temporalCondition: ${quereyParams.temporalCondition} | groupBy: [${dimensions.join(', ')}] `;
@@ -311,6 +312,13 @@ function TrafficController(context, log, env) {
     getPaidTrafficByCampaignChannelDevice: async () => fetchPaidTrafficData(['utm_campaign', 'trf_channel', 'device'], TrafficDataWithCWVDto),
     getPaidTrafficByCampaignChannelPlatform: async () => fetchPaidTrafficData(['utm_campaign', 'trf_channel', 'trf_platform'], TrafficDataWithCWVDto),
     getPaidTrafficByCampaignChannelPlatformDevice: async () => fetchPaidTrafficData(['utm_campaign', 'trf_channel', 'trf_platform', 'device'], TrafficDataWithCWVDto),
+
+    getPaidTrafficTemporalSeries: async () => fetchPaidTrafficData(
+      [],
+      TrafficDataWithCWVDto,
+      null,
+      true,
+    ),
   };
 }
 
