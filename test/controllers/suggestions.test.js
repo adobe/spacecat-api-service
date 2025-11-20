@@ -3671,8 +3671,16 @@ describe('Suggestions Controller', () => {
     let tokowakaSuggestions;
     let headingsOpportunity;
     let fetchStub;
+    let setTimeoutStub;
+    const originalSetTimeout = global.setTimeout;
 
     beforeEach(() => {
+      // Stub setTimeout to execute immediately (skip warmup delays in tests)
+      setTimeoutStub = sandbox.stub(global, 'setTimeout').callsFake((callback, delay) => {
+        // Execute callback immediately instead of waiting
+        return originalSetTimeout(callback, 0);
+      });
+
       // Stub global fetch for HTML fetching
       fetchStub = sandbox.stub(global, 'fetch');
       // Mock fetch responses for HTML fetching (warmup + actual for both original and optimized)
@@ -3806,7 +3814,6 @@ describe('Suggestions Controller', () => {
     });
 
     it('should preview headings suggestions successfully', async function () {
-      this.timeout(10000); // Increase timeout to account for warmup delay
       const response = await suggestionsController.previewSuggestions({
         ...context,
         params: {
@@ -3999,7 +4006,6 @@ describe('Suggestions Controller', () => {
     });
 
     it('should handle S3 upload failure gracefully', async function () {
-      this.timeout(10000); // Increase timeout to account for warmup delay
       s3ClientSendStub.rejects(Object.assign(new Error('S3 upload failed'), { status: 403 }));
 
       const response = await suggestionsController.previewSuggestions({
@@ -4024,7 +4030,6 @@ describe('Suggestions Controller', () => {
     });
 
     it('should handle missing and invalid status suggestions', async function () {
-      this.timeout(10000); // Increase timeout to account for warmup delay
       tokowakaSuggestions[1].getStatus = () => 'IN_PROGRESS';
 
       const response = await suggestionsController.previewSuggestions({
@@ -4055,7 +4060,6 @@ describe('Suggestions Controller', () => {
     });
 
     it('should validate preview config structure uses preview path', async function () {
-      this.timeout(10000); // Increase timeout to account for warmup delay
       const response = await suggestionsController.previewSuggestions({
         ...context,
         params: {
@@ -4146,8 +4150,6 @@ describe('Suggestions Controller', () => {
     });
 
     it('should handle ineligible suggestions that cannot be deployed', async function () {
-      this.timeout(10000); // Increase timeout to account for warmup delay
-      
       // Create a suggestion with an ineligible checkType
       const ineligibleSuggestion = {
         getId: () => SUGGESTION_IDS[0],
