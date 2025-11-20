@@ -720,6 +720,8 @@ function SitesController(ctx, log, env) {
           pageviews: mostRecentCompleteWeek?.pageviews ?? null,
           avgEngagement: mostRecentCompleteWeek?.avgEngagement ?? null,
           engagementCount: mostRecentCompleteWeek?.engagementCount ?? null,
+          conversions: mostRecentCompleteWeek?.conversions ?? null,
+          conversionRate: mostRecentCompleteWeek?.conversionRate ?? null,
           siteSpeed: mostRecentCompleteWeek?.siteSpeed ?? null,
         },
         previousCompleteWeek: {
@@ -729,6 +731,8 @@ function SitesController(ctx, log, env) {
           pageviews: previousCompleteWeek?.pageviews ?? null,
           avgEngagement: previousCompleteWeek?.avgEngagement ?? null,
           engagementCount: previousCompleteWeek?.engagementCount ?? null,
+          conversions: previousCompleteWeek?.conversions ?? null,
+          conversionRate: previousCompleteWeek?.conversionRate ?? null,
           siteSpeed: previousCompleteWeek?.siteSpeed ?? null,
         },
       });

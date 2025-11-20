@@ -879,6 +879,8 @@ describe('Sites Controller', () => {
         siteSpeed: 1234,
         avgEngagement: 45.2,
         engagementCount: 56500,
+        conversions: 25000,
+        conversionRate: 20.0,
       });
 
       const result = await sitesController.getLatestSiteMetrics({
@@ -902,6 +904,8 @@ describe('Sites Controller', () => {
         siteSpeed: 1234,
         avgEngagement: 45.2,
         engagementCount: 56500,
+        conversions: 25000,
+        conversionRate: 20.0,
       });
       expect(metrics.mostRecentCompleteWeek.label).to.be.a('string');
       expect(metrics.mostRecentCompleteWeek.start).to.be.a('string');
@@ -911,6 +915,8 @@ describe('Sites Controller', () => {
         siteSpeed: 1234,
         avgEngagement: 45.2,
         engagementCount: 56500,
+        conversions: 25000,
+        conversionRate: 20.0,
       });
       expect(metrics.previousCompleteWeek.start).to.be.a('string');
       expect(metrics.previousCompleteWeek.end).to.be.a('string');
@@ -1029,6 +1035,8 @@ describe('Sites Controller', () => {
         pageviews: 0,
         siteSpeed: 0,
         avgEngagement: 0,
+        conversions: 0,
+        conversionRate: 0,
       });
 
       const result = await sitesController.getLatestSiteMetrics({
@@ -1041,6 +1049,8 @@ describe('Sites Controller', () => {
       expect(metrics.mostRecentCompleteWeek.pageviews).to.equal(0);
       expect(metrics.mostRecentCompleteWeek.siteSpeed).to.equal(0);
       expect(metrics.mostRecentCompleteWeek.avgEngagement).to.equal(0);
+      expect(metrics.mostRecentCompleteWeek.conversions).to.equal(0);
+      expect(metrics.mostRecentCompleteWeek.conversionRate).to.equal(0);
     });
 
     it.skip('fetches metrics with correct date ranges for complete weeks', async () => {
