@@ -873,11 +873,12 @@ describe('Sites Controller', () => {
 
   // New tests for updated getLatestSiteMetrics implementation
   describe('getLatestSiteMetrics - updated implementation', () => {
-    it.skip('successfully fetches metrics for last two complete weeks', async () => {
+    it('successfully fetches metrics for last two complete weeks', async () => {
       context.rumApiClient.query.resolves({
         pageviews: 125000,
         siteSpeed: 1234,
         avgEngagement: 45.2,
+        engagementCount: 56500,
       });
 
       const result = await sitesController.getLatestSiteMetrics({
@@ -891,6 +892,7 @@ describe('Sites Controller', () => {
       expect(context.rumApiClient.query).to.have.been.calledWith('site-metrics', sinon.match({
         domain: 'www.site1.com',
         granularity: 'DAILY',
+        filterBotTraffic: false,
       }));
 
       expect(metrics).to.have.property('mostRecentCompleteWeek');
@@ -899,6 +901,7 @@ describe('Sites Controller', () => {
         pageviews: 125000,
         siteSpeed: 1234,
         avgEngagement: 45.2,
+        engagementCount: 56500,
       });
       expect(metrics.mostRecentCompleteWeek.label).to.be.a('string');
       expect(metrics.mostRecentCompleteWeek.start).to.be.a('string');
@@ -907,6 +910,7 @@ describe('Sites Controller', () => {
         pageviews: 125000,
         siteSpeed: 1234,
         avgEngagement: 45.2,
+        engagementCount: 56500,
       });
       expect(metrics.previousCompleteWeek.start).to.be.a('string');
       expect(metrics.previousCompleteWeek.end).to.be.a('string');

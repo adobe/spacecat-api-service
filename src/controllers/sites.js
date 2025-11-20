@@ -719,6 +719,7 @@ function SitesController(ctx, log, env) {
           end: mostRecentCompleteWeek?.endTime ?? null,
           pageviews: mostRecentCompleteWeek?.pageviews ?? null,
           avgEngagement: mostRecentCompleteWeek?.avgEngagement ?? null,
+          engagementCount: mostRecentCompleteWeek?.engagementCount ?? null,
           siteSpeed: mostRecentCompleteWeek?.siteSpeed ?? null,
         },
         previousCompleteWeek: {
@@ -727,6 +728,7 @@ function SitesController(ctx, log, env) {
           end: previousCompleteWeek?.endTime ?? null,
           pageviews: previousCompleteWeek?.pageviews ?? null,
           avgEngagement: previousCompleteWeek?.avgEngagement ?? null,
+          engagementCount: previousCompleteWeek?.engagementCount ?? null,
           siteSpeed: previousCompleteWeek?.siteSpeed ?? null,
         },
       });
