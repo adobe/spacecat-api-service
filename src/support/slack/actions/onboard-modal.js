@@ -696,7 +696,7 @@ export function onboardSiteModal(lambdaContext) {
 
       await client.chat.postMessage({
         channel: responseChannel,
-        text: `:gear: Starting onboarding for site ${siteUrl}...`,
+        text: `:gear: Starting onboarding for site ${siteUrl} with profile "${profile}"...`,
         thread_ts: responseThreadTs,
       });
 
@@ -713,6 +713,14 @@ export function onboardSiteModal(lambdaContext) {
 
       // Note: Configuration is already saved by sharedOnboardSingleSite in utils.js
       // No need to call configuration.save() here as it would overwrite the changes
+
+      if (reportLine.siteId) {
+        log.info('Onboarding initiated for site with profile:', {
+          siteId: reportLine.siteId,
+          profile,
+          organizationId: reportLine.spacecatOrgId,
+        });
+      }
 
       if (reportLine.errors.length > 0) {
         await client.chat.postMessage({
