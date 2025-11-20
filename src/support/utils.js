@@ -511,109 +511,53 @@ export function getLastTwoCompleteWeeks() {
   const now = new Date();
   const dayOfWeek = now.getUTCDay(); // 0=Sunday, 1=Monday, ... 6=Saturday
 
-  // Calculate days since last Monday
-  // If today is Sunday (0), it's 6 days since Monday
-  // If today is Monday (1), it's 0 days since Monday (but we want last week's Monday)
-  const daysSinceMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  // Calculate days since last Sunday (start of week)
+  const daysSinceSunday = dayOfWeek; // If today is Sunday (0), it's 0 days since Sunday
 
-  // Last complete week's Monday at 00:00:00.000 UTC (going back 7 days from most recent Monday)
-  const lastMonday = new Date(Date.UTC(
+  // Last complete week's Sunday at 00:00:00 UTC (going back 7 days from most recent Sunday)
+  const lastSunday = new Date(Date.UTC(
     now.getUTCFullYear(),
     now.getUTCMonth(),
-    now.getUTCDate() - daysSinceMonday - 7,
-    0,
-    0,
-    0,
-    0,
+    now.getUTCDate() - daysSinceSunday - 7,
   ));
 
-  // Last complete week's Sunday at 23:59:59.999 UTC
-  const lastSunday = new Date(Date.UTC(
-    lastMonday.getUTCFullYear(),
-    lastMonday.getUTCMonth(),
-    lastMonday.getUTCDate() + 6,
-    23,
-    59,
-    59,
-    999,
-  ));
-
-  // Adjusted start: Sunday before Monday (for exclusive filtering)
-  const lastStartDate = new Date(Date.UTC(
-    lastMonday.getUTCFullYear(),
-    lastMonday.getUTCMonth(),
-    lastMonday.getUTCDate() - 1,
-    0,
-    0,
-    0,
-    0,
-  ));
-
-  // Adjusted end: Monday after Sunday (for exclusive filtering)
-  const lastEndDate = new Date(Date.UTC(
+  // Last complete week's Saturday at 23:59:59 UTC
+  const lastSaturday = new Date(Date.UTC(
     lastSunday.getUTCFullYear(),
     lastSunday.getUTCMonth(),
-    lastSunday.getUTCDate() + 1,
+    lastSunday.getUTCDate() + 6,
     23,
     59,
     59,
-    999,
-  ));
-
-  // Week before that - Monday
-  const prevMonday = new Date(Date.UTC(
-    lastMonday.getUTCFullYear(),
-    lastMonday.getUTCMonth(),
-    lastMonday.getUTCDate() - 7,
-    0,
-    0,
-    0,
-    0,
   ));
 
   // Week before that - Sunday
   const prevSunday = new Date(Date.UTC(
-    prevMonday.getUTCFullYear(),
-    prevMonday.getUTCMonth(),
-    prevMonday.getUTCDate() + 6,
-    23,
-    59,
-    59,
-    999,
+    lastSunday.getUTCFullYear(),
+    lastSunday.getUTCMonth(),
+    lastSunday.getUTCDate() - 7,
   ));
 
-  // Adjusted start: Sunday before Monday (for exclusive filtering)
-  const prevStartDate = new Date(Date.UTC(
-    prevMonday.getUTCFullYear(),
-    prevMonday.getUTCMonth(),
-    prevMonday.getUTCDate() - 1,
-    0,
-    0,
-    0,
-    0,
-  ));
-
-  // Adjusted end: Monday after Sunday (for exclusive filtering)
-  const prevEndDate = new Date(Date.UTC(
+  // Week before that - Saturday
+  const prevSaturday = new Date(Date.UTC(
     prevSunday.getUTCFullYear(),
     prevSunday.getUTCMonth(),
-    prevSunday.getUTCDate() + 1,
+    prevSunday.getUTCDate() + 6,
     23,
     59,
     59,
-    999,
   ));
 
   return [
     {
-      label: getStringDate(lastSunday),
-      startTime: lastStartDate.toISOString(),
-      endTime: lastEndDate.toISOString(),
+      label: getStringDate(lastSaturday),
+      startTime: lastSunday.toISOString(),
+      endTime: lastSaturday.toISOString(),
     },
     {
-      label: getStringDate(prevSunday),
-      startTime: prevStartDate.toISOString(),
-      endTime: prevEndDate.toISOString(),
+      label: getStringDate(prevSaturday),
+      startTime: prevSunday.toISOString(),
+      endTime: prevSaturday.toISOString(),
     },
   ];
 }
