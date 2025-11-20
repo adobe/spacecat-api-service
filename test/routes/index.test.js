@@ -50,6 +50,11 @@ describe('getRouteHandlers', () => {
     getByBaseURL: sinon.stub(),
   };
 
+  const mockSiteMetricsController = {
+    getMetricsForSite: sinon.stub(),
+    getMetricsForAllSites: sinon.stub(),
+  };
+
   const mockPTA2Controller = {
     getPTAWeeklySummary: sinon.stub(),
   };
@@ -305,6 +310,7 @@ describe('getRouteHandlers', () => {
       mockSandboxAuditController,
       mockReportsController,
       mockPTA2Controller,
+      mockSiteMetricsController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -323,6 +329,7 @@ describe('getRouteHandlers', () => {
       'POST /sites',
       'GET /sites.csv',
       'GET /sites.xlsx',
+      'GET /sites/metrics',
       'GET /slack/events',
       'POST /slack/events',
       'GET /trigger',
@@ -349,6 +356,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['POST /sites']).to.equal(mockSitesController.createSite);
     expect(staticRoutes['GET /sites.csv']).to.equal(mockSitesController.getAllAsCsv);
     expect(staticRoutes['GET /sites.xlsx']).to.equal(mockSitesController.getAllAsExcel);
+    expect(staticRoutes['GET /sites/metrics']).to.equal(mockSiteMetricsController.getMetricsForAllSites);
     expect(staticRoutes['GET /trigger']).to.equal(mockTrigger);
     expect(staticRoutes['POST /tools/api-keys']).to.equal(mockApiKeyController.createApiKey);
     expect(staticRoutes['GET /tools/api-keys']).to.equal(mockApiKeyController.getApiKeys);
@@ -400,6 +408,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/audits/latest',
       'GET /sites/:siteId/latest-audit/:auditType',
       'GET /sites/:siteId/latest-metrics',
+      'GET /sites/:siteId/metrics',
       'GET /sites/:siteId/experiments',
       'GET /sites/:siteId/key-events',
       'POST /sites/:siteId/key-events',
