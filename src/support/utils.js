@@ -428,8 +428,6 @@ export const wwwUrlResolver = (site) => {
   return hasText(uri.subdomain()) ? baseURL.replace(/https?:\/\//, '') : baseURL.replace(/https?:\/\//, 'www.');
 };
 
-const MILLISECONDS_IN_A_DAY = 86400000;
-
 /**
  * Get string date in format YYYY-MM-DD
  * @param {Date} date - The date to convert to string
@@ -440,66 +438,6 @@ export function getStringDate(date) {
   const month = String(date.getUTCMonth() + 1).padStart(2, '0');
   const day = String(date.getUTCDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
-}
-
-/**
- * Get date ranges for today and last two Sundays
- * @returns {Array} - Array of date ranges with label, startTime, and endTime
- */
-export function getTodayAndLastTwoSundaysDateRanges() {
-  const now = new Date();
-  const isTodaySunday = now.getUTCDay() === 0;
-
-  const ranges = [];
-
-  if (isTodaySunday) {
-    // If today is Sunday, return today (which is Sunday) and last Sunday
-    const todayEnd = new Date(now);
-    const todayStart = new Date(now.getTime() - 7 * MILLISECONDS_IN_A_DAY);
-    ranges.push({
-      label: getStringDate(todayEnd),
-      startTime: todayStart.toISOString(),
-      endTime: todayEnd.toISOString(),
-    });
-
-    const lastSundayEnd = new Date(now.getTime() - 7 * MILLISECONDS_IN_A_DAY);
-    const lastSundayStart = new Date(lastSundayEnd.getTime() - 7 * MILLISECONDS_IN_A_DAY);
-    ranges.push({
-      label: getStringDate(lastSundayEnd),
-      startTime: lastSundayStart.toISOString(),
-      endTime: lastSundayEnd.toISOString(),
-    });
-  } else {
-    // If not Sunday, return today, last Sunday, and the Sunday before that
-    const todayEnd = new Date(now);
-    const todayStart = new Date(now.getTime() - 7 * MILLISECONDS_IN_A_DAY);
-    ranges.push({
-      label: getStringDate(todayEnd),
-      startTime: todayStart.toISOString(),
-      endTime: todayEnd.toISOString(),
-    });
-
-    const daysSinceLastSunday = now.getUTCDay();
-    const lastSundayEnd = new Date(now.getTime() - daysSinceLastSunday * MILLISECONDS_IN_A_DAY);
-    const lastSundayStart = new Date(lastSundayEnd.getTime() - 7 * MILLISECONDS_IN_A_DAY);
-    ranges.push({
-      label: getStringDate(lastSundayEnd),
-      startTime: lastSundayStart.toISOString(),
-      endTime: lastSundayEnd.toISOString(),
-    });
-
-    const sundayBeforeLastEnd = new Date(lastSundayEnd.getTime() - 7 * MILLISECONDS_IN_A_DAY);
-    const sundayBeforeLastStart = new Date(
-      sundayBeforeLastEnd.getTime() - 7 * MILLISECONDS_IN_A_DAY,
-    );
-    ranges.push({
-      label: getStringDate(sundayBeforeLastEnd),
-      startTime: sundayBeforeLastStart.toISOString(),
-      endTime: sundayBeforeLastEnd.toISOString(),
-    });
-  }
-
-  return ranges;
 }
 
 /**
@@ -564,63 +502,6 @@ export function getLastTwoCompleteWeeks() {
       endTime: prevSunday.toISOString(),
     },
   ];
-}
-
-/**
- * Get last two Sundays at noon (Sunday noon to Sunday noon periods)
- * If today is Sunday and past noon, includes today's week
- * @returns {Array} - Array of date ranges with label, startTime, and endTime
- */
-export function getLastTwoSundaysNoonToNoon() {
-  const now = new Date();
-  const ranges = [];
-  const currentHour = now.getUTCHours();
-  const currentMinute = now.getUTCMinutes();
-  const daysSinceLastSunday = now.getUTCDay(); // 0 = Sunday, 1 = Monday, etc.
-
-  const lastSundayNoon = new Date(now);
-
-  if (daysSinceLastSunday === 0) {
-    // Today is Sunday
-    const isPastNoon = currentHour > 12 || (currentHour === 12 && currentMinute >= 0);
-
-    if (isPastNoon) {
-      // It's past noon on Sunday - use today as the most recent Sunday
-      lastSundayNoon.setUTCHours(12, 0, 0, 0);
-    } else {
-      // It's before noon on Sunday - go back to last Sunday
-      lastSundayNoon.setUTCDate(now.getUTCDate() - 7);
-      lastSundayNoon.setUTCHours(12, 0, 0, 0);
-    }
-  } else {
-    // Not Sunday - go back to most recent Sunday
-    lastSundayNoon.setUTCDate(now.getUTCDate() - daysSinceLastSunday);
-    lastSundayNoon.setUTCHours(12, 0, 0, 0);
-  }
-
-  // Sunday before last at noon
-  const sundayBeforeLast = new Date(lastSundayNoon);
-  sundayBeforeLast.setUTCDate(lastSundayNoon.getUTCDate() - 7);
-
-  // Two Sundays ago at noon
-  const twoSundaysAgo = new Date(sundayBeforeLast);
-  twoSundaysAgo.setUTCDate(sundayBeforeLast.getUTCDate() - 7);
-
-  // Week 1: Most recent complete week (Sunday before noon to last Sunday noon)
-  ranges.push({
-    label: getStringDate(lastSundayNoon),
-    startTime: sundayBeforeLast.toISOString(), // 7 days ago noon
-    endTime: lastSundayNoon.toISOString(), // Last Sunday noon
-  });
-
-  // Week 2: Week before that (two Sundays ago noon to Sunday before last noon)
-  ranges.push({
-    label: getStringDate(sundayBeforeLast),
-    startTime: twoSundaysAgo.toISOString(), // 14 days ago noon
-    endTime: sundayBeforeLast.toISOString(), // 7 days ago noon
-  });
-
-  return ranges;
 }
 
 /**

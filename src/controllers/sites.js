@@ -45,11 +45,6 @@ import { wwwUrlResolver, getLastTwoCompleteWeeks } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 
-const AHREFS = 'ahrefs';
-const ORGANIC_TRAFFIC = 'organic-traffic';
-const MONTH_DAYS = 30;
-const TOTAL_METRICS = 'totalMetrics';
-
 /**
  * Sites controller. Provides methods to create, read, update and delete sites.
  * @param {object} ctx - Context of the request.
@@ -57,6 +52,10 @@ const TOTAL_METRICS = 'totalMetrics';
  * @constructor
  */
 
+const AHREFS = 'ahrefs';
+const ORGANIC_TRAFFIC = 'organic-traffic';
+const MONTH_DAYS = 30;
+const TOTAL_METRICS = 'totalMetrics';
 const BRAND_PROFILE_AGENT_ID = 'brand-profile';
 
 /**
@@ -661,9 +660,13 @@ function SitesController(ctx, log, env) {
   };
 
   /**
-   * Fetches and processes metrics for a single date range using the site-metrics handler
+   * Fetches and processes metrics for a single date range using the site-metrics handler.
    * @param {Object} params - Parameters for fetching metrics
-   * @returns {Object} Weekly metrics with label, dates, pageviews, speed, engagement
+   * @returns {Object} Weekly metrics with label, dates, pageviews, speed, engagement.
+   * @note If the RUM API response includes `label`, `startTime`, or `endTime` fields,
+   * these will override the corresponding values from the `dateRange` parameter in the
+   * returned object. This is useful when the RUM API response includes more detailed
+   * information than the date range, such as the day of the week.
    */
   const fetchWeeklyMetrics = async ({
     rumAPIClient, domain, dateRange,
@@ -732,17 +735,22 @@ function SitesController(ctx, log, env) {
         },
       });
     } catch (error) {
-      // Check if error is due to domain not having RUM data (404)
-      if (error.message && error.message.includes('Status: 404')) {
-        log.info(`No RUM data available for site ${siteId} (${domain})`);
-        return notFound('No RUM data available for this site');
+      const statusMatch = error.message?.match(/Status:\s*(\d+)/);
+      const statusCode = statusMatch ? parseInt(statusMatch[1], 10) : null;
+
+      if (statusCode === 404) {
+        return notFound(`No RUM data available for this site with domain: ${domain}`);
       }
 
-      log.error(`Error getting weekly metrics for site ${siteId}: ${error.message}`, error);
-      return internalServerError(`Failed to fetch weekly metrics: ${error.message}`);
+      return internalServerError(`Failed to fetch weekly metrics for site ${siteId}: ${error.message}`);
     }
   };
 
+  /**
+   * Fetches and processes metrics for the latest complete week using the site-metrics handler.
+   * @param {Object} context - Context of the request.
+   * @returns {Object} Latest site metrics with pageviews, speed, engagement.
+   */
   const getLatestSiteMetrics = async (context) => {
     const siteId = context.params?.siteId;
 
