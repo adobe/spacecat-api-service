@@ -263,6 +263,10 @@ describe('getRouteHandlers', () => {
     deleteReport: sinon.stub(),
   };
 
+  const mockProxyController = {
+    proxyContent: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -297,6 +301,7 @@ describe('getRouteHandlers', () => {
       mockSandboxAuditController,
       mockReportsController,
       mockPTA2Controller,
+      mockProxyController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -411,6 +416,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/brand-guidelines',
       'GET /sites/:siteId/brand-profile',
       'POST /sites/:siteId/brand-profile',
+      'GET /sites/:siteId/csproxy/:base64ProxyUrl',
       'GET /sites/:siteId/opportunities',
       'GET /sites/:siteId/opportunities/by-status/:status',
       'GET /sites/:siteId/opportunities/:opportunityId',

@@ -79,6 +79,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} sandboxAuditController - The sandbox audit controller.
  * @param {Object} reportsController - The reports controller.
  * @param {Object} pta2Controller - The PTA2 controller.
+ * @param {Object} proxyController - The proxy controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -114,6 +115,7 @@ export default function getRouteHandlers(
   sandboxAuditController,
   reportsController,
   pta2Controller,
+  proxyController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -252,6 +254,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/top-pages': sitesController.getTopPages,
     'GET /sites/:siteId/top-pages/:source': sitesController.getTopPages,
     'GET /sites/:siteId/top-pages/:source/:geo': sitesController.getTopPages,
+    'GET /sites/:siteId/csproxy/:base64ProxyUrl': proxyController.proxyContent,
     'GET /slack/events': slackController.handleEvent,
     'POST /slack/events': slackController.handleEvent,
     'POST /slack/channels/invite-by-user-id': slackController.inviteUserToChannel,
