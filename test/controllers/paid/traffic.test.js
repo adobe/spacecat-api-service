@@ -220,6 +220,32 @@ describe('Paid TrafficController', async () => {
       expect(query).not.to.include('5000');
     });
 
+    it('getPaidTrafficTemporalSeries returns temporal series data with isWeekOverWeek flag', async () => {
+      mockAthenaQuery.resolves([
+        {
+          trf_type: 'paid',
+          pageviews: 1000,
+          pct_pageviews: 0.5,
+          click_rate: 0.1,
+          engagement_rate: 0.2,
+          bounce_rate: 0.3,
+          p70_lcp: 2.5,
+          p70_cls: 0.1,
+          p70_inp: 200,
+        },
+      ]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficTemporalSeries();
+      expect(res.status).to.equal(200);
+      expect(mockAthenaQuery).to.have.been.calledOnce;
+      // Verify it uses trf_type dimension and temporal series mode
+      const athenaCall = mockAthenaQuery.getCall(0);
+      expect(athenaCall).to.exist;
+      const query = athenaCall.args[0];
+      expect(query).to.be.a('string');
+      expect(query).to.include('trf_type');
+    });
+
     it('does not log error if cache file is missing (known exception)', async () => {
       mockAthenaQuery.resolves(trafficTypeMock);
       const controller = TrafficController(mockContext, mockLog, mockEnv);

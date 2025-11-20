@@ -196,6 +196,14 @@ describe('getRouteHandlers', () => {
     getPaidTrafficByCampaignChannelDevice: sinon.stub(),
     getPaidTrafficByCampaignChannelPlatform: sinon.stub(),
     getPaidTrafficByCampaignChannelPlatformDevice: sinon.stub(),
+    getPaidTrafficTemporalSeries: sinon.stub(),
+    getPaidTrafficTemporalSeriesByCampaign: sinon.stub(),
+    getPaidTrafficTemporalSeriesByChannel: sinon.stub(),
+    getPaidTrafficTemporalSeriesByPlatform: sinon.stub(),
+    getPaidTrafficTemporalSeriesByCampaignChannel: sinon.stub(),
+    getPaidTrafficTemporalSeriesByCampaignPlatform: sinon.stub(),
+    getPaidTrafficTemporalSeriesByCampaignChannelPlatform: sinon.stub(),
+    getPaidTrafficTemporalSeriesByChannelPlatform: sinon.stub(),
   };
 
   const mockFixesController = {
@@ -491,6 +499,14 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/traffic/paid/campaign-channel-device',
       'GET /sites/:siteId/traffic/paid/campaign-channel-platform',
       'GET /sites/:siteId/traffic/paid/campaign-channel-platform-device',
+      'GET /sites/:siteId/traffic/paid/temporal-series',
+      'GET /sites/:siteId/traffic/paid/temporal-series-by-campaign',
+      'GET /sites/:siteId/traffic/paid/temporal-series-by-channel',
+      'GET /sites/:siteId/traffic/paid/temporal-series-by-platform',
+      'GET /sites/:siteId/traffic/paid/temporal-series-by-campaign-channel',
+      'GET /sites/:siteId/traffic/paid/temporal-series-by-campaign-platform',
+      'GET /sites/:siteId/traffic/paid/temporal-series-by-campaign-channel-platform',
+      'GET /sites/:siteId/traffic/paid/temporal-series-by-channel-platform',
       'GET /tools/scrape/jobs/:jobId',
       'GET /tools/scrape/jobs/:jobId/results',
       'GET /tools/scrape/jobs/by-date-range/:startDate/:endDate/all-jobs',
@@ -641,6 +657,14 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/campaign-channel-device'].handler).to.equal(mockTrafficController.getPaidTrafficByCampaignChannelDevice);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/campaign-channel-platform'].handler).to.equal(mockTrafficController.getPaidTrafficByCampaignChannelPlatform);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/campaign-channel-platform-device'].handler).to.equal(mockTrafficController.getPaidTrafficByCampaignChannelPlatformDevice);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/temporal-series'].handler).to.equal(mockTrafficController.getPaidTrafficTemporalSeries);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/temporal-series-by-campaign'].handler).to.equal(mockTrafficController.getPaidTrafficTemporalSeriesByCampaign);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/temporal-series-by-channel'].handler).to.equal(mockTrafficController.getPaidTrafficTemporalSeriesByChannel);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/temporal-series-by-platform'].handler).to.equal(mockTrafficController.getPaidTrafficTemporalSeriesByPlatform);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/temporal-series-by-campaign-channel'].handler).to.equal(mockTrafficController.getPaidTrafficTemporalSeriesByCampaignChannel);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/temporal-series-by-campaign-platform'].handler).to.equal(mockTrafficController.getPaidTrafficTemporalSeriesByCampaignPlatform);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/temporal-series-by-campaign-channel-platform'].handler).to.equal(mockTrafficController.getPaidTrafficTemporalSeriesByCampaignChannelPlatform);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/temporal-series-by-channel-platform'].handler).to.equal(mockTrafficController.getPaidTrafficTemporalSeriesByChannelPlatform);
     expect(dynamicRoutes['GET /sites/:siteId/files'].handler).to.equal(mockScrapeController.getFileByKey);
     expect(dynamicRoutes['GET /sites/:siteId/files'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /tools/scrape/jobs/:jobId'].handler).to.equal(mockScrapeJobController.getScrapeJobStatus);
