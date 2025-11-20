@@ -667,7 +667,7 @@ function SitesController(ctx, log, env) {
       domain,
       startTime: dateRange.startTime,
       endTime: dateRange.endTime,
-      granularity: 'HOURLY',
+      granularity: 'DAILY',
       filterBotTraffic: false,
       excludeStartDate: true,
       excludeEndDate: true,
