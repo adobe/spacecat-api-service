@@ -782,41 +782,6 @@ describe('Sites Controller', () => {
     });
   });
 
-  it.skip('gets the latest site metrics with no stored metrics', async () => {
-    context.rumApiClient.query.onCall(0).resolves({
-      totalCTR: 0.20,
-      totalClicks: 4901,
-      totalPageViews: 24173,
-    });
-    context.rumApiClient.query.onCall(1).resolves({
-      totalCTR: 0.21,
-      totalClicks: 9723,
-      totalPageViews: 46944,
-    });
-    const storedMetrics = [];
-
-    const getStoredMetrics = sinon.stub();
-    getStoredMetrics.resolves(storedMetrics);
-
-    const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
-      '@adobe/spacecat-shared-utils': {
-        getStoredMetrics,
-      },
-    });
-    const result = await (
-      await sitesControllerMock
-        .default(context, context.log)
-        .getLatestSiteMetrics({ ...context, params: { siteId: SITE_IDS[0] } })
-    );
-    const metrics = await result.json();
-
-    expect(metrics).to.deep.equal({
-      ctrChange: -5.553712152633755,
-      pageViewsChange: 6.156954020464625,
-      projectedTrafficValue: 0,
-    });
-  });
-
   it('logs error and returns zeroed metrics when rum query fails', async () => {
     const rumApiClient = {
       query: sandbox.stub().rejects(new Error('RUM query failed')),
@@ -834,45 +799,6 @@ describe('Sites Controller', () => {
       projectedTrafficValue: 0,
     });
   });
-
-  it.skip('returns bad request if site ID is not provided', async () => {
-    const response = await sitesController.getLatestSiteMetrics({
-      params: {},
-    });
-
-    const error = await response.json();
-
-    expect(response.status).to.equal(400);
-    expect(error).to.have.property('message', 'Site ID required');
-  });
-
-  it.skip('returns not found if site does not exist', async () => {
-    mockDataAccess.Site.findById.resolves(null);
-
-    const response = await sitesController.getLatestSiteMetrics({
-      params: { siteId: SITE_IDS[0] },
-    });
-
-    const error = await response.json();
-
-    expect(response.status).to.equal(404);
-    expect(error).to.have.property('message', 'Site not found');
-  });
-
-  it.skip('get latest site metrics for non belonging to the organization', async () => {
-    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
-    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
-
-    const result = await sitesController.getLatestSiteMetrics({
-      params: { siteId: SITE_IDS[0] },
-    });
-    const error = await result.json();
-
-    expect(result.status).to.equal(403);
-    expect(error).to.have.property('message', 'Only users belonging to the organization can view its metrics');
-  });
-
-  // Tests for getLatestSiteMetrics implementation
 
   describe('getLatestSiteMetrics', () => {
     it('successfully fetches metrics for rolling 7-day periods', async () => {

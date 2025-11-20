@@ -746,11 +746,6 @@ function SitesController(ctx, log, env) {
     }
   };
 
-  /**
-   * Fetches and processes metrics for the latest complete week using the site-metrics handler.
-   * @param {Object} context - Context of the request.
-   * @returns {Object} Latest site metrics with pageviews, speed, engagement.
-   */
   const getLatestSiteMetrics = async (context) => {
     const siteId = context.params?.siteId;
 
