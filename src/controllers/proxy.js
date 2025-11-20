@@ -227,7 +227,7 @@ function ProxyController(ctx, log) {
    * @returns {Promise<object>} The response with proxied content.
    */
   async function proxyContent(context) {
-    const { base64ProxyUrl } = context.pathInfo.params;
+    const base64ProxyUrl = context.params?.base64ProxyUrl;
     const siteId = context.params?.siteId;
 
     // Validate siteId
