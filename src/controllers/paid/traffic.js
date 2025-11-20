@@ -261,6 +261,15 @@ function TrafficController(context, log, env) {
     );
   }
 
+  async function fetchPaidTrafficDataTemporalSeries(dimensions) {
+    return fetchPaidTrafficData(
+      dimensions,
+      TrafficDataWithCWVDto,
+      null,
+      true,
+    );
+  }
+
   return {
     getPaidTrafficByCampaignUrlDevice: async () => fetchPaidTrafficData(['utm_campaign', 'path', 'device'], TrafficDataWithCWVDto),
     getPaidTrafficByCampaignDevice: async () => fetchPaidTrafficData(['utm_campaign', 'device'], TrafficDataWithCWVDto),
@@ -313,12 +322,14 @@ function TrafficController(context, log, env) {
     getPaidTrafficByCampaignChannelPlatform: async () => fetchPaidTrafficData(['utm_campaign', 'trf_channel', 'trf_platform'], TrafficDataWithCWVDto),
     getPaidTrafficByCampaignChannelPlatformDevice: async () => fetchPaidTrafficData(['utm_campaign', 'trf_channel', 'trf_platform', 'device'], TrafficDataWithCWVDto),
 
-    getPaidTrafficTemporalSeries: async () => fetchPaidTrafficData(
-      [],
-      TrafficDataWithCWVDto,
-      null,
-      true,
-    ),
+    getPaidTrafficTemporalSeries: async () => fetchPaidTrafficDataTemporalSeries([]),
+    getPaidTrafficTemporalSeriesByCampaign: async () => fetchPaidTrafficDataTemporalSeries(['utm_campaign']),
+    getPaidTrafficTemporalSeriesByChannel: async () => fetchPaidTrafficDataTemporalSeries(['trf_channel']),
+    getPaidTrafficTemporalSeriesByPlatform: async () => fetchPaidTrafficDataTemporalSeries(['trf_platform']),
+    getPaidTrafficTemporalSeriesByCampaignChannel: async () => fetchPaidTrafficDataTemporalSeries(['utm_campaign', 'trf_channel']),
+    getPaidTrafficTemporalSeriesByCampaignPlatform: async () => fetchPaidTrafficDataTemporalSeries(['utm_campaign', 'trf_platform']),
+    getPaidTrafficTemporalSeriesByCampaignChannelPlatform: async () => fetchPaidTrafficDataTemporalSeries(['utm_campaign', 'trf_channel', 'trf_platform']),
+    getPaidTrafficTemporalSeriesByChannelPlatform: async () => fetchPaidTrafficDataTemporalSeries(['trf_channel', 'trf_platform']),
   };
 }
 
