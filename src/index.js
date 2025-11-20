@@ -75,6 +75,7 @@ import TrialUsersController from './controllers/trial-users.js';
 import EntitlementsController from './controllers/entitlements.js';
 import SandboxAuditController from './controllers/sandbox-audit.js';
 import PTA2Controller from './controllers/paid/pta2.js';
+import ProxyController from './controllers/proxy.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -139,6 +140,7 @@ async function run(request, context) {
     const entitlementsController = EntitlementsController(context);
     const sandboxAuditController = SandboxAuditController(context);
     const pta2Controller = PTA2Controller(context, log, context.env);
+    const proxyController = ProxyController(context, log);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -173,6 +175,7 @@ async function run(request, context) {
       sandboxAuditController,
       reportsController,
       pta2Controller,
+      proxyController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
