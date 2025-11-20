@@ -503,62 +503,65 @@ export function getTodayAndLastTwoSundaysDateRanges() {
 }
 
 /**
- * Get last two complete weeks (Sunday 00:00 to Sunday 23:59 UTC)
- * Always returns last two COMPLETE weeks, excluding any partial current week
- * Each week is 8 days (Sun-Sun), overlapping on the boundary Sunday
+ * Get last two complete weeks (Monday 00:00 to Sunday 23:59 UTC)
+ * Always returns last two COMPLETE 7-day weeks, excluding any partial current week
+ * Weeks are consecutive Monday-Sunday periods
  * @returns {Array} - Array of date ranges with label, startTime, and endTime
  */
 export function getLastTwoCompleteWeeks() {
   const now = new Date();
   const dayOfWeek = now.getUTCDay(); // 0=Sunday, 1=Monday, ... 6=Saturday
 
-  // Calculate days since last Sunday
-  const daysSinceSunday = dayOfWeek === 0 ? 7 : dayOfWeek;
+  // Calculate days since last Monday
+  // If today is Sunday (0), it's 6 days since last Monday
+  // If today is Monday (1), it's 0 days since last Monday
+  const daysSinceMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
 
-  // Most recent complete week - ending on last Sunday at 23:59:59
-  const lastSundayEnd = new Date(Date.UTC(
+  // Most recent complete week ends on the Sunday before current week
+  // Last Sunday at 23:59:59
+  const lastSunday = new Date(Date.UTC(
     now.getUTCFullYear(),
     now.getUTCMonth(),
-    now.getUTCDate() - daysSinceSunday,
+    now.getUTCDate() - daysSinceMonday - 1,
     23,
     59,
     59,
   ));
 
-  // Most recent complete week - starting Sunday (7 days before ending Sunday)
-  const lastSundayStart = new Date(Date.UTC(
-    lastSundayEnd.getUTCFullYear(),
-    lastSundayEnd.getUTCMonth(),
-    lastSundayEnd.getUTCDate() - 7,
+  // Most recent complete week starts on Monday (6 days before last Sunday)
+  const lastMonday = new Date(Date.UTC(
+    lastSunday.getUTCFullYear(),
+    lastSunday.getUTCMonth(),
+    lastSunday.getUTCDate() - 6,
   ));
 
-  // Previous week - ending Sunday (same as most recent week's start, at 23:59:59)
-  const prevSundayEnd = new Date(Date.UTC(
-    lastSundayStart.getUTCFullYear(),
-    lastSundayStart.getUTCMonth(),
-    lastSundayStart.getUTCDate(),
+  // Previous week ends on the Sunday before last week
+  const prevSunday = new Date(Date.UTC(
+    lastMonday.getUTCFullYear(),
+    lastMonday.getUTCMonth(),
+    lastMonday.getUTCDate() - 1,
     23,
     59,
     59,
   ));
 
-  // Previous week - starting Sunday (7 days before its ending Sunday)
-  const prevSundayStart = new Date(Date.UTC(
-    prevSundayEnd.getUTCFullYear(),
-    prevSundayEnd.getUTCMonth(),
-    prevSundayEnd.getUTCDate() - 7,
+  // Previous week starts on Monday (6 days before previous Sunday)
+  const prevMonday = new Date(Date.UTC(
+    prevSunday.getUTCFullYear(),
+    prevSunday.getUTCMonth(),
+    prevSunday.getUTCDate() - 6,
   ));
 
   return [
     {
-      label: getStringDate(lastSundayEnd),
-      startTime: lastSundayStart.toISOString(),
-      endTime: lastSundayEnd.toISOString(),
+      label: getStringDate(lastSunday),
+      startTime: lastMonday.toISOString(),
+      endTime: lastSunday.toISOString(),
     },
     {
-      label: getStringDate(prevSundayEnd),
-      startTime: prevSundayStart.toISOString(),
-      endTime: prevSundayEnd.toISOString(),
+      label: getStringDate(prevSunday),
+      startTime: prevMonday.toISOString(),
+      endTime: prevSunday.toISOString(),
     },
   ];
 }
