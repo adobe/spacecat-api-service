@@ -668,7 +668,6 @@ function SitesController(ctx, log, env) {
       startTime: dateRange.startTime,
       endTime: dateRange.endTime,
       granularity: 'DAILY',
-      filterBotTraffic: false,
     });
 
     return {

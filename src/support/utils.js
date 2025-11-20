@@ -503,9 +503,9 @@ export function getTodayAndLastTwoSundaysDateRanges() {
 }
 
 /**
- * Get last two complete weeks (Saturday 00:00 to Sunday 23:59 UTC)
+ * Get last two complete weeks (Sunday 00:00 to Sunday 23:59 UTC)
  * Always returns last two COMPLETE weeks, excluding any partial current week
- * Each week is 9 days (Sat-Sun), overlapping by 2 days (Sat-Sun boundary)
+ * Each week is 8 days (Sun-Sun), overlapping on the boundary Sunday
  * @returns {Array} - Array of date ranges with label, startTime, and endTime
  */
 export function getLastTwoCompleteWeeks() {
@@ -525,39 +525,39 @@ export function getLastTwoCompleteWeeks() {
     59,
   ));
 
-  // Most recent complete week - starting Saturday (8 days before ending Sunday)
-  const lastSaturdayStart = new Date(Date.UTC(
-    lastSundayEnd.getUTCFullYear(),
-    lastSundayEnd.getUTCMonth(),
-    lastSundayEnd.getUTCDate() - 8,
-  ));
-
-  // Previous week - ending Sunday (7 days before most recent week's end)
-  const prevSundayEnd = new Date(Date.UTC(
+  // Most recent complete week - starting Sunday (7 days before ending Sunday)
+  const lastSundayStart = new Date(Date.UTC(
     lastSundayEnd.getUTCFullYear(),
     lastSundayEnd.getUTCMonth(),
     lastSundayEnd.getUTCDate() - 7,
+  ));
+
+  // Previous week - ending Sunday (same as most recent week's start, at 23:59:59)
+  const prevSundayEnd = new Date(Date.UTC(
+    lastSundayStart.getUTCFullYear(),
+    lastSundayStart.getUTCMonth(),
+    lastSundayStart.getUTCDate(),
     23,
     59,
     59,
   ));
 
-  // Previous week - starting Saturday (8 days before its ending Sunday)
-  const prevSaturdayStart = new Date(Date.UTC(
+  // Previous week - starting Sunday (7 days before its ending Sunday)
+  const prevSundayStart = new Date(Date.UTC(
     prevSundayEnd.getUTCFullYear(),
     prevSundayEnd.getUTCMonth(),
-    prevSundayEnd.getUTCDate() - 8,
+    prevSundayEnd.getUTCDate() - 7,
   ));
 
   return [
     {
       label: getStringDate(lastSundayEnd),
-      startTime: lastSaturdayStart.toISOString(),
+      startTime: lastSundayStart.toISOString(),
       endTime: lastSundayEnd.toISOString(),
     },
     {
       label: getStringDate(prevSundayEnd),
-      startTime: prevSaturdayStart.toISOString(),
+      startTime: prevSundayStart.toISOString(),
       endTime: prevSundayEnd.toISOString(),
     },
   ];
