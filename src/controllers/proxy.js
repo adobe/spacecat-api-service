@@ -123,14 +123,15 @@ function shouldProxyUrl(url, origin) {
  * @param {string} html - The HTML content.
  * @param {string} baseUrl - The base URL of the original page.
  * @param {string} siteId - The site ID for the proxy route.
+ * @param {string} apiBaseUrl - The SpaceCat API base URL.
  * @param {object} log - The logger instance.
  * @returns {string} The HTML with rewritten image URLs.
  */
-function rewriteImageUrls(html, baseUrl, siteId, log) {
+function rewriteImageUrls(html, baseUrl, siteId, apiBaseUrl, log) {
   try {
     const urlObj = new URL(baseUrl);
     const { origin } = urlObj;
-    log.info(`Rewriting image URLs with base: ${origin},for siteId: ${siteId}`);
+    log.info(`Rewriting image URLs with base: ${origin}, for siteId: ${siteId}, apiBaseUrl: ${apiBaseUrl}`);
 
     // Pattern to match img src attributes
     // Matches: <img src="..." or <img ... src="..."
@@ -144,7 +145,7 @@ function rewriteImageUrls(html, baseUrl, siteId, log) {
         const absoluteUrl = resolveUrl(srcUrl, origin);
         if (absoluteUrl && shouldProxyUrl(absoluteUrl, origin)) {
           const base64Url = encodeUrlToBase64(absoluteUrl);
-          const proxyUrl = `/sites/${siteId}/csproxy/${base64Url}`;
+          const proxyUrl = `${apiBaseUrl}/sites/${siteId}/csproxy/${base64Url}`;
           rewriteCount += 1;
           return `<img${beforeSrc}src="${proxyUrl}"`;
         }
@@ -159,7 +160,7 @@ function rewriteImageUrls(html, baseUrl, siteId, log) {
         const absoluteUrl = resolveUrl(bgUrl, origin);
         if (absoluteUrl && shouldProxyUrl(absoluteUrl, origin)) {
           const base64Url = encodeUrlToBase64(absoluteUrl);
-          const proxyUrl = `/sites/${siteId}/csproxy/${base64Url}`;
+          const proxyUrl = `${apiBaseUrl}/sites/${siteId}/csproxy/${base64Url}`;
           rewriteCount += 1;
           return `background-image: url("${proxyUrl}")`;
         }
@@ -176,7 +177,7 @@ function rewriteImageUrls(html, baseUrl, siteId, log) {
           const absoluteUrl = resolveUrl(url, origin);
           if (absoluteUrl && shouldProxyUrl(absoluteUrl, origin)) {
             const base64Url = encodeUrlToBase64(absoluteUrl);
-            const proxyUrl = `/sites/${siteId}/csproxy/${base64Url}`;
+            const proxyUrl = `${apiBaseUrl}/sites/${siteId}/csproxy/${base64Url}`;
             rewriteCount += 1;
             return descriptor ? `${proxyUrl} ${descriptor}` : proxyUrl;
           }
@@ -195,7 +196,7 @@ function rewriteImageUrls(html, baseUrl, siteId, log) {
           const absoluteUrl = resolveUrl(url, origin);
           if (absoluteUrl && shouldProxyUrl(absoluteUrl, origin)) {
             const base64Url = encodeUrlToBase64(absoluteUrl);
-            const proxyUrl = `/sites/${siteId}/csproxy/${base64Url}`;
+            const proxyUrl = `${apiBaseUrl}/sites/${siteId}/csproxy/${base64Url}`;
             rewriteCount += 1;
             return descriptor ? `${proxyUrl} ${descriptor}` : proxyUrl;
           }
@@ -220,6 +221,8 @@ function rewriteImageUrls(html, baseUrl, siteId, log) {
  * @returns {object} Proxy controller.
  */
 function ProxyController(ctx, log) {
+  // Hardcoded to 'ci' for now
+  const apiBaseUrl = 'https://spacecat.experiencecloud.live/api/ci';
   /**
    * Proxies content from the base64-encoded URL.
    * GET /sites/:siteId/csproxy/:base64ProxyUrl
@@ -268,7 +271,7 @@ function ProxyController(ctx, log) {
       if (isHtml) {
         // Rewrite image URLs in HTML
         // Note: CSS/JS URLs are NOT rewritten - they load directly from AEM CS
-        const rewrittenHtml = rewriteImageUrls(html, targetUrl, siteId, log);
+        const rewrittenHtml = rewriteImageUrls(html, targetUrl, siteId, apiBaseUrl, log);
 
         return createResponse(rewrittenHtml, 200, {
           'Content-Type': contentType,
