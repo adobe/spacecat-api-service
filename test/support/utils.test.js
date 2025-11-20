@@ -162,95 +162,6 @@ describe('utils', () => {
       }
     });
 
-    it.skip('returns last two complete weeks when run on a Tuesday', () => {
-      // Set date to Tuesday, November 19, 2025, 10:00 AM UTC
-      clock = sinon.useFakeTimers(new Date('2025-11-19T10:00:00.000Z'));
-
-      const weeks = getLastTwoCompleteWeeks();
-
-      expect(weeks).to.have.lengthOf(2);
-
-      // Most recent complete week: Nov 10 (Mon) to Nov 16 (Sun)
-      expect(weeks[0].label).to.equal('2025-11-16');
-      expect(weeks[0].startTime).to.equal('2025-11-10T00:00:00.000Z');
-      expect(weeks[0].endTime).to.equal('2025-11-16T23:59:59.999Z');
-
-      // Previous complete week: Nov 3 (Mon) to Nov 9 (Sun)
-      expect(weeks[1].label).to.equal('2025-11-09');
-      expect(weeks[1].startTime).to.equal('2025-11-03T00:00:00.000Z');
-      expect(weeks[1].endTime).to.equal('2025-11-09T23:59:59.999Z');
-    });
-
-    it.skip('returns last two complete weeks when run on a Monday', () => {
-      // Set date to Monday, November 17, 2025, 10:00 AM UTC
-      clock = sinon.useFakeTimers(new Date('2025-11-17T10:00:00.000Z'));
-
-      const weeks = getLastTwoCompleteWeeks();
-
-      expect(weeks).to.have.lengthOf(2);
-
-      // Most recent complete week: Nov 10 (Mon) to Nov 16 (Sun)
-      expect(weeks[0].label).to.equal('2025-11-16');
-      expect(weeks[0].startTime).to.equal('2025-11-10T00:00:00.000Z');
-      expect(weeks[0].endTime).to.equal('2025-11-16T23:59:59.999Z');
-
-      // Previous complete week: Nov 3 (Mon) to Nov 9 (Sun)
-      expect(weeks[1].label).to.equal('2025-11-09');
-      expect(weeks[1].startTime).to.equal('2025-11-03T00:00:00.000Z');
-      expect(weeks[1].endTime).to.equal('2025-11-09T23:59:59.999Z');
-    });
-
-    it.skip('returns last two complete weeks when run on a Sunday', () => {
-      // Set date to Sunday, November 23, 2025, 10:00 AM UTC
-      clock = sinon.useFakeTimers(new Date('2025-11-23T10:00:00.000Z'));
-
-      const weeks = getLastTwoCompleteWeeks();
-
-      expect(weeks).to.have.lengthOf(2);
-
-      // Most recent complete week: Nov 10 (Mon) to Nov 16 (Sun)
-      expect(weeks[0].label).to.equal('2025-11-16');
-      expect(weeks[0].startTime).to.equal('2025-11-10T00:00:00.000Z');
-      expect(weeks[0].endTime).to.equal('2025-11-16T23:59:59.999Z');
-
-      // Previous complete week: Nov 3 (Mon) to Nov 9 (Sun)
-      expect(weeks[1].label).to.equal('2025-11-09');
-      expect(weeks[1].startTime).to.equal('2025-11-03T00:00:00.000Z');
-      expect(weeks[1].endTime).to.equal('2025-11-09T23:59:59.999Z');
-    });
-
-    it.skip('always returns UTC times regardless of timezone', () => {
-      // Test in various timezones - result should be same
-      clock = sinon.useFakeTimers(new Date('2025-11-19T23:59:59.999Z')); // Late UTC
-
-      const weeks = getLastTwoCompleteWeeks();
-
-      // Verify ISO strings have UTC timezone
-      expect(weeks[0].startTime).to.match(/Z$/);
-      expect(weeks[0].endTime).to.match(/Z$/);
-      expect(weeks[1].startTime).to.match(/Z$/);
-      expect(weeks[1].endTime).to.match(/Z$/);
-
-      // Verify midnight and end-of-day times
-      expect(weeks[0].startTime).to.include('T00:00:00.000Z');
-      expect(weeks[0].endTime).to.include('T23:59:59.999Z');
-    });
-
-    it.skip('returns exactly 7 days between start and end of each week', () => {
-      clock = sinon.useFakeTimers(new Date('2025-11-19T10:00:00.000Z'));
-
-      const weeks = getLastTwoCompleteWeeks();
-
-      weeks.forEach((week) => {
-        const start = new Date(week.startTime);
-        const end = new Date(week.endTime);
-        const daysDiff = (end - start) / (1000 * 60 * 60 * 24);
-
-        // Should be almost 7 days (6.999... due to the milliseconds)
-        expect(daysDiff).to.be.closeTo(7, 0.001);
-      });
-    });
-
     it('returns weeks in chronological order (most recent first)', () => {
       clock = sinon.useFakeTimers(new Date('2025-11-19T10:00:00.000Z'));
 
@@ -265,19 +176,6 @@ describe('utils', () => {
       // Should be exactly 7 days apart
       const diffDays = (mostRecentEnd - previousEnd) / (1000 * 60 * 60 * 24);
       expect(diffDays).to.be.closeTo(7, 0.001);
-    });
-
-    it.skip('handles DST transitions correctly', () => {
-      // Test around DST transition (March 2025 DST starts in US, but we use UTC
-      // so should be unaffected)
-      clock = sinon.useFakeTimers(new Date('2025-03-11T10:00:00.000Z'));
-
-      const weeks = getLastTwoCompleteWeeks();
-
-      expect(weeks).to.have.lengthOf(2);
-      expect(weeks[0].startTime).to.include('T00:00:00.000Z');
-      expect(weeks[0].endTime).to.include('T23:59:59.999Z');
-      // DST changes don't affect UTC times
     });
   });
 });
