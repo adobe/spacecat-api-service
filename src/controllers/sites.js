@@ -45,6 +45,11 @@ import { wwwUrlResolver, getLastTwoCompleteWeeks } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 
+const AHREFS = 'ahrefs';
+const ORGANIC_TRAFFIC = 'organic-traffic';
+const MONTH_DAYS = 30;
+const TOTAL_METRICS = 'totalMetrics';
+
 /**
  * Sites controller. Provides methods to create, read, update and delete sites.
  * @param {object} ctx - Context of the request.
@@ -678,7 +683,7 @@ function SitesController(ctx, log, env) {
     };
   };
 
-  const getLatestSiteMetrics = async (context) => {
+  const getWeeklySiteMetrics = async (context) => {
     const siteId = context.params?.siteId;
 
     if (!isValidUUID(siteId)) {
@@ -700,7 +705,7 @@ function SitesController(ctx, log, env) {
     try {
       const weekRanges = getLastTwoCompleteWeeks();
 
-      const weeklyMetrics = await Promise.all(
+      const [latestCompleteWeekMetrics, priorCompleteWeekMetrics] = await Promise.all(
         weekRanges.map((dateRange) => fetchWeeklyMetrics({
           rumAPIClient,
           domain,
@@ -708,31 +713,22 @@ function SitesController(ctx, log, env) {
         })),
       );
 
-      const mostRecentCompleteWeek = weeklyMetrics[0];
-      const previousCompleteWeek = weeklyMetrics[1];
-
       return ok({
-        mostRecentCompleteWeek: {
-          label: mostRecentCompleteWeek?.label ?? null,
-          start: mostRecentCompleteWeek?.startTime ?? null,
-          end: mostRecentCompleteWeek?.endTime ?? null,
-          pageviews: mostRecentCompleteWeek?.pageviews ?? null,
-          avgEngagement: mostRecentCompleteWeek?.avgEngagement ?? null,
-          engagementCount: mostRecentCompleteWeek?.engagementCount ?? null,
-          conversions: mostRecentCompleteWeek?.conversions ?? null,
-          conversionRate: mostRecentCompleteWeek?.conversionRate ?? null,
-          siteSpeed: mostRecentCompleteWeek?.siteSpeed ?? null,
+        latestCompleteWeek: {
+          label: latestCompleteWeekMetrics.label,
+          start: latestCompleteWeekMetrics.startTime,
+          end: latestCompleteWeekMetrics.endTime,
+          pageviews: latestCompleteWeekMetrics?.pageviews ?? null,
+          engagementCount: latestCompleteWeekMetrics?.engagementCount ?? null,
+          lcp: latestCompleteWeekMetrics?.siteSpeed ?? null,
         },
-        previousCompleteWeek: {
-          label: previousCompleteWeek?.label ?? null,
-          start: previousCompleteWeek?.startTime ?? null,
-          end: previousCompleteWeek?.endTime ?? null,
-          pageviews: previousCompleteWeek?.pageviews ?? null,
-          avgEngagement: previousCompleteWeek?.avgEngagement ?? null,
-          engagementCount: previousCompleteWeek?.engagementCount ?? null,
-          conversions: previousCompleteWeek?.conversions ?? null,
-          conversionRate: previousCompleteWeek?.conversionRate ?? null,
-          siteSpeed: previousCompleteWeek?.siteSpeed ?? null,
+        priorCompleteWeek: {
+          label: priorCompleteWeekMetrics.label,
+          start: priorCompleteWeekMetrics.startTime,
+          end: priorCompleteWeekMetrics.endTime,
+          pageviews: priorCompleteWeekMetrics?.pageviews ?? null,
+          engagementCount: priorCompleteWeekMetrics?.engagementCount ?? null,
+          lcp: priorCompleteWeekMetrics?.siteSpeed ?? null,
         },
       });
     } catch (error) {
@@ -742,9 +738,73 @@ function SitesController(ctx, log, env) {
         return notFound('No RUM data available for this site');
       }
 
-      log.error(`Error getting latest metrics for site ${siteId}: ${error.message}`, error);
-      return internalServerError(`Failed to fetch latest metrics: ${error.message}`);
+      log.error(`Error getting weekly metrics for site ${siteId}: ${error.message}`, error);
+      return internalServerError(`Failed to fetch weekly metrics: ${error.message}`);
     }
+  };
+
+  const getLatestSiteMetrics = async (context) => {
+    const siteId = context.params?.siteId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view its metrics');
+    }
+
+    const rumAPIClient = RUMAPIClient.createFrom(context);
+    const domain = wwwUrlResolver(site);
+
+    try {
+      const current = await rumAPIClient.query(TOTAL_METRICS, {
+        domain,
+        interval: MONTH_DAYS,
+      });
+      const total = await rumAPIClient.query(TOTAL_METRICS, {
+        domain,
+        interval: 2 * MONTH_DAYS,
+      });
+      const organicTraffic = await getStoredMetrics(
+        { siteId, metric: ORGANIC_TRAFFIC, source: AHREFS },
+        context,
+      );
+
+      const previousPageViews = total.totalPageViews - current.totalPageViews;
+      const previousCTR = (total.totalClicks - current.totalClicks) / previousPageViews;
+      const pageViewsChange = ((current.totalPageViews - previousPageViews)
+        / previousPageViews) * 100;
+      const ctrChange = ((current.totalCTR - previousCTR) / previousCTR) * 100;
+
+      let cpc = 0;
+
+      if (organicTraffic.length > 0) {
+        const metric = organicTraffic[organicTraffic.length - 1];
+        cpc = metric.cost / metric.value;
+      }
+
+      const projectedTrafficValue = pageViewsChange * cpc;
+
+      return ok({
+        pageViewsChange,
+        ctrChange,
+        projectedTrafficValue,
+      });
+    } catch (error) {
+      log.error(`Error getting RUM metrics for site ${siteId}: ${error.message}`);
+    }
+
+    return ok({
+      pageViewsChange: 0,
+      ctrChange: 0,
+      projectedTrafficValue: 0,
+    });
   };
 
   const getPageMetricsBySource = async (context) => {
@@ -972,6 +1032,7 @@ function SitesController(ctx, log, env) {
     getSiteMetricsBySource,
     getPageMetricsBySource,
     getLatestSiteMetrics,
+    getWeeklySiteMetrics,
   };
 }
 

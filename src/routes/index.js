@@ -178,6 +178,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/metrics/:metric/:source': sitesController.getSiteMetricsBySource,
     'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': sitesController.getPageMetricsBySource,
     'GET /sites/:siteId/latest-metrics': sitesController.getLatestSiteMetrics,
+    'GET /sites/:siteId/weekly-metrics': sitesController.getWeeklySiteMetrics,
     'GET /sites/by-base-url/:baseURL': sitesController.getByBaseURL,
     'GET /sites/by-delivery-type/:deliveryType': sitesController.getAllByDeliveryType,
     'GET /sites/with-latest-audit/:auditType': sitesController.getAllWithLatestAudit,
