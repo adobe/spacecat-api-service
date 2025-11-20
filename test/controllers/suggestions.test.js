@@ -3680,6 +3680,14 @@ describe('Suggestions Controller', () => {
         ok: true,
         status: 200,
         statusText: 'OK',
+        headers: {
+          get: (headerName) => {
+            if (headerName === 'x-tokowaka-cache') {
+              return 'hit';
+            }
+            return null;
+          },
+        },
         text: async () => '<html><body>Test HTML</body></html>',
       });
 
