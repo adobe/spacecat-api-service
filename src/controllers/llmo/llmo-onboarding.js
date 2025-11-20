@@ -16,6 +16,7 @@ import { Octokit } from '@octokit/rest';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import { composeBaseURL, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
+import AhrefsAPIClient from '@adobe/spacecat-shared-ahrefs-client';
 
 // LLMO Constants
 const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
@@ -139,7 +140,7 @@ export async function validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, co
         };
       }
     } else if (existingSite.getOrganizationId() !== env.DEFAULT_ORGANIZATION_ID
-        && existingSite.getOrganizationId() !== ASO_DEMO_ORG) {
+      && existingSite.getOrganizationId() !== ASO_DEMO_ORG) {
       // if the organization doesn't exist, but the site does, check that the site isn't claimed yet
       // by another organization
       return {
@@ -423,7 +424,7 @@ export async function unpublishFromAdminHlx(dataFolder, env, log) {
  * @param {Function} say - Optional function to send messages (e.g., Slack say function)
  * @returns {Promise<void>}
  */
-export async function copyFilesToSharepoint(dataFolder, context, say = () => {}) {
+export async function copyFilesToSharepoint(dataFolder, context, say = () => { }) {
   const { log, env } = context;
 
   const sharepointClient = await createSharePointClient(env);
@@ -462,7 +463,7 @@ export async function copyFilesToSharepoint(dataFolder, context, say = () => {})
  * @param {Function} say - Optional function to send messages (e.g., Slack say function)
  * @returns {Promise<void>}
  */
-export async function updateIndexConfig(dataFolder, context, say = () => {}) {
+export async function updateIndexConfig(dataFolder, context, say = () => { }) {
   const { log, env } = context;
 
   log.debug('Starting Git modification of helix query config');
@@ -513,7 +514,7 @@ export async function updateIndexConfig(dataFolder, context, say = () => {}) {
  * @param {object} slackContext - Slack context (optional, for Slack operations)
  * @returns {Promise<object>} The organization object
  */
-export async function createOrFindOrganization(imsOrgId, context, say = () => {}) {
+export async function createOrFindOrganization(imsOrgId, context, say = () => { }) {
   const { dataAccess, log } = context;
   const { Organization } = dataAccess;
 
@@ -663,7 +664,7 @@ export async function removeLlmoConfig(site, config, context) {
  * @param {Function} say - Optional function to send messages (e.g., Slack say function)
  * @returns {Promise<object>} The entitlement and enrollment objects
  */
-export async function createEntitlementAndEnrollment(site, context, say = () => {}) {
+export async function createEntitlementAndEnrollment(site, context, say = () => { }) {
   const { log } = context;
 
   try {
@@ -724,6 +725,111 @@ export async function triggerAudits(audits, context, site) {
   );
 }
 
+async function determineCanonicalBaseURLWithAhrefs(defaultBaseURL, context) {
+  const { log } = context;
+
+  let parsed;
+  try {
+    parsed = new URL(defaultBaseURL);
+  } catch (e) {
+    log.warn(`LLMO onboarding: invalid base URL '${defaultBaseURL}' for canonical detection: ${e.message}`);
+    return defaultBaseURL;
+  }
+
+  const { protocol, hostname } = parsed;
+  const bareHostname = hostname.replace(/^www\./i, '');
+  const nonWwwHostname = bareHostname;
+  const wwwHostname = `www.${bareHostname}`;
+
+  const nonWwwBaseURL = `${protocol}//${nonWwwHostname}`;
+  const wwwBaseURL = `${protocol}//${wwwHostname}`;
+
+  let ahrefsClient;
+
+  try {
+    ahrefsClient = typeof context.ahrefsClientFactory === 'function'
+      ? context.ahrefsClientFactory({
+        ...context,
+        defaultBaseURL,
+      })
+      : AhrefsAPIClient.createFrom(context);
+  } catch (error) {
+    log.warn(`LLMO onboarding: unable to create Ahrefs client for canonical URL detection: ${error.message}`);
+    return defaultBaseURL;
+  }
+
+  if (!ahrefsClient || typeof ahrefsClient.getMetrics !== 'function') {
+    log.warn('LLMO onboarding: Ahrefs client is not available or does not expose getMetrics; using default base URL');
+    return defaultBaseURL;
+  }
+
+  const [nonWwwResult, wwwResult] = await Promise.allSettled([
+    ahrefsClient.getMetrics(nonWwwHostname),
+    ahrefsClient.getMetrics(wwwHostname),
+  ]);
+
+  const evaluateResult = (settledResult) => {
+    if (!settledResult || settledResult.status === 'rejected') {
+      return {
+        hasResults: false,
+        strength: 0,
+        error: settledResult?.reason,
+      };
+    }
+
+    const metrics = settledResult.value?.result?.metrics;
+    if (!metrics || typeof metrics !== 'object') {
+      return { hasResults: false, strength: 0 };
+    }
+
+    const numericValues = Object.values(metrics)
+      .filter((value) => typeof value === 'number' && Number.isFinite(value));
+
+    if (numericValues.length === 0) {
+      return { hasResults: false, strength: 0 };
+    }
+
+    const strength = numericValues.reduce((sum, value) => sum + value, 0);
+    const hasResults = numericValues.some((value) => value > 0);
+
+    return { hasResults, strength };
+  };
+
+  const nonWwwEval = evaluateResult(nonWwwResult);
+  const wwwEval = evaluateResult(wwwResult);
+
+  if (nonWwwResult.status === 'rejected' && wwwResult.status === 'rejected') {
+    /* c8 ignore next 5 */
+    log.error(
+      `LLMO onboarding: Ahrefs canonical URL detection failed for ${bareHostname} `
+      + `(non-www error="${nonWwwEval.error?.message || String(nonWwwEval.error || '')}", `
+      + `www error="${wwwEval.error?.message || String(wwwEval.error || '')}"). `
+      + `Falling back to default base URL ${defaultBaseURL}`,
+    );
+    return defaultBaseURL;
+  }
+
+  if (!nonWwwEval.hasResults && !wwwEval.hasResults) {
+    log.info(`LLMO onboarding: Ahrefs returned no meaningful metrics for ${nonWwwHostname} or ${wwwHostname}. Using default base URL ${defaultBaseURL}`);
+    return defaultBaseURL;
+  }
+
+  let canonicalBaseURL;
+  if (nonWwwEval.hasResults && !wwwEval.hasResults) {
+    canonicalBaseURL = nonWwwBaseURL;
+  } else if (!nonWwwEval.hasResults && wwwEval.hasResults) {
+    canonicalBaseURL = wwwBaseURL;
+  } else if (nonWwwEval.strength >= wwwEval.strength) {
+    canonicalBaseURL = nonWwwBaseURL;
+  } else {
+    canonicalBaseURL = wwwBaseURL;
+  }
+
+  log.info(`LLMO onboarding: selected canonical base URL ${canonicalBaseURL} (default=${defaultBaseURL}, non-www strength=${nonWwwEval.strength}, www strength=${wwwEval.strength})`);
+
+  return canonicalBaseURL;
+}
+
 /**
  * Complete LLMO onboarding process.
  * @param {object} params - Onboarding parameters
@@ -741,6 +847,8 @@ export async function performLlmoOnboarding(params, context) {
   // Construct base URL and data folder name
   const baseURL = composeBaseURL(domain);
   const dataFolder = generateDataFolder(baseURL, env.ENV);
+
+  const canonicalBaseURL = await determineCanonicalBaseURLWithAhrefs(baseURL, context);
 
   let site;
   try {
@@ -777,6 +885,11 @@ export async function performLlmoOnboarding(params, context) {
     // Update brand and data directory
     siteConfig.updateLlmoBrand(brandName.trim());
     siteConfig.updateLlmoDataFolder(dataFolder.trim());
+
+    if (canonicalBaseURL !== baseURL && typeof siteConfig.updateFetchConfig === 'function') {
+      log.info(`LLMO onboarding: applying canonical fetch override for site ${site.getId()}: ${canonicalBaseURL}`);
+      siteConfig.updateFetchConfig({ overrideBaseURL: canonicalBaseURL });
+    }
 
     // update the site config object
     site.setConfig(Config.toDynamoItem(siteConfig));

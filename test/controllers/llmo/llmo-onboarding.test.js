@@ -147,6 +147,45 @@ describe('LLMO Onboarding Functions', () => {
     });
   };
 
+  const createMockAhrefsClient = (sandbox = sinon, options = {}) => {
+    const {
+      nonWwwHasResults = false,
+      wwwHasResults = false,
+      nonWwwMetrics = {},
+      wwwMetrics = {},
+      nonWwwError = new Error('non-www Ahrefs error'),
+      wwwError = new Error('www Ahrefs error'),
+    } = options;
+
+    const client = {
+      getMetrics: sandbox.stub(),
+    };
+
+    client.getMetrics.callsFake((hostname) => {
+      const isWww = hostname.toLowerCase().startsWith('www.');
+
+      if (isWww) {
+        if (wwwHasResults) {
+          return Promise.resolve({ result: { metrics: wwwMetrics } });
+        }
+        if (Object.keys(wwwMetrics).length === 0) {
+          return Promise.resolve({ result: { metrics: {} } });
+        }
+        return Promise.reject(wwwError);
+      }
+
+      if (nonWwwHasResults) {
+        return Promise.resolve({ result: { metrics: nonWwwMetrics } });
+      }
+      if (Object.keys(nonWwwMetrics).length === 0) {
+        return Promise.resolve({ result: { metrics: {} } });
+      }
+      return Promise.reject(nonWwwError);
+    });
+
+    return client;
+  };
+
   const createCommonEsmockDependencies = (options = {}) => {
     const {
       mockTierClient,
@@ -155,6 +194,7 @@ describe('LLMO Onboarding Functions', () => {
       mockComposeBaseURL,
       mockSharePointClient: sharePointClient,
       mockOctokit,
+      mockAhrefsApiClient,
     } = options;
 
     const deps = {
@@ -186,6 +226,10 @@ describe('LLMO Onboarding Functions', () => {
       deps['@adobe/spacecat-shared-utils'] = {};
       if (mockTracingFetch) deps['@adobe/spacecat-shared-utils'].tracingFetch = mockTracingFetch;
       if (mockComposeBaseURL) deps['@adobe/spacecat-shared-utils'].composeBaseURL = mockComposeBaseURL;
+    }
+
+    if (mockAhrefsApiClient) {
+      deps['@adobe/spacecat-shared-ahrefs-client'] = { default: mockAhrefsApiClient };
     }
 
     return deps;
@@ -741,6 +785,45 @@ describe('LLMO Onboarding Functions', () => {
     });
   });
 
+  describe('updateIndexConfig', () => {
+    it('should log and skip GitHub update when helix-query.yaml already contains dataFolder', async () => {
+      const dataFolder = 'dev/example-com';
+      const contentWithFolder = `some existing config for ${dataFolder}`;
+
+      const mockOctokit = createMockOctokit(sinon, { content: contentWithFolder });
+
+      const { updateIndexConfig } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockOctokit,
+        }),
+      );
+
+      const say = sinon.stub().resolves();
+
+      const context = {
+        log: mockLog,
+        env: {
+          ...mockEnv,
+          LLMO_ONBOARDING_GITHUB_TOKEN: 'test-token',
+        },
+      };
+
+      await updateIndexConfig(dataFolder, context, say);
+
+      const octokitInstance = mockOctokit.firstCall.returnValue;
+
+      expect(octokitInstance.repos.getContent).to.have.been.calledOnce;
+      expect(octokitInstance.repos.createOrUpdateFileContents).to.not.have.been.called;
+      expect(mockLog.warn).to.have.been.calledWith(
+        `Helix query yaml already contains string ${dataFolder}. Skipping update.`,
+      );
+      expect(say).to.have.been.calledWith(
+        `Helix query yaml already contains string ${dataFolder}. Skipping GitHub update.`,
+      );
+    });
+  });
+
   describe('performLlmoOnboarding', () => {
     it('should successfully perform complete LLMO onboarding process', async () => {
       // Mock organization
@@ -757,6 +840,7 @@ describe('LLMO Onboarding Functions', () => {
           updateLlmoDataFolder: sinon.stub(),
           getImports: sinon.stub().returns([]),
           enableImport: sinon.stub(),
+          updateFetchConfig: sinon.stub(),
         }),
         setConfig: sinon.stub(),
         save: sinon.stub().resolves(),
@@ -800,6 +884,13 @@ describe('LLMO Onboarding Functions', () => {
         }),
       );
 
+      const ahrefsClient = createMockAhrefsClient(sinon, {
+        nonWwwHasResults: true,
+        nonWwwMetrics: { traffic: 10 },
+        wwwHasResults: false,
+        wwwMetrics: {},
+      });
+
       const context = {
         dataAccess: mockDataAccess,
         log: mockLog,
@@ -807,6 +898,7 @@ describe('LLMO Onboarding Functions', () => {
         sqs: {
           sendMessage: sinon.stub().resolves(),
         },
+        ahrefsClientFactory: () => ahrefsClient,
       };
 
       const params = {
@@ -838,6 +930,8 @@ describe('LLMO Onboarding Functions', () => {
       // Verify site config was updated
       expect(mockSite.getConfig().updateLlmoBrand).to.have.been.calledWith('Test Brand');
       expect(mockSite.getConfig().updateLlmoDataFolder).to.have.been.calledWith('dev/example-com');
+      // Since Ahrefs prefers the non-www host in this setup, no fetch override should be applied.
+      expect(mockSite.getConfig().updateFetchConfig).to.not.have.been.called;
 
       // Verify site was saved
       expect(mockSite.setConfig).to.have.been.calledWith({ config: 'dynamo-item' });
@@ -876,6 +970,7 @@ describe('LLMO Onboarding Functions', () => {
           updateLlmoDataFolder: sinon.stub(),
           getImports: sinon.stub().returns([]),
           enableImport: sinon.stub(),
+          updateFetchConfig: sinon.stub(),
         }),
         setConfig: sinon.stub(),
         save: sinon.stub().resolves(),
@@ -927,6 +1022,12 @@ describe('LLMO Onboarding Functions', () => {
         sqs: {
           sendMessage: sinon.stub().resolves(),
         },
+        ahrefsClientFactory: () => createMockAhrefsClient(sinon, {
+          nonWwwHasResults: true,
+          nonWwwMetrics: { traffic: 5 },
+          wwwHasResults: true,
+          wwwMetrics: { traffic: 10 },
+        }),
       };
 
       const params = {
@@ -971,6 +1072,7 @@ describe('LLMO Onboarding Functions', () => {
           updateLlmoDataFolder: sinon.stub(),
           getImports: sinon.stub().returns([]),
           enableImport: sinon.stub(),
+          updateFetchConfig: sinon.stub(),
         }),
         setConfig: sinon.stub(),
         save: sinon.stub().rejects(new Error('Database save failed')),
@@ -1062,6 +1164,12 @@ describe('LLMO Onboarding Functions', () => {
         sqs: {
           sendMessage: sinon.stub().resolves(),
         },
+        ahrefsClientFactory: () => createMockAhrefsClient(sinon, {
+          nonWwwHasResults: true,
+          nonWwwMetrics: { traffic: 10 },
+          wwwHasResults: true,
+          wwwMetrics: { traffic: 5 },
+        }),
       };
 
       const params = {
@@ -1079,7 +1187,9 @@ describe('LLMO Onboarding Functions', () => {
       }
 
       // Verify cleanup was attempted
-      expect(mockLog.error).to.have.been.calledWith(sinon.match('Error during LLMO onboarding: Database save failed. Attempting cleanup.'));
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match('Error during LLMO onboarding: Database save failed. Attempting cleanup.'),
+      );
 
       // Verify deleteSharePointFolder was called (which deletes folder and unpublishes)
       expect(mockSharePointFolderLocal.exists).to.have.been.called;
@@ -1091,6 +1201,619 @@ describe('LLMO Onboarding Functions', () => {
       expect(tierClient.revokeSiteEnrollment).to.have.been.called;
 
       // Restore setTimeout
+      restoreSetTimeout(originalSetTimeout);
+    });
+
+    it('should apply a canonical fetch override when Ahrefs prefers the www host', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      const mockSiteConfig = {
+        updateLlmoBrand: sinon.stub(),
+        updateLlmoDataFolder: sinon.stub(),
+        getImports: sinon.stub().returns([]),
+        enableImport: sinon.stub(),
+        updateFetchConfig: sinon.stub(),
+      };
+
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns(mockSiteConfig),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      const originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: {
+          sendMessage: sinon.stub().resolves(),
+        },
+        ahrefsClientFactory: () => createMockAhrefsClient(sinon, {
+          nonWwwHasResults: false,
+          nonWwwMetrics: {},
+          wwwHasResults: true,
+          wwwMetrics: { traffic: 50 },
+        }),
+      };
+
+      const params = {
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      };
+
+      const result = await performLlmoOnboardingWithMocks(params, context);
+
+      expect(result.baseURL).to.equal('https://example.com');
+      expect(mockSiteConfig.updateFetchConfig).to.have.been.calledOnceWithExactly({
+        overrideBaseURL: 'https://www.example.com',
+      });
+
+      restoreSetTimeout(originalSetTimeout);
+    });
+
+    it('should fall back to the default base URL when Ahrefs metrics are unavailable', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      const mockSiteConfig = {
+        updateLlmoBrand: sinon.stub(),
+        updateLlmoDataFolder: sinon.stub(),
+        getImports: sinon.stub().returns([]),
+        enableImport: sinon.stub(),
+        updateFetchConfig: sinon.stub(),
+      };
+
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns(mockSiteConfig),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      const originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+
+          mockOctokit,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: {
+          sendMessage: sinon.stub().resolves(),
+        },
+        ahrefsClientFactory: () => createMockAhrefsClient(sinon, {
+          nonWwwHasResults: true,
+          nonWwwMetrics: null,
+          wwwHasResults: false,
+          wwwMetrics: {},
+        }),
+      };
+
+      const params = {
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      };
+
+      const result = await performLlmoOnboardingWithMocks(params, context);
+
+      expect(result.baseURL).to.equal('https://example.com');
+      expect(mockSiteConfig.updateFetchConfig).to.not.have.been.called;
+      expect(mockLog.info).to.have.been.calledWith(
+        sinon.match('Ahrefs returned no meaningful metrics for example.com or www.example.com'),
+      );
+
+      restoreSetTimeout(originalSetTimeout);
+    });
+
+    it('should continue using default base URL when Ahrefs client cannot be constructed', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      const mockSiteConfig = {
+        updateLlmoBrand: sinon.stub(),
+        updateLlmoDataFolder: sinon.stub(),
+        getImports: sinon.stub().returns([]),
+        enableImport: sinon.stub(),
+        updateFetchConfig: sinon.stub(),
+      };
+
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns(mockSiteConfig),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      const originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: {
+          sendMessage: sinon.stub().resolves(),
+        },
+        ahrefsClientFactory: () => {
+          throw new Error('Bad Ahrefs config');
+        },
+      };
+
+      const params = {
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      };
+
+      const result = await performLlmoOnboardingWithMocks(params, context);
+
+      expect(result.baseURL).to.equal('https://example.com');
+      expect(mockSiteConfig.updateFetchConfig).to.not.have.been.called;
+      expect(mockLog.warn).to.have.been.calledWith(
+        sinon.match('unable to create Ahrefs client for canonical URL detection'),
+      );
+
+      restoreSetTimeout(originalSetTimeout);
+    });
+
+    it('should continue using default base URL when shared Ahrefs client module is missing', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      const mockSiteConfig = {
+        updateLlmoBrand: sinon.stub(),
+        updateLlmoDataFolder: sinon.stub(),
+        getImports: sinon.stub().returns([]),
+        enableImport: sinon.stub(),
+        updateFetchConfig: sinon.stub(),
+      };
+
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns(mockSiteConfig),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      const originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: {
+          sendMessage: sinon.stub().resolves(),
+        },
+        // Intentionally omit ahrefsClientFactory to exercise the dynamic import path.
+      };
+
+      const params = {
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      };
+
+      const result = await performLlmoOnboardingWithMocks(params, context);
+
+      expect(result.baseURL).to.equal('https://example.com');
+      expect(mockSiteConfig.updateFetchConfig).to.not.have.been.called;
+      expect(mockLog.warn).to.have.been.calledWith(
+        sinon.match('unable to create Ahrefs client for canonical URL detection'),
+      );
+
+      restoreSetTimeout(originalSetTimeout);
+    });
+
+    it('should continue using default base URL when Ahrefs client lacks getMetrics', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      const mockSiteConfig = {
+        updateLlmoBrand: sinon.stub(),
+        updateLlmoDataFolder: sinon.stub(),
+        getImports: sinon.stub().returns([]),
+        enableImport: sinon.stub(),
+        updateFetchConfig: sinon.stub(),
+      };
+
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns(mockSiteConfig),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      const originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: {
+          sendMessage: sinon.stub().resolves(),
+        },
+        ahrefsClientFactory: () => ({}),
+      };
+
+      const params = {
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      };
+
+      const result = await performLlmoOnboardingWithMocks(params, context);
+
+      expect(result.baseURL).to.equal('https://example.com');
+      expect(mockSiteConfig.updateFetchConfig).to.not.have.been.called;
+      expect(mockLog.warn).to.have.been.calledWith(
+        sinon.match('Ahrefs client is not available or does not expose getMetrics; using default base URL'),
+      );
+
+      restoreSetTimeout(originalSetTimeout);
+    });
+
+    it('should log an error and fall back when Ahrefs rejects for both hosts', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      const mockSiteConfig = {
+        updateLlmoBrand: sinon.stub(),
+        updateLlmoDataFolder: sinon.stub(),
+        getImports: sinon.stub().returns([]),
+        enableImport: sinon.stub(),
+        updateFetchConfig: sinon.stub(),
+      };
+
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns(mockSiteConfig),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      const originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: {
+          sendMessage: sinon.stub().resolves(),
+        },
+        ahrefsClientFactory: () => createMockAhrefsClient(sinon, {
+          nonWwwHasResults: false,
+          nonWwwMetrics: { traffic: 10 },
+          wwwHasResults: false,
+          wwwMetrics: { traffic: 20 },
+        }),
+      };
+
+      const params = {
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      };
+
+      const result = await performLlmoOnboardingWithMocks(params, context);
+
+      expect(result.baseURL).to.equal('https://example.com');
+      expect(mockSiteConfig.updateFetchConfig).to.not.have.been.called;
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match('Ahrefs canonical URL detection failed for example.com'),
+      );
+
+      restoreSetTimeout(originalSetTimeout);
+    });
+    it('should log a warning and fall back when URL parsing fails for canonical detection', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      const mockSiteConfig = {
+        updateLlmoBrand: sinon.stub(),
+        updateLlmoDataFolder: sinon.stub(),
+        getImports: sinon.stub().returns([]),
+        enableImport: sinon.stub(),
+        updateFetchConfig: sinon.stub(),
+      };
+
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns(mockSiteConfig),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      const originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+
+      const ahrefsClient = createMockAhrefsClient(sinon, {
+        nonWwwHasResults: true,
+        nonWwwMetrics: { traffic: 10 },
+        wwwHasResults: false,
+        wwwMetrics: {},
+      });
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+        }),
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: {
+          sendMessage: sinon.stub().resolves(),
+        },
+        ahrefsClientFactory: () => ahrefsClient,
+      };
+
+      const originalURL = global.URL;
+      let callCount = 0;
+
+      class MockURL extends originalURL {
+        constructor(url) {
+          callCount += 1;
+          if (callCount === 2) {
+            throw new Error('Canonical parse error');
+          }
+          super(url);
+        }
+      }
+
+      global.URL = MockURL;
+
+      const params = {
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      };
+
+      const result = await performLlmoOnboardingWithMocks(params, context);
+
+      expect(result.baseURL).to.equal('https://example.com');
+      expect(mockSiteConfig.updateFetchConfig).to.not.have.been.called;
+      expect(mockLog.warn).to.have.been.calledWith(
+        sinon.match("invalid base URL 'https://example.com' for canonical detection: Canonical parse error"),
+      );
+
+      global.URL = originalURL;
       restoreSetTimeout(originalSetTimeout);
     });
   });
