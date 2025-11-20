@@ -233,6 +233,389 @@ llmo-sheet-data-with-type-and-week:
     security:
       - api_key: [ ]
 
+llmo-data:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: file
+      in: query
+      required: false
+      description: One or more file paths to fetch (comma-separated or multiple query params). Used for multi-file mode when no path parameters are provided.
+      schema:
+        type: string
+        example: 'analytics/questions.json,analytics/answers.json'
+    - name: filter.*
+      in: query
+      required: false
+      description: Filter results by field values (e.g., filter.status=active, filter.category=cat1). Multiple filters are ANDed together with case-insensitive exact matching.
+      schema:
+        type: string
+    - name: include
+      in: query
+      required: false
+      description: Comma-separated list of fields to include in the response
+      schema:
+        type: string
+        example: 'field1,field2,field3'
+    - name: sort
+      in: query
+      required: false
+      description: Sort results by field in ascending or descending order (format - field:asc or field:desc)
+      schema:
+        type: string
+        example: 'date:desc'
+    - name: sheets
+      in: query
+      required: false
+      description: Comma-separated list of sheet names to include (for multi-sheet data)
+      schema:
+        type: string
+        example: 'sheet1,sheet2'
+    - name: limit
+      in: query
+      required: false
+      description: Maximum number of records to return
+      schema:
+        type: integer
+        default: 10000000
+    - name: offset
+      in: query
+      required: false
+      description: Number of records to skip
+      schema:
+        type: integer
+        default: 0
+    - name: sheet
+      in: query
+      required: false
+      description: Specific sheet name to fetch from the data source
+      schema:
+        type: string
+  get:
+    tags:
+      - llmo
+    summary: Query LLMO data files with filters and sorting
+    description: |
+      Retrieves and processes data from the external LLMO data endpoint with advanced querying capabilities via URL parameters.
+      This endpoint supports two modes:
+
+      **Multi-file mode**: Use the `file` query parameter to fetch multiple files at once (up to 7 concurrent requests).
+      Each file is processed independently and returned in a results array.
+
+      **Single-file mode**: The endpoint will look for dataSource in the path and fetch that specific file.
+
+      Query parameters allow filtering, field inclusion, sorting, and sheet selection. This is an optimized
+      alternative to the POST endpoints that uses GET requests with URL parameters for caching and simplicity.
+    operationId: queryLlmoData
+    responses:
+      '200':
+        description: LLMO data queried and processed successfully
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  description: Single file response with processed data
+                  properties:
+                    data:
+                      type: object
+                      description: The processed data
+                    headers:
+                      type: object
+                      description: Response headers from upstream
+                - type: array
+                  description: Multi-file response with array of results
+                  items:
+                    type: object
+                    properties:
+                      path:
+                        type: string
+                        description: The file path that was fetched
+                      status:
+                        type: string
+                        enum: [success, error]
+                        description: The status of the fetch operation
+                      data:
+                        type: object
+                        description: The processed data (only present if status is success)
+                      error:
+                        type: string
+                        description: Error message (only present if status is error)
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+llmo-data-with-datasource:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: dataSource
+      in: path
+      required: true
+      description: The data source identifier to fetch from the external endpoint
+      schema:
+        type: string
+        example: 'questions.json'
+    - name: filter.*
+      in: query
+      required: false
+      description: Filter results by field values (e.g., filter.status=active)
+      schema:
+        type: string
+    - name: include
+      in: query
+      required: false
+      description: Comma-separated list of fields to include in the response
+      schema:
+        type: string
+    - name: sort
+      in: query
+      required: false
+      description: Sort results by field (format - field:asc or field:desc)
+      schema:
+        type: string
+    - name: sheets
+      in: query
+      required: false
+      description: Comma-separated list of sheet names to include
+      schema:
+        type: string
+    - name: limit
+      in: query
+      required: false
+      description: Maximum number of records to return
+      schema:
+        type: integer
+    - name: offset
+      in: query
+      required: false
+      description: Number of records to skip
+      schema:
+        type: integer
+    - name: sheet
+      in: query
+      required: false
+      description: Specific sheet name to fetch from the data source
+      schema:
+        type: string
+  get:
+    tags:
+      - llmo
+    summary: Query LLMO data for a specific data source
+    description: |
+      Retrieves and processes data from a specific data source file with query parameters for filtering,
+      field inclusion, sorting, and sheet selection. The data is fetched from {dataFolder}/{dataSource}.
+    operationId: queryLlmoDataWithSource
+    responses:
+      '200':
+        description: LLMO data queried successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  type: object
+                  description: The processed data
+                headers:
+                  type: object
+                  description: Response headers
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+llmo-data-with-type:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: sheetType
+      in: path
+      required: true
+      description: The sheet type identifier
+      schema:
+        type: string
+        example: 'analytics'
+    - name: dataSource
+      in: path
+      required: true
+      description: The data source identifier to fetch from the external endpoint
+      schema:
+        type: string
+        example: 'questions.json'
+    - name: filter.*
+      in: query
+      required: false
+      description: Filter results by field values
+      schema:
+        type: string
+    - name: include
+      in: query
+      required: false
+      description: Comma-separated list of fields to include
+      schema:
+        type: string
+    - name: sort
+      in: query
+      required: false
+      description: Sort results by field
+      schema:
+        type: string
+    - name: sheets
+      in: query
+      required: false
+      description: Comma-separated list of sheet names to include
+      schema:
+        type: string
+    - name: limit
+      in: query
+      required: false
+      description: Maximum number of records to return
+      schema:
+        type: integer
+    - name: offset
+      in: query
+      required: false
+      description: Number of records to skip
+      schema:
+        type: integer
+    - name: sheet
+      in: query
+      required: false
+      description: Specific sheet name to fetch
+      schema:
+        type: string
+  get:
+    tags:
+      - llmo
+    summary: Query LLMO data with sheet type
+    description: |
+      Retrieves and processes data with a specified sheet type. The data is fetched from
+      {dataFolder}/{sheetType}/{dataSource}. Supports query parameters for filtering, sorting, and field selection.
+    operationId: queryLlmoDataWithType
+    responses:
+      '200':
+        description: LLMO data queried successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  type: object
+                headers:
+                  type: object
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+llmo-data-with-type-and-week:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: sheetType
+      in: path
+      required: true
+      description: The sheet type identifier
+      schema:
+        type: string
+        example: 'analytics'
+    - name: week
+      in: path
+      required: true
+      description: The week identifier (e.g., w01, w02)
+      schema:
+        type: string
+        pattern: '^w\d{2}$'
+        example: 'w01'
+    - name: dataSource
+      in: path
+      required: true
+      description: The data source identifier
+      schema:
+        type: string
+        example: 'questions.json'
+    - name: filter.*
+      in: query
+      required: false
+      description: Filter results by field values
+      schema:
+        type: string
+    - name: include
+      in: query
+      required: false
+      description: Comma-separated list of fields to include
+      schema:
+        type: string
+    - name: sort
+      in: query
+      required: false
+      description: Sort results by field
+      schema:
+        type: string
+    - name: sheets
+      in: query
+      required: false
+      description: Comma-separated list of sheet names to include
+      schema:
+        type: string
+    - name: limit
+      in: query
+      required: false
+      description: Maximum number of records to return
+      schema:
+        type: integer
+    - name: offset
+      in: query
+      required: false
+      description: Number of records to skip
+      schema:
+        type: integer
+    - name: sheet
+      in: query
+      required: false
+      description: Specific sheet name to fetch
+      schema:
+        type: string
+  get:
+    tags:
+      - llmo
+    summary: Query LLMO data with sheet type and week
+    description: |
+      Retrieves and processes time-series data with a specified sheet type and week. The data is fetched from
+      {dataFolder}/{sheetType}/{week}/{dataSource}. Supports query parameters for filtering, sorting, and field selection.
+    operationId: queryLlmoDataWithTypeAndWeek
+    responses:
+      '200':
+        description: LLMO data queried successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  type: object
+                headers:
+                  type: object
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 llmo-global-sheet-data:
   parameters:
     - $ref: './parameters.yaml#/siteId'
@@ -327,7 +710,7 @@ llmo-config:
       This operation completely overwrites the existing configuration with the provided payload.
       The payload is validated against the LLMO configuration schema before being stored in S3.
       The configuration must include entities, brands, and competitors sections.
-      
+
       Categories can optionally include URLs that can be either exact URLs or URL prefixes
       (ending with /*) to match against specific content areas.
     operationId: postLlmoConfig

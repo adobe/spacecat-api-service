@@ -113,8 +113,8 @@ function ConsentBannerController(ctx) {
     const fileVariants = [
       { key: 'desktop_cookie_banner_on', variant: 'screenshot-desktop-viewport-withBanner' },
       { key: 'desktop_cookie_banner_off', variant: 'screenshot-desktop-viewport-withoutBanner' },
-      { key: 'mobile_cookie_banner_on', variant: 'screenshot-iphone-6-viewport-withBanner' },
-      { key: 'mobile_cookie_banner_off', variant: 'screenshot-iphone-6-viewport-withoutBanner' },
+      { key: 'mobile_cookie_banner_on', variant: 'screenshot-iphone-13-viewport-withBanner' },
+      { key: 'mobile_cookie_banner_off', variant: 'screenshot-iphone-13-viewport-withoutBanner' },
     ];
 
     try {

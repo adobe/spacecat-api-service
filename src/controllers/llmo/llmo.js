@@ -26,12 +26,14 @@ import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/confi
 import crypto from 'crypto';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import {
   applyFilters,
   applyInclusions,
   applyExclusions,
   applyGroups,
   applyMappings,
+  LLMO_SHEETDATA_SOURCE_URL,
 } from './llmo-utils.js';
 import { LLMO_SHEET_MAPPINGS } from './llmo-mappings.js';
 import {
@@ -40,11 +42,10 @@ import {
   performLlmoOnboarding,
   performLlmoOffboarding,
 } from './llmo-onboarding.js';
+import { queryLlmoFiles } from './llmo-query-handler.js';
 
 const { readConfig, writeConfig } = llmo;
 const { llmoConfig: llmoConfigSchema } = schemas;
-
-const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
 
 function LlmoController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
@@ -904,6 +905,20 @@ function LlmoController(ctx) {
         context,
       );
 
+      let brandProfileExecutionName = null;
+      try {
+        const site = await context.dataAccess?.Site?.findById(result.siteId);
+        if (site) {
+          brandProfileExecutionName = await triggerBrandProfileAgent({
+            context,
+            site,
+            reason: 'llmo-http',
+          });
+        }
+      } catch (hookError) {
+        log.warn(`LLMO onboarding: failed to trigger brand-profile workflow for site ${result.siteId}`, hookError);
+      }
+
       log.info(`LLMO onboarding completed successfully for domain ${domain}`);
 
       return ok({
@@ -917,6 +932,7 @@ function LlmoController(ctx) {
         siteId: result.siteId,
         status: 'completed',
         createdAt: new Date().toISOString(),
+        brandProfileExecutionName,
       });
     } catch (error) {
       log.error(`Error during LLMO onboarding: ${error.message}`);
@@ -960,6 +976,19 @@ function LlmoController(ctx) {
     }
   };
 
+  const queryFiles = async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+    try {
+      const { llmoConfig } = await getSiteAndValidateLlmo(context);
+      const { data, headers } = await queryLlmoFiles(context, llmoConfig);
+      return ok(data, headers);
+    } catch (error) {
+      log.error(`Error during LLMO cached query for site ${siteId}: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -978,6 +1007,7 @@ function LlmoController(ctx) {
     updateLlmoConfig,
     onboardCustomer,
     offboardCustomer,
+    queryFiles,
   };
 }
 

@@ -827,7 +827,7 @@ describe('GetPromptUsageCommand', () => {
       expect(channelId).to.equal('test-channel');
       expect(filename).to.match(/^prompt-usage-\d+-part1\.csv$/);
       expect(slackContext.say.firstCall.args[0]).to.equal(
-        ':progress-loader: Retrieving total number of prompts in use for *all* organizations (excluding Adobe Corp)...',
+        ':progress-loader: Retrieving total number of prompts in use for *all* organizations (excluding Internal IMS orgs)...',
       );
 
       const csvString = Buffer.isBuffer(csvBuffer)
@@ -1056,7 +1056,7 @@ describe('GetPromptUsageCommand', () => {
 
       expect(sendFileStub.calledOnce).to.be.true;
       expect(slackContext.say.firstCall.args[0]).to.equal(
-        ':progress-loader: Retrieving total number of prompts in use for *all* organizations (excluding Adobe Corp)...',
+        ':progress-loader: Retrieving total number of prompts in use for *all* organizations (excluding Internal IMS orgs)...',
       );
       expect(slackContext.say.secondCall.args[0]).to.equal(expectedMessage);
 
@@ -1228,7 +1228,7 @@ describe('GetPromptUsageCommand', () => {
       await command.handleExecution(args, slackContext);
 
       expect(slackContext.say.firstCall.args[0]).to.equal(
-        ':progress-loader: Retrieving total number of prompts in use for *all* organizations (excluding Adobe Corp)...',
+        ':progress-loader: Retrieving total number of prompts in use for *all* organizations (excluding Internal IMS orgs)...',
       );
       expect(slackContext.say.secondCall.args[0]).to.equal(expectedMessage);
 
@@ -1463,7 +1463,7 @@ describe('GetPromptUsageCommand', () => {
       expect(channelIdBatch1).to.equal('test-channel');
       expect(filenameBatch1).to.match(/^prompt-usage-\d+-part1\.csv$/);
       expect(slackContext.say.firstCall.args[0]).to.equal(
-        ':progress-loader: Retrieving total number of prompts in use for *all* organizations (excluding Adobe Corp)...',
+        ':progress-loader: Retrieving total number of prompts in use for *all* organizations (excluding Internal IMS orgs)...',
       );
 
       const csvStringBatch1 = Buffer.isBuffer(csvBufferBatch1)
@@ -1494,7 +1494,7 @@ describe('GetPromptUsageCommand', () => {
       expect(channelIdBatch2).to.equal('test-channel');
       expect(filenameBatch2).to.match(/^prompt-usage-\d+-part2\.csv$/);
       expect(slackContext.say.firstCall.args[0]).to.equal(
-        ':progress-loader: Retrieving total number of prompts in use for *all* organizations (excluding Adobe Corp)...',
+        ':progress-loader: Retrieving total number of prompts in use for *all* organizations (excluding Internal IMS orgs)...',
       );
 
       const csvStringBatch2 = Buffer.isBuffer(csvBufferBatch2)
@@ -1738,7 +1738,7 @@ describe('GetPromptUsageCommand', () => {
       expect(channelId).to.equal('test-channel');
       expect(filename).to.match(/^prompt-usage-\d+-part1\.csv$/);
       expect(slackContext.say.firstCall.args[0]).to.equal(
-        ':progress-loader: Retrieving total number of prompts in use for *all* organizations (excluding Adobe Corp)...',
+        ':progress-loader: Retrieving total number of prompts in use for *all* organizations (excluding Internal IMS orgs)...',
       );
 
       const csvStringBatch = Buffer.isBuffer(csvBuffer)
