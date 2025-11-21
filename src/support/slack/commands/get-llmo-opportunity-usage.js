@@ -14,10 +14,42 @@ import { isValidUrl, SPACECAT_USER_AGENT, tracingFetch as fetch } from '@adobe/s
 import { sendFile, extractURLFromSlackInput } from '../../../utils/slack/base.js';
 import { createObjectCsvStringifier } from '../../../utils/slack/csvHelper.cjs';
 import BaseCommand from './base.js';
+import { LLMO_INTERNAL_IMS_ORGS } from './get-prompt-usage.js';
 
 const PHRASES = ['get-llmo-opportunity-usage'];
-const EXCLUDED_IMS_ORGS = ['9E1005A551ED61CA0A490D45@AdobeOrg'];
 const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
+const FETCH_TIMEOUT_MS = 30000; // 30 seconds timeout for external API calls
+const MAX_CONCURRENT_SITES = 5; // Limit concurrent site processing to prevent timeouts
+
+/**
+ * Process promises in batches with controlled concurrency
+ * Pattern from llmo-query-handler.js to prevent resource contention
+ * @param {Array} items - Items to process
+ * @param {Function} fn - Async function to process each item
+ * @param {number} concurrency - Maximum number of concurrent operations
+ * @returns {Promise<Array>} - Results array
+ */
+const processBatch = async (items, fn, concurrency) => {
+  const results = [];
+  const executing = [];
+
+  for (const item of items) {
+    const promise = fn(item).then((result) => {
+      executing.splice(executing.indexOf(promise), 1);
+      return result;
+    });
+
+    results.push(promise);
+    executing.push(promise);
+
+    if (executing.length >= concurrency) {
+      // eslint-disable-next-line no-await-in-loop
+      await Promise.race(executing);
+    }
+  }
+
+  return Promise.all(results);
+};
 
 /**
  * Fetches LLMO sheet data for a given site and data source path.
@@ -45,13 +77,14 @@ async function fetchLlmoSheetData(site, dataSourcePath, env) {
     const sheetURL = `${dataFolder}/${cleanDataSourcePath}`;
     const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
 
-    // Fetch data from the external endpoint
+    // Fetch data from the external endpoint with extended timeout
     const response = await fetch(url.toString(), {
       headers: {
-        Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
+        Authorization: `token ${env.LLMO_HLX_API_KEY}`,
         'User-Agent': SPACECAT_USER_AGENT,
         'Accept-Encoding': 'br',
       },
+      timeout: FETCH_TIMEOUT_MS,
     });
 
     if (!response.ok) {
@@ -119,9 +152,9 @@ function GetLlmoOpportunityUsageCommand(context) {
   const baseCommand = BaseCommand({
     id: 'get-llmo-opportunity-usage',
     name: 'Get LLMO Opportunity Usage',
-    description: 'Retrieves LLMO opportunity usage statistics for all llmo enabled sites or a specific site by ID/URL',
+    description: 'Retrieves LLMO opportunity usage statistics for all llmo enabled sites, specific site by ID/URL, or by IMS Org ID(s)',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} [siteId|baseURL]`,
+    usageText: `${PHRASES[0]} [siteId|baseURL|imsOrgID(s)|--all] – multiple IMS Org IDs can be comma or space separated`,
   });
 
   const { dataAccess, log } = context;
@@ -132,8 +165,8 @@ function GetLlmoOpportunityUsageCommand(context) {
 
     // Filter opportunities that have 'isElmo' tag or are prerender or llm-blocked types
     const llmoOpportunities = opportunities.filter((opportunity) => {
-      const tags = opportunity.getTags() || [];
-      const type = opportunity.getType() || '';
+      const tags = [...(opportunity.getTags())];
+      const type = opportunity.getType() ?? '';
       return tags.includes('isElmo') || type === 'prerender' || type === 'llm-blocked';
     });
 
@@ -142,28 +175,73 @@ function GetLlmoOpportunityUsageCommand(context) {
 
   const handleExecution = async (args, slackContext) => {
     const { say } = slackContext;
-    const [siteInput] = args;
 
     try {
       let sites = [];
 
-      if (siteInput) {
-        await say(`🔍 Fetching LLMO opportunity usage for site: ${siteInput}...`);
-        const baseURL = extractURLFromSlackInput(siteInput);
-        const site = isValidUrl(baseURL)
-          ? await Site.findByBaseURL(baseURL)
-          : await Site.findById(siteInput);
-
-        if (!site) {
-          await say(`❌ Site not found: ${siteInput}`);
-          return;
-        }
-        sites = [site];
-      } else {
+      // No arguments - process all LLMO-enabled sites
+      if (args.length === 0) {
         await say('🔍 Fetching all LLMO-enabled sites...');
-        // All sites with LLMO
         const allSites = await Site.all();
         sites = allSites.filter((site) => site.getConfig()?.getLlmoConfig());
+      } else {
+        const [firstArg] = args;
+
+        // Check if it's --all flag
+        if (firstArg === '--all') {
+          await say('🔍 Fetching all LLMO-enabled sites...');
+          const allSites = await Site.all();
+          sites = allSites.filter((site) => site.getConfig()?.getLlmoConfig());
+        } else if (firstArg.includes('@AdobeOrg')) {
+          // IMS Org ID(s) provided
+          const imsOrgIds = args
+            .flatMap((s) => s.trim().split(/[,\s]+/))
+            .filter(Boolean);
+
+          await say(`🔍 Fetching LLMO-enabled sites for ${imsOrgIds.length} IMS Org ID(s)...`);
+
+          const allSitesForOrgs = [];
+          for (const imsOrgId of imsOrgIds) {
+            try {
+              // eslint-disable-next-line no-await-in-loop
+              const organization = await Organization.findByImsOrgId(imsOrgId);
+              if (!organization) {
+                log.warn(`Organization not found for IMS Org ID: ${imsOrgId}`);
+                // eslint-disable-next-line no-await-in-loop
+                await say(`:warning: Organization not found for IMS Org ID: ${imsOrgId}`);
+                // eslint-disable-next-line no-continue
+                continue;
+              }
+
+              // eslint-disable-next-line no-await-in-loop
+              const orgSites = await Site.allByOrganizationId(organization.getId());
+              const llmoEnabledSites = orgSites.filter((site) => site.getConfig()?.getLlmoConfig());
+              allSitesForOrgs.push(...llmoEnabledSites);
+
+              log.info(`Found ${llmoEnabledSites.length} LLMO-enabled sites for IMS Org ID: ${imsOrgId}`);
+            } catch (error) {
+              log.warn(`Error fetching sites for IMS Org ID ${imsOrgId}: ${error.message}`);
+              // eslint-disable-next-line no-await-in-loop
+              await say(`:warning: Error fetching sites for IMS Org ID ${imsOrgId}: ${error.message}`);
+            }
+          }
+
+          sites = allSitesForOrgs;
+        } else {
+          // Single site by ID or URL
+          const siteInput = firstArg;
+          await say(`🔍 Fetching LLMO opportunity usage for site: ${siteInput}...`);
+          const baseURL = extractURLFromSlackInput(siteInput);
+          const site = isValidUrl(baseURL)
+            ? await Site.findByBaseURL(baseURL)
+            : await Site.findById(siteInput);
+
+          if (!site) {
+            await say(`❌ Site not found: ${siteInput}`);
+            return;
+          }
+          sites = [site];
+        }
       }
 
       if (sites.length === 0) {
@@ -171,7 +249,9 @@ function GetLlmoOpportunityUsageCommand(context) {
         return;
       }
 
-      const sitePromises = sites.map(async (site) => {
+      await say(`📊 Processing ${sites.length} site(s) with controlled concurrency...`);
+
+      const processSite = async (site) => {
         try {
           const { env } = context;
           const totalOpportunities = await countLlmoOpportunities(site.getId());
@@ -187,7 +267,7 @@ function GetLlmoOpportunityUsageCommand(context) {
             .trim();
 
           // Skip excluded IMS orgs
-          if (EXCLUDED_IMS_ORGS.includes(imsOrgId)) {
+          if (LLMO_INTERNAL_IMS_ORGS.includes(imsOrgId)) {
             log.info(`Skipping excluded IMS org: ${imsOrgId} for site: ${site.getBaseURL()}`);
             return null;
           }
@@ -214,6 +294,8 @@ function GetLlmoOpportunityUsageCommand(context) {
             totalOpportunitiesCount += thirdPartyOpportunities;
           }
 
+          log.info(`Processed site ${site.getBaseURL()}: ${totalOpportunitiesCount} total opportunities`);
+
           return {
             baseURL: site.getBaseURL(),
             siteId: site.getId(),
@@ -232,11 +314,11 @@ function GetLlmoOpportunityUsageCommand(context) {
           log.warn(`Failed to process site ${site.getId()}: ${siteError.message}`);
           return null;
         }
-      });
+      };
 
-      const siteResults = await Promise.allSettled(sitePromises);
+      // Process sites with controlled concurrency to prevent resource contention
+      const siteResults = await processBatch(sites, processSite, MAX_CONCURRENT_SITES);
       const results = siteResults
-        .map((result) => (result.status === 'fulfilled' ? result.value : null))
         .filter(Boolean)
         .sort((a, b) => a.baseURL.localeCompare(b.baseURL));
 
