@@ -1,3 +1,10 @@
+# [1.249.0](https://github.com/adobe/spacecat-api-service/compare/v1.248.1...v1.249.0) (2025-11-21)
+
+
+### Features
+
+* paid-traffic - added url-based endpoints for week-over-week ([#1533](https://github.com/adobe/spacecat-api-service/issues/1533)) ([d642403](https://github.com/adobe/spacecat-api-service/commit/d64240338ac87ed87e9b8305558e2b08ec1c7173))
+
 ## [1.248.1](https://github.com/adobe/spacecat-api-service/compare/v1.248.0...v1.248.1) (2025-11-21)
 
 
