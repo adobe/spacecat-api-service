@@ -49,6 +49,14 @@ base64PageUrl:
   schema:
     type: string
     format: base64url
+base64Url:
+  name: base64Url
+  description: Base64-encoded URL
+  in: path
+  required: true
+  schema:
+    type: string
+    format: base64url
 ascending:
   name: ascending
   description: Whether to sort ascending or descending
@@ -216,6 +224,13 @@ processingType:
   required: true
   schema:
     type: string
+processingTypeOptional:
+  name: processingType
+  description: Optional, The processing type/handler used by the scrape job, will use "default" if not provided
+  in: path
+  required: false
+  schema:
+    type: string
 weekNumber:
   name: weekNumber
   description: The ISO week number (1-53)
@@ -317,7 +332,7 @@ externalId:
 sandboxAuditType:
   name: auditType
   description: |
-    Comma-separated list of audit types to run on sandbox sites. 
+    Comma-separated list of audit types to run on sandbox sites.
     Use 'product-metatags' for specialized Product Detail Page (PDP) analysis of commerce sites.
   in: query
   required: false
@@ -343,3 +358,24 @@ llmoConfigVersion:
     type: string
     description: S3 object version ID
     example: "abc123def456"
+
+limit:
+  name: limit
+  description: The maximum number of items to return per page
+  in: path
+  required: true
+  schema:
+    type: integer
+    minimum: 1
+    maximum: 1000
+    default: 100
+    example: 100
+
+cursor:
+  name: cursor
+  description: The cursor for pagination to fetch the next page of results
+  in: path
+  required: false
+  schema:
+    type: string
+    example: "eyJzayI6IjIwMjQtMDEtMTVUMTI6MzA6MDBaIiwiaWQiOiIxMjNlNDU2Ny1lODliLTEyZDMtYTQ1Ni00MjY2MTQxNzQwMDAifQ=="

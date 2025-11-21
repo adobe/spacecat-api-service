@@ -26,12 +26,14 @@ import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/confi
 import crypto from 'crypto';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import {
   applyFilters,
   applyInclusions,
   applyExclusions,
   applyGroups,
   applyMappings,
+  LLMO_SHEETDATA_SOURCE_URL,
 } from './llmo-utils.js';
 import { LLMO_SHEET_MAPPINGS } from './llmo-mappings.js';
 import {
@@ -40,14 +42,14 @@ import {
   performLlmoOnboarding,
   performLlmoOffboarding,
 } from './llmo-onboarding.js';
+import { queryLlmoFiles } from './llmo-query-handler.js';
 
 const { readConfig, writeConfig } = llmo;
 const { llmoConfig: llmoConfigSchema } = schemas;
 
-const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
-
 function LlmoController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
+
   // Helper function to get site and validate LLMO config
   const getSiteAndValidateLlmo = async (context) => {
     const { siteId } = context.params;
@@ -105,11 +107,21 @@ function LlmoController(ctx) {
   // Handles requests to the LLMO sheet data endpoint
   const getLlmoSheetData = async (context) => {
     const { log } = context;
-    const { siteId, dataSource, sheetType } = context.params;
+    const {
+      siteId, dataSource, sheetType, week,
+    } = context.params;
     const { env } = context;
     try {
       const { llmoConfig } = await getSiteAndValidateLlmo(context);
-      const sheetURL = sheetType ? `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json` : `${llmoConfig.dataFolder}/${dataSource}.json`;
+      // Construct the sheet URL based on which parameters are provided
+      let sheetURL;
+      if (sheetType && week) {
+        sheetURL = `${llmoConfig.dataFolder}/${sheetType}/${week}/${dataSource}.json`;
+      } else if (sheetType) {
+        sheetURL = `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json`;
+      } else {
+        sheetURL = `${llmoConfig.dataFolder}/${dataSource}.json`;
+      }
 
       // Add limit, offset and sheet query params to the url
       const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
@@ -130,7 +142,7 @@ function LlmoController(ctx) {
         headers: {
           Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
           'User-Agent': SPACECAT_USER_AGENT,
-          'Accept-Encoding': 'gzip',
+          'Accept-Encoding': 'br',
         },
       });
 
@@ -142,7 +154,7 @@ function LlmoController(ctx) {
       // Get the response data
       const data = await response.json();
 
-      // Return the data and let the framework handle the compression
+      // Return the data, pass through any compression headers from upstream
       return ok(data, {
         ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
       });
@@ -156,11 +168,15 @@ function LlmoController(ctx) {
   // with query capabilities (filtering, exclusions, grouping)
   const queryLlmoSheetData = async (context) => {
     const { log } = context;
-    const { siteId, dataSource, sheetType } = context.params;
+    const {
+      siteId, dataSource, sheetType, week,
+    } = context.params;
     const { env } = context;
 
     // Start timing for the entire method
     const methodStartTime = Date.now();
+
+    const FIXED_LLMO_LIMIT = 1000000;
 
     // Extract and validate request body structure
     const {
@@ -169,6 +185,8 @@ function LlmoController(ctx) {
       include = [],
       exclude = [],
       groupBy = [],
+      limit = FIXED_LLMO_LIMIT, // Default to 1M records to return all records
+      offset = 0, // Default to 0 to return the first 1M records
     } = context.data || {};
 
     // Validate request body structure
@@ -191,15 +209,24 @@ function LlmoController(ctx) {
 
     try {
       const { llmoConfig } = await getSiteAndValidateLlmo(context);
-      const sheetURL = sheetType ? `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json` : `${llmoConfig.dataFolder}/${dataSource}.json`;
+      // Construct the sheet URL based on which parameters are provided
+      let sheetURL;
+      if (sheetType && week) {
+        sheetURL = `${llmoConfig.dataFolder}/${sheetType}/${week}/${dataSource}.json`;
+      } else if (sheetType) {
+        sheetURL = `${llmoConfig.dataFolder}/${sheetType}/${dataSource}.json`;
+      } else {
+        sheetURL = `${llmoConfig.dataFolder}/${dataSource}.json`;
+      }
 
       // Add limit, offset and sheet query params to the url
       const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
-
-      // This endpoint does not support limit as it needs to go through
-      // all records to apply filters, exclusions and grouping
-      const FIXED_LLMO_LIMIT = 1000000;
-      url.searchParams.set('limit', FIXED_LLMO_LIMIT);
+      if (limit) {
+        url.searchParams.set('limit', limit);
+      }
+      if (offset) {
+        url.searchParams.set('offset', offset);
+      }
 
       // Log setup completion time
       const setupTime = Date.now();
@@ -211,7 +238,7 @@ function LlmoController(ctx) {
         headers: {
           Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
           'User-Agent': SPACECAT_USER_AGENT,
-          'Accept-Encoding': 'gzip',
+          'Accept-Encoding': 'br',
         },
       });
 
@@ -293,7 +320,7 @@ function LlmoController(ctx) {
       const totalDuration = methodEndTime - methodStartTime;
       log.info(`LLMO query completed - total duration: ${totalDuration}ms (fetch: ${fetchDuration}ms, inclusion: ${inclusionDuration}ms, filtering: ${filterDuration}ms, exclusion: ${exclusionDuration}ms, grouping: ${groupingDuration}ms, mapping: ${mappingDuration}ms)`);
 
-      // Return the data and let the framework handle the compression
+      // Return the data, pass through any compression headers from upstream
       return ok(data, {
         ...(response.headers ? Object.fromEntries(response.headers.entries()) : {}),
       });
@@ -336,7 +363,7 @@ function LlmoController(ctx) {
         headers: {
           Authorization: `token ${env.LLMO_HLX_API_KEY || 'hlx_api_key_missing'}`,
           'User-Agent': SPACECAT_USER_AGENT,
-          'Accept-Encoding': 'gzip',
+          'Accept-Encoding': 'br',
         },
       });
 
@@ -387,6 +414,87 @@ function LlmoController(ctx) {
     }
   };
 
+  /**
+   * Compares two arrays of prompts for equality, regardless of original order.
+   * Returns true if promptsarrays have the same items.
+   */
+  const arePromptArraysEqual = (prompts1, prompts2) => {
+    if (prompts1.length !== prompts2.length) return false;
+
+    const sortedPrompts1 = JSON.stringify(
+      prompts1.sort((a, b) => a.prompt.localeCompare(b.prompt)),
+    );
+
+    const sortedPrompts2 = JSON.stringify(
+      prompts2.sort((a, b) => a.prompt.localeCompare(b.prompt)),
+    );
+
+    return sortedPrompts1 === sortedPrompts2;
+  };
+
+  /**
+   * Checks if config changes are only AI-origin categorization updates.
+   * Returns true if all new/modified categories and topics contain only AI-origin prompts.
+   */
+  const areChangesAICategorizationOnly = (oldConfig, newConfig) => {
+    if (!oldConfig) return false;
+
+    const oldCategories = oldConfig?.categories || {};
+    const newCategories = newConfig?.categories || {};
+    const oldTopics = oldConfig?.topics || {};
+    const newTopics = newConfig?.topics || {};
+
+    // Get new category IDs
+    const newCategoryIds = Object.keys(newCategories).filter((id) => !oldCategories[id]);
+
+    // Get new or modified topic IDs
+    const changedTopicIds = Object.keys(newTopics).filter((id) => {
+      if (!oldTopics[id]) return true; // New topic
+      // Check if prompts changed
+      const oldPrompts = oldTopics[id]?.prompts || [];
+      const newPrompts = newTopics[id]?.prompts || [];
+      return !arePromptArraysEqual(oldPrompts, newPrompts);
+    });
+
+    // If no category or topic changes, return false (other changes present)
+    if (newCategoryIds.length === 0 && changedTopicIds.length === 0) {
+      return false;
+    }
+
+    // Check if new categories are only referenced by topics with AI-origin prompts
+    const topicsReferencingNewCategories = Object.values(newTopics).filter(
+      (topic) => newCategoryIds.includes(topic.category),
+    );
+
+    for (const topic of topicsReferencingNewCategories) {
+      const prompts = topic.prompts || [];
+      // If any prompt is not AI-origin, return false
+      if (prompts.some((p) => p.origin.toLowerCase() !== 'ai')) {
+        return false;
+      }
+    }
+
+    // Check changed topics - ensure all new/modified prompts are AI-origin
+    for (const topicId of changedTopicIds) {
+      const newTopic = newTopics[topicId];
+      const oldTopic = oldTopics[topicId];
+      const newPrompts = newTopic?.prompts || [];
+      const oldPrompts = oldTopic?.prompts || [];
+
+      // Get prompts that are new (not in old config)
+      const oldPromptTexts = new Set(oldPrompts.map((p) => p.prompt));
+      const addedPrompts = newPrompts.filter((p) => !oldPromptTexts.has(p.prompt));
+
+      // If any added prompt is not AI-origin, return false
+      if (addedPrompts.some((p) => p.origin.toLowerCase() !== 'ai')) {
+        return false;
+      }
+    }
+
+    // All changes are AI-origin only
+    return true;
+  };
+
   async function updateLlmoConfig(context) {
     const { log, s3, data } = context;
     const { siteId } = context.params;
@@ -427,16 +535,27 @@ function LlmoController(ctx) {
         { s3Bucket: s3.s3Bucket },
       );
 
-      await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
-        type: 'llmo-customer-analysis',
-        siteId,
-        auditContext: {
-          configVersion: version,
-          previousConfigVersion: prevConfig.exists
-            ? prevConfig.version
-            : /* c8 ignore next */ null,
-        },
-      });
+      const previousConfig = prevConfig?.exists ? prevConfig.config : null;
+      if (areChangesAICategorizationOnly(previousConfig, parsedConfig)) {
+        await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
+          type: 'geo-brand-presence-trigger-refresh',
+          siteId,
+          auditContext: {
+            configVersion: version,
+          },
+        });
+      } else {
+        await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
+          type: 'llmo-customer-analysis',
+          siteId,
+          auditContext: {
+            configVersion: version,
+            previousConfigVersion: prevConfig.exists
+              ? prevConfig.version
+              : /* c8 ignore next */ null,
+          },
+        });
+      }
 
       // Calculate config summary
       const numCategories = Object.keys(parsedConfig.categories || {}).length;
@@ -448,6 +567,10 @@ function LlmoController(ctx) {
       const numBrandAliases = parsedConfig.brands?.aliases?.length || 0;
       const numCompetitors = parsedConfig.competitors?.competitors?.length || 0;
       const numDeletedPrompts = Object.keys(parsedConfig.deleted?.prompts || {}).length;
+      const numCategoryUrls = Object.values(parsedConfig.categories || {}).reduce(
+        (total, category) => total + (category.urls?.length || 0),
+        0,
+      );
 
       // Build config summary
       const summaryParts = [
@@ -457,6 +580,7 @@ function LlmoController(ctx) {
         `${numBrandAliases} brand aliases`,
         `${numCompetitors} competitors`,
         `${numDeletedPrompts} deleted prompts`,
+        `${numCategoryUrls} category URLs`,
       ];
       const configSummary = summaryParts.join(', ');
 
@@ -781,6 +905,20 @@ function LlmoController(ctx) {
         context,
       );
 
+      let brandProfileExecutionName = null;
+      try {
+        const site = await context.dataAccess?.Site?.findById(result.siteId);
+        if (site) {
+          brandProfileExecutionName = await triggerBrandProfileAgent({
+            context,
+            site,
+            reason: 'llmo-http',
+          });
+        }
+      } catch (hookError) {
+        log.warn(`LLMO onboarding: failed to trigger brand-profile workflow for site ${result.siteId}`, hookError);
+      }
+
       log.info(`LLMO onboarding completed successfully for domain ${domain}`);
 
       return ok({
@@ -794,6 +932,7 @@ function LlmoController(ctx) {
         siteId: result.siteId,
         status: 'completed',
         createdAt: new Date().toISOString(),
+        brandProfileExecutionName,
       });
     } catch (error) {
       log.error(`Error during LLMO onboarding: ${error.message}`);
@@ -837,6 +976,19 @@ function LlmoController(ctx) {
     }
   };
 
+  const queryFiles = async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+    try {
+      const { llmoConfig } = await getSiteAndValidateLlmo(context);
+      const { data, headers } = await queryLlmoFiles(context, llmoConfig);
+      return ok(data, headers);
+    } catch (error) {
+      log.error(`Error during LLMO cached query for site ${siteId}: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -855,6 +1007,7 @@ function LlmoController(ctx) {
     updateLlmoConfig,
     onboardCustomer,
     offboardCustomer,
+    queryFiles,
   };
 }
 

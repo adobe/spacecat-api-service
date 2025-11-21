@@ -22,10 +22,10 @@ import {
   BASIC_AUDITS,
   triggerAudits,
 } from '../../../controllers/llmo/llmo-onboarding.js';
+import { triggerBrandProfileAgent } from '../../brand-profile-trigger.js';
 
 const REFERRAL_TRAFFIC_AUDIT = 'llmo-referral-traffic';
 const REFERRAL_TRAFFIC_IMPORT = 'traffic-analysis';
-const AGENTIC_TRAFFIC_ANALYSIS_AUDIT = 'cdn-analysis';
 const AGENTIC_TRAFFIC_REPORT_AUDIT = 'cdn-logs-report';
 const GEO_BRAND_PRESENCE_WEEKLY = 'geo-brand-presence';
 const GEO_BRAND_PRESENCE_DAILY = 'geo-brand-presence-daily';
@@ -517,21 +517,6 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
       configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_DAILY, site);
     }
 
-    // enable the cdn-analysis only if no other site in this organization already has it enabled
-    const orgId = site.getOrganizationId();
-    const sitesInOrg = await Site.allByOrganizationId(orgId);
-
-    const hasAgenticTrafficEnabled = sitesInOrg.some(
-      (orgSite) => configuration.isHandlerEnabledForSite(AGENTIC_TRAFFIC_ANALYSIS_AUDIT, orgSite),
-    );
-
-    if (!hasAgenticTrafficEnabled) {
-      log.info(`Enabling agentic traffic audits for organization ${orgId} (first site in org)`);
-      configuration.enableHandlerForSite(AGENTIC_TRAFFIC_ANALYSIS_AUDIT, site);
-    } else {
-      log.debug(`Agentic traffic audits already enabled for organization ${orgId}, skipping`);
-    }
-
     try {
       await configuration.save();
 
@@ -572,6 +557,16 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
 The LLMO Customer Analysis handler has been triggered. It will take a few minutes to complete.`;
 
       await say(message);
+
+      await triggerBrandProfileAgent({
+        context: lambdaCtx,
+        site,
+        slackContext: {
+          channelId: slackCtx.channelId,
+          threadTs: slackCtx.threadTs,
+        },
+        reason: 'llmo-slack',
+      });
     } catch (error) {
       log.error(`Error saving LLMO config for site ${siteId}: ${error.message}`);
       await say(`:x: Failed to save LLMO configuration: ${error.message}`);

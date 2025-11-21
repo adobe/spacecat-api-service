@@ -60,6 +60,7 @@ broken-backlinks-suggestion:
         - 'https://www.example.com/customer-service'
       ai_rationale: 'The URL is about customer service, so it should be redirected to the customer service page.'
       traffic_domain: 571000
+      aggregationKey: 'https://www.dailynews.com/2024/08/13/black-friday-sale-at-example-inc/|broken-backlinks|ahrefs'
     status: 'APPROVED'
     createdAt: '2024-01-22T12:00:00Z'
     updatedAt: '2024-07-26T12:00:00Z'
@@ -110,6 +111,7 @@ broken-backlinks-suggestion-create-list-response:
               - 'https://www.example.com/customer-service/contact'
               - 'https://www.example.com/customer-service'
             traffic_domain: 571000
+            aggregationKey: 'https://www.dailynews.com/2024/08/13/black-friday-sale-at-example-inc/|broken-backlinks|ahrefs'
           createdAt: '2024-01-22T12:00:00Z'
           updatedAt: '2024-07-26T12:00:00Z'
       - id: 'invalid-suggestion'

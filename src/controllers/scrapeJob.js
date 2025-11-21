@@ -81,6 +81,8 @@ function ScrapeJobController(context) {
       endDate: requestContext.params.endDate,
       baseURL: requestContext.params.baseURL,
       processingType: requestContext.params.processingType,
+      url: requestContext.params.url,
+      maxAge: requestContext.params.maxAge,
     };
   }
 
@@ -193,12 +195,42 @@ function ScrapeJobController(context) {
     }
   }
 
+  async function getScrapeUrlByProcessingType(requestContext) {
+    const { url: encodedUrl, processingType } = parseRequestContext(requestContext);
+    let requestedProcessingType = processingType;
+
+    if (!hasText(encodedUrl)) {
+      return badRequest('A valid URL is required');
+    } else if (!hasText(processingType)) {
+      requestedProcessingType = 'default';
+    }
+
+    let decodedUrl = encodedUrl;
+    try {
+      decodedUrl = Buffer.from(encodedUrl, 'base64').toString('utf-8').trim();
+      const scrapeUrls = await scrapeClient.getScrapeUrlsByProcessingType(
+        decodedUrl,
+        requestedProcessingType,
+      );
+
+      if (!scrapeUrls || scrapeUrls.length === 0) {
+        return ok([]);
+      }
+
+      return ok(scrapeUrls.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
+    } catch (error) {
+      log.error(`Failed to fetch scrape URLs for url: ${decodedUrl} and processingType: ${processingType}, ${error.message}`);
+      return createErrorResponse(error);
+    }
+  }
+
   return {
     createScrapeJob,
     getScrapeJobStatus,
     getScrapeJobUrlResults,
     getScrapeJobsByBaseURL,
     getScrapeJobsByDateRange,
+    getScrapeUrlByProcessingType,
   };
 }
 
