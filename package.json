@@ -78,7 +78,7 @@
     "@adobe/spacecat-shared-gpt-client": "1.6.10",
     "@adobe/spacecat-shared-http-utils": "1.19.0",
     "@adobe/spacecat-shared-ims-client": "1.11.3",
-    "@adobe/spacecat-shared-rum-api-client": "2.38.10",
+    "@adobe/spacecat-shared-rum-api-client": "https://gitpkg.vercel.app/adobe/spacecat-shared/packages/spacecat-shared-rum-api-client?add-lcp-in-total-metrics",
     "@adobe/spacecat-shared-scrape-client": "2.3.2",
     "@adobe/spacecat-shared-slack-client": "1.5.30",
     "@adobe/spacecat-shared-tier-client": "1.3.0",
