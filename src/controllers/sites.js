@@ -736,6 +736,9 @@ function SitesController(ctx, log, env) {
         lcpChange,
         currentEngagement,
         engagementChange,
+        previousPageViews,
+        previousEngagement,
+        previousLCP,
       });
     } catch (error) {
       log.error(`Error getting RUM metrics for site ${siteId}: ${error.message}`);
@@ -748,6 +751,9 @@ function SitesController(ctx, log, env) {
       projectedTrafficValue: 0,
       currentLCP: null,
       lcpChange: null,
+      previousPageViews: 0,
+      previousEngagement: 0,
+      previousLCP: null,
     });
   };
 

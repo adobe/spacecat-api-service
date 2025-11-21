@@ -786,6 +786,9 @@ describe('Sites Controller', () => {
       lcpChange: -100,
       currentEngagement: 5000,
       engagementChange: -50,
+      previousPageViews: 46944,
+      previousEngagement: 10000,
+      previousLCP: 1600,
     });
   });
 
@@ -829,6 +832,9 @@ describe('Sites Controller', () => {
       lcpChange: -100,
       currentEngagement: 5000,
       engagementChange: -50,
+      previousPageViews: 46944,
+      previousEngagement: 10000,
+      previousLCP: 1600,
     });
   });
 
@@ -848,6 +854,11 @@ describe('Sites Controller', () => {
       pageViewsChange: 0,
       projectedTrafficValue: 0,
       engagementChange: 0,
+      currentLCP: null,
+      lcpChange: null,
+      previousPageViews: 0,
+      previousEngagement: 0,
+      previousLCP: null,
     });
   });
 
