@@ -330,6 +330,11 @@ function TrafficController(context, log, env) {
     getPaidTrafficTemporalSeriesByCampaignPlatform: async () => fetchPaidTrafficDataTemporalSeries(['utm_campaign', 'trf_platform']),
     getPaidTrafficTemporalSeriesByCampaignChannelPlatform: async () => fetchPaidTrafficDataTemporalSeries(['utm_campaign', 'trf_channel', 'trf_platform']),
     getPaidTrafficTemporalSeriesByChannelPlatform: async () => fetchPaidTrafficDataTemporalSeries(['trf_channel', 'trf_platform']),
+
+    getPaidTrafficTemporalSeriesByUrl: async () => fetchPaidTrafficDataTemporalSeries(['path']),
+    getPaidTrafficTemporalSeriesByUrlChannel: async () => fetchPaidTrafficDataTemporalSeries(['path', 'trf_channel']),
+    getPaidTrafficTemporalSeriesByUrlPlatform: async () => fetchPaidTrafficDataTemporalSeries(['path', 'trf_platform']),
+    getPaidTrafficTemporalSeriesByUrlChannelPlatform: async () => fetchPaidTrafficDataTemporalSeries(['path', 'trf_channel', 'trf_platform']),
   };
 }
 

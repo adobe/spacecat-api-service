@@ -204,6 +204,10 @@ describe('getRouteHandlers', () => {
     getPaidTrafficTemporalSeriesByCampaignPlatform: sinon.stub(),
     getPaidTrafficTemporalSeriesByCampaignChannelPlatform: sinon.stub(),
     getPaidTrafficTemporalSeriesByChannelPlatform: sinon.stub(),
+    getPaidTrafficTemporalSeriesByUrl: sinon.stub(),
+    getPaidTrafficTemporalSeriesByUrlChannel: sinon.stub(),
+    getPaidTrafficTemporalSeriesByUrlPlatform: sinon.stub(),
+    getPaidTrafficTemporalSeriesByUrlChannelPlatform: sinon.stub(),
   };
 
   const mockFixesController = {
@@ -507,6 +511,10 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/traffic/paid/temporal-series-by-campaign-platform',
       'GET /sites/:siteId/traffic/paid/temporal-series-by-campaign-channel-platform',
       'GET /sites/:siteId/traffic/paid/temporal-series-by-channel-platform',
+      'GET /sites/:siteId/traffic/paid/temporal-series-by-url',
+      'GET /sites/:siteId/traffic/paid/temporal-series-by-url-channel',
+      'GET /sites/:siteId/traffic/paid/temporal-series-by-url-platform',
+      'GET /sites/:siteId/traffic/paid/temporal-series-by-url-channel-platform',
       'GET /tools/scrape/jobs/:jobId',
       'GET /tools/scrape/jobs/:jobId/results',
       'GET /tools/scrape/jobs/by-date-range/:startDate/:endDate/all-jobs',
@@ -665,6 +673,10 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/temporal-series-by-campaign-platform'].handler).to.equal(mockTrafficController.getPaidTrafficTemporalSeriesByCampaignPlatform);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/temporal-series-by-campaign-channel-platform'].handler).to.equal(mockTrafficController.getPaidTrafficTemporalSeriesByCampaignChannelPlatform);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/temporal-series-by-channel-platform'].handler).to.equal(mockTrafficController.getPaidTrafficTemporalSeriesByChannelPlatform);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/temporal-series-by-url'].handler).to.equal(mockTrafficController.getPaidTrafficTemporalSeriesByUrl);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/temporal-series-by-url-channel'].handler).to.equal(mockTrafficController.getPaidTrafficTemporalSeriesByUrlChannel);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/temporal-series-by-url-platform'].handler).to.equal(mockTrafficController.getPaidTrafficTemporalSeriesByUrlPlatform);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/temporal-series-by-url-channel-platform'].handler).to.equal(mockTrafficController.getPaidTrafficTemporalSeriesByUrlChannelPlatform);
     expect(dynamicRoutes['GET /sites/:siteId/files'].handler).to.equal(mockScrapeController.getFileByKey);
     expect(dynamicRoutes['GET /sites/:siteId/files'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /tools/scrape/jobs/:jobId'].handler).to.equal(mockScrapeJobController.getScrapeJobStatus);
