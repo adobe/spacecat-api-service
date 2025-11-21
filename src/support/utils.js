@@ -429,6 +429,82 @@ export const wwwUrlResolver = (site) => {
 };
 
 /**
+ * Get string date in format YYYY-MM-DD
+ * @param {Date} date - The date to convert to string
+ * @returns {string} - The string date in format YYYY-MM-DD
+ */
+export function getStringDate(date) {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Get last two complete weeks (Monday 00:00 to Sunday 23:59 UTC)
+ * Always returns last two COMPLETE 7-day weeks, excluding any partial current week
+ * Weeks are consecutive Monday-Sunday periods
+ * @returns {Array} - Array of date ranges with label, startTime, and endTime
+ */
+export function getLastTwoCompleteWeeks() {
+  const now = new Date();
+  const dayOfWeek = now.getUTCDay(); // 0=Sunday, 1=Monday, ... 6=Saturday
+
+  // Calculate days since last Monday
+  // If today is Sunday (0), it's 6 days since last Monday
+  // If today is Monday (1), it's 0 days since last Monday
+  const daysSinceMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+
+  // Most recent complete week ends on the Sunday before current week
+  // Last Sunday at 23:59:59
+  const lastSunday = new Date(Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate() - daysSinceMonday - 1,
+    23,
+    59,
+    59,
+  ));
+
+  // Most recent complete week starts on Monday (6 days before last Sunday)
+  const lastMonday = new Date(Date.UTC(
+    lastSunday.getUTCFullYear(),
+    lastSunday.getUTCMonth(),
+    lastSunday.getUTCDate() - 6,
+  ));
+
+  // Previous week ends on the Sunday before last week
+  const prevSunday = new Date(Date.UTC(
+    lastMonday.getUTCFullYear(),
+    lastMonday.getUTCMonth(),
+    lastMonday.getUTCDate() - 1,
+    23,
+    59,
+    59,
+  ));
+
+  // Previous week starts on Monday (6 days before previous Sunday)
+  const prevMonday = new Date(Date.UTC(
+    prevSunday.getUTCFullYear(),
+    prevSunday.getUTCMonth(),
+    prevSunday.getUTCDate() - 6,
+  ));
+
+  return [
+    {
+      label: getStringDate(lastSunday),
+      startTime: lastMonday.toISOString(),
+      endTime: lastSunday.toISOString(),
+    },
+    {
+      label: getStringDate(prevSunday),
+      startTime: prevMonday.toISOString(),
+      endTime: prevSunday.toISOString(),
+    },
+  ];
+}
+
+/**
  * Get the IMS user token from the context.
  * @param {object} context - The context of the request.
  * @returns {string} imsUserToken - The IMS User access token.

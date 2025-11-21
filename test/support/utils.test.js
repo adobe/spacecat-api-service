@@ -14,7 +14,7 @@
 import { expect } from 'chai';
 import sinon from 'sinon';
 
-import { createProject, deriveProjectName } from '../../src/support/utils.js';
+import { createProject, deriveProjectName, getLastTwoCompleteWeeks } from '../../src/support/utils.js';
 
 describe('utils', () => {
   describe('deriveProjectName', () => {
@@ -150,6 +150,32 @@ describe('utils', () => {
       await expect(createProject(context, slackContext, 'https://fr.example.com/', 'org123')).to.be.rejectedWith('Failed to create project');
       expect(context.log.error).to.have.been.calledWith('Error creating project: Failed to create project');
       expect(slackContext.say).to.have.been.calledWith(':x: Error creating project: Failed to create project');
+    });
+  });
+
+  describe('getLastTwoCompleteWeeks', () => {
+    let clock;
+
+    afterEach(() => {
+      if (clock) {
+        clock.restore();
+      }
+    });
+
+    it('returns weeks in chronological order (most recent first)', () => {
+      clock = sinon.useFakeTimers(new Date('2025-11-19T10:00:00.000Z'));
+
+      const weeks = getLastTwoCompleteWeeks();
+
+      const mostRecentEnd = new Date(weeks[0].endTime);
+      const previousEnd = new Date(weeks[1].endTime);
+
+      // Most recent week should end after previous week
+      expect(mostRecentEnd.getTime()).to.be.greaterThan(previousEnd.getTime());
+
+      // Should be exactly 7 days apart
+      const diffDays = (mostRecentEnd - previousEnd) / (1000 * 60 * 60 * 24);
+      expect(diffDays).to.be.closeTo(7, 0.001);
     });
   });
 });

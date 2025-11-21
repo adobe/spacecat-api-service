@@ -41,7 +41,7 @@ import { OrganizationDto } from '../dto/organization.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
 import { KeyEventDto } from '../dto/key-event.js';
-import { wwwUrlResolver } from '../support/utils.js';
+import { wwwUrlResolver, getLastTwoCompleteWeeks } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 
@@ -659,6 +659,93 @@ function SitesController(ctx, log, env) {
     return ok(metrics);
   };
 
+  /**
+   * Fetches and processes metrics for a single date range using the site-metrics handler.
+   * @param {Object} params - Parameters for fetching metrics
+   * @returns {Object} Weekly metrics with label, dates, pageviews, speed, engagement.
+   * @note If the RUM API response includes `label`, `startTime`, or `endTime` fields,
+   * these will override the corresponding values from the `dateRange` parameter in the
+   * returned object. This is useful when the RUM API response includes more detailed
+   * information than the date range, such as the day of the week.
+   */
+  const fetchWeeklyMetrics = async ({
+    rumAPIClient, domain, dateRange,
+  }) => {
+    const metrics = await rumAPIClient.query('site-metrics', {
+      domain,
+      startTime: dateRange.startTime,
+      endTime: dateRange.endTime,
+      granularity: 'DAILY',
+    });
+
+    return {
+      label: dateRange.label,
+      startTime: dateRange.startTime,
+      endTime: dateRange.endTime,
+      ...metrics,
+    };
+  };
+
+  const getWeeklySiteMetrics = async (context) => {
+    const siteId = context.params?.siteId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view its metrics');
+    }
+
+    const rumAPIClient = RUMAPIClient.createFrom(context);
+    const domain = wwwUrlResolver(site);
+
+    try {
+      const weekRanges = getLastTwoCompleteWeeks();
+
+      const [latestCompleteWeekMetrics, priorCompleteWeekMetrics] = await Promise.all(
+        weekRanges.map((dateRange) => fetchWeeklyMetrics({
+          rumAPIClient,
+          domain,
+          dateRange,
+        })),
+      );
+
+      return ok({
+        latestCompleteWeek: {
+          label: latestCompleteWeekMetrics.label,
+          start: latestCompleteWeekMetrics.startTime,
+          end: latestCompleteWeekMetrics.endTime,
+          pageviews: latestCompleteWeekMetrics?.pageviews ?? null,
+          engagementCount: latestCompleteWeekMetrics?.engagementCount ?? null,
+          lcp: latestCompleteWeekMetrics?.siteSpeed ?? null,
+        },
+        priorCompleteWeek: {
+          label: priorCompleteWeekMetrics.label,
+          start: priorCompleteWeekMetrics.startTime,
+          end: priorCompleteWeekMetrics.endTime,
+          pageviews: priorCompleteWeekMetrics?.pageviews ?? null,
+          engagementCount: priorCompleteWeekMetrics?.engagementCount ?? null,
+          lcp: priorCompleteWeekMetrics?.siteSpeed ?? null,
+        },
+      });
+    } catch (error) {
+      const statusMatch = error.message?.match(/Status:\s*(\d+)/);
+      const statusCode = statusMatch ? parseInt(statusMatch[1], 10) : null;
+
+      if (statusCode === 404) {
+        return notFound(`No RUM data available for this site with domain: ${domain}`);
+      }
+
+      return internalServerError(`Failed to fetch weekly metrics for site ${siteId}: ${error.message}`);
+    }
+  };
+
   const getLatestSiteMetrics = async (context) => {
     const siteId = context.params?.siteId;
 
@@ -948,6 +1035,7 @@ function SitesController(ctx, log, env) {
     getSiteMetricsBySource,
     getPageMetricsBySource,
     getLatestSiteMetrics,
+    getWeeklySiteMetrics,
   };
 }
 
