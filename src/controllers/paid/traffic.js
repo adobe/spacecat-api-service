@@ -262,8 +262,11 @@ function TrafficController(context, log, env) {
   }
 
   async function fetchPaidTrafficDataTemporalSeries(dimensions) {
+    // For temporal series without specific dimensions, default to trf_type
+    /* c8 ignore next 7 - Defensive default, all callers provide dimensions */
+    const effectiveDimensions = dimensions.length === 0 ? ['trf_type'] : dimensions;
     return fetchPaidTrafficData(
-      dimensions,
+      effectiveDimensions,
       TrafficDataWithCWVDto,
       null,
       true,
