@@ -679,24 +679,45 @@ function SitesController(ctx, log, env) {
     const domain = wwwUrlResolver(site);
 
     try {
+      const nowUTC = new Date();
+      nowUTC.setUTCHours(0, 0, 0, 0);
+      const thirtyDaysAgo = new Date(nowUTC.getTime() - MONTH_DAYS * 24 * 60 * 60 * 1000);
+      const sixtyDaysAgo = new Date(nowUTC.getTime() - 2 * MONTH_DAYS * 24 * 60 * 60 * 1000);
+
       const current = await rumAPIClient.query(TOTAL_METRICS, {
         domain,
-        interval: MONTH_DAYS,
+        startTime: thirtyDaysAgo.toISOString(),
+        endTime: nowUTC.toISOString(),
       });
-      const total = await rumAPIClient.query(TOTAL_METRICS, {
+      const previous = await rumAPIClient.query(TOTAL_METRICS, {
         domain,
-        interval: 2 * MONTH_DAYS,
+        startTime: sixtyDaysAgo.toISOString(),
+        endTime: thirtyDaysAgo.toISOString(),
       });
       const organicTraffic = await getStoredMetrics(
         { siteId, metric: ORGANIC_TRAFFIC, source: AHREFS },
         context,
       );
 
-      const previousPageViews = total.totalPageViews - current.totalPageViews;
-      const previousCTR = (total.totalClicks - current.totalClicks) / previousPageViews;
-      const pageViewsChange = ((current.totalPageViews - previousPageViews)
-        / previousPageViews) * 100;
-      const ctrChange = ((current.totalCTR - previousCTR) / previousCTR) * 100;
+      const previousPageViews = previous.totalPageViews;
+      const pageViewsChange = previousPageViews !== 0
+        ? ((current.totalPageViews - previousPageViews) / previousPageViews) * 100
+        : 0;
+      const ctrChange = previous.totalCTR !== 0
+        ? ((current.totalCTR - previous.totalCTR) / previous.totalCTR) * 100
+        : 0;
+
+      const currentLCP = current.totalLCP;
+      const previousLCP = previous.totalLCP;
+      const lcpChange = (currentLCP && previousLCP)
+        ? currentLCP - previousLCP
+        : null;
+
+      const currentEngagement = current.totalEngagement || 0;
+      const previousEngagement = previous.totalEngagement || 0;
+      const engagementChange = previousEngagement !== 0
+        ? ((currentEngagement - previousEngagement) / previousEngagement) * 100
+        : 0;
 
       let cpc = 0;
 
@@ -711,6 +732,10 @@ function SitesController(ctx, log, env) {
         pageViewsChange,
         ctrChange,
         projectedTrafficValue,
+        currentLCP,
+        lcpChange,
+        currentEngagement,
+        engagementChange,
       });
     } catch (error) {
       log.error(`Error getting RUM metrics for site ${siteId}: ${error.message}`);
@@ -719,7 +744,10 @@ function SitesController(ctx, log, env) {
     return ok({
       pageViewsChange: 0,
       ctrChange: 0,
+      engagementChange: 0,
       projectedTrafficValue: 0,
+      currentLCP: null,
+      lcpChange: null,
     });
   };
 

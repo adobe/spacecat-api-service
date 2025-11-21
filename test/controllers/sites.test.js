@@ -744,11 +744,15 @@ describe('Sites Controller', () => {
       totalCTR: 0.20,
       totalClicks: 4901,
       totalPageViews: 24173,
+      totalLCP: 1500,
+      totalEngagement: 5000,
     });
     context.rumApiClient.query.onCall(1).resolves({
       totalCTR: 0.21,
       totalClicks: 9723,
       totalPageViews: 46944,
+      totalLCP: 1600,
+      totalEngagement: 10000,
     });
     const storedMetrics = [{
       siteId: '123',
@@ -778,6 +782,10 @@ describe('Sites Controller', () => {
       ctrChange: -5.553712152633755,
       pageViewsChange: 6.156954020464625,
       projectedTrafficValue: 0.3078477010232313,
+      currentLCP: 1500,
+      lcpChange: -100,
+      currentEngagement: 5000,
+      engagementChange: -50,
     });
   });
 
@@ -786,11 +794,15 @@ describe('Sites Controller', () => {
       totalCTR: 0.20,
       totalClicks: 4901,
       totalPageViews: 24173,
+      totalLCP: 1500,
+      totalEngagement: 5000,
     });
     context.rumApiClient.query.onCall(1).resolves({
       totalCTR: 0.21,
       totalClicks: 9723,
       totalPageViews: 46944,
+      totalLCP: 1600,
+      totalEngagement: 10000,
     });
     const storedMetrics = [];
 
@@ -813,6 +825,10 @@ describe('Sites Controller', () => {
       ctrChange: -5.553712152633755,
       pageViewsChange: 6.156954020464625,
       projectedTrafficValue: 0,
+      currentLCP: 1500,
+      lcpChange: -100,
+      currentEngagement: 5000,
+      engagementChange: -50,
     });
   });
 
@@ -831,6 +847,7 @@ describe('Sites Controller', () => {
       ctrChange: 0,
       pageViewsChange: 0,
       projectedTrafficValue: 0,
+      engagementChange: 0,
     });
   });
 

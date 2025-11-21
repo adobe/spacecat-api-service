@@ -87,6 +87,14 @@ site-metrics-latest:
                 projectedTrafficValue:
                   type: number
                   description: Projected traffic value based on page views change and cost per click
+                currentLCP:
+                  type: number
+                  nullable: true
+                  description: Current Largest Contentful Paint (LCP) in milliseconds at 75th percentile
+                lcpChange:
+                  type: number
+                  nullable: true
+                  description: Percentage change in LCP compared to the previous period
       '401':
         $ref: './responses.yaml#/401'
       '404':
