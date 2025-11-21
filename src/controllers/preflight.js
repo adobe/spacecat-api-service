@@ -111,11 +111,9 @@ function PreflightController(ctx, log, env) {
       let site;
       const url = new URL(data.urls[0]);
       const previewBaseURL = `${url.protocol}//${url.hostname}`;
-      if (url.hostname.endsWith('adobecqms.net')) {
-        // AMS
+      if (isValidUUID(data.siteId)) {
         site = await dataAccess.Site.findById(data.siteId);
       } else {
-        // EDS and CS
         site = await dataAccess.Site.findByPreviewURL(previewBaseURL);
       }
 
