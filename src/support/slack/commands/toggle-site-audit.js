@@ -11,12 +11,8 @@
  */
 import {
   hasText,
-  isNonEmptyArray,
   isValidUrl,
-  tracingFetch as fetch,
 } from '@adobe/spacecat-shared-utils';
-import { Readable } from 'stream';
-import { parse } from 'csv';
 import BaseCommand from './base.js';
 import { extractURLFromSlackInput, loadProfileConfig } from '../../../utils/slack/base.js';
 
@@ -34,24 +30,11 @@ const ERROR_MESSAGE_PREFIX = ':x: ';
    * - Disable a specific audit:
    *   @spacecat-dev audit disable https://site.com broken-backlinks
    *
-   * - Enable all audits from default (demo) profile:
-   *   @spacecat-dev audit enable https://site.com all
-   *
-   * - Enable all audits from a specific profile:
-   *   @spacecat-dev audit enable https://site.com all paid
-   *   @spacecat-dev audit enable https://site.com all plg
-   *
-   * - Disable all currently enabled audits:
+   * - Disable all audits from default (demo) profile:
    *   @spacecat-dev audit disable https://site.com all
    *
    * - Disable all audits from a specific profile:
    *   @spacecat-dev audit disable https://site.com all paid
-   *   @spacecat-dev audit disable https://site.com all plg
-   *
-   * CSV Bulk Operations:
-   * - Enable/disable audits for multiple sites (upload CSV with one baseURL per line):
-   *   @spacecat-dev audit enable demo [attach CSV file]
-   *   @spacecat-dev audit disable paid [attach CSV file]
    */
 
 /**
@@ -152,362 +135,122 @@ export default (context) => {
     }
   };
 
-  /**
-   * Processes CSV content to extract URLs from the first column.
-   *
-   * @param {string} fileContent - The raw CSV file content as a string
-   * @returns {Promise<string[]>} A promise that resolves to an array of trimmed URLs
-   * @throws {Error} If no valid URLs are found in the CSV or if CSV processing fails
-   */
-  const processCSVContent = async (fileContent) => {
-    const csvString = fileContent.trim();
-    const csvStream = Readable.from(csvString);
-
-    return new Promise((resolve, reject) => {
-      const urls = [];
-
-      csvStream
-        .pipe(parse({ skipEmptyLines: true }))
-        .on('data', (row) => {
-          if (row[0]?.trim()) {
-            urls.push(row[0].trim());
-          }
-        })
-        .on('end', () => {
-          /* c8 ignore start */
-          // Empty CSV error - difficult to test as CSV parser filters empty lines
-          if (urls.length === 0) {
-            reject(new Error('No valid URLs found in the CSV file.'));
-          /* c8 ignore stop */
-          } else {
-            resolve(urls);
-          }
-        })
-        .on('error', (error) => reject(new Error(`CSV processing failed: ${error.message}`)));
-    });
-  };
-
-  /**
-   * Validates the content of a CSV file by checking for non-empty content and valid URLs.
-   *
-   * @param {string} fileContent - The raw CSV file content to validate
-   * @returns {Promise<string[]>} A promise that resolves to an array of validated URLs
-   * @throws {Error} If the file is empty or contains invalid URLs
-   */
-  const validateCSVFile = async (fileContent) => {
-    if (hasText(fileContent) === false) {
-      throw new Error('The CSV file is empty.');
-    }
-    const urls = await processCSVContent(fileContent);
-
-    const invalidUrls = urls.filter((url) => !isValidUrl(url));
-
-    if (isNonEmptyArray(invalidUrls)) {
-      throw new Error(`Invalid URLs found in CSV:\n${invalidUrls.join('\n')}`);
-    }
-
-    return urls;
-  };
-
   const handleExecution = async (args, slackContext) => {
-    const { say, files } = slackContext;
+    const { say } = slackContext;
 
     try {
-      const [enableAuditInput, auditTypeOrProfileInput] = args;
+      const [enableAuditInput] = args;
 
       const enableAudit = enableAuditInput.toLowerCase();
       const isEnableAudit = enableAudit === 'enable';
-      const auditTypeOrProfile = auditTypeOrProfileInput
-        ? auditTypeOrProfileInput.toLowerCase() : null;
 
       const configuration = await Configuration.findLatest();
 
-      // single URL behavior
-      if (isNonEmptyArray(files) === false) {
-        const [, baseURLInput, singleAuditType, profileNameInput] = args;
+      const [, baseURLInput, singleAuditType, profileNameInput] = args;
 
-        const baseURL = extractURLFromSlackInput(baseURLInput);
+      const baseURL = extractURLFromSlackInput(baseURLInput);
 
-        validateInput(enableAudit, singleAuditType);
+      validateInput(enableAudit, singleAuditType);
 
-        if (isValidUrl(baseURL) === false) {
-          await say(`${ERROR_MESSAGE_PREFIX}Please provide either a CSV file or a single baseURL.`);
+      if (isValidUrl(baseURL) === false) {
+        await say(`${ERROR_MESSAGE_PREFIX}Please provide either a CSV file or a single baseURL.`);
+        return;
+      }
+
+      try {
+        const site = await Site.findByBaseURL(baseURL);
+        if (!site) {
+          await say(`${ERROR_MESSAGE_PREFIX}Cannot update site with baseURL: "${baseURL}", site not found.`);
           return;
         }
 
-        try {
-          const site = await Site.findByBaseURL(baseURL);
-          if (!site) {
-            await say(`${ERROR_MESSAGE_PREFIX}Cannot update site with baseURL: "${baseURL}", site not found.`);
+        const registeredAudits = configuration.getHandlers();
+
+        // Handle "all" keyword to disable all audits
+        if (singleAuditType.toLowerCase() === 'all') {
+          if (isEnableAudit) {
+            await say(`${ERROR_MESSAGE_PREFIX}"enable all" is not supported.`);
             return;
           }
 
-          const registeredAudits = configuration.getHandlers();
+          // Get profile name (default to 'demo' if not provided)
+          const profileName = profileNameInput ? profileNameInput.toLowerCase() : 'demo';
 
-          // Handle "all" keyword to enable/disable all audits
-          let auditTypes;
-          if (singleAuditType.toLowerCase() === 'all') {
-            const profileName = profileNameInput ? profileNameInput.toLowerCase() : 'demo';
+          try {
+            const profileConfig = await loadProfileConfig(profileName);
             /* c8 ignore start */
-            // Profile loading error - difficult to test as it reads from filesystem
-            try {
-              const profileConfig = await loadProfileConfig(profileName);
-              // Profile audits is an object with audit names as keys
-              const profileAuditTypes = Object.keys(profileConfig.audits || {});
-
-              if (isEnableAudit) {
-                // Filter to only audits that are currently disabled
-                auditTypes = profileAuditTypes.filter(
-                  (audit) => !configuration.isHandlerEnabledForSite(audit, site),
-                );
-                const alreadyEnabled = profileAuditTypes.length - auditTypes.length;
-                if (alreadyEnabled > 0) {
-                  await say(`:information_source: Enabling ${auditTypes.length} disabled audits from profile "${profileName}" (${alreadyEnabled} already enabled): ${auditTypes.join(', ')}`);
-                } else {
-                  await say(`:information_source: Enabling ${auditTypes.length} audits from profile "${profileName}": ${auditTypes.join(', ')}`);
-                }
-              } else {
-                // Filter to only audits that are currently enabled
-                auditTypes = profileAuditTypes.filter(
-                  (audit) => configuration.isHandlerEnabledForSite(audit, site),
-                );
-                const alreadyDisabled = profileAuditTypes.length - auditTypes.length;
-                if (alreadyDisabled > 0) {
-                  await say(`:information_source: Disabling ${auditTypes.length} enabled audits from profile "${profileName}" (${alreadyDisabled} already disabled): ${auditTypes.join(', ')}`);
-                } else {
-                  await say(`:information_source: Disabling ${auditTypes.length} audits from profile "${profileName}": ${auditTypes.join(', ')}`);
-                }
-              }
-            } catch (error) {
-              log.error(`Failed to load profile "${profileName}": ${error.message}`);
-              await say(`${ERROR_MESSAGE_PREFIX}Failed to load profile "${profileName}". ${error.message}`);
-              return;
-            }
+            // Defensive fallback, all profiles have audits property
+            const profileAuditTypes = Object.keys(profileConfig.audits || {});
             /* c8 ignore stop */
-          } else {
-            if (!registeredAudits[singleAuditType]) {
-              await say(`${ERROR_MESSAGE_PREFIX}The "${singleAuditType}" is not present in the configuration.\nList of allowed audits:\n${Object.keys(registeredAudits).join('\n')}.`);
-              return;
-            }
-            auditTypes = [singleAuditType];
-          }
 
-          // Process each audit type
-          const failedAudits = [];
-          const skippedAudits = [];
-          for (const auditType of auditTypes) {
-            // Skip if audit is already in the desired state
-            const isCurrentlyEnabled = configuration.isHandlerEnabledForSite(auditType, site);
-            const shouldSkip = (isEnableAudit && isCurrentlyEnabled)
-              || (!isEnableAudit && !isCurrentlyEnabled);
+            // Filter to only audits that are currently enabled
+            const enabledAudits = profileAuditTypes.filter(
+              (auditType) => configuration.isHandlerEnabledForSite(auditType, site),
+            );
 
-            /* c8 ignore start */
-            // Skip logic - difficult to test as it requires specific audit state combinations
-            if (shouldSkip) {
-              const reason = isEnableAudit ? 'Already enabled' : 'Already disabled';
-              skippedAudits.push({ audit: auditType, reason });
-            /* c8 ignore stop */
-            } else {
-              try {
-                if (isEnableAudit) {
-                  if (auditType === 'preflight') {
-                    const authoringType = site.getAuthoringType();
-                    const deliveryConfig = site.getDeliveryConfig();
-                    const helixConfig = site.getHlxConfig();
-
-                    let configMissing = false;
-
-                    if (!authoringType) {
-                      configMissing = true;
-                    } else if (authoringType === 'documentauthoring' || authoringType === 'ue') {
-                    // Document authoring and UE require helix config
-                      const hasHelixConfig = helixConfig
-                      && helixConfig.rso && Object.keys(helixConfig.rso).length > 0;
-                      if (!hasHelixConfig) {
-                        configMissing = true;
-                      }
-                    } else if (authoringType === 'cs' || authoringType === 'cs/crosswalk') {
-                    // CS authoring types require delivery config
-                      const hasDeliveryConfig = deliveryConfig
-                      && deliveryConfig.programId && deliveryConfig.environmentId;
-                      if (!hasDeliveryConfig) {
-                        configMissing = true;
-                      }
-                    }
-
-                    if (configMissing) {
-                    // Prompt user to configure missing requirements
-                    // eslint-disable-next-line no-await-in-loop
-                      await promptPreflightConfig(slackContext, site, auditType);
-                      return;
-                    }
-                  }
-
-                  configuration.enableHandlerForSite(auditType, site);
-                } else {
-                  configuration.disableHandlerForSite(auditType, site);
-                }
-              /* c8 ignore start */
-              // Error handling for dependency failures - difficult to test without complex mocking
-              } catch (error) {
-                log.warn(`Skipping audit ${auditType}: ${error.message}`);
-                failedAudits.push({ audit: auditType, reason: error.message });
-              }
-              /* c8 ignore stop */
-            }
-          }
-
-          await configuration.save();
-
-          const successCount = auditTypes.length - failedAudits.length - skippedAudits.length;
-          const processedCount = auditTypes.length - skippedAudits.length;
-
-          if (processedCount === 1 && failedAudits.length === 0) {
-            await say(`${SUCCESS_MESSAGE_PREFIX}The audit "${auditTypes[0]}" has been *${enableAudit}d* for "${site.getBaseURL()}".`);
-          } else if (failedAudits.length === 0 && skippedAudits.length === 0) {
-            await say(`${SUCCESS_MESSAGE_PREFIX}All ${auditTypes.length} audits have been *${enableAudit}d* for "${site.getBaseURL()}".`);
-          /* c8 ignore start */
-          // Partial success path - difficult to test without complex audit state setup
-          } else if (successCount > 0) {
-            await say(`${SUCCESS_MESSAGE_PREFIX}${successCount} out of ${processedCount} audits have been *${enableAudit}d* for "${site.getBaseURL()}".`);
-            if (failedAudits.length > 0) {
-              await say(`:warning: ${failedAudits.length} audit(s) failed:\n${failedAudits.map((f) => `• *${f.audit}*: ${f.reason}`).join('\n')}`);
-            }
-          /* c8 ignore stop */
-          /* c8 ignore start */
-          // Complete failure path - difficult to test without triggering dependency errors
-          } else {
-            await say(`${ERROR_MESSAGE_PREFIX}Failed to ${enableAudit} any audits for "${site.getBaseURL()}".`);
-            await say(`:warning: All ${processedCount} audit(s) failed:\n${failedAudits.map((f) => `• *${f.audit}*: ${f.reason}`).join('\n')}`);
-          }
-          /* c8 ignore stop */
-        /* c8 ignore start */
-        // Top-level error handling - difficult to test as it requires configuration.save() to fail
-        } catch (error) {
-          log.error(error);
-          await say(`${ERROR_MESSAGE_PREFIX}An error occurred while trying to enable or disable audits: ${error.message}`);
-        }
-        /* c8 ignore stop */
-        return;
-      }
-
-      validateInput(enableAudit, auditTypeOrProfile);
-
-      let auditTypes;
-      let isProfile = false;
-      try {
-      // Check if it's a profile by attempting to load it
-        try {
-          const profile = loadProfileConfig(auditTypeOrProfile);
-
-          auditTypes = Object.keys(profile.audits);
-          isProfile = true;
-        } catch (e) {
-        // If loading profile fails, it's a single audit type
-          const registeredAudits = configuration.getHandlers();
-          if (!registeredAudits[auditTypeOrProfile]) {
-            throw new Error(`Invalid audit type or profile: "${auditTypeOrProfile}"`);
-          }
-
-          auditTypes = [auditTypeOrProfile];
-
-          isProfile = false;
-        }
-
-        const typeDescription = isProfile ? `profile "${auditTypeOrProfile}"` : `audit type "${auditTypeOrProfile}"`;
-
-        await say(`:information_source: Processing ${typeDescription} with ${auditTypes.length} audit type${auditTypes.length > 1 ? 's' : ''}: ${auditTypes.join(', ')}`);
-      } catch (error) {
-        await say(`${ERROR_MESSAGE_PREFIX}${error.message}`);
-        return;
-      }
-
-      const file = files[0];
-
-      const response = await fetch(file.url_private, {
-        headers: {
-          Authorization: `Bearer ${context.env.SLACK_BOT_TOKEN}`,
-        },
-      });
-
-      if (!response.ok) {
-        await say(`${ERROR_MESSAGE_PREFIX}Failed to download the CSV file.`);
-        return;
-      }
-
-      const fileContent = await response.text();
-
-      let baseURLs;
-      try {
-        baseURLs = await validateCSVFile(fileContent);
-      } catch (error) {
-        await say(`${ERROR_MESSAGE_PREFIX}${error.message}`);
-        return;
-      }
-
-      const results = {
-        successful: [],
-        failed: [],
-      };
-
-      await say(`:hourglass_flowing_sand: Processing ${baseURLs.length} URLs...`);
-
-      const processPromises = baseURLs.map(async (baseURL) => {
-        try {
-          const site = await Site.findByBaseURL(baseURL);
-          if (!site) {
-            return { baseURL, success: false, error: 'Site not found' };
-          }
-
-          auditTypes.forEach((auditType) => {
-            if (isEnableAudit) {
-              configuration.enableHandlerForSite(auditType, site);
-            } else {
+            enabledAudits.forEach((auditType) => {
               configuration.disableHandlerForSite(auditType, site);
-            }
-          });
+            });
 
-          return { baseURL, success: true };
-        } catch (error) {
-          return { baseURL, success: false, error: error.message };
+            await configuration.save();
+            await say(`${SUCCESS_MESSAGE_PREFIX}Disabled ${enabledAudits.length} audits from profile "${profileName}" for "${site.getBaseURL()}".`);
+            return;
+            /* c8 ignore start */
+          } catch (error) {
+            log.error(`Failed to load profile "${profileName}": ${error.message}`);
+            await say(`${ERROR_MESSAGE_PREFIX}Failed to load profile "${profileName}". ${error.message}`);
+            return;
+          }
+          /* c8 ignore stop */
         }
-      });
 
-      const processedResults = await Promise.all(processPromises);
+        // Handle single audit type
+        if (!registeredAudits[singleAuditType]) {
+          await say(`${ERROR_MESSAGE_PREFIX}The "${singleAuditType}" is not present in the configuration.\nList of allowed audits:\n${Object.keys(registeredAudits).join('\n')}.`);
+          return;
+        }
 
-      results.successful = processedResults
-        .filter((result) => result.success)
-        .map((result) => result.baseURL);
+        if (isEnableAudit) {
+          if (singleAuditType === 'preflight') {
+            const authoringType = site.getAuthoringType();
+            const deliveryConfig = site.getDeliveryConfig();
+            const helixConfig = site.getHlxConfig();
 
-      results.failed = processedResults
-        .filter((result) => !result.success)
-        .map(({ baseURL, error }) => ({ baseURL, error }));
+            let configMissing = false;
 
-      await configuration.save();
+            if (!authoringType) {
+              configMissing = true;
+            } else if (authoringType === 'documentauthoring' || authoringType === 'ue') {
+              const hasHelixConfig = helixConfig
+                  && helixConfig.rso && Object.keys(helixConfig.rso).length > 0;
+              if (!hasHelixConfig) {
+                configMissing = true;
+              }
+            } else if (authoringType === 'cs' || authoringType === 'cs/crosswalk') {
+              const hasDeliveryConfig = deliveryConfig
+                  && deliveryConfig.programId && deliveryConfig.environmentId;
+              if (!hasDeliveryConfig) {
+                configMissing = true;
+              }
+            }
 
-      let message = ':clipboard: *Bulk Update Results*\n';
-      if (isProfile) {
-        message += `\nProfile: \`${auditTypeOrProfile}\` with ${auditTypes.length} audit types:`;
-        message += `\n\`\`\`${auditTypes.join('\n')}\`\`\``;
-      } else {
-        message += `\nAudit Type: \`${auditTypeOrProfile}\``;
+            if (configMissing) {
+              await promptPreflightConfig(slackContext, site, singleAuditType);
+              return;
+            }
+          }
+
+          configuration.enableHandlerForSite(singleAuditType, site);
+        } else {
+          configuration.disableHandlerForSite(singleAuditType, site);
+        }
+
+        await configuration.save();
+        await say(`${SUCCESS_MESSAGE_PREFIX}The audit "${singleAuditType}" has been *${enableAudit}d* for "${site.getBaseURL()}".`);
+      } catch (error) {
+        log.error(error);
+        await say(`${ERROR_MESSAGE_PREFIX}An error occurred while trying to enable or disable audits: ${error.message}`);
       }
-
-      if (isNonEmptyArray(results.successful)) {
-        message += `\n${SUCCESS_MESSAGE_PREFIX}Successfully ${enableAudit}d for ${results.successful.length} sites:`;
-        message += `\n\`\`\`${results.successful.join('\n')}\`\`\``;
-      }
-
-      if (isNonEmptyArray(results.failed)) {
-        message += `\n${ERROR_MESSAGE_PREFIX}Failed to process ${results.failed.length} sites:`;
-        message += '\n```';
-        results.failed.forEach(({ baseURL, error }) => {
-          message += `${baseURL}: ${error}\n`;
-        });
-        message += '```';
-      }
-
-      await say(message);
     } catch (error) {
       log.error(error);
       await say(`${ERROR_MESSAGE_PREFIX}An error occurred while trying to enable or disable audits: ${error.message}`);

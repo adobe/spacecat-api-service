@@ -196,11 +196,8 @@ describe('UpdateSitesAuditsCommand', () => {
     ).to.be.true;
   });
 
-  it('enable all audits for a site using "all" keyword', async () => {
+  it('should reject "enable all" and show error message', async () => {
     dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
-
-    // Mock isHandlerEnabledForSite: cwv is enabled, sitemap is disabled
-    configurationMock.isHandlerEnabledForSite = sandbox.stub().callsFake((auditType) => auditType === 'cwv');
 
     const command = ToggleSiteAuditCommand(contextMock);
     const args = ['enable', 'https://site0.com', 'all'];
@@ -211,17 +208,17 @@ describe('UpdateSitesAuditsCommand', () => {
       'Expected dataAccess.getSiteByBaseURL to be called with "https://site0.com", but it was not',
     ).to.be.true;
     expect(
+      slackContextMock.say.calledWith(sinon.match(/"enable all" is not supported/)),
+      'Expected error message about "enable all" not being supported, but it was not sent',
+    ).to.be.true;
+    expect(
       configurationMock.save.called,
-      'Expected configuration.save to be called, but it was not',
-    ).to.be.true;
+      'Expected configuration.save NOT to be called, but it was',
+    ).to.be.false;
     expect(
-      slackContextMock.say.calledWith(sinon.match(/Enabling 1 disabled audits from profile "demo"/)),
-      'Expected informational message about profile filtering with already enabled count, but it was not sent',
-    ).to.be.true;
-    expect(
-      configurationMock.enableHandlerForSite.calledWith('sitemap', site),
-      'Expected configuration.enableHandlerForSite to be called with "sitemap" and site, but it was not',
-    ).to.be.true;
+      configurationMock.enableHandlerForSite.called,
+      'Expected configuration.enableHandlerForSite NOT to be called, but it was',
+    ).to.be.false;
   });
 
   it('disable all audits for a site using "all" keyword', async () => {
@@ -257,44 +254,40 @@ describe('UpdateSitesAuditsCommand', () => {
       'Expected disableHandlerForSite to be called for each audit type (2 in demo profile)',
     ).to.equal(2);
     expect(
-      slackContextMock.say.calledWith(sinon.match(/Disabling 2 audits from profile "demo"/)),
-      'Expected informational message about disabling audits from profile, but it was not sent',
-    ).to.be.true;
-    expect(
-      slackContextMock.say.calledWith(`${SUCCESS_MESSAGE_PREFIX}All 2 audits have been *disabled* for "https://site0.com".`),
-      'Expected Slack message confirming all audits were disabled, but it was not sent',
+      slackContextMock.say.calledWith(sinon.match(/Disabled 2 audits from profile "demo"/)),
+      'Expected success message about disabled audits from profile, but it was not sent',
     ).to.be.true;
   });
 
-  it('should handle "all" keyword case-insensitively', async () => {
+  it('should handle "all" keyword case-insensitively for disable', async () => {
     dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
 
-    // Mock getEnabledAuditsForSite to return currently enabled audits
-    configurationMock.getEnabledAuditsForSite.returns(['cwv']);
+    // Mock isHandlerEnabledForSite: both audits are enabled
+    configurationMock.isHandlerEnabledForSite = sandbox.stub().returns(true);
 
     const command = ToggleSiteAuditCommand(contextMock);
-    const args = ['enable', 'https://site0.com', 'ALL'];
+    const args = ['disable', 'https://site0.com', 'ALL'];
     await command.handleExecution(args, slackContextMock);
 
     expect(
-      slackContextMock.say.calledWith(sinon.match(/audits from profile/i)),
-      'Expected informational message about processing audits, but it was not sent',
+      slackContextMock.say.calledWith(sinon.match(/Disabled.*audits from profile/i)),
+      'Expected success message about disabled audits, but it was not sent',
     ).to.be.true;
   });
 
-  it('should filter audits by profile when enabling all audits with profile parameter', async () => {
+  it('should filter audits by profile when disabling all audits with profile parameter', async () => {
     dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
 
-    // Mock getEnabledAuditsForSite to return currently enabled audits
-    configurationMock.getEnabledAuditsForSite.returns(['cwv']);
+    // Mock isHandlerEnabledForSite: both audits are enabled
+    configurationMock.isHandlerEnabledForSite = sandbox.stub().returns(true);
 
     const command = ToggleSiteAuditCommand(contextMock);
-    const args = ['enable', 'https://site0.com', 'all', 'demo'];
+    const args = ['disable', 'https://site0.com', 'all', 'demo'];
     await command.handleExecution(args, slackContextMock);
 
     expect(
-      configurationMock.enableHandlerForSite.callCount,
-      'Expected enableHandlerForSite to be called only for audits in the profile',
+      configurationMock.disableHandlerForSite.callCount,
+      'Expected disableHandlerForSite to be called only for audits in the profile',
     ).to.be.greaterThan(0);
     expect(
       slackContextMock.say.calledWith(sinon.match(/audits from profile "demo"/)),
@@ -306,14 +299,14 @@ describe('UpdateSitesAuditsCommand', () => {
     ).to.be.true;
   });
 
-  it('should use demo profile as default when no profile is specified for enable all', async () => {
+  it('should use demo profile as default when no profile is specified for disable all', async () => {
     dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
 
-    // Mock getEnabledAuditsForSite to return currently enabled audits
-    configurationMock.getEnabledAuditsForSite.returns(['cwv']);
+    // Mock isHandlerEnabledForSite: both audits are enabled
+    configurationMock.isHandlerEnabledForSite = sandbox.stub().returns(true);
 
     const command = ToggleSiteAuditCommand(contextMock);
-    const args = ['enable', 'https://site0.com', 'all'];
+    const args = ['disable', 'https://site0.com', 'all'];
     await command.handleExecution(args, slackContextMock);
 
     expect(
@@ -455,224 +448,6 @@ describe('UpdateSitesAuditsCommand', () => {
           + ` audits:\n${Object.keys(handlers).join('\n')}.`),
         'Expected error message was not called',
       ).to.be.true;
-    });
-  });
-
-  describe('CSV bulk operations', () => {
-    it('should process CSV file to enable with profile', async () => {
-      const args = ['enable', 'demo'];
-      const command = ToggleSiteAuditCommand(contextMock);
-
-      slackContextMock.files = [{
-        name: 'sites.csv',
-        url_private: 'https://mock-url',
-      }];
-      dataAccessMock.Site.findByBaseURL.withArgs('https://site1.com').resolves(site);
-      dataAccessMock.Site.findByBaseURL.withArgs('https://site2.com').resolves(site);
-
-      // Mock isHandlerEnabledForSite: nothing is enabled
-      configurationMock.isHandlerEnabledForSite = sandbox.stub().returns(false);
-
-      await command.handleExecution(args, slackContextMock);
-
-      expect(configurationMock.enableHandlerForSite.callCount)
-        .to.equal(4); // 2 audits in demo profile × 2 sites
-      expect(configurationMock.save.calledOnce).to.be.true;
-      expect(slackContextMock.say.calledWith(sinon.match('Successfully'))).to.be.true;
-    });
-
-    it('should process CSV file to disable with profile', async () => {
-      const args = ['disable', 'demo'];
-      const command = ToggleSiteAuditCommand(contextMock);
-
-      slackContextMock.files = [{
-        name: 'sites.csv',
-        url_private: 'https://mock-url',
-      }];
-      dataAccessMock.Site.findByBaseURL.withArgs('https://site1.com').resolves(site);
-      dataAccessMock.Site.findByBaseURL.withArgs('https://site2.com').resolves(site);
-
-      // Mock isHandlerEnabledForSite: all audits are enabled
-      configurationMock.isHandlerEnabledForSite = sandbox.stub().returns(true);
-
-      await command.handleExecution(args, slackContextMock);
-
-      expect(configurationMock.disableHandlerForSite.callCount)
-        .to.equal(4); // 2 audits in demo profile × 2 sites
-      expect(configurationMock.save.calledOnce).to.be.true;
-      expect(slackContextMock.say.calledWith(sinon.match('Successfully'))).to.be.true;
-    });
-
-    it('should handle errors during audit enabling/disabling in bulk processing', async () => {
-      slackContextMock.files = [{
-        name: 'sites.csv',
-        url_private: 'http://mock-url',
-      }];
-
-      dataAccessMock.Site.findByBaseURL.withArgs('https://site1.com').resolves(site);
-      dataAccessMock.Site.findByBaseURL.withArgs('https://site2.com').resolves(site);
-
-      configurationMock.enableHandlerForSite
-        .withArgs('cwv', site)
-        .onFirstCall().returns()
-        .onSecondCall()
-        .throws(new Error('Test error during enable'));
-
-      const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'cwv'], slackContextMock);
-
-      expect(slackContextMock.say.calledWith(
-        sinon.match((value) => value.includes(':clipboard: *Bulk Update Results*')
-          && value.includes('Successfully enabled for 1 sites')
-          && value.includes('https://site1.com')
-          && value.includes('Failed to process 1 sites')
-          && value.includes('https://site2.com: Test error during enable')),
-      )).to.be.true;
-
-      expect(configurationMock.save.calledOnce).to.be.true;
-    });
-
-    it('should handle CSV file with invalid URLs', async () => {
-      fetchStub.resolves({
-        ok: true,
-        text: () => Promise.resolve('invalid-url\nhttps://valid.com'),
-      });
-
-      slackContextMock.files = [{
-        name: 'sites.csv',
-        url_private: 'http://mock-url',
-      }];
-
-      const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'cwv'], slackContextMock);
-
-      expect(slackContextMock.say.calledWith(sinon.match('Invalid URLs found'))).to.be.true;
-    });
-
-    it('should handle CSV file with only invalid URLs', async () => {
-      fetchStub.resolves({
-        ok: true,
-        text: () => Promise.resolve(' \n  '),
-      });
-
-      slackContextMock.files = [{
-        name: 'sites.csv',
-        url_private: 'http://mock-url',
-      }];
-
-      const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'cwv'], slackContextMock);
-
-      expect(slackContextMock.say.calledWith(sinon.match(':x: The CSV file is empty.'))).to.be.true;
-    });
-
-    it('should handle empty CSV file', async () => {
-      fetchStub.resolves({
-        ok: true,
-        text: () => Promise.resolve(''),
-      });
-
-      slackContextMock.files = [{
-        name: 'sites.csv',
-        url_private: 'http://mock-url',
-      }];
-
-      const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'cwv'], slackContextMock);
-
-      expect(slackContextMock.say.calledWith(sinon.match('CSV file is empty'))).to.be.true;
-    });
-
-    it('should handle CSV download failure', async () => {
-      fetchStub.resolves({
-        ok: false,
-      });
-
-      slackContextMock.files = [{
-        name: 'sites.csv',
-        url_private: 'http://mock-url',
-      }];
-
-      const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'cwv'], slackContextMock);
-
-      expect(slackContextMock.say.calledWith(sinon.match('Failed to download'))).to.be.true;
-    });
-
-    it('should handle CSV file with invalid URLs', async () => {
-      fetchStub.resolves({
-        ok: true,
-        text: () => Promise.resolve('invalid-url1\ninvalid-url2'),
-      });
-
-      slackContextMock.files = [{
-        name: 'sites.csv',
-        url_private: 'http://mock-url',
-      }];
-
-      const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'cwv'], slackContextMock);
-
-      expect(slackContextMock.say.calledWith(sinon.match('Invalid URLs found'))).to.be.true;
-    });
-
-    it('should handle sites that are not found during bulk processing', async () => {
-      fetchStub.resolves({
-        ok: true,
-        text: () => Promise.resolve('https://site1.com\nhttps://nonexistent-site.com'),
-      });
-
-      slackContextMock.files = [{
-        name: 'sites.csv',
-        url_private: 'http://mock-url',
-      }];
-
-      dataAccessMock.Site.findByBaseURL.withArgs('https://site1.com').resolves(site);
-      dataAccessMock.Site.findByBaseURL.withArgs('https://nonexistent-site.com').resolves(null);
-
-      const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'cwv'], slackContextMock);
-
-      expect(slackContextMock.say.calledWith(
-        sinon.match((value) => value.includes(':clipboard: *Bulk Update Results*')
-          && value.includes('Successfully enabled for 1 sites')
-          && value.includes('https://site1.com')
-          && value.includes('Failed to process 1 sites')
-          && value.includes('https://nonexistent-site.com: Site not found')),
-      )).to.be.true;
-
-      expect(configurationMock.save.calledOnce).to.be.true;
-    });
-
-    it('should throw an error when CSV processing fails', async () => {
-      fetchStub.resolves({
-        ok: true,
-        text: () => Promise.resolve('"unclosed quote\nhttp://example.com'),
-      });
-
-      slackContextMock.files = [{
-        name: 'sites.csv',
-        url_private: 'http://mock-url',
-      }];
-
-      const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'cwv'], slackContextMock);
-
-      expect(slackContextMock.say.calledWith(sinon.match('CSV processing failed:'))).to.be.true;
-    });
-  });
-
-  describe('profile handling', () => {
-    it('should handle invalid profile name', async () => {
-      slackContextMock.files = [{
-        name: 'sites.csv',
-        url_private: 'http://mock-url',
-      }];
-
-      const command = ToggleSiteAuditCommand(contextMock);
-      await command.handleExecution(['enable', 'invalid-profile'], slackContextMock);
-
-      expect(slackContextMock.say.calledWith(sinon.match('Invalid audit type or profile'))).to.be.true;
     });
   });
 
