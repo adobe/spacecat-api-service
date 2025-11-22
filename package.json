@@ -74,7 +74,7 @@
     "@adobe/spacecat-helix-content-sdk": "1.4.27",
     "@adobe/spacecat-shared-athena-client": "1.7.2",
     "@adobe/spacecat-shared-brand-client": "1.1.29",
-    "@adobe/spacecat-shared-data-access": "2.87.1",
+    "@adobe/spacecat-shared-data-access": "https://gitpkg.now.sh/adobe/spacecat-shared/packages/spacecat-shared-tier-client?siteEnrollmentRemoveDeps&timestamp=1",
     "@adobe/spacecat-shared-gpt-client": "1.6.10",
     "@adobe/spacecat-shared-http-utils": "1.19.0",
     "@adobe/spacecat-shared-ims-client": "1.11.3",
