@@ -761,6 +761,16 @@ export const onboardSingleSite = async (
   const imsOrgID = imsOrganizationID || env.DEMO_IMS_ORG;
   const profileName = options.profileName || 'unknown';
 
+  // Debug: Log slackContext structure
+  log.info('onboardSingleSite slackContext check:', {
+    hasSlackContext: !!slackContext,
+    hasChannelId: !!slackContext?.channelId,
+    hasThreadTs: !!slackContext?.threadTs,
+    hasSayFunction: typeof slackContext?.say === 'function',
+    channelId: slackContext?.channelId,
+    threadTs: slackContext?.threadTs,
+  });
+
   const tier = additionalParams.tier || EntitlementModel.TIERS.FREE_TRIAL;
 
   await say(`:gear: Starting environment setup for site ${baseURL} with imsOrgID: ${imsOrgID} and tier: ${tier} using the ${profileName} profile`);
@@ -1104,6 +1114,13 @@ export const onboardSingleSite = async (
       cwvDemoSuggestionsJob,
       workflowWaitTime: workflowWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS,
     };
+
+    // Debug: Log what slackContext is being sent to Step Functions
+    log.info('Starting onboard workflow with slackContext:', {
+      demoURLJobSlackContext: demoURLJob.taskContext.slackContext,
+      hasChannelId: !!demoURLJob.taskContext.slackContext?.channelId,
+      hasThreadTs: !!demoURLJob.taskContext.slackContext?.threadTs,
+    });
 
     const workflowName = `onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`;
 
