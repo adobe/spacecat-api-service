@@ -95,7 +95,9 @@ function PreflightController(ctx, log, env) {
    */
   const createPreflightJob = async (context) => {
     const { data } = context;
-    const CS_TYPES = [SiteModel.AUTHORING_TYPES.CS, SiteModel.AUTHORING_TYPES.CS_CW];
+    const promiseBasedTypes = [
+      SiteModel.AUTHORING_TYPES.CS, SiteModel.AUTHORING_TYPES.CS_CW, SiteModel.AUTHORING_TYPES.AMS,
+    ];
     try {
       validateRequestData(data);
     } catch (error) {
@@ -109,11 +111,9 @@ function PreflightController(ctx, log, env) {
       let site;
       const url = new URL(data.urls[0]);
       const previewBaseURL = `${url.protocol}//${url.hostname}`;
-      if (url.hostname.endsWith('adobecqms.net')) {
-        // AMS
+      if (isValidUUID(data.siteId)) {
         site = await dataAccess.Site.findById(data.siteId);
       } else {
-        // EDS and CS
         site = await dataAccess.Site.findByPreviewURL(previewBaseURL);
       }
 
@@ -133,7 +133,7 @@ function PreflightController(ctx, log, env) {
       }
 
       let promiseTokenResponse;
-      if (CS_TYPES.includes(site.getAuthoringType())) {
+      if (promiseBasedTypes.includes(site.getAuthoringType())) {
         try {
           promiseTokenResponse = await getIMSPromiseToken(context);
         } catch (e) {
@@ -167,7 +167,7 @@ function PreflightController(ctx, log, env) {
           siteId: site.getId(),
           type: 'preflight',
         };
-        if (CS_TYPES.includes(site.getAuthoringType())) {
+        if (promiseBasedTypes.includes(site.getAuthoringType())) {
           sqsMessage.promiseToken = promiseTokenResponse;
         }
         await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, sqsMessage);

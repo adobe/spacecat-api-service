@@ -26,12 +26,15 @@ use(sinonChai);
 let startOnboarding;
 let onboardSiteModal;
 let extractDeliveryConfigFromPreviewUrl;
+let triggerBrandProfileAgentStub;
 
 describe('onboard-modal', () => {
   let sandbox;
 
   before(async () => {
     // Mock the network-dependent modules before importing
+    triggerBrandProfileAgentStub = sinon.stub().resolves('exec-123');
+
     const mockedModule = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
       '../../../../src/utils/slack/base.js': {
         loadProfileConfig: sinon.stub().resolves({
@@ -58,6 +61,9 @@ describe('onboard-modal', () => {
           region: 'US',
         }),
       },
+      '../../../../src/support/brand-profile-trigger.js': {
+        triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+      },
     });
 
     ({ startOnboarding, onboardSiteModal, extractDeliveryConfigFromPreviewUrl } = mockedModule);
@@ -67,6 +73,7 @@ describe('onboard-modal', () => {
     // Block all network requests
     nock.disableNetConnect();
     sandbox = sinon.createSandbox();
+    triggerBrandProfileAgentStub.resetHistory();
   });
 
   afterEach(() => {
@@ -94,19 +101,22 @@ describe('onboard-modal', () => {
       expect(returnedImsOrgId).to.equal(imsOrgId);
     });
 
-    it('should reject invalid preview URLs', async () => {
-      const invalidUrl = 'https://invalid-url.com';
-      expect(extractDeliveryConfigFromPreviewUrl(invalidUrl, null)).to.be.null;
+    it('should validate valid AMS preview URLs', async () => {
+      const previewURL = 'https://author.adobecqms.net';
+
+      const {
+        authorURL,
+        preferContentApi,
+        imsOrgId,
+      } = extractDeliveryConfigFromPreviewUrl(previewURL);
+      expect(authorURL).to.equal('https://author.adobecqms.net');
+      expect(preferContentApi).to.equal(true);
+      expect(imsOrgId).to.equal(null);
     });
 
     it('should handle malformed preview URLs', async () => {
       const malformedUrl = 'not-a-valid-url';
       expect(extractDeliveryConfigFromPreviewUrl(malformedUrl, null)).to.be.null;
-    });
-
-    it('should handle malformed environment ID in preview URLs', async () => {
-      const url = 'https://author-p123-e.adobeaemcloud.com';
-      expect(extractDeliveryConfigFromPreviewUrl(url, null)).to.be.null;
     });
 
     it('should handle null imsOrgId gracefully', async () => {
@@ -566,7 +576,7 @@ describe('onboard-modal', () => {
     });
 
     it('should validate preview URL format when provided', async () => {
-      body.view.state.values.preview_url_input.preview_url.value = 'https://invalid-preview-url.com';
+      body.view.state.values.preview_url_input.preview_url.value = 'invalid-preview-url';
 
       const onboardSiteModalAction = onboardSiteModal(context);
 
@@ -579,7 +589,7 @@ describe('onboard-modal', () => {
       expect(ackMock).to.have.been.calledOnceWith({
         response_action: 'errors',
         errors: {
-          preview_url_input: 'Could not extract program/environment ID from this URL. Please provide a valid AEM CS preview URL.',
+          preview_url_input: 'Please provide a valid preview URL.',
         },
       });
     });
@@ -642,7 +652,7 @@ describe('onboard-modal', () => {
 
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
         channel: 'C12345',
-        text: ':white_check_mark: *Onboarding completed successfully by test-user!*\n'
+        text: ':white_check_mark: *Onboarding triggered successfully by test-user!*\n'
           + '\n'
           + ':ims: *IMS Org ID:* 1234567894ABCDEF12345678@AdobeOrg\n'
           + ':groups: *Project ID:* project123\n'
@@ -662,6 +672,11 @@ describe('onboard-modal', () => {
           + ':inbox_tray: *Imports:* organic-traffic, top-pages, organic-keywords, all-traffic\n'
           + '        ',
         thread_ts: '1234567890.123456',
+      });
+
+      expect(triggerBrandProfileAgentStub).to.have.been.calledOnce;
+      expect(triggerBrandProfileAgentStub.firstCall.args[0]).to.include({
+        reason: 'aso-slack',
       });
     });
 
@@ -753,7 +768,7 @@ describe('onboard-modal', () => {
 
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
         channel: 'C12345',
-        text: ':white_check_mark: *Onboarding completed successfully by test-user!*\n'
+        text: ':white_check_mark: *Onboarding triggered successfully by test-user!*\n'
           + '\n'
           + ':ims: *IMS Org ID:* 1234567894ABCDEF12345678@AdobeOrg\n'
           + ':groups: *Project ID:* project123\n'
@@ -1015,7 +1030,7 @@ describe('onboard-modal', () => {
       expect(ackMock).to.have.been.called;
 
       const postMessageCalls = clientMock.chat.postMessage.getCalls();
-      const successMessages = postMessageCalls.filter((call) => call.args[0].text.includes(':white_check_mark: *Onboarding completed successfully'));
+      const successMessages = postMessageCalls.filter((call) => call.args[0].text.includes(':white_check_mark: *Onboarding triggered successfully'));
       expect(successMessages.length).to.be.greaterThan(0);
 
       const hasDeliveryConfigWithProgramId = successMessages.some((call) => call.args[0].text.includes(':gear: *Delivery Config:* Program 12345'));
@@ -1039,7 +1054,7 @@ describe('onboard-modal', () => {
       expect(ackMock).to.have.been.called;
 
       const postMessageCalls = clientMock.chat.postMessage.getCalls();
-      const successMessages = postMessageCalls.filter((call) => call.args[0].text.includes(':white_check_mark: *Onboarding completed successfully'));
+      const successMessages = postMessageCalls.filter((call) => call.args[0].text.includes(':white_check_mark: *Onboarding triggered successfully'));
       expect(successMessages.length).to.be.greaterThan(0);
 
       const hasTierInput = successMessages.some((call) => call.args[0].text.includes(':paid: *Entitlement Tier:* free_trial'));
