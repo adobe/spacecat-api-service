@@ -89,6 +89,7 @@ export function preflightConfigModal(lambdaContext) {
       // Determine URL type based on authoring type and validate accordingly
       let deliveryConfigFromPreview = null;
       let helixConfigFromPreview = null;
+      let amsAuthorUrl;
 
       if (authoringType === 'cs' || authoringType === 'cs/crosswalk') {
         // For AEM CS authoring types, expect AEM CS preview URL
@@ -113,7 +114,20 @@ export function preflightConfigModal(lambdaContext) {
           });
           return;
         }
-      } else if (authoringType !== 'ams') {
+      } else if (authoringType === 'ams') {
+        if (!isValidUrl(previewUrl)) {
+          await ack({
+            response_action: 'errors',
+            errors: {
+              preview_url_input:
+                'Please provide a valid AMS author URL.',
+            },
+          });
+          return;
+        }
+
+        amsAuthorUrl = previewUrl;
+      } else {
         await ack({
           response_action: 'errors',
           errors: {
@@ -146,11 +160,11 @@ export function preflightConfigModal(lambdaContext) {
         site.setHlxConfig(helixConfigFromPreview);
         configDetails = `:gear: *Helix Config:* ${helixConfigFromPreview.rso.ref}--${helixConfigFromPreview.rso.site}--${helixConfigFromPreview.rso.owner}.${helixConfigFromPreview.rso.tld}\n`
                        + `:link: *Preview URL:* ${previewUrl}`;
-      } else if (authoringType === 'ams' && isValidUrl(previewUrl)) {
+      } else if (amsAuthorUrl) {
         site.setDeliveryConfig({
-          authorURL: previewUrl,
+          authorURL: amsAuthorUrl,
         });
-        configDetails = `:gear: *Authoring URL:* ${previewUrl}`;
+        configDetails = `:gear: *Authoring URL:* ${amsAuthorUrl}`;
       }
 
       await site.save();

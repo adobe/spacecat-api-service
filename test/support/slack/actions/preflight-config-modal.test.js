@@ -280,6 +280,26 @@ describe('preflight-config-modal', () => {
       });
     });
 
+    it('should validate ams author URL for ams type', async () => {
+      body.view.state.values.authoring_type_input.authoring_type.selected_option.value = 'ams';
+      body.view.state.values.preview_url_input.preview_url.value = 'invalid';
+
+      const mockedModule = await esmock('../../../../src/support/slack/actions/preflight-config-modal.js');
+      const modalAction = mockedModule.preflightConfigModal(context);
+      await modalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.calledWith({
+        response_action: 'errors',
+        errors: {
+          preview_url_input: 'Please provide a valid AMS author URL.',
+        },
+      });
+    });
+
     it('should handle unsupported authoring type', async () => {
       body.view.state.values.authoring_type_input.authoring_type.selected_option.value = 'unsupported';
 
