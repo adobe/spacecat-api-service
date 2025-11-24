@@ -150,25 +150,11 @@ async function checkAuditRateLimit(site, auditType, windowMs) {
  * @returns {Promise<{allowed: string[], skipped: object[], response?: Response}>} Rate limit result
  */
 export async function enforceRateLimit(site, auditTypes, ctx, log) {
-  // Debug logging for rate limit environment variable
-  log.debug({
-    envValue: ctx.env.SANDBOX_AUDIT_RATE_LIMIT_HOURS,
-    envType: typeof ctx.env.SANDBOX_AUDIT_RATE_LIMIT_HOURS,
-    defaultValue: DEFAULT_RATE_LIMIT_HOURS,
-  }, 'Rate limit environment variable debug info');
-
   // Properly handle environment variable that could be "0"
   const envValue = ctx.env.SANDBOX_AUDIT_RATE_LIMIT_HOURS;
   const rateLimitHours = envValue !== undefined && envValue !== ''
     ? parseInt(envValue, 10)
     : DEFAULT_RATE_LIMIT_HOURS;
-  // Debug logging for parsed rate limit value
-  log.debug({
-    rateLimitHours,
-    isFinite: Number.isFinite(rateLimitHours),
-    isLessThanOrEqualZero: rateLimitHours <= 0,
-  }, 'Parsed rate limit hours debug info');
-
   const types = auditTypes.length > 0 ? auditTypes : ALL_AUDITS;
 
   // Rate limiting disabled - allow all
