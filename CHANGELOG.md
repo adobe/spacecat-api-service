@@ -1,3 +1,31 @@
+## [1.249.5](https://github.com/adobe/spacecat-api-service/compare/v1.249.4...v1.249.5) (2025-11-24)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.88.1 ([#1544](https://github.com/adobe/spacecat-api-service/issues/1544)) ([b7e8774](https://github.com/adobe/spacecat-api-service/commit/b7e87747ff0b195cc6041aa42549a5ac26a1a7b6))
+
+## [1.249.4](https://github.com/adobe/spacecat-api-service/compare/v1.249.3...v1.249.4) (2025-11-23)
+
+
+### Bug Fixes
+
+* **deps:** update dependency tldts to v7.0.19 ([#1542](https://github.com/adobe/spacecat-api-service/issues/1542)) ([0150462](https://github.com/adobe/spacecat-api-service/commit/01504625f398ab725ac58d473e8c480f725eaa58))
+
+## [1.249.3](https://github.com/adobe/spacecat-api-service/compare/v1.249.2...v1.249.3) (2025-11-23)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1541](https://github.com/adobe/spacecat-api-service/issues/1541)) ([557c9ea](https://github.com/adobe/spacecat-api-service/commit/557c9ea8a448f79a6de98f65746427f274c3304f))
+
+## [1.249.2](https://github.com/adobe/spacecat-api-service/compare/v1.249.1...v1.249.2) (2025-11-22)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#1540](https://github.com/adobe/spacecat-api-service/issues/1540)) ([9c8ba2c](https://github.com/adobe/spacecat-api-service/commit/9c8ba2c9add822d77df0ee6d3038771c2f00bdc5))
+
 ## [1.249.1](https://github.com/adobe/spacecat-api-service/compare/v1.249.0...v1.249.1) (2025-11-21)
 
 
