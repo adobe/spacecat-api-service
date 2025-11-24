@@ -417,52 +417,6 @@ describe('Organizations Controller', () => {
     expect(error).to.have.property('message', 'No updates provided');
   });
 
-  it('removes an organization', async () => {
-    organizations[0].remove = sinon.stub().resolves(organizations[0]);
-    mockDataAccess.Organization.findById.resolves(organizations[0]);
-    const response = await organizationsController.removeOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...context });
-
-    expect(organizations[0].remove).to.have.been.calledOnce;
-    expect(response.status).to.equal(204);
-  });
-
-  it('returns bad request when removing a site if id not provided', async () => {
-    organizations[0].remove = sinon.stub().resolves(organizations[0]);
-    mockDataAccess.Organization.findById.resolves(organizations[0]);
-    const response = await organizationsController.removeOrganization(
-      { params: {}, ...context },
-    );
-    const error = await response.json();
-
-    expect(organizations[0].remove).to.not.have.been.called;
-    expect(response.status).to.equal(400);
-    expect(error).to.have.property('message', 'Organization ID required');
-  });
-
-  it('returns unauthorized when removing a site for non admin users', async () => {
-    context.attributes.authInfo.withProfile({ is_admin: false });
-    organizations[0].remove = sinon.stub().resolves(organizations[0]);
-    mockDataAccess.Organization.findById.resolves(organizations[0]);
-    const response = await organizationsController.removeOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...context });
-    const error = await response.json();
-
-    expect(organizations[0].remove).to.not.have.been.called;
-    expect(response.status).to.equal(403);
-    expect(error).to.have.property('message', 'Only admins can delete Organizations');
-  });
-
-  it('returns not found when removing a non-existing organization', async () => {
-    organizations[0].remove = sinon.stub().resolves(organizations[0]);
-    mockDataAccess.Organization.findById.resolves(null);
-
-    const response = await organizationsController.removeOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...context });
-    const error = await response.json();
-
-    expect(organizations[0].remove).to.not.have.been.called;
-    expect(response.status).to.equal(404);
-    expect(error).to.have.property('message', 'Organization not found');
-  });
-
   it('gets all organizations', async () => {
     mockDataAccess.Organization.all.resolves(organizations);
 
@@ -910,6 +864,14 @@ describe('Organizations Controller', () => {
 
       expect(result.status).to.equal(403);
       expect(error).to.have.property('message', 'Only users belonging to the organization can view its sites');
+    });
+
+    it('throw restricted operation when user try to delete organization', async () => {
+      const response = await organizationsController.removeOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' } });
+      const error = await response.json();
+
+      expect(response.status).to.equal(403);
+      expect(error.message).to.equal('Restricted Operation');
     });
   });
 });
