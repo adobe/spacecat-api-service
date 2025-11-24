@@ -166,7 +166,7 @@ describe('sandbox-audit-service helpers', () => {
       ctx = {
         env: { AUDIT_JOBS_QUEUE_URL: 'https://sqs.url/queue' },
         sqs: { sendMessage: sinon.stub().resolves({ MessageId: 'test-id' }) },
-        log: { info: sinon.stub(), error: sinon.stub() },
+        log: { info: sinon.stub(), error: sinon.stub(), debug: sinon.stub() },
       };
       sinon.reset();
     });
