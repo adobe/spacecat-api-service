@@ -15,6 +15,9 @@ import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import esmock from 'esmock';
+import {
+  preflightConfigModal,
+} from '../../../../src/support/slack/actions/preflight-config-modal.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -166,6 +169,31 @@ describe('preflight-config-modal', () => {
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
         channel: 'C12345',
         text: ':white_check_mark: Successfully configured and enabled preflight audit for `https://example.com`\n:writing_hand: *Authoring Type:* documentauthoring\n:gear: *Helix Config:* main--site--owner.hlx.live\n:link: *Preview URL:* https://main--site--owner.hlx.live',
+        thread_ts: undefined,
+      });
+    });
+
+    it('should handle helix preview URL for ams type', async () => {
+      body.view.state.values.authoring_type_input.authoring_type.selected_option.value = 'ams';
+      body.view.state.values.preview_url_input.preview_url.value = 'https://some-preview.url';
+
+      siteMock.findById.resolves(siteMock);
+
+      const modalAction = preflightConfigModal(context);
+      await modalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.calledOnce;
+      expect(siteMock.setAuthoringType).to.have.been.calledWith('ams');
+      expect(siteMock.setDeliveryConfig).to.have.been.calledWith({
+        authorURL: 'https://some-preview.url',
+      });
+      expect(clientMock.chat.postMessage).to.have.been.calledWith({
+        channel: 'C12345',
+        text: ':white_check_mark: Successfully configured and enabled preflight audit for `https://example.com`\n:writing_hand: *Authoring Type:* ams\n:gear: *Authoring URL:* https://some-preview.url',
         thread_ts: undefined,
       });
     });

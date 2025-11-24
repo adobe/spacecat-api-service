@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { isValidUrl } from '@adobe/spacecat-shared-utils';
 import { extractDeliveryConfigFromPreviewUrl } from './onboard-modal.js';
 
 /**
@@ -112,7 +113,7 @@ export function preflightConfigModal(lambdaContext) {
           });
           return;
         }
-      } else {
+      } else if (authoringType !== 'ams') {
         await ack({
           response_action: 'errors',
           errors: {
@@ -145,6 +146,11 @@ export function preflightConfigModal(lambdaContext) {
         site.setHlxConfig(helixConfigFromPreview);
         configDetails = `:gear: *Helix Config:* ${helixConfigFromPreview.rso.ref}--${helixConfigFromPreview.rso.site}--${helixConfigFromPreview.rso.owner}.${helixConfigFromPreview.rso.tld}\n`
                        + `:link: *Preview URL:* ${previewUrl}`;
+      } else if (authoringType === 'ams' && isValidUrl(previewUrl)) {
+        site.setDeliveryConfig({
+          authorURL: previewUrl,
+        });
+        configDetails = `:gear: *Authoring URL:* ${previewUrl}`;
       }
 
       await site.save();
