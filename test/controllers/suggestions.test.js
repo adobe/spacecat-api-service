@@ -3541,7 +3541,7 @@ describe('Suggestions Controller', () => {
       expect(body.metadata.success).to.equal(0);
       expect(body.metadata.failed).to.equal(2);
       expect(body.suggestions[0].statusCode).to.equal(500);
-      expect(body.suggestions[0].message).to.include('Deployment failed');
+      expect(body.suggestions[0].message).to.include('deploy failed');
     });
 
     it('should handle partial success when some suggestions not found', async () => {
@@ -3663,6 +3663,294 @@ describe('Suggestions Controller', () => {
       expect(patches[0]).to.have.property('suggestionId');
       expect(patches[0]).to.have.property('prerenderRequired', true);
       expect(patches[0]).to.have.property('lastUpdated');
+    });
+  });
+
+  describe('rollbackSuggestionFromEdge (Tokowaka Rollback)', () => {
+    let s3ClientSendStub;
+    let tokowakaSuggestions;
+    let headingsOpportunity;
+
+    beforeEach(() => {
+      // Mock suggestions with tokowakaDeployed timestamp
+      tokowakaSuggestions = [
+        {
+          getId: () => SUGGESTION_IDS[0],
+          getType: () => 'headings',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 1,
+          getData: () => ({
+            url: 'https://example.com/page1',
+            recommendedAction: 'New Heading Title',
+            checkType: 'heading-empty',
+            transformRules: {
+              action: 'replace',
+              selector: 'h1.test-selector',
+            },
+            tokowakaDeployed: '2025-01-01T00:00:00.000Z',
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().returnsThis(),
+        },
+        {
+          getId: () => SUGGESTION_IDS[1],
+          getType: () => 'headings',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 2,
+          getData: () => ({
+            url: 'https://example.com/page1',
+            recommendedAction: 'New Subtitle',
+            checkType: 'heading-empty',
+            transformRules: {
+              action: 'replace',
+              selector: 'h2.test-selector',
+            },
+            tokowakaDeployed: '2025-01-01T00:00:00.000Z',
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().returnsThis(),
+        },
+      ];
+
+      headingsOpportunity = {
+        getId: sandbox.stub().returns(OPPORTUNITY_ID),
+        getSiteId: sandbox.stub().returns(SITE_ID),
+        getType: sandbox.stub().returns('headings'),
+      };
+
+      site.getConfig = sandbox.stub().returns({
+        getTokowakaConfig: () => ({ apiKey: 'test-api-key-123' }),
+      });
+      site.getBaseURL = sandbox.stub().returns('https://example.com');
+      site.getId = sandbox.stub().returns(SITE_ID);
+      mockOpportunity.findById.resetBehavior();
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(headingsOpportunity);
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID_NOT_ENABLED).resolves(opportunityNotEnabled);
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID_NOT_FOUND).resolves(null);
+      mockSuggestion.allByOpportunityId.resetBehavior();
+      mockSuggestion.allByOpportunityId.resolves(tokowakaSuggestions);
+
+      // Mock S3 GetObject to return existing config with deployed patches
+      const existingConfig = {
+        siteId: SITE_ID,
+        baseURL: 'https://example.com',
+        version: '1.0',
+        tokowakaOptimizations: {
+          '/page1': {
+            prerender: true,
+            patches: [
+              {
+                opportunityId: OPPORTUNITY_ID,
+                suggestionId: SUGGESTION_IDS[0],
+                op: 'replace',
+                selector: 'h1.test-selector',
+                value: 'New Heading Title',
+                prerenderRequired: true,
+                lastUpdated: '2025-01-01T00:00:00.000Z',
+              },
+              {
+                opportunityId: OPPORTUNITY_ID,
+                suggestionId: SUGGESTION_IDS[1],
+                op: 'replace',
+                selector: 'h2.test-selector',
+                value: 'New Subtitle',
+                prerenderRequired: true,
+                lastUpdated: '2025-01-01T00:00:00.000Z',
+              },
+            ],
+          },
+        },
+      };
+
+      s3ClientSendStub = sandbox.stub().callsFake((command) => {
+        // Handle GetObjectCommand (fetchConfig) - return existing config with deployed patches
+        if (command.constructor.name === 'GetObjectCommand') {
+          return Promise.resolve({
+            Body: {
+              transformToString: () => JSON.stringify(existingConfig),
+            },
+          });
+        }
+        // Handle PutObjectCommand (uploadConfig) - simulate successful upload
+        return Promise.resolve();
+      });
+      context.s3 = {
+        s3Client: {
+          send: s3ClientSendStub,
+        },
+      };
+      context.env = {
+        TOKOWAKA_SITE_CONFIG_BUCKET: 'test-tokowaka-bucket',
+        TOKOWAKA_PREVIEW_BUCKET: 'test-tokowaka-preview-bucket',
+        TOKOWAKA_CDN_PROVIDER: 'test-cdn-provider',
+        TOKOWAKA_EDGE_URL: 'https://edge-dev.tokowaka.now',
+        TOKOWAKA_CDN_CONFIG: JSON.stringify({
+          cloudfront: {
+            distributionId: 'E123456',
+            region: 'us-east-1',
+          },
+        }),
+      };
+
+      tokowakaSuggestions.forEach((suggestion, index) => {
+        mockSuggestion.findById
+          .withArgs(SUGGESTION_IDS[index])
+          .resolves(suggestion);
+      });
+
+      context.log = {
+        info: sandbox.stub(),
+        warn: sandbox.stub(),
+        error: sandbox.stub(),
+        debug: sandbox.stub(),
+      };
+    });
+
+    it('should successfully rollback suggestions', async () => {
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          action: 'rollback',
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      expect(body.metadata.success).to.equal(1);
+      expect(body.metadata.failed).to.equal(0);
+
+      // Verify tokowakaDeployed was removed
+      const suggestion = tokowakaSuggestions[0];
+      expect(suggestion.setData.calledOnce).to.be.true;
+      const dataArg = suggestion.setData.firstCall.args[0];
+      expect(dataArg).to.not.have.property('tokowakaDeployed');
+
+      // Verify setUpdatedBy was called
+      expect(suggestion.setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
+
+      // Verify save was called
+      expect(suggestion.save.calledOnce).to.be.true;
+    });
+
+    it('should return 400 for invalid action parameter', async () => {
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          action: 'invalid-action',
+        },
+      });
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('action must be either "deploy" or "rollback"');
+    });
+
+    it('should return 400 for suggestions without tokowakaDeployed during rollback', async () => {
+      // Remove tokowakaDeployed from suggestion
+      tokowakaSuggestions[0].getData = () => ({
+        type: 'headings',
+        checkType: 'heading-empty',
+        recommendedAction: {
+          description: 'Suggestion 1',
+          transformRules: {
+            action: 'replace',
+            selector: 'h1:nth-of-type(1)',
+          },
+        },
+      });
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          action: 'rollback',
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      expect(body.metadata.success).to.equal(0);
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0].message).to.include('has not been deployed');
+    });
+
+    it('should handle multiple suggestions rollback', async () => {
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+          action: 'rollback',
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      expect(body.metadata.success).to.equal(2);
+      expect(body.metadata.failed).to.equal(0);
+
+      // Verify both suggestions were updated
+      tokowakaSuggestions.forEach((suggestion) => {
+        expect(suggestion.setData.calledOnce).to.be.true;
+        expect(suggestion.setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
+        expect(suggestion.save.calledOnce).to.be.true;
+      });
+    });
+
+    it('should handle rollback failure gracefully', async () => {
+      // Make S3 upload fail
+      s3ClientSendStub.rejects(new Error('S3 upload failed'));
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          action: 'rollback',
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      expect(body.metadata.success).to.equal(0);
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0].message).to.include('rollback failed');
     });
   });
 
