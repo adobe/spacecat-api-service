@@ -1093,6 +1093,242 @@ describe('LLMO Onboarding Functions', () => {
       // Restore setTimeout
       restoreSetTimeout(originalSetTimeout);
     });
+
+    it('should set overrideBaseURL when Ahrefs determines it is needed', async () => {
+      // Mock organization
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      // Mock site config with getFetchConfig and updateFetchConfig
+      const mockSiteConfig = {
+        updateLlmoBrand: sinon.stub(),
+        updateLlmoDataFolder: sinon.stub(),
+        getImports: sinon.stub().returns([]),
+        enableImport: sinon.stub(),
+        getFetchConfig: sinon.stub().returns({}),
+        updateFetchConfig: sinon.stub(),
+      };
+
+      // Mock site
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns(mockSiteConfig),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      // Mock configuration
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      // Setup mocks
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      // Mock Ahrefs client to return overrideBaseURL
+      const mockAhrefsClient = {
+        getTopPages: sinon.stub(),
+      };
+      // Base URL fails, www variant succeeds
+      mockAhrefsClient.getTopPages
+        .withArgs('https://example.com', 1)
+        .resolves({ result: { pages: [] } });
+      mockAhrefsClient.getTopPages
+        .withArgs('https://www.example.com/', 1)
+        .resolves({ result: { pages: [{ url: 'https://www.example.com/page1' }] } });
+
+      // Use helper functions for common mocks
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      const originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+
+      // Mock the module with Ahrefs client
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          ...createCommonEsmockDependencies({
+            mockTierClient,
+            mockTracingFetch,
+            mockConfig,
+            mockComposeBaseURL,
+            mockSharePointClient: sharePointClient,
+            mockOctokit,
+          }),
+          '@adobe/spacecat-shared-ahrefs-client': {
+            default: {
+              createFrom: sinon.stub().returns(mockAhrefsClient),
+            },
+          },
+        },
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: {
+          ...mockEnv,
+          AHREFS_API_BASE_URL: 'https://api.ahrefs.com',
+          AHREFS_API_KEY: 'test-ahrefs-key',
+        },
+        sqs: {
+          sendMessage: sinon.stub().resolves(),
+        },
+      };
+
+      const params = {
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      };
+
+      const result = await performLlmoOnboardingWithMocks(params, context);
+
+      // Verify the function completed successfully
+      expect(result).to.exist;
+      expect(result.siteId).to.equal('site123');
+
+      // Debug: Check if determineOverrideBaseURL was called
+      expect(mockLog.info).to.have.been.calledWith(
+        sinon.match(/Determining overrideBaseURL/),
+      );
+
+      // Verify updateFetchConfig was called with overrideBaseURL
+      expect(mockSiteConfig.updateFetchConfig).to.have.been.called;
+      const updateFetchConfigCall = mockSiteConfig.updateFetchConfig.getCall(0);
+      expect(updateFetchConfigCall.args[0]).to.have.property('overrideBaseURL', 'https://www.example.com/');
+
+      // Verify log message
+      expect(mockLog.info).to.have.been.calledWith(
+        'Set overrideBaseURL to https://www.example.com/ for site site123',
+      );
+
+      // Restore setTimeout
+      restoreSetTimeout(originalSetTimeout);
+    });
+
+    it('should not set overrideBaseURL when Ahrefs determines it is not needed', async () => {
+      // Mock organization
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      // Mock site config
+      const mockSiteConfig = {
+        updateLlmoBrand: sinon.stub(),
+        updateLlmoDataFolder: sinon.stub(),
+        getImports: sinon.stub().returns([]),
+        enableImport: sinon.stub(),
+        getFetchConfig: sinon.stub().returns({}),
+        updateFetchConfig: sinon.stub(),
+      };
+
+      // Mock site
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns(mockSiteConfig),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      // Mock configuration
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      // Setup mocks
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      // Mock Ahrefs client - both URLs succeed
+      const mockAhrefsClient = {
+        getTopPages: sinon.stub(),
+      };
+      // Both URLs succeed, so no overrideBaseURL should be set
+      mockAhrefsClient.getTopPages
+        .withArgs('https://example.com', 1)
+        .resolves({ result: { pages: [{ url: 'https://example.com/page1' }] } });
+      mockAhrefsClient.getTopPages
+        .withArgs('https://www.example.com/', 1)
+        .resolves({ result: { pages: [{ url: 'https://www.example.com/page1' }] } });
+
+      // Use helper functions for common mocks
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      const originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+
+      // Mock the module with Ahrefs client
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          ...createCommonEsmockDependencies({
+            mockTierClient,
+            mockTracingFetch,
+            mockConfig,
+            mockComposeBaseURL,
+            mockSharePointClient: sharePointClient,
+            mockOctokit,
+          }),
+          '@adobe/spacecat-shared-ahrefs-client': {
+            default: {
+              createFrom: sinon.stub().returns(mockAhrefsClient),
+            },
+          },
+        },
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: {
+          ...mockEnv,
+          AHREFS_API_BASE_URL: 'https://api.ahrefs.com',
+          AHREFS_API_KEY: 'test-ahrefs-key',
+        },
+        sqs: {
+          sendMessage: sinon.stub().resolves(),
+        },
+      };
+
+      const params = {
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      };
+
+      await performLlmoOnboardingWithMocks(params, context);
+
+      // Verify updateFetchConfig was NOT called
+      expect(mockSiteConfig.updateFetchConfig).to.not.have.been.called;
+
+      // Restore setTimeout
+      restoreSetTimeout(originalSetTimeout);
+    });
   });
 
   describe('createEntitlementAndEnrollment', () => {
@@ -1366,6 +1602,120 @@ describe('LLMO Onboarding Functions', () => {
 
       // Verify the successful log was NOT called since it failed
       expect(mockLog.info).to.not.have.been.calledWith('Successfully revoked LLMO enrollment for site site456');
+    });
+  });
+
+  describe('updateIndexConfig', () => {
+    it('should handle error when admin.hlx.page API returns non-ok response', async () => {
+      // Mock Octokit to return file content that doesn't contain the dataFolder
+      const mockOctokit = createMockOctokit(sinon, {
+        content: 'default:\n  <<: *default\n  include:\n    - \'/**\'\n',
+        sha: 'test-sha-789',
+      });
+
+      // Mock tracingFetch to return a non-ok response
+      const mockTracingFetch = sinon.stub();
+      // First call (preview) fails
+      mockTracingFetch.onCall(0).resolves({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+      });
+
+      // Mock SharePoint client
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+
+      // Import the function with mocked dependencies
+      const { copyFilesToSharepoint } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@octokit/rest': { Octokit: mockOctokit },
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+          '@adobe/spacecat-helix-content-sdk': {
+            createFrom: sinon.stub().resolves(sharePointClient),
+          },
+        },
+      );
+
+      const context = {
+        log: mockLog,
+        env: {
+          ...mockEnv,
+          LLMO_ONBOARDING_GITHUB_TOKEN: 'test-github-token',
+        },
+      };
+
+      const mockSay = sinon.stub().resolves();
+
+      // Call copyFilesToSharepoint which calls publishToAdminHlx
+      await copyFilesToSharepoint('dev/test-com', context, mockSay);
+
+      // Verify that the error was logged
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/Failed to publish via admin\.hlx\.page/),
+      );
+
+      // Verify that tracingFetch was called
+      expect(mockTracingFetch).to.have.been.called;
+    });
+
+    it('should skip update when helix query yaml already contains dataFolder', async () => {
+      // Mock Octokit to return file content that already contains the dataFolder
+      const existingContent = `default:
+  <<: *default
+  include:
+    - '/**'
+
+dev/test-com:
+  <<: *default
+  include:
+    - '/dev/test-com/**'
+  target: /dev/test-com/query-index.xlsx
+`;
+      const mockOctokit = createMockOctokit(sinon, {
+        content: existingContent,
+        sha: 'test-sha-existing',
+      });
+
+      // Import the function with mocked dependencies
+      const { updateIndexConfig: updateIndexConfigWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@octokit/rest': { Octokit: mockOctokit },
+        },
+      );
+
+      const context = {
+        log: mockLog,
+        env: {
+          ...mockEnv,
+          LLMO_ONBOARDING_GITHUB_TOKEN: 'test-github-token',
+        },
+      };
+
+      const mockSay = sinon.stub().resolves();
+
+      // Call the function
+      await updateIndexConfigWithMocks('dev/test-com', context, mockSay);
+
+      // Verify that the warning was logged
+      expect(mockLog.warn).to.have.been.calledWith(
+        'Helix query yaml already contains string dev/test-com. Skipping update.',
+      );
+
+      // Verify that the say function was called
+      expect(mockSay).to.have.been.calledWith(
+        'Helix query yaml already contains string dev/test-com. Skipping GitHub update.',
+      );
+
+      // Verify that the Octokit createOrUpdateFileContents was NOT called
+      const octokitInstance = mockOctokit.returnValues[0];
+      expect(octokitInstance.repos.createOrUpdateFileContents).to.not.have.been.called;
     });
   });
 
@@ -1650,6 +2000,143 @@ describe('LLMO Onboarding Functions', () => {
 
       // Verify tracingFetch was called (attempted to start bulk status job)
       expect(mockTracingFetch).to.have.been.called;
+    });
+  });
+
+  describe('determineOverrideBaseURL', () => {
+    const testCases = [
+      {
+        name: 'should return alternate URL when only alternate succeeds (base without www)',
+        baseURL: 'https://example.com',
+        responses: {
+          'https://example.com': [],
+          'https://www.example.com/': [{ url: 'https://www.example.com/page1' }],
+        },
+        expected: 'https://www.example.com/',
+        expectedLog: { level: 'info', pattern: /Setting overrideBaseURL to https:\/\/www\.example\.com/ },
+      },
+      {
+        name: 'should return alternate URL when only alternate succeeds (base with www)',
+        baseURL: 'https://www.example.com',
+        responses: {
+          'https://www.example.com': [],
+          'https://example.com/': [{ url: 'https://example.com/page1' }],
+        },
+        expected: 'https://example.com/',
+        expectedLog: { level: 'info', pattern: /Setting overrideBaseURL/ },
+      },
+      {
+        name: 'should return null when both URLs succeed',
+        baseURL: 'https://example.com',
+        responses: {
+          'https://example.com': [{ url: 'https://example.com/page1' }],
+          'https://www.example.com/': [{ url: 'https://www.example.com/page1' }],
+        },
+        expected: null,
+        expectedLog: { level: 'debug', pattern: /Both URLs succeeded, no overrideBaseURL needed/ },
+      },
+      {
+        name: 'should return null when only base URL succeeds',
+        baseURL: 'https://example.com',
+        responses: {
+          'https://example.com': [{ url: 'https://example.com/page1' }],
+          'https://www.example.com/': [],
+        },
+        expected: null,
+        expectedLog: { level: 'debug', pattern: /Base URL succeeded, no overrideBaseURL needed/ },
+      },
+      {
+        name: 'should return null when both URLs fail',
+        baseURL: 'https://example.com',
+        responses: {
+          'https://example.com': [],
+          'https://www.example.com/': [],
+        },
+        expected: null,
+        expectedLog: { level: 'warn', pattern: /Both URLs failed Ahrefs test/ },
+      },
+      {
+        name: 'should return null when URL has non-www subdomain',
+        baseURL: 'https://blog.example.com',
+        responses: {},
+        expected: null,
+        expectedLog: { level: 'debug', pattern: /No www variation possible/ },
+        skipAhrefsCall: true,
+      },
+    ];
+
+    testCases.forEach(({
+      name, baseURL, responses, expected, expectedLog, skipAhrefsCall,
+    }) => {
+      it(name, async () => {
+        const mockAhrefsClient = {
+          getTopPages: sinon.stub(),
+        };
+
+        Object.entries(responses).forEach(([url, pages]) => {
+          mockAhrefsClient.getTopPages
+            .withArgs(url, 1)
+            .resolves({ result: { pages } });
+        });
+
+        const { determineOverrideBaseURL } = await esmock(
+          '../../../src/controllers/llmo/llmo-onboarding.js',
+          {
+            '@adobe/spacecat-shared-ahrefs-client': {
+              default: {
+                createFrom: sinon.stub().returns(mockAhrefsClient),
+              },
+            },
+          },
+        );
+
+        const context = {
+          log: mockLog,
+          env: mockEnv,
+        };
+
+        const result = await determineOverrideBaseURL(baseURL, context);
+
+        expect(result).to.equal(expected);
+        expect(mockLog[expectedLog.level])
+          .to.have.been.calledWith(sinon.match(expectedLog.pattern));
+
+        if (skipAhrefsCall) {
+          expect(mockAhrefsClient.getTopPages).to.not.have.been.called;
+        }
+      });
+    });
+
+    it('should handle Ahrefs API errors gracefully', async () => {
+      const mockAhrefsClient = {
+        getTopPages: sinon.stub(),
+      };
+
+      mockAhrefsClient.getTopPages.rejects(new Error('Ahrefs API error'));
+
+      const { determineOverrideBaseURL } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-ahrefs-client': {
+            default: {
+              createFrom: sinon.stub().returns(mockAhrefsClient),
+            },
+          },
+        },
+      );
+
+      const context = {
+        log: mockLog,
+        env: mockEnv,
+      };
+
+      const result = await determineOverrideBaseURL('https://example.com', context);
+
+      expect(result).to.be.null;
+      expect(mockLog.debug).to.have.been.calledWith(
+        sinon.match(/Ahrefs top pages test.*FAILED/),
+      );
+      expect(mockLog.warn).to.have.been.calledWith('Both URLs failed Ahrefs test, no overrideBaseURL set');
     });
   });
 });
