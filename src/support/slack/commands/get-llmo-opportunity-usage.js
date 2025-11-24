@@ -266,9 +266,9 @@ function GetLlmoOpportunityUsageCommand(context) {
             .replace(/\s+/g, ' ') // Normalize multiple spaces to single space
             .trim();
 
-          // Skip excluded IMS orgs
+          // Skip excluded/internal IMS orgs (non customer facing orgs)
           if (LLMO_INTERNAL_IMS_ORGS.includes(imsOrgId)) {
-            log.info(`Skipping excluded IMS org: ${imsOrgId} for site: ${site.getBaseURL()}`);
+            log.info(`Skipping excluded/internal IMS org: ${imsOrgId} for site: ${site.getBaseURL()}`);
             return null;
           }
           const containsGeo403 = queryIndex?.data?.some((item) => item.path.includes('agentic-traffic/agentictraffic-errors-403')) || false;
