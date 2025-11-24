@@ -1,3 +1,10 @@
+# [1.250.0](https://github.com/adobe/spacecat-api-service/compare/v1.249.6...v1.250.0) (2025-11-24)
+
+
+### Features
+
+* added endpoint for PTR - channel-platform-device ([#1547](https://github.com/adobe/spacecat-api-service/issues/1547)) ([fd8c1aa](https://github.com/adobe/spacecat-api-service/commit/fd8c1aa04bf918e6a6a978d07886af0198469112))
+
 ## [1.249.6](https://github.com/adobe/spacecat-api-service/compare/v1.249.5...v1.249.6) (2025-11-24)
 
 
