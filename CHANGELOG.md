@@ -1,3 +1,66 @@
+## [1.249.4](https://github.com/adobe/spacecat-api-service/compare/v1.249.3...v1.249.4) (2025-11-23)
+
+
+### Bug Fixes
+
+* **deps:** update dependency tldts to v7.0.19 ([#1542](https://github.com/adobe/spacecat-api-service/issues/1542)) ([0150462](https://github.com/adobe/spacecat-api-service/commit/01504625f398ab725ac58d473e8c480f725eaa58))
+
+## [1.249.3](https://github.com/adobe/spacecat-api-service/compare/v1.249.2...v1.249.3) (2025-11-23)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1541](https://github.com/adobe/spacecat-api-service/issues/1541)) ([557c9ea](https://github.com/adobe/spacecat-api-service/commit/557c9ea8a448f79a6de98f65746427f274c3304f))
+
+## [1.249.2](https://github.com/adobe/spacecat-api-service/compare/v1.249.1...v1.249.2) (2025-11-22)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#1540](https://github.com/adobe/spacecat-api-service/issues/1540)) ([9c8ba2c](https://github.com/adobe/spacecat-api-service/commit/9c8ba2c9add822d77df0ee6d3038771c2f00bdc5))
+
+## [1.249.1](https://github.com/adobe/spacecat-api-service/compare/v1.249.0...v1.249.1) (2025-11-21)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1531](https://github.com/adobe/spacecat-api-service/issues/1531)) ([bf8ca0e](https://github.com/adobe/spacecat-api-service/commit/bf8ca0e42a879d2a94c98f73a0caa6917b74a6ef))
+
+# [1.249.0](https://github.com/adobe/spacecat-api-service/compare/v1.248.1...v1.249.0) (2025-11-21)
+
+
+### Features
+
+* paid-traffic - added url-based endpoints for week-over-week ([#1533](https://github.com/adobe/spacecat-api-service/issues/1533)) ([d642403](https://github.com/adobe/spacecat-api-service/commit/d64240338ac87ed87e9b8305558e2b08ec1c7173))
+
+## [1.248.1](https://github.com/adobe/spacecat-api-service/compare/v1.248.0...v1.248.1) (2025-11-21)
+
+
+### Bug Fixes
+
+* add preview feature API for tokowaka ([#1491](https://github.com/adobe/spacecat-api-service/issues/1491)) ([696c54e](https://github.com/adobe/spacecat-api-service/commit/696c54eaedcf8464146bd15ce258a1d93b077b9c))
+
+# [1.248.0](https://github.com/adobe/spacecat-api-service/compare/v1.247.1...v1.248.0) (2025-11-20)
+
+
+### Features
+
+* paid traffic - additional temporal series endpoints ([#1529](https://github.com/adobe/spacecat-api-service/issues/1529)) ([3470f39](https://github.com/adobe/spacecat-api-service/commit/3470f39b675540a5a987f84d0f6178212e62a214))
+
+## [1.247.1](https://github.com/adobe/spacecat-api-service/compare/v1.247.0...v1.247.1) (2025-11-20)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1525](https://github.com/adobe/spacecat-api-service/issues/1525)) ([303ebfe](https://github.com/adobe/spacecat-api-service/commit/303ebfecf24c39200a6157c2284176876e650341))
+
+# [1.247.0](https://github.com/adobe/spacecat-api-service/compare/v1.246.1...v1.247.0) (2025-11-20)
+
+
+### Features
+
+* new paid traffic endpoint for temporal-series ([#1528](https://github.com/adobe/spacecat-api-service/issues/1528)) ([717cae6](https://github.com/adobe/spacecat-api-service/commit/717cae6eae8bb949e53dd23cf97e8423e94e9cac))
+
 ## [1.246.1](https://github.com/adobe/spacecat-api-service/compare/v1.246.0...v1.246.1) (2025-11-19)
 
 

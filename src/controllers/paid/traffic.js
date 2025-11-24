@@ -118,7 +118,7 @@ function TrafficController(context, log, env) {
     return { cachedResultUrl: null, cacheKey, outPrefix };
   }
 
-  async function fetchPaidTrafficData(dimensions, mapper, filter = null) {
+  async function fetchPaidTrafficData(dimensions, mapper, filter = null, isWeekOverWeek = false) {
     /* c8 ignore next 1 */
     const requestId = context.invocation?.requestId;
     const siteId = context.params?.siteId;
@@ -178,6 +178,7 @@ function TrafficController(context, log, env) {
       pageTypeMatchColumn: 'path',
       trfTypes,
       pageViewThreshold,
+      numTemporalSeries: isWeekOverWeek ? 4 : 1,
     });
 
     const description = `fetch paid channel data db: ${rumMetricsDatabase}| siteKey: ${siteId} | year: ${year} | month: ${month} | week: ${week} } | temporalCondition: ${quereyParams.temporalCondition} | groupBy: [${dimensions.join(', ')}] `;
@@ -260,6 +261,15 @@ function TrafficController(context, log, env) {
     );
   }
 
+  async function fetchPaidTrafficDataTemporalSeries(dimensions) {
+    return fetchPaidTrafficData(
+      dimensions,
+      TrafficDataWithCWVDto,
+      null,
+      true,
+    );
+  }
+
   return {
     getPaidTrafficByCampaignUrlDevice: async () => fetchPaidTrafficData(['utm_campaign', 'path', 'device'], TrafficDataWithCWVDto),
     getPaidTrafficByCampaignDevice: async () => fetchPaidTrafficData(['utm_campaign', 'device'], TrafficDataWithCWVDto),
@@ -311,6 +321,20 @@ function TrafficController(context, log, env) {
     getPaidTrafficByCampaignChannelDevice: async () => fetchPaidTrafficData(['utm_campaign', 'trf_channel', 'device'], TrafficDataWithCWVDto),
     getPaidTrafficByCampaignChannelPlatform: async () => fetchPaidTrafficData(['utm_campaign', 'trf_channel', 'trf_platform'], TrafficDataWithCWVDto),
     getPaidTrafficByCampaignChannelPlatformDevice: async () => fetchPaidTrafficData(['utm_campaign', 'trf_channel', 'trf_platform', 'device'], TrafficDataWithCWVDto),
+
+    getPaidTrafficTemporalSeries: async () => fetchPaidTrafficDataTemporalSeries([]),
+    getPaidTrafficTemporalSeriesByCampaign: async () => fetchPaidTrafficDataTemporalSeries(['utm_campaign']),
+    getPaidTrafficTemporalSeriesByChannel: async () => fetchPaidTrafficDataTemporalSeries(['trf_channel']),
+    getPaidTrafficTemporalSeriesByPlatform: async () => fetchPaidTrafficDataTemporalSeries(['trf_platform']),
+    getPaidTrafficTemporalSeriesByCampaignChannel: async () => fetchPaidTrafficDataTemporalSeries(['utm_campaign', 'trf_channel']),
+    getPaidTrafficTemporalSeriesByCampaignPlatform: async () => fetchPaidTrafficDataTemporalSeries(['utm_campaign', 'trf_platform']),
+    getPaidTrafficTemporalSeriesByCampaignChannelPlatform: async () => fetchPaidTrafficDataTemporalSeries(['utm_campaign', 'trf_channel', 'trf_platform']),
+    getPaidTrafficTemporalSeriesByChannelPlatform: async () => fetchPaidTrafficDataTemporalSeries(['trf_channel', 'trf_platform']),
+
+    getPaidTrafficTemporalSeriesByUrl: async () => fetchPaidTrafficDataTemporalSeries(['path']),
+    getPaidTrafficTemporalSeriesByUrlChannel: async () => fetchPaidTrafficDataTemporalSeries(['path', 'trf_channel']),
+    getPaidTrafficTemporalSeriesByUrlPlatform: async () => fetchPaidTrafficDataTemporalSeries(['path', 'trf_platform']),
+    getPaidTrafficTemporalSeriesByUrlChannelPlatform: async () => fetchPaidTrafficDataTemporalSeries(['path', 'trf_channel', 'trf_platform']),
   };
 }
 
