@@ -15,8 +15,9 @@ import { createFrom } from '@adobe/spacecat-helix-content-sdk';
 import { Octokit } from '@octokit/rest';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import TierClient from '@adobe/spacecat-shared-tier-client';
-import { composeBaseURL, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
+import { composeBaseURL, tracingFetch as fetch, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
 import AhrefsAPIClient from '@adobe/spacecat-shared-ahrefs-client';
+import { parse as parseDomain } from 'tldts';
 
 // LLMO Constants
 const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
@@ -540,21 +541,55 @@ export async function createOrFindOrganization(imsOrgId, context, say = () => {}
 }
 
 /**
+ * Checks if a hostname has a non-www subdomain using the tldts library.
+ * This properly handles all TLDs including multi-part TLDs like .co.uk, .com.au, etc.
+ *
+ * @param {string} hostname - The hostname to check (e.g., "blog.example.com")
+ * @returns {boolean} - True if the hostname has a subdomain other than www
+ *
+ * @example
+ * hasNonWWWSubdomain('example.com')           // false - apex domain
+ * hasNonWWWSubdomain('www.example.com')       // false - only www subdomain
+ * hasNonWWWSubdomain('blog.example.com')      // true - has subdomain
+ * hasNonWWWSubdomain('blog.example.co.uk')    // true - has subdomain (multi-part TLD)
+ * hasNonWWWSubdomain('example.co.uk')         // false - apex domain (multi-part TLD)
+ */
+function hasNonWWWSubdomain(hostname) {
+  const parsed = parseDomain(hostname);
+
+  // If parsing failed, be conservative and assume it's a subdomain
+  /* c8 ignore next 3 */
+  if (!parsed || !parsed.domain) {
+    return true;
+  }
+
+  const subdomain = parsed.subdomain || '';
+  return subdomain !== '' && subdomain !== 'www';
+}
+
+/**
  * Toggles the www subdomain in a given URL.
  * If the URL has www, it removes it. If it doesn't have www, it adds it.
- * Only works for URLs without other subdomains.
+ * Only works for URLs without other subdomains (e.g., blog.example.com).
+ * For URLs with non-www subdomains, returns the original URL unchanged.
+ *
  * @param {string} url - The URL to toggle (e.g., "https://example.com" or "https://www.example.com")
- * @returns {string} - The URL with www toggled
+ * @returns {string} - The URL with www toggled, or the original URL if it has a subdomain
  */
 function toggleWWW(url) {
   try {
     const urlObj = new URL(url);
-    const hostnameParts = urlObj.hostname.split('.');
+    const { hostname } = urlObj;
 
-    if (urlObj.hostname.startsWith('www.')) {
-      urlObj.hostname = urlObj.hostname.replace('www.', '');
-    } else if (hostnameParts.length === 2) {
-      urlObj.hostname = `www.${urlObj.hostname}`;
+    if (hasNonWWWSubdomain(hostname)) {
+      return url;
+    }
+
+    // Safe to toggle www for apex domains
+    if (hostname.startsWith('www.')) {
+      urlObj.hostname = hostname.replace('www.', '');
+    } else {
+      urlObj.hostname = `www.${hostname}`;
     }
 
     return urlObj.toString();
@@ -574,7 +609,7 @@ function toggleWWW(url) {
 async function testAhrefsTopPages(url, ahrefsClient, log) {
   try {
     const { result } = await ahrefsClient.getTopPages(url, 1);
-    const hasData = result?.pages && Array.isArray(result.pages) && result.pages.length > 0;
+    const hasData = isNonEmptyArray(result?.pages);
     log.debug(`Ahrefs top pages test for ${url}: ${hasData ? 'SUCCESS' : 'NO DATA'}`);
     return hasData;
   } catch (error) {
@@ -599,11 +634,11 @@ export async function determineOverrideBaseURL(baseURL, context) {
     log.info(`Determining overrideBaseURL for ${baseURL}`);
     const ahrefsClient = AhrefsAPIClient.createFrom(context);
     const alternateURL = toggleWWW(baseURL);
-    const normalizedBase = new URL(baseURL).toString();
-    const normalizedAlternate = alternateURL;
 
-    if (normalizedAlternate === normalizedBase) {
-      log.debug(`No www variation possible for ${baseURL}, skipping overrideBaseURL check`);
+    // If toggleWWW returns the same URL, it means the URL has a subdomain
+    // and we shouldn't try to toggle www (would create invalid nested subdomain)
+    if (alternateURL === baseURL) {
+      log.info(`Skipping overrideBaseURL detection for subdomain URL: ${baseURL}`);
       return null;
     }
 
@@ -876,15 +911,21 @@ export async function performLlmoOnboarding(params, context) {
     siteConfig.updateLlmoDataFolder(dataFolder.trim());
 
     // Determine and set overrideBaseURL if needed
-    const overrideBaseURL = await determineOverrideBaseURL(baseURL, context);
-    if (overrideBaseURL) {
-      /* c8 ignore next */
-      const currentFetchConfig = siteConfig.getFetchConfig() || {};
-      siteConfig.updateFetchConfig({
-        ...currentFetchConfig,
-        overrideBaseURL,
-      });
-      log.info(`Set overrideBaseURL to ${overrideBaseURL} for site ${site.getId()}`);
+    /* c8 ignore next */
+    const currentFetchConfig = siteConfig.getFetchConfig() || {};
+
+    // Only determine override if one doesn't already exist
+    if (!currentFetchConfig.overrideBaseURL) {
+      const overrideBaseURL = await determineOverrideBaseURL(baseURL, context);
+      if (overrideBaseURL) {
+        siteConfig.updateFetchConfig({
+          ...currentFetchConfig,
+          overrideBaseURL,
+        });
+        log.info(`Set overrideBaseURL to ${overrideBaseURL} for site ${site.getId()}`);
+      }
+    } else {
+      log.info(`Site ${site.getId()} already has overrideBaseURL: ${currentFetchConfig.overrideBaseURL}, skipping auto-detection`);
     }
 
     // update the site config object

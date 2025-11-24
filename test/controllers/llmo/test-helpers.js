@@ -18,7 +18,7 @@ import sinon from 'sinon';
  * @param {Object} responses - Map of URL to response data (array of pages)
  * @returns {Object} Mock Ahrefs client
  */
-export const createMockAhrefsClient = (responses) => {
+export const createMockAhrefsClient = (responses = {}) => {
   const mockClient = {
     getTopPages: sinon.stub(),
   };
@@ -44,3 +44,18 @@ export const setupDetermineOverrideBaseURLTest = async (mockAhrefsClient) => esm
     },
   },
 });
+
+/**
+ * Helper function to test determineOverrideBaseURL with given URL and responses
+ * @param {string} baseURL - The base URL to test
+ * @param {Object} responses - Map of URL to response data (array of pages)
+ * @param {Object} context - Test context with log and env
+ * @returns {Promise<Object>} Object containing result and mockAhrefsClient
+ */
+export const testDetermineOverrideBaseURL = async (baseURL, responses, context) => {
+  const mockAhrefsClient = createMockAhrefsClient(responses);
+  const { determineOverrideBaseURL } = await setupDetermineOverrideBaseURLTest(mockAhrefsClient);
+  const result = await determineOverrideBaseURL(baseURL, context);
+
+  return { result, mockAhrefsClient };
+};
