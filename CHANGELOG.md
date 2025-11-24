@@ -1,3 +1,10 @@
+## [1.251.2](https://github.com/adobe/spacecat-api-service/compare/v1.251.1...v1.251.2) (2025-11-24)
+
+
+### Bug Fixes
+
+* custom AMS urls for preflight ([#1536](https://github.com/adobe/spacecat-api-service/issues/1536)) ([5dce47e](https://github.com/adobe/spacecat-api-service/commit/5dce47ebc0047c908cb83cc174cb8a6bb2aaeb9f))
+
 ## [1.251.1](https://github.com/adobe/spacecat-api-service/compare/v1.251.0...v1.251.1) (2025-11-24)
 
 
