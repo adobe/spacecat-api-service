@@ -1,3 +1,10 @@
+# [1.252.0](https://github.com/adobe/spacecat-api-service/compare/v1.251.2...v1.252.0) (2025-11-24)
+
+
+### Features
+
+* **llmo:** add base URL check during onboarding ([#1549](https://github.com/adobe/spacecat-api-service/issues/1549)) ([94e25cb](https://github.com/adobe/spacecat-api-service/commit/94e25cb7db469a7f675dac7270ddb4ce962fd88b))
+
 ## [1.251.2](https://github.com/adobe/spacecat-api-service/compare/v1.251.1...v1.251.2) (2025-11-24)
 
 
