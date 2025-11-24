@@ -78,6 +78,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} entitlementController - The entitlement controller.
  * @param {Object} sandboxAuditController - The sandbox audit controller.
  * @param {Object} reportsController - The reports controller.
+ * @param {Object} pta2Controller - The PTA2 controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -112,6 +113,7 @@ export default function getRouteHandlers(
   entitlementController,
   sandboxAuditController,
   reportsController,
+  pta2Controller,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -120,10 +122,14 @@ export default function getRouteHandlers(
     'GET /audits/latest/:auditType': auditsController.getAllLatest,
     'GET /configurations': configurationController.getAll,
     'GET /configurations/latest': configurationController.getLatest,
-    'PUT /configurations/latest': configurationController.updateConfiguration,
+    'PATCH /configurations/latest': configurationController.updateConfiguration,
+    'POST /configurations/:version/restore': configurationController.restoreVersion,
     'GET /configurations/:version': configurationController.getByVersion,
     'POST /configurations/audits': configurationController.registerAudit,
     'DELETE /configurations/audits/:auditType': configurationController.unregisterAudit,
+    'PUT /configurations/latest/queues': configurationController.updateQueues,
+    'PATCH /configurations/latest/jobs/:jobType': configurationController.updateJob,
+    'PATCH /configurations/latest/handlers/:handlerType': configurationController.updateHandler,
     'PATCH /configurations/sites/audits': sitesAuditsToggleController.execute,
     'POST /event/fulfillment': fulfillmentController.processFulfillmentEvents,
     'POST /event/fulfillment/:eventType': fulfillmentController.processFulfillmentEvents,
@@ -186,6 +192,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit': suggestionsController.getAllForOpportunityPaged,
     'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix': suggestionsController.autofixSuggestions,
     'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy': suggestionsController.deploySuggestionToEdge,
+    'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-preview': suggestionsController.previewSuggestions,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status': suggestionsController.getByStatus,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit/:cursor': suggestionsController.getByStatusPaged,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit': suggestionsController.getByStatusPaged,
@@ -220,7 +227,41 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/traffic/paid/type-channel': trafficController.getPaidTrafficByTypeChannel,
     'GET /sites/:siteId/traffic/paid/type-campaign': trafficController.getPaidTrafficByTypeCampaign,
     'GET /sites/:siteId/traffic/paid/type': trafficController.getPaidTrafficByType,
+    'GET /sites/:siteId/traffic/paid/pta2/weekly-summary': pta2Controller.getPTAWeeklySummary,
+    'GET /sites/:siteId/traffic/paid/type-device': trafficController.getPaidTrafficByTypeDevice,
+    'GET /sites/:siteId/traffic/paid/type-device-channel': trafficController.getPaidTrafficByTypeDeviceChannel,
+    'GET /sites/:siteId/traffic/paid/channel': trafficController.getPaidTrafficByChannel,
+    'GET /sites/:siteId/traffic/paid/channel-device': trafficController.getPaidTrafficByChannelDevice,
+    'GET /sites/:siteId/traffic/paid/social-platform': trafficController.getPaidTrafficBySocialPlatform,
+    'GET /sites/:siteId/traffic/paid/social-platform-device': trafficController.getPaidTrafficBySocialPlatformDevice,
+    'GET /sites/:siteId/traffic/paid/search-platform': trafficController.getPaidTrafficBySearchPlatform,
+    'GET /sites/:siteId/traffic/paid/search-platform-device': trafficController.getPaidTrafficBySearchPlatformDevice,
+    'GET /sites/:siteId/traffic/paid/display-platform': trafficController.getPaidTrafficByDisplayPlatform,
+    'GET /sites/:siteId/traffic/paid/display-platform-device': trafficController.getPaidTrafficByDisplayPlatformDevice,
+    'GET /sites/:siteId/traffic/paid/video-platform': trafficController.getPaidTrafficByVideoPlatform,
+    'GET /sites/:siteId/traffic/paid/video-platform-device': trafficController.getPaidTrafficByVideoPlatformDevice,
+    'GET /sites/:siteId/traffic/paid/url': trafficController.getPaidTrafficByUrl,
+    'GET /sites/:siteId/traffic/paid/url-channel': trafficController.getPaidTrafficByUrlChannel,
+    'GET /sites/:siteId/traffic/paid/url-channel-device': trafficController.getPaidTrafficByUrlChannelDevice,
+    'GET /sites/:siteId/traffic/paid/url-channel-platform-device': trafficController.getPaidTrafficByUrlChannelPlatformDevice,
+    'GET /sites/:siteId/traffic/paid/campaign-channel-device': trafficController.getPaidTrafficByCampaignChannelDevice,
+    'GET /sites/:siteId/traffic/paid/campaign-channel-platform': trafficController.getPaidTrafficByCampaignChannelPlatform,
+    'GET /sites/:siteId/traffic/paid/campaign-channel-platform-device': trafficController.getPaidTrafficByCampaignChannelPlatformDevice,
+    'GET /sites/:siteId/traffic/paid/temporal-series': trafficController.getPaidTrafficTemporalSeries,
+    'GET /sites/:siteId/traffic/paid/temporal-series-by-campaign': trafficController.getPaidTrafficTemporalSeriesByCampaign,
+    'GET /sites/:siteId/traffic/paid/temporal-series-by-channel': trafficController.getPaidTrafficTemporalSeriesByChannel,
+    'GET /sites/:siteId/traffic/paid/temporal-series-by-platform': trafficController.getPaidTrafficTemporalSeriesByPlatform,
+    'GET /sites/:siteId/traffic/paid/temporal-series-by-campaign-channel': trafficController.getPaidTrafficTemporalSeriesByCampaignChannel,
+    'GET /sites/:siteId/traffic/paid/temporal-series-by-campaign-platform': trafficController.getPaidTrafficTemporalSeriesByCampaignPlatform,
+    'GET /sites/:siteId/traffic/paid/temporal-series-by-campaign-channel-platform': trafficController.getPaidTrafficTemporalSeriesByCampaignChannelPlatform,
+    'GET /sites/:siteId/traffic/paid/temporal-series-by-channel-platform': trafficController.getPaidTrafficTemporalSeriesByChannelPlatform,
+    'GET /sites/:siteId/traffic/paid/temporal-series-by-url': trafficController.getPaidTrafficTemporalSeriesByUrl,
+    'GET /sites/:siteId/traffic/paid/temporal-series-by-url-channel': trafficController.getPaidTrafficTemporalSeriesByUrlChannel,
+    'GET /sites/:siteId/traffic/paid/temporal-series-by-url-platform': trafficController.getPaidTrafficTemporalSeriesByUrlPlatform,
+    'GET /sites/:siteId/traffic/paid/temporal-series-by-url-channel-platform': trafficController.getPaidTrafficTemporalSeriesByUrlChannelPlatform,
     'GET /sites/:siteId/brand-guidelines': brandsController.getBrandGuidelinesForSite,
+    'GET /sites/:siteId/brand-profile': sitesController.getBrandProfile,
+    'POST /sites/:siteId/brand-profile': sitesController.triggerBrandProfile,
     'GET /sites/:siteId/top-pages': sitesController.getTopPages,
     'GET /sites/:siteId/top-pages/:source': sitesController.getTopPages,
     'GET /sites/:siteId/top-pages/:source/:geo': sitesController.getTopPages,
@@ -270,6 +311,10 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/llmo/sheet-data/:dataSource': llmoController.queryLlmoSheetData,
     'POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource': llmoController.queryLlmoSheetData,
     'POST /sites/:siteId/llmo/sheet-data/:sheetType/:week/:dataSource': llmoController.queryLlmoSheetData,
+    'GET /sites/:siteId/llmo/data': llmoController.queryFiles,
+    'GET /sites/:siteId/llmo/data/:dataSource': llmoController.queryFiles,
+    'GET /sites/:siteId/llmo/data/:sheetType/:dataSource': llmoController.queryFiles,
+    'GET /sites/:siteId/llmo/data/:sheetType/:week/:dataSource': llmoController.queryFiles,
     'GET /sites/:siteId/llmo/config': llmoController.getLlmoConfig,
     'PATCH /sites/:siteId/llmo/config': llmoController.updateLlmoConfig,
     'POST /sites/:siteId/llmo/config': llmoController.updateLlmoConfig,
@@ -305,6 +350,8 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/reports/:reportId': reportsController.getReport,
     'PATCH /sites/:siteId/reports/:reportId': reportsController.patchReport,
     'DELETE /sites/:siteId/reports/:reportId': reportsController.deleteReport,
+
+    'GET /sites-resolve': sitesController.resolveSite,
   };
 
   // Initialization of static and dynamic routes

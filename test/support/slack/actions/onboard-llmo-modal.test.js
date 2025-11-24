@@ -32,6 +32,7 @@ describe('onboard-llmo-modal', () => {
   let sharedConfigMock;
   let sharedSharepointMock;
   let sharedSlackMock;
+  let triggerBrandProfileAgentStub;
 
   // Default mocks that can be reused across tests
   const createDefaultMockSite = (sinonSandbox) => {
@@ -165,6 +166,8 @@ describe('onboard-llmo-modal', () => {
 
   const createDefaultMockSlackCtx = (sinonSandbox) => ({
     say: sinonSandbox.stub(),
+    channelId: 'C12345',
+    threadTs: '1234567890.123456',
   });
 
   const createDefaultMockFetch = (sinonSandbox) => sinonSandbox.stub().resolves({
@@ -208,6 +211,9 @@ describe('onboard-llmo-modal', () => {
       },
       '../../../../src/utils/slack/base.js': sharedSlackMock,
       '../../../../src/controllers/llmo/llmo-onboarding.js': updatedMockedLLMOOnboarding,
+      '../../../../src/support/brand-profile-trigger.js': {
+        triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+      },
     });
 
     return testMockedModule;
@@ -290,6 +296,8 @@ describe('onboard-llmo-modal', () => {
     });
 
     // Mock the ES modules that can't be stubbed directly
+    triggerBrandProfileAgentStub = sinon.stub().resolves('exec-llmo');
+
     mockedModule = await esmock('../../../../src/support/slack/actions/onboard-llmo-modal.js', {
       '@adobe/spacecat-shared-data-access/src/models/site/config.js': sharedConfigMock,
       '@adobe/spacecat-helix-content-sdk': sharedSharepointMock,
@@ -301,6 +309,9 @@ describe('onboard-llmo-modal', () => {
       },
       '../../../../src/utils/slack/base.js': sharedSlackMock,
       '../../../../src/controllers/llmo/llmo-onboarding.js': mockedLLMOOnboarding,
+      '../../../../src/support/brand-profile-trigger.js': {
+        triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+      },
     });
 
     onboardSite = mockedModule.onboardSite;
@@ -319,6 +330,8 @@ describe('onboard-llmo-modal', () => {
     // Reset TierClient mock completely for each test
     tierClientMock.createForSite.resetHistory();
     tierClientMock.createForSite.resetBehavior();
+
+    triggerBrandProfileAgentStub.resetHistory();
 
     // Create a fresh mock instance for each test with sandbox stubs
     const freshCreateEntitlementStub = sandbox.stub().resolves({
@@ -413,7 +426,6 @@ describe('onboard-llmo-modal', () => {
       expect(config.enableHandlerForSite).to.have.been.calledWith('llmo-referral-traffic', mockSite);
       expect(config.enableHandlerForSite).to.have.been.calledWith('geo-brand-presence', mockSite);
       expect(config.disableHandlerForSite).to.have.been.calledWith('geo-brand-presence-daily', mockSite);
-      expect(config.enableHandlerForSite).to.have.been.calledWith('cdn-analysis', mockSite);
       expect(config.enableHandlerForSite).to.have.been.calledWith('cdn-logs-report', mockSite);
       expect(config.enableHandlerForSite).to.have.been.calledWith('llmo-customer-analysis', mockSite);
       expect(config.enableHandlerForSite).to.have.been.calledWith('headings', mockSite);
@@ -435,6 +447,11 @@ describe('onboard-llmo-modal', () => {
         message: 'Automation: Onboard example-com',
         content: sinon.match.string,
         sha: 'test-sha-123',
+      });
+
+      expect(triggerBrandProfileAgentStub).to.have.been.calledOnce;
+      expect(triggerBrandProfileAgentStub.firstCall.args[0]).to.deep.include({
+        reason: 'llmo-slack',
       });
     });
 
@@ -497,6 +514,9 @@ describe('onboard-llmo-modal', () => {
         },
         '../../../../src/utils/slack/base.js': sharedSlackMock,
         '../../../../src/controllers/llmo/llmo-onboarding.js': updatedMockedLLMOOnboarding,
+        '../../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
       });
 
       onboardSite = mockedModule.onboardSite;
@@ -798,63 +818,6 @@ describe('onboard-llmo-modal', () => {
       expect(lambdaCtx.log.error).to.have.been.calledWith(sinon.match('Error saving LLMO config for site site123: SQS service unavailable'));
     });
 
-    it('should log that agentic traffic audits are already enabled when organization has them', async () => {
-      // Mock data
-      const input = {
-        baseURL: 'https://example.com',
-        brandName: 'Test Brand',
-        imsOrgId: 'ABC123@AdobeOrg',
-        deliveryType: 'aem_edge',
-        brandPresenceCadence: 'weekly',
-      };
-
-      // Use default mocks
-      const mockSite = createDefaultMockSite(sandbox);
-      const slackCtx = createDefaultMockSlackCtx(sandbox);
-
-      // Mock fetch for admin.hlx.page calls
-      global.fetch = createDefaultMockFetch(sandbox);
-
-      // Mock sites in organization to include one with agentic traffic already enabled
-      const existingSiteWithAgenticTraffic = createDefaultMockSite(sandbox);
-      existingSiteWithAgenticTraffic.getId.returns('existing-site-456');
-      existingSiteWithAgenticTraffic.getOrganizationId.returns('org123');
-
-      // Mock the configuration to return that agentic traffic is already enabled for existing site
-      const mockConfiguration = createDefaultMockConfiguration(sandbox);
-      const configurationInstance = {
-        save: sandbox.stub().resolves(),
-        enableHandlerForSite: sandbox.stub(),
-        disableHandlerForSite: sandbox.stub(),
-        isHandlerEnabledForSite: sandbox.stub().callsFake((auditType, site) => {
-          if (auditType === 'cdn-analysis') {
-            // Return true for the existing site with agentic traffic enabled
-            return site.getId() === 'existing-site-456';
-          }
-          return false;
-        }),
-        getQueues: sandbox.stub().returns({ audits: 'audit-queue' }),
-      };
-      mockConfiguration.findLatest.resolves(configurationInstance);
-
-      // Mock allByOrganizationId to return sites including the one with agentic traffic enabled
-      const mockSiteModel = createDefaultMockSiteModel(sandbox, mockSite);
-      mockSiteModel.allByOrganizationId = sandbox.stub()
-        .resolves([existingSiteWithAgenticTraffic, mockSite]);
-
-      const lambdaCtxWithSites = createDefaultMockLambdaCtx(sandbox, {
-        mockSite,
-        mockConfiguration,
-        mockSiteModel,
-      });
-
-      // Execute the function
-      await onboardSite(input, lambdaCtxWithSites, slackCtx);
-
-      // Verify that the log message for already enabled agentic traffic audits is called
-      expect(lambdaCtxWithSites.log.debug).to.have.been.calledWith(sinon.match('Agentic traffic audits already enabled for organization org123, skipping'));
-    });
-
     it('should create new organization when no existing organization is found', async () => {
       // Mock data
       const input = {
@@ -1119,6 +1082,9 @@ describe('onboard-llmo-modal', () => {
         },
         '../../../../src/utils/slack/base.js': sharedSlackMock,
         '../../../../src/controllers/llmo/llmo-onboarding.js': updatedMockedLLMOOnboarding,
+        '../../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
       });
 
       onboardSite = mockedModule.onboardSite;
@@ -1207,6 +1173,9 @@ example-com:
         },
         '../../../../src/utils/slack/base.js': sharedSlackMock,
         '../../../../src/controllers/llmo/llmo-onboarding.js': updatedMockedLLMOOnboarding,
+        '../../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
       });
 
       onboardSite = mockedModule.onboardSite;

@@ -19,6 +19,7 @@ import {
   tracingFetch as fetch,
   isValidUrl,
   isObject,
+  isNonEmptyObject,
   resolveCanonicalUrl, isValidIMSOrgId,
   detectAEMVersion,
   detectLocale,
@@ -144,6 +145,7 @@ export const sendAutofixMessage = async (
   promiseToken,
   variations,
   action,
+  customData,
   { url } = {},
 ) => sqs.sendMessage(queueUrl, {
   opportunityId,
@@ -153,6 +155,7 @@ export const sendAutofixMessage = async (
   variations,
   action,
   url,
+  ...(customData && { customData }),
 });
 /* c8 ignore end */
 
@@ -1029,6 +1032,7 @@ export const onboardSingleSite = async (
       organizationId,
       taskContext: {
         auditTypes,
+        onboardStartTime: Date.now(), // Track exact onboarding start time for log search
         slackContext: {
           channelId: slackContext.channelId,
           threadTs: slackContext.threadTs,
@@ -1130,18 +1134,20 @@ export const onboardSingleSite = async (
  */
 export const filterSitesForProductCode = async (context, organization, sites, productCode) => {
   // for every site we will create tier client and will check valid entitlement and enrollment
-  const filteredSites = [];
   const { SiteEnrollment } = context.dataAccess;
   const tierClient = TierClient.createForOrg(context, organization, productCode);
   const { entitlement } = await tierClient.checkValidEntitlement();
-  for (const site of sites) {
-    /* eslint-disable no-await-in-loop */
-    const siteEnrollments = await SiteEnrollment.allBySiteId(site.getId());
-    /* eslint-disable no-await-in-loop, max-len */
-    const validSiteEnrollment = siteEnrollments.find((se) => se.getEntitlementId() === entitlement?.getId());
-    if (validSiteEnrollment) {
-      filteredSites.push(site);
-    }
+
+  if (!isNonEmptyObject(entitlement)) {
+    return [];
   }
-  return filteredSites;
+
+  // Get all enrollments for this entitlement in one query
+  const siteEnrollments = await SiteEnrollment.allByEntitlementId(entitlement.getId());
+
+  // Create a Set of enrolled site IDs for efficient lookup
+  const enrolledSiteIds = new Set(siteEnrollments.map((se) => se.getSiteId()));
+
+  // Filter sites based on enrollment
+  return sites.filter((site) => enrolledSiteIds.has(site.getId()));
 };

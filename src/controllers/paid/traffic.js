@@ -30,8 +30,8 @@ import {
   getSignedUrlWithRetries,
 } from './caching-helper.js';
 
-function getCacheKey(siteId, query, cacheLocation) {
-  const outPrefix = crypto.createHash('md5').update(query).digest('hex');
+function getCacheKey(siteId, query, cacheLocation, pageViewThreshold, filter = null) {
+  const outPrefix = crypto.createHash('md5').update(`${query}_${pageViewThreshold}_${filter ? filter.filterKey : ''}`).digest('hex');
   const cacheKey = `${cacheLocation}/${siteId}/${outPrefix}.json`;
   return { cacheKey, outPrefix };
 }
@@ -81,7 +81,7 @@ function validateTemporalParams({ year, week, month }) {
   }
 }
 
-const isTrue = (value) => value === true || value === 'true';
+const isTrue = (value) => value === true || value === 'true' || value === '1' || value === 1;
 
 function TrafficController(context, log, env) {
   const { dataAccess, s3 } = context;
@@ -97,8 +97,14 @@ function TrafficController(context, log, env) {
   const ATHENA_TEMP_FOLDER = `s3://${bucketName}/rum-metrics-compact/temp/out`;
   const CACHE_LOCATION = `s3://${bucketName}/rum-metrics-compact/cache`;
 
-  async function tryGetCacheResult(siteId, query, noCache) {
-    const { cacheKey, outPrefix } = getCacheKey(siteId, query, CACHE_LOCATION);
+  async function tryGetCacheResult(siteId, query, noCache, pageViewThreshold, filter = null) {
+    const { cacheKey, outPrefix } = getCacheKey(
+      siteId,
+      query,
+      CACHE_LOCATION,
+      pageViewThreshold,
+      filter,
+    );
     if (isTrue(noCache)) {
       return { cachedResultUrl: null, cacheKey, outPrefix };
     }
@@ -112,7 +118,7 @@ function TrafficController(context, log, env) {
     return { cachedResultUrl: null, cacheKey, outPrefix };
   }
 
-  async function fetchPaidTrafficData(dimensions, mapper) {
+  async function fetchPaidTrafficData(dimensions, mapper, filter = null, isWeekOverWeek = false) {
     /* c8 ignore next 1 */
     const requestId = context.invocation?.requestId;
     const siteId = context.params?.siteId;
@@ -128,13 +134,15 @@ function TrafficController(context, log, env) {
 
     // validate input params
     const {
-      year, week, month, noCache, trafficType,
+      year, week, month, noCache, trafficType, noThreshold,
     } = context.data;
 
     const temporal = validateTemporalParams({ year, week, month });
     if (!temporal.ok) {
       return badRequest(temporal.error);
     }
+
+    const disableThreshold = isTrue(noThreshold);
 
     const { yearInt, weekInt, monthInt } = temporal.values;
 
@@ -154,7 +162,10 @@ function TrafficController(context, log, env) {
     if (trafficType == null && !dimensions.includes('trf_type')) {
       trfTypes = ['paid'];
     }
-    const pageViewThreshold = env.PAID_DATA_THRESHOLD ?? 1000;
+    let pageViewThreshold = env.PAID_DATA_THRESHOLD ?? 1000;
+    if (disableThreshold) {
+      pageViewThreshold = 0;
+    }
 
     const quereyParams = getTrafficAnalysisQueryPlaceholdersFilled({
       week: weekInt,
@@ -167,6 +178,7 @@ function TrafficController(context, log, env) {
       pageTypeMatchColumn: 'path',
       trfTypes,
       pageViewThreshold,
+      numTemporalSeries: isWeekOverWeek ? 4 : 1,
     });
 
     const description = `fetch paid channel data db: ${rumMetricsDatabase}| siteKey: ${siteId} | year: ${year} | month: ${month} | week: ${week} } | temporalCondition: ${quereyParams.temporalCondition} | groupBy: [${dimensions.join(', ')}] `;
@@ -179,6 +191,8 @@ function TrafficController(context, log, env) {
       siteId,
       query,
       noCache,
+      pageViewThreshold,
+      filter,
     );
     let thresholdConfig = {};
     if (env.CWV_THRESHOLDS) {
@@ -204,7 +218,8 @@ function TrafficController(context, log, env) {
     const athenaClient = AWSAthenaClient.fromContext(context, resultLocation);
 
     const results = await athenaClient.query(query, rumMetricsDatabase, description);
-    const response = results.map((row) => mapper.toJSON(row, thresholdConfig, baseURL));
+    const filteredResults = filter?.filterFunction ? filter.filterFunction(results) : results;
+    const response = filteredResults.map((row) => mapper.toJSON(row, thresholdConfig, baseURL));
 
     // add to cache
     let isCached = false;
@@ -229,6 +244,30 @@ function TrafficController(context, log, env) {
     return ok(response, {
       'content-encoding': 'gzip',
     });
+  }
+
+  async function getPaidTrafficBySpecificPlatform(channel, withDevice = false) {
+    const dimensions = ['trf_channel', 'trf_platform'];
+    if (withDevice) {
+      dimensions.push('device');
+    }
+    return fetchPaidTrafficData(
+      dimensions,
+      TrafficDataResponseDto,
+      {
+        filterKey: channel,
+        filterFunction: (results) => results.filter((item) => item.trf_channel === channel),
+      },
+    );
+  }
+
+  async function fetchPaidTrafficDataTemporalSeries(dimensions) {
+    return fetchPaidTrafficData(
+      dimensions,
+      TrafficDataWithCWVDto,
+      null,
+      true,
+    );
   }
 
   return {
@@ -256,6 +295,46 @@ function TrafficController(context, log, env) {
     getPaidTrafficByPageTypePlatformDevice: async () => fetchPaidTrafficData(['page_type', 'trf_platform', 'device'], TrafficDataWithCWVDto),
     getPaidTrafficByPageTypePlatformCampaign: async () => fetchPaidTrafficData(['page_type', 'trf_platform', 'utm_campaign'], TrafficDataWithCWVDto),
     getPaidTrafficByUrlPageType: async () => fetchPaidTrafficData(['path', 'page_type'], TrafficDataWithCWVDto),
+    // new PTA2 endpoints
+    getPaidTrafficByTypeDevice: async () => fetchPaidTrafficData(['trf_type', 'device'], TrafficDataResponseDto),
+    getPaidTrafficByTypeDeviceChannel: async () => fetchPaidTrafficData(['trf_type', 'device', 'trf_channel'], TrafficDataResponseDto),
+    getPaidTrafficByChannel: async () => fetchPaidTrafficData(['trf_channel'], TrafficDataResponseDto),
+    getPaidTrafficByChannelDevice: async () => fetchPaidTrafficData(['trf_channel', 'device'], TrafficDataResponseDto),
+
+    getPaidTrafficBySocialPlatform: async () => getPaidTrafficBySpecificPlatform('social'),
+    getPaidTrafficBySocialPlatformDevice: async () => getPaidTrafficBySpecificPlatform('social', true),
+    getPaidTrafficBySearchPlatform: async () => getPaidTrafficBySpecificPlatform('search'),
+    getPaidTrafficBySearchPlatformDevice: async () => getPaidTrafficBySpecificPlatform('search', true),
+    getPaidTrafficByDisplayPlatform: async () => getPaidTrafficBySpecificPlatform('display'),
+    getPaidTrafficByDisplayPlatformDevice: async () => getPaidTrafficBySpecificPlatform('display', true),
+    getPaidTrafficByVideoPlatform: async () => getPaidTrafficBySpecificPlatform('video'),
+    getPaidTrafficByVideoPlatformDevice: async () => getPaidTrafficBySpecificPlatform('video', true),
+
+    // Page Performance endpoints
+    getPaidTrafficByUrl: async () => fetchPaidTrafficData(['path'], TrafficDataWithCWVDto),
+    getPaidTrafficByUrlChannel: async () => fetchPaidTrafficData(['path', 'trf_channel'], TrafficDataWithCWVDto),
+    getPaidTrafficByUrlChannelDevice: async () => fetchPaidTrafficData(['path', 'trf_channel', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByUrlChannelPlatformDevice: async () => fetchPaidTrafficData(['path', 'trf_channel', 'trf_platform', 'device'], TrafficDataWithCWVDto),
+
+    // Campaign Performance endpoints
+    // getPaidTrafficByCampaign (see above)
+    getPaidTrafficByCampaignChannelDevice: async () => fetchPaidTrafficData(['utm_campaign', 'trf_channel', 'device'], TrafficDataWithCWVDto),
+    getPaidTrafficByCampaignChannelPlatform: async () => fetchPaidTrafficData(['utm_campaign', 'trf_channel', 'trf_platform'], TrafficDataWithCWVDto),
+    getPaidTrafficByCampaignChannelPlatformDevice: async () => fetchPaidTrafficData(['utm_campaign', 'trf_channel', 'trf_platform', 'device'], TrafficDataWithCWVDto),
+
+    getPaidTrafficTemporalSeries: async () => fetchPaidTrafficDataTemporalSeries([]),
+    getPaidTrafficTemporalSeriesByCampaign: async () => fetchPaidTrafficDataTemporalSeries(['utm_campaign']),
+    getPaidTrafficTemporalSeriesByChannel: async () => fetchPaidTrafficDataTemporalSeries(['trf_channel']),
+    getPaidTrafficTemporalSeriesByPlatform: async () => fetchPaidTrafficDataTemporalSeries(['trf_platform']),
+    getPaidTrafficTemporalSeriesByCampaignChannel: async () => fetchPaidTrafficDataTemporalSeries(['utm_campaign', 'trf_channel']),
+    getPaidTrafficTemporalSeriesByCampaignPlatform: async () => fetchPaidTrafficDataTemporalSeries(['utm_campaign', 'trf_platform']),
+    getPaidTrafficTemporalSeriesByCampaignChannelPlatform: async () => fetchPaidTrafficDataTemporalSeries(['utm_campaign', 'trf_channel', 'trf_platform']),
+    getPaidTrafficTemporalSeriesByChannelPlatform: async () => fetchPaidTrafficDataTemporalSeries(['trf_channel', 'trf_platform']),
+
+    getPaidTrafficTemporalSeriesByUrl: async () => fetchPaidTrafficDataTemporalSeries(['path']),
+    getPaidTrafficTemporalSeriesByUrlChannel: async () => fetchPaidTrafficDataTemporalSeries(['path', 'trf_channel']),
+    getPaidTrafficTemporalSeriesByUrlPlatform: async () => fetchPaidTrafficDataTemporalSeries(['path', 'trf_platform']),
+    getPaidTrafficTemporalSeriesByUrlChannelPlatform: async () => fetchPaidTrafficDataTemporalSeries(['path', 'trf_channel', 'trf_platform']),
   };
 }
 

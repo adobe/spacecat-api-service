@@ -21,7 +21,7 @@ import BaseCommand from './base.js';
 const PHRASES = ['backfill-llmo'];
 
 const AUDIT_TYPES = {
-  CDN_ANALYSIS: 'cdn-analysis',
+  CDN_LOGS_ANALYSIS: 'cdn-logs-analysis',
   CDN_LOGS_REPORT: 'cdn-logs-report',
   LLMO_REFERRAL_TRAFFIC: 'llmo-referral-traffic',
 };
@@ -39,31 +39,53 @@ function parseArgs(args) {
   return parsed;
 }
 
-async function triggerBackfill(context, configuration, siteId, auditType, timeValue) {
+async function triggerBackfill(
+  context,
+  configuration,
+  siteId,
+  auditType,
+  timeValue,
+  specificDate,
+) {
   const { sqs } = context;
 
   switch (auditType) {
-    case AUDIT_TYPES.CDN_ANALYSIS: {
-      const days = timeValue;
-      const now = new Date();
-
-      for (let dayOffset = 1; dayOffset <= days; dayOffset += 1) {
-        const targetDate = new Date(now);
-        targetDate.setDate(now.getDate() - dayOffset);
-
+    case AUDIT_TYPES.CDN_LOGS_ANALYSIS: {
+      // If specific date/hour provided, run for that hour only
+      if (specificDate) {
         const message = {
           type: auditType,
           siteId,
           auditContext: {
-            year: targetDate.getUTCFullYear(),
-            month: targetDate.getUTCMonth() + 1,
-            day: targetDate.getUTCDate(),
-            hour: 23,
-            processFullDay: true,
+            year: specificDate.year,
+            month: specificDate.month,
+            day: specificDate.day,
+            hour: specificDate.hour,
           },
         };
-        // eslint-disable-next-line no-await-in-loop
         await sqs.sendMessage(configuration.getQueues().audits, message);
+      } else {
+        const days = timeValue;
+        const now = new Date();
+
+        for (let dayOffset = 1; dayOffset <= days; dayOffset += 1) {
+          const targetDate = new Date(now);
+          targetDate.setDate(now.getDate() - dayOffset);
+
+          const message = {
+            type: auditType,
+            siteId,
+            auditContext: {
+              year: targetDate.getUTCFullYear(),
+              month: targetDate.getUTCMonth() + 1,
+              day: targetDate.getUTCDate(),
+              hour: 23,
+              processFullDay: true,
+            },
+          };
+          // eslint-disable-next-line no-await-in-loop
+          await sqs.sendMessage(configuration.getQueues().audits, message);
+        }
       }
       break;
     }
@@ -135,7 +157,8 @@ function BackfillLlmoCommand(context) {
       if (!parsed.baseurl || !parsed.audit) {
         await say(':warning: Required: baseurl={baseURL} audit={auditType}');
         await say('Examples:');
-        await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_ANALYSIS} days=3\``);
+        await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS} days=3\` (last 3 days)`);
+        await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS} year=2024 month=11 day=15 hour=14\` (specific hour)`);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_REPORT} weeks=2\``);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_REPORT} weeks=0\` (current week)`);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC} weeks=2\``);
@@ -152,11 +175,30 @@ function BackfillLlmoCommand(context) {
 
       let timeValue;
       let timeDesc;
+      let specificDate = null;
 
       switch (auditType) {
-        case AUDIT_TYPES.CDN_ANALYSIS:
-          timeValue = parseInt(parsed.days, 10) || 1;
-          timeDesc = `${timeValue} days`;
+        case AUDIT_TYPES.CDN_LOGS_ANALYSIS:
+          // Check if specific date is provided
+          if (parsed.year && parsed.month && parsed.day && parsed.hour) {
+            specificDate = {
+              year: parseInt(parsed.year, 10),
+              month: parseInt(parsed.month, 10),
+              day: parseInt(parsed.day, 10),
+              hour: parseInt(parsed.hour, 10),
+            };
+            timeValue = 1;
+            timeDesc = `${parsed.year}-${parsed.month}-${parsed.day} hour ${parsed.hour}`;
+          } else {
+            timeValue = parseInt(parsed.days, 10) || 1;
+
+            if (timeValue > 14) {
+              await say(`:warning: Max 14 days for ${AUDIT_TYPES.CDN_LOGS_ANALYSIS}`);
+              return;
+            }
+
+            timeDesc = `${timeValue} days`;
+          }
           break;
 
         case AUDIT_TYPES.CDN_LOGS_REPORT:
@@ -179,11 +221,16 @@ function BackfillLlmoCommand(context) {
           timeValue = parseInt(parsed.weeks, 10);
           if (Number.isNaN(timeValue)) timeValue = 1;
 
+          if (timeValue > 10) {
+            await say(`:warning: Max 10 weeks for ${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC}`);
+            return;
+          }
+
           timeDesc = `${timeValue} previous ${timeValue === 1 ? 'week' : 'weeks'}`;
           break;
 
         default:
-          await say(`:warning: Supported audits: ${AUDIT_TYPES.CDN_ANALYSIS}, ${AUDIT_TYPES.CDN_LOGS_REPORT}, ${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC}`);
+          await say(`:warning: Supported audits: ${AUDIT_TYPES.CDN_LOGS_ANALYSIS}, ${AUDIT_TYPES.CDN_LOGS_REPORT}, ${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC}`);
           return;
       }
 
@@ -196,11 +243,18 @@ function BackfillLlmoCommand(context) {
       }
 
       const configuration = await Configuration.findLatest();
-      await triggerBackfill(context, configuration, site.getId(), auditType, timeValue);
+      await triggerBackfill(
+        context,
+        configuration,
+        site.getId(),
+        auditType,
+        timeValue,
+        specificDate,
+      );
 
       let totalMessages;
       switch (auditType) {
-        case AUDIT_TYPES.CDN_ANALYSIS:
+        case AUDIT_TYPES.CDN_LOGS_ANALYSIS:
           totalMessages = timeValue;
           break;
         case AUDIT_TYPES.CDN_LOGS_REPORT:

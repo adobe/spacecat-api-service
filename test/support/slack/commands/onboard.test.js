@@ -26,6 +26,8 @@ describe('OnboardCommand', () => {
   let dataAccessStub;
   let sqsStub;
   let parseCSVStub;
+  let triggerBrandProfileAgentStub;
+  let onboardSingleSiteStub;
   let baseURL;
   let OnboardCommand;
   let imsClientStub;
@@ -37,6 +39,8 @@ describe('OnboardCommand', () => {
     };
     baseURL = 'https://example.com';
 
+    triggerBrandProfileAgentStub = sinon.stub().resolves('exec-123');
+
     dataAccessStub = {
       Configuration: {
         findLatest: sinon.stub().resolves(configuration),
@@ -44,6 +48,7 @@ describe('OnboardCommand', () => {
       Site: {
         create: sinon.stub(),
         findByBaseURL: sinon.stub(),
+        findById: sinon.stub(),
       },
       Organization: {
         create: sinon.stub(),
@@ -83,10 +88,19 @@ describe('OnboardCommand', () => {
     slackContext.botToken = 'test-token';
 
     parseCSVStub = sinon.stub().resolves([]);
+    onboardSingleSiteStub = sinon.stub().resolves({
+      siteId: 'site-abc',
+      status: 'Success',
+    });
+
     OnboardCommand = await esmock(
       '../../../../src/support/slack/commands/onboard.js',
       {
         '../../../../src/utils/slack/base.js': { parseCSV: parseCSVStub },
+        '../../../../src/support/utils.js': { onboardSingleSite: onboardSingleSiteStub },
+        '../../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
       },
     );
   });
@@ -817,6 +831,10 @@ describe('OnboardCommand', () => {
       dataAccessStub.Organization.create.resolves(null);
       dataAccessStub.Site.findByBaseURL.resolves(null);
       dataAccessStub.Site.create.resolves({});
+      dataAccessStub.Site.findById.resolves({
+        getId: () => 'site-abc',
+        getBaseURL: () => 'https://example1.com',
+      });
 
       const args = ['default'];
       const command = OnboardCommand(context);

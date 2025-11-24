@@ -54,6 +54,7 @@ function SuggestionsController(ctx, sqs, env) {
   const AUTOFIX_UNGROUPED_OPPTY_TYPES = [
     'broken-backlinks',
     'form-accessibility',
+    'product-metatags',
   ];
 
   const DEFAULT_PAGE_SIZE = 100;
@@ -642,7 +643,9 @@ function SuggestionsController(ctx, sqs, env) {
     if (!isNonEmptyObject(context.data)) {
       return badRequest('No updates provided');
     }
-    const { suggestionIds, variations, action } = context.data;
+    const {
+      suggestionIds, variations, action, customData,
+    } = context.data;
 
     if (!isArray(suggestionIds)) {
       return badRequest('Request body must be an array of suggestionIds');
@@ -772,6 +775,7 @@ function SuggestionsController(ctx, sqs, env) {
           promiseTokenResponse,
           variations,
           action,
+          customData,
           { url },
         )),
       );
@@ -783,6 +787,9 @@ function SuggestionsController(ctx, sqs, env) {
         opportunityId,
         succeededSuggestions.map((s) => s.getId()),
         promiseTokenResponse,
+        variations,
+        action,
+        customData,
       );
     }
 
@@ -833,6 +840,178 @@ function SuggestionsController(ctx, sqs, env) {
     } catch (e) {
       return createResponse({ message: 'Error removing suggestion' }, 500);
     }
+  };
+
+  /**
+   * Previews suggestions through Tokowaka edge delivery
+   * Returns both original and optimized HTML for comparison
+   * @param {Object} context of the request
+   * @returns {Promise<Response>} Preview response with HTML comparison
+   */
+  const previewSuggestions = async (context) => {
+    const siteId = context.params?.siteId;
+    const opportunityId = context.params?.opportunityId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!isValidUUID(opportunityId)) {
+      return badRequest('Opportunity ID required');
+    }
+
+    // validate request body
+    if (!isNonEmptyObject(context.data)) {
+      return badRequest('No data provided');
+    }
+    const { suggestionIds } = context.data;
+    if (!isArray(suggestionIds) || suggestionIds.length === 0) {
+      return badRequest('Request body must contain a non-empty array of suggestionIds');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
+    }
+
+    const opportunity = await Opportunity.findById(opportunityId);
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound('Opportunity not found');
+    }
+
+    // Fetch all suggestions for this opportunity
+    const allSuggestions = await Suggestion.allByOpportunityId(opportunityId);
+
+    // Track valid, failed, and missing suggestions
+    const validSuggestions = [];
+    const failedSuggestions = [];
+
+    // Check each requested suggestion (basic validation only)
+    suggestionIds.forEach((suggestionId, index) => {
+      const suggestion = allSuggestions.find((s) => s.getId() === suggestionId);
+
+      if (!suggestion) {
+        failedSuggestions.push({
+          uuid: suggestionId,
+          index,
+          message: 'Suggestion not found',
+          statusCode: 404,
+        });
+      } else if (suggestion.getStatus() !== SuggestionModel.STATUSES.NEW) {
+        failedSuggestions.push({
+          uuid: suggestionId,
+          index,
+          message: 'Suggestion is not in NEW status',
+          statusCode: 400,
+        });
+      } else {
+        validSuggestions.push(suggestion);
+      }
+    });
+
+    // Validate that all suggestions belong to the same URL
+    if (isNonEmptyArray(validSuggestions)) {
+      const urls = new Set();
+      validSuggestions.forEach((suggestion) => {
+        const url = suggestion.getData()?.url;
+        if (url) {
+          urls.add(url);
+        }
+      });
+
+      if (urls.size > 1) {
+        return badRequest('All suggestions must belong to the same URL for preview');
+      }
+
+      if (urls.size === 0) {
+        return badRequest('No valid URLs found in suggestions');
+      }
+    }
+
+    let succeededSuggestions = [];
+    let previewUrl = null;
+    let originalHtml = null;
+    let optimizedHtml = null;
+
+    // Only attempt preview if we have valid suggestions
+    if (isNonEmptyArray(validSuggestions)) {
+      try {
+        const tokowakaClient = TokowakaClient.createFrom(context);
+        const previewResult = await tokowakaClient.previewSuggestions(
+          site,
+          opportunity,
+          validSuggestions,
+        );
+
+        // Process preview results
+        const {
+          succeededSuggestions: previewedSuggestions,
+          failedSuggestions: ineligibleSuggestions,
+          html: htmlResult,
+        } = previewResult;
+
+        succeededSuggestions = previewedSuggestions;
+
+        // Add ineligible suggestions to failed list
+        ineligibleSuggestions.forEach((item) => {
+          failedSuggestions.push({
+            uuid: item.suggestion.getId(),
+            index: suggestionIds.indexOf(item.suggestion.getId()),
+            message: item.reason,
+            statusCode: 400,
+          });
+        });
+
+        // Get HTML data from preview result
+        if (htmlResult) {
+          previewUrl = htmlResult.url;
+          originalHtml = htmlResult.originalHtml;
+          optimizedHtml = htmlResult.optimizedHtml;
+        }
+
+        context.log.info(`Successfully previewed ${succeededSuggestions.length} suggestions`);
+      } catch (error) {
+        context.log.error(`Error generating preview: ${error.message}`, error);
+        // If preview fails, mark all valid suggestions as failed
+        validSuggestions.forEach((suggestion) => {
+          failedSuggestions.push({
+            uuid: suggestion.getId(),
+            index: suggestionIds.indexOf(suggestion.getId()),
+            message: 'Preview generation failed: Internal server error',
+            statusCode: 500,
+          });
+        });
+      }
+    }
+
+    const response = {
+      suggestions: [
+        ...succeededSuggestions.map((suggestion) => ({
+          uuid: suggestion.getId(),
+          index: suggestionIds.indexOf(suggestion.getId()),
+          statusCode: 200,
+          suggestion: SuggestionDto.toJSON(suggestion),
+        })),
+        ...failedSuggestions,
+      ],
+      metadata: {
+        total: suggestionIds.length,
+        success: succeededSuggestions.length,
+        failed: failedSuggestions.length,
+      },
+      html: {
+        url: previewUrl,
+        originalHtml,
+        optimizedHtml,
+      },
+    };
+    response.suggestions.sort((a, b) => a.index - b.index);
+
+    return createResponse(response, 207);
   };
 
   /**
@@ -987,6 +1166,7 @@ function SuggestionsController(ctx, sqs, env) {
     autofixSuggestions,
     createSuggestions,
     deploySuggestionToEdge,
+    previewSuggestions,
     getAllForOpportunity,
     getAllForOpportunityPaged,
     getByID,
