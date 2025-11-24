@@ -756,7 +756,7 @@ describe('GetLlmoOpportunityUsageCommand', () => {
       await command.handleExecution([], slackContext);
 
       expect(slackContext.say).to.have.been.calledWith('No LLMO opportunities found.');
-      expect(context.log.info).to.have.been.calledWith(sinon.match('Skipping excluded IMS org'));
+      expect(context.log.info).to.have.been.calledWith(sinon.match('Skipping excluded/internal IMS org: 9E1005A551ED61CA0A490D45@AdobeOrg for site: https://test.com'));
     });
   });
 
