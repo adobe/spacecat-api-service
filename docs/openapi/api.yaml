@@ -214,6 +214,8 @@ paths:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-by-status-paged-with-cursor'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/{suggestionId}:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestion'
+  /sites/{siteId}/opportunities/{opportunityId}/suggestions/{suggestionId}/fixes:
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestion-fixes'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/status:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-status'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/auto-fix:

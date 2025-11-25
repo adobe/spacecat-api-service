@@ -3330,6 +3330,14 @@ FixList:
   items:
     $ref: '#/Fix'
 
+FixListResponse:
+  type: object
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/Fix'
+
 FixCreate:
   type: object
   required:
