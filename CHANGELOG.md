@@ -1,3 +1,10 @@
+## [1.252.2](https://github.com/adobe/spacecat-api-service/compare/v1.252.1...v1.252.2) (2025-11-25)
+
+
+### Bug Fixes
+
+* deploy lambda ([#1553](https://github.com/adobe/spacecat-api-service/issues/1553)) ([80113bd](https://github.com/adobe/spacecat-api-service/commit/80113bd52e953d397f1aca0dcef8b57bea7ea473))
+
 ## [1.252.1](https://github.com/adobe/spacecat-api-service/compare/v1.252.0...v1.252.1) (2025-11-25)
 
 
