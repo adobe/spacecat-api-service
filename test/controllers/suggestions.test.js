@@ -20,6 +20,7 @@ import esmock from 'esmock';
 
 import { ValidationError, Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
+import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import SuggestionsController from '../../src/controllers/suggestions.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
 
@@ -3819,6 +3820,98 @@ describe('Suggestions Controller', () => {
       };
     });
 
+    it('should return 400 when no data provided', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: null,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'No data provided');
+    });
+
+    it('should return 400 when suggestionIds is empty', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [],
+        },
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Request body must contain a non-empty array of suggestionIds');
+    });
+
+    it('should return 404 when site not found', async () => {
+      mockSite.findById.withArgs('non-existent-site').resolves(null);
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: 'non-existent-site',
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(404);
+    });
+
+    it('should return 403 when user does not have access', async () => {
+      const restrictedSite = {
+        getId: sandbox.stub().returns('restricted-site-id'),
+        getConfig: sandbox.stub().returns({
+          getTokowakaConfig: () => ({ apiKey: 'test-api-key-123' }),
+        }),
+        getBaseURL: sandbox.stub().returns('https://example.com'),
+      };
+
+      mockSite.findById.withArgs('restricted-site-id').resolves(restrictedSite);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: 'restricted-site-id',
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(403);
+    });
+
+    it('should return 404 when opportunity not found', async () => {
+      mockOpportunity.findById.withArgs('non-existent-opportunity').resolves(null);
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: 'non-existent-opportunity',
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(404);
+    });
+
     it('should successfully rollback suggestions', async () => {
       const response = await suggestionsController.rollbackSuggestionFromEdge({
         ...context,
@@ -3930,6 +4023,69 @@ describe('Suggestions Controller', () => {
       expect(body.metadata.success).to.equal(0);
       expect(body.metadata.failed).to.equal(1);
       expect(body.suggestions[0].message).to.include('Rollback failed');
+    });
+
+    it('should handle suggestion not found during rollback', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], 'not-found-id'],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      expect(body.metadata.total).to.equal(2);
+      expect(body.metadata.success).to.equal(1);
+      expect(body.metadata.failed).to.equal(1);
+
+      const failedSuggestion = body.suggestions.find((s) => s.uuid === 'not-found-id');
+      expect(failedSuggestion.statusCode).to.equal(404);
+      expect(failedSuggestion.message).to.include('not found');
+    });
+
+    it('should handle ineligible suggestions during rollback from tokowaka client', async () => {
+      // Mock TokowakaClient to return some ineligible suggestions
+      const TokowakaClientStub = {
+        rollbackSuggestions: sandbox.stub().resolves({
+          succeededSuggestions: [tokowakaSuggestions[0]],
+          failedSuggestions: [
+            {
+              suggestion: tokowakaSuggestions[1],
+              reason: 'Suggestion cannot be rolled back due to invalid configuration',
+            },
+          ],
+        }),
+      };
+
+      sandbox.stub(TokowakaClient, 'createFrom').returns(TokowakaClientStub);
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      expect(body.metadata.total).to.equal(2);
+      expect(body.metadata.success).to.equal(1);
+      expect(body.metadata.failed).to.equal(1);
+
+      const failedSuggestion = body.suggestions.find((s) => s.uuid === SUGGESTION_IDS[1]);
+      expect(failedSuggestion.statusCode).to.equal(400);
+      expect(failedSuggestion.message).to.include('invalid configuration');
     });
   });
 
