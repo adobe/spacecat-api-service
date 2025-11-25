@@ -414,9 +414,12 @@ function LlmoController(ctx) {
     }
   };
 
-  async function updateLlmoConfig(context) {
+  async function updateLlmoConfig(context, ...rest) {
     const { log, s3, data } = context;
     const { siteId } = context.params;
+
+    log.error('Updating LLMO config', context, ...rest);
+    if (Math.random() < 0) return badRequest('Bailing out');
 
     const userId = context.attributes?.authInfo?.getProfile()?.sub || 'unknown';
 
