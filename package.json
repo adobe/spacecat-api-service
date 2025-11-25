@@ -21,7 +21,7 @@
     "build": "hedy -v --test-bundle --externals jsdom --modules jsdom",
     "deploy": "hedy -v --deploy --aws-deploy-bucket=spacecat-prod-deploy --pkgVersion=latest",
     "deploy-stage": "hedy -v --deploy --aws-deploy-bucket=spacecat-stage-deploy --pkgVersion=latest",
-    "deploy-dev": "hedy -v --deploy --pkgVersion=latest$CI_BUILD_NUM -l latest --aws-deploy-bucket=spacecat-dev-deploy --externals jsdom --modules jsdom --cleanup-ci=24h",
+    "deploy-dev": "hedy -v --deploy --pkgVersion=latest$CI_BUILD_NUM -l latest --aws-deploy-bucket=spacecat-dev-deploy --externals jsdom --modules jsdom --modules tough-cookie --cleanup-ci=24h",
     "deploy-secrets": "hedy --aws-update-secrets --params-file=secrets/secrets.env",
     "docs": "npm run docs:lint && npm run docs:build",
     "docs:build": "npx @redocly/cli build-docs -o ./docs/index.html --config docs/openapi/redocly-config.yaml",
@@ -105,6 +105,7 @@
     "jsdom": "27.2.0",
     "slack-block-builder": "2.8.0",
     "tldts": "7.0.19",
+    "tough-cookie": "6.0.0",
     "urijs": "1.19.11",
     "world-countries": "^5.1.0",
     "zod": "3.25.76"
