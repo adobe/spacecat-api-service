@@ -9,7 +9,7 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-import { JSDOM } from 'jsdom';
+import { parseHTML } from 'linkedom';
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 /**
@@ -34,7 +34,7 @@ export function extractLinks(html, domain, log) {
   try {
     const baseDomain = domain.endsWith('/') ? domain : `${domain}/`;
 
-    const dom = new JSDOM(html);
+    const dom = parseHTML(html);
     const { document } = dom.window;
     const anchorElements = document.querySelectorAll('a');
 
