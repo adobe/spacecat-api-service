@@ -36,6 +36,12 @@ import getPromptUsage from './commands/get-prompt-usage.js';
 import getLlmoConfigSummary from './commands/get-llmo-config-summary.js';
 import getLlmoOpportunityUsage from './commands/get-llmo-opportunity-usage.js';
 import runBrandProfile from './commands/run-brand-profile.js';
+import ensureEntitlementSite from './commands/ensure-entitlement-site.js';
+import ensureEntitlementImsOrg from './commands/ensure-entitlement-imsorg.js';
+import getEntitlementSite from './commands/get-entitlement-site.js';
+import getEntitlementImsOrg from './commands/get-entitlement-imsorg.js';
+import revokeEntitlementSite from './commands/revoke-entitlement-site.js';
+import revokeEntitlementImsOrg from './commands/revoke-entitlement-imsorg.js';
 
 /**
  * Returns all commands.
@@ -70,4 +76,10 @@ export default (context) => [
   getLlmoConfigSummary(context),
   getLlmoOpportunityUsage(context),
   runBrandProfile(context),
+  ensureEntitlementSite(context),
+  ensureEntitlementImsOrg(context),
+  getEntitlementSite(context),
+  getEntitlementImsOrg(context),
+  revokeEntitlementSite(context),
+  revokeEntitlementImsOrg(context),
 ];
