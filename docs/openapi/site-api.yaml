@@ -88,15 +88,24 @@ site:
   delete:
     tags:
       - site
-    summary: Delete a site
+    summary: Delete a site (Restricted Operation)
     description: |
-      This endpoint is useful for deleting a site.
+      This endpoint is restricted and will return a 403 Forbidden response.
+      Site deletion is not allowed through the API for security and data integrity reasons.
     operationId: deleteSite
     security:
       - admin_key: [ ]
     responses:
-      '204':
-        description: Site deleted successfully
+      '403':
+        description: Restricted Operation - Site deletion is not allowed
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Restricted Operation"
       '400':
         $ref: './responses.yaml#/400-no-site-id'
       '401':

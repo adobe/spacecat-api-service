@@ -368,26 +368,7 @@ function SitesController(ctx, log, env) {
    * @param {object} context - Context of the request.
    * @return {Promise<Response>} Delete response.
    */
-  const removeSite = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can remove sites');
-    }
-    const siteId = context.params?.siteId;
-
-    if (!isValidUUID(siteId)) {
-      return badRequest('Site ID required');
-    }
-
-    const site = await Site.findById(siteId);
-
-    if (!site) {
-      return notFound('Site not found');
-    }
-
-    await site.remove();
-
-    return noContent();
-  };
+  const removeSite = async () => forbidden('Restricted Operation');
 
   /**
    * Updates a site

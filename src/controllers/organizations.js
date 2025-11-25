@@ -13,7 +13,6 @@
 import {
   createResponse,
   badRequest,
-  noContent,
   notFound,
   ok, forbidden,
 } from '@adobe/spacecat-shared-http-utils';
@@ -210,26 +209,7 @@ function OrganizationsController(ctx, env) {
    * @param {object} context - Context of the request.
    * @return {Promise<Response>} Delete response.
    */
-  const removeOrganization = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can delete Organizations');
-    }
-    const organizationId = context.params?.organizationId;
-
-    if (!isValidUUID(organizationId)) {
-      return badRequest('Organization ID required');
-    }
-
-    const organization = await Organization.findById(organizationId);
-
-    if (!organization) {
-      return notFound('Organization not found');
-    }
-
-    await organization.remove();
-
-    return noContent();
-  };
+  const removeOrganization = async () => forbidden('Restricted Operation');
 
   /**
    * Updates an organization
