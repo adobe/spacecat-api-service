@@ -40,11 +40,15 @@ function EnsureEntitlementSiteCommand(context) {
    * @param {Array<string>} args - The arguments provided to the command.
    * @param {Object} slackContext - The Slack context object.
    * @param {Function} slackContext.say - The Slack say function.
+   * @param {string} slackContext.channelId - The Slack channel ID.
    * @param {string} slackContext.threadTs - The Slack thread timestamp.
+   * @param {Object} slackContext.client - The Slack client.
    * @returns {Promise} A promise that resolves when the operation is complete.
    */
   const handleExecution = async (args, slackContext) => {
-    const { say, threadTs } = slackContext;
+    const {
+      say, channelId, threadTs, client,
+    } = slackContext;
 
     try {
       const [siteURLInput] = args;
@@ -66,7 +70,10 @@ function EnsureEntitlementSiteCommand(context) {
       const siteId = site.getId();
 
       // Show button to open product selection modal
-      const message = {
+      const buttonMessage = await client.chat.postMessage({
+        channel: channelId,
+        thread_ts: threadTs,
+        text: `Ensure entitlement for site ${siteURL}`,
         blocks: [
           {
             type: 'section',
@@ -87,8 +94,9 @@ function EnsureEntitlementSiteCommand(context) {
                 value: JSON.stringify({
                   siteId,
                   baseURL: siteURL,
-                  channelId: slackContext.channelId,
+                  channelId,
                   threadTs,
+                  messageTs: 'placeholder',
                 }),
                 action_id: 'open_ensure_entitlement_site_modal',
                 style: 'primary',
@@ -96,10 +104,44 @@ function EnsureEntitlementSiteCommand(context) {
             ],
           },
         ],
-        thread_ts: threadTs,
-      };
+      });
 
-      await say(message);
+      // Update the button with the actual message timestamp
+      await client.chat.update({
+        channel: channelId,
+        ts: buttonMessage.ts,
+        text: `Ensure entitlement for site ${siteURL}`,
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `:white_check_mark: *Ensure Entitlement for Site*\n\nSite: *${siteURL}*\n\nClick the button below to select products for entitlement.`,
+            },
+          },
+          {
+            type: 'actions',
+            elements: [
+              {
+                type: 'button',
+                text: {
+                  type: 'plain_text',
+                  text: 'Select Products',
+                },
+                value: JSON.stringify({
+                  siteId,
+                  baseURL: siteURL,
+                  channelId,
+                  threadTs,
+                  messageTs: buttonMessage.ts,
+                }),
+                action_id: 'open_ensure_entitlement_site_modal',
+                style: 'primary',
+              },
+            ],
+          },
+        ],
+      });
     } catch (error) {
       log.error('Error in ensure entitlement site command:', error);
       await postErrorMessage(say, error);

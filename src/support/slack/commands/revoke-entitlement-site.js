@@ -40,11 +40,15 @@ function RevokeEntitlementSiteCommand(context) {
    * @param {Array<string>} args - The arguments provided to the command.
    * @param {Object} slackContext - The Slack context object.
    * @param {Function} slackContext.say - The Slack say function.
+   * @param {string} slackContext.channelId - The Slack channel ID.
    * @param {string} slackContext.threadTs - The Slack thread timestamp.
+   * @param {Object} slackContext.client - The Slack client.
    * @returns {Promise} A promise that resolves when the operation is complete.
    */
   const handleExecution = async (args, slackContext) => {
-    const { say, threadTs } = slackContext;
+    const {
+      say, channelId, threadTs, client,
+    } = slackContext;
 
     try {
       const [siteURLInput] = args;
@@ -66,7 +70,10 @@ function RevokeEntitlementSiteCommand(context) {
       const siteId = site.getId();
 
       // Show button to open product selection modal
-      const message = {
+      const buttonMessage = await client.chat.postMessage({
+        channel: channelId,
+        thread_ts: threadTs,
+        text: `Revoke entitlement for site ${siteURL}`,
         blocks: [
           {
             type: 'section',
@@ -87,8 +94,9 @@ function RevokeEntitlementSiteCommand(context) {
                 value: JSON.stringify({
                   siteId,
                   baseURL: siteURL,
-                  channelId: slackContext.channelId,
+                  channelId,
                   threadTs,
+                  messageTs: 'placeholder',
                 }),
                 action_id: 'open_revoke_entitlement_site_modal',
                 style: 'danger',
@@ -96,10 +104,44 @@ function RevokeEntitlementSiteCommand(context) {
             ],
           },
         ],
-        thread_ts: threadTs,
-      };
+      });
 
-      await say(message);
+      // Update the button with the actual message timestamp
+      await client.chat.update({
+        channel: channelId,
+        ts: buttonMessage.ts,
+        text: `Revoke entitlement for site ${siteURL}`,
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `:warning: *Revoke Entitlement for Site*\n\nSite: *${siteURL}*\n\nClick the button below to select products to revoke enrollment for.`,
+            },
+          },
+          {
+            type: 'actions',
+            elements: [
+              {
+                type: 'button',
+                text: {
+                  type: 'plain_text',
+                  text: 'Select Products to Revoke',
+                },
+                value: JSON.stringify({
+                  siteId,
+                  baseURL: siteURL,
+                  channelId,
+                  threadTs,
+                  messageTs: buttonMessage.ts,
+                }),
+                action_id: 'open_revoke_entitlement_site_modal',
+                style: 'danger',
+              },
+            ],
+          },
+        ],
+      });
     } catch (error) {
       log.error('Error in revoke entitlement site command:', error);
       await postErrorMessage(say, error);

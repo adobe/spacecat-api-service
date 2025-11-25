@@ -40,11 +40,15 @@ function EnsureEntitlementImsOrgCommand(context) {
    * @param {Array<string>} args - The arguments provided to the command.
    * @param {Object} slackContext - The Slack context object.
    * @param {Function} slackContext.say - The Slack say function.
+   * @param {string} slackContext.channelId - The Slack channel ID.
    * @param {string} slackContext.threadTs - The Slack thread timestamp.
+   * @param {Object} slackContext.client - The Slack client.
    * @returns {Promise} A promise that resolves when the operation is complete.
    */
   const handleExecution = async (args, slackContext) => {
-    const { say, threadTs } = slackContext;
+    const {
+      say, channelId, threadTs, client,
+    } = slackContext;
 
     try {
       const [imsOrgId] = args;
@@ -66,7 +70,10 @@ function EnsureEntitlementImsOrgCommand(context) {
       const orgName = organization.getName() || imsOrgId;
 
       // Show button to open product selection modal
-      const message = {
+      const buttonMessage = await client.chat.postMessage({
+        channel: channelId,
+        thread_ts: threadTs,
+        text: `Ensure entitlement for organization ${orgName}`,
         blocks: [
           {
             type: 'section',
@@ -88,8 +95,9 @@ function EnsureEntitlementImsOrgCommand(context) {
                   organizationId,
                   imsOrgId,
                   orgName,
-                  channelId: slackContext.channelId,
+                  channelId,
                   threadTs,
+                  messageTs: 'placeholder',
                 }),
                 action_id: 'open_ensure_entitlement_imsorg_modal',
                 style: 'primary',
@@ -97,10 +105,45 @@ function EnsureEntitlementImsOrgCommand(context) {
             ],
           },
         ],
-        thread_ts: threadTs,
-      };
+      });
 
-      await say(message);
+      // Update the button with the actual message timestamp
+      await client.chat.update({
+        channel: channelId,
+        ts: buttonMessage.ts,
+        text: `Ensure entitlement for organization ${orgName}`,
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `:white_check_mark: *Ensure Entitlement for Organization*\n\nOrganization: *${orgName}*\nIMS Org ID: ${imsOrgId}\n\nClick the button below to select products for entitlement.`,
+            },
+          },
+          {
+            type: 'actions',
+            elements: [
+              {
+                type: 'button',
+                text: {
+                  type: 'plain_text',
+                  text: 'Select Products',
+                },
+                value: JSON.stringify({
+                  organizationId,
+                  imsOrgId,
+                  orgName,
+                  channelId,
+                  threadTs,
+                  messageTs: buttonMessage.ts,
+                }),
+                action_id: 'open_ensure_entitlement_imsorg_modal',
+                style: 'primary',
+              },
+            ],
+          },
+        ],
+      });
     } catch (error) {
       log.error('Error in ensure entitlement imsorg command:', error);
       await postErrorMessage(say, error);
