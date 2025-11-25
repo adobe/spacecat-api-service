@@ -42,6 +42,7 @@ import AuditsController from './controllers/audits.js';
 import OrganizationsController from './controllers/organizations.js';
 import ProjectsController from './controllers/project.js';
 import SitesController from './controllers/sites.js';
+import SiteMetricsController from './controllers/site-metrics.js';
 import ExperimentsController from './controllers/experiments.js';
 import HooksController from './controllers/hooks.js';
 import SlackController from './controllers/slack.js';
@@ -114,6 +115,7 @@ async function run(request, context) {
     const organizationsController = OrganizationsController(context, context.env);
     const projectsController = ProjectsController(context, context.env);
     const sitesController = SitesController(context, log, context.env);
+    const siteMetricsController = SiteMetricsController(context);
     const experimentsController = ExperimentsController(context);
     const slackController = SlackController(SlackApp);
     const fulfillmentController = FulfillmentController(context);
@@ -173,6 +175,7 @@ async function run(request, context) {
       sandboxAuditController,
       reportsController,
       pta2Controller,
+      siteMetricsController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);

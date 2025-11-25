@@ -1073,6 +1073,7 @@ export const onboardSingleSite = async (
       organizationId,
       taskContext: {
         experienceUrl: env.EXPERIENCE_URL || 'https://experience.adobe.com',
+        profile: profileName,
         slackContext: {
           channelId: slackContext.channelId,
           threadTs: slackContext.threadTs,

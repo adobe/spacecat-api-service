@@ -646,7 +646,7 @@ describe('onboard-modal', () => {
       // Note: delivery config is now set during site creation, not afterward
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
         channel: 'C12345',
-        text: ':gear: Starting onboarding for site https://example.com...',
+        text: ':gear: Starting onboarding for site https://example.com with profile "demo"...',
         thread_ts: '1234567890.123456',
       });
 
@@ -729,7 +729,7 @@ describe('onboard-modal', () => {
 
       expect(clientMock.chat.postMessage).to.have.been.calledWith({
         channel: 'U12345',
-        text: ':gear: Starting onboarding for site https://example.com...',
+        text: ':gear: Starting onboarding for site https://example.com with profile "demo"...',
         thread_ts: undefined,
       });
     });
