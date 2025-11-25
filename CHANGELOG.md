@@ -1,3 +1,10 @@
+# [1.253.0](https://github.com/adobe/spacecat-api-service/compare/v1.252.2...v1.253.0) (2025-11-25)
+
+
+### Features
+
+* edge rollback feature for tokowaka ([#1550](https://github.com/adobe/spacecat-api-service/issues/1550)) ([bfccf07](https://github.com/adobe/spacecat-api-service/commit/bfccf072ea3e4ca04be1ef125ac20e5ab808645a))
+
 ## [1.252.2](https://github.com/adobe/spacecat-api-service/compare/v1.252.1...v1.252.2) (2025-11-25)
 
 
