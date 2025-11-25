@@ -233,6 +233,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/traffic/paid/type-device-channel': trafficController.getPaidTrafficByTypeDeviceChannel,
     'GET /sites/:siteId/traffic/paid/channel': trafficController.getPaidTrafficByChannel,
     'GET /sites/:siteId/traffic/paid/channel-device': trafficController.getPaidTrafficByChannelDevice,
+    'GET /sites/:siteId/traffic/paid/channel-platform-device': trafficController.getPaidTrafficByChannelPlatformDevice,
     'GET /sites/:siteId/traffic/paid/social-platform': trafficController.getPaidTrafficBySocialPlatform,
     'GET /sites/:siteId/traffic/paid/social-platform-device': trafficController.getPaidTrafficBySocialPlatformDevice,
     'GET /sites/:siteId/traffic/paid/search-platform': trafficController.getPaidTrafficBySearchPlatform,

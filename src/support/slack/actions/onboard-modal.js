@@ -17,7 +17,6 @@ import { triggerBrandProfileAgent } from '../../brand-profile-trigger.js';
 import { loadProfileConfig } from '../../../utils/slack/base.js';
 
 export const AEM_CS_HOST = /^author-p(\d+)-e(\d+)/i;
-const AMS_HOST = 'adobecqms.net';
 
 /**
  * Extracts program and environment ID from AEM Cloud Service preview URLs.
@@ -27,33 +26,26 @@ const AMS_HOST = 'adobecqms.net';
  *                        and imsOrgId, or null if not extractable
  */
 export function extractDeliveryConfigFromPreviewUrl(previewUrl, imsOrgId) {
-  try {
-    if (!isValidUrl(previewUrl)) {
-      return null;
-    }
-    const url = new URL(previewUrl);
-    const { hostname } = url;
-
-    if (hostname.endsWith(AMS_HOST)) {
-      return {
-        authorURL: previewUrl,
-        preferContentApi: true,
-        imsOrgId: imsOrgId || null,
-      };
-    }
-
-    const [, programId, envId] = AEM_CS_HOST.exec(hostname);
-
-    return {
-      programId: `${programId}`,
-      environmentId: `${envId}`,
-      authorURL: previewUrl,
-      preferContentApi: true,
-      imsOrgId: imsOrgId || null,
-    };
-  } catch (error) {
+  if (!isValidUrl(previewUrl)) {
     return null;
   }
+  const url = new URL(previewUrl);
+  const { hostname } = url;
+
+  let programId = null;
+  let environmentId = null;
+
+  if (AEM_CS_HOST.test(hostname)) {
+    [, programId, environmentId] = hostname.match(AEM_CS_HOST);
+  }
+
+  return {
+    ...(programId && { programId }),
+    ...(environmentId && { environmentId }),
+    authorURL: previewUrl,
+    preferContentApi: true,
+    imsOrgId: imsOrgId || null,
+  };
 }
 
 /**
@@ -643,7 +635,7 @@ export function onboardSiteModal(lambdaContext) {
           await ack({
             response_action: 'errors',
             errors: {
-              preview_url_input: 'Could not extract program/environment ID from this URL. Please provide a valid AEM CS preview URL.',
+              preview_url_input: 'Please provide a valid preview URL.',
             },
           });
           return;

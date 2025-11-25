@@ -181,6 +181,7 @@ describe('getRouteHandlers', () => {
     getPaidTrafficByPageTypeCampaign: sinon.stub(),
     getPaidTrafficByPageTypePlatform: sinon.stub(),
     getPaidTrafficByPageTypePlatformDevice: sinon.stub(),
+    getPaidTrafficByChannelPlatformDevice: sinon.stub(),
     getPaidTrafficBySocialPlatformDevice: sinon.stub(),
     getPaidTrafficBySearchPlatformDevice: sinon.stub(),
     getPaidTrafficByDisplayPlatformDevice: sinon.stub(),
@@ -489,6 +490,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/traffic/paid/type-device-channel',
       'GET /sites/:siteId/traffic/paid/channel',
       'GET /sites/:siteId/traffic/paid/channel-device',
+      'GET /sites/:siteId/traffic/paid/channel-platform-device',
       'GET /sites/:siteId/traffic/paid/social-platform',
       'GET /sites/:siteId/traffic/paid/social-platform-device',
       'GET /sites/:siteId/traffic/paid/search-platform',
@@ -651,6 +653,7 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/type-device-channel'].handler).to.equal(mockTrafficController.getPaidTrafficByTypeDeviceChannel);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/channel'].handler).to.equal(mockTrafficController.getPaidTrafficByChannel);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/channel-device'].handler).to.equal(mockTrafficController.getPaidTrafficByChannelDevice);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/channel-platform-device'].handler).to.equal(mockTrafficController.getPaidTrafficByChannelPlatformDevice);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/social-platform'].handler).to.equal(mockTrafficController.getPaidTrafficBySocialPlatform);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/social-platform-device'].handler).to.equal(mockTrafficController.getPaidTrafficBySocialPlatformDevice);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/search-platform'].handler).to.equal(mockTrafficController.getPaidTrafficBySearchPlatform);
