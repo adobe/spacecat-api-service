@@ -1015,7 +1015,7 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   /**
-   * Deploys or rolls back suggestions through Tokowaka edge delivery
+   * Deploys suggestions through Tokowaka edge delivery
    * @param {Object} context of the request
    * @returns {Promise<Response>} Deployment response
    */
@@ -1035,17 +1035,142 @@ function SuggestionsController(ctx, sqs, env) {
     if (!isNonEmptyObject(context.data)) {
       return badRequest('No data provided');
     }
-    const { suggestionIds, action = 'deploy' } = context.data;
+    const { suggestionIds } = context.data;
     if (!isArray(suggestionIds) || suggestionIds.length === 0) {
       return badRequest('Request body must contain a non-empty array of suggestionIds');
     }
 
-    // Validate action parameter if provided, deploy is default
-    if (action && !['deploy', 'rollback'].includes(action)) {
-      return badRequest('action must be either "deploy" or "rollback"');
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
     }
 
-    const isRollback = action === 'rollback';
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
+    }
+
+    const opportunity = await Opportunity.findById(opportunityId);
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound('Opportunity not found');
+    }
+
+    // Fetch all suggestions for this opportunity
+    const allSuggestions = await Suggestion.allByOpportunityId(opportunityId);
+
+    // Track valid, failed, and missing suggestions
+    const validSuggestions = [];
+    const failedSuggestions = [];
+
+    // Check each requested suggestion (basic validation only)
+    suggestionIds.forEach((suggestionId, index) => {
+      const suggestion = allSuggestions.find((s) => s.getId() === suggestionId);
+
+      if (!suggestion) {
+        failedSuggestions.push({
+          uuid: suggestionId,
+          index,
+          message: 'Suggestion not found',
+          statusCode: 404,
+        });
+      } else if (suggestion.getStatus() !== SuggestionModel.STATUSES.NEW) {
+        failedSuggestions.push({
+          uuid: suggestionId,
+          index,
+          message: 'Suggestion is not in NEW status',
+          statusCode: 400,
+        });
+      } else {
+        validSuggestions.push(suggestion);
+      }
+    });
+
+    let succeededSuggestions = [];
+
+    // Only attempt deployment if we have valid suggestions
+    if (isNonEmptyArray(validSuggestions)) {
+      try {
+        const tokowakaClient = TokowakaClient.createFrom(context);
+        const deploymentResult = await tokowakaClient.deploySuggestions(
+          site,
+          opportunity,
+          validSuggestions,
+        );
+
+        // Process deployment results
+        const {
+          succeededSuggestions: deployedSuggestions,
+          failedSuggestions: ineligibleSuggestions,
+        } = deploymentResult;
+
+        // Update successfully deployed suggestions with deployment timestamp
+        const deploymentTimestamp = Date.now();
+        succeededSuggestions = await Promise.all(
+          deployedSuggestions.map(async (suggestion) => {
+            const currentData = suggestion.getData();
+            suggestion.setData({
+              ...currentData,
+              tokowakaDeployed: deploymentTimestamp,
+            });
+            suggestion.setUpdatedBy('tokowaka-deployment');
+            return suggestion.save();
+          }),
+        );
+
+        // Add ineligible suggestions to failed list
+        ineligibleSuggestions.forEach((item) => {
+          failedSuggestions.push({
+            uuid: item.suggestion.getId(),
+            index: suggestionIds.indexOf(item.suggestion.getId()),
+            message: item.reason,
+            statusCode: 400,
+          });
+        });
+
+        context.log.info(`Successfully deployed ${succeededSuggestions.length} suggestions to Edge`);
+      } catch (error) {
+        context.log.error(`Error deploying to Tokowaka: ${error.message}`, error);
+        // If deployment fails, mark all valid suggestions as failed
+        validSuggestions.forEach((suggestion) => {
+          failedSuggestions.push({
+            uuid: suggestion.getId(),
+            index: suggestionIds.indexOf(suggestion.getId()),
+            message: 'Deployment failed: Internal server error',
+            statusCode: 500,
+          });
+        });
+      }
+    }
+
+    const response = {
+      suggestions: [
+        ...succeededSuggestions.map((suggestion) => ({
+          uuid: suggestion.getId(),
+          index: suggestionIds.indexOf(suggestion.getId()),
+          statusCode: 200,
+          suggestion: SuggestionDto.toJSON(suggestion),
+        })),
+        ...failedSuggestions,
+      ],
+      metadata: {
+        total: suggestionIds.length,
+        success: succeededSuggestions.length,
+        failed: failedSuggestions.length,
+      },
+    };
+    response.suggestions.sort((a, b) => a.index - b.index);
+
+    return createResponse(response, 207);
+  };
+
+  const rollbackSuggestionFromEdge = async (context) => {
+    const { siteId, opportunityId } = context.params;
+    if (!isNonEmptyObject(context.data)) {
+      return badRequest('No data provided');
+    }
+    const { suggestionIds } = context.data;
+    if (!isArray(suggestionIds) || suggestionIds.length === 0) {
+      return badRequest('Request body must contain a non-empty array of suggestionIds');
+    }
 
     const site = await Site.findById(siteId);
     if (!site) {
@@ -1079,7 +1204,7 @@ function SuggestionsController(ctx, sqs, env) {
           message: 'Suggestion not found',
           statusCode: 404,
         });
-      } else if (isRollback) {
+      } else {
         // For rollback, check if suggestion has been deployed
         const hasBeenDeployed = suggestion.getData()?.tokowakaDeployed;
         if (!hasBeenDeployed) {
@@ -1092,41 +1217,22 @@ function SuggestionsController(ctx, sqs, env) {
         } else {
           validSuggestions.push(suggestion);
         }
-      } else if (suggestion.getStatus() !== SuggestionModel.STATUSES.NEW) {
-        failedSuggestions.push({
-          uuid: suggestionId,
-          index,
-          message: 'Suggestion is not in NEW status',
-          statusCode: 400,
-        });
-      } else {
-        validSuggestions.push(suggestion);
       }
     });
 
     let succeededSuggestions = [];
 
-    // Only attempt deployment/rollback if we have valid suggestions
+    // Only attempt rollback if we have valid suggestions
     if (isNonEmptyArray(validSuggestions)) {
       try {
         const tokowakaClient = TokowakaClient.createFrom(context);
-        let result;
 
-        if (isRollback) {
-          // Rollback suggestions
-          result = await tokowakaClient.rollbackSuggestions(
-            site,
-            opportunity,
-            validSuggestions,
-          );
-        } else {
-          // Deploy suggestions
-          result = await tokowakaClient.deploySuggestions(
-            site,
-            opportunity,
-            validSuggestions,
-          );
-        }
+        // Rollback suggestions
+        const result = await tokowakaClient.rollbackSuggestions(
+          site,
+          opportunity,
+          validSuggestions,
+        );
 
         // Process results
         const {
@@ -1134,14 +1240,13 @@ function SuggestionsController(ctx, sqs, env) {
           failedSuggestions: ineligibleSuggestions,
         } = result;
 
+        // Update successfully rolled back suggestions - remove tokowakaDeployed timestamp
         succeededSuggestions = await Promise.all(
           processedSuggestions.map(async (suggestion) => {
             const currentData = suggestion.getData();
-            suggestion.setData({
-              ...currentData,
-              ...(!isRollback && { tokowakaDeployed: Date.now() }),
-            });
-            suggestion.setUpdatedBy(isRollback ? 'tokowaka-rollback' : 'tokowaka-deployment');
+            delete currentData.tokowakaDeployed;
+            suggestion.setData(currentData);
+            suggestion.setUpdatedBy('tokowaka-rollback');
             return suggestion.save();
           }),
         );
@@ -1156,15 +1261,15 @@ function SuggestionsController(ctx, sqs, env) {
           });
         });
 
-        context.log.info(`Successfully ${action}ed ${succeededSuggestions.length} suggestions`);
+        context.log.info(`Successfully rolled back ${succeededSuggestions.length} suggestions from Edge`);
       } catch (error) {
-        context.log.error(`Error during Tokowaka ${action}: ${error.message}`, error);
-        // If operation fails, mark all valid suggestions as failed
+        context.log.error(`Error during Tokowaka rollback: ${error.message}`, error);
+        // If rollback fails, mark all valid suggestions as failed
         validSuggestions.forEach((suggestion) => {
           failedSuggestions.push({
             uuid: suggestion.getId(),
             index: suggestionIds.indexOf(suggestion.getId()),
-            message: `${action} failed: Internal server error`,
+            message: 'Rollback failed: Internal server error',
             statusCode: 500,
           });
         });
@@ -1196,6 +1301,7 @@ function SuggestionsController(ctx, sqs, env) {
     autofixSuggestions,
     createSuggestions,
     deploySuggestionToEdge,
+    rollbackSuggestionFromEdge,
     previewSuggestions,
     getAllForOpportunity,
     getAllForOpportunityPaged,

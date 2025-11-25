@@ -145,6 +145,7 @@ describe('Suggestions Controller', () => {
     'getAllForOpportunity',
     'getAllForOpportunityPaged',
     'deploySuggestionToEdge',
+    'rollbackSuggestionFromEdge',
     'previewSuggestions',
     'getByID',
     'getByStatus',
@@ -3541,7 +3542,7 @@ describe('Suggestions Controller', () => {
       expect(body.metadata.success).to.equal(0);
       expect(body.metadata.failed).to.equal(2);
       expect(body.suggestions[0].statusCode).to.equal(500);
-      expect(body.suggestions[0].message).to.include('deploy failed');
+      expect(body.suggestions[0].message).to.include('Deployment failed');
     });
 
     it('should handle partial success when some suggestions not found', async () => {
@@ -3819,7 +3820,7 @@ describe('Suggestions Controller', () => {
     });
 
     it('should successfully rollback suggestions', async () => {
-      const response = await suggestionsController.deploySuggestionToEdge({
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
         ...context,
         params: {
           siteId: SITE_ID,
@@ -3827,7 +3828,6 @@ describe('Suggestions Controller', () => {
         },
         data: {
           suggestionIds: [SUGGESTION_IDS[0]],
-          action: 'rollback',
         },
       });
 
@@ -3850,24 +3850,6 @@ describe('Suggestions Controller', () => {
       expect(suggestion.save.calledOnce).to.be.true;
     });
 
-    it('should return 400 for invalid action parameter', async () => {
-      const response = await suggestionsController.deploySuggestionToEdge({
-        ...context,
-        params: {
-          siteId: SITE_ID,
-          opportunityId: OPPORTUNITY_ID,
-        },
-        data: {
-          suggestionIds: [SUGGESTION_IDS[0]],
-          action: 'invalid-action',
-        },
-      });
-
-      expect(response.status).to.equal(400);
-      const body = await response.json();
-      expect(body.message).to.include('action must be either "deploy" or "rollback"');
-    });
-
     it('should return 400 for suggestions without tokowakaDeployed during rollback', async () => {
       // Remove tokowakaDeployed from suggestion
       tokowakaSuggestions[0].getData = () => ({
@@ -3882,7 +3864,7 @@ describe('Suggestions Controller', () => {
         },
       });
 
-      const response = await suggestionsController.deploySuggestionToEdge({
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
         ...context,
         params: {
           siteId: SITE_ID,
@@ -3890,7 +3872,6 @@ describe('Suggestions Controller', () => {
         },
         data: {
           suggestionIds: [SUGGESTION_IDS[0]],
-          action: 'rollback',
         },
       });
 
@@ -3903,7 +3884,7 @@ describe('Suggestions Controller', () => {
     });
 
     it('should handle multiple suggestions rollback', async () => {
-      const response = await suggestionsController.deploySuggestionToEdge({
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
         ...context,
         params: {
           siteId: SITE_ID,
@@ -3911,7 +3892,6 @@ describe('Suggestions Controller', () => {
         },
         data: {
           suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
-          action: 'rollback',
         },
       });
 
@@ -3933,7 +3913,7 @@ describe('Suggestions Controller', () => {
       // Make S3 upload fail
       s3ClientSendStub.rejects(new Error('S3 upload failed'));
 
-      const response = await suggestionsController.deploySuggestionToEdge({
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
         ...context,
         params: {
           siteId: SITE_ID,
@@ -3941,7 +3921,6 @@ describe('Suggestions Controller', () => {
         },
         data: {
           suggestionIds: [SUGGESTION_IDS[0]],
-          action: 'rollback',
         },
       });
 
@@ -3950,7 +3929,7 @@ describe('Suggestions Controller', () => {
 
       expect(body.metadata.success).to.equal(0);
       expect(body.metadata.failed).to.equal(1);
-      expect(body.suggestions[0].message).to.include('rollback failed');
+      expect(body.suggestions[0].message).to.include('Rollback failed');
     });
   });
 
