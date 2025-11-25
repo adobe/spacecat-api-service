@@ -88,6 +88,8 @@ function RevokeEntitlementImsOrgCommand(context) {
                   organizationId,
                   imsOrgId,
                   orgName,
+                  channelId: slackContext.channelId,
+                  threadTs,
                 }),
                 action_id: 'open_revoke_entitlement_imsorg_modal',
                 style: 'danger',

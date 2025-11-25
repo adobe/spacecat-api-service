@@ -87,6 +87,8 @@ function EnsureEntitlementSiteCommand(context) {
                 value: JSON.stringify({
                   siteId,
                   baseURL: siteURL,
+                  channelId: slackContext.channelId,
+                  threadTs,
                 }),
                 action_id: 'open_ensure_entitlement_site_modal',
                 style: 'primary',

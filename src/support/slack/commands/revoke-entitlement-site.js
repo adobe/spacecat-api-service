@@ -87,6 +87,8 @@ function RevokeEntitlementSiteCommand(context) {
                 value: JSON.stringify({
                   siteId,
                   baseURL: siteURL,
+                  channelId: slackContext.channelId,
+                  threadTs,
                 }),
                 action_id: 'open_revoke_entitlement_site_modal',
                 style: 'danger',

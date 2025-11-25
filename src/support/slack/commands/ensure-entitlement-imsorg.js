@@ -88,6 +88,8 @@ function EnsureEntitlementImsOrgCommand(context) {
                   organizationId,
                   imsOrgId,
                   orgName,
+                  channelId: slackContext.channelId,
+                  threadTs,
                 }),
                 action_id: 'open_ensure_entitlement_imsorg_modal',
                 style: 'primary',

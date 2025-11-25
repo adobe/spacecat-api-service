@@ -30,24 +30,25 @@ export function openEnsureEntitlementSiteModal(lambdaContext) {
     try {
       await ack();
 
-      const { trigger_id: triggerId, channel, message } = body;
       const metadata = JSON.parse(body.actions[0].value);
-      const { siteId, baseURL } = metadata;
+      const {
+        siteId, baseURL, channelId, threadTs,
+      } = metadata;
 
       const modal = createProductSelectionModal(
         'ensure_entitlement_site_modal',
         {
           siteId,
           baseURL,
-          channelId: channel.id,
-          threadTs: message.thread_ts || message.ts,
+          channelId,
+          threadTs,
         },
         'Select Products for Entitlement',
         `Creating entitlement for site: *${baseURL}*\n\nPlease select the products you want to ensure entitlement for:`,
       );
 
       await client.views.open({
-        trigger_id: triggerId,
+        trigger_id: body.trigger_id,
         view: modal,
       });
     } catch (error) {
@@ -66,9 +67,10 @@ export function openEnsureEntitlementImsOrgModal(lambdaContext) {
     try {
       await ack();
 
-      const { trigger_id: triggerId, channel, message } = body;
       const metadata = JSON.parse(body.actions[0].value);
-      const { organizationId, imsOrgId, orgName } = metadata;
+      const {
+        organizationId, imsOrgId, orgName, channelId, threadTs,
+      } = metadata;
 
       const modal = createProductSelectionModal(
         'ensure_entitlement_imsorg_modal',
@@ -76,15 +78,15 @@ export function openEnsureEntitlementImsOrgModal(lambdaContext) {
           organizationId,
           imsOrgId,
           orgName,
-          channelId: channel.id,
-          threadTs: message.thread_ts || message.ts,
+          channelId,
+          threadTs,
         },
         'Select Products for Entitlement',
         `Creating entitlement for organization: *${orgName}* (${imsOrgId})\n\nPlease select the products you want to ensure entitlement for:`,
       );
 
       await client.views.open({
-        trigger_id: triggerId,
+        trigger_id: body.trigger_id,
         view: modal,
       });
     } catch (error) {
@@ -103,24 +105,25 @@ export function openRevokeEntitlementSiteModal(lambdaContext) {
     try {
       await ack();
 
-      const { trigger_id: triggerId, channel, message } = body;
       const metadata = JSON.parse(body.actions[0].value);
-      const { siteId, baseURL } = metadata;
+      const {
+        siteId, baseURL, channelId, threadTs,
+      } = metadata;
 
       const modal = createProductSelectionModal(
         'revoke_entitlement_site_modal',
         {
           siteId,
           baseURL,
-          channelId: channel.id,
-          threadTs: message.thread_ts || message.ts,
+          channelId,
+          threadTs,
         },
         'Select Products to Revoke',
         `Revoking enrollment for site: *${baseURL}*\n\nPlease select the products you want to revoke enrollment for:`,
       );
 
       await client.views.open({
-        trigger_id: triggerId,
+        trigger_id: body.trigger_id,
         view: modal,
       });
     } catch (error) {
@@ -139,9 +142,10 @@ export function openRevokeEntitlementImsOrgModal(lambdaContext) {
     try {
       await ack();
 
-      const { trigger_id: triggerId, channel, message } = body;
       const metadata = JSON.parse(body.actions[0].value);
-      const { organizationId, imsOrgId, orgName } = metadata;
+      const {
+        organizationId, imsOrgId, orgName, channelId, threadTs,
+      } = metadata;
 
       const modal = createProductSelectionModal(
         'revoke_entitlement_imsorg_modal',
@@ -149,15 +153,15 @@ export function openRevokeEntitlementImsOrgModal(lambdaContext) {
           organizationId,
           imsOrgId,
           orgName,
-          channelId: channel.id,
-          threadTs: message.thread_ts || message.ts,
+          channelId,
+          threadTs,
         },
         'Select Products to Revoke',
         `Revoking entitlement for organization: *${orgName}* (${imsOrgId})\n\nPlease select the products you want to revoke entitlement for:`,
       );
 
       await client.views.open({
-        trigger_id: triggerId,
+        trigger_id: body.trigger_id,
         view: modal,
       });
     } catch (error) {
