@@ -1,3 +1,10 @@
+## [1.252.1](https://github.com/adobe/spacecat-api-service/compare/v1.252.0...v1.252.1) (2025-11-25)
+
+
+### Bug Fixes
+
+* updates docs for suggestion apis ([#1551](https://github.com/adobe/spacecat-api-service/issues/1551)) ([8ec4bc0](https://github.com/adobe/spacecat-api-service/commit/8ec4bc0f46e34f425b84f0ff6627b6d3bf6e3a99))
+
 # [1.252.0](https://github.com/adobe/spacecat-api-service/compare/v1.251.2...v1.252.0) (2025-11-24)
 
 
