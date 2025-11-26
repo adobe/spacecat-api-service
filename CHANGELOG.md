@@ -1,3 +1,10 @@
+## [1.253.5](https://github.com/adobe/spacecat-api-service/compare/v1.253.4...v1.253.5) (2025-11-26)
+
+
+### Bug Fixes
+
+* back to working version of @adobe/helix-deploy ([1635bc4](https://github.com/adobe/spacecat-api-service/commit/1635bc47143b721ef7600247a9e56fedfba0cdfe))
+
 ## [1.253.4](https://github.com/adobe/spacecat-api-service/compare/v1.253.3...v1.253.4) (2025-11-26)
 
 
