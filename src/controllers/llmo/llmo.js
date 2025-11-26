@@ -415,7 +415,12 @@ function LlmoController(ctx) {
   };
 
   async function updateLlmoConfig(context) {
-    const { log, s3, data } = context;
+    const {
+      log,
+      s3,
+      data,
+      pathInfo,
+    } = context;
     const { siteId } = context.params;
 
     const userId = context.attributes?.authInfo?.getProfile()?.sub || 'unknown';
@@ -454,16 +459,19 @@ function LlmoController(ctx) {
         { s3Bucket: s3.s3Bucket },
       );
 
-      await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
-        type: 'llmo-customer-analysis',
-        siteId,
-        auditContext: {
-          configVersion: version,
-          previousConfigVersion: prevConfig.exists
-            ? prevConfig.version
-            : /* c8 ignore next */ null,
-        },
-      });
+      // Only send audit job message if X-Trigger-Audits header is present
+      if (pathInfo?.headers?.['x-trigger-audits']) {
+        await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
+          type: 'llmo-customer-analysis',
+          siteId,
+          auditContext: {
+            configVersion: version,
+            previousConfigVersion: prevConfig.exists
+              ? prevConfig.version
+              : /* c8 ignore next */ null,
+          },
+        });
+      }
 
       // Calculate config summary
       const numCategories = Object.keys(parsedConfig.categories || {}).length;
