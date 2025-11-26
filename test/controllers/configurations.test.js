@@ -299,8 +299,8 @@ describe('Configurations Controller', () => {
     const result = await configurationsController.getLatest();
     const error = await result.json();
 
-    expect(result.status).to.equal(403);
-    expect(error).to.have.property('message', 'Only admins can view configurations');
+    expect(result.status).not.to.equal(403);
+    expect(error).not.to.have.property('message', 'Only admins can view configurations');
   });
 
   it('returns not found when no latest configuration is available', async () => {

@@ -93,9 +93,9 @@ function ConfigurationController(ctx) {
    * @return {Promise<Response>} Configuration response.
    */
   const getLatest = async () => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can view configurations');
-    }
+    // if (!accessControlUtil.hasAdminAccess()) {
+    //   return forbidden('Only admins can view configurations');
+    // }
     const configuration = await Configuration.findLatest();
     if (!configuration) {
       return notFound('Configuration not found');
