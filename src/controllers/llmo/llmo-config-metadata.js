@@ -230,8 +230,15 @@ export const updateModifiedByDetails = (updates, oldConfig, userId) => {
     Object.entries(newConfig.deleted.prompts).forEach(([id, prompt]) => {
       stats.deletedPrompts.total += 1;
       const oldPrompt = oldDeletedPrompts[id];
-      const modified = updateEntityMetadata(prompt, oldPrompt, userId, timestamp);
-      if (modified) stats.deletedPrompts.modified += 1;
+
+      if (oldPrompt) {
+        if (oldPrompt.updatedBy) prompt.updatedBy = oldPrompt.updatedBy;
+        if (oldPrompt.updatedAt) prompt.updatedAt = oldPrompt.updatedAt;
+      } else {
+        prompt.updatedBy = userId;
+        prompt.updatedAt = timestamp;
+        stats.deletedPrompts.modified += 1;
+      }
     });
   }
 
