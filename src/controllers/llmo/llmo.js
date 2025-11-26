@@ -43,6 +43,7 @@ import {
   performLlmoOffboarding,
 } from './llmo-onboarding.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
+import { updateConfigMetadata } from './llmo-config-metadata.js';
 
 const { readConfig, writeConfig } = llmo;
 const { llmoConfig: llmoConfigSchema } = schemas;
@@ -517,6 +518,12 @@ function LlmoController(ctx) {
         ...data,
       };
 
+      const stats = updateConfigMetadata(
+        newConfig,
+        prevConfig?.exists ? prevConfig.config : null,
+        userId,
+      );
+
       // Validate the config, return 400 if validation fails
       const result = llmoConfigSchema.safeParse(newConfig);
       if (!result.success) {
@@ -557,30 +564,15 @@ function LlmoController(ctx) {
         });
       }
 
-      // Calculate config summary
-      const numCategories = Object.keys(parsedConfig.categories || {}).length;
-      const numTopics = Object.keys(parsedConfig.topics || {}).length;
-      const numPrompts = Object.values(parsedConfig.topics || {}).reduce(
-        (total, topic) => total + (topic.prompts?.length || 0),
-        0,
-      );
-      const numBrandAliases = parsedConfig.brands?.aliases?.length || 0;
-      const numCompetitors = parsedConfig.competitors?.competitors?.length || 0;
-      const numDeletedPrompts = Object.keys(parsedConfig.deleted?.prompts || {}).length;
-      const numCategoryUrls = Object.values(parsedConfig.categories || {}).reduce(
-        (total, category) => total + (category.urls?.length || 0),
-        0,
-      );
-
       // Build config summary
       const summaryParts = [
-        `${numPrompts} prompts`,
-        `${numCategories} categories`,
-        `${numTopics} topics`,
-        `${numBrandAliases} brand aliases`,
-        `${numCompetitors} competitors`,
-        `${numDeletedPrompts} deleted prompts`,
-        `${numCategoryUrls} category URLs`,
+        `${stats.prompts.total} prompts${stats.prompts.modified ? ` (${stats.prompts.modified} modified)` : ''}`,
+        `${stats.categories.total} categories${stats.categories.modified ? ` (${stats.categories.modified} modified)` : ''}`,
+        `${stats.topics.total} topics${stats.topics.modified ? ` (${stats.topics.modified} modified)` : ''}`,
+        `${stats.brandAliases.total} brand aliases${stats.brandAliases.modified ? ` (${stats.brandAliases.modified} modified)` : ''}`,
+        `${stats.competitors.total} competitors${stats.competitors.modified ? ` (${stats.competitors.modified} modified)` : ''}`,
+        `${stats.deletedPrompts.total} deleted prompts${stats.deletedPrompts.modified ? ` (${stats.deletedPrompts.modified} modified)` : ''}`,
+        `${stats.categoryUrls.total} category URLs`,
       ];
       const configSummary = summaryParts.join(', ');
 
