@@ -29,10 +29,6 @@
     "docs:serve": "npx @redocly/cli preview --project-dir docs/openapi --product redoc",
     "prepare": "husky"
   },
-  "wsk": {
-    "name": "spacecat-services/api-service",
-    "namespace": "spacecat"
-  },
   "hlx": {
     "target": "aws",
     "linkRoutes": false,
