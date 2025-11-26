@@ -9,7 +9,7 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-import { parseHTML } from 'linkedom';
+import { parse } from 'node-html-parser';
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 /**
@@ -34,11 +34,10 @@ export function extractLinks(html, domain, log) {
   try {
     const baseDomain = domain.endsWith('/') ? domain : `${domain}/`;
 
-    const dom = parseHTML(html);
-    const { document } = dom.window;
-    const anchorElements = document.querySelectorAll('a');
+    const root = parse(html);
+    const anchorElements = root.querySelectorAll('a');
 
-    const links = Array.from(anchorElements)
+    const links = anchorElements
       .map((anchor) => {
         const href = anchor.getAttribute('href');
 
