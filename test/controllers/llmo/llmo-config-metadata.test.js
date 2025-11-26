@@ -245,6 +245,24 @@ describe('LLMO Config Metadata Utils', () => {
       expect(stats.prompts.modified).to.equal(0);
     });
 
+    it('should handle prompts with IDs (match by ID)', () => {
+      const oldPrompt = {
+        id: '507f1f77-bcf8-6cd7-9436-3b7713d911e9',
+        prompt: 'Old Prompt',
+        origin: 'human',
+        updatedBy: 'old-user',
+        updatedAt: '2023-01-01',
+      };
+      const newPrompt = oldPrompt;
+      const inputConfig = { topics: { [topicId]: { prompts: [newPrompt] } } };
+      const oldConfig = { topics: { [topicId]: { prompts: [oldPrompt] } } };
+
+      const { newConfig, stats } = updateModifiedByDetails(inputConfig, oldConfig, userId);
+
+      expect(newConfig.topics[topicId].prompts[0].updatedBy).to.equal('old-user');
+      expect(stats.prompts.modified).to.equal(0);
+    });
+
     it('should handle aiTopics correctly', () => {
       const inputConfig = {
         aiTopics: {

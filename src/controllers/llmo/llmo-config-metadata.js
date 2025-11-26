@@ -58,7 +58,7 @@ const stripMetadata = (obj) => {
   if (!obj || typeof obj !== 'object') return obj;
   const {
     // eslint-disable-next-line no-unused-vars
-    updatedAt, updatedBy, status, ...rest
+    updatedAt, updatedBy, status, id, ...rest
   } = obj;
   return rest;
 };
@@ -163,7 +163,12 @@ export const updateModifiedByDetails = (updates, oldConfig, userId) => {
         stats.prompts.total += topic.prompts.length;
 
         const oldPromptsMap = new Map();
+        const oldPromptsIdMap = new Map();
+
         oldPrompts.forEach((p) => {
+          if (p.id) {
+            oldPromptsIdMap.set(p.id, p);
+          }
           const clean = stripMetadata(p);
           const key = getDeterministicKey(clean);
           if (!oldPromptsMap.has(key)) {
@@ -173,23 +178,37 @@ export const updateModifiedByDetails = (updates, oldConfig, userId) => {
         });
 
         topic.prompts.forEach((prompt) => {
-          const cleanPrompt = stripMetadata(prompt);
-          const key = getDeterministicKey(cleanPrompt);
-          const potentialMatches = oldPromptsMap.get(key);
+          let match = null;
 
-          let matchFound = false;
+          // 1. Try ID match
+          if (prompt.id && oldPromptsIdMap.has(prompt.id)) {
+            match = oldPromptsIdMap.get(prompt.id);
+            oldPromptsIdMap.delete(prompt.id); // Prevent reuse
 
-          if (potentialMatches && potentialMatches.length > 0) {
-            const match = potentialMatches.shift(); // Remove from pool to handle duplicates
-
-            if (match) {
-              if (match.updatedBy) prompt.updatedBy = match.updatedBy;
-              if (match.updatedAt) prompt.updatedAt = match.updatedAt;
-              matchFound = true;
+            // Remove from content map to prevent reuse in fallback
+            const cleanMatch = stripMetadata(match);
+            const matchKey = getDeterministicKey(cleanMatch);
+            const potentialMatches = oldPromptsMap.get(matchKey);
+            if (potentialMatches && potentialMatches.length > 0) {
+              potentialMatches.shift();
             }
           }
 
-          if (!matchFound) {
+          // 2. Fallback to content match
+          if (!match) {
+            const cleanPrompt = stripMetadata(prompt);
+            const key = getDeterministicKey(cleanPrompt);
+            const potentialMatches = oldPromptsMap.get(key);
+
+            if (potentialMatches && potentialMatches.length > 0) {
+              match = potentialMatches.shift(); // Remove from pool
+            }
+          }
+
+          if (match) {
+            if (match.updatedBy) prompt.updatedBy = match.updatedBy;
+            if (match.updatedAt) prompt.updatedAt = match.updatedAt;
+          } else {
             // No match, it's new or modified
             prompt.updatedBy = userId;
             prompt.updatedAt = timestamp;
