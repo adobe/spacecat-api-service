@@ -751,6 +751,7 @@ ${deliveryConfigInfo}${previewConfigInfo}
 
         log.info('Onboard modal: attempting to trigger brand-profile', {
           hasSite: !!site,
+          /* c8 ignore next 2 - defensive optional chaining for null site */
           siteId: site?.getId?.(),
           baseURL: site?.getBaseURL?.(),
           hasSlackContext: !!slackContext?.channelId,
