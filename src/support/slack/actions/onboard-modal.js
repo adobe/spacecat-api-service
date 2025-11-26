@@ -757,12 +757,28 @@ ${deliveryConfigInfo}${previewConfigInfo}
           thread_ts: responseThreadTs,
         });
 
-        if (site) {
+        // Trigger brand-profile agent (matching onboard command flow)
+        log.info('Onboard modal: attempting to trigger brand-profile', {
+          siteId: reportLine.siteId,
+          status: reportLine.status,
+          baseURL: reportLine.site,
+          hasSlackContext: !!slackContext?.channelId,
+          willTrigger: !!(reportLine.siteId && reportLine.status !== 'Failed'),
+        });
+
+        if (reportLine.siteId && reportLine.status !== 'Failed') {
           await triggerBrandProfileAgent({
             context: lambdaContext,
-            site,
+            siteId: reportLine.siteId,
+            baseURL: reportLine.site,
             slackContext,
             reason: 'aso-slack',
+          });
+        } else {
+          log.warn('Onboard modal: skipping brand-profile trigger', {
+            siteId: reportLine.siteId,
+            status: reportLine.status,
+            reason: !reportLine.siteId ? 'no siteId' : 'failed status',
           });
         }
       }
