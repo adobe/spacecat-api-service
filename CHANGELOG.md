@@ -1,3 +1,31 @@
+## [1.253.2](https://github.com/adobe/spacecat-api-service/compare/v1.253.1...v1.253.2) (2025-11-25)
+
+
+### Bug Fixes
+
+* deploy lambda ([#1554](https://github.com/adobe/spacecat-api-service/issues/1554)) ([3f521c5](https://github.com/adobe/spacecat-api-service/commit/3f521c5053adc1192da0f230f1feaefae5e56b7e))
+
+## [1.253.1](https://github.com/adobe/spacecat-api-service/compare/v1.253.0...v1.253.1) (2025-11-25)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1552](https://github.com/adobe/spacecat-api-service/issues/1552)) ([209e64c](https://github.com/adobe/spacecat-api-service/commit/209e64c93b3fb37c0b77590f8aced4dd0141f1ad))
+
+# [1.253.0](https://github.com/adobe/spacecat-api-service/compare/v1.252.2...v1.253.0) (2025-11-25)
+
+
+### Features
+
+* edge rollback feature for tokowaka ([#1550](https://github.com/adobe/spacecat-api-service/issues/1550)) ([bfccf07](https://github.com/adobe/spacecat-api-service/commit/bfccf072ea3e4ca04be1ef125ac20e5ab808645a))
+
+## [1.252.2](https://github.com/adobe/spacecat-api-service/compare/v1.252.1...v1.252.2) (2025-11-25)
+
+
+### Bug Fixes
+
+* deploy lambda ([#1553](https://github.com/adobe/spacecat-api-service/issues/1553)) ([80113bd](https://github.com/adobe/spacecat-api-service/commit/80113bd52e953d397f1aca0dcef8b57bea7ea473))
+
 ## [1.252.1](https://github.com/adobe/spacecat-api-service/compare/v1.252.0...v1.252.1) (2025-11-25)
 
 
