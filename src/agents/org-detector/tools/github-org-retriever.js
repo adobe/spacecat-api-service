@@ -9,7 +9,7 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-import { JSDOM } from 'jsdom';
+import { parseHTML } from 'linkedom';
 import { Octokit } from '@octokit/rest';
 import { tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 /**
@@ -31,7 +31,7 @@ async function scrapeGithubOrgName(orgLogin, log) {
     }
 
     const html = await response.text();
-    const dom = new JSDOM(html);
+    const dom = parseHTML(html);
     const { document } = dom.window;
 
     const orgElement = document.querySelector('h1[class*="sso-title"] strong');
