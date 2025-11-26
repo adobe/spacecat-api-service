@@ -32,9 +32,108 @@ describe('EntitlementModals', () => {
   let mockPostEntitlementMessages;
   let mockUpdateMessageToProcessing;
 
+  // Test data constants
+  const TEST_IDS = {
+    site: 'site-123',
+    org: 'org-123',
+    channel: 'ch-123',
+    thread: 'thread-123',
+    message: 'msg-123',
+    trigger: 'trigger-123',
+    ent: 'ent-123',
+  };
+
+  const TEST_URLS = {
+    site: 'https://example.com',
+    imsOrg: 'ims@AdobeOrg',
+  };
+
+  // Helper to create standard product selection state
+  const createProductState = (asoSelected = true, llmoSelected = false) => ({
+    products_block: {
+      aso_checkbox: { selected_options: asoSelected ? [{ value: 'ASO' }] : [] },
+      llmo_checkbox: { selected_options: llmoSelected ? [{ value: 'LLMO' }] : [] },
+    },
+  });
+
+  // Helper to create site modal metadata
+  const createSiteMetadata = (includeMessage = true) => ({
+    siteId: TEST_IDS.site,
+    baseURL: TEST_URLS.site,
+    channelId: TEST_IDS.channel,
+    threadTs: TEST_IDS.thread,
+    ...(includeMessage && { messageTs: TEST_IDS.message }),
+  });
+
+  // Helper to create org modal metadata
+  const createOrgMetadata = (includeMessage = true) => ({
+    organizationId: TEST_IDS.org,
+    imsOrgId: TEST_URLS.imsOrg,
+    orgName: 'Test Org',
+    channelId: TEST_IDS.channel,
+    threadTs: TEST_IDS.thread,
+    ...(includeMessage && { messageTs: TEST_IDS.message }),
+  });
+
+  // Helper to create standard client mock
+  const createClientMock = (openRejects = false) => ({
+    views: {
+      open: openRejects
+        ? sinon.stub().rejects(new Error('Modal error'))
+        : sinon.stub().resolves(),
+    },
+    chat: {
+      postMessage: sinon.stub().resolves(),
+      update: sinon.stub().resolves(),
+    },
+  });
+
+  // Helper to create modal submission body
+  const createModalBody = (metadata, products = createProductState()) => ({
+    view: {
+      private_metadata: JSON.stringify(metadata),
+      state: { values: products },
+    },
+  });
+
+  // Helper to create action body for opening modals
+  const createActionBody = (metadata) => ({
+    actions: [{ value: JSON.stringify(metadata) }],
+    trigger_id: TEST_IDS.trigger,
+  });
+
+  // Helper to test modal opening
+  const testModalOpening = async (handlerFn, metadata, expectError = false) => {
+    const ack = sinon.stub().resolves();
+    const client = createClientMock(expectError);
+    const body = createActionBody(metadata);
+
+    const handler = handlerFn(lambdaContext);
+    await handler({ ack, body, client });
+
+    expect(ack).to.have.been.calledOnce;
+    if (expectError) {
+      expect(lambdaContext.log.error).to.have.been.called;
+    } else {
+      expect(client.views.open).to.have.been.calledOnce;
+    }
+  };
+
+  // Helper to test modal submission
+  const testModalSubmission = async (handlerFn, metadata, products, assertions) => {
+    const ack = sinon.stub().resolves();
+    const client = createClientMock();
+    const body = createModalBody(metadata, products);
+
+    const handler = handlerFn(lambdaContext);
+    await handler({ ack, body, client });
+
+    assertions(ack, client);
+  };
+
   before(async () => {
     mockCreateEntitlementsForProducts = sinon.stub().resolves([
-      { product: 'ASO', entitlementId: 'ent-1', enrollmentId: 'enr-1' },
+      { product: 'ASO', entitlementId: TEST_IDS.ent, enrollmentId: 'enr-1' },
     ]);
     mockPostEntitlementMessages = sinon.stub().resolves();
     mockUpdateMessageToProcessing = sinon.stub().resolves();
@@ -58,7 +157,7 @@ describe('EntitlementModals', () => {
           }),
           createForOrg: sinon.stub().returns({
             createEntitlement: sinon.stub().resolves({
-              entitlement: { getId: () => 'ent-123' },
+              entitlement: { getId: () => TEST_IDS.ent },
             }),
             revokeEntitlement: sinon.stub().resolves(),
           }),
@@ -86,13 +185,13 @@ describe('EntitlementModals', () => {
       dataAccess: {
         Site: {
           findById: sinon.stub().resolves({
-            getId: () => 'site-123',
-            getBaseURL: () => 'https://example.com',
+            getId: () => TEST_IDS.site,
+            getBaseURL: () => TEST_URLS.site,
           }),
         },
         Organization: {
           findById: sinon.stub().resolves({
-            getId: () => 'org-123',
+            getId: () => TEST_IDS.org,
             getName: () => 'Test Org',
           }),
         },
@@ -108,255 +207,83 @@ describe('EntitlementModals', () => {
   });
 
   describe('openEnsureEntitlementSiteModal', () => {
-    it('opens modal with correct metadata', async () => {
-      const ack = sinon.stub().resolves();
-      const client = {
-        views: { open: sinon.stub().resolves() },
-      };
-      const body = {
-        actions: [{
-          value: JSON.stringify({
-            siteId: 'site-123',
-            baseURL: 'https://example.com',
-            channelId: 'ch-123',
-            threadTs: 'thread-123',
-            messageTs: 'msg-123',
-          }),
-        }],
-        trigger_id: 'trigger-123',
-      };
+    it('opens modal with correct metadata', () => testModalOpening(
+      openEnsureEntitlementSiteModal,
+      createSiteMetadata(),
+    ));
 
-      const handler = openEnsureEntitlementSiteModal(lambdaContext);
-      await handler({ ack, body, client });
-
-      expect(ack).to.have.been.calledOnce;
-      expect(client.views.open).to.have.been.calledOnce;
-    });
-
-    it('handles errors when opening modal', async () => {
-      const ack = sinon.stub().resolves();
-      const client = {
-        views: { open: sinon.stub().rejects(new Error('Modal error')) },
-      };
-      const body = {
-        actions: [{ value: JSON.stringify({ siteId: 'site-123', baseURL: 'https://example.com' }) }],
-        trigger_id: 'trigger-123',
-      };
-
-      const handler = openEnsureEntitlementSiteModal(lambdaContext);
-      await handler({ ack, body, client });
-
-      expect(lambdaContext.log.error).to.have.been.called;
-    });
+    it('handles errors when opening modal', () => testModalOpening(
+      openEnsureEntitlementSiteModal,
+      { siteId: TEST_IDS.site, baseURL: TEST_URLS.site },
+      true,
+    ));
   });
 
   describe('ensureEntitlementSiteModal', () => {
-    it('processes modal submission successfully', async () => {
-      const ack = sinon.stub().resolves();
-      const client = {
-        chat: {
-          postMessage: sinon.stub().resolves(),
-          update: sinon.stub().resolves(),
-        },
-      };
-      const body = {
-        view: {
-          private_metadata: JSON.stringify({
-            siteId: 'site-123',
-            baseURL: 'https://example.com',
-            channelId: 'ch-123',
-            threadTs: 'thread-123',
-            messageTs: 'msg-123',
-          }),
-          state: {
-            values: {
-              products_block: {
-                aso_checkbox: { selected_options: [{ value: 'ASO' }] },
-                llmo_checkbox: { selected_options: [] },
-              },
-            },
-          },
-        },
-      };
-
-      const handler = ensureEntitlementSiteModal(lambdaContext);
-      await handler({ ack, body, client });
-
-      expect(ack).to.have.been.calledOnce;
-      expect(mockUpdateMessageToProcessing).to.have.been.calledOnce;
-      expect(mockCreateEntitlementsForProducts).to.have.been.calledOnce;
-    });
+    it('processes modal submission successfully', () => testModalSubmission(
+      ensureEntitlementSiteModal,
+      createSiteMetadata(),
+      createProductState(),
+      (ack) => {
+        expect(ack).to.have.been.calledOnce;
+        expect(mockUpdateMessageToProcessing).to.have.been.calledOnce;
+        expect(mockCreateEntitlementsForProducts).to.have.been.calledOnce;
+      },
+    ));
 
     it('handles errors during entitlement creation', async () => {
       mockCreateEntitlementsForProducts.rejects(new Error('Creation failed'));
-      const ack = sinon.stub().resolves();
-      const client = {
-        chat: {
-          postMessage: sinon.stub().resolves(),
-          update: sinon.stub().resolves(),
-        },
-      };
-      const body = {
-        view: {
-          private_metadata: JSON.stringify({
-            siteId: 'site-123',
-            baseURL: 'https://example.com',
-            channelId: 'ch-123',
-            threadTs: 'thread-123',
-            messageTs: 'msg-123',
-          }),
-          state: {
-            values: {
-              products_block: {
-                aso_checkbox: { selected_options: [{ value: 'ASO' }] },
-                llmo_checkbox: { selected_options: [] },
-              },
-            },
-          },
-        },
-      };
-
-      const handler = ensureEntitlementSiteModal(lambdaContext);
-      await handler({ ack, body, client });
-
-      expect(lambdaContext.log.error).to.have.been.called;
+      await testModalSubmission(
+        ensureEntitlementSiteModal,
+        createSiteMetadata(),
+        createProductState(),
+        () => { expect(lambdaContext.log.error).to.have.been.called; },
+      );
     });
 
-    it('handles no products selected', async () => {
-      const ack = sinon.stub().resolves();
-      const client = {
-        chat: { postMessage: sinon.stub().resolves() },
-      };
-      const body = {
-        view: {
-          private_metadata: JSON.stringify({
-            siteId: 'site-123',
-            baseURL: 'https://example.com',
-            channelId: 'ch-123',
-            threadTs: 'thread-123',
-          }),
-          state: {
-            values: {
-              products_block: {
-                aso_checkbox: { selected_options: [] },
-                llmo_checkbox: { selected_options: [] },
-              },
-            },
-          },
-        },
-      };
-
-      const handler = ensureEntitlementSiteModal(lambdaContext);
-      await handler({ ack, body, client });
-
-      expect(ack).to.have.been.calledOnce;
-      expect(client.chat.postMessage).to.have.been.calledWith(sinon.match({
-        text: sinon.match(':warning:'),
-      }));
-    });
+    it('handles no products selected', () => testModalSubmission(
+      ensureEntitlementSiteModal,
+      createSiteMetadata(false),
+      createProductState(false, false),
+      (ack, client) => {
+        expect(ack).to.have.been.calledOnce;
+        expect(client.chat.postMessage).to.have.been.calledWith(sinon.match({
+          text: sinon.match(':warning:'),
+        }));
+      },
+    ));
 
     it('handles site not found', async () => {
       lambdaContext.dataAccess.Site.findById.resolves(null);
-      const ack = sinon.stub().resolves();
-      const client = {
-        chat: { postMessage: sinon.stub().resolves() },
-      };
-      const body = {
-        view: {
-          private_metadata: JSON.stringify({
-            siteId: 'site-123',
-            baseURL: 'https://example.com',
-            channelId: 'ch-123',
-            threadTs: 'thread-123',
-          }),
-          state: {
-            values: {
-              products_block: {
-                aso_checkbox: { selected_options: [{ value: 'ASO' }] },
-                llmo_checkbox: { selected_options: [] },
-              },
-            },
-          },
-        },
-      };
-
-      const handler = ensureEntitlementSiteModal(lambdaContext);
-      await handler({ ack, body, client });
-
-      expect(lambdaContext.log.error).to.have.been.called;
+      await testModalSubmission(
+        ensureEntitlementSiteModal,
+        createSiteMetadata(false),
+        createProductState(),
+        () => { expect(lambdaContext.log.error).to.have.been.called; },
+      );
     });
   });
 
   describe('revokeEntitlementSiteModal', () => {
-    it('revokes enrollment successfully', async () => {
-      const ack = sinon.stub().resolves();
-      const client = {
-        chat: {
-          postMessage: sinon.stub().resolves(),
-          update: sinon.stub().resolves(),
-        },
-      };
-      const body = {
-        view: {
-          private_metadata: JSON.stringify({
-            siteId: 'site-123',
-            baseURL: 'https://example.com',
-            channelId: 'ch-123',
-            threadTs: 'thread-123',
-            messageTs: 'msg-123',
-          }),
-          state: {
-            values: {
-              products_block: {
-                aso_checkbox: { selected_options: [{ value: 'ASO' }] },
-                llmo_checkbox: { selected_options: [] },
-              },
-            },
-          },
-        },
-      };
-
-      const handler = revokeEntitlementSiteModal(lambdaContext);
-      await handler({ ack, body, client });
-
-      expect(ack).to.have.been.calledOnce;
-      expect(mockUpdateMessageToProcessing).to.have.been.calledOnce;
-      expect(client.chat.postMessage).to.have.been.called;
-    });
+    it('revokes enrollment successfully', () => testModalSubmission(
+      revokeEntitlementSiteModal,
+      createSiteMetadata(),
+      createProductState(),
+      (ack, client) => {
+        expect(ack).to.have.been.calledOnce;
+        expect(mockUpdateMessageToProcessing).to.have.been.calledOnce;
+        expect(client.chat.postMessage).to.have.been.called;
+      },
+    ));
 
     it('handles errors during revocation', async () => {
       lambdaContext.dataAccess.Site.findById.rejects(new Error('DB error'));
-      const ack = sinon.stub().resolves();
-      const client = {
-        chat: {
-          postMessage: sinon.stub().resolves(),
-          update: sinon.stub().resolves(),
-        },
-      };
-      const body = {
-        view: {
-          private_metadata: JSON.stringify({
-            siteId: 'site-123',
-            baseURL: 'https://example.com',
-            channelId: 'ch-123',
-            threadTs: 'thread-123',
-            messageTs: 'msg-123',
-          }),
-          state: {
-            values: {
-              products_block: {
-                aso_checkbox: { selected_options: [{ value: 'ASO' }] },
-                llmo_checkbox: { selected_options: [] },
-              },
-            },
-          },
-        },
-      };
-
-      const handler = revokeEntitlementSiteModal(lambdaContext);
-      await handler({ ack, body, client });
-
-      expect(lambdaContext.log.error).to.have.been.called;
+      await testModalSubmission(
+        revokeEntitlementSiteModal,
+        createSiteMetadata(),
+        createProductState(),
+        () => { expect(lambdaContext.log.error).to.have.been.called; },
+      );
     });
 
     it('handles errors during individual product revocation', async () => {
@@ -379,296 +306,96 @@ describe('EntitlementModals', () => {
         },
       });
 
-      const handler = module.revokeEntitlementSiteModal(lambdaContext);
-      const ack = sinon.stub().resolves();
-      const client = {
-        chat: {
-          postMessage: sinon.stub().resolves(),
-          update: sinon.stub().resolves(),
+      await testModalSubmission(
+        module.revokeEntitlementSiteModal,
+        createSiteMetadata(),
+        createProductState(),
+        () => {
+          expect(lambdaContext.log.error).to.have.been.calledWith(sinon.match('Error revoking'));
         },
-      };
-      const body = {
-        view: {
-          private_metadata: JSON.stringify({
-            siteId: 'site-123',
-            baseURL: 'https://example.com',
-            channelId: 'ch-123',
-            threadTs: 'thread-123',
-            messageTs: 'msg-123',
-          }),
-          state: {
-            values: {
-              products_block: {
-                aso_checkbox: { selected_options: [{ value: 'ASO' }] },
-                llmo_checkbox: { selected_options: [] },
-              },
-            },
-          },
-        },
-      };
-
-      await handler({ ack, body, client });
-
-      expect(lambdaContext.log.error).to.have.been.calledWith(sinon.match('Error revoking'));
+      );
     });
 
     it('handles site not found during revocation', async () => {
       lambdaContext.dataAccess.Site.findById.resolves(null);
-      const ack = sinon.stub().resolves();
-      const client = {
-        chat: { postMessage: sinon.stub().resolves() },
-      };
-      const body = {
-        view: {
-          private_metadata: JSON.stringify({
-            siteId: 'site-123',
-            baseURL: 'https://example.com',
-            channelId: 'ch-123',
-            threadTs: 'thread-123',
-          }),
-          state: {
-            values: {
-              products_block: {
-                aso_checkbox: { selected_options: [{ value: 'ASO' }] },
-                llmo_checkbox: { selected_options: [] },
-              },
-            },
-          },
-        },
-      };
-
-      const handler = revokeEntitlementSiteModal(lambdaContext);
-      await handler({ ack, body, client });
-
-      expect(lambdaContext.log.error).to.have.been.called;
+      await testModalSubmission(
+        revokeEntitlementSiteModal,
+        createSiteMetadata(false),
+        createProductState(),
+        () => { expect(lambdaContext.log.error).to.have.been.called; },
+      );
     });
 
-    it('handles no products selected during revocation', async () => {
-      const ack = sinon.stub().resolves();
-      const client = {
-        chat: { postMessage: sinon.stub().resolves() },
-      };
-      const body = {
-        view: {
-          private_metadata: JSON.stringify({
-            siteId: 'site-123',
-            baseURL: 'https://example.com',
-            channelId: 'ch-123',
-            threadTs: 'thread-123',
-          }),
-          state: {
-            values: {
-              products_block: {
-                aso_checkbox: { selected_options: [] },
-                llmo_checkbox: { selected_options: [] },
-              },
-            },
-          },
-        },
-      };
-
-      const handler = revokeEntitlementSiteModal(lambdaContext);
-      await handler({ ack, body, client });
-
-      expect(client.chat.postMessage).to.have.been.calledWith(sinon.match({
-        text: sinon.match(':warning:'),
-      }));
-    });
+    it('handles no products selected during revocation', () => testModalSubmission(
+      revokeEntitlementSiteModal,
+      createSiteMetadata(false),
+      createProductState(false, false),
+      (ack, client) => {
+        expect(client.chat.postMessage).to.have.been.calledWith(sinon.match({
+          text: sinon.match(':warning:'),
+        }));
+      },
+    ));
   });
 
   describe('openEnsureEntitlementImsOrgModal', () => {
-    it('opens modal for IMS org', async () => {
-      const ack = sinon.stub().resolves();
-      const client = { views: { open: sinon.stub().resolves() } };
-      const body = {
-        actions: [{
-          value: JSON.stringify({
-            organizationId: 'org-123',
-            imsOrgId: 'ims@AdobeOrg',
-            orgName: 'Test Org',
-            channelId: 'ch-123',
-            threadTs: 'thread-123',
-            messageTs: 'msg-123',
-          }),
-        }],
-        trigger_id: 'trigger-123',
-      };
+    it('opens modal for IMS org', () => testModalOpening(
+      openEnsureEntitlementImsOrgModal,
+      createOrgMetadata(),
+    ));
 
-      const handler = openEnsureEntitlementImsOrgModal(lambdaContext);
-      await handler({ ack, body, client });
-
-      expect(client.views.open).to.have.been.calledOnce;
-    });
-
-    it('handles errors when opening ensure IMS org modal', async () => {
-      const ack = sinon.stub().resolves();
-      const client = {
-        views: { open: sinon.stub().rejects(new Error('Modal error')) },
-      };
-      const body = {
-        actions: [{ value: JSON.stringify({ organizationId: 'org-123', imsOrgId: 'ims@AdobeOrg' }) }],
-        trigger_id: 'trigger-123',
-      };
-
-      const handler = openEnsureEntitlementImsOrgModal(lambdaContext);
-      await handler({ ack, body, client });
-
-      expect(lambdaContext.log.error).to.have.been.called;
-    });
+    it('handles errors when opening ensure IMS org modal', () => testModalOpening(
+      openEnsureEntitlementImsOrgModal,
+      { organizationId: TEST_IDS.org, imsOrgId: TEST_URLS.imsOrg },
+      true,
+    ));
   });
 
   describe('openRevokeEntitlementSiteModal', () => {
-    it('opens revoke modal for site', async () => {
-      const ack = sinon.stub().resolves();
-      const client = { views: { open: sinon.stub().resolves() } };
-      const body = {
-        actions: [{
-          value: JSON.stringify({
-            siteId: 'site-123',
-            baseURL: 'https://example.com',
-            channelId: 'ch-123',
-            threadTs: 'thread-123',
-            messageTs: 'msg-123',
-          }),
-        }],
-        trigger_id: 'trigger-123',
-      };
+    it('opens revoke modal for site', () => testModalOpening(
+      openRevokeEntitlementSiteModal,
+      createSiteMetadata(),
+    ));
 
-      const handler = openRevokeEntitlementSiteModal(lambdaContext);
-      await handler({ ack, body, client });
-
-      expect(client.views.open).to.have.been.calledOnce;
-    });
-
-    it('handles errors when opening revoke site modal', async () => {
-      const ack = sinon.stub().resolves();
-      const client = {
-        views: { open: sinon.stub().rejects(new Error('Modal error')) },
-      };
-      const body = {
-        actions: [{ value: JSON.stringify({ siteId: 'site-123', baseURL: 'https://example.com' }) }],
-        trigger_id: 'trigger-123',
-      };
-
-      const handler = openRevokeEntitlementSiteModal(lambdaContext);
-      await handler({ ack, body, client });
-
-      expect(lambdaContext.log.error).to.have.been.called;
-    });
+    it('handles errors when opening revoke site modal', () => testModalOpening(
+      openRevokeEntitlementSiteModal,
+      { siteId: TEST_IDS.site, baseURL: TEST_URLS.site },
+      true,
+    ));
   });
 
   describe('openRevokeEntitlementImsOrgModal', () => {
-    it('opens revoke modal for IMS org', async () => {
-      const ack = sinon.stub().resolves();
-      const client = { views: { open: sinon.stub().resolves() } };
-      const body = {
-        actions: [{
-          value: JSON.stringify({
-            organizationId: 'org-123',
-            imsOrgId: 'ims@AdobeOrg',
-            orgName: 'Test Org',
-            channelId: 'ch-123',
-            threadTs: 'thread-123',
-            messageTs: 'msg-123',
-          }),
-        }],
-        trigger_id: 'trigger-123',
-      };
+    it('opens revoke modal for IMS org', () => testModalOpening(
+      openRevokeEntitlementImsOrgModal,
+      createOrgMetadata(),
+    ));
 
-      const handler = openRevokeEntitlementImsOrgModal(lambdaContext);
-      await handler({ ack, body, client });
-
-      expect(client.views.open).to.have.been.calledOnce;
-    });
-
-    it('handles errors when opening revoke IMS org modal', async () => {
-      const ack = sinon.stub().resolves();
-      const client = {
-        views: { open: sinon.stub().rejects(new Error('Modal error')) },
-      };
-      const body = {
-        actions: [{ value: JSON.stringify({ organizationId: 'org-123', imsOrgId: 'ims@AdobeOrg' }) }],
-        trigger_id: 'trigger-123',
-      };
-
-      const handler = openRevokeEntitlementImsOrgModal(lambdaContext);
-      await handler({ ack, body, client });
-
-      expect(lambdaContext.log.error).to.have.been.called;
-    });
+    it('handles errors when opening revoke IMS org modal', () => testModalOpening(
+      openRevokeEntitlementImsOrgModal,
+      { organizationId: TEST_IDS.org, imsOrgId: TEST_URLS.imsOrg },
+      true,
+    ));
   });
 
   describe('ensureEntitlementImsOrgModal', () => {
-    it('ensures entitlement for organization', async () => {
-      const ack = sinon.stub().resolves();
-      const client = {
-        chat: {
-          postMessage: sinon.stub().resolves(),
-          update: sinon.stub().resolves(),
-        },
-      };
-      const body = {
-        view: {
-          private_metadata: JSON.stringify({
-            organizationId: 'org-123',
-            imsOrgId: 'ims@AdobeOrg',
-            orgName: 'Test Org',
-            channelId: 'ch-123',
-            threadTs: 'thread-123',
-            messageTs: 'msg-123',
-          }),
-          state: {
-            values: {
-              products_block: {
-                aso_checkbox: { selected_options: [{ value: 'ASO' }] },
-                llmo_checkbox: { selected_options: [] },
-              },
-            },
-          },
-        },
-      };
-
-      const handler = ensureEntitlementImsOrgModal(lambdaContext);
-      await handler({ ack, body, client });
-
-      expect(ack).to.have.been.calledOnce;
-      expect(mockUpdateMessageToProcessing).to.have.been.calledOnce;
-    });
+    it('ensures entitlement for organization', () => testModalSubmission(
+      ensureEntitlementImsOrgModal,
+      createOrgMetadata(),
+      createProductState(),
+      (ack) => {
+        expect(ack).to.have.been.calledOnce;
+        expect(mockUpdateMessageToProcessing).to.have.been.calledOnce;
+      },
+    ));
 
     it('handles errors during org entitlement creation', async () => {
       lambdaContext.dataAccess.Organization.findById.rejects(new Error('DB error'));
-      const ack = sinon.stub().resolves();
-      const client = {
-        chat: {
-          postMessage: sinon.stub().resolves(),
-          update: sinon.stub().resolves(),
-        },
-      };
-      const body = {
-        view: {
-          private_metadata: JSON.stringify({
-            organizationId: 'org-123',
-            imsOrgId: 'ims@AdobeOrg',
-            orgName: 'Test Org',
-            channelId: 'ch-123',
-            threadTs: 'thread-123',
-            messageTs: 'msg-123',
-          }),
-          state: {
-            values: {
-              products_block: {
-                aso_checkbox: { selected_options: [{ value: 'ASO' }] },
-                llmo_checkbox: { selected_options: [] },
-              },
-            },
-          },
-        },
-      };
-
-      const handler = ensureEntitlementImsOrgModal(lambdaContext);
-      await handler({ ack, body, client });
-
-      expect(lambdaContext.log.error).to.have.been.called;
+      await testModalSubmission(
+        ensureEntitlementImsOrgModal,
+        createOrgMetadata(),
+        createProductState(),
+        () => { expect(lambdaContext.log.error).to.have.been.called; },
+      );
     });
 
     it('handles errors during individual product entitlement', async () => {
@@ -691,173 +418,60 @@ describe('EntitlementModals', () => {
         },
       });
 
-      const handler = module.ensureEntitlementImsOrgModal(lambdaContext);
-      const ack = sinon.stub().resolves();
-      const client = {
-        chat: {
-          postMessage: sinon.stub().resolves(),
-          update: sinon.stub().resolves(),
+      await testModalSubmission(
+        module.ensureEntitlementImsOrgModal,
+        createOrgMetadata(),
+        createProductState(),
+        () => {
+          expect(lambdaContext.log.error).to.have.been.calledWith(sinon.match('Error creating'));
         },
-      };
-      const body = {
-        view: {
-          private_metadata: JSON.stringify({
-            organizationId: 'org-123',
-            imsOrgId: 'ims@AdobeOrg',
-            orgName: 'Test Org',
-            channelId: 'ch-123',
-            threadTs: 'thread-123',
-            messageTs: 'msg-123',
-          }),
-          state: {
-            values: {
-              products_block: {
-                aso_checkbox: { selected_options: [{ value: 'ASO' }] },
-                llmo_checkbox: { selected_options: [] },
-              },
-            },
-          },
-        },
-      };
-
-      await handler({ ack, body, client });
-
-      expect(lambdaContext.log.error).to.have.been.calledWith(sinon.match('Error creating'));
+      );
     });
 
     it('handles organization not found', async () => {
       lambdaContext.dataAccess.Organization.findById.resolves(null);
-      const ack = sinon.stub().resolves();
-      const client = { chat: { postMessage: sinon.stub().resolves() } };
-      const body = {
-        view: {
-          private_metadata: JSON.stringify({
-            organizationId: 'org-123',
-            imsOrgId: 'ims@AdobeOrg',
-            channelId: 'ch-123',
-            threadTs: 'thread-123',
-          }),
-          state: {
-            values: {
-              products_block: {
-                aso_checkbox: { selected_options: [{ value: 'ASO' }] },
-                llmo_checkbox: { selected_options: [] },
-              },
-            },
-          },
-        },
-      };
-
-      const handler = ensureEntitlementImsOrgModal(lambdaContext);
-      await handler({ ack, body, client });
-
-      expect(lambdaContext.log.error).to.have.been.called;
+      await testModalSubmission(
+        ensureEntitlementImsOrgModal,
+        createOrgMetadata(false),
+        createProductState(),
+        () => { expect(lambdaContext.log.error).to.have.been.called; },
+      );
     });
 
-    it('handles no products selected for org', async () => {
-      const ack = sinon.stub().resolves();
-      const client = {
-        chat: { postMessage: sinon.stub().resolves() },
-      };
-      const body = {
-        view: {
-          private_metadata: JSON.stringify({
-            organizationId: 'org-123',
-            imsOrgId: 'ims@AdobeOrg',
-            orgName: 'Test Org',
-            channelId: 'ch-123',
-            threadTs: 'thread-123',
-          }),
-          state: {
-            values: {
-              products_block: {
-                aso_checkbox: { selected_options: [] },
-                llmo_checkbox: { selected_options: [] },
-              },
-            },
-          },
-        },
-      };
-
-      const handler = ensureEntitlementImsOrgModal(lambdaContext);
-      await handler({ ack, body, client });
-
-      expect(ack).to.have.been.calledOnce;
-      expect(client.chat.postMessage).to.have.been.calledWith(sinon.match({
-        text: sinon.match(':warning:'),
-      }));
-    });
+    it('handles no products selected for org', () => testModalSubmission(
+      ensureEntitlementImsOrgModal,
+      createOrgMetadata(false),
+      createProductState(false, false),
+      (ack, client) => {
+        expect(ack).to.have.been.calledOnce;
+        expect(client.chat.postMessage).to.have.been.calledWith(sinon.match({
+          text: sinon.match(':warning:'),
+        }));
+      },
+    ));
   });
 
   describe('revokeEntitlementImsOrgModal', () => {
-    it('revokes entitlement for organization', async () => {
-      const ack = sinon.stub().resolves();
-      const client = {
-        chat: {
-          postMessage: sinon.stub().resolves(),
-          update: sinon.stub().resolves(),
-        },
-      };
-      const body = {
-        view: {
-          private_metadata: JSON.stringify({
-            organizationId: 'org-123',
-            imsOrgId: 'ims@AdobeOrg',
-            orgName: 'Test Org',
-            channelId: 'ch-123',
-            threadTs: 'thread-123',
-            messageTs: 'msg-123',
-          }),
-          state: {
-            values: {
-              products_block: {
-                aso_checkbox: { selected_options: [{ value: 'ASO' }] },
-                llmo_checkbox: { selected_options: [] },
-              },
-            },
-          },
-        },
-      };
+    it('revokes entitlement for organization', () => testModalSubmission(
+      revokeEntitlementImsOrgModal,
+      createOrgMetadata(),
+      createProductState(),
+      (ack) => {
+        expect(ack).to.have.been.calledOnce;
+        expect(mockUpdateMessageToProcessing).to.have.been.calledOnce;
+      },
+    ));
 
-      const handler = revokeEntitlementImsOrgModal(lambdaContext);
-      await handler({ ack, body, client });
-
-      expect(ack).to.have.been.calledOnce;
-      expect(mockUpdateMessageToProcessing).to.have.been.calledOnce;
-    });
-
-    it('handles no products selected during org revocation', async () => {
-      const ack = sinon.stub().resolves();
-      const client = {
-        chat: { postMessage: sinon.stub().resolves() },
-      };
-      const body = {
-        view: {
-          private_metadata: JSON.stringify({
-            organizationId: 'org-123',
-            imsOrgId: 'ims@AdobeOrg',
-            orgName: 'Test Org',
-            channelId: 'ch-123',
-            threadTs: 'thread-123',
-          }),
-          state: {
-            values: {
-              products_block: {
-                aso_checkbox: { selected_options: [] },
-                llmo_checkbox: { selected_options: [] },
-              },
-            },
-          },
-        },
-      };
-
-      const handler = revokeEntitlementImsOrgModal(lambdaContext);
-      await handler({ ack, body, client });
-
-      expect(client.chat.postMessage).to.have.been.calledWith(sinon.match({
-        text: sinon.match(':warning:'),
-      }));
-    });
+    it('handles no products selected during org revocation', () => testModalSubmission(
+      revokeEntitlementImsOrgModal,
+      createOrgMetadata(false),
+      createProductState(false, false),
+      (ack, client) => {
+        expect(client.chat.postMessage).to.have.been.calledWith(sinon.match({
+          text: sinon.match(':warning:'),
+        }));
+      },
+    ));
 
     it('handles errors during org revocation', async () => {
       const mockTierClient = {
@@ -872,67 +486,22 @@ describe('EntitlementModals', () => {
         },
       });
 
-      const handler = module.revokeEntitlementImsOrgModal(lambdaContext);
-      const ack = sinon.stub().resolves();
-      const client = {
-        chat: {
-          postMessage: sinon.stub().resolves(),
-          update: sinon.stub().resolves(),
-        },
-      };
-      const body = {
-        view: {
-          private_metadata: JSON.stringify({
-            organizationId: 'org-123',
-            imsOrgId: 'ims@AdobeOrg',
-            orgName: 'Test Org',
-            channelId: 'ch-123',
-            threadTs: 'thread-123',
-            messageTs: 'msg-123',
-          }),
-          state: {
-            values: {
-              products_block: {
-                aso_checkbox: { selected_options: [{ value: 'ASO' }] },
-                llmo_checkbox: { selected_options: [] },
-              },
-            },
-          },
-        },
-      };
-
-      await handler({ ack, body, client });
-
-      expect(lambdaContext.log.error).to.have.been.called;
+      await testModalSubmission(
+        module.revokeEntitlementImsOrgModal,
+        createOrgMetadata(),
+        createProductState(),
+        () => { expect(lambdaContext.log.error).to.have.been.called; },
+      );
     });
 
     it('handles organization not found during revocation', async () => {
       lambdaContext.dataAccess.Organization.findById.resolves(null);
-      const ack = sinon.stub().resolves();
-      const client = { chat: { postMessage: sinon.stub().resolves() } };
-      const body = {
-        view: {
-          private_metadata: JSON.stringify({
-            organizationId: 'org-123',
-            imsOrgId: 'ims@AdobeOrg',
-            channelId: 'ch-123',
-            threadTs: 'thread-123',
-          }),
-          state: {
-            values: {
-              products_block: {
-                aso_checkbox: { selected_options: [{ value: 'ASO' }] },
-                llmo_checkbox: { selected_options: [] },
-              },
-            },
-          },
-        },
-      };
-
-      const handler = revokeEntitlementImsOrgModal(lambdaContext);
-      await handler({ ack, body, client });
-
-      expect(lambdaContext.log.error).to.have.been.called;
+      await testModalSubmission(
+        revokeEntitlementImsOrgModal,
+        createOrgMetadata(false),
+        createProductState(),
+        () => { expect(lambdaContext.log.error).to.have.been.called; },
+      );
     });
   });
 });

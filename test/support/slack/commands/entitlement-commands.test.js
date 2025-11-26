@@ -35,16 +35,57 @@ describe('Entitlement Slack Commands', () => {
   let mockEntitlement;
   let mockEnrollment;
 
+  const SITE_URL = 'https://example.com';
+  const IMS_ORG_ID = 'test-ims-org@AdobeOrg';
+
+  // Helper to test command execution with expectation
+  const testCommandExecution = async (CommandClass, args, expectations) => {
+    const command = CommandClass(context);
+    await command.handleExecution(args, slackContext);
+    expectations();
+  };
+
+  // Helper to test entity not found scenarios
+  const testEntityNotFound = async (CommandClass, args, setupFn) => {
+    setupFn();
+    await testCommandExecution(CommandClass, args, () => {
+      expect(slackContext.say).to.have.been.calledWith(sinon.match(':x:'));
+    });
+  };
+
+  // Helper to test usage message scenarios
+  const testShowsUsage = async (CommandClass) => {
+    await testCommandExecution(CommandClass, [], () => {
+      expect(slackContext.say).to.have.been.calledOnce;
+    });
+  };
+
+  // Helper to test error handling scenarios
+  const testErrorHandling = async (CommandClass, args, setupFn, logMethod = 'error') => {
+    setupFn();
+    await testCommandExecution(CommandClass, args, () => {
+      expect(context.log[logMethod]).to.have.been.called;
+    });
+  };
+
+  // Helper to test button display scenarios
+  const testDisplaysButton = async (CommandClass, args) => {
+    await testCommandExecution(CommandClass, args, () => {
+      expect(slackContext.client.chat.postMessage).to.have.been.called;
+      expect(slackContext.client.chat.update).to.have.been.called;
+    });
+  };
+
   beforeEach(() => {
     site = {
       getId: () => 'site-123',
-      getBaseURL: () => 'https://example.com',
+      getBaseURL: () => SITE_URL,
     };
 
     organization = {
       getId: () => 'org-123',
       getName: sinon.stub().returns('Test Org'),
-      getImsOrgId: () => 'test-ims-org@AdobeOrg',
+      getImsOrgId: () => IMS_ORG_ID,
     };
 
     mockEntitlement = {
@@ -108,266 +149,186 @@ describe('Entitlement Slack Commands', () => {
 
   describe('GetEntitlementSiteCommand', () => {
     it('shows entitlement with enrollment', async () => {
-      const command = GetEntitlementSiteCommand(context);
-      await command.handleExecution(['https://example.com'], slackContext);
-
-      expect(slackContext.say).to.have.been.calledWith(sinon.match(':mag:'));
-      expect(slackContext.say).to.have.been.calledWith(sinon.match('ASO'));
+      await testCommandExecution(GetEntitlementSiteCommand, [SITE_URL], () => {
+        expect(slackContext.say).to.have.been.calledWith(sinon.match(':mag:'));
+        expect(slackContext.say).to.have.been.calledWith(sinon.match('ASO'));
+      });
     });
 
-    it('handles site not found', async () => {
-      context.dataAccess.Site.findByBaseURL.resolves(null);
-      const command = GetEntitlementSiteCommand(context);
-      await command.handleExecution(['https://example.com'], slackContext);
-
-      expect(slackContext.say).to.have.been.calledWith(sinon.match(':x:'));
-    });
+    it('handles site not found', () => testEntityNotFound(
+      GetEntitlementSiteCommand,
+      [SITE_URL],
+      () => { context.dataAccess.Site.findByBaseURL.resolves(null); },
+    ));
 
     it('does not show entitlement without enrollment', async () => {
       tierClientStub.checkValidEntitlement.resolves({
         entitlement: mockEntitlement,
         siteEnrollment: null,
       });
-      const command = GetEntitlementSiteCommand(context);
-      await command.handleExecution(['https://example.com'], slackContext);
-
-      expect(slackContext.say).to.have.been.calledWith(sinon.match(':information_source:'));
+      await testCommandExecution(GetEntitlementSiteCommand, [SITE_URL], () => {
+        expect(slackContext.say).to.have.been.calledWith(sinon.match(':information_source:'));
+      });
     });
 
-    it('shows usage when no URL provided', async () => {
-      const command = GetEntitlementSiteCommand(context);
-      await command.handleExecution([], slackContext);
+    it('shows usage when no URL provided', () => testShowsUsage(GetEntitlementSiteCommand));
 
-      expect(slackContext.say).to.have.been.calledOnce;
-    });
+    it('handles errors gracefully', () => testErrorHandling(
+      GetEntitlementSiteCommand,
+      [SITE_URL],
+      () => { context.dataAccess.Site.findByBaseURL.rejects(new Error('DB error')); },
+    ));
 
-    it('handles errors gracefully', async () => {
-      context.dataAccess.Site.findByBaseURL.rejects(new Error('DB error'));
-      const command = GetEntitlementSiteCommand(context);
-      await command.handleExecution(['https://example.com'], slackContext);
-
-      expect(context.log.error).to.have.been.called;
-    });
-
-    it('handles TierClient error gracefully', async () => {
-      tierClientStub.checkValidEntitlement.rejects(new Error('Tier error'));
-      const command = GetEntitlementSiteCommand(context);
-      await command.handleExecution(['https://example.com'], slackContext);
-
-      expect(context.log.debug).to.have.been.called;
-    });
+    it('handles TierClient error gracefully', () => testErrorHandling(
+      GetEntitlementSiteCommand,
+      [SITE_URL],
+      () => { tierClientStub.checkValidEntitlement.rejects(new Error('Tier error')); },
+      'debug',
+    ));
   });
 
   describe('GetEntitlementImsOrgCommand', () => {
     it('shows entitlement for organization', async () => {
-      const command = GetEntitlementImsOrgCommand(context);
-      await command.handleExecution(['test-ims-org@AdobeOrg'], slackContext);
-
-      expect(slackContext.say).to.have.been.calledWith(sinon.match(':mag:'));
-      expect(slackContext.say).to.have.been.calledWith(sinon.match('ASO'));
+      await testCommandExecution(GetEntitlementImsOrgCommand, [IMS_ORG_ID], () => {
+        expect(slackContext.say).to.have.been.calledWith(sinon.match(':mag:'));
+        expect(slackContext.say).to.have.been.calledWith(sinon.match('ASO'));
+      });
     });
 
-    it('handles organization not found', async () => {
-      context.dataAccess.Organization.findByImsOrgId.resolves(null);
-      const command = GetEntitlementImsOrgCommand(context);
-      await command.handleExecution(['test-ims-org@AdobeOrg'], slackContext);
+    it('handles organization not found', () => testEntityNotFound(
+      GetEntitlementImsOrgCommand,
+      [IMS_ORG_ID],
+      () => { context.dataAccess.Organization.findByImsOrgId.resolves(null); },
+    ));
 
-      expect(slackContext.say).to.have.been.calledWith(sinon.match(':x:'));
-    });
+    it('shows usage when no IMS Org ID provided', () => testShowsUsage(GetEntitlementImsOrgCommand));
 
-    it('shows usage when no IMS Org ID provided', async () => {
-      const command = GetEntitlementImsOrgCommand(context);
-      await command.handleExecution([], slackContext);
+    it('handles errors gracefully', () => testErrorHandling(
+      GetEntitlementImsOrgCommand,
+      [IMS_ORG_ID],
+      () => { context.dataAccess.Organization.findByImsOrgId.rejects(new Error('DB error')); },
+    ));
 
-      expect(slackContext.say).to.have.been.calledOnce;
-    });
-
-    it('handles errors gracefully', async () => {
-      context.dataAccess.Organization.findByImsOrgId.rejects(new Error('DB error'));
-      const command = GetEntitlementImsOrgCommand(context);
-      await command.handleExecution(['test-ims-org@AdobeOrg'], slackContext);
-
-      expect(context.log.error).to.have.been.called;
-    });
-
-    it('handles TierClient error gracefully', async () => {
-      tierClientStub.checkValidEntitlement.rejects(new Error('Tier error'));
-      const command = GetEntitlementImsOrgCommand(context);
-      await command.handleExecution(['test-ims-org@AdobeOrg'], slackContext);
-
-      expect(context.log.debug).to.have.been.called;
-    });
+    it('handles TierClient error gracefully', () => testErrorHandling(
+      GetEntitlementImsOrgCommand,
+      [IMS_ORG_ID],
+      () => { tierClientStub.checkValidEntitlement.rejects(new Error('Tier error')); },
+      'debug',
+    ));
 
     it('shows no entitlements message when none found', async () => {
       tierClientStub.checkValidEntitlement.resolves({ entitlement: null, siteEnrollment: null });
-      const command = GetEntitlementImsOrgCommand(context);
-      await command.handleExecution(['test-ims-org@AdobeOrg'], slackContext);
-
-      expect(slackContext.say).to.have.been.calledWith(sinon.match(':information_source:'));
+      await testCommandExecution(GetEntitlementImsOrgCommand, [IMS_ORG_ID], () => {
+        expect(slackContext.say).to.have.been.calledWith(sinon.match(':information_source:'));
+      });
     });
 
     it('handles null enrollments array gracefully', async () => {
       context.dataAccess.SiteEnrollment.allByEntitlementId.resolves(null);
-      const command = GetEntitlementImsOrgCommand(context);
-      await command.handleExecution(['test-ims-org@AdobeOrg'], slackContext);
-
-      expect(slackContext.say).to.have.been.called;
+      await testCommandExecution(GetEntitlementImsOrgCommand, [IMS_ORG_ID], () => {
+        expect(slackContext.say).to.have.been.called;
+      });
     });
 
     it('uses IMS Org ID when org name is null', async () => {
       organization.getName.returns(null);
-      const command = GetEntitlementImsOrgCommand(context);
-      await command.handleExecution(['test-ims-org@AdobeOrg'], slackContext);
-
-      expect(slackContext.say).to.have.been.called;
+      await testCommandExecution(GetEntitlementImsOrgCommand, [IMS_ORG_ID], () => {
+        expect(slackContext.say).to.have.been.called;
+      });
     });
   });
 
   describe('EnsureEntitlementSiteCommand', () => {
-    it('displays button to ensure entitlement', async () => {
-      const command = EnsureEntitlementSiteCommand(context);
-      await command.handleExecution(['https://example.com'], slackContext);
+    it('displays button to ensure entitlement', () => testDisplaysButton(
+      EnsureEntitlementSiteCommand,
+      [SITE_URL],
+    ));
 
-      expect(slackContext.client.chat.postMessage).to.have.been.called;
-      expect(slackContext.client.chat.update).to.have.been.called;
-    });
+    it('handles site not found', () => testEntityNotFound(
+      EnsureEntitlementSiteCommand,
+      [SITE_URL],
+      () => { context.dataAccess.Site.findByBaseURL.resolves(null); },
+    ));
 
-    it('handles site not found', async () => {
-      context.dataAccess.Site.findByBaseURL.resolves(null);
-      const command = EnsureEntitlementSiteCommand(context);
-      await command.handleExecution(['https://example.com'], slackContext);
+    it('shows usage when no URL provided', () => testShowsUsage(EnsureEntitlementSiteCommand));
 
-      expect(slackContext.say).to.have.been.calledWith(sinon.match(':x:'));
-    });
-
-    it('shows usage when no URL provided', async () => {
-      const command = EnsureEntitlementSiteCommand(context);
-      await command.handleExecution([], slackContext);
-
-      expect(slackContext.say).to.have.been.calledOnce;
-    });
-
-    it('handles errors gracefully', async () => {
-      context.dataAccess.Site.findByBaseURL.rejects(new Error('DB error'));
-      const command = EnsureEntitlementSiteCommand(context);
-      await command.handleExecution(['https://example.com'], slackContext);
-
-      expect(context.log.error).to.have.been.called;
-    });
+    it('handles errors gracefully', () => testErrorHandling(
+      EnsureEntitlementSiteCommand,
+      [SITE_URL],
+      () => { context.dataAccess.Site.findByBaseURL.rejects(new Error('DB error')); },
+    ));
   });
 
   describe('EnsureEntitlementImsOrgCommand', () => {
-    it('displays button to ensure entitlement', async () => {
-      const command = EnsureEntitlementImsOrgCommand(context);
-      await command.handleExecution(['test-ims-org@AdobeOrg'], slackContext);
+    it('displays button to ensure entitlement', () => testDisplaysButton(
+      EnsureEntitlementImsOrgCommand,
+      [IMS_ORG_ID],
+    ));
 
-      expect(slackContext.client.chat.postMessage).to.have.been.called;
-      expect(slackContext.client.chat.update).to.have.been.called;
-    });
+    it('handles organization not found', () => testEntityNotFound(
+      EnsureEntitlementImsOrgCommand,
+      [IMS_ORG_ID],
+      () => { context.dataAccess.Organization.findByImsOrgId.resolves(null); },
+    ));
 
-    it('handles organization not found', async () => {
-      context.dataAccess.Organization.findByImsOrgId.resolves(null);
-      const command = EnsureEntitlementImsOrgCommand(context);
-      await command.handleExecution(['test-ims-org@AdobeOrg'], slackContext);
+    it('shows usage when no IMS Org ID provided', () => testShowsUsage(EnsureEntitlementImsOrgCommand));
 
-      expect(slackContext.say).to.have.been.calledWith(sinon.match(':x:'));
-    });
-
-    it('shows usage when no IMS Org ID provided', async () => {
-      const command = EnsureEntitlementImsOrgCommand(context);
-      await command.handleExecution([], slackContext);
-
-      expect(slackContext.say).to.have.been.calledOnce;
-    });
-
-    it('handles errors gracefully', async () => {
-      context.dataAccess.Organization.findByImsOrgId.rejects(new Error('DB error'));
-      const command = EnsureEntitlementImsOrgCommand(context);
-      await command.handleExecution(['test-ims-org@AdobeOrg'], slackContext);
-
-      expect(context.log.error).to.have.been.called;
-    });
+    it('handles errors gracefully', () => testErrorHandling(
+      EnsureEntitlementImsOrgCommand,
+      [IMS_ORG_ID],
+      () => { context.dataAccess.Organization.findByImsOrgId.rejects(new Error('DB error')); },
+    ));
 
     it('uses IMS Org ID as fallback when organization has no name', async () => {
       organization.getName.returns(null);
-      const command = EnsureEntitlementImsOrgCommand(context);
-      await command.handleExecution(['test-ims-org@AdobeOrg'], slackContext);
-
-      expect(slackContext.client.chat.postMessage).to.have.been.called;
+      await testDisplaysButton(EnsureEntitlementImsOrgCommand, [IMS_ORG_ID]);
     });
   });
 
   describe('RevokeEntitlementSiteCommand', () => {
-    it('displays button to revoke entitlement', async () => {
-      const command = RevokeEntitlementSiteCommand(context);
-      await command.handleExecution(['https://example.com'], slackContext);
+    it('displays button to revoke entitlement', () => testDisplaysButton(
+      RevokeEntitlementSiteCommand,
+      [SITE_URL],
+    ));
 
-      expect(slackContext.client.chat.postMessage).to.have.been.called;
-      expect(slackContext.client.chat.update).to.have.been.called;
-    });
+    it('handles site not found', () => testEntityNotFound(
+      RevokeEntitlementSiteCommand,
+      [SITE_URL],
+      () => { context.dataAccess.Site.findByBaseURL.resolves(null); },
+    ));
 
-    it('handles site not found', async () => {
-      context.dataAccess.Site.findByBaseURL.resolves(null);
-      const command = RevokeEntitlementSiteCommand(context);
-      await command.handleExecution(['https://example.com'], slackContext);
+    it('shows usage when no URL provided', () => testShowsUsage(RevokeEntitlementSiteCommand));
 
-      expect(slackContext.say).to.have.been.calledWith(sinon.match(':x:'));
-    });
-
-    it('shows usage when no URL provided', async () => {
-      const command = RevokeEntitlementSiteCommand(context);
-      await command.handleExecution([], slackContext);
-
-      expect(slackContext.say).to.have.been.calledOnce;
-    });
-
-    it('handles errors gracefully', async () => {
-      context.dataAccess.Site.findByBaseURL.rejects(new Error('DB error'));
-      const command = RevokeEntitlementSiteCommand(context);
-      await command.handleExecution(['https://example.com'], slackContext);
-
-      expect(context.log.error).to.have.been.called;
-    });
+    it('handles errors gracefully', () => testErrorHandling(
+      RevokeEntitlementSiteCommand,
+      [SITE_URL],
+      () => { context.dataAccess.Site.findByBaseURL.rejects(new Error('DB error')); },
+    ));
   });
 
   describe('RevokeEntitlementImsOrgCommand', () => {
-    it('displays button to revoke entitlement', async () => {
-      const command = RevokeEntitlementImsOrgCommand(context);
-      await command.handleExecution(['test-ims-org@AdobeOrg'], slackContext);
+    it('displays button to revoke entitlement', () => testDisplaysButton(
+      RevokeEntitlementImsOrgCommand,
+      [IMS_ORG_ID],
+    ));
 
-      expect(slackContext.client.chat.postMessage).to.have.been.called;
-      expect(slackContext.client.chat.update).to.have.been.called;
-    });
+    it('handles organization not found', () => testEntityNotFound(
+      RevokeEntitlementImsOrgCommand,
+      [IMS_ORG_ID],
+      () => { context.dataAccess.Organization.findByImsOrgId.resolves(null); },
+    ));
 
-    it('handles organization not found', async () => {
-      context.dataAccess.Organization.findByImsOrgId.resolves(null);
-      const command = RevokeEntitlementImsOrgCommand(context);
-      await command.handleExecution(['test-ims-org@AdobeOrg'], slackContext);
+    it('shows usage when no IMS Org ID provided', () => testShowsUsage(RevokeEntitlementImsOrgCommand));
 
-      expect(slackContext.say).to.have.been.calledWith(sinon.match(':x:'));
-    });
-
-    it('shows usage when no IMS Org ID provided', async () => {
-      const command = RevokeEntitlementImsOrgCommand(context);
-      await command.handleExecution([], slackContext);
-
-      expect(slackContext.say).to.have.been.calledOnce;
-    });
-
-    it('handles errors gracefully', async () => {
-      context.dataAccess.Organization.findByImsOrgId.rejects(new Error('DB error'));
-      const command = RevokeEntitlementImsOrgCommand(context);
-      await command.handleExecution(['test-ims-org@AdobeOrg'], slackContext);
-
-      expect(context.log.error).to.have.been.called;
-    });
+    it('handles errors gracefully', () => testErrorHandling(
+      RevokeEntitlementImsOrgCommand,
+      [IMS_ORG_ID],
+      () => { context.dataAccess.Organization.findByImsOrgId.rejects(new Error('DB error')); },
+    ));
 
     it('uses IMS Org ID as fallback when organization has no name', async () => {
       organization.getName.returns(null);
-      const command = RevokeEntitlementImsOrgCommand(context);
-      await command.handleExecution(['test-ims-org@AdobeOrg'], slackContext);
-
-      expect(slackContext.client.chat.postMessage).to.have.been.called;
+      await testDisplaysButton(RevokeEntitlementImsOrgCommand, [IMS_ORG_ID]);
     });
   });
 });
