@@ -180,18 +180,11 @@ export const updateModifiedByDetails = (updates, oldConfig, userId) => {
           let matchFound = false;
 
           if (potentialMatches && potentialMatches.length > 0) {
-            // Found potential matches with same content hash
-            const matchIndex = potentialMatches.findIndex(
-              (oldP) => deepEqual(cleanPrompt, stripMetadata(oldP)),
-            );
+            const match = potentialMatches.shift(); // Remove from pool to handle duplicates
 
-            if (matchIndex !== -1) {
-              // Found match, preserve metadata
-              const match = potentialMatches[matchIndex];
+            if (match) {
               if (match.updatedBy) prompt.updatedBy = match.updatedBy;
               if (match.updatedAt) prompt.updatedAt = match.updatedAt;
-              // Remove from pool to handle duplicates
-              potentialMatches.splice(matchIndex, 1);
               matchFound = true;
             }
           }
