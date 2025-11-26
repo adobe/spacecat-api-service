@@ -29,6 +29,10 @@
     "docs:serve": "npx @redocly/cli preview --project-dir docs/openapi --product redoc",
     "prepare": "husky"
   },
+  "wsk": {
+    "name": "spacecat-services/api-service",
+    "namespace": "spacecat"
+  },
   "hlx": {
     "target": "aws",
     "linkRoutes": false,
@@ -76,7 +80,7 @@
     "@adobe/spacecat-shared-ahrefs-client": "1.10.1",
     "@adobe/spacecat-shared-athena-client": "1.7.3",
     "@adobe/spacecat-shared-brand-client": "1.1.30",
-    "@adobe/spacecat-shared-data-access": "2.88.2",
+    "@adobe/spacecat-shared-data-access": "2.88.3",
     "@adobe/spacecat-shared-gpt-client": "1.6.10",
     "@adobe/spacecat-shared-http-utils": "1.19.0",
     "@adobe/spacecat-shared-ims-client": "1.11.3",
