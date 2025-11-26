@@ -1,3 +1,10 @@
+# [1.254.0](https://github.com/adobe/spacecat-api-service/compare/v1.253.5...v1.254.0) (2025-11-26)
+
+
+### Features
+
+* add support for X-Trigger-Audits header (LLMO-1531) ([4900ad6](https://github.com/adobe/spacecat-api-service/commit/4900ad6e2e9e40dd34c72b9ba86dc98ee8ecb40b))
+
 ## [1.253.5](https://github.com/adobe/spacecat-api-service/compare/v1.253.4...v1.253.5) (2025-11-26)
 
 
