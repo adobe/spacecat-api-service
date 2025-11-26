@@ -43,7 +43,7 @@ export function openEnsureEntitlementSiteModal(lambdaContext) {
           channelId,
           threadTs,
         },
-        'Select Products for Entitlement',
+        'Ensure Entitlement',
         `Creating entitlement for site: *${baseURL}*\n\nPlease select the products you want to ensure entitlement for:`,
       );
 
@@ -81,7 +81,7 @@ export function openEnsureEntitlementImsOrgModal(lambdaContext) {
           channelId,
           threadTs,
         },
-        'Select Products for Entitlement',
+        'Ensure Entitlement',
         `Creating entitlement for organization: *${orgName}* (${imsOrgId})\n\nPlease select the products you want to ensure entitlement for:`,
       );
 
@@ -118,7 +118,7 @@ export function openRevokeEntitlementSiteModal(lambdaContext) {
           channelId,
           threadTs,
         },
-        'Select Products to Revoke',
+        'Revoke Enrollment',
         `Revoking enrollment for site: *${baseURL}*\n\nPlease select the products you want to revoke enrollment for:`,
       );
 
@@ -156,7 +156,7 @@ export function openRevokeEntitlementImsOrgModal(lambdaContext) {
           channelId,
           threadTs,
         },
-        'Select Products to Revoke',
+        'Revoke Entitlement',
         `Revoking entitlement for organization: *${orgName}* (${imsOrgId})\n\nPlease select the products you want to revoke entitlement for:`,
       );
 
