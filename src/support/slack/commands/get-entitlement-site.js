@@ -81,18 +81,18 @@ function GetEntitlementSiteCommand(context) {
           const tierClient = await TierClient.createForSite(context, site, productCode);
           const { entitlement, siteEnrollment } = await tierClient.checkValidEntitlement();
 
-          if (entitlement) {
+          // Only show entitlements that have an active enrollment for the site
+          if (entitlement && siteEnrollment) {
             hasAnyEntitlement = true;
             const tier = entitlement.getTier();
             const entitlementId = entitlement.getId();
-            const enrollmentInfo = siteEnrollment
-              ? `\n  Enrollment ID: ${siteEnrollment.getId()}`
-              : '\n  No active enrollment';
+            const enrollmentId = siteEnrollment.getId();
 
             await say(
               `:white_check_mark: *${productCode}* Entitlement\n`
               + `  Entitlement ID: ${entitlementId}\n`
-              + `  Tier: ${tier}${enrollmentInfo}`,
+              + `  Tier: ${tier}\n`
+              + `  Enrollment ID: ${enrollmentId}`,
             );
           }
         } catch (error) {

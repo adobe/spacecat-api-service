@@ -18,6 +18,7 @@ import {
   createEntitlementsForProducts,
   postEntitlementMessages,
   createProductSelectionModal,
+  updateMessageToProcessing,
 } from './entitlement-modal-utils.js';
 
 /**
@@ -32,7 +33,7 @@ export function openEnsureEntitlementSiteModal(lambdaContext) {
 
       const metadata = JSON.parse(body.actions[0].value);
       const {
-        siteId, baseURL, channelId, threadTs,
+        siteId, baseURL, channelId, threadTs, messageTs,
       } = metadata;
 
       const modal = createProductSelectionModal(
@@ -42,6 +43,7 @@ export function openEnsureEntitlementSiteModal(lambdaContext) {
           baseURL,
           channelId,
           threadTs,
+          messageTs,
         },
         'Ensure Entitlement',
         `Creating entitlement for site: *${baseURL}*\n\nPlease select the products you want to ensure entitlement for:`,
@@ -69,7 +71,7 @@ export function openEnsureEntitlementImsOrgModal(lambdaContext) {
 
       const metadata = JSON.parse(body.actions[0].value);
       const {
-        organizationId, imsOrgId, orgName, channelId, threadTs,
+        organizationId, imsOrgId, orgName, channelId, threadTs, messageTs,
       } = metadata;
 
       const modal = createProductSelectionModal(
@@ -80,6 +82,7 @@ export function openEnsureEntitlementImsOrgModal(lambdaContext) {
           orgName,
           channelId,
           threadTs,
+          messageTs,
         },
         'Ensure Entitlement',
         `Creating entitlement for organization: *${orgName}* (${imsOrgId})\n\nPlease select the products you want to ensure entitlement for:`,
@@ -107,7 +110,7 @@ export function openRevokeEntitlementSiteModal(lambdaContext) {
 
       const metadata = JSON.parse(body.actions[0].value);
       const {
-        siteId, baseURL, channelId, threadTs,
+        siteId, baseURL, channelId, threadTs, messageTs,
       } = metadata;
 
       const modal = createProductSelectionModal(
@@ -117,6 +120,7 @@ export function openRevokeEntitlementSiteModal(lambdaContext) {
           baseURL,
           channelId,
           threadTs,
+          messageTs,
         },
         'Revoke Enrollment',
         `Revoking enrollment for site: *${baseURL}*\n\nPlease select the products you want to revoke enrollment for:`,
@@ -144,7 +148,7 @@ export function openRevokeEntitlementImsOrgModal(lambdaContext) {
 
       const metadata = JSON.parse(body.actions[0].value);
       const {
-        organizationId, imsOrgId, orgName, channelId, threadTs,
+        organizationId, imsOrgId, orgName, channelId, threadTs, messageTs,
       } = metadata;
 
       const modal = createProductSelectionModal(
@@ -155,6 +159,7 @@ export function openRevokeEntitlementImsOrgModal(lambdaContext) {
           orgName,
           channelId,
           threadTs,
+          messageTs,
         },
         'Revoke Entitlement',
         `Revoking entitlement for organization: *${orgName}* (${imsOrgId})\n\nPlease select the products you want to revoke entitlement for:`,
@@ -182,7 +187,7 @@ export function ensureEntitlementSiteModal(lambdaContext) {
       const { view } = body;
       const { private_metadata: privateMetadata, state } = view;
       const {
-        siteId, baseURL, channelId, threadTs,
+        siteId, baseURL, channelId, threadTs, messageTs,
       } = JSON.parse(privateMetadata);
 
       // Extract selected products from checkboxes
@@ -207,6 +212,15 @@ export function ensureEntitlementSiteModal(lambdaContext) {
         await say(`:x: Site not found: ${baseURL}`);
         return;
       }
+
+      // Remove the button by updating the message
+      await updateMessageToProcessing(
+        client,
+        channelId,
+        messageTs,
+        baseURL,
+        'Ensure Entitlement',
+      );
 
       await say(`:gear: Ensuring entitlements for site: *${baseURL}*`);
 
@@ -237,7 +251,7 @@ export function ensureEntitlementImsOrgModal(lambdaContext) {
       const { view } = body;
       const { private_metadata: privateMetadata, state } = view;
       const {
-        organizationId, imsOrgId, orgName, channelId, threadTs,
+        organizationId, imsOrgId, orgName, channelId, threadTs, messageTs,
       } = JSON.parse(privateMetadata);
 
       // Extract selected products from checkboxes
@@ -262,6 +276,15 @@ export function ensureEntitlementImsOrgModal(lambdaContext) {
         await say(`:x: Organization not found: ${imsOrgId}`);
         return;
       }
+
+      // Remove the button by updating the message
+      await updateMessageToProcessing(
+        client,
+        channelId,
+        messageTs,
+        orgName,
+        'Ensure Entitlement',
+      );
 
       await say(`:gear: Ensuring entitlements for organization: *${orgName}* (${imsOrgId})`);
 
@@ -311,7 +334,7 @@ export function revokeEntitlementSiteModal(lambdaContext) {
       const { view } = body;
       const { private_metadata: privateMetadata, state } = view;
       const {
-        siteId, baseURL, channelId, threadTs,
+        siteId, baseURL, channelId, threadTs, messageTs,
       } = JSON.parse(privateMetadata);
 
       // Extract selected products from checkboxes
@@ -336,6 +359,15 @@ export function revokeEntitlementSiteModal(lambdaContext) {
         await say(`:x: Site not found: ${baseURL}`);
         return;
       }
+
+      // Remove the button by updating the message
+      await updateMessageToProcessing(
+        client,
+        channelId,
+        messageTs,
+        baseURL,
+        'Revoke Enrollment',
+      );
 
       await say(`:gear: Revoking enrollments for site: *${baseURL}*`);
 
@@ -373,7 +405,7 @@ export function revokeEntitlementImsOrgModal(lambdaContext) {
       const { view } = body;
       const { private_metadata: privateMetadata, state } = view;
       const {
-        organizationId, imsOrgId, orgName, channelId, threadTs,
+        organizationId, imsOrgId, orgName, channelId, threadTs, messageTs,
       } = JSON.parse(privateMetadata);
 
       // Extract selected products from checkboxes
@@ -398,6 +430,15 @@ export function revokeEntitlementImsOrgModal(lambdaContext) {
         await say(`:x: Organization not found: ${imsOrgId}`);
         return;
       }
+
+      // Remove the button by updating the message
+      await updateMessageToProcessing(
+        client,
+        channelId,
+        messageTs,
+        orgName,
+        'Revoke Entitlement',
+      );
 
       await say(`:gear: Revoking entitlements for organization: *${orgName}* (${imsOrgId})`);
 
