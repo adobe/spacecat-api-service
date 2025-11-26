@@ -43,7 +43,7 @@ import {
   performLlmoOffboarding,
 } from './llmo-onboarding.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
-import { updateConfigMetadata } from './llmo-config-metadata.js';
+import { updateModifiedByDetails } from './llmo-config-metadata.js';
 
 const { readConfig, writeConfig } = llmo;
 const { llmoConfig: llmoConfigSchema } = schemas;
@@ -424,7 +424,7 @@ function LlmoController(ctx) {
     } = context;
     const { siteId } = context.params;
 
-    const userId = context.attributes?.authInfo?.getProfile()?.sub || 'unknown';
+    const userId = context.attributes?.authInfo?.getProfile()?.sub || 'system';
 
     try {
       if (!isObject(data)) {
@@ -437,13 +437,8 @@ function LlmoController(ctx) {
 
       const prevConfig = await readConfig(siteId, s3.s3Client, { s3Bucket: s3.s3Bucket });
 
-      const newConfig = {
-        ...(prevConfig?.exists && { ...prevConfig.config }),
-        ...data,
-      };
-
-      const stats = updateConfigMetadata(
-        newConfig,
+      const { newConfig, stats } = updateModifiedByDetails(
+        data,
         prevConfig?.exists ? prevConfig.config : null,
         userId,
       );

@@ -66,16 +66,16 @@ describe('LlmoController', () => {
   let writeConfigStub;
   let llmoConfigSchemaStub;
   let triggerBrandProfileAgentStub;
-  let updateConfigMetadataStub;
+  let updateModifiedByDetailsStub;
 
   before(async () => {
     triggerBrandProfileAgentStub = sinon.stub().resolves('exec-123');
-    updateConfigMetadataStub = sinon.stub();
+    updateModifiedByDetailsStub = sinon.stub();
 
     // Set up esmock once for all tests
     LlmoController = await esmock('../../../src/controllers/llmo/llmo.js', {
       '../../../src/controllers/llmo/llmo-config-metadata.js': {
-        updateConfigMetadata: updateConfigMetadataStub,
+        updateModifiedByDetails: updateModifiedByDetailsStub,
       },
       '@adobe/spacecat-shared-utils': {
         SPACECAT_USER_AGENT: TEST_USER_AGENT,
@@ -130,16 +130,19 @@ describe('LlmoController', () => {
 
   beforeEach(async () => {
     triggerBrandProfileAgentStub.resetHistory();
-    updateConfigMetadataStub.resetHistory();
-    updateConfigMetadataStub.returns({
-      categories: { total: 0, modified: 0 },
-      topics: { total: 0, modified: 0 },
-      prompts: { total: 0, modified: 0 },
-      brandAliases: { total: 0, modified: 0 },
-      competitors: { total: 0, modified: 0 },
-      deletedPrompts: { total: 0, modified: 0 },
-      categoryUrls: { total: 0 },
-    });
+    updateModifiedByDetailsStub.resetHistory();
+    updateModifiedByDetailsStub.callsFake((config) => ({
+      newConfig: config,
+      stats: {
+        categories: { total: 0, modified: 0 },
+        topics: { total: 0, modified: 0 },
+        prompts: { total: 0, modified: 0 },
+        brandAliases: { total: 0, modified: 0 },
+        competitors: { total: 0, modified: 0 },
+        deletedPrompts: { total: 0, modified: 0 },
+        categoryUrls: { total: 0 },
+      },
+    }));
     mockLlmoConfig = {
       dataFolder: TEST_FOLDER,
       brand: TEST_BRAND,
@@ -1367,15 +1370,19 @@ describe('LlmoController', () => {
       };
       mockContext.data = configWithAllFields;
       llmoConfigSchemaStub.safeParse.returns({ success: true, data: configWithAllFields });
-      updateConfigMetadataStub.returns({
-        categories: { total: 1, modified: 1 },
-        topics: { total: 1, modified: 1 },
-        prompts: { total: 2, modified: 2 },
-        brandAliases: { total: 1, modified: 1 },
-        competitors: { total: 1, modified: 1 },
-        deletedPrompts: { total: 2, modified: 2 },
-        categoryUrls: { total: 2 },
-      });
+      updateModifiedByDetailsStub.callsFake((config) => ({
+        newConfig: config,
+        stats: {
+          categories: { total: 1, modified: 1 },
+          topics: { total: 1, modified: 1 },
+          aiTopics: { total: 0, modified: 0 },
+          prompts: { total: 2, modified: 2 },
+          brandAliases: { total: 1, modified: 1 },
+          competitors: { total: 1, modified: 1 },
+          deletedPrompts: { total: 2, modified: 2 },
+          categoryUrls: { total: 2 },
+        },
+      }));
 
       const result = await controller.updateLlmoConfig(mockContext);
 
@@ -1392,7 +1399,7 @@ describe('LlmoController', () => {
       );
     });
 
-    it('should use "unknown" as userId when sub is missing from profile', async () => {
+    it('should use "system" as userId when sub is missing from profile', async () => {
       // Override getProfile to return profile without sub
       mockContext.attributes.authInfo.getProfile = () => ({
         email: 'test@example.com',
@@ -1406,11 +1413,11 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       expect(mockLog.info).to.have.been.calledWith(
-        sinon.match(/User unknown modifying customer configuration/),
+        sinon.match(/User system modifying customer configuration/),
       );
     });
 
-    it('should use "unknown" as userId in error when authInfo is missing', async () => {
+    it('should use "system" as userId in error when authInfo is missing', async () => {
       // Remove authInfo
       mockContext.attributes = {};
       writeConfigStub.rejects(new Error('S3 write failed'));
@@ -1424,7 +1431,7 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(400);
       expect(mockLog.error).to.have.been.calledWith(
-        sinon.match(/User unknown error updating llmo config/),
+        sinon.match(/User system error updating llmo config/),
       );
     });
 
@@ -1459,15 +1466,18 @@ describe('LlmoController', () => {
       };
       mockContext.data = configWithCategoryUrls;
       llmoConfigSchemaStub.safeParse.returns({ success: true, data: configWithCategoryUrls });
-      updateConfigMetadataStub.returns({
-        categories: { total: 3, modified: 3 },
-        topics: { total: 0, modified: 0 },
-        prompts: { total: 0, modified: 0 },
-        brandAliases: { total: 0, modified: 0 },
-        competitors: { total: 0, modified: 0 },
-        deletedPrompts: { total: 0, modified: 0 },
-        categoryUrls: { total: 4 },
-      });
+      updateModifiedByDetailsStub.callsFake((config) => ({
+        newConfig: config,
+        stats: {
+          categories: { total: 3, modified: 3 },
+          topics: { total: 0, modified: 0 },
+          prompts: { total: 0, modified: 0 },
+          brandAliases: { total: 0, modified: 0 },
+          competitors: { total: 0, modified: 0 },
+          deletedPrompts: { total: 0, modified: 0 },
+          categoryUrls: { total: 4 },
+        },
+      }));
 
       const result = await controller.updateLlmoConfig(mockContext);
 
@@ -1493,15 +1503,18 @@ describe('LlmoController', () => {
       };
       mockContext.data = configWithoutUrls;
       llmoConfigSchemaStub.safeParse.returns({ success: true, data: configWithoutUrls });
-      updateConfigMetadataStub.returns({
-        categories: { total: 1, modified: 1 },
-        topics: { total: 0, modified: 0 },
-        prompts: { total: 0, modified: 0 },
-        brandAliases: { total: 0, modified: 0 },
-        competitors: { total: 0, modified: 0 },
-        deletedPrompts: { total: 0, modified: 0 },
-        categoryUrls: { total: 0 },
-      });
+      updateModifiedByDetailsStub.callsFake((config) => ({
+        newConfig: config,
+        stats: {
+          categories: { total: 1, modified: 1 },
+          topics: { total: 0, modified: 0 },
+          prompts: { total: 0, modified: 0 },
+          brandAliases: { total: 0, modified: 0 },
+          competitors: { total: 0, modified: 0 },
+          deletedPrompts: { total: 0, modified: 0 },
+          categoryUrls: { total: 0 },
+        },
+      }));
 
       const result = await controller.updateLlmoConfig(mockContext);
 
@@ -1531,15 +1544,18 @@ describe('LlmoController', () => {
       };
       mockContext.data = configWithEmptyPrompts;
       llmoConfigSchemaStub.safeParse.returns({ success: true, data: configWithEmptyPrompts });
-      updateConfigMetadataStub.returns({
-        categories: { total: 1, modified: 1 },
-        topics: { total: 2, modified: 2 },
-        prompts: { total: 0, modified: 0 },
-        brandAliases: { total: 0, modified: 0 },
-        competitors: { total: 0, modified: 0 },
-        deletedPrompts: { total: 0, modified: 0 },
-        categoryUrls: { total: 0 },
-      });
+      updateModifiedByDetailsStub.callsFake((config) => ({
+        newConfig: config,
+        stats: {
+          categories: { total: 1, modified: 1 },
+          topics: { total: 2, modified: 2 },
+          prompts: { total: 0, modified: 0 },
+          brandAliases: { total: 0, modified: 0 },
+          competitors: { total: 0, modified: 0 },
+          deletedPrompts: { total: 0, modified: 0 },
+          categoryUrls: { total: 0 },
+        },
+      }));
 
       const result = await controller.updateLlmoConfig(mockContext);
 

@@ -72,9 +72,6 @@ const stripMetadata = (obj) => {
  * @returns {boolean} True if the entity was modified/created.
  */
 const updateEntityMetadata = (newEntity, oldEntity, userId, timestamp) => {
-  // Skip AI origin items
-  if (newEntity.origin === 'ai') return false;
-
   const cleanNew = stripMetadata(newEntity);
   const cleanOld = stripMetadata(oldEntity);
 
@@ -92,15 +89,20 @@ const updateEntityMetadata = (newEntity, oldEntity, userId, timestamp) => {
 
 /**
  * Updates metadata for the entire LLMO configuration.
- * @param {object} newConfig - The new configuration object.
+ * @param {object} updates - The new configuration updates.
  * @param {object} oldConfig - The previous configuration object.
  * @param {string} userId - The user ID performing the update.
- * @returns {object} The change statistics.
+ * @returns {object} An object containing the new config and change statistics.
  */
-export const updateConfigMetadata = (newConfig, oldConfig, userId) => {
+export const updateModifiedByDetails = (updates, oldConfig, userId) => {
+  const newConfig = structuredClone({
+    ...(oldConfig || {}),
+    ...updates,
+  });
   const timestamp = new Date().toISOString();
   const oldCategories = oldConfig?.categories || {};
   const oldTopics = oldConfig?.topics || {};
+  const oldAiTopics = oldConfig?.aiTopics || {};
   const oldBrandsAliases = oldConfig?.brands?.aliases || [];
   const oldCompetitors = oldConfig?.competitors?.competitors || [];
   const oldDeletedPrompts = oldConfig?.deleted?.prompts || {};
@@ -108,6 +110,7 @@ export const updateConfigMetadata = (newConfig, oldConfig, userId) => {
   const stats = {
     categories: { total: 0, modified: 0 },
     topics: { total: 0, modified: 0 },
+    aiTopics: { total: 0, modified: 0 },
     prompts: { total: 0, modified: 0 },
     brandAliases: { total: 0, modified: 0 },
     competitors: { total: 0, modified: 0 },
@@ -130,12 +133,12 @@ export const updateConfigMetadata = (newConfig, oldConfig, userId) => {
     });
   }
 
-  // 2. Prompts
-  if (newConfig.topics) {
-    Object.entries(newConfig.topics).forEach(([id, topic]) => {
-      stats.topics.total += 1;
-      const oldTopic = oldTopics[id];
-      if (!oldTopic) stats.topics.modified += 1;
+  // Helper to process topics and aiTopics
+  const processTopics = (topics, oldTopicsSource, statsCounter) => {
+    Object.entries(topics).forEach(([id, topic]) => {
+      statsCounter.total += 1;
+      const oldTopic = oldTopicsSource[id];
+      if (!oldTopic) statsCounter.modified += 1;
 
       const oldPrompts = oldTopic?.prompts || [];
       if (topic.prompts) {
@@ -143,9 +146,6 @@ export const updateConfigMetadata = (newConfig, oldConfig, userId) => {
         const remainingOldPrompts = [...oldPrompts];
 
         topic.prompts.forEach((prompt) => {
-          // Skip AI prompts
-          if (prompt.origin === 'ai') return;
-
           const cleanPrompt = stripMetadata(prompt);
           const matchIndex = remainingOldPrompts.findIndex(
             (oldP) => deepEqual(cleanPrompt, stripMetadata(oldP)),
@@ -167,6 +167,16 @@ export const updateConfigMetadata = (newConfig, oldConfig, userId) => {
         });
       }
     });
+  };
+
+  // 2. Topics
+  if (newConfig.topics) {
+    processTopics(newConfig.topics, oldTopics, stats.topics);
+  }
+
+  // 2.1 AI Topics
+  if (newConfig.aiTopics) {
+    processTopics(newConfig.aiTopics, oldAiTopics, stats.aiTopics);
   }
 
   // 3. Brand Aliases
@@ -225,5 +235,5 @@ export const updateConfigMetadata = (newConfig, oldConfig, userId) => {
     });
   }
 
-  return stats;
+  return { newConfig, stats };
 };
