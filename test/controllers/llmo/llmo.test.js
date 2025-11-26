@@ -275,7 +275,7 @@ describe('LlmoController', () => {
           }),
         },
       },
-      pathInfo: { method: 'GET', suffix: '/llmo/sheet-data' },
+      pathInfo: { method: 'GET', suffix: '/llmo/sheet-data', headers: {} },
     };
 
     tracingFetchStub = sinon.stub();
@@ -1218,12 +1218,13 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
     });
 
-    it('should trigger llmo-customer-analysis audit after writing config', async () => {
+    it('should trigger llmo-customer-analysis audit after writing config when X-Trigger-Audits header is present', async () => {
       readConfigStub.resolves({
         config: llmoConfig.defaultConfig(),
         exists: true,
         version: 'v0',
       });
+      mockContext.pathInfo.headers = { 'x-trigger-audits': 'true' };
 
       await controller.updateLlmoConfig(mockContext);
 
@@ -1238,6 +1239,19 @@ describe('LlmoController', () => {
           },
         },
       );
+    });
+
+    it('should not trigger llmo-customer-analysis audit when X-Trigger-Audits header is missing', async () => {
+      readConfigStub.resolves({
+        config: llmoConfig.defaultConfig(),
+        exists: true,
+        version: 'v0',
+      });
+      mockContext.pathInfo.headers = {};
+
+      await controller.updateLlmoConfig(mockContext);
+
+      expect(mockContext.sqs.sendMessage).to.not.have.been.called;
     });
 
     it('should return bad request when payload is not an object', async () => {
