@@ -114,19 +114,9 @@ describe('onboard-modal', () => {
       expect(imsOrgId).to.equal(null);
     });
 
-    it('should reject invalid preview URLs', async () => {
-      const invalidUrl = 'https://invalid-url.com';
-      expect(extractDeliveryConfigFromPreviewUrl(invalidUrl, null)).to.be.null;
-    });
-
     it('should handle malformed preview URLs', async () => {
       const malformedUrl = 'not-a-valid-url';
       expect(extractDeliveryConfigFromPreviewUrl(malformedUrl, null)).to.be.null;
-    });
-
-    it('should handle malformed environment ID in preview URLs', async () => {
-      const url = 'https://author-p123-e.adobeaemcloud.com';
-      expect(extractDeliveryConfigFromPreviewUrl(url, null)).to.be.null;
     });
 
     it('should handle null imsOrgId gracefully', async () => {
@@ -586,7 +576,7 @@ describe('onboard-modal', () => {
     });
 
     it('should validate preview URL format when provided', async () => {
-      body.view.state.values.preview_url_input.preview_url.value = 'https://invalid-preview-url.com';
+      body.view.state.values.preview_url_input.preview_url.value = 'invalid-preview-url';
 
       const onboardSiteModalAction = onboardSiteModal(context);
 
@@ -599,7 +589,7 @@ describe('onboard-modal', () => {
       expect(ackMock).to.have.been.calledOnceWith({
         response_action: 'errors',
         errors: {
-          preview_url_input: 'Could not extract program/environment ID from this URL. Please provide a valid AEM CS preview URL.',
+          preview_url_input: 'Please provide a valid preview URL.',
         },
       });
     });

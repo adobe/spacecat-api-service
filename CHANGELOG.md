@@ -1,3 +1,45 @@
+# [1.252.0](https://github.com/adobe/spacecat-api-service/compare/v1.251.2...v1.252.0) (2025-11-24)
+
+
+### Features
+
+* **llmo:** add base URL check during onboarding ([#1549](https://github.com/adobe/spacecat-api-service/issues/1549)) ([94e25cb](https://github.com/adobe/spacecat-api-service/commit/94e25cb7db469a7f675dac7270ddb4ce962fd88b))
+
+## [1.251.2](https://github.com/adobe/spacecat-api-service/compare/v1.251.1...v1.251.2) (2025-11-24)
+
+
+### Bug Fixes
+
+* custom AMS urls for preflight ([#1536](https://github.com/adobe/spacecat-api-service/issues/1536)) ([5dce47e](https://github.com/adobe/spacecat-api-service/commit/5dce47ebc0047c908cb83cc174cb8a6bb2aaeb9f))
+
+## [1.251.1](https://github.com/adobe/spacecat-api-service/compare/v1.251.0...v1.251.1) (2025-11-24)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v2.39.0 ([#1548](https://github.com/adobe/spacecat-api-service/issues/1548)) ([6d7077a](https://github.com/adobe/spacecat-api-service/commit/6d7077a6adf24984537a86a3081d4f5abdaea27e))
+
+# [1.251.0](https://github.com/adobe/spacecat-api-service/compare/v1.250.0...v1.251.0) (2025-11-24)
+
+
+### Features
+
+* update get-llmo-opportunity-usage to fix timeout error ([#1534](https://github.com/adobe/spacecat-api-service/issues/1534)) ([c0f9eb0](https://github.com/adobe/spacecat-api-service/commit/c0f9eb0d18f8dae602eeb44b995a0397067cc7b7))
+
+# [1.250.0](https://github.com/adobe/spacecat-api-service/compare/v1.249.6...v1.250.0) (2025-11-24)
+
+
+### Features
+
+* added endpoint for PTR - channel-platform-device ([#1547](https://github.com/adobe/spacecat-api-service/issues/1547)) ([fd8c1aa](https://github.com/adobe/spacecat-api-service/commit/fd8c1aa04bf918e6a6a978d07886af0198469112))
+
+## [1.249.6](https://github.com/adobe/spacecat-api-service/compare/v1.249.5...v1.249.6) (2025-11-24)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tier-client to v1.3.1 ([#1546](https://github.com/adobe/spacecat-api-service/issues/1546)) ([906bc7e](https://github.com/adobe/spacecat-api-service/commit/906bc7e7d103dd2da7fd08a3da549bbdf7701346))
+
 ## [1.249.5](https://github.com/adobe/spacecat-api-service/compare/v1.249.4...v1.249.5) (2025-11-24)
 
 
