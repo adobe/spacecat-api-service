@@ -64,6 +64,24 @@ const stripMetadata = (obj) => {
 };
 
 /**
+ * Generates a deterministic string key for an object, independent of key order.
+ * Arrays are sorted to match deepEqual's set-like behavior.
+ * @param {any} obj - The object to hash.
+ * @returns {string} A deterministic string representation.
+ */
+const getDeterministicKey = (obj) => {
+  if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
+
+  if (Array.isArray(obj)) {
+    return JSON.stringify(obj.map(getDeterministicKey).sort());
+  }
+
+  const sortedKeys = Object.keys(obj).sort();
+  const parts = sortedKeys.map((key) => `${JSON.stringify(key)}:${getDeterministicKey(obj[key])}`);
+  return `{${parts.join(',')}}`;
+};
+
+/**
  * Updates metadata for a single entity based on comparison with its old version.
  * @param {object} newEntity - The new entity object.
  * @param {object} oldEntity - The old entity object.
@@ -143,22 +161,42 @@ export const updateModifiedByDetails = (updates, oldConfig, userId) => {
       const oldPrompts = oldTopic?.prompts || [];
       if (topic.prompts) {
         stats.prompts.total += topic.prompts.length;
-        const remainingOldPrompts = [...oldPrompts];
+
+        const oldPromptsMap = new Map();
+        oldPrompts.forEach((p) => {
+          const clean = stripMetadata(p);
+          const key = getDeterministicKey(clean);
+          if (!oldPromptsMap.has(key)) {
+            oldPromptsMap.set(key, []);
+          }
+          oldPromptsMap.get(key).push(p);
+        });
 
         topic.prompts.forEach((prompt) => {
           const cleanPrompt = stripMetadata(prompt);
-          const matchIndex = remainingOldPrompts.findIndex(
-            (oldP) => deepEqual(cleanPrompt, stripMetadata(oldP)),
-          );
+          const key = getDeterministicKey(cleanPrompt);
+          const potentialMatches = oldPromptsMap.get(key);
 
-          if (matchIndex !== -1) {
-            // Found match, preserve metadata
-            const match = remainingOldPrompts[matchIndex];
-            if (match.updatedBy) prompt.updatedBy = match.updatedBy;
-            if (match.updatedAt) prompt.updatedAt = match.updatedAt;
-            // Remove from pool to handle duplicates
-            remainingOldPrompts.splice(matchIndex, 1);
-          } else {
+          let matchFound = false;
+
+          if (potentialMatches && potentialMatches.length > 0) {
+            // Found potential matches with same content hash
+            const matchIndex = potentialMatches.findIndex(
+              (oldP) => deepEqual(cleanPrompt, stripMetadata(oldP)),
+            );
+
+            if (matchIndex !== -1) {
+              // Found match, preserve metadata
+              const match = potentialMatches[matchIndex];
+              if (match.updatedBy) prompt.updatedBy = match.updatedBy;
+              if (match.updatedAt) prompt.updatedAt = match.updatedAt;
+              // Remove from pool to handle duplicates
+              potentialMatches.splice(matchIndex, 1);
+              matchFound = true;
+            }
+          }
+
+          if (!matchFound) {
             // No match, it's new or modified
             prompt.updatedBy = userId;
             prompt.updatedAt = timestamp;
