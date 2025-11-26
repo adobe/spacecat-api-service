@@ -1,3 +1,10 @@
+## [1.253.3](https://github.com/adobe/spacecat-api-service/compare/v1.253.2...v1.253.3) (2025-11-26)
+
+
+### Bug Fixes
+
+* remove jsdom + linkedom ([#1559](https://github.com/adobe/spacecat-api-service/issues/1559)) ([04308ae](https://github.com/adobe/spacecat-api-service/commit/04308ae2e16af3fdce9aaf37c5c3782c196286a1))
+
 ## [1.253.2](https://github.com/adobe/spacecat-api-service/compare/v1.253.1...v1.253.2) (2025-11-25)
 
 

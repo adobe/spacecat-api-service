@@ -9,7 +9,7 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-import { parseHTML } from 'linkedom';
+import { parse } from 'node-html-parser';
 import { resolveUrl, scrape } from './common-retriever.js';
 
 /**
@@ -43,8 +43,8 @@ export async function retrieveMainContent(url, apiKey, apiUrl, log) {
     return null;
   }
 
-  const dom = parseHTML(content);
-  const mainContent = dom.window.document.querySelector('main');
+  const root = parse(content);
+  const mainContent = root.querySelector('main');
   if (!mainContent) {
     log.info('No `<main>` element found in the parsed content.');
     return null;
