@@ -300,6 +300,7 @@ function TrafficController(context, log, env) {
     getPaidTrafficByTypeDeviceChannel: async () => fetchPaidTrafficData(['trf_type', 'device', 'trf_channel'], TrafficDataResponseDto),
     getPaidTrafficByChannel: async () => fetchPaidTrafficData(['trf_channel'], TrafficDataResponseDto),
     getPaidTrafficByChannelDevice: async () => fetchPaidTrafficData(['trf_channel', 'device'], TrafficDataResponseDto),
+    getPaidTrafficByChannelPlatformDevice: async () => fetchPaidTrafficData(['trf_channel', 'trf_platform', 'device'], TrafficDataResponseDto),
 
     getPaidTrafficBySocialPlatform: async () => getPaidTrafficBySpecificPlatform('social'),
     getPaidTrafficBySocialPlatformDevice: async () => getPaidTrafficBySpecificPlatform('social', true),
