@@ -1,3 +1,66 @@
+## [1.254.1](https://github.com/adobe/spacecat-api-service/compare/v1.254.0...v1.254.1) (2025-11-26)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.80.0 ([#1564](https://github.com/adobe/spacecat-api-service/issues/1564)) ([984d865](https://github.com/adobe/spacecat-api-service/commit/984d865139e58ffff8b3402d73c67c7e0c9df70e))
+
+# [1.254.0](https://github.com/adobe/spacecat-api-service/compare/v1.253.5...v1.254.0) (2025-11-26)
+
+
+### Features
+
+* add support for X-Trigger-Audits header (LLMO-1531) ([4900ad6](https://github.com/adobe/spacecat-api-service/commit/4900ad6e2e9e40dd34c72b9ba86dc98ee8ecb40b))
+
+## [1.253.5](https://github.com/adobe/spacecat-api-service/compare/v1.253.4...v1.253.5) (2025-11-26)
+
+
+### Bug Fixes
+
+* back to working version of @adobe/helix-deploy ([1635bc4](https://github.com/adobe/spacecat-api-service/commit/1635bc47143b721ef7600247a9e56fedfba0cdfe))
+
+## [1.253.4](https://github.com/adobe/spacecat-api-service/compare/v1.253.3...v1.253.4) (2025-11-26)
+
+
+### Bug Fixes
+
+* Revert check llmo config categorization ([#1555](https://github.com/adobe/spacecat-api-service/issues/1555)) ([a6419c6](https://github.com/adobe/spacecat-api-service/commit/a6419c6491afc7d0f3d457062869023a63cfc31d))
+
+## [1.253.3](https://github.com/adobe/spacecat-api-service/compare/v1.253.2...v1.253.3) (2025-11-26)
+
+
+### Bug Fixes
+
+* remove jsdom + linkedom ([#1559](https://github.com/adobe/spacecat-api-service/issues/1559)) ([04308ae](https://github.com/adobe/spacecat-api-service/commit/04308ae2e16af3fdce9aaf37c5c3782c196286a1))
+
+## [1.253.2](https://github.com/adobe/spacecat-api-service/compare/v1.253.1...v1.253.2) (2025-11-25)
+
+
+### Bug Fixes
+
+* deploy lambda ([#1554](https://github.com/adobe/spacecat-api-service/issues/1554)) ([3f521c5](https://github.com/adobe/spacecat-api-service/commit/3f521c5053adc1192da0f230f1feaefae5e56b7e))
+
+## [1.253.1](https://github.com/adobe/spacecat-api-service/compare/v1.253.0...v1.253.1) (2025-11-25)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1552](https://github.com/adobe/spacecat-api-service/issues/1552)) ([209e64c](https://github.com/adobe/spacecat-api-service/commit/209e64c93b3fb37c0b77590f8aced4dd0141f1ad))
+
+# [1.253.0](https://github.com/adobe/spacecat-api-service/compare/v1.252.2...v1.253.0) (2025-11-25)
+
+
+### Features
+
+* edge rollback feature for tokowaka ([#1550](https://github.com/adobe/spacecat-api-service/issues/1550)) ([bfccf07](https://github.com/adobe/spacecat-api-service/commit/bfccf072ea3e4ca04be1ef125ac20e5ab808645a))
+
+## [1.252.2](https://github.com/adobe/spacecat-api-service/compare/v1.252.1...v1.252.2) (2025-11-25)
+
+
+### Bug Fixes
+
+* deploy lambda ([#1553](https://github.com/adobe/spacecat-api-service/issues/1553)) ([80113bd](https://github.com/adobe/spacecat-api-service/commit/80113bd52e953d397f1aca0dcef8b57bea7ea473))
+
 ## [1.252.1](https://github.com/adobe/spacecat-api-service/compare/v1.252.0...v1.252.1) (2025-11-25)
 
 
