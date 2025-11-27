@@ -1,3 +1,64 @@
+# [1.255.0](https://github.com/adobe/spacecat-api-service/compare/v1.254.4...v1.255.0) (2025-11-27)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1572](https://github.com/adobe/spacecat-api-service/issues/1572)) ([74b8f52](https://github.com/adobe/spacecat-api-service/commit/74b8f52e0b97f3dd92cc1cdda22c048dd5276241))
+
+
+### Features
+
+* entitlement command support ([#1566](https://github.com/adobe/spacecat-api-service/issues/1566)) ([32ba17a](https://github.com/adobe/spacecat-api-service/commit/32ba17a1cdee35b46e0c10aa87eca541c2054bfd))
+
+## [1.254.4](https://github.com/adobe/spacecat-api-service/compare/v1.254.3...v1.254.4) (2025-11-26)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1569](https://github.com/adobe/spacecat-api-service/issues/1569)) ([4d38550](https://github.com/adobe/spacecat-api-service/commit/4d38550608107ae6cbefb0f476c5dd05aa713019))
+
+## [1.254.3](https://github.com/adobe/spacecat-api-service/compare/v1.254.2...v1.254.3) (2025-11-26)
+
+
+### Bug Fixes
+
+* update helix-deploy ([#1567](https://github.com/adobe/spacecat-api-service/issues/1567)) ([5207a68](https://github.com/adobe/spacecat-api-service/commit/5207a68a88336678235a356c394f871e9d579540))
+
+## [1.254.2](https://github.com/adobe/spacecat-api-service/compare/v1.254.1...v1.254.2) (2025-11-26)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.88.2 ([#1565](https://github.com/adobe/spacecat-api-service/issues/1565)) ([ab5ea4e](https://github.com/adobe/spacecat-api-service/commit/ab5ea4e5a11aa9240adeb62b4fba363a8e2ecb32))
+
+## [1.254.1](https://github.com/adobe/spacecat-api-service/compare/v1.254.0...v1.254.1) (2025-11-26)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.80.0 ([#1564](https://github.com/adobe/spacecat-api-service/issues/1564)) ([984d865](https://github.com/adobe/spacecat-api-service/commit/984d865139e58ffff8b3402d73c67c7e0c9df70e))
+
+# [1.254.0](https://github.com/adobe/spacecat-api-service/compare/v1.253.5...v1.254.0) (2025-11-26)
+
+
+### Features
+
+* add support for X-Trigger-Audits header (LLMO-1531) ([4900ad6](https://github.com/adobe/spacecat-api-service/commit/4900ad6e2e9e40dd34c72b9ba86dc98ee8ecb40b))
+
+## [1.253.5](https://github.com/adobe/spacecat-api-service/compare/v1.253.4...v1.253.5) (2025-11-26)
+
+
+### Bug Fixes
+
+* back to working version of @adobe/helix-deploy ([1635bc4](https://github.com/adobe/spacecat-api-service/commit/1635bc47143b721ef7600247a9e56fedfba0cdfe))
+
+## [1.253.4](https://github.com/adobe/spacecat-api-service/compare/v1.253.3...v1.253.4) (2025-11-26)
+
+
+### Bug Fixes
+
+* Revert check llmo config categorization ([#1555](https://github.com/adobe/spacecat-api-service/issues/1555)) ([a6419c6](https://github.com/adobe/spacecat-api-service/commit/a6419c6491afc7d0f3d457062869023a63cfc31d))
+
 ## [1.253.3](https://github.com/adobe/spacecat-api-service/compare/v1.253.2...v1.253.3) (2025-11-26)
 
 
