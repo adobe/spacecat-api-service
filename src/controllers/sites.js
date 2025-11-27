@@ -689,11 +689,8 @@ function SitesController(ctx, log, env) {
         0,
         0,
       ));
-      log.info(`[getLatestSiteMetrics] Today UTC: ${todayUTC.toISOString()}`);
       const thirtyDaysAgo = new Date(todayUTC.getTime() - MONTH_DAYS * 24 * 60 * 60 * 1000);
       const sixtyDaysAgo = new Date(todayUTC.getTime() - 2 * MONTH_DAYS * 24 * 60 * 60 * 1000);
-      log.info(`[getLatestSiteMetrics] Thirty days ago: ${thirtyDaysAgo.toISOString()}`);
-      log.info(`[getLatestSiteMetrics] Sixty days ago: ${sixtyDaysAgo.toISOString()}`);
 
       const current = await rumAPIClient.query(TOTAL_METRICS, {
         domain,
@@ -704,18 +701,6 @@ function SitesController(ctx, log, env) {
         domain,
         startTime: sixtyDaysAgo.toISOString(),
         endTime: thirtyDaysAgo.toISOString(),
-      });
-      const currentWithBots = await rumAPIClient.query(TOTAL_METRICS, {
-        domain,
-        startTime: thirtyDaysAgo.toISOString(),
-        endTime: todayUTC.toISOString(),
-        filterBotTraffic: false,
-      });
-      const previousWithBots = await rumAPIClient.query(TOTAL_METRICS, {
-        domain,
-        startTime: sixtyDaysAgo.toISOString(),
-        endTime: thirtyDaysAgo.toISOString(),
-        filterBotTraffic: false,
       });
       const organicTraffic = await getStoredMetrics(
         { siteId, metric: ORGANIC_TRAFFIC, source: AHREFS },
@@ -739,9 +724,6 @@ function SitesController(ctx, log, env) {
       const currentConversion = current.totalClicks || 0;
       const previousConversion = previous.totalClicks || 0;
 
-      const currentBotViews = currentWithBots.totalPageViews || 0;
-      const previousBotViews = previousWithBots.totalPageViews || 0;
-
       let cpc = 0;
 
       if (organicTraffic.length > 0) {
@@ -763,8 +745,6 @@ function SitesController(ctx, log, env) {
         previousEngagement,
         currentConversion,
         previousConversion,
-        currentBotViews,
-        previousBotViews,
       });
     } catch (error) {
       log.error(`Error getting RUM metrics for site ${siteId}: ${error.message}`);

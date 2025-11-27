@@ -34,7 +34,7 @@ import AccessControlUtil from '../../src/support/access-control-util.js';
 use(chaiAsPromised);
 use(sinonChai);
 
-xdescribe('Sites Controller', () => {
+describe('Sites Controller', () => {
   const sandbox = sinon.createSandbox();
 
   const loggerStub = {
