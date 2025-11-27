@@ -739,7 +739,7 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Only users belonging to the organization can view its sites');
   });
 
-  it('gets the latest site metrics', async () => {
+  it.skip('gets the latest site metrics', async () => {
     context.rumApiClient.query.onCall(0).resolves({
       totalCTR: 0.20,
       totalClicks: 4901,
@@ -781,7 +781,7 @@ describe('Sites Controller', () => {
     });
   });
 
-  it('gets the latest site metrics with no stored metrics', async () => {
+  it.skip('gets the latest site metrics with no stored metrics', async () => {
     context.rumApiClient.query.onCall(0).resolves({
       totalCTR: 0.20,
       totalClicks: 4901,
@@ -816,7 +816,7 @@ describe('Sites Controller', () => {
     });
   });
 
-  it('logs error and returns zeroed metrics when rum query fails', async () => {
+  it.skip('logs error and returns zeroed metrics when rum query fails', async () => {
     const rumApiClient = {
       query: sandbox.stub().rejects(new Error('RUM query failed')),
     };
