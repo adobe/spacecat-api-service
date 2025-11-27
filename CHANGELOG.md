@@ -1,3 +1,10 @@
+# [1.256.0](https://github.com/adobe/spacecat-api-service/compare/v1.255.1...v1.256.0) (2025-11-27)
+
+
+### Features
+
+* LLMO-1023: integrate logWrapper for trace ID logging ([#1435](https://github.com/adobe/spacecat-api-service/issues/1435)) ([074acae](https://github.com/adobe/spacecat-api-service/commit/074acae98b40e56c164eba04a04447dbe30935c1))
+
 ## [1.255.1](https://github.com/adobe/spacecat-api-service/compare/v1.255.0...v1.255.1) (2025-11-27)
 
 
