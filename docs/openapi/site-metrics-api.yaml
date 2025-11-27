@@ -80,13 +80,37 @@ site-metrics-latest:
               properties:
                 pageViewsChange:
                   type: number
-                  description: Percentage change in page views compared to the previous period
+                  description: Percentage change in page views compared to the previous period (last 30 days vs prior 30 days)
                 ctrChange:
                   type: number
                   description: Percentage change in Click-Through Rate (CTR) compared to the previous period
                 projectedTrafficValue:
                   type: number
                   description: Projected traffic value based on page views change and cost per click
+                currentPageViews:
+                  type: number
+                  description: Total page views for the current period (last 30 days)
+                previousPageViews:
+                  type: number
+                  description: Total page views for the previous period (prior 30 days)
+                currentLCP:
+                  type: number
+                  description: Current Largest Contentful Paint (LCP) metric in milliseconds for the last 30 days
+                previousLCP:
+                  type: number
+                  description: Previous Largest Contentful Paint (LCP) metric in milliseconds for the prior 30 days
+                currentEngagement:
+                  type: number
+                  description: Current engagement metric for the last 30 days
+                previousEngagement:
+                  type: number
+                  description: Previous engagement metric for the prior 30 days
+                currentConversion:
+                  type: number
+                  description: Current conversion (total clicks) for the last 30 days
+                previousConversion:
+                  type: number
+                  description: Previous conversion (total clicks) for the prior 30 days
       '401':
         $ref: './responses.yaml#/401'
       '404':

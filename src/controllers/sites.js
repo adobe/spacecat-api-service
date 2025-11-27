@@ -707,9 +707,8 @@ function SitesController(ctx, log, env) {
         context,
       );
 
-      const previousPageViews = previous.totalPageViews;
-      const pageViewsChange = previousPageViews !== 0
-        ? ((current.totalPageViews - previousPageViews) / previousPageViews) * 100
+      const pageViewsChange = previous.totalPageViews !== 0
+        ? ((current.totalPageViews - previous.totalPageViews) / previous.totalPageViews) * 100
         : 0;
       const ctrChange = previous.totalCTR !== 0
         ? ((current.totalCTR - previous.totalCTR) / previous.totalCTR) * 100
@@ -738,7 +737,7 @@ function SitesController(ctx, log, env) {
         ctrChange,
         projectedTrafficValue,
         currentPageViews: current.totalPageViews,
-        previousPageViews,
+        previousPageViews: previous.totalPageViews,
         currentLCP,
         previousLCP,
         currentEngagement,
