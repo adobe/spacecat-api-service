@@ -408,7 +408,9 @@ function LlmoController(ctx) {
         return notFound(`LLMO config version '${version}' not found for site '${siteId}'`);
       }
 
-      return ok({ config, version: configVersion || null });
+      return ok({ config, version: configVersion || null }, {
+        'Content-Encoding': 'br',
+      });
     } catch (error) {
       log.error(`Error getting llmo config for siteId: ${siteId}, error: ${error.message}`);
       return badRequest(error.message);
