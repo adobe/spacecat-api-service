@@ -979,6 +979,51 @@ describe('Sites Controller', () => {
     });
   });
 
+  it('handles missing conversion values by defaulting to zero', async () => {
+    context.rumApiClient.query.onCall(0).resolves({
+      totalCTR: 0.20,
+      totalPageViews: 24173,
+      totalLCP: 1500,
+      totalEngagement: 5000,
+    });
+    context.rumApiClient.query.onCall(1).resolves({
+      totalCTR: 0.19,
+      totalPageViews: 24000,
+      totalLCP: 1600,
+      totalEngagement: 4800,
+    });
+    const storedMetrics = [];
+
+    const getStoredMetrics = sinon.stub();
+    getStoredMetrics.resolves(storedMetrics);
+
+    const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+      '@adobe/spacecat-shared-utils': {
+        getStoredMetrics,
+      },
+    });
+    const result = await (
+      await sitesControllerMock
+        .default(context, context.log)
+        .getLatestSiteMetrics({ ...context, params: { siteId: SITE_IDS[0] } })
+    );
+    const metrics = await result.json();
+
+    expect(metrics).to.deep.equal({
+      ctrChange: 5.263157894736847,
+      pageViewsChange: 0.7208333333333333,
+      projectedTrafficValue: 0,
+      currentPageViews: 24173,
+      currentLCP: 1500,
+      currentEngagement: 5000,
+      previousPageViews: 24000,
+      previousEngagement: 4800,
+      previousLCP: 1600,
+      currentConversion: 0,
+      previousConversion: 0,
+    });
+  });
+
   it('logs error and returns zeroed metrics when rum query fails', async () => {
     const rumApiClient = {
       query: sandbox.stub().rejects(new Error('RUM query failed')),
