@@ -713,8 +713,8 @@ function SitesController(ctx, log, env) {
       const currentEngagement = current.totalEngagement || 0;
       const previousEngagement = previous.totalEngagement || 0;
 
-      const currentConversion = current.totalConversion || 0;
-      const previousConversion = previous.totalConversion || 0;
+      const currentConversion = current.totalClicks || 0;
+      const previousConversion = previous.totalClicks || 0;
 
       let cpc = 0;
 
