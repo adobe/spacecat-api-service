@@ -1,3 +1,10 @@
+# [1.258.0](https://github.com/adobe/spacecat-api-service/compare/v1.257.1...v1.258.0) (2025-11-27)
+
+
+### Features
+
+* update llmo config with user id and timestamp | LLMO-1515 ([#1563](https://github.com/adobe/spacecat-api-service/issues/1563)) ([2e3ea32](https://github.com/adobe/spacecat-api-service/commit/2e3ea3273c3b129ddd1c29daae237b9b22e63217))
+
 ## [1.257.1](https://github.com/adobe/spacecat-api-service/compare/v1.257.0...v1.257.1) (2025-11-27)
 
 
