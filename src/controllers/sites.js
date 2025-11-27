@@ -712,9 +712,9 @@ function SitesController(ctx, log, env) {
         ctrChange,
         projectedTrafficValue,
         currentPageViews: current.totalPageViews,
-        previousPageViews: total.totalPageViews,
+        previousPageViews: total.totalPageViews - current.totalPageViews,
         currentClicks: current.totalClicks,
-        previousClicks: total.totalClicks,
+        previousClicks: total.totalClicks - current.totalClicks,
       });
     } catch (error) {
       log.error(`Error getting RUM metrics for site ${siteId}: ${error.message}`);
