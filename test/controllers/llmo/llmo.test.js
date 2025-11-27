@@ -65,10 +65,43 @@ describe('LlmoController', () => {
   let readConfigStub;
   let writeConfigStub;
   let llmoConfigSchemaStub;
+  let triggerBrandProfileAgentStub;
+  let updateModifiedByDetailsStub;
+
+  const mockHttpUtils = {
+    ok: (data, headers = {}) => ({
+      status: 200,
+      headers: new Map(Object.entries(headers)),
+      json: async () => data,
+    }),
+    badRequest: (message) => ({
+      status: 400,
+      json: async () => ({ message }),
+    }),
+    forbidden: (message) => ({
+      status: 403,
+      json: async () => ({ message }),
+    }),
+    notFound: (message) => ({
+      status: 404,
+      json: async () => ({ message }),
+    }),
+    createResponse: (data, status) => ({
+      status,
+      json: async () => data,
+    }),
+  };
 
   before(async () => {
+    triggerBrandProfileAgentStub = sinon.stub().resolves('exec-123');
+    updateModifiedByDetailsStub = sinon.stub();
+
     // Set up esmock once for all tests
     LlmoController = await esmock('../../../src/controllers/llmo/llmo.js', {
+      '../../../src/controllers/llmo/llmo-config-metadata.js': {
+        updateModifiedByDetails: updateModifiedByDetailsStub,
+      },
+      '@adobe/spacecat-shared-http-utils': mockHttpUtils,
       '@adobe/spacecat-shared-utils': {
         SPACECAT_USER_AGENT: TEST_USER_AGENT,
         tracingFetch: (...args) => tracingFetchStub(...args),
@@ -83,6 +116,9 @@ describe('LlmoController', () => {
         hasText: (str) => typeof str === 'string' && str.trim().length > 0,
         isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
         composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+      },
+      '../../../src/support/brand-profile-trigger.js': {
+        triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
       },
       '../../../src/support/access-control-util.js': {
         default: class MockAccessControlUtil {
@@ -110,11 +146,29 @@ describe('LlmoController', () => {
       '../../../src/support/access-control-util.js': {
         default: createMockAccessControlUtil(false),
       },
+      '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      '../../../src/support/brand-profile-trigger.js': {
+        triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+      },
     });
     controllerWithAccessDenied = LlmoControllerDenied;
   });
 
   beforeEach(async () => {
+    triggerBrandProfileAgentStub.resetHistory();
+    updateModifiedByDetailsStub.resetHistory();
+    updateModifiedByDetailsStub.callsFake((config) => ({
+      newConfig: config,
+      stats: {
+        categories: { total: 0, modified: 0 },
+        topics: { total: 0, modified: 0 },
+        prompts: { total: 0, modified: 0 },
+        brandAliases: { total: 0, modified: 0 },
+        competitors: { total: 0, modified: 0 },
+        deletedPrompts: { total: 0, modified: 0 },
+        categoryUrls: { total: 0 },
+      },
+    }));
     mockLlmoConfig = {
       dataFolder: TEST_FOLDER,
       brand: TEST_BRAND,
@@ -265,7 +319,7 @@ describe('LlmoController', () => {
           }),
         },
       },
-      pathInfo: { method: 'GET', suffix: '/llmo/sheet-data' },
+      pathInfo: { method: 'GET', suffix: '/llmo/sheet-data', headers: {} },
     };
 
     tracingFetchStub = sinon.stub();
@@ -1041,6 +1095,7 @@ describe('LlmoController', () => {
       const result = await controller.getLlmoConfig(mockContext);
 
       expect(result.status).to.equal(200);
+      expect(result.headers.get('Content-Encoding')).to.equal('br');
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({ config: expectedConfig, version: 'v123' });
     });
@@ -1074,6 +1129,7 @@ describe('LlmoController', () => {
       const result = await controller.getLlmoConfig(mockContext);
 
       expect(result.status).to.equal(200);
+      expect(result.headers.get('Content-Encoding')).to.equal('br');
       const responseBody = await result.json();
       expect(responseBody.version).to.equal('v123');
     });
@@ -1208,12 +1264,13 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
     });
 
-    it('should trigger llmo-customer-analysis audit after writing config', async () => {
+    it('should trigger llmo-customer-analysis audit after writing config when X-Trigger-Audits header is present', async () => {
       readConfigStub.resolves({
         config: llmoConfig.defaultConfig(),
         exists: true,
         version: 'v0',
       });
+      mockContext.pathInfo.headers = { 'x-trigger-audits': 'true' };
 
       await controller.updateLlmoConfig(mockContext);
 
@@ -1228,6 +1285,19 @@ describe('LlmoController', () => {
           },
         },
       );
+    });
+
+    it('should not trigger llmo-customer-analysis audit when X-Trigger-Audits header is missing', async () => {
+      readConfigStub.resolves({
+        config: llmoConfig.defaultConfig(),
+        exists: true,
+        version: 'v0',
+      });
+      mockContext.pathInfo.headers = {};
+
+      await controller.updateLlmoConfig(mockContext);
+
+      expect(mockContext.sqs.sendMessage).to.not.have.been.called;
     });
 
     it('should return bad request when payload is not an object', async () => {
@@ -1328,23 +1398,36 @@ describe('LlmoController', () => {
       };
       mockContext.data = configWithAllFields;
       llmoConfigSchemaStub.safeParse.returns({ success: true, data: configWithAllFields });
+      updateModifiedByDetailsStub.callsFake((config) => ({
+        newConfig: config,
+        stats: {
+          categories: { total: 1, modified: 1 },
+          topics: { total: 1, modified: 1 },
+          aiTopics: { total: 0, modified: 0 },
+          prompts: { total: 2, modified: 2 },
+          brandAliases: { total: 1, modified: 1 },
+          competitors: { total: 1, modified: 1 },
+          deletedPrompts: { total: 2, modified: 2 },
+          categoryUrls: { total: 2 },
+        },
+      }));
 
       const result = await controller.updateLlmoConfig(mockContext);
 
       expect(result.status).to.equal(200);
       expect(mockLog.info).to.have.been.calledWith(
         sinon.match(/User test-user-id modifying customer configuration/)
-          .and(sinon.match(/2 prompts/))
-          .and(sinon.match(/1 categories/))
-          .and(sinon.match(/1 topics/))
-          .and(sinon.match(/1 brand aliases/))
-          .and(sinon.match(/1 competitors/))
-          .and(sinon.match(/2 deleted prompts/))
+          .and(sinon.match(/2 prompts \(2 modified\)/))
+          .and(sinon.match(/1 categories \(1 modified\)/))
+          .and(sinon.match(/1 topics \(1 modified\)/))
+          .and(sinon.match(/1 brand aliases \(1 modified\)/))
+          .and(sinon.match(/1 competitors \(1 modified\)/))
+          .and(sinon.match(/2 deleted prompts \(2 modified\)/))
           .and(sinon.match(/2 category URLs/)),
       );
     });
 
-    it('should use "unknown" as userId when sub is missing from profile', async () => {
+    it('should use "system" as userId when sub is missing from profile', async () => {
       // Override getProfile to return profile without sub
       mockContext.attributes.authInfo.getProfile = () => ({
         email: 'test@example.com',
@@ -1358,11 +1441,11 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       expect(mockLog.info).to.have.been.calledWith(
-        sinon.match(/User unknown modifying customer configuration/),
+        sinon.match(/User system modifying customer configuration/),
       );
     });
 
-    it('should use "unknown" as userId in error when authInfo is missing', async () => {
+    it('should use "system" as userId in error when authInfo is missing', async () => {
       // Remove authInfo
       mockContext.attributes = {};
       writeConfigStub.rejects(new Error('S3 write failed'));
@@ -1376,7 +1459,7 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(400);
       expect(mockLog.error).to.have.been.calledWith(
-        sinon.match(/User unknown error updating llmo config/),
+        sinon.match(/User system error updating llmo config/),
       );
     });
 
@@ -1411,6 +1494,18 @@ describe('LlmoController', () => {
       };
       mockContext.data = configWithCategoryUrls;
       llmoConfigSchemaStub.safeParse.returns({ success: true, data: configWithCategoryUrls });
+      updateModifiedByDetailsStub.callsFake((config) => ({
+        newConfig: config,
+        stats: {
+          categories: { total: 3, modified: 3 },
+          topics: { total: 0, modified: 0 },
+          prompts: { total: 0, modified: 0 },
+          brandAliases: { total: 0, modified: 0 },
+          competitors: { total: 0, modified: 0 },
+          deletedPrompts: { total: 0, modified: 0 },
+          categoryUrls: { total: 4 },
+        },
+      }));
 
       const result = await controller.updateLlmoConfig(mockContext);
 
@@ -1436,6 +1531,18 @@ describe('LlmoController', () => {
       };
       mockContext.data = configWithoutUrls;
       llmoConfigSchemaStub.safeParse.returns({ success: true, data: configWithoutUrls });
+      updateModifiedByDetailsStub.callsFake((config) => ({
+        newConfig: config,
+        stats: {
+          categories: { total: 1, modified: 1 },
+          topics: { total: 0, modified: 0 },
+          prompts: { total: 0, modified: 0 },
+          brandAliases: { total: 0, modified: 0 },
+          competitors: { total: 0, modified: 0 },
+          deletedPrompts: { total: 0, modified: 0 },
+          categoryUrls: { total: 0 },
+        },
+      }));
 
       const result = await controller.updateLlmoConfig(mockContext);
 
@@ -1465,6 +1572,18 @@ describe('LlmoController', () => {
       };
       mockContext.data = configWithEmptyPrompts;
       llmoConfigSchemaStub.safeParse.returns({ success: true, data: configWithEmptyPrompts });
+      updateModifiedByDetailsStub.callsFake((config) => ({
+        newConfig: config,
+        stats: {
+          categories: { total: 1, modified: 1 },
+          topics: { total: 2, modified: 2 },
+          prompts: { total: 0, modified: 0 },
+          brandAliases: { total: 0, modified: 0 },
+          competitors: { total: 0, modified: 0 },
+          deletedPrompts: { total: 0, modified: 0 },
+          categoryUrls: { total: 0 },
+        },
+      }));
 
       const result = await controller.updateLlmoConfig(mockContext);
 
@@ -1472,805 +1591,6 @@ describe('LlmoController', () => {
       expect(mockLog.info).to.have.been.calledWith(
         sinon.match(/0 prompts/),
       );
-    });
-
-    describe('areChangesAICategorizationOnly (via updateLlmoConfig)', () => {
-      const aiCategoryId = 'ai-category-123';
-      const aiTopicId = 'ai-topic-456';
-
-      it('should NOT skip audit when there are no config changes', async () => {
-        readConfigStub.resolves({
-          config: llmoConfig.defaultConfig(),
-          exists: true,
-          version: 'v0',
-        });
-        mockContext.data = llmoConfig.defaultConfig();
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: llmoConfig.defaultConfig() });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-      });
-
-      it('should NOT skip audit when adding new category with human prompts', async () => {
-        readConfigStub.resolves({
-          config: llmoConfig.defaultConfig(),
-          exists: true,
-          version: 'v0',
-        });
-
-        const newConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [aiCategoryId]: { name: 'Human Category', region: ['us'] },
-          },
-          topics: {
-            [aiTopicId]: {
-              name: 'Human Topic',
-              category: aiCategoryId,
-              prompts: [{
-                prompt: 'What is this?',
-                regions: ['us'],
-                origin: 'human', // Human origin
-                source: 'config',
-              }],
-            },
-          },
-        };
-
-        mockContext.data = newConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: newConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-        const sqsCall = mockContext.sqs.sendMessage.getCall(0);
-        expect(sqsCall.args[1].auditContext.skipBrandPresenceTrigger).to.be.undefined;
-      });
-
-      it('should skip audit when adding new category with ONLY AI prompts', async () => {
-        readConfigStub.resolves({
-          config: llmoConfig.defaultConfig(),
-          exists: true,
-          version: 'v0',
-        });
-
-        const newConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [aiCategoryId]: { name: 'AI Category', region: ['us'] },
-          },
-          topics: {
-            [aiTopicId]: {
-              name: 'AI Topic',
-              category: aiCategoryId,
-              prompts: [{
-                prompt: 'AI generated prompt',
-                regions: ['us'],
-                origin: 'ai', // AI origin
-                source: 'mystique',
-              }],
-            },
-          },
-        };
-
-        mockContext.data = newConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: newConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
-          mockContext.env.AUDIT_JOBS_QUEUE_URL,
-          {
-            type: 'geo-brand-presence-trigger-refresh',
-            siteId: mockSite.getId(),
-            auditContext: {
-              configVersion: 'v1',
-            },
-          },
-        );
-      });
-
-      it('should NOT skip audit when adding multiple prompts with mixed origins', async () => {
-        readConfigStub.resolves({
-          config: llmoConfig.defaultConfig(),
-          exists: true,
-          version: 'v0',
-        });
-
-        const newConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [aiCategoryId]: { name: 'Mixed Category', region: ['us'] },
-          },
-          topics: {
-            [aiTopicId]: {
-              name: 'Mixed Topic',
-              category: aiCategoryId,
-              prompts: [
-                {
-                  prompt: 'AI prompt 1',
-                  regions: ['us'],
-                  origin: 'ai',
-                  source: 'mystique',
-                },
-                {
-                  prompt: 'Human prompt',
-                  regions: ['us'],
-                  origin: 'human', // Mixed with human
-                  source: 'config',
-                },
-              ],
-            },
-          },
-        };
-
-        mockContext.data = newConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: newConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-      });
-
-      it('should skip audit when modifying existing topic by adding ONLY AI prompts', async () => {
-        const existingConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [CATEGORY_ID]: { name: 'Existing Category', region: ['us'] },
-          },
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [{
-                prompt: 'Original prompt',
-                regions: ['us'],
-                origin: 'human',
-                source: 'config',
-              }],
-            },
-          },
-        };
-
-        readConfigStub.resolves({
-          config: existingConfig,
-          exists: true,
-          version: 'v0',
-        });
-
-        const updatedConfig = {
-          ...existingConfig,
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [
-                {
-                  prompt: 'Original prompt',
-                  regions: ['us'],
-                  origin: 'human',
-                  source: 'config',
-                },
-                {
-                  prompt: 'New AI prompt',
-                  regions: ['us'],
-                  origin: 'ai', // Only adding AI prompts
-                  source: 'mystique',
-                },
-              ],
-            },
-          },
-        };
-
-        mockContext.data = updatedConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
-          mockContext.env.AUDIT_JOBS_QUEUE_URL,
-          {
-            type: 'geo-brand-presence-trigger-refresh',
-            siteId: mockSite.getId(),
-            auditContext: {
-              configVersion: 'v1',
-            },
-          },
-        );
-      });
-
-      it('should NOT skip audit when modifying existing topic by adding human prompts', async () => {
-        const existingConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [CATEGORY_ID]: { name: 'Existing Category', region: ['us'] },
-          },
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [{
-                prompt: 'Original prompt',
-                regions: ['us'],
-                origin: 'human',
-                source: 'config',
-              }],
-            },
-          },
-        };
-
-        readConfigStub.resolves({
-          config: existingConfig,
-          exists: true,
-          version: 'v0',
-        });
-
-        const updatedConfig = {
-          ...existingConfig,
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [
-                {
-                  prompt: 'Original prompt',
-                  regions: ['us'],
-                  origin: 'human',
-                  source: 'config',
-                },
-                {
-                  prompt: 'New human prompt',
-                  regions: ['us'],
-                  origin: 'human', // Adding human prompts
-                  source: 'config',
-                },
-              ],
-            },
-          },
-        };
-
-        mockContext.data = updatedConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-      });
-
-      it('should NOT skip audit when there is no previous config (first-time onboarding)', async () => {
-        readConfigStub.resolves({
-          config: llmoConfig.defaultConfig(),
-          exists: false,
-          version: null,
-        });
-
-        const newConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [aiCategoryId]: { name: 'AI Category', region: ['us'] },
-          },
-          topics: {
-            [aiTopicId]: {
-              name: 'AI Topic',
-              category: aiCategoryId,
-              prompts: [{
-                prompt: 'AI generated prompt',
-                regions: ['us'],
-                origin: 'ai',
-                source: 'mystique',
-              }],
-            },
-          },
-        };
-
-        mockContext.data = newConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: newConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-      });
-
-      it('should NOT skip audit when brands or competitors are modified', async () => {
-        const existingConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [CATEGORY_ID]: { name: 'Category', region: ['us'] },
-          },
-          brands: {
-            aliases: [{ aliases: ['brand1'], category: CATEGORY_ID, region: ['us'] }],
-          },
-        };
-
-        readConfigStub.resolves({
-          config: existingConfig,
-          exists: true,
-          version: 'v0',
-        });
-
-        const updatedConfig = {
-          ...existingConfig,
-          brands: {
-            aliases: [
-              { aliases: ['brand1'], category: CATEGORY_ID, region: ['us'] },
-              { aliases: ['brand2'], category: CATEGORY_ID, region: ['us'] }, // New brand
-            ],
-          },
-        };
-
-        mockContext.data = updatedConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-      });
-
-      it('should skip audit when multiple categories and topics with ONLY AI prompts are added', async () => {
-        readConfigStub.resolves({
-          config: llmoConfig.defaultConfig(),
-          exists: true,
-          version: 'v0',
-        });
-
-        const newConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            'ai-cat-1': { name: 'AI Category 1', region: ['us'] },
-            'ai-cat-2': { name: 'AI Category 2', region: ['eu'] },
-          },
-          topics: {
-            'ai-topic-1': {
-              name: 'AI Topic 1',
-              category: 'ai-cat-1',
-              prompts: [
-                {
-                  prompt: 'AI prompt 1', regions: ['us'], origin: 'ai', source: 'mystique',
-                },
-                {
-                  prompt: 'AI prompt 2', regions: ['us'], origin: 'ai', source: 'mystique',
-                },
-              ],
-            },
-            'ai-topic-2': {
-              name: 'AI Topic 2',
-              category: 'ai-cat-2',
-              prompts: [
-                {
-                  prompt: 'AI prompt 3', regions: ['eu'], origin: 'ai', source: 'mystique',
-                },
-              ],
-            },
-          },
-        };
-
-        mockContext.data = newConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: newConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
-          mockContext.env.AUDIT_JOBS_QUEUE_URL,
-          {
-            type: 'geo-brand-presence-trigger-refresh',
-            siteId: mockSite.getId(),
-            auditContext: {
-              configVersion: 'v1',
-            },
-          },
-        );
-      });
-
-      it('should NOT skip audit when existing topic prompts are modified but no new prompts added', async () => {
-        const existingConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [CATEGORY_ID]: { name: 'Existing Category', region: ['us'] },
-          },
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [{
-                prompt: 'Original prompt',
-                regions: ['us'],
-                origin: 'human',
-                source: 'config',
-              }],
-            },
-          },
-        };
-
-        readConfigStub.resolves({
-          config: existingConfig,
-          exists: true,
-          version: 'v0',
-        });
-
-        // Prompts array changes but no new prompts actually added (same prompt text)
-        const updatedConfig = {
-          ...existingConfig,
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [{
-                prompt: 'Original prompt',
-                regions: ['eu'], // Only region changed
-                origin: 'human',
-                source: 'config',
-              }],
-            },
-          },
-        };
-
-        mockContext.data = updatedConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        // Should trigger brand presence refresh since only regions changed
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
-          mockContext.env.AUDIT_JOBS_QUEUE_URL,
-          {
-            type: 'geo-brand-presence-trigger-refresh',
-            siteId: mockSite.getId(),
-            auditContext: {
-              configVersion: 'v1',
-            },
-          },
-        );
-      });
-
-      it('should NOT skip audit when prompt order changes but prompts are identical', async () => {
-        const existingConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [CATEGORY_ID]: { name: 'Existing Category', region: ['us'] },
-          },
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [
-                {
-                  prompt: 'Prompt A', regions: ['us'], origin: 'human', source: 'config',
-                },
-                {
-                  prompt: 'Prompt B', regions: ['us'], origin: 'human', source: 'config',
-                },
-              ],
-            },
-          },
-        };
-
-        readConfigStub.resolves({
-          config: existingConfig,
-          exists: true,
-          version: 'v0',
-        });
-
-        // Same prompts but in different order
-        const updatedConfig = {
-          ...existingConfig,
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [
-                {
-                  prompt: 'Prompt B', regions: ['us'], origin: 'human', source: 'config',
-                },
-                {
-                  prompt: 'Prompt A', regions: ['us'], origin: 'human', source: 'config',
-                },
-              ],
-            },
-          },
-        };
-
-        mockContext.data = updatedConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        // Should NOT send message since prompts are identical (just reordered)
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-      });
-
-      it('should handle prompts with regions in different order as equal', async () => {
-        const existingConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [CATEGORY_ID]: { name: 'Existing Category', region: ['us'] },
-          },
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [{
-                prompt: 'Multi-region prompt',
-                regions: ['us', 'eu', 'asia'],
-                origin: 'ai',
-                source: 'mystique',
-              }],
-            },
-          },
-        };
-
-        readConfigStub.resolves({
-          config: existingConfig,
-          exists: true,
-          version: 'v0',
-        });
-
-        // Same prompt but regions in different order
-        const updatedConfig = {
-          ...existingConfig,
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [{
-                prompt: 'Multi-region prompt',
-                regions: ['asia', 'us', 'eu'], // Different order
-                origin: 'ai',
-                source: 'mystique',
-              }],
-            },
-          },
-        };
-
-        mockContext.data = updatedConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        // Should trigger brand presence refresh since only region order changed (AI-only)
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
-          mockContext.env.AUDIT_JOBS_QUEUE_URL,
-          {
-            type: 'geo-brand-presence-trigger-refresh',
-            siteId: mockSite.getId(),
-            auditContext: {
-              configVersion: 'v1',
-            },
-          },
-        );
-      });
-
-      it('should NOT skip audit when prompts array has different length', async () => {
-        const existingConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [CATEGORY_ID]: { name: 'Existing Category', region: ['us'] },
-          },
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [{
-                prompt: 'AI prompt 1',
-                regions: ['us'],
-                origin: 'ai',
-                source: 'mystique',
-              }],
-            },
-          },
-        };
-
-        readConfigStub.resolves({
-          config: existingConfig,
-          exists: true,
-          version: 'v0',
-        });
-
-        // Add a second AI prompt (different length array)
-        const updatedConfig = {
-          ...existingConfig,
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [
-                {
-                  prompt: 'AI prompt 1',
-                  regions: ['us'],
-                  origin: 'ai',
-                  source: 'mystique',
-                },
-                {
-                  prompt: 'AI prompt 2',
-                  regions: ['us'],
-                  origin: 'ai',
-                  source: 'mystique',
-                },
-              ],
-            },
-          },
-        };
-
-        mockContext.data = updatedConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        // Should trigger brand presence refresh since only AI prompts added
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
-          mockContext.env.AUDIT_JOBS_QUEUE_URL,
-          {
-            type: 'geo-brand-presence-trigger-refresh',
-            siteId: mockSite.getId(),
-            auditContext: {
-              configVersion: 'v1',
-            },
-          },
-        );
-      });
-
-      it('should handle topics without prompts property', async () => {
-        const existingConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [CATEGORY_ID]: { name: 'Existing Category', region: ['us'] },
-          },
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              // No prompts property
-            },
-          },
-        };
-
-        readConfigStub.resolves({
-          config: existingConfig,
-          exists: true,
-          version: 'v0',
-        });
-
-        // Add a topic with prompts
-        const updatedConfig = {
-          ...existingConfig,
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [{
-                prompt: 'AI prompt 1',
-                regions: ['us'],
-                origin: 'ai',
-                source: 'mystique',
-              }],
-            },
-          },
-        };
-
-        mockContext.data = updatedConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        // Should trigger brand presence refresh since only AI prompts added
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
-          mockContext.env.AUDIT_JOBS_QUEUE_URL,
-          {
-            type: 'geo-brand-presence-trigger-refresh',
-            siteId: mockSite.getId(),
-            auditContext: {
-              configVersion: 'v1',
-            },
-          },
-        );
-      });
-
-      it('should handle new category with topic missing prompts property', async () => {
-        readConfigStub.resolves({
-          config: llmoConfig.defaultConfig(),
-          exists: true,
-          version: 'v0',
-        });
-
-        const newCategoryId = 'new-category';
-        const newTopicId = 'new-topic';
-
-        const newConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [newCategoryId]: { name: 'New Category', region: ['us'] },
-          },
-          topics: {
-            [newTopicId]: {
-              name: 'New Topic',
-              category: newCategoryId,
-              // No prompts property - should be treated as empty array
-            },
-          },
-        };
-
-        mockContext.data = newConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: newConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        // Should trigger brand presence refresh (empty prompts array means no non-AI prompts)
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
-          mockContext.env.AUDIT_JOBS_QUEUE_URL,
-          {
-            type: 'geo-brand-presence-trigger-refresh',
-            siteId: mockSite.getId(),
-            auditContext: {
-              configVersion: 'v1',
-            },
-          },
-        );
-      });
-
-      it('should handle changed topic with new topic missing prompts property', async () => {
-        const existingConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [CATEGORY_ID]: { name: 'Existing Category', region: ['us'] },
-          },
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [{
-                prompt: 'Original prompt',
-                regions: ['us'],
-                origin: 'ai',
-                source: 'mystique',
-              }],
-            },
-          },
-        };
-
-        readConfigStub.resolves({
-          config: existingConfig,
-          exists: true,
-          version: 'v0',
-        });
-
-        // Update with topic that has no prompts property
-        const updatedConfig = {
-          ...existingConfig,
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Updated Topic',
-              category: CATEGORY_ID,
-              // No prompts property
-            },
-          },
-        };
-
-        mockContext.data = updatedConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        // Should trigger brand presence refresh (no new prompts added, all removed are AI)
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
-          mockContext.env.AUDIT_JOBS_QUEUE_URL,
-          {
-            type: 'geo-brand-presence-trigger-refresh',
-            siteId: mockSite.getId(),
-            auditContext: {
-              configVersion: 'v1',
-            },
-          },
-        );
-      });
     });
   });
 
@@ -2877,6 +2197,9 @@ describe('LlmoController', () => {
           schemas: {},
           composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
         },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
       });
       const testController = LlmoControllerOnboard(mockContext);
 
@@ -2885,8 +2208,10 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
       expect(responseBody.status).to.equal('completed');
+      expect(responseBody.brandProfileExecutionName).to.equal('exec-123');
       expect(validateSiteNotOnboardedStub).to.have.been.calledOnce;
       expect(performLlmoOnboardingStub).to.have.been.calledOnce;
+      expect(triggerBrandProfileAgentStub).to.have.been.calledOnce;
     });
 
     ['data', 'domain', 'brandName', 'authInfo', 'profile', 'tenants', 'tenant ID'].forEach((field) => {
@@ -2964,6 +2289,9 @@ describe('LlmoController', () => {
           schemas: {},
           composeBaseURL: (domain) => `https://${domain}`,
         },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
       });
       const testController = LlmoControllerOnboard(mockContext);
 
@@ -2995,6 +2323,9 @@ describe('LlmoController', () => {
           schemas: {},
           composeBaseURL: (domain) => `https://${domain}`,
         },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
       });
       const testController = LlmoControllerOnboard(mockContext);
 
@@ -3002,6 +2333,54 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(400);
       expect(mockLog.error).to.have.been.calledWith('Error during LLMO onboarding: Validation error');
+    });
+
+    it('should log warning when brand profile trigger fails but still return success', async () => {
+      const brandProfileError = new Error('brand profile failed');
+      triggerBrandProfileAgentStub.rejects(brandProfileError);
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+          performLlmoOnboarding: performLlmoOnboardingStub,
+          generateDataFolder: (baseURL, env) => {
+            const url = new URL(baseURL);
+            const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+            return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+          },
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: tracingFetchStub,
+          hasText: (text) => text && text.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object',
+          llmoConfig,
+          schemas: {},
+          composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+        },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+      });
+      const testController = LlmoControllerOnboard(mockContext);
+
+      try {
+        const result = await testController.onboardCustomer(onboardingContext);
+
+        expect(result.status).to.equal(200);
+        const responseBody = await result.json();
+        expect(responseBody.brandProfileExecutionName).to.be.null;
+        expect(mockLog.warn).to.have.been.calledWith(
+          'LLMO onboarding: failed to trigger brand-profile workflow for site new-site-id',
+          brandProfileError,
+        );
+      } finally {
+        triggerBrandProfileAgentStub.resetBehavior();
+        triggerBrandProfileAgentStub.resolves('exec-123');
+      }
     });
   });
 
@@ -3040,6 +2419,9 @@ describe('LlmoController', () => {
           performLlmoOffboarding: performLlmoOffboardingStub,
         },
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
       });
       const testController = LlmoControllerOffboard(mockContext);
 
@@ -3066,6 +2448,9 @@ describe('LlmoController', () => {
           performLlmoOffboarding: performLlmoOffboardingStub,
         },
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
       });
       const testController = LlmoControllerOffboard(mockContext);
 
@@ -3074,6 +2459,68 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
       expect(mockLog.error).to.have.been.calledWith(
         'Error during LLMO offboarding for site site123: Offboarding failed',
+      );
+    });
+  });
+
+  describe('queryFiles', () => {
+    const createControllerWithCacheStub = async (mockData) => {
+      const queryLlmoFilesStub = sinon.stub().resolves({
+        data: mockData,
+        headers: {},
+      });
+
+      const LlmoControllerWithCache = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-query-handler.js': {
+          queryLlmoFiles: queryLlmoFilesStub,
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+      });
+
+      return {
+        controller: LlmoControllerWithCache(mockContext),
+        stub: queryLlmoFilesStub,
+      };
+    };
+
+    it('should successfully fetch and return files data', async () => {
+      const mockSingleSheetData = {
+        ':type': 'sheet',
+        data: [
+          { id: 1, name: 'Test Item 1' },
+          { id: 2, name: 'Test Item 2' },
+        ],
+      };
+      const { controller: cacheController, stub } = await createControllerWithCacheStub(
+        mockSingleSheetData,
+      );
+      const result = await cacheController.queryFiles(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockSingleSheetData);
+      expect(stub).to.have.been.calledOnce;
+      expect(stub).to.have.been.calledWith(mockContext, mockLlmoConfig);
+    });
+
+    it('should handle errors and return bad request', async () => {
+      const queryLlmoFilesStub = sinon.stub().rejects(new Error('Cache query failed'));
+
+      const LlmoControllerWithCache = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-query-handler.js': {
+          queryLlmoFiles: queryLlmoFilesStub,
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+      });
+
+      const errorController = LlmoControllerWithCache(mockContext);
+      const result = await errorController.queryFiles(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Cache query failed');
+      expect(mockLog.error).to.have.been.calledWith(
+        `Error during LLMO cached query for site ${TEST_SITE_ID}: Cache query failed`,
       );
     });
   });

@@ -182,6 +182,26 @@ describe('open-preflight-config', () => {
       expect(authoringBlock.element.initial_option.text.text).to.equal('Cloud Service/Crosswalk');
     });
 
+    it('should open modal with ams authoring type', async () => {
+      siteMock.getAuthoringType.returns('ams');
+      siteMock.findById.resolves(siteMock);
+
+      const openAction = openPreflightConfig(context);
+      await openAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(clientMock.views.open).to.have.been.calledOnce;
+      const openCall = clientMock.views.open.firstCall.args[0];
+      const { blocks } = openCall.view;
+
+      const authoringBlock = blocks.find((block) => block.block_id === 'authoring_type_input');
+      expect(authoringBlock.element.initial_option.value).to.equal('ams');
+      expect(authoringBlock.element.initial_option.text.text).to.equal('AMS');
+    });
+
     it('should handle empty authoring type', async () => {
       siteMock.getAuthoringType.returns(null);
       siteMock.getDeliveryConfig.returns(null);

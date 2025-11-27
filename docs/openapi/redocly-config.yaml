@@ -1,5 +1,3 @@
-organization: adobe
-
 extends:
   - recommended
 
@@ -10,7 +8,3 @@ apis:
       operation-4xx-response: off
       operation-2xx-response: off
       path-not-include-query: off
-
-theme:
-  openapi:
-    hideRequestPayloadSample: false

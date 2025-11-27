@@ -83,8 +83,16 @@ paths:
     $ref: './configurations-api.yaml#/configurations'
   /configurations/latest:
     $ref: './configuration-api.yaml#/latest-configuration'
+  /configurations/latest/queues:
+    $ref: './configuration-api.yaml#/configuration-queues'
+  /configurations/latest/jobs/{jobType}:
+    $ref: './configuration-api.yaml#/configuration-job'
+  /configurations/latest/handlers/{handlerType}:
+    $ref: './configuration-api.yaml#/configuration-handler'
   /configurations/{version}:
     $ref: './configuration-api.yaml#/configuration'
+  /configurations/{version}/restore:
+    $ref: './configuration-api.yaml#/configuration-restore'
   /configurations/audits:
     $ref: './configuration-api.yaml#/configuration-audits'
   /configurations/audits/{auditType}:
@@ -158,6 +166,8 @@ paths:
     $ref: './consent-banner-api.yaml#/consent-banner'
   /sites:
     $ref: './sites-api.yaml#/sites'
+  /sites-resolve:
+    $ref: './sites-api.yaml#/sites-resolve'
   /sites/by-delivery-type/{deliveryType}:
     $ref: './sites-api.yaml#/sites-by-delivery-type'
   /sites/by-base-url/{base64BaseUrl}:
@@ -182,6 +192,8 @@ paths:
     $ref: './audit-api.yaml#/update-handler-type-config-for-site'
   /sites/{siteId}/brand-guidelines:
     $ref: './brands-api.yaml#/brand-guidelines-by-site-id'
+  /sites/{siteId}/brand-profile:
+    $ref: './sites-api.yaml#/site-brand-profile'
   /sites/{siteId}/config/cdn-logs:
     $ref: './site-api.yaml#/site-cdn-logs-config'
   /sites/{siteId}/opportunities:
@@ -204,6 +216,8 @@ paths:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-by-status-paged-with-cursor'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/{suggestionId}:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestion'
+  /sites/{siteId}/opportunities/{opportunityId}/suggestions/{suggestionId}/fixes:
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestion-fixes'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/status:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-status'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/auto-fix:
@@ -290,6 +304,14 @@ paths:
     $ref: './tools-api.yaml#/import-job-progress'
   /tools/import/jobs/{jobId}/result:
     $ref: './tools-api.yaml#/import-job-result'
+  /sites/{siteId}/llmo/data:
+    $ref: './llmo-api.yaml#/llmo-data'
+  /sites/{siteId}/llmo/data/{dataSource}:
+    $ref: './llmo-api.yaml#/llmo-data-with-datasource'
+  /sites/{siteId}/llmo/data/{sheetType}/{dataSource}:
+    $ref: './llmo-api.yaml#/llmo-data-with-type'
+  /sites/{siteId}/llmo/data/{sheetType}/{week}/{dataSource}:
+    $ref: './llmo-api.yaml#/llmo-data-with-type-and-week'
   /sites/{siteId}/llmo/sheet-data/{dataSource}:
     $ref: './llmo-api.yaml#/llmo-sheet-data'
   /sites/{siteId}/llmo/sheet-data/{sheetType}/{dataSource}:
