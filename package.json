@@ -80,7 +80,7 @@
     "@adobe/spacecat-shared-gpt-client": "1.6.10",
     "@adobe/spacecat-shared-http-utils": "1.19.0",
     "@adobe/spacecat-shared-ims-client": "1.11.3",
-    "@adobe/spacecat-shared-rum-api-client": "https://gist.github.com/prithipalpatwal/58e36ab4b6de0030cb5e9daa81aa09cf/raw/ec59beeb37726dac460c78216c5dcd3338de524c/adobe-spacecat-shared-rum-api-client-2.39.0.tgz",
+    "@adobe/spacecat-shared-rum-api-client": "https://gist.github.com/prithipalpatwal/58e36ab4b6de0030cb5e9daa81aa09cf/raw/91e58fc4562f30c975f0512489684612662d36ca/adobe-spacecat-shared-rum-api-client-2.39.0.tgz",
     "@adobe/spacecat-shared-scrape-client": "2.3.2",
     "@adobe/spacecat-shared-slack-client": "1.5.30",
     "@adobe/spacecat-shared-tokowaka-client": "1.1.0",
