@@ -128,10 +128,6 @@ describe('LlmoController', () => {
     mockLlmoConfig = {
       dataFolder: TEST_FOLDER,
       brand: TEST_BRAND,
-      questions: {
-        Human: [{ key: 'test-question', question: 'What is the main goal of this page?' }],
-        AI: [{ key: 'ai-question', question: 'Analyze the page content and identify key themes.' }],
-      },
       customerIntent: [
         { key: 'target_audience', value: 'small business owners' },
         { key: 'primary_goal', value: 'increase conversions' },
@@ -152,12 +148,6 @@ describe('LlmoController', () => {
     mockConfig = {
       getLlmoConfig: sinon.stub().returns(mockLlmoConfig),
       updateLlmoConfig: sinon.stub(),
-      addLlmoHumanQuestions: sinon.stub(),
-      addLlmoAIQuestions: sinon.stub(),
-      removeLlmoQuestion: sinon.stub(),
-      updateLlmoQuestion: sinon.stub(),
-      getLlmoHumanQuestions: sinon.stub().returns(mockLlmoConfig.questions.Human),
-      getLlmoAIQuestions: sinon.stub().returns(mockLlmoConfig.questions.AI),
       getLlmoCustomerIntent: sinon.stub().returns(mockLlmoConfig.customerIntent),
       addLlmoCustomerIntent: sinon.stub(),
       removeLlmoCustomerIntent: sinon.stub(),
@@ -247,12 +237,8 @@ describe('LlmoController', () => {
         siteId: TEST_SITE_ID,
         dataSource: 'test-data',
         configName: 'test-data',
-        questionKey: 'test-question',
       },
-      data: {
-        Human: [{ question: 'New human question?' }],
-        AI: [{ question: 'New AI question?' }],
-      },
+      data: {},
       dataAccess: mockDataAccess,
       log: mockLog,
       env: mockEnv,
@@ -1496,115 +1482,6 @@ describe('LlmoController', () => {
       expect(mockLog.info).to.have.been.calledWith(
         sinon.match(/0 prompts/),
       );
-    });
-  });
-
-  describe('getLlmoQuestions', () => {
-    it('should return LLMO questions successfully', async () => {
-      const result = await controller.getLlmoQuestions(mockContext);
-
-      expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-      expect(responseBody).to.deep.equal(mockLlmoConfig.questions);
-    });
-
-    it('should return empty questions when not configured', async () => {
-      mockConfig.getLlmoConfig.returns({ dataFolder: TEST_FOLDER, brand: TEST_BRAND });
-
-      const result = await controller.getLlmoQuestions(mockContext);
-
-      expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-      expect(responseBody).to.deep.equal({});
-    });
-  });
-
-  describe('addLlmoQuestion', () => {
-    it('should add human questions successfully', async () => {
-      const result = await controller.addLlmoQuestion(mockContext);
-
-      expect(result.status).to.equal(200);
-      expect(mockConfig.addLlmoHumanQuestions).to.have.been.calledOnce;
-      expect(mockSite.save).to.have.been.calledOnce;
-    });
-
-    it('should add AI questions successfully', async () => {
-      mockContext.data = { AI: [{ question: 'New AI question?' }] };
-
-      const result = await controller.addLlmoQuestion(mockContext);
-
-      expect(result.status).to.equal(200);
-      expect(mockConfig.addLlmoAIQuestions).to.have.been.calledOnce;
-    });
-
-    it('should return bad request when no questions provided', async () => {
-      mockContext.data = null;
-
-      const result = await controller.addLlmoQuestion(mockContext);
-
-      expect(result.status).to.equal(400);
-    });
-
-    it('should not save when no questions are added', async () => {
-      mockContext.data = {};
-
-      await controller.addLlmoQuestion(mockContext);
-
-      expect(mockSite.save).to.not.have.been.called;
-    });
-
-    it('should handle save errors gracefully', async () => {
-      mockSite.save.rejects(new Error('Database connection failed'));
-
-      const result = await controller.addLlmoQuestion(mockContext);
-
-      expect(result.status).to.equal(200);
-      expect(mockLog.error).to.have.been.called;
-    });
-  });
-
-  describe('removeLlmoQuestion', () => {
-    it('should remove question successfully', async () => {
-      const result = await controller.removeLlmoQuestion(mockContext);
-
-      expect(result.status).to.equal(200);
-      expect(mockConfig.removeLlmoQuestion).to.have.been.calledWith('test-question');
-    });
-
-    it('should throw error for invalid question key', async () => {
-      mockContext.params.questionKey = 'invalid-key';
-
-      try {
-        await controller.removeLlmoQuestion(mockContext);
-        expect.fail('Should have thrown an error');
-      } catch (error) {
-        expect(error.message).to.include('Invalid question key');
-      }
-    });
-
-    it('should handle null human and AI questions gracefully', async () => {
-      mockConfig.getLlmoHumanQuestions.returns(null);
-      mockConfig.getLlmoAIQuestions.returns(null);
-      mockContext.params.questionKey = 'any-key';
-
-      try {
-        await controller.removeLlmoQuestion(mockContext);
-        expect.fail('Should have thrown an error');
-      } catch (error) {
-        expect(error.message).to.include('Invalid question key');
-      }
-    });
-  });
-
-  describe('patchLlmoQuestion', () => {
-    it('should update question successfully', async () => {
-      const updateData = { question: 'Updated question?' };
-      mockContext.data = updateData;
-
-      const result = await controller.patchLlmoQuestion(mockContext);
-
-      expect(result.status).to.equal(200);
-      expect(mockConfig.updateLlmoQuestion).to.have.been.calledWith('test-question', updateData);
     });
   });
 

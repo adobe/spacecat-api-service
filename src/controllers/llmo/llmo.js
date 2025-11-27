@@ -23,7 +23,6 @@ import {
   composeBaseURL,
 } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
-import crypto from 'crypto';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
@@ -81,17 +80,6 @@ function LlmoController(ctx) {
       await site.save();
     } catch (error) {
       log.error(`Error ${operation} for site's llmo config ${site.getId()}: ${error.message}`);
-    }
-  };
-
-  // Helper function to validate question key
-  const validateQuestionKey = (config, questionKey) => {
-    const humanQuestions = config.getLlmoHumanQuestions() || [];
-    const aiQuestions = config.getLlmoAIQuestions() || [];
-
-    if (!humanQuestions.some((question) => question.key === questionKey)
-      && !aiQuestions.some((question) => question.key === questionKey)) {
-      throw new Error('Invalid question key, please provide a valid question key');
     }
   };
 
@@ -509,88 +497,6 @@ function LlmoController(ctx) {
     }
   }
 
-  // Handles requests to the LLMO questions endpoint, returns both human and ai questions
-  const getLlmoQuestions = async (context) => {
-    const { llmoConfig } = await getSiteAndValidateLlmo(context);
-    return ok(llmoConfig.questions || {});
-  };
-
-  // Handles requests to the LLMO questions endpoint, adds a new question
-  // the body format is { Human: [question1, question2], AI: [question3, question4] }
-  const addLlmoQuestion = async (context) => {
-    const { log } = context;
-    const { site, config } = await getSiteAndValidateLlmo(context);
-
-    // add the question to the llmoConfig
-    const newQuestions = context.data;
-    if (!newQuestions) {
-      return badRequest('No questions provided in the request body');
-    }
-    let updated = false;
-
-    // Prepare human questions with unique keys
-    if (newQuestions.Human && newQuestions.Human.length > 0) {
-      const humanQuestionsWithKeys = newQuestions.Human.map((question) => ({
-        ...question,
-        key: crypto.randomUUID(),
-      }));
-      config.addLlmoHumanQuestions(humanQuestionsWithKeys);
-      updated = true;
-    }
-
-    // Prepare AI questions with unique keys
-    if (newQuestions.AI && newQuestions.AI.length > 0) {
-      const aiQuestionsWithKeys = newQuestions.AI.map((question) => ({
-        ...question,
-        key: crypto.randomUUID(),
-      }));
-      config.addLlmoAIQuestions(aiQuestionsWithKeys);
-      updated = true;
-    }
-
-    if (updated) {
-      await saveSiteConfig(site, config, log, 'adding new questions');
-    }
-
-    // return the updated llmoConfig questions
-    return ok(config.getLlmoConfig().questions);
-  };
-
-  // Handles requests to the LLMO questions endpoint, removes a question
-  const removeLlmoQuestion = async (context) => {
-    const { log } = context;
-    const { questionKey } = context.params;
-    const { site, config } = await getSiteAndValidateLlmo(context);
-
-    validateQuestionKey(config, questionKey);
-
-    // remove the question using the config method
-    config.removeLlmoQuestion(questionKey);
-
-    await saveSiteConfig(site, config, log, 'removing question');
-
-    // return the updated llmoConfig questions
-    return ok(config.getLlmoConfig().questions);
-  };
-
-  // Handles requests to the LLMO questions endpoint, updates a question
-  const patchLlmoQuestion = async (context) => {
-    const { log } = context;
-    const { questionKey } = context.params;
-    const { data } = context;
-    const { site, config } = await getSiteAndValidateLlmo(context);
-
-    validateQuestionKey(config, questionKey);
-
-    // update the question using the config method
-    config.updateLlmoQuestion(questionKey, data);
-
-    await saveSiteConfig(site, config, log, 'updating question');
-
-    // return the updated llmoConfig questions
-    return ok(config.getLlmoConfig().questions);
-  };
-
   // Handles requests to the LLMO customer intent endpoint, returns customer intent array
   const getLlmoCustomerIntent = async (context) => {
     try {
@@ -910,10 +816,6 @@ function LlmoController(ctx) {
     queryLlmoSheetData,
     getLlmoGlobalSheetData,
     getLlmoConfig,
-    getLlmoQuestions,
-    addLlmoQuestion,
-    removeLlmoQuestion,
-    patchLlmoQuestion,
     getLlmoCustomerIntent,
     addLlmoCustomerIntent,
     removeLlmoCustomerIntent,
