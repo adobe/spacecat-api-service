@@ -921,6 +921,63 @@ function SitesController(ctx, log, env) {
     }
   };
 
+  const getGraph = async (context) => {
+    const siteId = context.params?.siteId;
+    const {
+      urls, startDate, endDate, granularity,
+    } = context.data || {};
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view graph data');
+    }
+
+    // Validate required parameters
+    if (!isArray(urls) || urls.length === 0) {
+      return badRequest('urls array is required and must not be empty');
+    }
+
+    if (!hasText(startDate)) {
+      return badRequest('startDate is required');
+    }
+
+    if (!hasText(endDate)) {
+      return badRequest('endDate is required');
+    }
+
+    if (!hasText(granularity)) {
+      return badRequest('granularity is required');
+    }
+
+    const rumAPIClient = RUMAPIClient.createFrom(context);
+    const domain = wwwUrlResolver(site);
+
+    try {
+      const params = {
+        domain,
+        urls,
+        startDate,
+        endDate,
+        granularity,
+      };
+
+      const graphData = await rumAPIClient.query('optimization-report-graph', params);
+
+      return ok(graphData);
+    } catch (error) {
+      log.error(`Error getting optimization report graph for site ${siteId}: ${error.message}`);
+      return internalServerError('Failed to retrieve graph data');
+    }
+  };
+
   return {
     createSite,
     getAll,
@@ -948,6 +1005,7 @@ function SitesController(ctx, log, env) {
     getSiteMetricsBySource,
     getPageMetricsBySource,
     getLatestSiteMetrics,
+    getGraph,
   };
 }
 
