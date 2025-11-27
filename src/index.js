@@ -74,6 +74,7 @@ import SiteEnrollmentsController from './controllers/site-enrollments.js';
 import TrialUsersController from './controllers/trial-users.js';
 import EntitlementsController from './controllers/entitlements.js';
 import SandboxAuditController from './controllers/sandbox-audit.js';
+import PTA2Controller from './controllers/paid/pta2.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -97,7 +98,7 @@ async function run(request, context) {
   if (method === 'OPTIONS') {
     return noContent({
       'access-control-allow-methods': 'GET, HEAD, PATCH, POST, OPTIONS, DELETE',
-      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type',
+      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type, x-trigger-audits',
       'access-control-max-age': '86400',
       'access-control-allow-origin': '*',
     });
@@ -137,6 +138,7 @@ async function run(request, context) {
     const trialUsersController = TrialUsersController(context);
     const entitlementsController = EntitlementsController(context);
     const sandboxAuditController = SandboxAuditController(context);
+    const pta2Controller = PTA2Controller(context, log, context.env);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -170,6 +172,7 @@ async function run(request, context) {
       entitlementsController,
       sandboxAuditController,
       reportsController,
+      pta2Controller,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);

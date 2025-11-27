@@ -65,8 +65,11 @@ describe('LlmoController', () => {
   let readConfigStub;
   let writeConfigStub;
   let llmoConfigSchemaStub;
+  let triggerBrandProfileAgentStub;
 
   before(async () => {
+    triggerBrandProfileAgentStub = sinon.stub().resolves('exec-123');
+
     // Set up esmock once for all tests
     LlmoController = await esmock('../../../src/controllers/llmo/llmo.js', {
       '@adobe/spacecat-shared-utils': {
@@ -83,6 +86,9 @@ describe('LlmoController', () => {
         hasText: (str) => typeof str === 'string' && str.trim().length > 0,
         isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
         composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+      },
+      '../../../src/support/brand-profile-trigger.js': {
+        triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
       },
       '../../../src/support/access-control-util.js': {
         default: class MockAccessControlUtil {
@@ -110,11 +116,15 @@ describe('LlmoController', () => {
       '../../../src/support/access-control-util.js': {
         default: createMockAccessControlUtil(false),
       },
+      '../../../src/support/brand-profile-trigger.js': {
+        triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+      },
     });
     controllerWithAccessDenied = LlmoControllerDenied;
   });
 
   beforeEach(async () => {
+    triggerBrandProfileAgentStub.resetHistory();
     mockLlmoConfig = {
       dataFolder: TEST_FOLDER,
       brand: TEST_BRAND,
@@ -265,7 +275,7 @@ describe('LlmoController', () => {
           }),
         },
       },
-      pathInfo: { method: 'GET', suffix: '/llmo/sheet-data' },
+      pathInfo: { method: 'GET', suffix: '/llmo/sheet-data', headers: {} },
     };
 
     tracingFetchStub = sinon.stub();
@@ -299,7 +309,7 @@ describe('LlmoController', () => {
         headers: {
           Authorization: `token ${TEST_API_KEY}`,
           'User-Agent': TEST_USER_AGENT,
-          'Accept-Encoding': 'gzip',
+          'Accept-Encoding': 'br',
         },
       });
     });
@@ -366,7 +376,7 @@ describe('LlmoController', () => {
         headers: {
           Authorization: 'token hlx_api_key_missing',
           'User-Agent': TEST_USER_AGENT,
-          'Accept-Encoding': 'gzip',
+          'Accept-Encoding': 'br',
         },
       });
     });
@@ -578,6 +588,8 @@ describe('LlmoController', () => {
       tracingFetchStub.resolves(createMockResponse(mockResponseData));
       mockContext.data = {
         filters: { status: 'active', category: 'premium' },
+        offset: 10,
+        limit: 100,
       };
 
       const result = await controller.queryLlmoSheetData(mockContext);
@@ -1206,12 +1218,13 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
     });
 
-    it('should trigger llmo-customer-analysis audit after writing config', async () => {
+    it('should trigger llmo-customer-analysis audit after writing config when X-Trigger-Audits header is present', async () => {
       readConfigStub.resolves({
         config: llmoConfig.defaultConfig(),
         exists: true,
         version: 'v0',
       });
+      mockContext.pathInfo.headers = { 'x-trigger-audits': 'true' };
 
       await controller.updateLlmoConfig(mockContext);
 
@@ -1226,6 +1239,19 @@ describe('LlmoController', () => {
           },
         },
       );
+    });
+
+    it('should not trigger llmo-customer-analysis audit when X-Trigger-Audits header is missing', async () => {
+      readConfigStub.resolves({
+        config: llmoConfig.defaultConfig(),
+        exists: true,
+        version: 'v0',
+      });
+      mockContext.pathInfo.headers = {};
+
+      await controller.updateLlmoConfig(mockContext);
+
+      expect(mockContext.sqs.sendMessage).to.not.have.been.called;
     });
 
     it('should return bad request when payload is not an object', async () => {
@@ -2076,6 +2102,9 @@ describe('LlmoController', () => {
           schemas: {},
           composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
         },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
       });
       const testController = LlmoControllerOnboard(mockContext);
 
@@ -2084,8 +2113,10 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
       expect(responseBody.status).to.equal('completed');
+      expect(responseBody.brandProfileExecutionName).to.equal('exec-123');
       expect(validateSiteNotOnboardedStub).to.have.been.calledOnce;
       expect(performLlmoOnboardingStub).to.have.been.calledOnce;
+      expect(triggerBrandProfileAgentStub).to.have.been.calledOnce;
     });
 
     ['data', 'domain', 'brandName', 'authInfo', 'profile', 'tenants', 'tenant ID'].forEach((field) => {
@@ -2163,6 +2194,9 @@ describe('LlmoController', () => {
           schemas: {},
           composeBaseURL: (domain) => `https://${domain}`,
         },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
       });
       const testController = LlmoControllerOnboard(mockContext);
 
@@ -2194,6 +2228,9 @@ describe('LlmoController', () => {
           schemas: {},
           composeBaseURL: (domain) => `https://${domain}`,
         },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
       });
       const testController = LlmoControllerOnboard(mockContext);
 
@@ -2201,6 +2238,54 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(400);
       expect(mockLog.error).to.have.been.calledWith('Error during LLMO onboarding: Validation error');
+    });
+
+    it('should log warning when brand profile trigger fails but still return success', async () => {
+      const brandProfileError = new Error('brand profile failed');
+      triggerBrandProfileAgentStub.rejects(brandProfileError);
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+          performLlmoOnboarding: performLlmoOnboardingStub,
+          generateDataFolder: (baseURL, env) => {
+            const url = new URL(baseURL);
+            const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+            return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+          },
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: tracingFetchStub,
+          hasText: (text) => text && text.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object',
+          llmoConfig,
+          schemas: {},
+          composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+        },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+      });
+      const testController = LlmoControllerOnboard(mockContext);
+
+      try {
+        const result = await testController.onboardCustomer(onboardingContext);
+
+        expect(result.status).to.equal(200);
+        const responseBody = await result.json();
+        expect(responseBody.brandProfileExecutionName).to.be.null;
+        expect(mockLog.warn).to.have.been.calledWith(
+          'LLMO onboarding: failed to trigger brand-profile workflow for site new-site-id',
+          brandProfileError,
+        );
+      } finally {
+        triggerBrandProfileAgentStub.resetBehavior();
+        triggerBrandProfileAgentStub.resolves('exec-123');
+      }
     });
   });
 
@@ -2239,6 +2324,9 @@ describe('LlmoController', () => {
           performLlmoOffboarding: performLlmoOffboardingStub,
         },
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
       });
       const testController = LlmoControllerOffboard(mockContext);
 
@@ -2265,6 +2353,9 @@ describe('LlmoController', () => {
           performLlmoOffboarding: performLlmoOffboardingStub,
         },
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
       });
       const testController = LlmoControllerOffboard(mockContext);
 
@@ -2273,6 +2364,68 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
       expect(mockLog.error).to.have.been.calledWith(
         'Error during LLMO offboarding for site site123: Offboarding failed',
+      );
+    });
+  });
+
+  describe('queryFiles', () => {
+    const createControllerWithCacheStub = async (mockData) => {
+      const queryLlmoFilesStub = sinon.stub().resolves({
+        data: mockData,
+        headers: {},
+      });
+
+      const LlmoControllerWithCache = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-query-handler.js': {
+          queryLlmoFiles: queryLlmoFilesStub,
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+      });
+
+      return {
+        controller: LlmoControllerWithCache(mockContext),
+        stub: queryLlmoFilesStub,
+      };
+    };
+
+    it('should successfully fetch and return files data', async () => {
+      const mockSingleSheetData = {
+        ':type': 'sheet',
+        data: [
+          { id: 1, name: 'Test Item 1' },
+          { id: 2, name: 'Test Item 2' },
+        ],
+      };
+      const { controller: cacheController, stub } = await createControllerWithCacheStub(
+        mockSingleSheetData,
+      );
+      const result = await cacheController.queryFiles(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockSingleSheetData);
+      expect(stub).to.have.been.calledOnce;
+      expect(stub).to.have.been.calledWith(mockContext, mockLlmoConfig);
+    });
+
+    it('should handle errors and return bad request', async () => {
+      const queryLlmoFilesStub = sinon.stub().rejects(new Error('Cache query failed'));
+
+      const LlmoControllerWithCache = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-query-handler.js': {
+          queryLlmoFiles: queryLlmoFilesStub,
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+      });
+
+      const errorController = LlmoControllerWithCache(mockContext);
+      const result = await errorController.queryFiles(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Cache query failed');
+      expect(mockLog.error).to.have.been.calledWith(
+        `Error during LLMO cached query for site ${TEST_SITE_ID}: Cache query failed`,
       );
     });
   });

@@ -301,7 +301,7 @@ describe('UpdateSitesAuditsCommand', () => {
       await command.handleExecution(args, slackContextMock);
 
       expect(configurationMock.enableHandlerForSite.callCount)
-        .to.equal(44); // 22 audits in demo profile × 2 sites
+        .to.equal(46); // 23 audits in demo profile × 2 sites
       expect(configurationMock.save.calledOnce).to.be.true;
       expect(slackContextMock.say.calledWith(sinon.match('Successfully'))).to.be.true;
     });
@@ -320,7 +320,7 @@ describe('UpdateSitesAuditsCommand', () => {
       await command.handleExecution(args, slackContextMock);
 
       expect(configurationMock.disableHandlerForSite.callCount)
-        .to.equal(44); // 22 audits in demo profile × 2 sites
+        .to.equal(46); // 23 audits in demo profile × 2 sites
       expect(configurationMock.save.calledOnce).to.be.true;
       expect(slackContextMock.say.calledWith(sinon.match('Successfully'))).to.be.true;
     });
@@ -601,6 +601,20 @@ describe('UpdateSitesAuditsCommand', () => {
         blocks: sinon.match.array,
       })).to.be.true;
       expect(configurationMock.enableHandlerForSite.called).to.be.false;
+    });
+
+    it('should prompt for configuration when ams type missing delivery config', async () => {
+      preflightSiteMock.getAuthoringType.returns('ams');
+      preflightSiteMock.getDeliveryConfig.returns({ }); // missing author url
+      preflightSiteMock.getHlxConfig.returns({});
+
+      const command = ToggleSiteAuditCommand(contextMock);
+      await command.handleExecution(['enable', 'https://example.com', 'preflight'], slackContextMock);
+
+      expect(slackContextMock.say.calledWith({
+        text: ':warning: Preflight audit requires additional configuration for `https://example.com`',
+        blocks: sinon.match.array,
+      }));
     });
 
     it('should show correct missing items for documentauthoring with missing helix config', async () => {

@@ -12,12 +12,14 @@
 
 /* eslint-env mocha */
 
-import { KeyEvent, Site } from '@adobe/spacecat-shared-data-access';
+import { KeyEvent, Organization, Site } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import KeyEventSchema from '@adobe/spacecat-shared-data-access/src/models/key-event/key-event.schema.js';
+import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/models/organization/organization.schema.js';
 import SiteSchema from '@adobe/spacecat-shared-data-access/src/models/site/site.schema.js';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import { hasText } from '@adobe/spacecat-shared-utils';
+import TierClient from '@adobe/spacecat-shared-tier-client';
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
@@ -43,6 +45,8 @@ describe('Sites Controller', () => {
   };
 
   const SITE_IDS = ['0b4dcf79-fe5f-410b-b11f-641f0bf56da3', 'c4420c67-b4e8-443d-b7ab-0099cfd5da20'];
+  const BRAND_PROFILE_TRIGGER_MODULE = new URL('../../src/support/brand-profile-trigger.js', import.meta.url).pathname;
+  const ACCESS_CONTROL_MODULE = new URL('../../src/support/access-control-util.js', import.meta.url).pathname;
 
   const defaultAuthAttributes = {
     attributes: {
@@ -64,14 +68,14 @@ describe('Sites Controller', () => {
     },
   };
 
-  const sites = [
+  const buildSites = () => ([
     {
       siteId: SITE_IDS[0], baseURL: 'https://site1.com', deliveryType: 'aem_edge', authoringType: 'cs/crosswalk', deliveryConfig: {}, config: Config({}), hlxConfig: {}, isSandbox: false, code: null,
     },
     {
       siteId: SITE_IDS[1], baseURL: 'https://site2.com', deliveryType: 'aem_edge', authoringType: 'cs/crosswalk', config: Config({}), hlxConfig: {}, isSandbox: false, code: null,
     },
-  ].map((site) => new Site(
+  ]).map((site) => new Site(
     {
       entities: {
         site: {
@@ -113,11 +117,11 @@ describe('Sites Controller', () => {
     loggerStub,
   ));
 
-  const keyEvents = [{
-    keyEventId: 'k1', siteId: sites[0].getId(), name: 'some-key-event', type: KeyEvent.KEY_EVENT_TYPES.CODE, time: new Date().toISOString(),
+  const buildKeyEvents = (siteList) => [{
+    keyEventId: 'k1', siteId: siteList[0].getId(), name: 'some-key-event', type: KeyEvent.KEY_EVENT_TYPES.CODE, time: new Date().toISOString(),
   },
   {
-    keyEventId: 'k2', siteId: sites[0].getId(), name: 'other-key-event', type: KeyEvent.KEY_EVENT_TYPES.SEO, time: new Date().toISOString(),
+    keyEventId: 'k2', siteId: siteList[0].getId(), name: 'other-key-event', type: KeyEvent.KEY_EVENT_TYPES.SEO, time: new Date().toISOString(),
   },
   ].map((keyEvent) => new KeyEvent(
     {
@@ -141,6 +145,9 @@ describe('Sites Controller', () => {
     loggerStub,
   ));
 
+  let sites;
+  let keyEvents;
+
   const siteFunctions = [
     'createSite',
     'getAll',
@@ -152,6 +159,7 @@ describe('Sites Controller', () => {
     'getAuditForSite',
     'getByBaseURL',
     'getByID',
+    'getBrandProfile',
     'removeSite',
     'updateSite',
     'updateCdnLogsConfig',
@@ -161,6 +169,8 @@ describe('Sites Controller', () => {
     'removeKeyEvent',
     'getSiteMetricsBySource',
     'getPageMetricsBySource',
+    'resolveSite',
+    'triggerBrandProfile',
   ];
 
   let mockDataAccess;
@@ -168,6 +178,9 @@ describe('Sites Controller', () => {
   let context;
 
   beforeEach(() => {
+    sites = buildSites();
+    keyEvents = buildKeyEvents(sites);
+
     mockDataAccess = {
       Audit: {
         findBySiteIdAndAuditTypeAndAuditedAt: sandbox.stub().resolves({
@@ -199,6 +212,14 @@ describe('Sites Controller', () => {
         allBySiteIdAndSource: sandbox.stub().resolves([]),
         allBySiteIdAndSourceAndGeo: sandbox.stub().resolves([]),
       },
+      Organization: {
+        findById: sandbox.stub().resolves(null),
+        findByImsOrgId: sandbox.stub().resolves(null),
+      },
+      SiteEnrollment: {
+        allByEntitlementId: sandbox.stub().resolves([]),
+        allBySiteId: sandbox.stub().resolves([]),
+      },
     };
 
     context = {
@@ -210,6 +231,7 @@ describe('Sites Controller', () => {
       log: loggerStub,
       env: {
         DEFAULT_ORGANIZATION_ID: 'default',
+        AGENT_WORKFLOW_STATE_MACHINE_ARN: 'arn:aws:states:us-east-1:123456789012:stateMachine:agent-workflow',
       },
       dataAccess: mockDataAccess,
       pathInfo: {
@@ -532,7 +554,7 @@ describe('Sites Controller', () => {
     expect(mockDataAccess.Site.allByDeliveryType).to.have.been.calledOnce;
     expect(resultSites).to.be.an('array').with.lengthOf(2);
     expect(resultSites[0]).to.have.property('id', SITE_IDS[0]);
-    expect(resultSites[0]).to.have.property('deliveryType', 'other');
+    expect(resultSites[0]).to.have.property('deliveryType', 'aem_edge');
   });
 
   it('gets all sites by delivery type for a non-admin user', async () => {
@@ -574,6 +596,20 @@ describe('Sites Controller', () => {
   });
 
   it('gets all sites with latest audit with ascending true', async () => {
+    const audit = {
+      getAuditedAt: () => '2021-01-01T00:00:00.000Z',
+      getAuditResult: () => ({}),
+      getAuditType: () => 'lhs-mobile',
+      getFullAuditRef: () => '',
+      getIsError: () => false,
+      getIsLive: () => true,
+      getSiteId: () => SITE_IDS[0],
+      getInvocationId: () => 'invocation-id',
+    };
+    sites.forEach((site) => {
+      // eslint-disable-next-line no-param-reassign
+      site.getLatestAuditByAuditType = sandbox.stub().resolves(audit);
+    });
     await sitesController.getAllWithLatestAudit({ params: { auditType: 'lhs-mobile', ascending: 'true' } });
 
     expect(mockDataAccess.Site.allWithLatestAudit).to.have.been.calledWith('lhs-mobile', 'asc');
@@ -590,6 +626,20 @@ describe('Sites Controller', () => {
   });
 
   it('gets all sites with latest audit with ascending false', async () => {
+    const audit = {
+      getAuditedAt: () => '2021-01-01T00:00:00.000Z',
+      getAuditResult: () => ({}),
+      getAuditType: () => 'lhs-mobile',
+      getFullAuditRef: () => '',
+      getIsError: () => false,
+      getIsLive: () => true,
+      getSiteId: () => SITE_IDS[0],
+      getInvocationId: () => 'invocation-id',
+    };
+    sites.forEach((site) => {
+      // eslint-disable-next-line no-param-reassign
+      site.getLatestAuditByAuditType = sandbox.stub().resolves(audit);
+    });
     await sitesController.getAllWithLatestAudit({ params: { auditType: 'lhs-mobile', ascending: 'false' } });
 
     expect(mockDataAccess.Site.allWithLatestAudit).to.have.been.calledWith('lhs-mobile', 'desc');
@@ -1144,20 +1194,9 @@ describe('Sites Controller', () => {
       },
     });
 
-    const resp = await (await sitesControllerMock.default(context).getSiteMetricsBySource({
+    const controller = sitesControllerMock.default(context, loggerStub, context.env);
+    const resp = await (await controller.getSiteMetricsBySource({
       params: { siteId, source, metric },
-      log: {
-        info: sandbox.spy(),
-        warn: sandbox.spy(),
-        error: sandbox.spy(),
-      },
-      s3: {
-        s3Client: {
-          send: sinon.stub(),
-        },
-        s3Bucket: 'test-bucket',
-        region: 'us-west-2',
-      },
     })).json();
 
     expect(resp).to.deep.equal(storedMetrics);
@@ -1231,6 +1270,208 @@ describe('Sites Controller', () => {
 
     expect(result.status).to.equal(403);
     expect(error).to.have.property('message', 'Only users belonging to the organization can view its metrics');
+  });
+
+  // Metrics filtering tests
+  describe('Metrics filtering by top pageViews', () => {
+    it('filters metrics to top 100 by pageViews when filterByTop100PageViews=true', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      // Create mock metrics with pageviews - 150 total, unsorted
+      const mockMetrics = Array.from({ length: 150 }, (_, i) => ({
+        url: `https://example.com/page${i}`,
+        pageviews: Math.floor(Math.random() * 10000),
+        lcp: 1500 + i,
+        cls: 0.1,
+      }));
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTop100PageViews: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Should filter to top 100
+      expect(response).to.have.length(100);
+
+      // Verify they are sorted by pageviews descending
+      response.slice(0, -1).forEach((item, index) => {
+        expect(item.pageviews).to.be.at.least(response[index + 1].pageviews);
+      });
+    });
+
+    it('filters out metrics without pageViews when filterByTop100PageViews=true', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockMetrics = [
+        { url: 'https://example.com/page1', pageviews: 5000, lcp: 1500 },
+        { url: 'https://example.com/page2', pageviews: 3000, lcp: 2000 },
+        { url: 'https://example.com/page3', lcp: 1800 }, // No pageviews
+        { url: 'https://example.com/page4', pageviews: 4000, lcp: 2200 },
+      ];
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTop100PageViews: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Should only include 3 metrics with pageviews, sorted by pageviews descending
+      expect(response).to.have.length(3);
+      expect(response[0].url).to.equal('https://example.com/page1'); // 5000
+      expect(response[1].url).to.equal('https://example.com/page4'); // 4000
+      expect(response[2].url).to.equal('https://example.com/page2'); // 3000
+    });
+
+    it('does not filter when filterByTop100PageViews is not set', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockMetrics = [
+        { url: 'https://example.com/page1', lcp: 1500, cls: 0.1 },
+        { url: 'https://example.com/page2', lcp: 2000, cls: 0.2 },
+      ];
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        // No data.filterByTop100PageViews parameter
+      });
+
+      const response = await result.json();
+
+      // Should return all unfiltered metrics (no filtering applied)
+      expect(response).to.have.length(2);
+    });
+
+    it('works with different metric types when filterByTop100PageViews=true', async () => {
+      const siteId = sites[0].getId();
+      const source = 'ahrefs';
+      const metric = 'organic-traffic';
+
+      const mockMetrics = [
+        { url: 'https://example.com/page1', pageviews: 100, views: 100 },
+        { url: 'https://example.com/page2', pageviews: 200, views: 200 },
+        { url: 'https://example.com/page3', pageviews: 150, views: 150 },
+      ];
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTop100PageViews: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Should return top 3 by pageviews, sorted descending
+      expect(response).to.have.length(3);
+      expect(response[0].url).to.equal('https://example.com/page2'); // 200 pageviews
+      expect(response[1].url).to.equal('https://example.com/page3'); // 150 pageviews
+      expect(response[2].url).to.equal('https://example.com/page1'); // 100 pageviews
+    });
+
+    it('returns all metrics when less than 100 have pageviews', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      // Create only 50 metrics with pageviews
+      const mockRumMetrics = Array.from({ length: 50 }, (_, i) => ({
+        url: `https://example.com/page${i}`,
+        pageviews: 1000 - i,
+        lcp: 1500,
+        cls: 0.1,
+      }));
+
+      const getStoredMetrics = sandbox.stub().resolves(mockRumMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTop100PageViews: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Should return all 50 metrics (less than the 100 limit)
+      expect(response).to.have.length(50);
+
+      // Verify they are sorted by pageviews descending
+      expect(response[0].pageviews).to.equal(1000);
+      expect(response[49].pageviews).to.equal(951);
+    });
+
+    it('handles null and zero pageviews correctly in sorting', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockMetrics = [
+        { url: 'https://example.com/page1', pageviews: 100, lcp: 1500 },
+        { url: 'https://example.com/page2', pageviews: null, lcp: 2000 },
+        { url: 'https://example.com/page3', pageviews: 0, lcp: 1800 },
+        { url: 'https://example.com/page4', pageviews: 50, lcp: 2200 },
+        { url: 'https://example.com/page5', pageviews: 0, lcp: 1600 },
+      ];
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTop100PageViews: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Should include only metrics where pageviews !== undefined
+      // null !== undefined is true, so null is kept
+      expect(response).to.have.length(5);
+      // Sorted: page1 (100), page4 (50), then pageviews that are 0 or null (falsy)
+      // The || 0 operator converts null to 0 for sorting
+      expect(response[0].pageviews).to.equal(100);
+      expect(response[1].pageviews).to.equal(50);
+      // Remaining items have pageviews that are falsy (0 or null)
+      // They all get treated as 0 in the sort, so order among them doesn't matter
+      expect([0, null]).to.include(response[2].pageviews);
+      expect([0, null]).to.include(response[3].pageviews);
+      expect([0, null]).to.include(response[4].pageviews);
+    });
   });
 
   it('get page metrics by source returns list of metrics', async () => {
@@ -2119,6 +2360,565 @@ describe('Sites Controller', () => {
       expect(result.status).to.equal(200);
       expect(response).to.be.an('array');
       expect(mockDataAccess.SiteTopPage.allBySiteIdAndSourceAndGeo).to.have.been.calledWith(SITE_IDS[0], 'ahrefs', 'US');
+    });
+  });
+
+  describe('resolveSite', () => {
+    let mockTierClientStub;
+    let tierClientStub;
+    let accessControlStub;
+    let testOrganizations;
+    let testSites;
+
+    beforeEach(() => {
+      accessControlStub = sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      testOrganizations = [
+        {
+          organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28',
+          name: 'Org 1',
+          imsOrgId: '1234567890ABCDEF12345678@AdobeOrg',
+          config: Config({}),
+        },
+        {
+          organizationId: '5f3b3626-029c-476e-924b-0c1bba2e871f',
+          name: 'Org 2',
+          imsOrgId: '2234567890ABCDEF12345678@AdobeOrg',
+          config: Config({}),
+        },
+        {
+          organizationId: 'org3',
+          name: 'Org 3',
+          imsOrgId: '9876567890ABCDEF12345678@AdobeOrg',
+          config: Config({}),
+        },
+        {
+          organizationId: '7033554c-de8a-44ac-a356-09b51af8cc28',
+          name: 'Org 4',
+          imsOrgId: '1176567890ABCDEF12345678@AdobeOrg',
+          config: Config({}),
+        },
+      ].map((org) => new Organization(
+        {
+          entities: {
+            organization: {
+              model: {
+                indexes: {},
+                schema: {
+                  attributes: {
+                    organizationId: { type: 'string', get: (value) => value },
+                    config: { type: 'any', get: (value) => Config(value) },
+                    name: { type: 'string', get: (value) => value },
+                    imsOrgId: { type: 'string', get: (value) => value },
+                  },
+                },
+              },
+              patch: sinon.stub().returns({
+                composite: () => ({ go: () => {} }),
+                set: () => {},
+              }),
+            },
+          },
+        },
+        {
+          log: console,
+          getCollection: stub().returns({
+            schema: OrganizationSchema,
+            findById: stub(),
+          }),
+        },
+        OrganizationSchema,
+        org,
+        console,
+      ));
+
+      // Create test sites with organizationId
+      testSites = [
+        {
+          siteId: SITE_IDS[0],
+          organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28',
+          baseURL: 'https://test-site-1.com',
+          deliveryType: 'aem_edge',
+          config: Config({}),
+        },
+        {
+          siteId: SITE_IDS[1],
+          organizationId: '7033554c-de8a-44ac-a356-09b51af8cc28',
+          baseURL: 'https://test-site-2.com',
+          deliveryType: 'aem_edge',
+          config: Config({}),
+        },
+      ].map((site) => new Site(
+        { entities: { site: { model: {} } } },
+        {
+          log: console,
+          getCollection: stub().returns({
+            schema: SiteSchema,
+            findById: stub(),
+          }),
+        },
+        SiteSchema,
+        site,
+        console,
+      ));
+
+      mockTierClientStub = {
+        checkValidEntitlement: sandbox.stub().resolves({
+          entitlement: { getId: () => 'entitlement-123' },
+        }),
+        getFirstEnrollment: sandbox.stub().resolves({
+          entitlement: { getId: () => 'entitlement-123' },
+          enrollment: { getId: () => 'enrollment-123', getSiteId: () => SITE_IDS[0] },
+          site: testSites[0],
+        }),
+        getAllEnrollment: sandbox.stub().resolves({
+          entitlement: { getId: () => 'entitlement-123' },
+          enrollments: [{ getId: () => 'enrollment-123', getSiteId: () => SITE_IDS[0] }],
+        }),
+      };
+      tierClientStub = sandbox.stub(TierClient, 'createForOrg').returns(mockTierClientStub);
+      sandbox.stub(TierClient, 'createForSite').returns(mockTierClientStub);
+    });
+
+    afterEach(() => {
+      if (accessControlStub) {
+        accessControlStub.restore();
+      }
+      if (tierClientStub) {
+        tierClientStub.restore();
+      }
+    });
+
+    it('should return bad request if no product code header provided', async () => {
+      context.pathInfo.headers = {};
+      context.data = {};
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('Product code required');
+    });
+
+    it('should return bad request if no query parameters provided', async () => {
+      context.data = {};
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('Either organizationId or imsOrg must be provided');
+    });
+
+    it('should return site data for valid organizationId with enrolled sites', async () => {
+      context.data = { organizationId: testOrganizations[0].getId() };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+      mockDataAccess.Site.findById.resolves(testSites[0]);
+
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: { getId: () => 'entitlement-123' },
+        enrollment: { getId: () => 'enrollment-1', getSiteId: () => SITE_IDS[0] },
+        site: testSites[0],
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('data');
+      expect(body.data).to.have.property('organization');
+      expect(body.data).to.have.property('site');
+    });
+
+    it('should return not found for non-existent imsOrg', async () => {
+      context.data = { imsOrg: 'nonexistent@AdobeOrg' };
+      mockDataAccess.Organization.findByImsOrgId.resolves(null);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledWith('nonexistent@AdobeOrg');
+    });
+
+    it('should call proper methods for valid imsOrg', async () => {
+      context.data = { imsOrg: testOrganizations[0].getImsOrgId() };
+      mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[0]);
+      mockDataAccess.Site.findById.resolves(testSites[0]);
+
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: null,
+        enrollment: null,
+        site: null,
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledWith(
+        testOrganizations[0].getImsOrgId(),
+      );
+      // Response can be 200 or 404 depending on enrollment data
+      expect(response.status).to.be.oneOf([200, 404]);
+    });
+
+    it('should return not found when organization has no enrolled sites', async () => {
+      context.data = { organizationId: testOrganizations[0].getId() };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: null,
+        enrollment: null,
+        site: null,
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    it('should handle errors gracefully', async () => {
+      context.data = { siteId: SITE_IDS[0], imsOrg: testOrganizations[0].getImsOrgId() };
+      mockDataAccess.Site.findById.rejects(new Error('Database error'));
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('Failed to resolve site');
+    });
+
+    it('should return site data for valid siteId with matching enrollment', async () => {
+      const validSiteId = SITE_IDS[1];
+      const targetOrgId = testOrganizations[3].getId();
+      const entitlementId = 'entitlement-siteId-path';
+
+      context.data = { siteId: validSiteId, imsOrg: testOrganizations[3].getImsOrgId() };
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+
+      const mockEntitlement = {
+        getId: () => entitlementId,
+        getProductCode: () => 'ASO',
+      };
+
+      mockTierClientStub.getAllEnrollment.resolves({
+        entitlement: mockEntitlement,
+        enrollments: [{
+          getEntitlementId: () => entitlementId,
+          getId: () => 'enrollment-siteId',
+          getSiteId: () => validSiteId,
+        }],
+      });
+
+      mockDataAccess.Site.findById.resolves(testSites[1]);
+
+      mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(mockDataAccess.Organization.findById.calledWith(targetOrgId)).to.be.true;
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('data');
+      expect(body.data).to.have.property('organization');
+      expect(body.data).to.have.property('site');
+    });
+
+    it('should return 404 not found when organization does not exist', async () => {
+      const validSiteId = SITE_IDS[1];
+      const targetOrgId = testOrganizations[3].getId();
+      const entitlementId = 'entitlement-siteId-path';
+
+      context.data = { siteId: validSiteId, organizationId: 'nonexistent-organization-id' };
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+
+      const mockEntitlement = {
+        getId: () => entitlementId,
+        getProductCode: () => 'ASO',
+      };
+
+      mockTierClientStub.getAllEnrollment.resolves({
+        entitlement: mockEntitlement,
+        enrollments: [{
+          getEntitlementId: () => entitlementId,
+          getId: () => 'enrollment-siteId',
+          getSiteId: () => validSiteId,
+        }],
+      });
+
+      mockDataAccess.Site.findById.resolves(testSites[1]);
+
+      mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(mockDataAccess.Organization.findById.calledWith(targetOrgId)).to.be.true;
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    it('should return 404 not found when ims org does not exist', async () => {
+      const validSiteId = SITE_IDS[1];
+      const entitlementId = 'entitlement-siteId-path';
+      const targetOrgId = testOrganizations[3].getId();
+
+      context.data = { siteId: validSiteId, imsOrg: 'nonexistent@AdobeOrg' };
+      context.pathInfo = { headers: { 'x-product': 'ASO' } };
+
+      const mockEntitlement = {
+        getId: () => entitlementId,
+        getProductCode: () => 'ASO',
+      };
+
+      mockTierClientStub.getAllEnrollment.resolves({
+        entitlement: mockEntitlement,
+        enrollments: [{
+          getEntitlementId: () => entitlementId,
+          getId: () => 'enrollment-siteId',
+          getSiteId: () => validSiteId,
+        }],
+      });
+
+      mockDataAccess.Site.findById.resolves(testSites[1]);
+
+      mockDataAccess.Organization.findById.resolves(testOrganizations[3]);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(mockDataAccess.Organization.findById.calledWith(targetOrgId)).to.be.true;
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.include('No site found for the provided parameters');
+    });
+
+    it('should return site data for valid imsOrg with matching enrollment', async () => {
+      context.data = { imsOrg: testOrganizations[2].getImsOrgId() };
+
+      const mockEntitlement = {
+        getId: () => 'entitlement-456',
+        getProductCode: () => 'ASO',
+      };
+
+      const mockTierClient = {
+        getFirstEnrollment: sandbox.stub().resolves({
+          entitlement: mockEntitlement,
+          enrollment: { getId: () => 'enrollment-2', getSiteId: () => SITE_IDS[0] },
+          site: testSites[0],
+        }),
+      };
+      TierClient.createForOrg.returns(mockTierClient);
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(testOrganizations[2]);
+      mockDataAccess.Site.findById.resolves(testSites[0]);
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('data');
+      expect(body.data).to.have.property('organization');
+      expect(body.data).to.have.property('site');
+      expect(body.data.organization.imsOrgId).to.equal('9876567890ABCDEF12345678@AdobeOrg');
+    });
+  });
+
+  describe('getBrandProfile', () => {
+    it('returns 400 when siteId is invalid', async () => {
+      const response = await sitesController.getBrandProfile({ params: { siteId: 'abc' } });
+      const error = await response.json();
+
+      expect(response.status).to.equal(400);
+      expect(error.message).to.equal('Site ID required');
+    });
+
+    it('returns 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const response = await sitesController.getBrandProfile({ params: { siteId: SITE_IDS[0] } });
+      const error = await response.json();
+
+      expect(response.status).to.equal(404);
+      expect(error.message).to.equal('Site not found');
+
+      mockDataAccess.Site.findById.resolves(sites[0]);
+    });
+
+    it('returns 403 when user lacks access', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
+
+      const response = await sitesController.getBrandProfile({ params: { siteId: SITE_IDS[0] } });
+      const error = await response.json();
+
+      expect(response.status).to.equal(403);
+      expect(error.message).to.equal('Only users belonging to the organization can view its sites');
+    });
+
+    it('returns 204 when no brand profile is stored', async () => {
+      const site = sites[0];
+      sandbox.stub(site, 'getConfig').returns({
+        getBrandProfile: () => null,
+      });
+
+      const response = await sitesController.getBrandProfile({ params: { siteId: SITE_IDS[0] } });
+
+      expect(response.status).to.equal(204);
+    });
+
+    it('returns the stored brand profile', async () => {
+      const site = sites[0];
+      const profile = { version: 2, summary: 'test profile' };
+      sandbox.stub(site, 'getConfig').returns({
+        getBrandProfile: () => profile,
+      });
+
+      const response = await sitesController.getBrandProfile({ params: { siteId: SITE_IDS[0] } });
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body).to.deep.equal({ brandProfile: profile });
+    });
+  });
+
+  describe('triggerBrandProfile', () => {
+    let controllerFactory;
+    let helperStub;
+    let setHasAccess;
+
+    before(async function beforeTriggerBrandProfile() {
+      this.timeout(5000);
+      helperStub = sinon.stub().resolves('exec-123');
+      let hasAccess = true;
+      const moduleMocks = {
+        [BRAND_PROFILE_TRIGGER_MODULE]: {
+          triggerBrandProfileAgent: (...args) => helperStub(...args),
+        },
+        [ACCESS_CONTROL_MODULE]: {
+          default: class MockAccessControlUtil {
+            static fromContext() {
+              return new MockAccessControlUtil();
+            }
+
+            // eslint-disable-next-line class-methods-use-this
+            hasAdminAccess() {
+              return true;
+            }
+
+            // eslint-disable-next-line class-methods-use-this
+            async hasAccess() {
+              return hasAccess;
+            }
+          },
+        },
+      };
+      const controllerModule = await esmock('../../src/controllers/sites.js', {}, moduleMocks);
+      controllerFactory = () => controllerModule.default(context, context.log, context.env);
+      setHasAccess = (value) => {
+        hasAccess = value;
+      };
+    });
+
+    beforeEach(() => {
+      helperStub.resetHistory();
+      helperStub.resolves('exec-123');
+      setHasAccess(true);
+    });
+
+    it('returns 400 when siteId is invalid', async () => {
+      const controller = controllerFactory();
+      const response = await controller.triggerBrandProfile({ params: { siteId: 'xyz' } });
+      const error = await response.json();
+
+      expect(response.status).to.equal(400);
+      expect(error.message).to.equal('Site ID required');
+      expect(helperStub).to.not.have.been.called;
+    });
+
+    it('returns 404 when site is not found', async () => {
+      const controller = controllerFactory();
+      mockDataAccess.Site.findById.resolves(null);
+
+      const response = await controller.triggerBrandProfile({ params: { siteId: SITE_IDS[0] } });
+      const error = await response.json();
+
+      expect(response.status).to.equal(404);
+      expect(error.message).to.equal('Site not found');
+      expect(helperStub).to.not.have.been.called;
+
+      mockDataAccess.Site.findById.resolves(sites[0]);
+    });
+
+    it('returns 403 when user lacks access', async () => {
+      setHasAccess(false);
+      const controller = controllerFactory();
+
+      const response = await controller.triggerBrandProfile({ params: { siteId: SITE_IDS[0] } });
+      const error = await response.json();
+
+      expect(response.status).to.equal(403);
+      expect(error.message).to.equal('Only users belonging to the organization can view its sites');
+      expect(helperStub).to.not.have.been.called;
+    });
+
+    it('returns 202 and triggers workflow with provided idempotencyKey', async () => {
+      const controller = controllerFactory();
+
+      const response = await controller.triggerBrandProfile({
+        params: { siteId: SITE_IDS[0] },
+        data: { idempotencyKey: 'manual-key' },
+      });
+      const payload = await response.json();
+
+      expect(response.status).to.equal(202);
+      expect(payload).to.deep.equal({
+        executionName: 'exec-123',
+        siteId: SITE_IDS[0],
+      });
+      expect(helperStub).to.have.been.calledOnce;
+      const args = helperStub.firstCall.args[0];
+      expect(args).to.include({
+        context,
+        site: sites[0],
+        reason: 'sites-http',
+      });
+    });
+
+    it('generates an idempotency key when one is not provided', async () => {
+      helperStub.resolves('exec-456');
+      const controller = controllerFactory();
+
+      const response = await controller.triggerBrandProfile({
+        params: { siteId: SITE_IDS[0] },
+      });
+
+      expect(response.status).to.equal(202);
+      expect(helperStub).to.have.been.calledOnce;
+    });
+
+    it('returns 500 when helper invocation fails', async () => {
+      helperStub.rejects(new Error('boom'));
+      const controller = controllerFactory();
+
+      const response = await controller.triggerBrandProfile({
+        params: { siteId: SITE_IDS[0] },
+      });
+      const error = await response.json();
+
+      expect(response.status).to.equal(500);
+      expect(error.message).to.equal('Failed to trigger brand profile agent');
+    });
+
+    it('returns 500 when helper resolves null', async () => {
+      helperStub.resolves(null);
+      const controller = controllerFactory();
+
+      const response = await controller.triggerBrandProfile({
+        params: { siteId: SITE_IDS[0] },
+      });
+      const error = await response.json();
+
+      expect(response.status).to.equal(500);
+      expect(error.message).to.equal('Failed to trigger brand profile agent');
     });
   });
 });

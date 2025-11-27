@@ -635,6 +635,7 @@ describe('Audits Controller', () => {
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
+        getBrandProfile: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -673,6 +674,7 @@ describe('Audits Controller', () => {
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
+        getBrandProfile: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -712,6 +714,7 @@ describe('Audits Controller', () => {
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
+        getBrandProfile: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -754,6 +757,7 @@ describe('Audits Controller', () => {
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
+        getBrandProfile: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -836,6 +840,7 @@ describe('Audits Controller', () => {
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
+        getBrandProfile: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -879,6 +884,7 @@ describe('Audits Controller', () => {
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
+        getBrandProfile: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -920,6 +926,7 @@ describe('Audits Controller', () => {
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
+        getBrandProfile: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -960,6 +967,7 @@ describe('Audits Controller', () => {
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
+        getBrandProfile: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -999,6 +1007,7 @@ describe('Audits Controller', () => {
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
+        getBrandProfile: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -1064,6 +1073,7 @@ describe('Audits Controller', () => {
           getCdnLogsConfig: () => ({}),
           getLlmoConfig: () => ({}),
           getTokowakaConfig: () => ({}),
+          getBrandProfile: () => ({}),
         };
 
         site.getConfig = () => siteConfig;

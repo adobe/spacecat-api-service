@@ -27,6 +27,16 @@ import { preflightConfigModal } from './preflight-config-modal.js';
 import openPreflightConfig from './open-preflight-config.js';
 import { openSetImsOrgModal, setImsOrgModal } from './set-ims-org-modal.js';
 import { openAddSiteModal, addSiteModal } from './add-site-modal.js';
+import {
+  openEnsureEntitlementSiteModal,
+  openEnsureEntitlementImsOrgModal,
+  openRevokeEntitlementSiteModal,
+  openRevokeEntitlementImsOrgModal,
+  ensureEntitlementSiteModal,
+  ensureEntitlementImsOrgModal,
+  revokeEntitlementSiteModal,
+  revokeEntitlementImsOrgModal,
+} from './entitlement-modals.js';
 
 const actions = {
   approveFriendsFamily,
@@ -47,6 +57,14 @@ const actions = {
   open_add_site_modal: openAddSiteModal,
   add_entitlements_action: addEntitlementsAction,
   update_org_action: updateOrgAction,
+  open_ensure_entitlement_site_modal: openEnsureEntitlementSiteModal,
+  open_ensure_entitlement_imsorg_modal: openEnsureEntitlementImsOrgModal,
+  open_revoke_entitlement_site_modal: openRevokeEntitlementSiteModal,
+  open_revoke_entitlement_imsorg_modal: openRevokeEntitlementImsOrgModal,
+  ensure_entitlement_site_modal: ensureEntitlementSiteModal,
+  ensure_entitlement_imsorg_modal: ensureEntitlementImsOrgModal,
+  revoke_entitlement_site_modal: revokeEntitlementSiteModal,
+  revoke_entitlement_imsorg_modal: revokeEntitlementImsOrgModal,
 };
 
 export default actions;
