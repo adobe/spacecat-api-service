@@ -1619,6 +1619,18 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(400);
     });
+
+    it('should handle save errors gracefully and still return success', async () => {
+      mockContext.data = [{ key: 'new_target', value: 'enterprise customers' }];
+      mockSite.save.rejects(new Error('Database save failed'));
+
+      const result = await controller.addLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/Error adding customer intent for site's llmo config/),
+      );
+    });
   });
 
   describe('removeLlmoCustomerIntent', () => {
