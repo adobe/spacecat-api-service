@@ -788,6 +788,8 @@ describe('Sites Controller', () => {
       previousPageViews: 24000,
       previousEngagement: 4800,
       previousLCP: 1600,
+      currentConversion: 0,
+      previousConversion: 0,
     });
   });
 
@@ -833,6 +835,8 @@ describe('Sites Controller', () => {
       previousPageViews: 24000,
       previousEngagement: 4800,
       previousLCP: 1600,
+      currentConversion: 0,
+      previousConversion: 0,
     });
   });
 
@@ -878,6 +882,8 @@ describe('Sites Controller', () => {
       previousPageViews: 0,
       previousEngagement: 4800,
       previousLCP: 1600,
+      currentConversion: 0,
+      previousConversion: 0,
     });
   });
 
@@ -923,6 +929,8 @@ describe('Sites Controller', () => {
       previousPageViews: 24000,
       previousEngagement: 4800,
       previousLCP: 1600,
+      currentConversion: 0,
+      previousConversion: 0,
     });
   });
 
@@ -966,6 +974,8 @@ describe('Sites Controller', () => {
       previousPageViews: 24000,
       previousEngagement: 0,
       previousLCP: 1600,
+      currentConversion: 0,
+      previousConversion: 0,
     });
   });
 
@@ -990,6 +1000,8 @@ describe('Sites Controller', () => {
       previousLCP: null,
       previousEngagement: 0,
       currentEngagement: 0,
+      currentConversion: 0,
+      previousConversion: 0,
     });
   });
 

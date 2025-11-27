@@ -713,6 +713,9 @@ function SitesController(ctx, log, env) {
       const currentEngagement = current.totalEngagement || 0;
       const previousEngagement = previous.totalEngagement || 0;
 
+      const currentConversion = current.totalConversion || 0;
+      const previousConversion = previous.totalConversion || 0;
+
       let cpc = 0;
 
       if (organicTraffic.length > 0) {
@@ -732,6 +735,8 @@ function SitesController(ctx, log, env) {
         previousLCP,
         currentEngagement,
         previousEngagement,
+        currentConversion,
+        previousConversion,
       });
     } catch (error) {
       log.error(`Error getting RUM metrics for site ${siteId}: ${error.message}`);
@@ -744,6 +749,8 @@ function SitesController(ctx, log, env) {
       currentLCP: null,
       previousPageViews: 0,
       currentPageViews: 0,
+      currentConversion: 0,
+      previousConversion: 0,
       previousLCP: null,
       previousEngagement: 0,
       currentEngagement: 0,
