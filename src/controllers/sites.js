@@ -704,7 +704,7 @@ function SitesController(ctx, log, env) {
         ? ((current.totalPageViews - previousPageViews) / previousPageViews) * 100
         : 0;
       const ctrChange = previous.totalCTR !== 0
-        ? Number((((current.totalCTR - previous.totalCTR) / previous.totalCTR) * 100).toFixed(15))
+        ? ((current.totalCTR - previous.totalCTR) / previous.totalCTR) * 100
         : 0;
 
       const currentLCP = current.totalLCP;

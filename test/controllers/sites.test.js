@@ -779,7 +779,7 @@ describe('Sites Controller', () => {
     const metrics = await result.json();
 
     expect(metrics).to.deep.equal({
-      ctrChange: 5.263157894736842,
+      ctrChange: 5.263157894736847,
       pageViewsChange: 0.7208333333333333,
       projectedTrafficValue: 0.036041666666666666,
       currentPageViews: 24173,
@@ -824,7 +824,7 @@ describe('Sites Controller', () => {
     const metrics = await result.json();
 
     expect(metrics).to.deep.equal({
-      ctrChange: 5.263157894736842,
+      ctrChange: 5.263157894736847,
       pageViewsChange: 0.7208333333333333,
       projectedTrafficValue: 0,
       currentPageViews: 24173,
@@ -869,7 +869,7 @@ describe('Sites Controller', () => {
     const metrics = await result.json();
 
     expect(metrics).to.deep.equal({
-      ctrChange: 5.263157894736842,
+      ctrChange: 5.263157894736847,
       pageViewsChange: 0,
       projectedTrafficValue: 0,
       currentPageViews: 24173,
@@ -957,7 +957,7 @@ describe('Sites Controller', () => {
     const metrics = await result.json();
 
     expect(metrics).to.deep.equal({
-      ctrChange: 5.263157894736842,
+      ctrChange: 5.263157894736847,
       pageViewsChange: 0.7208333333333333,
       projectedTrafficValue: 0,
       currentPageViews: 24173,
