@@ -749,6 +749,14 @@ ${deliveryConfigInfo}${previewConfigInfo}
           thread_ts: responseThreadTs,
         });
 
+        log.info('Onboard modal: attempting to trigger brand-profile', {
+          hasSite: !!site,
+          /* c8 ignore next 2 - defensive optional chaining for null site */
+          siteId: site?.getId?.(),
+          baseURL: site?.getBaseURL?.(),
+          hasSlackContext: !!slackContext?.channelId,
+        });
+
         if (site) {
           await triggerBrandProfileAgent({
             context: lambdaContext,
@@ -756,6 +764,8 @@ ${deliveryConfigInfo}${previewConfigInfo}
             slackContext,
             reason: 'aso-slack',
           });
+        } else {
+          log.warn('Onboard modal: site is null, skipping brand-profile trigger');
         }
       }
 
