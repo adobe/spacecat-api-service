@@ -228,8 +228,6 @@ paths:
     $ref: './site-top-pages-api.yaml#/site-top-pages-by-source-and-geo'
   /sites/{siteId}/url-store:
     $ref: './url-store-api.yaml#/url-store-list'
-  /sites/{siteId}/url-store/by-source/{source}:
-    $ref: './url-store-api.yaml#/url-store-by-source'
   /sites/{siteId}/url-store/by-audit/{auditType}:
     $ref: './url-store-api.yaml#/url-store-by-audit'
   /sites/{siteId}/url-store/{base64Url}:

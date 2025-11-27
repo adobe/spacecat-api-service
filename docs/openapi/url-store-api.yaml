@@ -3,6 +3,13 @@ url-store-list:
     - $ref: './parameters.yaml#/siteId'
   get:
     parameters:
+      - name: byCustomer
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: true
+        description: Filter by customer-added (true) or system-added (false) URLs. Defaults to true.
       - name: limit
         in: query
         required: false
@@ -36,82 +43,16 @@ url-store-list:
     tags:
       - site
       - url store
-    summary: List all URLs for a site
+    summary: List URLs for a site
     description: |
-      Retrieves all URLs stored for a site with pagination support.
+      Retrieves URLs stored for a site with pagination support.
+      By default, returns customer-added URLs (byCustomer=true).
+      Pass byCustomer=false to get system-added URLs.
       URLs are returned in batches with a cursor for fetching the next page.
     operationId: listUrls
     responses:
       '200':
         description: A paginated list of audit URLs
-        content:
-          application/json:
-            schema:
-              $ref: './schemas.yaml#/AuditUrlListResponse'
-      '400':
-        $ref: './responses.yaml#/400'
-      '401':
-        $ref: './responses.yaml#/401'
-      '403':
-        $ref: './responses.yaml#/403'
-      '404':
-        $ref: './responses.yaml#/404-site-not-found-with-id'
-      '500':
-        $ref: './responses.yaml#/500'
-    security:
-      - api_key: [ ]
-
-url-store-by-source:
-  parameters:
-    - $ref: './parameters.yaml#/siteId'
-    - name: source
-      in: path
-      required: true
-      schema:
-        type: string
-      description: Source of the URLs (e.g., "manual", "sitemap")
-    - name: limit
-      in: query
-      required: false
-      schema:
-        type: integer
-        minimum: 1
-        maximum: 500
-        default: 100
-      description: Number of items to return per page
-    - name: cursor
-      in: query
-      required: false
-      schema:
-        type: string
-      description: Pagination cursor from previous response
-    - name: sortBy
-      in: query
-      required: false
-      schema:
-        type: string
-        enum: [rank, traffic, url, createdAt, updatedAt]
-      description: Field to sort by
-    - name: sortOrder
-      in: query
-      required: false
-      schema:
-        type: string
-        enum: [asc, desc]
-        default: asc
-      description: Sort order (ascending or descending)
-  get:
-    tags:
-      - site
-      - url store
-    summary: List URLs by source
-    description: |
-      Retrieves URLs filtered by their source (e.g., "manual", "sitemap").
-      Results are paginated.
-    operationId: listUrlsBySource
-    responses:
-      '200':
-        description: A paginated list of audit URLs from the specified source
         content:
           application/json:
             schema:

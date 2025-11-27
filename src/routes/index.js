@@ -244,7 +244,6 @@ export default function getRouteHandlers(
 
     // URL Store endpoints
     'GET /sites/:siteId/url-store': urlStoreController.listUrls,
-    'GET /sites/:siteId/url-store/by-source/:source': urlStoreController.listUrlsBySource,
     'GET /sites/:siteId/url-store/by-audit/:auditType': urlStoreController.listUrlsByAuditType,
     'GET /sites/:siteId/url-store/:base64Url': urlStoreController.getUrl,
     'POST /sites/:siteId/url-store': urlStoreController.addUrls,

@@ -104,7 +104,8 @@ function UrlStoreController(ctx, log) {
 
   /**
    * List all URLs for a site with pagination and sorting.
-   * GET /sites/{siteId}/url-store
+   * Supports optional byCustomer filter (defaults to true for customer-added URLs).
+   * GET /sites/{siteId}/url-store?byCustomer=true|false
    */
   const listUrls = async (context) => {
     const { siteId } = context.params;
@@ -113,11 +114,20 @@ function UrlStoreController(ctx, log) {
       cursor,
       sortBy,
       sortOrder = 'asc',
+      byCustomer, // Optional: true for customer-added, false for system-added
     } = context.data || {};
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
+
+    // Validate byCustomer parameter if provided
+    if (byCustomer !== undefined && typeof byCustomer !== 'boolean' && byCustomer !== 'true' && byCustomer !== 'false') {
+      return badRequest('byCustomer must be a boolean (true or false)');
+    }
+
+    // Convert string to boolean if needed, default to true
+    const byCustomerFilter = byCustomer === undefined ? true : (byCustomer === true || byCustomer === 'true');
 
     // Validate sortBy field
     const validSortFields = ['rank', 'traffic', 'url', 'createdAt', 'updatedAt'];
@@ -142,7 +152,8 @@ function UrlStoreController(ctx, log) {
     }
 
     try {
-      const result = await AuditUrl.allBySiteIdSorted(siteId, {
+      // If byCustomer filter was explicitly provided or defaulted, filter by it
+      const result = await AuditUrl.allBySiteIdByCustomerSorted(siteId, byCustomerFilter, {
         limit: parsedLimit,
         cursor,
         sortBy,
@@ -156,67 +167,6 @@ function UrlStoreController(ctx, log) {
     } catch (error) {
       log.error(`Error listing URLs for site ${siteId}: ${error.message}`);
       return internalServerError('Failed to list URLs');
-    }
-  };
-
-  /**
-   * List URLs by source with pagination and sorting.
-   * GET /sites/{siteId}/url-store/by-source/{source}
-   */
-  const listUrlsBySource = async (context) => {
-    const { siteId, source } = context.params;
-    const {
-      limit = DEFAULT_LIMIT,
-      cursor,
-      sortBy,
-      sortOrder = 'asc',
-    } = context.data || {};
-
-    if (!isValidUUID(siteId)) {
-      return badRequest('Site ID required');
-    }
-
-    if (!hasText(source)) {
-      return badRequest('Source required');
-    }
-
-    // Validate sortBy field
-    const validSortFields = ['rank', 'traffic', 'url', 'createdAt', 'updatedAt'];
-    if (sortBy && !validSortFields.includes(sortBy)) {
-      return badRequest(`Invalid sortBy field. Must be one of: ${validSortFields.join(', ')}`);
-    }
-
-    // Validate sortOrder
-    if (sortOrder && !['asc', 'desc'].includes(sortOrder)) {
-      return badRequest('Invalid sortOrder. Must be "asc" or "desc"');
-    }
-
-    const parsedLimit = Math.min(parseInt(limit, 10) || DEFAULT_LIMIT, MAX_LIMIT);
-
-    const site = await Site.findById(siteId);
-    if (!site) {
-      return notFound('Site not found');
-    }
-
-    if (!await accessControlUtil.hasAccess(site)) {
-      return forbidden('Only users belonging to the organization can view URLs');
-    }
-
-    try {
-      const result = await AuditUrl.allBySiteIdAndSourceSorted(siteId, source, {
-        limit: parsedLimit,
-        cursor,
-        sortBy,
-        sortOrder,
-      });
-
-      return ok({
-        items: result.items || [],
-        cursor: result.cursor,
-      });
-    } catch (error) {
-      log.error(`Error listing URLs by source for site ${siteId}: ${error.message}`);
-      return internalServerError('Failed to list URLs by source');
     }
   };
 
@@ -374,13 +324,16 @@ function UrlStoreController(ctx, log) {
         const rank = urlData.rank !== undefined ? urlData.rank : null;
         const traffic = urlData.traffic !== undefined ? urlData.traffic : null;
 
+        // Extract byCustomer flag, default to true
+        const byCustomer = urlData.byCustomer !== undefined ? urlData.byCustomer : true;
+
         // Check if URL already exists (idempotent)
         let existingUrl = await AuditUrl.findBySiteIdAndUrl(siteId, canonicalUrl);
 
         if (existingUrl) {
-          // Upsert: update to manual source and merge audits if user-provided
-          if (urlData.source === 'manual' || !existingUrl.getSource || existingUrl.getSource() !== 'manual') {
-            existingUrl.setSource('manual');
+          // Upsert: update if user is claiming ownership
+          if (byCustomer || !existingUrl.getByCustomer || existingUrl.getByCustomer() !== true) {
+            existingUrl.setByCustomer(byCustomer);
             existingUrl.setAudits(audits);
             if (rank !== null) existingUrl.setRank(rank);
             if (traffic !== null) existingUrl.setTraffic(traffic);
@@ -394,7 +347,7 @@ function UrlStoreController(ctx, log) {
         const newUrl = await AuditUrl.create({
           siteId,
           url: canonicalUrl,
-          source: urlData.source || 'manual',
+          byCustomer,
           audits,
           rank,
           traffic,
@@ -568,7 +521,7 @@ function UrlStoreController(ctx, log) {
   };
 
   /**
-   * Remove URLs in bulk (only manual sources).
+   * Remove URLs in bulk (only customer-added URLs with byCustomer=true).
    * DELETE /sites/{siteId}/url-store
    */
   const deleteUrls = async (context) => {
@@ -619,13 +572,13 @@ function UrlStoreController(ctx, log) {
           };
         }
 
-        // Check if source is manual
-        const source = auditUrl.getSource ? auditUrl.getSource() : auditUrl.source;
-        if (source !== 'manual') {
+        // Check if byCustomer is true (customer-added)
+        const byCustomer = auditUrl.getByCustomer ? auditUrl.getByCustomer() : auditUrl.byCustomer;
+        if (!byCustomer) {
           return {
             success: false,
             url,
-            reason: 'Can only delete URLs with source: manual',
+            reason: 'Can only delete customer-added URLs (byCustomer: true)',
           };
         }
 
@@ -673,7 +626,6 @@ function UrlStoreController(ctx, log) {
 
   return {
     listUrls,
-    listUrlsBySource,
     listUrlsByAuditType,
     getUrl,
     addUrls,

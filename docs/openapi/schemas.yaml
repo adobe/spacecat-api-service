@@ -1654,11 +1654,11 @@ AuditUrl:
     url:
       description: URL after canonicalization
       $ref: '#/URL'
-    source:
-      description: Origin of the URL
-      type: string
-      default: manual
-      example: manual
+    byCustomer:
+      description: Whether the URL was added by a customer (true) or system (false)
+      type: boolean
+      default: true
+      example: true
     audits:
       description: Enabled audit types
       type: array
@@ -1692,7 +1692,7 @@ AuditUrl:
   example:
     siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
     url: 'https://example.com/documents/report.pdf'
-    source: 'manual'
+    byCustomer: true
     audits: ['accessibility', 'broken-backlinks']
     rank: 1
     traffic: 50000
@@ -1709,10 +1709,10 @@ AuditUrlInput:
     url:
       description: The URL to add
       $ref: '#/URL'
-    source:
-      description: Origin of the URL (defaults to "manual")
-      type: string
-      default: manual
+    byCustomer:
+      description: Whether the URL was added by a customer (true) or system (false). Defaults to true.
+      type: boolean
+      default: true
     audits:
       description: Enabled audit types
       type: array
@@ -1731,7 +1731,7 @@ AuditUrlInput:
       example: 50000
   example:
     url: 'https://example.com/page1.html'
-    source: 'manual'
+    byCustomer: true
     audits: ['accessibility', 'broken-backlinks']
     rank: 1
     traffic: 50000
@@ -1781,7 +1781,7 @@ AuditUrlListResponse:
     items:
       - siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
         url: 'https://example.com/page1.html'
-        source: 'manual'
+        byCustomer: true
         audits: ['accessibility']
         createdAt: '2025-10-10T12:00:00Z'
         updatedAt: '2025-10-10T15:30:00Z'
@@ -1840,7 +1840,7 @@ AuditUrlBulkResponse:
     items:
       - siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
         url: 'https://example.com/page1.html'
-        source: 'manual'
+        byCustomer: true
         audits: ['accessibility']
         createdAt: '2025-10-10T12:00:00Z'
         updatedAt: '2025-10-10T15:30:00Z'
@@ -1888,7 +1888,7 @@ AuditUrlDeleteResponse:
       failure: 1
     failures:
       - url: 'https://example.com/from-sitemap'
-        reason: 'Can only delete URLs with source: manual'
+        reason: 'Can only delete customer-added URLs (byCustomer: true)'
 SiteExperimentVariant:
   type: object
   properties:
