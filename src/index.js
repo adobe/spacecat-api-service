@@ -32,7 +32,7 @@ import {
   elevatedSlackClientWrapper,
   SLACK_TARGETS,
 } from '@adobe/spacecat-shared-slack-client';
-import { hasText, resolveSecretsName } from '@adobe/spacecat-shared-utils';
+import { hasText, resolveSecretsName, logWrapper } from '@adobe/spacecat-shared-utils';
 
 import sqs from './support/sqs.js';
 import getRouteHandlers from './routes/index.js';
@@ -207,6 +207,7 @@ export const main = wrap(run)
   .with(authWrapper, {
     authHandlers: [JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler],
   })
+  .with(logWrapper)
   .with(dataAccess)
   .with(bodyData)
   .with(multipartFormData)
