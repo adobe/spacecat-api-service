@@ -177,6 +177,7 @@ describe('Opportunities Controller', () => {
     'createOpportunity',
     'patchOpportunity',
     'removeOpportunity',
+    'getTopPaidOpportunities',
   ];
 
   let mockOpportunityDataAccess;
@@ -1031,6 +1032,455 @@ describe('Opportunities Controller', () => {
         expect(error).to.have.property('message', 'Only users belonging to the organization of the site can remove its opportunities');
         expect(mockSite.findById).to.have.been.calledWith(SITE_ID);
       });
+    });
+  });
+
+  describe('getTopPaidOpportunities', () => {
+    let mockSuggestion;
+
+    beforeEach(() => {
+      mockSuggestion = {
+        allByOpportunityId: sandbox.stub(),
+      };
+
+      mockOpportunityDataAccess.Suggestion = mockSuggestion;
+      opportunitiesController = OpportunitiesController(mockContext);
+    });
+
+    it('returns top paid opportunities with NEW and IN_PROGRESS status', async () => {
+      const paidOppty1 = {
+        getId: () => 'oppty-1',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'Paid Media Opportunity',
+        getDescription: () => 'Description for paid media',
+        getType: () => 'broken-backlinks',
+        getStatus: () => 'NEW',
+        getTags: () => ['paid media'],
+        getData: () => ({ projectedTrafficLost: 1000, projectedTrafficValue: 5000 }),
+      };
+
+      const paidOppty2 = {
+        getId: () => 'oppty-2',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'Traffic Acquisition Opportunity',
+        getDescription: () => 'Description for traffic acquisition',
+        getType: () => 'content-optimization',
+        getStatus: () => 'IN_PROGRESS',
+        getTags: () => ['traffic acquisition'],
+        getData: () => ({ projectedTrafficLost: 2000, projectedTrafficValue: 8000 }),
+      };
+
+      mockOpportunity.allBySiteIdAndStatus
+        .withArgs(SITE_ID, 'NEW').resolves([paidOppty1])
+        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([paidOppty2]);
+
+      const mockSuggestions = [
+        {
+          getData: () => ({ url_from: 'https://example.com/page1' }),
+          getRank: () => 100,
+        },
+      ];
+
+      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+
+      const response = await opportunitiesController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+      });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      expect(opportunities).to.be.an('array').with.lengthOf(2);
+      // Should be sorted by projectedTrafficValue descending
+      expect(opportunities[0].projectedTrafficValue).to.equal(8000);
+      expect(opportunities[1].projectedTrafficValue).to.equal(5000);
+      expect(opportunities[0]).to.have.property('status', 'IN_PROGRESS');
+      expect(opportunities[1]).to.have.property('status', 'NEW');
+    });
+
+    it('filters out opportunities without description', async () => {
+      const withDescription = {
+        getId: () => 'oppty-1',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'Valid Opportunity',
+        getDescription: () => 'Has description',
+        getType: () => 'broken-backlinks',
+        getStatus: () => 'NEW',
+        getTags: () => ['paid media'],
+        getData: () => ({ projectedTrafficLost: 1000, projectedTrafficValue: 5000 }),
+      };
+
+      const withoutDescription = {
+        getId: () => 'oppty-2',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'Invalid Opportunity',
+        getDescription: () => '',
+        getType: () => 'content-optimization',
+        getStatus: () => 'NEW',
+        getTags: () => ['paid media'],
+        getData: () => ({ projectedTrafficLost: 2000, projectedTrafficValue: 8000 }),
+      };
+
+      mockOpportunity.allBySiteIdAndStatus
+        .withArgs(SITE_ID, 'NEW').resolves([withDescription, withoutDescription])
+        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+
+      mockSuggestion.allByOpportunityId.resolves([]);
+
+      const response = await opportunitiesController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+      });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      expect(opportunities).to.be.an('array').with.lengthOf(1);
+      expect(opportunities[0].name).to.equal('Valid Opportunity');
+    });
+
+    it('filters out opportunities with "report" in title', async () => {
+      const validOppty = {
+        getId: () => 'oppty-1',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'Valid Opportunity',
+        getDescription: () => 'Has description',
+        getType: () => 'broken-backlinks',
+        getStatus: () => 'NEW',
+        getTags: () => ['paid media'],
+        getData: () => ({ projectedTrafficLost: 1000, projectedTrafficValue: 5000 }),
+      };
+
+      const reportOppty = {
+        getId: () => 'oppty-2',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'Monthly Report Opportunity',
+        getDescription: () => 'Has description',
+        getType: () => 'content-optimization',
+        getStatus: () => 'NEW',
+        getTags: () => ['paid media'],
+        getData: () => ({ projectedTrafficLost: 2000, projectedTrafficValue: 8000 }),
+      };
+
+      mockOpportunity.allBySiteIdAndStatus
+        .withArgs(SITE_ID, 'NEW').resolves([validOppty, reportOppty])
+        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+
+      mockSuggestion.allByOpportunityId.resolves([]);
+
+      const response = await opportunitiesController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+      });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      expect(opportunities).to.be.an('array').with.lengthOf(1);
+      expect(opportunities[0].name).to.equal('Valid Opportunity');
+    });
+
+    it('filters out opportunities with 0 projected traffic value', async () => {
+      const validOppty = {
+        getId: () => 'oppty-1',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'Valid Opportunity',
+        getDescription: () => 'Has description',
+        getType: () => 'broken-backlinks',
+        getStatus: () => 'NEW',
+        getTags: () => ['paid media'],
+        getData: () => ({ projectedTrafficLost: 1000, projectedTrafficValue: 5000 }),
+      };
+
+      const zeroValueOppty = {
+        getId: () => 'oppty-2',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'Zero Value Opportunity',
+        getDescription: () => 'Has description',
+        getType: () => 'content-optimization',
+        getStatus: () => 'NEW',
+        getTags: () => ['paid media'],
+        getData: () => ({ projectedTrafficLost: 0, projectedTrafficValue: 0 }),
+      };
+
+      mockOpportunity.allBySiteIdAndStatus
+        .withArgs(SITE_ID, 'NEW').resolves([validOppty, zeroValueOppty])
+        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+
+      mockSuggestion.allByOpportunityId.resolves([]);
+
+      const response = await opportunitiesController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+      });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      expect(opportunities).to.be.an('array').with.lengthOf(1);
+      expect(opportunities[0].name).to.equal('Valid Opportunity');
+      expect(opportunities[0].projectedTrafficValue).to.equal(5000);
+    });
+
+    it('filters by target tags (case-insensitive)', async () => {
+      const paidMediaOppty = {
+        getId: () => 'oppty-1',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'Paid Media Opportunity',
+        getDescription: () => 'Description',
+        getType: () => 'broken-backlinks',
+        getStatus: () => 'NEW',
+        getTags: () => ['Paid Media'], // Different case
+        getData: () => ({ projectedTrafficLost: 1000, projectedTrafficValue: 5000 }),
+      };
+
+      const engagementOppty = {
+        getId: () => 'oppty-2',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'Engagement Opportunity',
+        getDescription: () => 'Description',
+        getType: () => 'content-optimization',
+        getStatus: () => 'NEW',
+        getTags: () => ['ENGAGEMENT'], // Different case
+        getData: () => ({ projectedTrafficLost: 2000, projectedTrafficValue: 8000 }),
+      };
+
+      const otherOppty = {
+        getId: () => 'oppty-3',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'Other Opportunity',
+        getDescription: () => 'Description',
+        getType: () => 'other',
+        getStatus: () => 'NEW',
+        getTags: () => ['other-tag'],
+        getData: () => ({ projectedTrafficLost: 3000, projectedTrafficValue: 10000 }),
+      };
+
+      mockOpportunity.allBySiteIdAndStatus
+        .withArgs(SITE_ID, 'NEW').resolves([paidMediaOppty, engagementOppty, otherOppty])
+        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+
+      mockSuggestion.allByOpportunityId.resolves([]);
+
+      const response = await opportunitiesController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+      });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      expect(opportunities).to.be.an('array').with.lengthOf(2);
+      expect(opportunities.map((o) => o.name)).to.include('Paid Media Opportunity');
+      expect(opportunities.map((o) => o.name)).to.include('Engagement Opportunity');
+      expect(opportunities.map((o) => o.name)).to.not.include('Other Opportunity');
+    });
+
+    it('limits URLs to 10', async () => {
+      const oppty = {
+        getId: () => 'oppty-1',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'Opportunity with many URLs',
+        getDescription: () => 'Description',
+        getType: () => 'broken-backlinks',
+        getStatus: () => 'NEW',
+        getTags: () => ['paid media'],
+        getData: () => ({ projectedTrafficLost: 1000, projectedTrafficValue: 5000 }),
+      };
+
+      mockOpportunity.allBySiteIdAndStatus
+        .withArgs(SITE_ID, 'NEW').resolves([oppty])
+        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+
+      // Create 15 suggestions with different URLs
+      const manySuggestions = Array.from({ length: 15 }, (_, i) => ({
+        getData: () => ({ url_from: `https://example.com/page${i + 1}` }),
+        getRank: () => 100,
+      }));
+
+      mockSuggestion.allByOpportunityId.resolves(manySuggestions);
+
+      const response = await opportunitiesController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+      });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      expect(opportunities).to.be.an('array').with.lengthOf(1);
+      expect(opportunities[0].urls).to.be.an('array').with.lengthOf(10);
+    });
+
+    it('returns 400 for invalid site ID', async () => {
+      const response = await opportunitiesController.getTopPaidOpportunities({
+        params: { siteId: 'invalid-uuid' },
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Site ID required');
+    });
+
+    it('returns 404 when site does not exist', async () => {
+      mockSite.findById.resolves(null);
+
+      const response = await opportunitiesController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+      });
+
+      expect(response.status).to.equal(404);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Site not found');
+    });
+
+    it('includes type, description, status, system_type, and system_description in response', async () => {
+      const oppty = {
+        getId: () => 'oppty-1',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'Test Opportunity',
+        getDescription: () => 'System description',
+        getType: () => 'broken-backlinks',
+        getStatus: () => 'NEW',
+        getTags: () => ['paid media'],
+        getData: () => ({ projectedTrafficLost: 1000, projectedTrafficValue: 5000 }),
+      };
+
+      mockOpportunity.allBySiteIdAndStatus
+        .withArgs(SITE_ID, 'NEW').resolves([oppty])
+        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+
+      mockSuggestion.allByOpportunityId.resolves([]);
+
+      const response = await opportunitiesController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+      });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      expect(opportunities).to.be.an('array').with.lengthOf(1);
+      expect(opportunities[0]).to.have.property('type', null);
+      expect(opportunities[0]).to.have.property('description', null);
+      expect(opportunities[0]).to.have.property('status', 'NEW');
+      expect(opportunities[0]).to.have.property('system_type', 'broken-backlinks');
+      expect(opportunities[0]).to.have.property('system_description', 'System description');
+    });
+
+    it('aggregates page views from traffic_domain field', async () => {
+      const oppty = {
+        getId: () => 'oppty-1',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'Test Opportunity',
+        getDescription: () => 'Description',
+        getType: () => 'broken-backlinks',
+        getStatus: () => 'NEW',
+        getTags: () => ['paid media'],
+        getData: () => ({ projectedTrafficLost: 1000, projectedTrafficValue: 5000 }),
+      };
+
+      mockOpportunity.allBySiteIdAndStatus
+        .withArgs(SITE_ID, 'NEW').resolves([oppty])
+        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+
+      const suggestionsWithTrafficDomain = [
+        {
+          getData: () => ({ url_from: 'https://example.com/page1', traffic_domain: 500 }),
+          getRank: () => 100,
+        },
+        {
+          getData: () => ({ url_from: 'https://example.com/page2', traffic_domain: 300 }),
+          getRank: () => 50,
+        },
+      ];
+
+      mockSuggestion.allByOpportunityId.resolves(suggestionsWithTrafficDomain);
+
+      const response = await opportunitiesController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+      });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      expect(opportunities).to.be.an('array').with.lengthOf(1);
+      // Should aggregate: rank (100 + 50) + traffic_domain (500 + 300) = 950
+      expect(opportunities[0].pageViews).to.equal(950);
+    });
+
+    it('aggregates page views from trafficDomain field', async () => {
+      const oppty = {
+        getId: () => 'oppty-1',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'Test Opportunity',
+        getDescription: () => 'Description',
+        getType: () => 'broken-backlinks',
+        getStatus: () => 'NEW',
+        getTags: () => ['paid media'],
+        getData: () => ({ projectedTrafficLost: 1000, projectedTrafficValue: 5000 }),
+      };
+
+      mockOpportunity.allBySiteIdAndStatus
+        .withArgs(SITE_ID, 'NEW').resolves([oppty])
+        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+
+      const suggestionsWithTrafficDomain = [
+        {
+          getData: () => ({ url_from: 'https://example.com/page1', trafficDomain: 400 }),
+          getRank: () => 100,
+        },
+        {
+          getData: () => ({ url_from: 'https://example.com/page2', trafficDomain: 200 }),
+          getRank: () => 50,
+        },
+      ];
+
+      mockSuggestion.allByOpportunityId.resolves(suggestionsWithTrafficDomain);
+
+      const response = await opportunitiesController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+      });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      expect(opportunities).to.be.an('array').with.lengthOf(1);
+      // Should aggregate: rank (100 + 50) + trafficDomain (400 + 200) = 750
+      expect(opportunities[0].pageViews).to.equal(750);
+    });
+
+    it('returns 403 when user does not have access to site', async () => {
+      // Mock Site with Organization
+      const mockOrg = {
+        getImsOrgId: () => 'test-org-id',
+      };
+
+      const mockSiteWithOrg = {
+        id: SITE_ID,
+        getOrganization: async () => mockOrg,
+      };
+      Object.setPrototypeOf(mockSiteWithOrg, Site.prototype);
+      mockSite.findById.resolves(mockSiteWithOrg);
+
+      // Create a restricted auth context
+      const restrictedAuthInfo = new AuthInfo()
+        .withType('jwt')
+        .withScopes([{ name: 'user' }])
+        .withProfile({ is_admin: false })
+        .withAuthenticated(true);
+
+      // Set organizations claim to empty array (no access)
+      restrictedAuthInfo.claims = {
+        organizations: [],
+      };
+
+      const restrictedContext = {
+        dataAccess: mockOpportunityDataAccess,
+        log: mockContext.log,
+        pathInfo: {
+          headers: { 'x-product': 'abcd' },
+        },
+        attributes: {
+          authInfo: restrictedAuthInfo,
+        },
+      };
+
+      const restrictedController = OpportunitiesController(restrictedContext);
+
+      const response = await restrictedController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+      });
+
+      expect(response.status).to.equal(403);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Only users belonging to the organization of the site can view its opportunities');
+      expect(mockSite.findById).to.have.been.calledWith(SITE_ID);
     });
   });
 });
