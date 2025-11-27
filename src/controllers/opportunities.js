@@ -341,7 +341,7 @@ function OpportunitiesController(ctx) {
     const filteredOpportunities = allOpportunities.filter((oppty) => {
       const tags = oppty.getTags() || [];
       const title = oppty.getTitle() || '';
-      const description = oppty.getDescription() || '';
+      const description = oppty.getDescription();
 
       if (!description) {
         return false;

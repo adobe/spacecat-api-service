@@ -1482,5 +1482,138 @@ describe('Opportunities Controller', () => {
       expect(error).to.have.property('message', 'Only users belonging to the organization of the site can view its opportunities');
       expect(mockSite.findById).to.have.been.calledWith(SITE_ID);
     });
+
+    it('handles opportunities with null tags and title', async () => {
+      const opptyWithNulls = {
+        getId: () => 'oppty-null-1',
+        getTitle: () => null,
+        getDescription: () => 'Valid description',
+        getStatus: () => 'NEW',
+        getType: () => 'paid-media',
+        getTags: () => null,
+        getData: () => ({ projectedTrafficLost: 100, projectedTrafficValue: 500 }),
+      };
+
+      mockOpportunity.allBySiteIdAndStatus.withArgs(SITE_ID, 'NEW').resolves([opptyWithNulls]);
+      mockOpportunity.allBySiteIdAndStatus.withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+      mockSuggestion.allByOpportunityId.resolves([]);
+
+      const response = await opportunitiesController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+      });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      // Should be filtered out because null tags means no matching tags
+      expect(opportunities).to.be.an('array').with.lengthOf(0);
+    });
+
+    it('handles suggestions with all URL field variations', async () => {
+      const oppty = {
+        getId: () => 'oppty-urls-1',
+        getTitle: () => 'URL Test Opportunity',
+        getDescription: () => 'Testing all URL fields',
+        getStatus: () => 'NEW',
+        getType: () => 'broken-backlinks',
+        getTags: () => ['paid media'],
+        getData: () => ({ projectedTrafficLost: 100, projectedTrafficValue: 500 }),
+      };
+
+      const suggestionsWithAllUrlFields = [
+        {
+          getId: () => 'sugg-1',
+          getRank: () => 0,
+          getData: () => ({ url_from: 'https://example.com/from1' }),
+        },
+        {
+          getId: () => 'sugg-2',
+          getRank: () => 0,
+          getData: () => ({ url_to: 'https://example.com/to1' }),
+        },
+        {
+          getId: () => 'sugg-3',
+          getRank: () => 0,
+          getData: () => ({ urlFrom: 'https://example.com/from2' }),
+        },
+        {
+          getId: () => 'sugg-4',
+          getRank: () => 0,
+          getData: () => ({ urlTo: 'https://example.com/to2' }),
+        },
+        {
+          getId: () => 'sugg-5',
+          getRank: () => 0,
+          getData: () => ({ url: 'https://example.com/url1' }),
+        },
+      ];
+
+      mockOpportunity.allBySiteIdAndStatus.withArgs(SITE_ID, 'NEW').resolves([oppty]);
+      mockOpportunity.allBySiteIdAndStatus.withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+      mockSuggestion.allByOpportunityId.resolves(suggestionsWithAllUrlFields);
+
+      const response = await opportunitiesController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+      });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      expect(opportunities).to.be.an('array').with.lengthOf(1);
+      expect(opportunities[0].urls).to.be.an('array').with.lengthOf(5);
+      expect(opportunities[0].urls).to.include('https://example.com/from1');
+      expect(opportunities[0].urls).to.include('https://example.com/to1');
+      expect(opportunities[0].urls).to.include('https://example.com/from2');
+      expect(opportunities[0].urls).to.include('https://example.com/to2');
+      expect(opportunities[0].urls).to.include('https://example.com/url1');
+    });
+
+    it('handles opportunity with null type and description', async () => {
+      const opptyWithNullTypeDesc = {
+        getId: () => 'oppty-null-type-1',
+        getTitle: () => 'Null Type Test',
+        getDescription: () => null,
+        getStatus: () => 'NEW',
+        getType: () => null,
+        getTags: () => ['paid media'],
+        getData: () => ({ projectedTrafficLost: 100, projectedTrafficValue: 500 }),
+      };
+
+      mockOpportunity.allBySiteIdAndStatus.withArgs(SITE_ID, 'NEW').resolves([opptyWithNullTypeDesc]);
+      mockOpportunity.allBySiteIdAndStatus.withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+      mockSuggestion.allByOpportunityId.resolves([]);
+
+      const response = await opportunitiesController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+      });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      // Should be filtered out because description is null
+      expect(opportunities).to.be.an('array').with.lengthOf(0);
+    });
+
+    it('handles opportunity with null getData', async () => {
+      const opptyWithNullData = {
+        getId: () => 'oppty-null-data-1',
+        getTitle: () => 'Null Data Test',
+        getDescription: () => 'Valid description',
+        getStatus: () => 'NEW',
+        getType: () => 'paid-media',
+        getTags: () => ['paid media'],
+        getData: () => null,
+      };
+
+      mockOpportunity.allBySiteIdAndStatus.withArgs(SITE_ID, 'NEW').resolves([opptyWithNullData]);
+      mockOpportunity.allBySiteIdAndStatus.withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+      mockSuggestion.allByOpportunityId.resolves([]);
+
+      const response = await opportunitiesController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+      });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      // Should be filtered out because projectedTrafficValue is 0
+      expect(opportunities).to.be.an('array').with.lengthOf(0);
+    });
   });
 });
