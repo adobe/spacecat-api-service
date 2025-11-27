@@ -1,3 +1,22 @@
+# [1.255.0](https://github.com/adobe/spacecat-api-service/compare/v1.254.4...v1.255.0) (2025-11-27)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1572](https://github.com/adobe/spacecat-api-service/issues/1572)) ([74b8f52](https://github.com/adobe/spacecat-api-service/commit/74b8f52e0b97f3dd92cc1cdda22c048dd5276241))
+
+
+### Features
+
+* entitlement command support ([#1566](https://github.com/adobe/spacecat-api-service/issues/1566)) ([32ba17a](https://github.com/adobe/spacecat-api-service/commit/32ba17a1cdee35b46e0c10aa87eca541c2054bfd))
+
+## [1.254.4](https://github.com/adobe/spacecat-api-service/compare/v1.254.3...v1.254.4) (2025-11-26)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1569](https://github.com/adobe/spacecat-api-service/issues/1569)) ([4d38550](https://github.com/adobe/spacecat-api-service/commit/4d38550608107ae6cbefb0f476c5dd05aa713019))
+
 ## [1.254.3](https://github.com/adobe/spacecat-api-service/compare/v1.254.2...v1.254.3) (2025-11-26)
 
 
