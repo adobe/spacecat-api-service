@@ -232,10 +232,6 @@ paths:
     $ref: './url-store-api.yaml#/url-store-by-source'
   /sites/{siteId}/url-store/by-audit/{auditType}:
     $ref: './url-store-api.yaml#/url-store-by-audit'
-  /sites/{siteId}/url-store/by-platform/{platformType}:
-    $ref: './url-store-api.yaml#/url-store-by-platform'
-  /sites/{siteId}/url-store/offsite:
-    $ref: './url-store-api.yaml#/url-store-offsite'
   /sites/{siteId}/url-store/{base64Url}:
     $ref: './url-store-api.yaml#/url-store-get'
   /sites/{siteId}/traffic/paid:
