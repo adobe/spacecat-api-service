@@ -1,3 +1,10 @@
+# [1.259.0](https://github.com/adobe/spacecat-api-service/compare/v1.258.0...v1.259.0) (2025-11-27)
+
+
+### Features
+
+* **slack/traffic-analysis-backfill:** disallow cache ([#1579](https://github.com/adobe/spacecat-api-service/issues/1579)) ([d60dd0a](https://github.com/adobe/spacecat-api-service/commit/d60dd0a01d7dd8eaf0b42c84f0e86f209c4c56b9))
+
 # [1.258.0](https://github.com/adobe/spacecat-api-service/compare/v1.257.1...v1.258.0) (2025-11-27)
 
 
