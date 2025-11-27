@@ -68,6 +68,30 @@ describe('LlmoController', () => {
   let triggerBrandProfileAgentStub;
   let updateModifiedByDetailsStub;
 
+  const mockHttpUtils = {
+    ok: (data, headers = {}) => ({
+      status: 200,
+      headers: new Map(Object.entries(headers)),
+      json: async () => data,
+    }),
+    badRequest: (message) => ({
+      status: 400,
+      json: async () => ({ message }),
+    }),
+    forbidden: (message) => ({
+      status: 403,
+      json: async () => ({ message }),
+    }),
+    notFound: (message) => ({
+      status: 404,
+      json: async () => ({ message }),
+    }),
+    createResponse: (data, status) => ({
+      status,
+      json: async () => data,
+    }),
+  };
+
   before(async () => {
     triggerBrandProfileAgentStub = sinon.stub().resolves('exec-123');
     updateModifiedByDetailsStub = sinon.stub();
@@ -77,6 +101,7 @@ describe('LlmoController', () => {
       '../../../src/controllers/llmo/llmo-config-metadata.js': {
         updateModifiedByDetails: updateModifiedByDetailsStub,
       },
+      '@adobe/spacecat-shared-http-utils': mockHttpUtils,
       '@adobe/spacecat-shared-utils': {
         SPACECAT_USER_AGENT: TEST_USER_AGENT,
         tracingFetch: (...args) => tracingFetchStub(...args),
@@ -121,6 +146,7 @@ describe('LlmoController', () => {
       '../../../src/support/access-control-util.js': {
         default: createMockAccessControlUtil(false),
       },
+      '@adobe/spacecat-shared-http-utils': mockHttpUtils,
       '../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
       },
@@ -1069,6 +1095,7 @@ describe('LlmoController', () => {
       const result = await controller.getLlmoConfig(mockContext);
 
       expect(result.status).to.equal(200);
+      expect(result.headers.get('Content-Encoding')).to.equal('br');
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({ config: expectedConfig, version: 'v123' });
     });
@@ -1102,6 +1129,7 @@ describe('LlmoController', () => {
       const result = await controller.getLlmoConfig(mockContext);
 
       expect(result.status).to.equal(200);
+      expect(result.headers.get('Content-Encoding')).to.equal('br');
       const responseBody = await result.json();
       expect(responseBody.version).to.equal('v123');
     });
