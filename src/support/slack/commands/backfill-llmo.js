@@ -155,20 +155,22 @@ function BackfillLlmoCommand(context) {
       const parsed = parseArgs(args);
 
       if (!parsed.baseurl || !parsed.audit) {
-        await say(':warning: Required: baseurl={baseURL} audit={auditType}');
+        await say(':warning: Required: baseurl={baseURL|all} audit={auditType}');
         await say('Examples:');
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS} days=3\` (last 3 days)`);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS} year=2024 month=11 day=15 hour=14\` (specific hour)`);
+        await say(`• \`backfill-llmo baseurl=all audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS} year=2024 month=11 day=15 hour=14\` (all enabled sites)`);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_REPORT} weeks=2\``);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_REPORT} weeks=0\` (current week)`);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC} weeks=2\``);
         return;
       }
 
-      const baseURL = extractURLFromSlackInput(parsed.baseurl);
       const auditType = parsed.audit;
+      const isAllSites = parsed.baseurl?.toLowerCase() === 'all';
+      const baseURL = isAllSites ? 'all' : extractURLFromSlackInput(parsed.baseurl);
 
-      if (!isValidUrl(baseURL)) {
+      if (!isAllSites && !isValidUrl(baseURL)) {
         await say(':warning: Invalid URL provided');
         return;
       }
@@ -234,42 +236,45 @@ function BackfillLlmoCommand(context) {
           return;
       }
 
-      await say(`:gear: Starting ${auditType} backfill for ${baseURL} (${timeDesc})...`);
-
-      const site = await Site.findByBaseURL(baseURL);
-      if (!site) {
-        await say(`:x: Site '${baseURL}' not found`);
-        return;
+      // Get sites to process
+      let sites;
+      if (isAllSites) {
+        await say(`:gear: Finding sites enabled for ${auditType}...`);
+        const allSites = await Site.all();
+        const configuration = await Configuration.findLatest();
+        sites = allSites.filter((s) => configuration.isHandlerEnabledForSite(auditType, s));
+        if (sites.length === 0) {
+          await say(`:x: No sites enabled for ${auditType}`);
+          return;
+        }
+      } else {
+        const site = await Site.findByBaseURL(baseURL);
+        if (!site) {
+          await say(`:x: Site '${baseURL}' not found`);
+          return;
+        }
+        sites = [site];
       }
+
+      const target = isAllSites ? `${sites.length} sites` : baseURL;
+      await say(`:rocket: Triggering ${auditType} for ${target} (${timeDesc})...`);
 
       const configuration = await Configuration.findLatest();
-      await triggerBackfill(
-        context,
-        configuration,
-        site.getId(),
-        auditType,
-        timeValue,
-        specificDate,
-      );
-
-      let totalMessages;
-      switch (auditType) {
-        case AUDIT_TYPES.CDN_LOGS_ANALYSIS:
-          totalMessages = timeValue;
-          break;
-        case AUDIT_TYPES.CDN_LOGS_REPORT:
-          totalMessages = timeValue === 0 ? 1 : timeValue;
-          break;
-        case AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC:
-          totalMessages = timeValue;
-          break;
-        /* c8 ignore start */
-        default:
-          totalMessages = 1;
-          break;
-        /* c8 ignore end */
+      for (const s of sites) {
+        // eslint-disable-next-line no-await-in-loop
+        await triggerBackfill(
+          context,
+          configuration,
+          s.getId(),
+          auditType,
+          timeValue,
+          specificDate,
+        );
       }
-      await say(`:white_check_mark: ${auditType} backfill triggered! ${totalMessages} messages queued.`);
+
+      const msgsPerSite = auditType === AUDIT_TYPES.CDN_LOGS_REPORT
+        && timeValue === 0 ? 1 : timeValue;
+      await say(`:white_check_mark: Done! ${sites.length * msgsPerSite} messages queued.`);
     } catch (error) {
       log.error('Error in LLMO backfill:', error);
       await postErrorMessage(say, error);
