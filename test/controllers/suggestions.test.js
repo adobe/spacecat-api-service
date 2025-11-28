@@ -3316,9 +3316,9 @@ describe('Suggestions Controller', () => {
 
       // Verify S3 was called (GET to fetch existing config, PUT to upload)
       expect(s3ClientSendStub.callCount).to.be.at.least(1);
-      // Verify PutObjectCommand was called for upload (grouped by URL, so 1 call for both suggestions)
+      // Verify PutObjectCommand was called for upload (1 for metaconfig + 1 for URL config in v1.2.0)
       const putObjectCalls = s3ClientSendStub.getCalls().filter((call) => call.args[0].constructor.name === 'PutObjectCommand');
-      expect(putObjectCalls).to.have.length(1);
+      expect(putObjectCalls).to.have.length(2);
 
       // Verify suggestion data was updated with deployment timestamp
       const firstSugg = tokowakaSuggestions[0];
@@ -3643,25 +3643,26 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(207);
 
-      // Find the PutObjectCommand call (grouped by URL, so 1 call for both suggestions)
+      // Find the PutObjectCommand calls (1 for metaconfig + 1 for URL config in v1.2.0)
       const putObjectCalls = s3ClientSendStub.getCalls().filter((call) => call.args[0].constructor.name === 'PutObjectCommand');
-      expect(putObjectCalls).to.have.length.at.least(1);
-      const uploadedConfig = JSON.parse(putObjectCalls[0].args[0].input.Body);
-      console.log(JSON.stringify(uploadedConfig, null, 2));
-      // Validate config structure (new format groups by path)
-      expect(uploadedConfig).to.have.property('siteId');
-      expect(uploadedConfig).to.have.property('baseURL', 'https://example.com');
-      expect(uploadedConfig).to.have.property('version', '1.0');
-      expect(uploadedConfig).to.have.property('tokowakaForceFail', false);
-      expect(uploadedConfig).to.have.property('tokowakaOptimizations');
-
-      const { tokowakaOptimizations } = uploadedConfig;
-      expect(tokowakaOptimizations).to.have.property('/page1');
-      const pageOptimization = tokowakaOptimizations['/page1'];
-      expect(pageOptimization).to.have.property('prerender', true);
-      expect(pageOptimization).to.have.property('patches');
+      expect(putObjectCalls).to.have.length(2);
       
-      const { patches } = pageOptimization;
+      // First call is metaconfig
+      const metaconfig = JSON.parse(putObjectCalls[0].args[0].input.Body);
+      expect(metaconfig).to.have.property('siteId', SITE_ID);
+      expect(metaconfig).to.have.property('prerender', true);
+      
+      // Second call is URL config
+      const uploadedConfig = JSON.parse(putObjectCalls[1].args[0].input.Body);
+      console.log(JSON.stringify(uploadedConfig, null, 2));
+      // Validate config structure (v1.2.0 uses URL-based format)
+      expect(uploadedConfig).to.have.property('url', 'https://example.com/page1');
+      expect(uploadedConfig).to.have.property('version', '1.0');
+      expect(uploadedConfig).to.have.property('forceFail', false);
+      expect(uploadedConfig).to.have.property('prerender', true);
+      expect(uploadedConfig).to.have.property('patches');
+      
+      const { patches } = uploadedConfig;
       expect(patches).to.have.length(2);
       expect(patches[0]).to.have.property('op', 'replace');
       expect(patches[0]).to.have.property('selector');
@@ -4511,25 +4512,19 @@ describe('Suggestions Controller', () => {
       const key = putCall.args[0].input.Key;
       const body2 = putCall.args[0].input.Body;
 
-      // Verify preview path (uses API key format)
-      expect(key).to.equal('preview/opportunities/test-api-key-123');
+      // Verify preview path (v1.2.0 uses domain + base64-encoded path format)
+      expect(key).to.include('preview/opportunities/example.com/');
 
-      // Verify uploaded config structure (new format groups by path)
+      // Verify uploaded config structure (v1.2.0 uses URL-based format)
       const uploadedConfig = JSON.parse(body2);
-      expect(uploadedConfig).to.have.property('siteId');
-      expect(uploadedConfig).to.have.property('baseURL', 'https://example.com');
+      expect(uploadedConfig).to.have.property('url', 'https://example.com/page1');
       expect(uploadedConfig).to.have.property('version', '1.0');
-      expect(uploadedConfig).to.have.property('tokowakaForceFail', false);
-      expect(uploadedConfig).to.have.property('tokowakaOptimizations');
-
-      const { tokowakaOptimizations } = uploadedConfig;
-      expect(tokowakaOptimizations).to.have.property('/page1');
-      const pageOptimization = tokowakaOptimizations['/page1'];
-      expect(pageOptimization).to.have.property('prerender', true);
-      expect(pageOptimization).to.have.property('patches');
+      expect(uploadedConfig).to.have.property('forceFail', false);
+      expect(uploadedConfig).to.have.property('prerender', true);
+      expect(uploadedConfig).to.have.property('patches');
       
       // Validate patch structure
-      const { patches } = pageOptimization;
+      const { patches } = uploadedConfig;
       expect(patches).to.have.length(2);
       expect(patches[0]).to.have.property('op', 'replace');
       expect(patches[0]).to.have.property('selector');
