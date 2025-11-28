@@ -1,3 +1,10 @@
+# [1.263.0](https://github.com/adobe/spacecat-api-service/compare/v1.262.0...v1.263.0) (2025-11-28)
+
+
+### Features
+
+* Added autofix for security redundant permissions ([#1583](https://github.com/adobe/spacecat-api-service/issues/1583)) ([0001976](https://github.com/adobe/spacecat-api-service/commit/00019768a73341cf7c9dbeb590db2993107c37ef))
+
 # [1.262.0](https://github.com/adobe/spacecat-api-service/compare/v1.261.0...v1.262.0) (2025-11-28)
 
 
