@@ -264,6 +264,11 @@ describe('getRouteHandlers', () => {
     createTrialUserForEmailInvite: () => null,
   };
 
+  const mockUserDetailsController = {
+    getUserDetailsByExternalUserId: () => null,
+    getUserDetailsInBulk: () => null,
+  };
+
   const mockEntitlementController = {
     getByOrganizationID: () => null,
   };
@@ -306,6 +311,7 @@ describe('getRouteHandlers', () => {
       mockUserActivityController,
       mockSiteEnrollmentController,
       mockTrialUserController,
+      mockUserDetailsController,
       mockEntitlementController,
       mockSandboxAuditController,
       mockReportsController,

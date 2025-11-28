@@ -75,6 +75,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} userActivityController - The user activity controller.
  * @param {Object} siteEnrollmentController - The site enrollment controller.
  * @param {Object} trialUserController - The trial user controller.
+ * @param {Object} userDetailsController - The user details controller.
  * @param {Object} entitlementController - The entitlement controller.
  * @param {Object} sandboxAuditController - The sandbox audit controller.
  * @param {Object} reportsController - The reports controller.
@@ -110,6 +111,7 @@ export default function getRouteHandlers(
   userActivityController,
   siteEnrollmentController,
   trialUserController,
+  userDetailsController,
   entitlementController,
   sandboxAuditController,
   reportsController,
@@ -339,6 +341,8 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/user-activities': userActivityController.createTrialUserActivity,
     'GET /sites/:siteId/site-enrollments': siteEnrollmentController.getBySiteID,
     'GET /organizations/:organizationId/trial-users': trialUserController.getByOrganizationID,
+    'GET /organizations/:organizationId/userDetails/:externalUserId': userDetailsController.getUserDetailsByExternalUserId,
+    'POST /organizations/:organizationId/userDetails': userDetailsController.getUserDetailsInBulk,
     'POST /organizations/:organizationId/trial-user-invite': trialUserController.createTrialUserForEmailInvite,
     'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
     'POST /organizations/:organizationId/entitlements': entitlementController.createEntitlement,
