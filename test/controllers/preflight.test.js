@@ -191,7 +191,7 @@ describe('Preflight Controller', () => {
         data: {
           urls: ['http://author.adobecqms.net/path'],
           step: 'identify',
-          siteId: 'test-site-123',
+          siteId: 'd140668d-aacf-45fb-a8f2-27ffda65bab4',
         },
       };
       mockDataAccess.Site.findById = sandbox.stub().resolves(mockSite);

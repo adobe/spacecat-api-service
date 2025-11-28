@@ -9,7 +9,7 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-import { JSDOM } from 'jsdom';
+import { parse } from 'node-html-parser';
 import { Octokit } from '@octokit/rest';
 import { tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 /**
@@ -31,10 +31,9 @@ async function scrapeGithubOrgName(orgLogin, log) {
     }
 
     const html = await response.text();
-    const dom = new JSDOM(html);
-    const { document } = dom.window;
+    const root = parse(html);
 
-    const orgElement = document.querySelector('h1[class*="sso-title"] strong');
+    const orgElement = root.querySelector('h1[class*="sso-title"] strong');
     if (!orgElement) {
       log.info(`Organization name not found on GitHub page for ${orgLogin}`);
       return '';

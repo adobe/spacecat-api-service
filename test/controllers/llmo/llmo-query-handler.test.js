@@ -14,9 +14,11 @@
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
+import chaiAsPromised from 'chai-as-promised';
 import esmock from 'esmock';
 
 use(sinonChai);
+use(chaiAsPromised);
 
 describe('llmo-query-handler', () => {
   let queryLlmoFiles;
