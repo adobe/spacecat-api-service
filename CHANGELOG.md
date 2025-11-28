@@ -1,3 +1,10 @@
+# [1.261.0](https://github.com/adobe/spacecat-api-service/compare/v1.260.0...v1.261.0) (2025-11-28)
+
+
+### Features
+
+* add paid opp summary endpoint ([#1580](https://github.com/adobe/spacecat-api-service/issues/1580)) ([bd30ef6](https://github.com/adobe/spacecat-api-service/commit/bd30ef63687d46b61148aae0b4d606f33a8308f3))
+
 # [1.260.0](https://github.com/adobe/spacecat-api-service/compare/v1.259.2...v1.260.0) (2025-11-28)
 
 
