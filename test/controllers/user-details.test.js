@@ -83,10 +83,10 @@ describe('User Details Controller', () => {
 
     mockImsClient = {
       getImsAdminProfile: sandbox.stub().resolves({
-        id: 'ims-user-123',
+        userId: 'ims-user-123',
         email: 'imsuser@example.com',
-        firstName: 'IMS',
-        lastName: 'User',
+        first_name: 'IMS',
+        last_name: 'User',
       }),
     };
 
@@ -235,8 +235,8 @@ describe('User Details Controller', () => {
       };
       mockAccessControlUtil.hasAdminAccess.returns(true);
       mockImsClient.getImsAdminProfile.resolves({
-        id: 'incomplete-user-123',
-        // firstName, lastName, email are missing/null
+        userId: 'incomplete-user-123',
+        // first_name, last_name, email are missing/null
       });
 
       const result = await controller.getUserDetailsByExternalUserId(context);
@@ -444,9 +444,9 @@ describe('User Details Controller', () => {
       };
       mockAccessControlUtil.hasAdminAccess.returns(true);
       mockImsClient.getImsAdminProfile.resolves({
-        id: 'incomplete-user-123',
-        firstName: null,
-        lastName: undefined,
+        userId: 'incomplete-user-123',
+        first_name: null,
+        last_name: undefined,
         email: null,
       });
 

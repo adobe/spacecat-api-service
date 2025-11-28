@@ -68,8 +68,8 @@ function UserDetailsController(ctx) {
       log.debug(`Admin user requesting details for ${externalUserId}, attempting IMS fallback`);
       const imsProfile = await imsClient.getImsAdminProfile(externalUserId);
       return {
-        firstName: imsProfile.firstName || 'system',
-        lastName: imsProfile.lastName || '',
+        firstName: imsProfile.first_name || 'system',
+        lastName: imsProfile.last_name || '',
         email: imsProfile.email || 'system',
         organizationId,
       };
