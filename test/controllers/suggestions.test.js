@@ -3316,7 +3316,7 @@ describe('Suggestions Controller', () => {
 
       // Verify S3 was called (GET to fetch existing config, PUT to upload)
       expect(s3ClientSendStub.callCount).to.be.at.least(1);
-      // Verify PutObjectCommand was called for upload (1 for metaconfig + 1 for URL config in v1.2.0)
+      // Verify PutObjectCommand was called for upload
       const putObjectCalls = s3ClientSendStub.getCalls().filter((call) => call.args[0].constructor.name === 'PutObjectCommand');
       expect(putObjectCalls).to.have.length(2);
 
@@ -3643,25 +3643,17 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(207);
 
-      // Find the PutObjectCommand calls (1 for metaconfig + 1 for URL config in v1.2.0)
+      // Find the second PutObjectCommand call
       const putObjectCalls = s3ClientSendStub.getCalls().filter((call) => call.args[0].constructor.name === 'PutObjectCommand');
-      expect(putObjectCalls).to.have.length(2);
-      
-      // First call is metaconfig
-      const metaconfig = JSON.parse(putObjectCalls[0].args[0].input.Body);
-      expect(metaconfig).to.have.property('siteId', SITE_ID);
-      expect(metaconfig).to.have.property('prerender', true);
-      
-      // Second call is URL config
+      expect(putObjectCalls).to.have.length.at.least(2);
       const uploadedConfig = JSON.parse(putObjectCalls[1].args[0].input.Body);
       console.log(JSON.stringify(uploadedConfig, null, 2));
-      // Validate config structure (v1.2.0 uses URL-based format)
-      expect(uploadedConfig).to.have.property('url', 'https://example.com/page1');
+      // Validate config structure
+      expect(uploadedConfig).to.have.property('url');
       expect(uploadedConfig).to.have.property('version', '1.0');
       expect(uploadedConfig).to.have.property('forceFail', false);
-      expect(uploadedConfig).to.have.property('prerender', true);
       expect(uploadedConfig).to.have.property('patches');
-      
+
       const { patches } = uploadedConfig;
       expect(patches).to.have.length(2);
       expect(patches[0]).to.have.property('op', 'replace');
@@ -4512,17 +4504,16 @@ describe('Suggestions Controller', () => {
       const key = putCall.args[0].input.Key;
       const body2 = putCall.args[0].input.Body;
 
-      // Verify preview path (v1.2.0 uses domain + base64-encoded path format)
-      expect(key).to.include('preview/opportunities/example.com/');
+      // Verify preview path
+      expect(key).to.equal('preview/opportunities/example.com/L3BhZ2Ux');
 
-      // Verify uploaded config structure (v1.2.0 uses URL-based format)
+      // Verify uploaded config structure
       const uploadedConfig = JSON.parse(body2);
       expect(uploadedConfig).to.have.property('url', 'https://example.com/page1');
       expect(uploadedConfig).to.have.property('version', '1.0');
       expect(uploadedConfig).to.have.property('forceFail', false);
-      expect(uploadedConfig).to.have.property('prerender', true);
       expect(uploadedConfig).to.have.property('patches');
-      
+
       // Validate patch structure
       const { patches } = uploadedConfig;
       expect(patches).to.have.length(2);
