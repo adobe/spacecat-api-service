@@ -674,6 +674,10 @@ site-opportunity-fixes:
     operationId: createSiteOpportunityFixes
     summary: |
       Create and add a list of one or more fixes to an opportunity in one transaction
+    description: |
+      Creates one or more fix entities for a given opportunity. Each fix can optionally include 
+      an array of suggestionIds to associate existing suggestions with the fix. This allows you 
+      to link fixes to the suggestions they address in a single transaction.
     tags:
       - opportunity-fixes
     requestBody:
@@ -682,6 +686,9 @@ site-opportunity-fixes:
         application/json:
           schema:
             $ref: './schemas.yaml#/FixCreateList'
+          examples:
+            fix-create-list:
+              $ref: './examples.yaml#/fix-create-list'
     responses:
       '207':
         description: |
@@ -691,6 +698,9 @@ site-opportunity-fixes:
           application/json:
             schema:
               $ref: './schemas.yaml#/FixCreateListResponse'
+            examples:
+              fix-create-list-response:
+                $ref: './examples.yaml#/fix-create-list-response'
     security:
       - ims_key: [ ]
 
@@ -765,6 +775,10 @@ site-opportunity-fix:
     operationId: updateSiteOpportunityFix
     summary: |
       Update specific attributes of an existing fix
+    description: |
+      Updates one or more attributes of an existing fix. This includes the ability to update 
+      the suggestionIds array to associate or reassociate suggestions with the fix. When updating 
+      suggestionIds, the new array replaces any existing associations.
     tags:
       - opportunity-fixes
     requestBody:

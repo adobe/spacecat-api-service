@@ -1,3 +1,59 @@
+## [1.259.2](https://github.com/adobe/spacecat-api-service/compare/v1.259.1...v1.259.2) (2025-11-28)
+
+
+### Bug Fixes
+
+* update docs for POST and PATCH fixes ([#1524](https://github.com/adobe/spacecat-api-service/issues/1524)) ([504e284](https://github.com/adobe/spacecat-api-service/commit/504e284e6936119f7f4d3e12473409617a65a47a))
+
+## [1.259.1](https://github.com/adobe/spacecat-api-service/compare/v1.259.0...v1.259.1) (2025-11-28)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1578](https://github.com/adobe/spacecat-api-service/issues/1578)) ([458bbe7](https://github.com/adobe/spacecat-api-service/commit/458bbe7bb967238307a0abda7601d61fb9e13148))
+
+# [1.259.0](https://github.com/adobe/spacecat-api-service/compare/v1.258.0...v1.259.0) (2025-11-27)
+
+
+### Features
+
+* **slack/traffic-analysis-backfill:** disallow cache ([#1579](https://github.com/adobe/spacecat-api-service/issues/1579)) ([d60dd0a](https://github.com/adobe/spacecat-api-service/commit/d60dd0a01d7dd8eaf0b42c84f0e86f209c4c56b9))
+
+# [1.258.0](https://github.com/adobe/spacecat-api-service/compare/v1.257.1...v1.258.0) (2025-11-27)
+
+
+### Features
+
+* update llmo config with user id and timestamp | LLMO-1515 ([#1563](https://github.com/adobe/spacecat-api-service/issues/1563)) ([2e3ea32](https://github.com/adobe/spacecat-api-service/commit/2e3ea3273c3b129ddd1c29daae237b9b22e63217))
+
+## [1.257.1](https://github.com/adobe/spacecat-api-service/compare/v1.257.0...v1.257.1) (2025-11-27)
+
+
+### Bug Fixes
+
+* back to working version of @adobe/helix-deploy ([#1561](https://github.com/adobe/spacecat-api-service/issues/1561)) ([d3fb0ee](https://github.com/adobe/spacecat-api-service/commit/d3fb0ee451b39d1daa8f092bd6f0a08ae81a765e))
+
+# [1.257.0](https://github.com/adobe/spacecat-api-service/compare/v1.256.0...v1.257.0) (2025-11-27)
+
+
+### Features
+
+* url path wise edge deployment ([#1576](https://github.com/adobe/spacecat-api-service/issues/1576)) ([9e4b4c7](https://github.com/adobe/spacecat-api-service/commit/9e4b4c73eaee28af542bbc98d3f2d16c854bd399))
+
+# [1.256.0](https://github.com/adobe/spacecat-api-service/compare/v1.255.1...v1.256.0) (2025-11-27)
+
+
+### Features
+
+* LLMO-1023: integrate logWrapper for trace ID logging ([#1435](https://github.com/adobe/spacecat-api-service/issues/1435)) ([074acae](https://github.com/adobe/spacecat-api-service/commit/074acae98b40e56c164eba04a04447dbe30935c1))
+
+## [1.255.1](https://github.com/adobe/spacecat-api-service/compare/v1.255.0...v1.255.1) (2025-11-27)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tier-client to v1.3.3 ([#1574](https://github.com/adobe/spacecat-api-service/issues/1574)) ([7585918](https://github.com/adobe/spacecat-api-service/commit/75859186dfd9e19950b2d80975673ac9f4317660))
+
 # [1.255.0](https://github.com/adobe/spacecat-api-service/compare/v1.254.4...v1.255.0) (2025-11-27)
 
 
