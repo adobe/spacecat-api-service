@@ -314,10 +314,6 @@ paths:
     $ref: './llmo-api.yaml#/llmo-global-sheet-data'
   /sites/{siteId}/llmo/config:
     $ref: './llmo-api.yaml#/llmo-config'
-  /sites/{siteId}/llmo/questions:
-    $ref: './llmo-api.yaml#/llmo-questions'
-  /sites/{siteId}/llmo/questions/{questionKey}:
-    $ref: './llmo-api.yaml#/llmo-question'
   /sites/{siteId}/llmo/customer-intent:
     $ref: './llmo-api.yaml#/llmo-customer-intent'
   /sites/{siteId}/llmo/customer-intent/{intentKey}:
