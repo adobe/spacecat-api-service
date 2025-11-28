@@ -37,13 +37,14 @@ describe('BackfillLlmoCommand', () => {
   beforeEach(() => {
     dataAccessStub = {
       Configuration: { findLatest: sinon.stub() },
-      Site: { findByBaseURL: sinon.stub() },
+      Site: { findByBaseURL: sinon.stub(), all: sinon.stub() },
     };
     sqsStub = {
       sendMessage: sinon.stub().resolves(),
     };
     configStub = {
       getQueues: sinon.stub().returns({ audits: 'test-audits-queue-url' }),
+      isHandlerEnabledForSite: sinon.stub().returns(true),
     };
     siteStub = {
       getId: sinon.stub().returns('test-site-id'),
@@ -80,7 +81,7 @@ describe('BackfillLlmoCommand', () => {
       await command.handleExecution(['baseurl=https://example.com', `audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS}`], slackContext);
 
       expect(slackContext.say.called).to.be.true;
-      expect(slackContext.say.firstCall.args[0]).to.include(`:gear: Starting ${AUDIT_TYPES.CDN_LOGS_ANALYSIS} backfill for https://example.com (1 days)...`);
+      expect(slackContext.say.firstCall.args[0]).to.include(`:rocket: Triggering ${AUDIT_TYPES.CDN_LOGS_ANALYSIS} for https://example.com (1 days)...`);
       expect(sqsStub.sendMessage.called).to.be.true;
       expect(sqsStub.sendMessage.callCount).to.equal(1);
     });
@@ -92,7 +93,7 @@ describe('BackfillLlmoCommand', () => {
       await command.handleExecution(['baseurl=https://example.com', `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`], slackContext);
 
       expect(slackContext.say.called).to.be.true;
-      expect(slackContext.say.firstCall.args[0]).to.include(`:gear: Starting ${AUDIT_TYPES.CDN_LOGS_REPORT} backfill for https://example.com (4 previous weeks)...`);
+      expect(slackContext.say.firstCall.args[0]).to.include(`:rocket: Triggering ${AUDIT_TYPES.CDN_LOGS_REPORT} for https://example.com (4 previous weeks)...`);
       expect(sqsStub.sendMessage.called).to.be.true;
       expect(sqsStub.sendMessage.callCount).to.equal(4);
     });
@@ -104,7 +105,7 @@ describe('BackfillLlmoCommand', () => {
       await command.handleExecution(['baseurl=https://example.com', `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`, 'weeks=0'], slackContext);
 
       expect(slackContext.say.called).to.be.true;
-      expect(slackContext.say.firstCall.args[0]).to.include(`:gear: Starting ${AUDIT_TYPES.CDN_LOGS_REPORT} backfill for https://example.com (current week only)...`);
+      expect(slackContext.say.firstCall.args[0]).to.include(`:rocket: Triggering ${AUDIT_TYPES.CDN_LOGS_REPORT} for https://example.com (current week only)...`);
       expect(sqsStub.sendMessage.called).to.be.true;
       expect(sqsStub.sendMessage.callCount).to.equal(1);
     });
@@ -116,7 +117,7 @@ describe('BackfillLlmoCommand', () => {
       await command.handleExecution(['baseurl=https://example.com', `audit=${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC}`], slackContext);
 
       expect(slackContext.say.called).to.be.true;
-      expect(slackContext.say.firstCall.args[0]).to.include(`:gear: Starting ${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC} backfill for https://example.com (1 previous week)...`);
+      expect(slackContext.say.firstCall.args[0]).to.include(`:rocket: Triggering ${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC} for https://example.com (1 previous week)...`);
       expect(sqsStub.sendMessage.called).to.be.true;
       // Default weeks=1, so should send 1 message
       expect(sqsStub.sendMessage.callCount).to.equal(1);
@@ -129,7 +130,7 @@ describe('BackfillLlmoCommand', () => {
       await command.handleExecution(['baseurl=https://example.com', `audit=${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC}`, 'weeks=2'], slackContext);
 
       expect(slackContext.say.called).to.be.true;
-      expect(slackContext.say.firstCall.args[0]).to.include(`:gear: Starting ${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC} backfill for https://example.com (2 previous weeks)...`);
+      expect(slackContext.say.firstCall.args[0]).to.include(`:rocket: Triggering ${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC} for https://example.com (2 previous weeks)...`);
       expect(sqsStub.sendMessage.called).to.be.true;
       // weeks=2, so should send 2 messages
       expect(sqsStub.sendMessage.callCount).to.equal(2);
@@ -142,7 +143,7 @@ describe('BackfillLlmoCommand', () => {
       await command.handleExecution(['baseurl=https://example.com', `audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS}`, 'days=2'], slackContext);
 
       expect(slackContext.say.called).to.be.true;
-      expect(slackContext.say.firstCall.args[0]).to.include(`:gear: Starting ${AUDIT_TYPES.CDN_LOGS_ANALYSIS} backfill for https://example.com (2 days)...`);
+      expect(slackContext.say.firstCall.args[0]).to.include(`:rocket: Triggering ${AUDIT_TYPES.CDN_LOGS_ANALYSIS} for https://example.com (2 days)...`);
       expect(sqsStub.sendMessage.called).to.be.true;
       expect(sqsStub.sendMessage.callCount).to.equal(2);
     });
@@ -219,7 +220,7 @@ describe('BackfillLlmoCommand', () => {
 
       await command.handleExecution([], slackContext);
 
-      expect(slackContext.say.firstCall.args[0]).to.include(':warning: Required: baseurl={baseURL} audit={auditType}');
+      expect(slackContext.say.firstCall.args[0]).to.include(':warning: Required: baseurl={baseURL|all} audit={auditType}');
     });
 
     it('responds with usage when missing required arguments', async () => {
@@ -227,7 +228,7 @@ describe('BackfillLlmoCommand', () => {
 
       await command.handleExecution(['baseurl=https://example.com'], slackContext);
 
-      expect(slackContext.say.firstCall.args[0]).to.include(':warning: Required: baseurl={baseURL} audit={auditType}');
+      expect(slackContext.say.firstCall.args[0]).to.include(':warning: Required: baseurl={baseURL|all} audit={auditType}');
     });
 
     it('responds with error for invalid site url', async () => {
@@ -293,6 +294,27 @@ describe('BackfillLlmoCommand', () => {
       await command.handleExecution(['baseurl=https://example.com', `audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS}`, 'days=15'], slackContext);
 
       expect(slackContext.say.calledWith(`:warning: Max 14 days for ${AUDIT_TYPES.CDN_LOGS_ANALYSIS}`)).to.be.true;
+    });
+
+    it('triggers backfill for all enabled sites with baseurl=all', async () => {
+      const site1 = { getId: () => 'site-1' };
+      const site2 = { getId: () => 'site-2' };
+      dataAccessStub.Site.all.resolves([site1, site2]);
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution(['baseurl=all', `audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS}`, 'days=1'], slackContext);
+
+      expect(sqsStub.sendMessage.callCount).to.equal(2);
+    });
+
+    it('reports no sites enabled when baseurl=all and none enabled', async () => {
+      dataAccessStub.Site.all.resolves([siteStub]);
+      configStub.isHandlerEnabledForSite.returns(false);
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution(['baseurl=all', `audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS}`, 'days=1'], slackContext);
+
+      expect(slackContext.say.calledWith(`:x: No sites enabled for ${AUDIT_TYPES.CDN_LOGS_ANALYSIS}`)).to.be.true;
     });
   });
 });
