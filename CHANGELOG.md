@@ -1,3 +1,10 @@
+## [1.264.2](https://github.com/adobe/spacecat-api-service/compare/v1.264.1...v1.264.2) (2025-11-28)
+
+
+### Bug Fixes
+
+* update to node 24 ([#1584](https://github.com/adobe/spacecat-api-service/issues/1584)) ([b87372a](https://github.com/adobe/spacecat-api-service/commit/b87372a3a0c721b81eeac579ec886c3126182a12))
+
 ## [1.264.1](https://github.com/adobe/spacecat-api-service/compare/v1.264.0...v1.264.1) (2025-11-28)
 
 
