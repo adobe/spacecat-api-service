@@ -1,3 +1,10 @@
+# [1.260.0](https://github.com/adobe/spacecat-api-service/compare/v1.259.2...v1.260.0) (2025-11-28)
+
+
+### Features
+
+* enhance getLatestSiteMetrics with explicit date ranges and additional metrics ([#1571](https://github.com/adobe/spacecat-api-service/issues/1571)) ([1455e0b](https://github.com/adobe/spacecat-api-service/commit/1455e0b06cdc9dbcb0965d410dbbf8d12603c72b))
+
 ## [1.259.2](https://github.com/adobe/spacecat-api-service/compare/v1.259.1...v1.259.2) (2025-11-28)
 
 
