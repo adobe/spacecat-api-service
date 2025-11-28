@@ -7,7 +7,7 @@ runs:
     - name: Set up Node
       uses: actions/setup-node@v5
       with:
-        node-version: 22.21
+        node-version-file: '.nvmrc'
 
     - name: Get npm cache directory
       id: npm-cache-dir
@@ -22,10 +22,6 @@ runs:
         key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
         restore-keys: |
           ${{ runner.os }}-node-
-
-    - name: Update NPM (only if cache miss)
-      run: npm install -g npm@10.9.2
-      shell: bash
 
     - name: Install dependencies (only if cache miss)
       run: npm ci
