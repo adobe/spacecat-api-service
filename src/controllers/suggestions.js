@@ -55,6 +55,7 @@ function SuggestionsController(ctx, sqs, env) {
     'broken-backlinks',
     'form-accessibility',
     'product-metatags',
+    'security-permissions-redundant',
   ];
 
   const DEFAULT_PAGE_SIZE = 100;
