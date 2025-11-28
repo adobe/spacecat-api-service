@@ -1,3 +1,10 @@
+# [1.264.0](https://github.com/adobe/spacecat-api-service/compare/v1.263.0...v1.264.0) (2025-11-28)
+
+
+### Features
+
+* support all sites to be backfilled ([#1586](https://github.com/adobe/spacecat-api-service/issues/1586)) ([c650973](https://github.com/adobe/spacecat-api-service/commit/c65097394dddb32aac1af9f39a38688146d96908))
+
 # [1.263.0](https://github.com/adobe/spacecat-api-service/compare/v1.262.0...v1.263.0) (2025-11-28)
 
 
