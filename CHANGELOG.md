@@ -1,3 +1,24 @@
+# [1.261.0](https://github.com/adobe/spacecat-api-service/compare/v1.260.0...v1.261.0) (2025-11-28)
+
+
+### Features
+
+* add paid opp summary endpoint ([#1580](https://github.com/adobe/spacecat-api-service/issues/1580)) ([bd30ef6](https://github.com/adobe/spacecat-api-service/commit/bd30ef63687d46b61148aae0b4d606f33a8308f3))
+
+# [1.260.0](https://github.com/adobe/spacecat-api-service/compare/v1.259.2...v1.260.0) (2025-11-28)
+
+
+### Features
+
+* enhance getLatestSiteMetrics with explicit date ranges and additional metrics ([#1571](https://github.com/adobe/spacecat-api-service/issues/1571)) ([1455e0b](https://github.com/adobe/spacecat-api-service/commit/1455e0b06cdc9dbcb0965d410dbbf8d12603c72b))
+
+## [1.259.2](https://github.com/adobe/spacecat-api-service/compare/v1.259.1...v1.259.2) (2025-11-28)
+
+
+### Bug Fixes
+
+* update docs for POST and PATCH fixes ([#1524](https://github.com/adobe/spacecat-api-service/issues/1524)) ([504e284](https://github.com/adobe/spacecat-api-service/commit/504e284e6936119f7f4d3e12473409617a65a47a))
+
 ## [1.259.1](https://github.com/adobe/spacecat-api-service/compare/v1.259.0...v1.259.1) (2025-11-28)
 
 

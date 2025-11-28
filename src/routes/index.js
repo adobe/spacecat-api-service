@@ -184,6 +184,7 @@ export default function getRouteHandlers(
     'GET /sites/by-delivery-type/:deliveryType': sitesController.getAllByDeliveryType,
     'GET /sites/with-latest-audit/:auditType': sitesController.getAllWithLatestAudit,
     'GET /sites/:siteId/opportunities': opportunitiesController.getAllForSite,
+    'GET /sites/:siteId/opportunities/top-paid': opportunitiesController.getTopPaidOpportunities,
     'GET /sites/:siteId/opportunities/by-status/:status': opportunitiesController.getByStatus,
     'GET /sites/:siteId/opportunities/:opportunityId': opportunitiesController.getByID,
     'POST /sites/:siteId/opportunities': opportunitiesController.createOpportunity,
