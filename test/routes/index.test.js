@@ -387,6 +387,8 @@ describe('getRouteHandlers', () => {
       'GET /organizations/:organizationId/entitlements',
       'POST /organizations/:organizationId/entitlements',
       'GET /organizations/:organizationId/trial-users',
+      'GET /organizations/:organizationId/userDetails/:externalUserId',
+      'POST /organizations/:organizationId/userDetails',
       'POST /organizations/:organizationId/trial-user-invite',
       'GET /organizations/by-ims-org-id/:imsOrgId',
       'GET /organizations/by-ims-org-id/:imsOrgId/slack-config',
