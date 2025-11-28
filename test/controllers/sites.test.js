@@ -744,11 +744,15 @@ describe('Sites Controller', () => {
       totalCTR: 0.20,
       totalClicks: 4901,
       totalPageViews: 24173,
+      totalLCP: 1500,
+      totalEngagement: 5000,
     });
     context.rumApiClient.query.onCall(1).resolves({
-      totalCTR: 0.21,
-      totalClicks: 9723,
-      totalPageViews: 46944,
+      totalCTR: 0.19,
+      totalClicks: 4560,
+      totalPageViews: 24000,
+      totalLCP: 1600,
+      totalEngagement: 4800,
     });
     const storedMetrics = [{
       siteId: '123',
@@ -775,9 +779,17 @@ describe('Sites Controller', () => {
     const metrics = await result.json();
 
     expect(metrics).to.deep.equal({
-      ctrChange: -5.553712152633755,
-      pageViewsChange: 6.156954020464625,
-      projectedTrafficValue: 0.3078477010232313,
+      ctrChange: 5.263157894736847,
+      pageViewsChange: 0.7208333333333333,
+      projectedTrafficValue: 0.036041666666666666,
+      currentPageViews: 24173,
+      currentLCP: 1500,
+      currentEngagement: 5000,
+      previousPageViews: 24000,
+      previousEngagement: 4800,
+      previousLCP: 1600,
+      currentConversion: 4901,
+      previousConversion: 4560,
     });
   });
 
@@ -786,11 +798,15 @@ describe('Sites Controller', () => {
       totalCTR: 0.20,
       totalClicks: 4901,
       totalPageViews: 24173,
+      totalLCP: 1500,
+      totalEngagement: 5000,
     });
     context.rumApiClient.query.onCall(1).resolves({
-      totalCTR: 0.21,
-      totalClicks: 9723,
-      totalPageViews: 46944,
+      totalCTR: 0.19,
+      totalClicks: 4560,
+      totalPageViews: 24000,
+      totalLCP: 1600,
+      totalEngagement: 4800,
     });
     const storedMetrics = [];
 
@@ -810,9 +826,201 @@ describe('Sites Controller', () => {
     const metrics = await result.json();
 
     expect(metrics).to.deep.equal({
-      ctrChange: -5.553712152633755,
-      pageViewsChange: 6.156954020464625,
+      ctrChange: 5.263157894736847,
+      pageViewsChange: 0.7208333333333333,
       projectedTrafficValue: 0,
+      currentPageViews: 24173,
+      currentLCP: 1500,
+      currentEngagement: 5000,
+      previousPageViews: 24000,
+      previousEngagement: 4800,
+      previousLCP: 1600,
+      currentConversion: 4901,
+      previousConversion: 4560,
+    });
+  });
+
+  it('handles zero previous page views without division error', async () => {
+    context.rumApiClient.query.onCall(0).resolves({
+      totalCTR: 0.20,
+      totalClicks: 4901,
+      totalPageViews: 24173,
+      totalLCP: 1500,
+      totalEngagement: 5000,
+    });
+    context.rumApiClient.query.onCall(1).resolves({
+      totalCTR: 0.19,
+      totalClicks: 0,
+      totalPageViews: 0,
+      totalLCP: 1600,
+      totalEngagement: 4800,
+    });
+    const storedMetrics = [];
+
+    const getStoredMetrics = sinon.stub();
+    getStoredMetrics.resolves(storedMetrics);
+
+    const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+      '@adobe/spacecat-shared-utils': {
+        getStoredMetrics,
+      },
+    });
+    const result = await (
+      await sitesControllerMock
+        .default(context, context.log)
+        .getLatestSiteMetrics({ ...context, params: { siteId: SITE_IDS[0] } })
+    );
+    const metrics = await result.json();
+
+    expect(metrics).to.deep.equal({
+      ctrChange: 5.263157894736847,
+      pageViewsChange: 0,
+      projectedTrafficValue: 0,
+      currentPageViews: 24173,
+      currentLCP: 1500,
+      currentEngagement: 5000,
+      previousPageViews: 0,
+      previousEngagement: 4800,
+      previousLCP: 1600,
+      currentConversion: 4901,
+      previousConversion: 0,
+    });
+  });
+
+  it('handles zero previous CTR without division error', async () => {
+    context.rumApiClient.query.onCall(0).resolves({
+      totalCTR: 0.20,
+      totalClicks: 4901,
+      totalPageViews: 24173,
+      totalLCP: 1500,
+      totalEngagement: 5000,
+    });
+    context.rumApiClient.query.onCall(1).resolves({
+      totalCTR: 0,
+      totalClicks: 0,
+      totalPageViews: 24000,
+      totalLCP: 1600,
+      totalEngagement: 4800,
+    });
+    const storedMetrics = [];
+
+    const getStoredMetrics = sinon.stub();
+    getStoredMetrics.resolves(storedMetrics);
+
+    const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+      '@adobe/spacecat-shared-utils': {
+        getStoredMetrics,
+      },
+    });
+    const result = await (
+      await sitesControllerMock
+        .default(context, context.log)
+        .getLatestSiteMetrics({ ...context, params: { siteId: SITE_IDS[0] } })
+    );
+    const metrics = await result.json();
+
+    expect(metrics).to.deep.equal({
+      ctrChange: 0,
+      pageViewsChange: 0.7208333333333333,
+      projectedTrafficValue: 0,
+      currentPageViews: 24173,
+      currentLCP: 1500,
+      currentEngagement: 5000,
+      previousPageViews: 24000,
+      previousEngagement: 4800,
+      previousLCP: 1600,
+      currentConversion: 4901,
+      previousConversion: 0,
+    });
+  });
+
+  it('handles missing engagement values by defaulting to zero', async () => {
+    context.rumApiClient.query.onCall(0).resolves({
+      totalCTR: 0.20,
+      totalClicks: 4901,
+      totalPageViews: 24173,
+      totalLCP: 1500,
+    });
+    context.rumApiClient.query.onCall(1).resolves({
+      totalCTR: 0.19,
+      totalClicks: 4560,
+      totalPageViews: 24000,
+      totalLCP: 1600,
+    });
+    const storedMetrics = [];
+
+    const getStoredMetrics = sinon.stub();
+    getStoredMetrics.resolves(storedMetrics);
+
+    const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+      '@adobe/spacecat-shared-utils': {
+        getStoredMetrics,
+      },
+    });
+    const result = await (
+      await sitesControllerMock
+        .default(context, context.log)
+        .getLatestSiteMetrics({ ...context, params: { siteId: SITE_IDS[0] } })
+    );
+    const metrics = await result.json();
+
+    expect(metrics).to.deep.equal({
+      ctrChange: 5.263157894736847,
+      pageViewsChange: 0.7208333333333333,
+      projectedTrafficValue: 0,
+      currentPageViews: 24173,
+      currentLCP: 1500,
+      currentEngagement: 0,
+      previousPageViews: 24000,
+      previousEngagement: 0,
+      previousLCP: 1600,
+      currentConversion: 4901,
+      previousConversion: 4560,
+    });
+  });
+
+  it('handles missing conversion values by defaulting to zero', async () => {
+    context.rumApiClient.query.onCall(0).resolves({
+      totalCTR: 0.20,
+      totalPageViews: 24173,
+      totalLCP: 1500,
+      totalEngagement: 5000,
+    });
+    context.rumApiClient.query.onCall(1).resolves({
+      totalCTR: 0.19,
+      totalPageViews: 24000,
+      totalLCP: 1600,
+      totalEngagement: 4800,
+    });
+    const storedMetrics = [];
+
+    const getStoredMetrics = sinon.stub();
+    getStoredMetrics.resolves(storedMetrics);
+
+    const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+      '@adobe/spacecat-shared-utils': {
+        getStoredMetrics,
+      },
+    });
+    const result = await (
+      await sitesControllerMock
+        .default(context, context.log)
+        .getLatestSiteMetrics({ ...context, params: { siteId: SITE_IDS[0] } })
+    );
+    const metrics = await result.json();
+
+    expect(metrics).to.deep.equal({
+      ctrChange: 5.263157894736847,
+      pageViewsChange: 0.7208333333333333,
+      projectedTrafficValue: 0,
+      currentPageViews: 24173,
+      currentLCP: 1500,
+      currentEngagement: 5000,
+      previousPageViews: 24000,
+      previousEngagement: 4800,
+      previousLCP: 1600,
+      currentConversion: 0,
+      previousConversion: 0,
     });
   });
 
@@ -831,6 +1039,14 @@ describe('Sites Controller', () => {
       ctrChange: 0,
       pageViewsChange: 0,
       projectedTrafficValue: 0,
+      currentLCP: null,
+      previousPageViews: 0,
+      currentPageViews: 0,
+      previousLCP: null,
+      previousEngagement: 0,
+      currentEngagement: 0,
+      currentConversion: 0,
+      previousConversion: 0,
     });
   });
 

@@ -3351,6 +3351,11 @@ FixCreate:
       additionalProperties: true
     status:
       $ref: '#/FixStatus'
+    suggestionIds:
+      type: array
+      description: Optional array of suggestion IDs to associate with this fix
+      items:
+        $ref: '#/Id'
 
 FixOperationSuccess:
   type: object
@@ -3446,6 +3451,23 @@ FixUpdate:
       additionalProperties: true
     status:
       $ref: '#/FixStatus'
+    suggestionIds:
+      type: array
+      description: Optional array of suggestion IDs to associate with this fix. Replaces existing associations.
+      items:
+        $ref: '#/Id'
+    executedBy:
+      type: string
+      description: Email or identifier of who executed the fix
+    executedAt:
+      $ref: '#/DateTime'
+      description: ISO timestamp when the fix was executed
+    publishedAt:
+      $ref: '#/DateTime'
+      description: ISO timestamp when the fix was published
+    origin:
+      type: string
+      description: Origin of the fix (e.g., 'manual', 'automated')
 
 FixStatusUpdate:
   type: array

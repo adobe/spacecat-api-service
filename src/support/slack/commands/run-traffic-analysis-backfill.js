@@ -71,6 +71,7 @@ function RunTrafficAnalysisBackfillCommand(context) {
       siteId: site.getId(),
       week,
       year,
+      allowCache: false,
       slackContext,
     });
   };
