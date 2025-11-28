@@ -66,12 +66,42 @@ describe('LlmoController', () => {
   let writeConfigStub;
   let llmoConfigSchemaStub;
   let triggerBrandProfileAgentStub;
+  let updateModifiedByDetailsStub;
+
+  const mockHttpUtils = {
+    ok: (data, headers = {}) => ({
+      status: 200,
+      headers: new Map(Object.entries(headers)),
+      json: async () => data,
+    }),
+    badRequest: (message) => ({
+      status: 400,
+      json: async () => ({ message }),
+    }),
+    forbidden: (message) => ({
+      status: 403,
+      json: async () => ({ message }),
+    }),
+    notFound: (message) => ({
+      status: 404,
+      json: async () => ({ message }),
+    }),
+    createResponse: (data, status) => ({
+      status,
+      json: async () => data,
+    }),
+  };
 
   before(async () => {
     triggerBrandProfileAgentStub = sinon.stub().resolves('exec-123');
+    updateModifiedByDetailsStub = sinon.stub();
 
     // Set up esmock once for all tests
     LlmoController = await esmock('../../../src/controllers/llmo/llmo.js', {
+      '../../../src/controllers/llmo/llmo-config-metadata.js': {
+        updateModifiedByDetails: updateModifiedByDetailsStub,
+      },
+      '@adobe/spacecat-shared-http-utils': mockHttpUtils,
       '@adobe/spacecat-shared-utils': {
         SPACECAT_USER_AGENT: TEST_USER_AGENT,
         tracingFetch: (...args) => tracingFetchStub(...args),
@@ -116,6 +146,7 @@ describe('LlmoController', () => {
       '../../../src/support/access-control-util.js': {
         default: createMockAccessControlUtil(false),
       },
+      '@adobe/spacecat-shared-http-utils': mockHttpUtils,
       '../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
       },
@@ -125,6 +156,19 @@ describe('LlmoController', () => {
 
   beforeEach(async () => {
     triggerBrandProfileAgentStub.resetHistory();
+    updateModifiedByDetailsStub.resetHistory();
+    updateModifiedByDetailsStub.callsFake((config) => ({
+      newConfig: config,
+      stats: {
+        categories: { total: 0, modified: 0 },
+        topics: { total: 0, modified: 0 },
+        prompts: { total: 0, modified: 0 },
+        brandAliases: { total: 0, modified: 0 },
+        competitors: { total: 0, modified: 0 },
+        deletedPrompts: { total: 0, modified: 0 },
+        categoryUrls: { total: 0 },
+      },
+    }));
     mockLlmoConfig = {
       dataFolder: TEST_FOLDER,
       brand: TEST_BRAND,
@@ -1051,6 +1095,7 @@ describe('LlmoController', () => {
       const result = await controller.getLlmoConfig(mockContext);
 
       expect(result.status).to.equal(200);
+      expect(result.headers.get('Content-Encoding')).to.equal('br');
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({ config: expectedConfig, version: 'v123' });
     });
@@ -1084,6 +1129,7 @@ describe('LlmoController', () => {
       const result = await controller.getLlmoConfig(mockContext);
 
       expect(result.status).to.equal(200);
+      expect(result.headers.get('Content-Encoding')).to.equal('br');
       const responseBody = await result.json();
       expect(responseBody.version).to.equal('v123');
     });
@@ -1352,23 +1398,36 @@ describe('LlmoController', () => {
       };
       mockContext.data = configWithAllFields;
       llmoConfigSchemaStub.safeParse.returns({ success: true, data: configWithAllFields });
+      updateModifiedByDetailsStub.callsFake((config) => ({
+        newConfig: config,
+        stats: {
+          categories: { total: 1, modified: 1 },
+          topics: { total: 1, modified: 1 },
+          aiTopics: { total: 0, modified: 0 },
+          prompts: { total: 2, modified: 2 },
+          brandAliases: { total: 1, modified: 1 },
+          competitors: { total: 1, modified: 1 },
+          deletedPrompts: { total: 2, modified: 2 },
+          categoryUrls: { total: 2 },
+        },
+      }));
 
       const result = await controller.updateLlmoConfig(mockContext);
 
       expect(result.status).to.equal(200);
       expect(mockLog.info).to.have.been.calledWith(
         sinon.match(/User test-user-id modifying customer configuration/)
-          .and(sinon.match(/2 prompts/))
-          .and(sinon.match(/1 categories/))
-          .and(sinon.match(/1 topics/))
-          .and(sinon.match(/1 brand aliases/))
-          .and(sinon.match(/1 competitors/))
-          .and(sinon.match(/2 deleted prompts/))
+          .and(sinon.match(/2 prompts \(2 modified\)/))
+          .and(sinon.match(/1 categories \(1 modified\)/))
+          .and(sinon.match(/1 topics \(1 modified\)/))
+          .and(sinon.match(/1 brand aliases \(1 modified\)/))
+          .and(sinon.match(/1 competitors \(1 modified\)/))
+          .and(sinon.match(/2 deleted prompts \(2 modified\)/))
           .and(sinon.match(/2 category URLs/)),
       );
     });
 
-    it('should use "unknown" as userId when sub is missing from profile', async () => {
+    it('should use "system" as userId when sub is missing from profile', async () => {
       // Override getProfile to return profile without sub
       mockContext.attributes.authInfo.getProfile = () => ({
         email: 'test@example.com',
@@ -1382,11 +1441,11 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       expect(mockLog.info).to.have.been.calledWith(
-        sinon.match(/User unknown modifying customer configuration/),
+        sinon.match(/User system modifying customer configuration/),
       );
     });
 
-    it('should use "unknown" as userId in error when authInfo is missing', async () => {
+    it('should use "system" as userId in error when authInfo is missing', async () => {
       // Remove authInfo
       mockContext.attributes = {};
       writeConfigStub.rejects(new Error('S3 write failed'));
@@ -1400,7 +1459,7 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(400);
       expect(mockLog.error).to.have.been.calledWith(
-        sinon.match(/User unknown error updating llmo config/),
+        sinon.match(/User system error updating llmo config/),
       );
     });
 
@@ -1435,6 +1494,18 @@ describe('LlmoController', () => {
       };
       mockContext.data = configWithCategoryUrls;
       llmoConfigSchemaStub.safeParse.returns({ success: true, data: configWithCategoryUrls });
+      updateModifiedByDetailsStub.callsFake((config) => ({
+        newConfig: config,
+        stats: {
+          categories: { total: 3, modified: 3 },
+          topics: { total: 0, modified: 0 },
+          prompts: { total: 0, modified: 0 },
+          brandAliases: { total: 0, modified: 0 },
+          competitors: { total: 0, modified: 0 },
+          deletedPrompts: { total: 0, modified: 0 },
+          categoryUrls: { total: 4 },
+        },
+      }));
 
       const result = await controller.updateLlmoConfig(mockContext);
 
@@ -1460,6 +1531,18 @@ describe('LlmoController', () => {
       };
       mockContext.data = configWithoutUrls;
       llmoConfigSchemaStub.safeParse.returns({ success: true, data: configWithoutUrls });
+      updateModifiedByDetailsStub.callsFake((config) => ({
+        newConfig: config,
+        stats: {
+          categories: { total: 1, modified: 1 },
+          topics: { total: 0, modified: 0 },
+          prompts: { total: 0, modified: 0 },
+          brandAliases: { total: 0, modified: 0 },
+          competitors: { total: 0, modified: 0 },
+          deletedPrompts: { total: 0, modified: 0 },
+          categoryUrls: { total: 0 },
+        },
+      }));
 
       const result = await controller.updateLlmoConfig(mockContext);
 
@@ -1489,6 +1572,18 @@ describe('LlmoController', () => {
       };
       mockContext.data = configWithEmptyPrompts;
       llmoConfigSchemaStub.safeParse.returns({ success: true, data: configWithEmptyPrompts });
+      updateModifiedByDetailsStub.callsFake((config) => ({
+        newConfig: config,
+        stats: {
+          categories: { total: 1, modified: 1 },
+          topics: { total: 2, modified: 2 },
+          prompts: { total: 0, modified: 0 },
+          brandAliases: { total: 0, modified: 0 },
+          competitors: { total: 0, modified: 0 },
+          deletedPrompts: { total: 0, modified: 0 },
+          categoryUrls: { total: 0 },
+        },
+      }));
 
       const result = await controller.updateLlmoConfig(mockContext);
 
