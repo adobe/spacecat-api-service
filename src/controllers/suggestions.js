@@ -917,7 +917,7 @@ function SuggestionsController(ctx, sqs, env) {
     if (isNonEmptyArray(validSuggestions)) {
       const urls = new Set();
       validSuggestions.forEach((suggestion) => {
-        const url = suggestion.getData()?.url;
+        const url = suggestion.getData()?.url || suggestion.getData()?.pageUrl;
         if (url) {
           urls.add(url);
         }
