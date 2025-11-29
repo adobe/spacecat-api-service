@@ -18,7 +18,7 @@ import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import AccessControlUtil from '../src/support/access-control-util.js';
 
-import { main } from '../src/index.js';
+import { main } from './utils.js';
 
 use(sinonChai);
 
