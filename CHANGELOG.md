@@ -1,3 +1,24 @@
+# [1.265.0](https://github.com/adobe/spacecat-api-service/compare/v1.264.4...v1.265.0) (2025-11-30)
+
+
+### Features
+
+* url handling in Edge deployment ([#1592](https://github.com/adobe/spacecat-api-service/issues/1592)) ([58b7585](https://github.com/adobe/spacecat-api-service/commit/58b758574aa2c9b0b9b55d951fff26afd585bc97))
+
+## [1.264.4](https://github.com/adobe/spacecat-api-service/compare/v1.264.3...v1.264.4) (2025-11-30)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#1591](https://github.com/adobe/spacecat-api-service/issues/1591)) ([f85755c](https://github.com/adobe/spacecat-api-service/commit/f85755c86b7f9a15f62319a4eec3136a39104f13))
+
+## [1.264.3](https://github.com/adobe/spacecat-api-service/compare/v1.264.2...v1.264.3) (2025-11-29)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tokowaka-client to v1.2.4 ([#1590](https://github.com/adobe/spacecat-api-service/issues/1590)) ([82cdb79](https://github.com/adobe/spacecat-api-service/commit/82cdb79a53d5a19be1e7398619fc58a2347efcb9))
+
 ## [1.264.2](https://github.com/adobe/spacecat-api-service/compare/v1.264.1...v1.264.2) (2025-11-28)
 
 
