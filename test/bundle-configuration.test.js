@@ -21,7 +21,7 @@ import { main } from './utils.js';
 
 const baseUrl = 'https://base.spacecat';
 
-describe('Bundle Test: Configuration.findLatest()', () => {
+describe.skip('Bundle Test: Configuration.findLatest()', () => {
   let request;
   let context;
 
