@@ -100,8 +100,9 @@ export default (context) => {
     CSV file must be in the format of baseURL per line(no headers).
     Profiles are defined in the config/profiles.json file.`,
     phrases: [PHRASE],
-    usageText: `${PHRASE} {enable/disable} {site} {auditType} for singleURL, 
-    or ${PHRASE} {enable/disable} {profile/auditType} with CSV file uploaded.`,
+    usageText: `${PHRASE} {enable/disable} {site} {auditType} for single URL, 
+    or ${PHRASE} {enable/disable} {profile/auditType} with CSV file uploaded.
+    Special: ${PHRASE} disable {site} all [profile] to disable all audits from a profile.`,
   });
 
   const { log, dataAccess } = context;
@@ -193,7 +194,7 @@ export default (context) => {
 
       // single URL behavior
       if (isNonEmptyArray(files) === false) {
-        const [, baseURLInput, singleAuditType] = args;
+        const [, baseURLInput, singleAuditType, profileName] = args;
 
         const baseURL = extractURLFromSlackInput(baseURLInput);
 
@@ -212,6 +213,41 @@ export default (context) => {
           }
 
           const registeredAudits = configuration.getHandlers();
+
+          // Handle "all" keyword to disable all audits from a profile
+          if (singleAuditType === 'all') {
+            // Only allow disable, not enable
+            if (isEnableAudit) {
+              await say(`${ERROR_MESSAGE_PREFIX}Enable all is not supported. Please enable audits individually or use a profile with CSV upload.`);
+              return;
+            }
+
+            // Default to 'demo' profile if not specified
+            const targetProfile = profileName || 'demo';
+
+            let profile;
+            try {
+              profile = loadProfileConfig(targetProfile);
+            } catch (error) {
+              await say(`${ERROR_MESSAGE_PREFIX}Profile "${targetProfile}" not found.`);
+              return;
+            }
+            const profileAuditTypes = Object.keys(profile.audits || {});
+            if (profileAuditTypes.length === 0) {
+              return;
+            }
+
+            await say(`:hourglass_flowing_sand: Disabling ${profileAuditTypes.length} audits from profile "${targetProfile}" for ${site.getBaseURL()}...`);
+
+            profileAuditTypes.forEach((auditType) => {
+              configuration.disableHandlerForSite(auditType, site);
+            });
+
+            await configuration.save();
+            await say(`${SUCCESS_MESSAGE_PREFIX}Successfully disabled ${profileAuditTypes.length} audits from profile "${targetProfile}" for "${site.getBaseURL()}".\n\`\`\`${profileAuditTypes.join('\n')}\`\`\``);
+            return;
+          }
+
           if (!registeredAudits[singleAuditType]) {
             await say(`${ERROR_MESSAGE_PREFIX}The "${singleAuditType}" is not present in the configuration.\nList of allowed audits:\n${Object.keys(registeredAudits).join('\n')}.`);
             return;
