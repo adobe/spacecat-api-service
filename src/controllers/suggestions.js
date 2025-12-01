@@ -55,6 +55,7 @@ function SuggestionsController(ctx, sqs, env) {
     'broken-backlinks',
     'form-accessibility',
     'product-metatags',
+    'security-permissions-redundant',
   ];
 
   const DEFAULT_PAGE_SIZE = 100;
@@ -917,7 +918,7 @@ function SuggestionsController(ctx, sqs, env) {
     if (isNonEmptyArray(validSuggestions)) {
       const urls = new Set();
       validSuggestions.forEach((suggestion) => {
-        const url = suggestion.getData()?.url;
+        const url = suggestion.getData()?.url || suggestion.getData()?.pageUrl;
         if (url) {
           urls.add(url);
         }
@@ -1162,10 +1163,146 @@ function SuggestionsController(ctx, sqs, env) {
     return createResponse(response, 207);
   };
 
+  const rollbackSuggestionFromEdge = async (context) => {
+    const { siteId, opportunityId } = context.params;
+    if (!isNonEmptyObject(context.data)) {
+      return badRequest('No data provided');
+    }
+    const { suggestionIds } = context.data;
+    if (!isArray(suggestionIds) || suggestionIds.length === 0) {
+      return badRequest('Request body must contain a non-empty array of suggestionIds');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
+    }
+
+    const opportunity = await Opportunity.findById(opportunityId);
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound('Opportunity not found');
+    }
+
+    // Fetch all suggestions for this opportunity
+    const allSuggestions = await Suggestion.allByOpportunityId(opportunityId);
+
+    // Track valid, failed, and missing suggestions
+    const validSuggestions = [];
+    const failedSuggestions = [];
+
+    // Check each requested suggestion
+    suggestionIds.forEach((suggestionId, index) => {
+      const suggestion = allSuggestions.find((s) => s.getId() === suggestionId);
+
+      if (!suggestion) {
+        failedSuggestions.push({
+          uuid: suggestionId,
+          index,
+          message: 'Suggestion not found',
+          statusCode: 404,
+        });
+      } else {
+        // For rollback, check if suggestion has been deployed
+        const hasBeenDeployed = suggestion.getData()?.tokowakaDeployed;
+        if (!hasBeenDeployed) {
+          failedSuggestions.push({
+            uuid: suggestionId,
+            index,
+            message: 'Suggestion has not been deployed, cannot rollback',
+            statusCode: 400,
+          });
+        } else {
+          validSuggestions.push(suggestion);
+        }
+      }
+    });
+
+    let succeededSuggestions = [];
+
+    // Only attempt rollback if we have valid suggestions
+    if (isNonEmptyArray(validSuggestions)) {
+      try {
+        const tokowakaClient = TokowakaClient.createFrom(context);
+
+        // Rollback suggestions
+        const result = await tokowakaClient.rollbackSuggestions(
+          site,
+          opportunity,
+          validSuggestions,
+        );
+
+        // Process results
+        const {
+          succeededSuggestions: processedSuggestions,
+          failedSuggestions: ineligibleSuggestions,
+        } = result;
+
+        // Update successfully rolled back suggestions - remove tokowakaDeployed timestamp
+        succeededSuggestions = await Promise.all(
+          processedSuggestions.map(async (suggestion) => {
+            const currentData = suggestion.getData();
+            delete currentData.tokowakaDeployed;
+            suggestion.setData(currentData);
+            suggestion.setUpdatedBy('tokowaka-rollback');
+            return suggestion.save();
+          }),
+        );
+
+        // Add ineligible suggestions to failed list
+        ineligibleSuggestions.forEach((item) => {
+          failedSuggestions.push({
+            uuid: item.suggestion.getId(),
+            index: suggestionIds.indexOf(item.suggestion.getId()),
+            message: item.reason,
+            statusCode: 400,
+          });
+        });
+
+        context.log.info(`Successfully rolled back ${succeededSuggestions.length} suggestions from Edge`);
+      } catch (error) {
+        context.log.error(`Error during Tokowaka rollback: ${error.message}`, error);
+        // If rollback fails, mark all valid suggestions as failed
+        validSuggestions.forEach((suggestion) => {
+          failedSuggestions.push({
+            uuid: suggestion.getId(),
+            index: suggestionIds.indexOf(suggestion.getId()),
+            message: 'Rollback failed: Internal server error',
+            statusCode: 500,
+          });
+        });
+      }
+    }
+
+    const response = {
+      suggestions: [
+        ...succeededSuggestions.map((suggestion) => ({
+          uuid: suggestion.getId(),
+          index: suggestionIds.indexOf(suggestion.getId()),
+          statusCode: 200,
+          suggestion: SuggestionDto.toJSON(suggestion),
+        })),
+        ...failedSuggestions,
+      ],
+      metadata: {
+        total: suggestionIds.length,
+        success: succeededSuggestions.length,
+        failed: failedSuggestions.length,
+      },
+    };
+    response.suggestions.sort((a, b) => a.index - b.index);
+
+    return createResponse(response, 207);
+  };
+
   return {
     autofixSuggestions,
     createSuggestions,
     deploySuggestionToEdge,
+    rollbackSuggestionFromEdge,
     previewSuggestions,
     getAllForOpportunity,
     getAllForOpportunityPaged,

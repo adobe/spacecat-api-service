@@ -20,6 +20,7 @@ import esmock from 'esmock';
 
 import { ValidationError, Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
+import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import SuggestionsController from '../../src/controllers/suggestions.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
 
@@ -145,6 +146,7 @@ describe('Suggestions Controller', () => {
     'getAllForOpportunity',
     'getAllForOpportunityPaged',
     'deploySuggestionToEdge',
+    'rollbackSuggestionFromEdge',
     'previewSuggestions',
     'getByID',
     'getByStatus',
@@ -3316,7 +3318,7 @@ describe('Suggestions Controller', () => {
       expect(s3ClientSendStub.callCount).to.be.at.least(1);
       // Verify PutObjectCommand was called for upload
       const putObjectCalls = s3ClientSendStub.getCalls().filter((call) => call.args[0].constructor.name === 'PutObjectCommand');
-      expect(putObjectCalls).to.have.length(1);
+      expect(putObjectCalls).to.have.length(2);
 
       // Verify suggestion data was updated with deployment timestamp
       const firstSugg = tokowakaSuggestions[0];
@@ -3641,20 +3643,18 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(207);
 
-      // Find the PutObjectCommand call (second call after GetObjectCommand)
-      const putObjectCall = s3ClientSendStub.getCalls().find((call) => call.args[0].constructor.name === 'PutObjectCommand');
-      expect(putObjectCall).to.exist;
-      const uploadedConfig = JSON.parse(putObjectCall.args[0].input.Body);
-
+      // Find the second PutObjectCommand call
+      const putObjectCalls = s3ClientSendStub.getCalls().filter((call) => call.args[0].constructor.name === 'PutObjectCommand');
+      expect(putObjectCalls).to.have.length.at.least(2);
+      const uploadedConfig = JSON.parse(putObjectCalls[1].args[0].input.Body);
+      console.log(JSON.stringify(uploadedConfig, null, 2));
       // Validate config structure
-      expect(uploadedConfig).to.have.property('siteId', SITE_ID);
-      expect(uploadedConfig).to.have.property('baseURL');
+      expect(uploadedConfig).to.have.property('url');
       expect(uploadedConfig).to.have.property('version', '1.0');
-      expect(uploadedConfig).to.have.property('tokowakaForceFail', false);
-      expect(uploadedConfig).to.have.property('tokowakaOptimizations');
+      expect(uploadedConfig).to.have.property('forceFail', false);
+      expect(uploadedConfig).to.have.property('patches');
 
-      // Validate patch structure
-      const { patches } = uploadedConfig.tokowakaOptimizations['/page1'];
+      const { patches } = uploadedConfig;
       expect(patches).to.have.length(2);
       expect(patches[0]).to.have.property('op', 'replace');
       expect(patches[0]).to.have.property('selector');
@@ -3663,6 +3663,427 @@ describe('Suggestions Controller', () => {
       expect(patches[0]).to.have.property('suggestionId');
       expect(patches[0]).to.have.property('prerenderRequired', true);
       expect(patches[0]).to.have.property('lastUpdated');
+    });
+  });
+
+  describe('rollbackSuggestionFromEdge (Tokowaka Rollback)', () => {
+    let s3ClientSendStub;
+    let tokowakaSuggestions;
+    let headingsOpportunity;
+
+    beforeEach(() => {
+      // Mock suggestions with tokowakaDeployed timestamp
+      tokowakaSuggestions = [
+        {
+          getId: () => SUGGESTION_IDS[0],
+          getType: () => 'headings',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 1,
+          getData: () => ({
+            url: 'https://example.com/page1',
+            recommendedAction: 'New Heading Title',
+            checkType: 'heading-empty',
+            transformRules: {
+              action: 'replace',
+              selector: 'h1.test-selector',
+            },
+            tokowakaDeployed: '2025-01-01T00:00:00.000Z',
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().returnsThis(),
+        },
+        {
+          getId: () => SUGGESTION_IDS[1],
+          getType: () => 'headings',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 2,
+          getData: () => ({
+            url: 'https://example.com/page1',
+            recommendedAction: 'New Subtitle',
+            checkType: 'heading-empty',
+            transformRules: {
+              action: 'replace',
+              selector: 'h2.test-selector',
+            },
+            tokowakaDeployed: '2025-01-01T00:00:00.000Z',
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().returnsThis(),
+        },
+      ];
+
+      headingsOpportunity = {
+        getId: sandbox.stub().returns(OPPORTUNITY_ID),
+        getSiteId: sandbox.stub().returns(SITE_ID),
+        getType: sandbox.stub().returns('headings'),
+      };
+
+      site.getConfig = sandbox.stub().returns({
+        getTokowakaConfig: () => ({ apiKey: 'test-api-key-123' }),
+      });
+      site.getBaseURL = sandbox.stub().returns('https://example.com');
+      site.getId = sandbox.stub().returns(SITE_ID);
+      mockOpportunity.findById.resetBehavior();
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(headingsOpportunity);
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID_NOT_ENABLED).resolves(opportunityNotEnabled);
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID_NOT_FOUND).resolves(null);
+      mockSuggestion.allByOpportunityId.resetBehavior();
+      mockSuggestion.allByOpportunityId.resolves(tokowakaSuggestions);
+
+      // Mock S3 GetObject to return existing config with deployed patches
+      const existingConfig = {
+        siteId: SITE_ID,
+        baseURL: 'https://example.com',
+        version: '1.0',
+        tokowakaOptimizations: {
+          '/page1': {
+            prerender: true,
+            patches: [
+              {
+                opportunityId: OPPORTUNITY_ID,
+                suggestionId: SUGGESTION_IDS[0],
+                op: 'replace',
+                selector: 'h1.test-selector',
+                value: 'New Heading Title',
+                prerenderRequired: true,
+                lastUpdated: '2025-01-01T00:00:00.000Z',
+              },
+              {
+                opportunityId: OPPORTUNITY_ID,
+                suggestionId: SUGGESTION_IDS[1],
+                op: 'replace',
+                selector: 'h2.test-selector',
+                value: 'New Subtitle',
+                prerenderRequired: true,
+                lastUpdated: '2025-01-01T00:00:00.000Z',
+              },
+            ],
+          },
+        },
+      };
+
+      s3ClientSendStub = sandbox.stub().callsFake((command) => {
+        // Handle GetObjectCommand (fetchConfig) - return existing config with deployed patches
+        if (command.constructor.name === 'GetObjectCommand') {
+          return Promise.resolve({
+            Body: {
+              transformToString: () => JSON.stringify(existingConfig),
+            },
+          });
+        }
+        // Handle PutObjectCommand (uploadConfig) - simulate successful upload
+        return Promise.resolve();
+      });
+      context.s3 = {
+        s3Client: {
+          send: s3ClientSendStub,
+        },
+      };
+      context.env = {
+        TOKOWAKA_SITE_CONFIG_BUCKET: 'test-tokowaka-bucket',
+        TOKOWAKA_PREVIEW_BUCKET: 'test-tokowaka-preview-bucket',
+        TOKOWAKA_CDN_PROVIDER: 'test-cdn-provider',
+        TOKOWAKA_EDGE_URL: 'https://edge-dev.tokowaka.now',
+        TOKOWAKA_CDN_CONFIG: JSON.stringify({
+          cloudfront: {
+            distributionId: 'E123456',
+            region: 'us-east-1',
+          },
+        }),
+      };
+
+      tokowakaSuggestions.forEach((suggestion, index) => {
+        mockSuggestion.findById
+          .withArgs(SUGGESTION_IDS[index])
+          .resolves(suggestion);
+      });
+
+      context.log = {
+        info: sandbox.stub(),
+        warn: sandbox.stub(),
+        error: sandbox.stub(),
+        debug: sandbox.stub(),
+      };
+    });
+
+    it('should return 400 when no data provided', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: null,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'No data provided');
+    });
+
+    it('should return 400 when suggestionIds is empty', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [],
+        },
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Request body must contain a non-empty array of suggestionIds');
+    });
+
+    it('should return 404 when site not found', async () => {
+      mockSite.findById.withArgs('non-existent-site').resolves(null);
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: 'non-existent-site',
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(404);
+    });
+
+    it('should return 403 when user does not have access', async () => {
+      const restrictedSite = {
+        getId: sandbox.stub().returns('restricted-site-id'),
+        getConfig: sandbox.stub().returns({
+          getTokowakaConfig: () => ({ apiKey: 'test-api-key-123' }),
+        }),
+        getBaseURL: sandbox.stub().returns('https://example.com'),
+      };
+
+      mockSite.findById.withArgs('restricted-site-id').resolves(restrictedSite);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: 'restricted-site-id',
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(403);
+    });
+
+    it('should return 404 when opportunity not found', async () => {
+      mockOpportunity.findById.withArgs('non-existent-opportunity').resolves(null);
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: 'non-existent-opportunity',
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(404);
+    });
+
+    it('should successfully rollback suggestions', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      expect(body.metadata.success).to.equal(1);
+      expect(body.metadata.failed).to.equal(0);
+
+      // Verify tokowakaDeployed was removed
+      const suggestion = tokowakaSuggestions[0];
+      expect(suggestion.setData.calledOnce).to.be.true;
+      const dataArg = suggestion.setData.firstCall.args[0];
+      expect(dataArg).to.not.have.property('tokowakaDeployed');
+
+      // Verify setUpdatedBy was called
+      expect(suggestion.setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
+
+      // Verify save was called
+      expect(suggestion.save.calledOnce).to.be.true;
+    });
+
+    it('should return 400 for suggestions without tokowakaDeployed during rollback', async () => {
+      // Remove tokowakaDeployed from suggestion
+      tokowakaSuggestions[0].getData = () => ({
+        type: 'headings',
+        checkType: 'heading-empty',
+        recommendedAction: {
+          description: 'Suggestion 1',
+          transformRules: {
+            action: 'replace',
+            selector: 'h1:nth-of-type(1)',
+          },
+        },
+      });
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      expect(body.metadata.success).to.equal(0);
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0].message).to.include('has not been deployed');
+    });
+
+    it('should handle multiple suggestions rollback', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      expect(body.metadata.success).to.equal(2);
+      expect(body.metadata.failed).to.equal(0);
+
+      // Verify both suggestions were updated
+      tokowakaSuggestions.forEach((suggestion) => {
+        expect(suggestion.setData.calledOnce).to.be.true;
+        expect(suggestion.setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
+        expect(suggestion.save.calledOnce).to.be.true;
+      });
+    });
+
+    it('should handle rollback failure gracefully', async () => {
+      // Make S3 upload fail
+      s3ClientSendStub.rejects(new Error('S3 upload failed'));
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      expect(body.metadata.success).to.equal(0);
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0].message).to.include('Rollback failed');
+    });
+
+    it('should handle suggestion not found during rollback', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], 'not-found-id'],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      expect(body.metadata.total).to.equal(2);
+      expect(body.metadata.success).to.equal(1);
+      expect(body.metadata.failed).to.equal(1);
+
+      const failedSuggestion = body.suggestions.find((s) => s.uuid === 'not-found-id');
+      expect(failedSuggestion.statusCode).to.equal(404);
+      expect(failedSuggestion.message).to.include('not found');
+    });
+
+    it('should handle ineligible suggestions during rollback from tokowaka client', async () => {
+      // Mock TokowakaClient to return some ineligible suggestions
+      const TokowakaClientStub = {
+        rollbackSuggestions: sandbox.stub().resolves({
+          succeededSuggestions: [tokowakaSuggestions[0]],
+          failedSuggestions: [
+            {
+              suggestion: tokowakaSuggestions[1],
+              reason: 'Suggestion cannot be rolled back due to invalid configuration',
+            },
+          ],
+        }),
+      };
+
+      sandbox.stub(TokowakaClient, 'createFrom').returns(TokowakaClientStub);
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      expect(body.metadata.total).to.equal(2);
+      expect(body.metadata.success).to.equal(1);
+      expect(body.metadata.failed).to.equal(1);
+
+      const failedSuggestion = body.suggestions.find((s) => s.uuid === SUGGESTION_IDS[1]);
+      expect(failedSuggestion.statusCode).to.equal(400);
+      expect(failedSuggestion.message).to.include('invalid configuration');
     });
   });
 
@@ -4084,18 +4505,17 @@ describe('Suggestions Controller', () => {
       const body2 = putCall.args[0].input.Body;
 
       // Verify preview path
-      expect(key).to.equal('preview/opportunities/test-api-key-123');
+      expect(key).to.equal('preview/opportunities/example.com/L3BhZ2Ux');
 
       // Verify uploaded config structure
       const uploadedConfig = JSON.parse(body2);
-      expect(uploadedConfig).to.have.property('siteId', SITE_ID);
-      expect(uploadedConfig).to.have.property('baseURL', 'https://example.com');
+      expect(uploadedConfig).to.have.property('url', 'https://example.com/page1');
       expect(uploadedConfig).to.have.property('version', '1.0');
-      expect(uploadedConfig).to.have.property('tokowakaForceFail', false);
-      expect(uploadedConfig).to.have.property('tokowakaOptimizations');
+      expect(uploadedConfig).to.have.property('forceFail', false);
+      expect(uploadedConfig).to.have.property('patches');
 
       // Validate patch structure
-      const { patches } = uploadedConfig.tokowakaOptimizations['/page1'];
+      const { patches } = uploadedConfig;
       expect(patches).to.have.length(2);
       expect(patches[0]).to.have.property('op', 'replace');
       expect(patches[0]).to.have.property('selector');
