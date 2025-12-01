@@ -60,15 +60,24 @@ organization:
   delete:
     tags:
       - organization
-    summary: Delete an organization
+    summary: Delete an organization (Restricted Operation)
     description: |
-      This endpoint is useful for deleting an organization.
+      This endpoint is restricted and will return a 403 Forbidden response.
+      Organization deletion is not allowed through the API for security and data integrity reasons.
     operationId: deleteOrganization
     security:
       - admin_key: [ ]
     responses:
-      '204':
-        description: Organization deleted successfully
+      '403':
+        description: Restricted Operation - Organization deletion is not allowed
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Restricted Operation"
       '400':
         $ref: './responses.yaml#/400-no-organization-id'
       '401':
