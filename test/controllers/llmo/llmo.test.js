@@ -121,19 +121,15 @@ describe('LlmoController', () => {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
       },
       '../../../src/support/access-control-util.js': {
-        default: class MockAccessControlUtil {
-          static fromContext(context) {
-            return new MockAccessControlUtil(context);
-          }
-
-          constructor(context) {
-            this.log = context.log;
-          }
-
-          // eslint-disable-next-line class-methods-use-this
-          async hasAccess() {
-            return true;
-          }
+        default: {
+          fromContext(context) {
+            return {
+              log: context.log,
+              async hasAccess() {
+                return true;
+              },
+            };
+          },
         },
       },
       '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
@@ -2522,6 +2518,233 @@ describe('LlmoController', () => {
       expect(mockLog.error).to.have.been.calledWith(
         `Error during LLMO cached query for site ${TEST_SITE_ID}: Cache query failed`,
       );
+    });
+  });
+
+  describe('getLlmoRecommendations', () => {
+    let mockS3Client;
+    let mockS3Response;
+    let recommendationsContext;
+
+    beforeEach(() => {
+      mockS3Response = {
+        Body: {
+          transformToString: sinon.stub(),
+        },
+      };
+
+      mockS3Client = {
+        send: sinon.stub(),
+      };
+
+      recommendationsContext = {
+        ...mockContext,
+        params: {
+          siteId: TEST_SITE_ID,
+        },
+        s3: {
+          s3Client: mockS3Client,
+          GetObjectCommand: function MockGetObjectCommand(params) {
+            this.params = params;
+          },
+        },
+      };
+    });
+
+    it('should successfully retrieve and return recommendations from S3', async () => {
+      const mockRecommendationsData = {
+        recommendations: [
+          { id: 1, type: 'prompt', content: 'Test recommendation 1' },
+          { id: 2, type: 'prompt', content: 'Test recommendation 2' },
+        ],
+        metadata: {
+          generated: '2025-01-15T10:00:00Z',
+          version: '1.0',
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRecommendationsData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRecommendations(recommendationsContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(mockRecommendationsData);
+
+      expect(mockS3Client.send).to.have.been.calledOnce;
+      const commandArg = mockS3Client.send.getCall(0).args[0];
+      expect(commandArg.params.Bucket).to.equal('spacecat-dev-mystique-assets');
+      expect(commandArg.params.Key).to.equal(`llm_cache/${TEST_SITE_ID}/prompts/human_prompts_popularity_cache.json`);
+
+      expect(mockLog.info).to.have.been.calledWith(`Getting LLMO recommendations for site ${TEST_SITE_ID}`);
+      expect(mockLog.info).to.have.been.calledWith(`Successfully retrieved LLMO recommendations for site ${TEST_SITE_ID} from S3`);
+    });
+
+    it('should return 404 when S3 file does not exist (NoSuchKey)', async () => {
+      const noSuchKeyError = new Error('The specified key does not exist');
+      noSuchKeyError.name = 'NoSuchKey';
+      mockS3Client.send.rejects(noSuchKeyError);
+
+      const result = await controller.getLlmoRecommendations(recommendationsContext);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal(`Recommendations file not found for site ${TEST_SITE_ID}`);
+
+      expect(mockLog.warn).to.have.been.calledWith(
+        `LLMO recommendations file not found for site ${TEST_SITE_ID} at llm_cache/${TEST_SITE_ID}/prompts/human_prompts_popularity_cache.json`,
+      );
+    });
+
+    it('should return 400 when S3 bucket does not exist (NoSuchBucket)', async () => {
+      const noSuchBucketError = new Error('The specified bucket does not exist');
+      noSuchBucketError.name = 'NoSuchBucket';
+      mockS3Client.send.rejects(noSuchBucketError);
+
+      const result = await controller.getLlmoRecommendations(recommendationsContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Storage bucket not found: spacecat-dev-mystique-assets');
+
+      expect(mockLog.error).to.have.been.calledWith('S3 bucket spacecat-dev-mystique-assets not found');
+    });
+
+    it('should return 400 when JSON parsing fails', async () => {
+      mockS3Response.Body.transformToString.resolves('invalid json content');
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRecommendations(recommendationsContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Invalid JSON format in recommendations file');
+
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(`Invalid JSON in recommendations file for site ${TEST_SITE_ID}:`),
+      );
+    });
+
+    it('should return 400 for other S3 errors', async () => {
+      const genericS3Error = new Error('Access denied');
+      genericS3Error.name = 'AccessDenied';
+      mockS3Client.send.rejects(genericS3Error);
+
+      const result = await controller.getLlmoRecommendations(recommendationsContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Error retrieving recommendations: Access denied');
+
+      expect(mockLog.error).to.have.been.calledWith(
+        `S3 error retrieving recommendations for site ${TEST_SITE_ID}: Access denied`,
+      );
+    });
+
+    it('should return 400 when S3 is not configured', async () => {
+      const contextWithoutS3 = {
+        ...recommendationsContext,
+        s3: null,
+      };
+
+      const result = await controller.getLlmoRecommendations(contextWithoutS3);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('S3 storage is not configured for this environment');
+    });
+
+    it('should return 400 when S3 client is not configured', async () => {
+      const contextWithoutS3Client = {
+        ...recommendationsContext,
+        s3: {
+          s3Client: null,
+        },
+      };
+
+      const result = await controller.getLlmoRecommendations(contextWithoutS3Client);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('S3 storage is not configured for this environment');
+    });
+
+    it('should return 400 when LLMO access validation fails', async () => {
+      const controllerDenied = controllerWithAccessDenied(mockContext);
+      const result = await controllerDenied.getLlmoRecommendations(recommendationsContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
+
+      expect(mockLog.error).to.have.been.calledWith(
+        `Error getting LLMO recommendations for site ${TEST_SITE_ID}: Only users belonging to the organization can view its sites`,
+      );
+    });
+
+    it('should return 400 when site validation fails', async () => {
+      const contextWithInvalidSite = {
+        ...recommendationsContext,
+        dataAccess: {
+          Site: {
+            findById: sinon.stub().resolves(null),
+          },
+        },
+      };
+
+      const result = await controller.getLlmoRecommendations(contextWithInvalidSite);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Cannot read properties of null');
+
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(`Error getting LLMO recommendations for site ${TEST_SITE_ID}:`),
+      );
+    });
+
+    it('should handle empty JSON file correctly', async () => {
+      const emptyData = {};
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(emptyData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRecommendations(recommendationsContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(emptyData);
+    });
+
+    it('should handle complex nested JSON structure', async () => {
+      const complexData = {
+        recommendations: {
+          prompts: {
+            popular: [
+              { id: 1, text: 'Popular prompt 1', score: 0.95 },
+              { id: 2, text: 'Popular prompt 2', score: 0.87 },
+            ],
+            trending: [
+              { id: 3, text: 'Trending prompt 1', score: 0.92 },
+            ],
+          },
+          categories: ['marketing', 'sales', 'support'],
+        },
+        metadata: {
+          lastUpdated: '2025-01-15T10:00:00Z',
+          totalPrompts: 3,
+          averageScore: 0.913,
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(complexData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRecommendations(recommendationsContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(complexData);
     });
   });
 });
