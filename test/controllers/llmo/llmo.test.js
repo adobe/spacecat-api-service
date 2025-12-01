@@ -3211,5 +3211,87 @@ describe('LlmoController', () => {
       expect(responseBody.every((item) => item.topic === 'Marketing')).to.be.true;
       expect(responseBody.every((item) => item.prompt.toLowerCase().includes('popular'))).to.be.true;
     });
+
+    it('should handle special characters in topic and prompt parameters', async () => {
+      const mockRationaleData = {
+        site_id: TEST_SITE_ID,
+        prompts: [
+          {
+            prompt: 'Food & Nutrition: healthy & tasty recipes',
+            topic: 'Food & Nutrition',
+            category: 'Health & Wellness',
+            region: 'US',
+          },
+          {
+            prompt: 'Coffee & Tea brewing methods',
+            topic: 'Beverages & Drinks',
+            category: 'Food & Beverage',
+            region: 'US',
+          },
+          {
+            prompt: 'Regular nutrition tips',
+            topic: 'Health',
+            category: 'General',
+            region: 'US',
+          },
+        ],
+      };
+
+      const contextWithSpecialChars = {
+        ...rationaleContext,
+        data: {
+          topic: 'Food & Nutrition', // Contains & character
+          prompt: 'healthy & tasty', // Contains & character
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRationale(contextWithSpecialChars);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.have.length(1);
+      expect(responseBody[0].prompt).to.equal('Food & Nutrition: healthy & tasty recipes');
+      expect(responseBody[0].topic).to.equal('Food & Nutrition');
+
+      // Verify that the log message handles special characters correctly
+      expect(mockLog.info).to.have.been.calledWith(
+        `Getting LLMO rationale for site ${TEST_SITE_ID} with filters - topic: Food & Nutrition, prompt: healthy & tasty, category: all, region: all`,
+      );
+    });
+
+    it('should handle URL-encoded special characters in parameters', async () => {
+      const mockRationaleData = {
+        site_id: TEST_SITE_ID,
+        prompts: [
+          {
+            prompt: 'Search & Discovery: find what you need',
+            topic: 'Search & Discovery',
+            category: 'Technology',
+            region: 'US',
+          },
+        ],
+      };
+
+      const contextWithEncodedChars = {
+        ...rationaleContext,
+        data: {
+          topic: 'Search & Discovery', // Would be %26 in URL, but should be decoded by framework
+          prompt: 'find', // Contains & character - simplified to match the prompt data
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRationale(contextWithEncodedChars);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.have.length(1);
+      expect(responseBody[0].topic).to.equal('Search & Discovery');
+    });
   });
 });
