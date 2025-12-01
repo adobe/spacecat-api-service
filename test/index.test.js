@@ -18,7 +18,7 @@ import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import AccessControlUtil from '../src/support/access-control-util.js';
 
-import { main } from '../src/index.js';
+import { main } from './utils.js';
 
 use(sinonChai);
 
@@ -98,6 +98,13 @@ describe('Index Tests', () => {
         Audit: {
           findBySiteIdAndAuditTypeAndAuditedAt: sinon.stub().resolves(mockAuditData),
         },
+        Configuration: {
+          findLatest: sinon.stub().resolves({
+            getVersion: () => 1,
+            getHandlers: () => ({}),
+            isHandlerEnabledForSite: sinon.stub().returns(false),
+          }),
+        },
         Organization: {
           findById: sinon.stub().resolves({
             getId: () => 'default',
@@ -117,6 +124,9 @@ describe('Index Tests', () => {
           findById: sinon.stub().resolves({
             id: 'site-id',
           }),
+        },
+        ApiKey: {
+          findByHashedApiKey: sinon.stub().resolves(null),
         },
         Opportunity: {},
         Suggestion: {},
