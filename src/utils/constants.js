@@ -31,3 +31,45 @@ export const REPORT_TYPES = {
   OPTIMIZATION: 'optimization',
   PERFORMANCE: 'performance',
 };
+
+/**
+ * Opportunity tag mappings for different opportunity types
+ */
+export const OPPORTUNITY_TAG_MAPPINGS = {
+  // Web Performance
+  cwv: ['Core Web Vitals', 'Web Performance'],
+
+  // Traffic Acquisition
+  metatags: ['Traffic Acquisition', 'Meta Tags', 'SEO'],
+  'internal-links': ['Traffic Acquisition', 'Internal links', 'SEO', 'Engagement'],
+  'broken-backlinks': ['Traffic Acquisition', 'Backlinks', 'SEO'],
+  'broken-internal-links': ['Traffic Acquisition', 'Backlinks', 'SEO'],
+  sitemap: ['Traffic Acquisition', 'Sitemap', 'SEO'],
+  canonical: ['Traffic Acquisition', 'Canonical URLs', 'SEO'],
+  hreflang: ['Traffic Acquisition', 'Hreflang', 'SEO'],
+  'structured-data': ['Traffic Acquisition', 'Structured Data', 'SEO'],
+  'redirect-chains': ['Traffic Acquisition', 'Redirect Chains', 'SEO', 'Traffic Acquisition'],
+  'consent-banner': ['Traffic Acquisition', 'Consent Banner', 'Engagement'],
+  headings: ['Traffic Acquisition', 'Headings', 'SEO', 'Engagement'],
+
+  // Compliance & Accessibility
+  'a11y-assistive': ['Compliance & Accessibility', 'ARIA Labels', 'Accessibility'],
+  'color-contrast': ['Compliance & Accessibility', 'Color Constrast', 'Accessibility', 'Engagement'],
+  'keyboard-access': ['Compliance & Accessibility', 'Keyboard Access', 'Accessibility'],
+  readability: ['Compliance & Accessibility', 'Readbability', 'Accessibility', 'Engagement'],
+  'screen-readers': ['Compliance & Accessibility', 'Screen Readers', 'Accessibility'],
+  'alt-text': ['Compliance & Accessibility', 'Alt-Text', 'Accessibility', 'SEO'],
+  'form-a11y': ['Compliance & Accessibility', 'Form Accessibility', 'Accessibility', 'Engagement'],
+
+  // Engagement & Conversion
+  'high-organic-low-ctr': ['Engagement & Conversion', 'Low CTR', 'Engagement'],
+  'high-page-views-low-form-views': ['Engagement & Conversion', 'Form Visibility', 'Engagement'],
+  'high-page-views-low-form-nav': ['Engagement & Conversion', 'Form Placement', 'Engagement'],
+  'high-form-views-low-conversions': ['Engagement & Conversion', 'Form CTR', 'Conversion'],
+
+  // Security
+  'security-xss': ['Security', 'Cross Site Scripting', 'Security'],
+  'security-libraries': ['Security', '3rd Party Libraries', 'Security'],
+  'security-permissions': ['Security', 'Permission Settings', 'Security'],
+  'security-cors': ['Security', 'CORS', 'Security'],
+};
