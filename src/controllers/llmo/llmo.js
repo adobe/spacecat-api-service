@@ -44,6 +44,7 @@ import {
 } from './llmo-onboarding.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
+import { handleLlmoRationale } from './llmo-rationale.js';
 
 const { readConfig, writeConfig } = llmo;
 const { llmoConfig: llmoConfigSchema } = schemas;
@@ -894,60 +895,18 @@ function LlmoController(ctx) {
     }
   };
 
-  // Handles requests to the LLMO recommendations endpoint
-  const getLlmoRecommendations = async (context) => {
-    const { log, s3 } = context;
+  // Handles requests to the LLMO rationale endpoint
+  const getLlmoRationale = async (context) => {
+    const { log } = context;
     const { siteId } = context.params;
     try {
       // Validate site and LLMO access
       await getSiteAndValidateLlmo(context);
 
-      if (!s3 || !s3.s3Client) {
-        return badRequest('S3 storage is not configured for this environment');
-      }
-
-      log.info(`Getting LLMO recommendations for site ${siteId}`);
-
-      // Construct the S3 key for the human prompts popularity cache file
-      const env = 'dev'; // Hardcoded for now
-      const bucketName = `spacecat-${env}-mystique-assets`;
-      const s3Key = `llm_cache/${siteId}/prompts/human_prompts_popularity_cache.json`;
-
-      try {
-        // Fetch the file from S3
-        const { GetObjectCommand } = s3;
-        const command = new GetObjectCommand({
-          Bucket: bucketName,
-          Key: s3Key,
-        });
-
-        const response = await s3.s3Client.send(command);
-        const fileContent = await response.Body.transformToString();
-
-        // Parse the JSON content
-        const jsonData = JSON.parse(fileContent);
-
-        log.info(`Successfully retrieved LLMO recommendations for site ${siteId} from S3`);
-        return ok(jsonData);
-      } catch (s3Error) {
-        if (s3Error.name === 'NoSuchKey') {
-          log.warn(`LLMO recommendations file not found for site ${siteId} at ${s3Key}`);
-          return notFound(`Recommendations file not found for site ${siteId}`);
-        }
-        if (s3Error.name === 'NoSuchBucket') {
-          log.error(`S3 bucket ${bucketName} not found`);
-          return badRequest(`Storage bucket not found: ${bucketName}`);
-        }
-        if (s3Error instanceof SyntaxError) {
-          log.error(`Invalid JSON in recommendations file for site ${siteId}: ${s3Error.message}`);
-          return badRequest('Invalid JSON format in recommendations file');
-        }
-
-        log.error(`S3 error retrieving recommendations for site ${siteId}: ${s3Error.message}`);
-        return badRequest(`Error retrieving recommendations: ${s3Error.message}`);
-      }
+      // Delegate to the rationale handler for the actual processing
+      return await handleLlmoRationale(context);
     } catch (error) {
-      log.error(`Error getting LLMO recommendations for site ${siteId}: ${error.message}`);
+      log.error(`Error getting LLMO rationale for site ${siteId}: ${error.message}`);
       return badRequest(error.message);
     }
   };
@@ -971,7 +930,7 @@ function LlmoController(ctx) {
     onboardCustomer,
     offboardCustomer,
     queryFiles,
-    getLlmoRecommendations,
+    getLlmoRationale,
   };
 }
 

@@ -2521,10 +2521,10 @@ describe('LlmoController', () => {
     });
   });
 
-  describe('getLlmoRecommendations', () => {
+  describe('getLlmoRationale', () => {
     let mockS3Client;
     let mockS3Response;
-    let recommendationsContext;
+    let rationaleContext;
 
     beforeEach(() => {
       mockS3Response = {
@@ -2537,10 +2537,14 @@ describe('LlmoController', () => {
         send: sinon.stub(),
       };
 
-      recommendationsContext = {
+      rationaleContext = {
         ...mockContext,
         params: {
           siteId: TEST_SITE_ID,
+        },
+        env: {
+          ...mockEnv,
+          ENV: 'dev',
         },
         s3: {
           s3Client: mockS3Client,
@@ -2551,9 +2555,9 @@ describe('LlmoController', () => {
       };
     });
 
-    it('should successfully retrieve and return recommendations from S3', async () => {
+    it('should successfully retrieve and return rationale from S3', async () => {
       const mockRecommendationsData = {
-        recommendations: [
+        rationale: [
           { id: 1, type: 'prompt', content: 'Test recommendation 1' },
           { id: 2, type: 'prompt', content: 'Test recommendation 2' },
         ],
@@ -2566,7 +2570,7 @@ describe('LlmoController', () => {
       mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRecommendationsData));
       mockS3Client.send.resolves(mockS3Response);
 
-      const result = await controller.getLlmoRecommendations(recommendationsContext);
+      const result = await controller.getLlmoRationale(rationaleContext);
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
@@ -2577,8 +2581,7 @@ describe('LlmoController', () => {
       expect(commandArg.params.Bucket).to.equal('spacecat-dev-mystique-assets');
       expect(commandArg.params.Key).to.equal(`llm_cache/${TEST_SITE_ID}/prompts/human_prompts_popularity_cache.json`);
 
-      expect(mockLog.info).to.have.been.calledWith(`Getting LLMO recommendations for site ${TEST_SITE_ID}`);
-      expect(mockLog.info).to.have.been.calledWith(`Successfully retrieved LLMO recommendations for site ${TEST_SITE_ID} from S3`);
+      expect(mockLog.info).to.have.been.calledWith(`Getting LLMO rationale for site ${TEST_SITE_ID}`);
     });
 
     it('should return 404 when S3 file does not exist (NoSuchKey)', async () => {
@@ -2586,14 +2589,14 @@ describe('LlmoController', () => {
       noSuchKeyError.name = 'NoSuchKey';
       mockS3Client.send.rejects(noSuchKeyError);
 
-      const result = await controller.getLlmoRecommendations(recommendationsContext);
+      const result = await controller.getLlmoRationale(rationaleContext);
 
       expect(result.status).to.equal(404);
       const responseBody = await result.json();
-      expect(responseBody.message).to.equal(`Recommendations file not found for site ${TEST_SITE_ID}`);
+      expect(responseBody.message).to.equal(`Rationale file not found for site ${TEST_SITE_ID}`);
 
       expect(mockLog.warn).to.have.been.calledWith(
-        `LLMO recommendations file not found for site ${TEST_SITE_ID} at llm_cache/${TEST_SITE_ID}/prompts/human_prompts_popularity_cache.json`,
+        `LLMO rationale file not found for site ${TEST_SITE_ID} at llm_cache/${TEST_SITE_ID}/prompts/human_prompts_popularity_cache.json`,
       );
     });
 
@@ -2602,7 +2605,7 @@ describe('LlmoController', () => {
       noSuchBucketError.name = 'NoSuchBucket';
       mockS3Client.send.rejects(noSuchBucketError);
 
-      const result = await controller.getLlmoRecommendations(recommendationsContext);
+      const result = await controller.getLlmoRationale(rationaleContext);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
@@ -2615,14 +2618,14 @@ describe('LlmoController', () => {
       mockS3Response.Body.transformToString.resolves('invalid json content');
       mockS3Client.send.resolves(mockS3Response);
 
-      const result = await controller.getLlmoRecommendations(recommendationsContext);
+      const result = await controller.getLlmoRationale(rationaleContext);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
-      expect(responseBody.message).to.equal('Invalid JSON format in recommendations file');
+      expect(responseBody.message).to.equal('Invalid JSON format in rationale file');
 
       expect(mockLog.error).to.have.been.calledWith(
-        sinon.match(`Invalid JSON in recommendations file for site ${TEST_SITE_ID}:`),
+        sinon.match(`Invalid JSON in rationale file for site ${TEST_SITE_ID}:`),
       );
     });
 
@@ -2631,24 +2634,24 @@ describe('LlmoController', () => {
       genericS3Error.name = 'AccessDenied';
       mockS3Client.send.rejects(genericS3Error);
 
-      const result = await controller.getLlmoRecommendations(recommendationsContext);
+      const result = await controller.getLlmoRationale(rationaleContext);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
-      expect(responseBody.message).to.equal('Error retrieving recommendations: Access denied');
+      expect(responseBody.message).to.equal('Error retrieving rationale: Access denied');
 
       expect(mockLog.error).to.have.been.calledWith(
-        `S3 error retrieving recommendations for site ${TEST_SITE_ID}: Access denied`,
+        `S3 error retrieving rationale for site ${TEST_SITE_ID}: Access denied`,
       );
     });
 
     it('should return 400 when S3 is not configured', async () => {
       const contextWithoutS3 = {
-        ...recommendationsContext,
+        ...rationaleContext,
         s3: null,
       };
 
-      const result = await controller.getLlmoRecommendations(contextWithoutS3);
+      const result = await controller.getLlmoRationale(contextWithoutS3);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
@@ -2657,13 +2660,13 @@ describe('LlmoController', () => {
 
     it('should return 400 when S3 client is not configured', async () => {
       const contextWithoutS3Client = {
-        ...recommendationsContext,
+        ...rationaleContext,
         s3: {
           s3Client: null,
         },
       };
 
-      const result = await controller.getLlmoRecommendations(contextWithoutS3Client);
+      const result = await controller.getLlmoRationale(contextWithoutS3Client);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
@@ -2672,20 +2675,20 @@ describe('LlmoController', () => {
 
     it('should return 400 when LLMO access validation fails', async () => {
       const controllerDenied = controllerWithAccessDenied(mockContext);
-      const result = await controllerDenied.getLlmoRecommendations(recommendationsContext);
+      const result = await controllerDenied.getLlmoRationale(rationaleContext);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
 
       expect(mockLog.error).to.have.been.calledWith(
-        `Error getting LLMO recommendations for site ${TEST_SITE_ID}: Only users belonging to the organization can view its sites`,
+        `Error getting LLMO rationale for site ${TEST_SITE_ID}: Only users belonging to the organization can view its sites`,
       );
     });
 
     it('should return 400 when site validation fails', async () => {
       const contextWithInvalidSite = {
-        ...recommendationsContext,
+        ...rationaleContext,
         dataAccess: {
           Site: {
             findById: sinon.stub().resolves(null),
@@ -2693,14 +2696,14 @@ describe('LlmoController', () => {
         },
       };
 
-      const result = await controller.getLlmoRecommendations(contextWithInvalidSite);
+      const result = await controller.getLlmoRationale(contextWithInvalidSite);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.include('Cannot read properties of null');
 
       expect(mockLog.error).to.have.been.calledWith(
-        sinon.match(`Error getting LLMO recommendations for site ${TEST_SITE_ID}:`),
+        sinon.match(`Error getting LLMO rationale for site ${TEST_SITE_ID}:`),
       );
     });
 
@@ -2709,7 +2712,7 @@ describe('LlmoController', () => {
       mockS3Response.Body.transformToString.resolves(JSON.stringify(emptyData));
       mockS3Client.send.resolves(mockS3Response);
 
-      const result = await controller.getLlmoRecommendations(recommendationsContext);
+      const result = await controller.getLlmoRationale(rationaleContext);
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
@@ -2718,7 +2721,7 @@ describe('LlmoController', () => {
 
     it('should handle complex nested JSON structure', async () => {
       const complexData = {
-        recommendations: {
+        rationale: {
           prompts: {
             popular: [
               { id: 1, text: 'Popular prompt 1', score: 0.95 },
@@ -2740,7 +2743,7 @@ describe('LlmoController', () => {
       mockS3Response.Body.transformToString.resolves(JSON.stringify(complexData));
       mockS3Client.send.resolves(mockS3Response);
 
-      const result = await controller.getLlmoRecommendations(recommendationsContext);
+      const result = await controller.getLlmoRationale(rationaleContext);
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
