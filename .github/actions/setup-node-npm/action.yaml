@@ -19,14 +19,10 @@ runs:
       id: npm-cache
       with:
         path: ${{ steps.npm-cache-dir.outputs.dir }}
-        key: ${{ runner.os }}-node-v2-${{ hashFiles('**/package-lock.json') }}
-        # Cache version: v2 (2024-12-01) - invalidated to remove nested data-access packages
-        # No restore-keys - only use cache with exact package-lock.json match
+        key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-
 
-    - name: Clean node_modules for fresh install
-      run: rm -rf node_modules
-      shell: bash
-
-    - name: Install dependencies
+    - name: Install dependencies (only if cache miss)
       run: npm ci
       shell: bash
