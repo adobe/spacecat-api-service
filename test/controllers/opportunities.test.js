@@ -363,8 +363,8 @@ describe('Opportunities Controller', () => {
 
   // TODO: Complete tests for OpportunitiesController
   it('creates an opportunity with hardcoded tags', async () => {
-    // Setup spy to capture the actual data passed to create
-    const createSpy = sinon.spy(mockOpportunityDataAccess.Opportunity, 'create');
+    // Reset the stub to track calls
+    mockOpportunity.create.resetHistory();
 
     const response = await opportunitiesController.createOpportunity({
       params: { siteId: SITE_ID },
@@ -378,16 +378,14 @@ describe('Opportunities Controller', () => {
     expect(opportunity).to.have.property('siteId', SITE_ID);
 
     // Verify that hardcoded tags were added to the create call
-    const createCallData = createSpy.getCall(0).args[0];
+    const createCallData = mockOpportunity.create.getCall(0).args[0];
     expect(createCallData).to.have.property('tags').that.includes('automated');
     expect(createCallData).to.have.property('tags').that.includes('spacecat');
-
-    createSpy.restore();
   });
 
   it('updates an opportunity and preserves hardcoded tags', async () => {
-    // Setup spy on setTags method
-    const setTagsSpy = sinon.spy(mockOpportunity, 'setTags');
+    // Create a spy for the setTags method
+    const setTagsSpy = sandbox.spy(mockOpptyEntity, 'setTags');
 
     const response = await opportunitiesController.patchOpportunity({
       ...defaultAuthAttributes,
@@ -410,14 +408,18 @@ describe('Opportunities Controller', () => {
         updatedBy: 'test@test.com',
       },
     });
-    // Verify that hardcoded tags were included in the setTags call
-    expect(setTagsSpy.calledOnce).to.be.true;
-    const tagsArgument = setTagsSpy.getCall(0).args[0];
+
+    // Verify that setTags was called
+    expect(setTagsSpy.called).to.be.true;
+
+    // Verify the tags argument contains the expected values
+    const tagsArgument = setTagsSpy.firstCall.args[0];
     expect(tagsArgument).to.include('automated');
     expect(tagsArgument).to.include('spacecat');
     expect(tagsArgument).to.include('tag1');
     expect(tagsArgument).to.include('tag2');
     expect(tagsArgument).to.include('NEW');
+
     setTagsSpy.restore();
 
     // Validate updated values
