@@ -39,37 +39,39 @@ export const OPPORTUNITY_TAG_MAPPINGS = {
   // Web Performance
   cwv: ['Core Web Vitals', 'Web Performance'],
 
-  // Traffic Acquisition
-  metatags: ['Traffic Acquisition', 'Meta Tags', 'SEO'],
-  'internal-links': ['Traffic Acquisition', 'Internal links', 'SEO', 'Engagement'],
-  'broken-backlinks': ['Traffic Acquisition', 'Backlinks', 'SEO'],
-  'broken-internal-links': ['Traffic Acquisition', 'Backlinks', 'SEO'],
-  sitemap: ['Traffic Acquisition', 'Sitemap', 'SEO'],
-  canonical: ['Traffic Acquisition', 'Canonical URLs', 'SEO'],
-  hreflang: ['Traffic Acquisition', 'Hreflang', 'SEO'],
-  'structured-data': ['Traffic Acquisition', 'Structured Data', 'SEO'],
-  'redirect-chains': ['Traffic Acquisition', 'Redirect Chains', 'SEO', 'Traffic Acquisition'],
-  'consent-banner': ['Traffic Acquisition', 'Consent Banner', 'Engagement'],
-  headings: ['Traffic Acquisition', 'Headings', 'SEO', 'Engagement'],
+  // Traffic Acquisition - SEO
+  metatags: ['Meta Tags', 'SEO'],
+  'internal-links': ['Internal links', 'SEO', 'Engagement'],
+  'broken-backlinks': ['Backlinks', 'SEO'],
+  'broken-internal-links': ['Backlinks', 'SEO'],
+  sitemap: ['Sitemap', 'SEO'],
+  canonical: ['Canonical URLs', 'SEO'],
+  hreflang: ['Hreflang', 'SEO'],
+  'structured-data': ['Structured Data', 'SEO'],
+  'redirect-chains': ['Redirect Chains', 'SEO'],
+  headings: ['Headings', 'SEO', 'Engagement'],
+
+  // Traffic Acquisition - Paid Media
+  'consent-banner': ['Consent Banner', 'Engagement'],
 
   // Compliance & Accessibility
-  'a11y-assistive': ['Compliance & Accessibility', 'ARIA Labels', 'Accessibility'],
-  'color-contrast': ['Compliance & Accessibility', 'Color Constrast', 'Accessibility', 'Engagement'],
-  'keyboard-access': ['Compliance & Accessibility', 'Keyboard Access', 'Accessibility'],
-  readability: ['Compliance & Accessibility', 'Readbability', 'Accessibility', 'Engagement'],
-  'screen-readers': ['Compliance & Accessibility', 'Screen Readers', 'Accessibility'],
-  'alt-text': ['Compliance & Accessibility', 'Alt-Text', 'Accessibility', 'SEO'],
-  'form-a11y': ['Compliance & Accessibility', 'Form Accessibility', 'Accessibility', 'Engagement'],
+  'a11y-assistive': ['ARIA Labels', 'Accessibility'],
+  'color-contrast': ['Color Constrast', 'Accessibility', 'Engagement'],
+  'keyboard-access': ['Keyboard Access', 'Accessibility'],
+  readability: ['Readbability', 'Accessibility', 'Engagement'],
+  'screen-readers': ['Screen Readers', 'Accessibility'],
+  'alt-text': ['Alt-Text', 'Accessibility', 'SEO'],
+  'form-a11y': ['Form Accessibility', 'Accessibility', 'Engagement'],
 
   // Engagement & Conversion
-  'high-organic-low-ctr': ['Engagement & Conversion', 'Low CTR', 'Engagement'],
-  'high-page-views-low-form-views': ['Engagement & Conversion', 'Form Visibility', 'Engagement'],
-  'high-page-views-low-form-nav': ['Engagement & Conversion', 'Form Placement', 'Engagement'],
-  'high-form-views-low-conversions': ['Engagement & Conversion', 'Form CTR', 'Conversion'],
+  'high-organic-low-ctr': ['Low CTR', 'Engagement'],
+  'high-page-views-low-form-views': ['Form Visibility', 'Engagement'],
+  'high-page-views-low-form-nav': ['Form Placement', 'Engagement'],
+  'high-form-views-low-conversions': ['Form CTR', 'Conversion'],
 
   // Security
-  'security-xss': ['Security', 'Cross Site Scripting', 'Security'],
-  'security-libraries': ['Security', '3rd Party Libraries', 'Security'],
-  'security-permissions': ['Security', 'Permission Settings', 'Security'],
-  'security-cors': ['Security', 'CORS', 'Security'],
+  'security-xss': ['Cross Site Scripting', 'Security'],
+  'security-libraries': ['3rd Party Libraries', 'Security'],
+  'security-permissions': ['Permission Settings', 'Security'],
+  'security-cors': ['CORS', 'Security'],
 };
