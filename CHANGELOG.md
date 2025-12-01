@@ -1,3 +1,73 @@
+## [1.265.2](https://github.com/adobe/spacecat-api-service/compare/v1.265.1...v1.265.2) (2025-12-01)
+
+
+### Bug Fixes
+
+* config update issues after update of helix-deploy ([#1589](https://github.com/adobe/spacecat-api-service/issues/1589)) ([1a58875](https://github.com/adobe/spacecat-api-service/commit/1a58875f4e7b2197813bc32ae05d1fb2f2fec47e))
+
+## [1.265.1](https://github.com/adobe/spacecat-api-service/compare/v1.265.0...v1.265.1) (2025-12-01)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1593](https://github.com/adobe/spacecat-api-service/issues/1593)) ([554050f](https://github.com/adobe/spacecat-api-service/commit/554050f08c344a14999e641619e9d19d26114807))
+
+# [1.265.0](https://github.com/adobe/spacecat-api-service/compare/v1.264.4...v1.265.0) (2025-11-30)
+
+
+### Features
+
+* url handling in Edge deployment ([#1592](https://github.com/adobe/spacecat-api-service/issues/1592)) ([58b7585](https://github.com/adobe/spacecat-api-service/commit/58b758574aa2c9b0b9b55d951fff26afd585bc97))
+
+## [1.264.4](https://github.com/adobe/spacecat-api-service/compare/v1.264.3...v1.264.4) (2025-11-30)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#1591](https://github.com/adobe/spacecat-api-service/issues/1591)) ([f85755c](https://github.com/adobe/spacecat-api-service/commit/f85755c86b7f9a15f62319a4eec3136a39104f13))
+
+## [1.264.3](https://github.com/adobe/spacecat-api-service/compare/v1.264.2...v1.264.3) (2025-11-29)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tokowaka-client to v1.2.4 ([#1590](https://github.com/adobe/spacecat-api-service/issues/1590)) ([82cdb79](https://github.com/adobe/spacecat-api-service/commit/82cdb79a53d5a19be1e7398619fc58a2347efcb9))
+
+## [1.264.2](https://github.com/adobe/spacecat-api-service/compare/v1.264.1...v1.264.2) (2025-11-28)
+
+
+### Bug Fixes
+
+* update to node 24 ([#1584](https://github.com/adobe/spacecat-api-service/issues/1584)) ([b87372a](https://github.com/adobe/spacecat-api-service/commit/b87372a3a0c721b81eeac579ec886c3126182a12))
+
+## [1.264.1](https://github.com/adobe/spacecat-api-service/compare/v1.264.0...v1.264.1) (2025-11-28)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1581](https://github.com/adobe/spacecat-api-service/issues/1581)) ([7732158](https://github.com/adobe/spacecat-api-service/commit/7732158699e0a1df118871d2d403cf4b4fc7f2da))
+
+# [1.264.0](https://github.com/adobe/spacecat-api-service/compare/v1.263.0...v1.264.0) (2025-11-28)
+
+
+### Features
+
+* support all sites to be backfilled ([#1586](https://github.com/adobe/spacecat-api-service/issues/1586)) ([c650973](https://github.com/adobe/spacecat-api-service/commit/c65097394dddb32aac1af9f39a38688146d96908))
+
+# [1.263.0](https://github.com/adobe/spacecat-api-service/compare/v1.262.0...v1.263.0) (2025-11-28)
+
+
+### Features
+
+* Added autofix for security redundant permissions ([#1583](https://github.com/adobe/spacecat-api-service/issues/1583)) ([0001976](https://github.com/adobe/spacecat-api-service/commit/00019768a73341cf7c9dbeb590db2993107c37ef))
+
+# [1.262.0](https://github.com/adobe/spacecat-api-service/compare/v1.261.0...v1.262.0) (2025-11-28)
+
+
+### Features
+
+* readability oppty handling in Edge deployment ([#1587](https://github.com/adobe/spacecat-api-service/issues/1587)) ([7e22e5f](https://github.com/adobe/spacecat-api-service/commit/7e22e5f1513a0dfe0f5c02d487cf1c6a82b4e52e))
+
 # [1.261.0](https://github.com/adobe/spacecat-api-service/compare/v1.260.0...v1.261.0) (2025-11-28)
 
 
