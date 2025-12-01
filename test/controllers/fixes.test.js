@@ -18,7 +18,6 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
-import { getEntitySchemas } from '@adobe/spacecat-shared-data-access/src/models/base/entity-definitions.js';
 import EntityRegistry from '@adobe/spacecat-shared-data-access/src/models/base/entity.registry.js';
 // eslint-disable-next-line import/no-extraneous-dependencies -- snatched from shared-data-access
 import * as electrodb from 'electrodb';
@@ -46,7 +45,7 @@ describe('Fixes Controller', () => {
   // This must not be mocked, because index creation on the schema relies on side effects.
   // electrodb.Service() extends index definitions with `facets` properties.
   // Index accessor creation on collections relies on the presence of `facets`.
-  const electroService = new electrodb.Service(getEntitySchemas());
+  const electroService = new electrodb.Service(EntityRegistry.getEntities());
 
   const sandbox = sinon.createSandbox();
   /** @type {AccessControlUtil} */
