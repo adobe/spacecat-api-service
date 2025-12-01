@@ -610,6 +610,37 @@ site-opportunity-suggestion:
     security:
       - ims_key: [ ]
 
+site-opportunity-suggestion-fixes:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+    - $ref: './parameters.yaml#/suggestionId'
+  get:
+    operationId: getSiteOpportunitySuggestionFixes
+    summary: |
+      Retrieve a list of all fixes for a specific suggestion
+    tags:
+      - opportunity-suggestions
+    responses:
+      '200':
+        description: A list of fixes associated with the suggestion
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/FixListResponse'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
 site-opportunity-fixes:
   parameters:
     - $ref: './parameters.yaml#/siteId'
@@ -643,6 +674,10 @@ site-opportunity-fixes:
     operationId: createSiteOpportunityFixes
     summary: |
       Create and add a list of one or more fixes to an opportunity in one transaction
+    description: |
+      Creates one or more fix entities for a given opportunity. Each fix can optionally include 
+      an array of suggestionIds to associate existing suggestions with the fix. This allows you 
+      to link fixes to the suggestions they address in a single transaction.
     tags:
       - opportunity-fixes
     requestBody:
@@ -651,6 +686,9 @@ site-opportunity-fixes:
         application/json:
           schema:
             $ref: './schemas.yaml#/FixCreateList'
+          examples:
+            fix-create-list:
+              $ref: './examples.yaml#/fix-create-list'
     responses:
       '207':
         description: |
@@ -660,6 +698,9 @@ site-opportunity-fixes:
           application/json:
             schema:
               $ref: './schemas.yaml#/FixCreateListResponse'
+            examples:
+              fix-create-list-response:
+                $ref: './examples.yaml#/fix-create-list-response'
     security:
       - ims_key: [ ]
 
@@ -734,6 +775,10 @@ site-opportunity-fix:
     operationId: updateSiteOpportunityFix
     summary: |
       Update specific attributes of an existing fix
+    description: |
+      Updates one or more attributes of an existing fix. This includes the ability to update 
+      the suggestionIds array to associate or reassociate suggestions with the fix. When updating 
+      suggestionIds, the new array replaces any existing associations.
     tags:
       - opportunity-fixes
     requestBody:
