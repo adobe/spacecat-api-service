@@ -2555,33 +2555,412 @@ describe('LlmoController', () => {
       };
     });
 
-    it('should successfully retrieve and return rationale from S3', async () => {
-      const mockRecommendationsData = {
-        rationale: [
-          { id: 1, type: 'prompt', content: 'Test recommendation 1' },
-          { id: 2, type: 'prompt', content: 'Test recommendation 2' },
+    it('should successfully retrieve and return filtered prompts from S3', async () => {
+      const mockRationaleData = {
+        site_id: TEST_SITE_ID,
+        prompts: [
+          {
+            prompt: 'are frosted mini wheats sweet?',
+            popularity: 'High',
+            volume: -30,
+            added_date: '2025-11-27T14:40:16.924824',
+            reasoning: 'Branded product with mass market recognition and consumer interest.',
+            topic: 'Frosted Mini Wheats',
+            category: 'Frosted Mini-Wheats - General',
+            region: 'US',
+          },
+          {
+            prompt: 'Are corn flakes gluten free?',
+            popularity: 'High',
+            volume: -30,
+            added_date: '2025-11-27T14:40:16.925010',
+            reasoning: 'Broad product category with mass market appeal and purchase intent.',
+            topic: 'Breakfast Cereals',
+            category: 'Products',
+            region: 'US',
+          },
         ],
-        metadata: {
-          generated: '2025-01-15T10:00:00Z',
-          version: '1.0',
+        last_updated: '2025-11-27T14:40:16.925258',
+        version: '1.0',
+      };
+
+      const contextWithFilters = {
+        ...rationaleContext,
+        data: {
+          topic: 'Frosted Mini Wheats',
+          prompt: 'sweet',
         },
       };
 
-      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRecommendationsData));
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
       mockS3Client.send.resolves(mockS3Response);
 
-      const result = await controller.getLlmoRationale(rationaleContext);
+      const result = await controller.getLlmoRationale(contextWithFilters);
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
-      expect(responseBody).to.deep.equal(mockRecommendationsData);
+
+      // Should return only the filtered prompts array, not the full JSON
+      expect(responseBody).to.be.an('array');
+      expect(responseBody).to.have.length(1);
+      expect(responseBody[0].prompt).to.equal('are frosted mini wheats sweet?');
+      expect(responseBody[0].topic).to.equal('Frosted Mini Wheats');
 
       expect(mockS3Client.send).to.have.been.calledOnce;
       const commandArg = mockS3Client.send.getCall(0).args[0];
       expect(commandArg.params.Bucket).to.equal('spacecat-dev-mystique-assets');
       expect(commandArg.params.Key).to.equal(`llm_cache/${TEST_SITE_ID}/prompts/human_prompts_popularity_cache.json`);
 
-      expect(mockLog.info).to.have.been.calledWith(`Getting LLMO rationale for site ${TEST_SITE_ID}`);
+      expect(mockLog.info).to.have.been.calledWith(
+        `Getting LLMO rationale for site ${TEST_SITE_ID} with filters - topic: Frosted Mini Wheats, prompt: sweet, category: all, region: all`,
+      );
+    });
+
+    it('should return 400 when topic parameter is missing', async () => {
+      const contextWithoutTopic = {
+        ...rationaleContext,
+        data: {
+          prompt: 'sweet',
+        },
+      };
+
+      const result = await controller.getLlmoRationale(contextWithoutTopic);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('topic parameter is required');
+    });
+
+    it('should return 400 when prompt parameter is missing', async () => {
+      const contextWithoutPrompt = {
+        ...rationaleContext,
+        data: {
+          topic: 'Frosted Mini Wheats',
+        },
+      };
+
+      const result = await controller.getLlmoRationale(contextWithoutPrompt);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('prompt parameter is required');
+    });
+
+    it('should return 400 when both mandatory parameters are missing', async () => {
+      const contextWithoutParams = {
+        ...rationaleContext,
+        data: {},
+      };
+
+      const result = await controller.getLlmoRationale(contextWithoutParams);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('topic parameter is required');
+    });
+
+    it('should filter prompts by topic and prompt (case-insensitive)', async () => {
+      const mockRationaleData = {
+        site_id: TEST_SITE_ID,
+        prompts: [
+          {
+            prompt: 'are frosted mini wheats sweet?',
+            topic: 'Frosted Mini Wheats',
+            category: 'Frosted Mini-Wheats - General',
+            region: 'US',
+          },
+          {
+            prompt: 'Are corn flakes gluten free?',
+            topic: 'Breakfast Cereals',
+            category: 'Products',
+            region: 'US',
+          },
+          {
+            prompt: 'Compare frosted mini wheats with cornflakes',
+            topic: 'Comparisons',
+            category: 'Frosted Mini-Wheats - General',
+            region: 'US',
+          },
+        ],
+      };
+
+      const contextWithFilters = {
+        ...rationaleContext,
+        data: {
+          topic: 'breakfast cereals', // lowercase should match
+          prompt: 'gluten', // partial match
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRationale(contextWithFilters);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.have.length(1);
+      expect(responseBody[0].prompt).to.equal('Are corn flakes gluten free?');
+      expect(responseBody[0].topic).to.equal('Breakfast Cereals');
+    });
+
+    it('should filter prompts with optional category filter', async () => {
+      const mockRationaleData = {
+        site_id: TEST_SITE_ID,
+        prompts: [
+          {
+            prompt: 'are frosted mini wheats sweet?',
+            topic: 'Frosted Mini Wheats',
+            category: 'Frosted Mini-Wheats - General',
+            region: 'US',
+          },
+          {
+            prompt: 'Compare frosted mini wheats with cornflakes',
+            topic: 'Frosted Mini Wheats',
+            category: 'Frosted Mini-Wheats - General',
+            region: 'US',
+          },
+          {
+            prompt: 'Are corn flakes gluten free?',
+            topic: 'Breakfast Cereals',
+            category: 'Products',
+            region: 'US',
+          },
+        ],
+      };
+
+      const contextWithFilters = {
+        ...rationaleContext,
+        data: {
+          topic: 'frosted',
+          prompt: 'mini wheats', // this will match both frosted mini wheats prompts
+          category: 'general', // should match both "General" entries
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRationale(contextWithFilters);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.have.length(2);
+      expect(responseBody.every((item) => item.category.toLowerCase().includes('general'))).to.be.true;
+    });
+
+    it('should filter prompts with optional region filter', async () => {
+      const mockRationaleData = {
+        site_id: TEST_SITE_ID,
+        prompts: [
+          {
+            prompt: 'are frosted mini wheats sweet?',
+            topic: 'Frosted Mini Wheats',
+            category: 'Frosted Mini-Wheats - General',
+            region: 'US',
+          },
+          {
+            prompt: 'are frosted mini wheats available?',
+            topic: 'Frosted Mini Wheats',
+            category: 'Frosted Mini-Wheats - General',
+            region: 'CA',
+          },
+        ],
+      };
+
+      const contextWithFilters = {
+        ...rationaleContext,
+        data: {
+          topic: 'frosted',
+          prompt: 'wheats',
+          region: 'ca', // lowercase should match CA
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRationale(contextWithFilters);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.have.length(1);
+      expect(responseBody[0].region).to.equal('CA');
+    });
+
+    it('should return empty array when no prompts match filters', async () => {
+      const mockRationaleData = {
+        site_id: TEST_SITE_ID,
+        prompts: [
+          {
+            prompt: 'are frosted mini wheats sweet?',
+            topic: 'Frosted Mini Wheats',
+            category: 'Frosted Mini-Wheats - General',
+            region: 'US',
+          },
+        ],
+      };
+
+      const contextWithFilters = {
+        ...rationaleContext,
+        data: {
+          topic: 'nonexistent topic',
+          prompt: 'nonexistent prompt',
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRationale(contextWithFilters);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.be.an('array');
+      expect(responseBody).to.have.length(0);
+    });
+
+    it('should handle missing prompts array gracefully', async () => {
+      const mockRationaleData = {
+        site_id: TEST_SITE_ID,
+        // No prompts array
+        last_updated: '2025-11-27T14:40:16.925258',
+        version: '1.0',
+      };
+
+      const contextWithFilters = {
+        ...rationaleContext,
+        data: {
+          topic: 'any topic',
+          prompt: 'any prompt',
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRationale(contextWithFilters);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.be.an('array');
+      expect(responseBody).to.have.length(0);
+    });
+
+    it('should filter out prompts that do not match optional category filter', async () => {
+      const mockRationaleData = {
+        site_id: TEST_SITE_ID,
+        prompts: [
+          {
+            prompt: 'are frosted mini wheats sweet?',
+            topic: 'Frosted Mini Wheats',
+            category: 'Frosted Mini-Wheats - General',
+            region: 'US',
+          },
+          {
+            prompt: 'are frosted mini wheats healthy?',
+            topic: 'Frosted Mini Wheats',
+            category: 'Products', // Different category
+            region: 'US',
+          },
+        ],
+      };
+
+      const contextWithFilters = {
+        ...rationaleContext,
+        data: {
+          topic: 'frosted',
+          prompt: 'mini wheats',
+          category: 'general', // Only matches first prompt
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRationale(contextWithFilters);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.have.length(1);
+      expect(responseBody[0].category).to.equal('Frosted Mini-Wheats - General');
+    });
+
+    it('should filter out prompts that do not match optional region filter', async () => {
+      const mockRationaleData = {
+        site_id: TEST_SITE_ID,
+        prompts: [
+          {
+            prompt: 'are frosted mini wheats sweet?',
+            topic: 'Frosted Mini Wheats',
+            category: 'Frosted Mini-Wheats - General',
+            region: 'US',
+          },
+          {
+            prompt: 'are frosted mini wheats available?',
+            topic: 'Frosted Mini Wheats',
+            category: 'Frosted Mini-Wheats - General',
+            region: 'CA', // Different region
+          },
+        ],
+      };
+
+      const contextWithFilters = {
+        ...rationaleContext,
+        data: {
+          topic: 'frosted',
+          prompt: 'mini wheats',
+          region: 'us', // Only matches first prompt
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRationale(contextWithFilters);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.have.length(1);
+      expect(responseBody[0].region).to.equal('US');
+    });
+
+    it('should filter out prompts that do not match mandatory prompt filter', async () => {
+      const mockRationaleData = {
+        site_id: TEST_SITE_ID,
+        prompts: [
+          {
+            prompt: 'are frosted mini wheats sweet?',
+            topic: 'Frosted Mini Wheats',
+            category: 'Frosted Mini-Wheats - General',
+            region: 'US',
+          },
+          {
+            prompt: 'what are the ingredients in corn flakes?',
+            topic: 'Frosted Mini Wheats', // Same topic
+            category: 'Frosted Mini-Wheats - General',
+            region: 'US',
+          },
+        ],
+      };
+
+      const contextWithFilters = {
+        ...rationaleContext,
+        data: {
+          topic: 'frosted',
+          prompt: 'sweet', // Only matches first prompt, not "ingredients"
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRationale(contextWithFilters);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.have.length(1);
+      expect(responseBody[0].prompt).to.equal('are frosted mini wheats sweet?');
     });
 
     it('should return 404 when S3 file does not exist (NoSuchKey)', async () => {
@@ -2589,7 +2968,15 @@ describe('LlmoController', () => {
       noSuchKeyError.name = 'NoSuchKey';
       mockS3Client.send.rejects(noSuchKeyError);
 
-      const result = await controller.getLlmoRationale(rationaleContext);
+      const contextWithParams = {
+        ...rationaleContext,
+        data: {
+          topic: 'any topic',
+          prompt: 'any prompt',
+        },
+      };
+
+      const result = await controller.getLlmoRationale(contextWithParams);
 
       expect(result.status).to.equal(404);
       const responseBody = await result.json();
@@ -2605,7 +2992,15 @@ describe('LlmoController', () => {
       noSuchBucketError.name = 'NoSuchBucket';
       mockS3Client.send.rejects(noSuchBucketError);
 
-      const result = await controller.getLlmoRationale(rationaleContext);
+      const contextWithParams = {
+        ...rationaleContext,
+        data: {
+          topic: 'any topic',
+          prompt: 'any prompt',
+        },
+      };
+
+      const result = await controller.getLlmoRationale(contextWithParams);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
@@ -2618,7 +3013,15 @@ describe('LlmoController', () => {
       mockS3Response.Body.transformToString.resolves('invalid json content');
       mockS3Client.send.resolves(mockS3Response);
 
-      const result = await controller.getLlmoRationale(rationaleContext);
+      const contextWithParams = {
+        ...rationaleContext,
+        data: {
+          topic: 'any topic',
+          prompt: 'any prompt',
+        },
+      };
+
+      const result = await controller.getLlmoRationale(contextWithParams);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
@@ -2634,7 +3037,15 @@ describe('LlmoController', () => {
       genericS3Error.name = 'AccessDenied';
       mockS3Client.send.rejects(genericS3Error);
 
-      const result = await controller.getLlmoRationale(rationaleContext);
+      const contextWithParams = {
+        ...rationaleContext,
+        data: {
+          topic: 'any topic',
+          prompt: 'any prompt',
+        },
+      };
+
+      const result = await controller.getLlmoRationale(contextWithParams);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
@@ -2649,6 +3060,10 @@ describe('LlmoController', () => {
       const contextWithoutS3 = {
         ...rationaleContext,
         s3: null,
+        data: {
+          topic: 'any topic',
+          prompt: 'any prompt',
+        },
       };
 
       const result = await controller.getLlmoRationale(contextWithoutS3);
@@ -2664,6 +3079,10 @@ describe('LlmoController', () => {
         s3: {
           s3Client: null,
         },
+        data: {
+          topic: 'any topic',
+          prompt: 'any prompt',
+        },
       };
 
       const result = await controller.getLlmoRationale(contextWithoutS3Client);
@@ -2675,7 +3094,14 @@ describe('LlmoController', () => {
 
     it('should return 400 when LLMO access validation fails', async () => {
       const controllerDenied = controllerWithAccessDenied(mockContext);
-      const result = await controllerDenied.getLlmoRationale(rationaleContext);
+      const contextWithParams = {
+        ...rationaleContext,
+        data: {
+          topic: 'any topic',
+          prompt: 'any prompt',
+        },
+      };
+      const result = await controllerDenied.getLlmoRationale(contextWithParams);
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
@@ -2694,6 +3120,10 @@ describe('LlmoController', () => {
             findById: sinon.stub().resolves(null),
           },
         },
+        data: {
+          topic: 'any topic',
+          prompt: 'any prompt',
+        },
       };
 
       const result = await controller.getLlmoRationale(contextWithInvalidSite);
@@ -2709,30 +3139,51 @@ describe('LlmoController', () => {
 
     it('should handle empty JSON file correctly', async () => {
       const emptyData = {};
+      const contextWithFilters = {
+        ...rationaleContext,
+        data: {
+          topic: 'any topic',
+          prompt: 'any prompt',
+        },
+      };
+
       mockS3Response.Body.transformToString.resolves(JSON.stringify(emptyData));
       mockS3Client.send.resolves(mockS3Response);
 
-      const result = await controller.getLlmoRationale(rationaleContext);
+      const result = await controller.getLlmoRationale(contextWithFilters);
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
-      expect(responseBody).to.deep.equal(emptyData);
+      expect(responseBody).to.be.an('array');
+      expect(responseBody).to.have.length(0);
     });
 
-    it('should handle complex nested JSON structure', async () => {
+    it('should handle complex nested JSON structure with proper prompts array', async () => {
       const complexData = {
-        rationale: {
-          prompts: {
-            popular: [
-              { id: 1, text: 'Popular prompt 1', score: 0.95 },
-              { id: 2, text: 'Popular prompt 2', score: 0.87 },
-            ],
-            trending: [
-              { id: 3, text: 'Trending prompt 1', score: 0.92 },
-            ],
+        site_id: TEST_SITE_ID,
+        prompts: [
+          {
+            prompt: 'Popular prompt 1',
+            topic: 'Marketing',
+            category: 'Popular',
+            region: 'US',
+            score: 0.95,
           },
-          categories: ['marketing', 'sales', 'support'],
-        },
+          {
+            prompt: 'Popular prompt 2',
+            topic: 'Marketing',
+            category: 'Popular',
+            region: 'US',
+            score: 0.87,
+          },
+          {
+            prompt: 'Trending prompt 1',
+            topic: 'Sales',
+            category: 'Trending',
+            region: 'US',
+            score: 0.92,
+          },
+        ],
         metadata: {
           lastUpdated: '2025-01-15T10:00:00Z',
           totalPrompts: 3,
@@ -2740,14 +3191,25 @@ describe('LlmoController', () => {
         },
       };
 
+      const contextWithFilters = {
+        ...rationaleContext,
+        data: {
+          topic: 'marketing',
+          prompt: 'popular',
+        },
+      };
+
       mockS3Response.Body.transformToString.resolves(JSON.stringify(complexData));
       mockS3Client.send.resolves(mockS3Response);
 
-      const result = await controller.getLlmoRationale(rationaleContext);
+      const result = await controller.getLlmoRationale(contextWithFilters);
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
-      expect(responseBody).to.deep.equal(complexData);
+      expect(responseBody).to.be.an('array');
+      expect(responseBody).to.have.length(2);
+      expect(responseBody.every((item) => item.topic === 'Marketing')).to.be.true;
+      expect(responseBody.every((item) => item.prompt.toLowerCase().includes('popular'))).to.be.true;
     });
   });
 });
