@@ -362,13 +362,13 @@ describe('Opportunities Controller', () => {
   });
 
   // TODO: Complete tests for OpportunitiesController
-  it('creates an opportunity with hardcoded tags', async () => {
+  it('creates an opportunity with hardcoded tags merged with existing tags', async () => {
     // Reset the stub to track calls
     mockOpportunity.create.resetHistory();
 
     const response = await opportunitiesController.createOpportunity({
       params: { siteId: SITE_ID },
-      data: opptys[0],
+      data: opptys[0], // This has tags: ['tag1', 'tag2']
     });
     expect(mockOpportunityDataAccess.Opportunity.create.calledOnce).to.be.true;
     expect(response.status).to.equal(201);
@@ -381,6 +381,30 @@ describe('Opportunities Controller', () => {
     const createCallData = mockOpportunity.create.getCall(0).args[0];
     expect(createCallData).to.have.property('tags').that.includes('automated');
     expect(createCallData).to.have.property('tags').that.includes('spacecat');
+    expect(createCallData).to.have.property('tags').that.includes('tag1');
+    expect(createCallData).to.have.property('tags').that.includes('tag2');
+  });
+
+  it('creates an opportunity with hardcoded tags when no tags exist', async () => {
+    // Reset the stub to track calls
+    mockOpportunity.create.resetHistory();
+
+    // Create a copy of the opportunity data without tags
+    const opptyWithoutTags = { ...opptys[0] };
+    delete opptyWithoutTags.tags;
+
+    const response = await opportunitiesController.createOpportunity({
+      params: { siteId: SITE_ID },
+      data: opptyWithoutTags,
+    });
+    expect(mockOpportunityDataAccess.Opportunity.create.calledOnce).to.be.true;
+    expect(response.status).to.equal(201);
+
+    // Verify that only hardcoded tags were added to the create call
+    const createCallData = mockOpportunity.create.getCall(0).args[0];
+    expect(createCallData).to.have.property('tags').that.includes('automated');
+    expect(createCallData).to.have.property('tags').that.includes('spacecat');
+    expect(createCallData.tags).to.have.lengthOf(2); // Only the hardcoded tags
   });
 
   it('updates an opportunity and preserves hardcoded tags', async () => {
