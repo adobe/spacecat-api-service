@@ -1,3 +1,10 @@
+## [1.265.2](https://github.com/adobe/spacecat-api-service/compare/v1.265.1...v1.265.2) (2025-12-01)
+
+
+### Bug Fixes
+
+* config update issues after update of helix-deploy ([#1589](https://github.com/adobe/spacecat-api-service/issues/1589)) ([1a58875](https://github.com/adobe/spacecat-api-service/commit/1a58875f4e7b2197813bc32ae05d1fb2f2fec47e))
+
 ## [1.265.1](https://github.com/adobe/spacecat-api-service/compare/v1.265.0...v1.265.1) (2025-12-01)
 
 
