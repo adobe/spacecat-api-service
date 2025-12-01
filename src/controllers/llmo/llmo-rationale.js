@@ -62,7 +62,7 @@ export async function handleLlmoRationale(context) {
   // Extract query parameters
   const {
     topic, prompt, category, region,
-  } = context.data || {};
+  } = context.data;
 
   // Validate mandatory parameters
   if (!topic) {
