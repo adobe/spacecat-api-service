@@ -76,7 +76,7 @@
     "@adobe/spacecat-shared-ahrefs-client": "1.10.1",
     "@adobe/spacecat-shared-athena-client": "1.7.3",
     "@adobe/spacecat-shared-brand-client": "1.1.30",
-    "@adobe/spacecat-shared-data-access": "https://gist.github.com/tathagat2241/baa0d24fc1d1b06a50238574767b273d/raw/1b014a21ab50d2c1d650c309e95461f196040a40/adobe-spacecat-shared-data-access-2.88.8.tgz",
+    "@adobe/spacecat-shared-data-access": "https://gist.github.com/tathagat2241/baa0d24fc1d1b06a50238574767b273d/raw/71550aa5f7b7658a13ee4fa4eb3b0c36ac2c4abd/adobe-spacecat-shared-data-access-2.88.8.tgz",
     "@adobe/spacecat-shared-gpt-client": "1.6.10",
     "@adobe/spacecat-shared-http-utils": "1.19.0",
     "@adobe/spacecat-shared-ims-client": "1.11.3",
