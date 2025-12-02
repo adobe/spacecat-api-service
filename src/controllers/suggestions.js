@@ -55,6 +55,7 @@ function SuggestionsController(ctx, sqs, env) {
     'broken-backlinks',
     'form-accessibility',
     'product-metatags',
+    'security-permissions-redundant',
   ];
 
   const DEFAULT_PAGE_SIZE = 100;
@@ -917,7 +918,7 @@ function SuggestionsController(ctx, sqs, env) {
     if (isNonEmptyArray(validSuggestions)) {
       const urls = new Set();
       validSuggestions.forEach((suggestion) => {
-        const url = suggestion.getData()?.url;
+        const url = suggestion.getData()?.url || suggestion.getData()?.pageUrl;
         if (url) {
           urls.add(url);
         }

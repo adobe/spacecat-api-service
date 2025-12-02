@@ -32,7 +32,7 @@ import {
   elevatedSlackClientWrapper,
   SLACK_TARGETS,
 } from '@adobe/spacecat-shared-slack-client';
-import { hasText, resolveSecretsName } from '@adobe/spacecat-shared-utils';
+import { hasText, resolveSecretsName, logWrapper } from '@adobe/spacecat-shared-utils';
 
 import sqs from './support/sqs.js';
 import getRouteHandlers from './routes/index.js';
@@ -72,6 +72,7 @@ import LlmoController from './controllers/llmo/llmo.js';
 import UserActivitiesController from './controllers/user-activities.js';
 import SiteEnrollmentsController from './controllers/site-enrollments.js';
 import TrialUsersController from './controllers/trial-users.js';
+import UserDetailsController from './controllers/user-details.js';
 import EntitlementsController from './controllers/entitlements.js';
 import SandboxAuditController from './controllers/sandbox-audit.js';
 import PTA2Controller from './controllers/paid/pta2.js';
@@ -136,6 +137,7 @@ async function run(request, context) {
     const userActivitiesController = UserActivitiesController(context);
     const siteEnrollmentsController = SiteEnrollmentsController(context);
     const trialUsersController = TrialUsersController(context);
+    const userDetailsController = UserDetailsController(context);
     const entitlementsController = EntitlementsController(context);
     const sandboxAuditController = SandboxAuditController(context);
     const pta2Controller = PTA2Controller(context, log, context.env);
@@ -169,6 +171,7 @@ async function run(request, context) {
       userActivitiesController,
       siteEnrollmentsController,
       trialUsersController,
+      userDetailsController,
       entitlementsController,
       sandboxAuditController,
       reportsController,
@@ -207,6 +210,7 @@ export const main = wrap(run)
   .with(authWrapper, {
     authHandlers: [JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler],
   })
+  .with(logWrapper)
   .with(dataAccess)
   .with(bodyData)
   .with(multipartFormData)

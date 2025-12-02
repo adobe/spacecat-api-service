@@ -27,6 +27,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 import { ValidationError } from '@adobe/spacecat-shared-data-access';
 import { OpportunityDto } from '../dto/opportunity.js';
+import { OpportunitySummaryDto } from '../dto/opportunity-summary.js';
 import AccessControlUtil from '../support/access-control-util.js';
 
 /**
@@ -43,7 +44,7 @@ function OpportunitiesController(ctx) {
   if (!isNonEmptyObject(dataAccess)) {
     throw new Error('Data access required');
   }
-  const { Opportunity } = dataAccess;
+  const { Opportunity, Suggestion } = dataAccess;
   if (!isObject(Opportunity)) {
     throw new Error('Opportunity Collection not available');
   }
@@ -311,11 +312,70 @@ function OpportunitiesController(ctx) {
     }
   };
 
+  /**
+   * Gets top opportunities for paid media with 'NEW' or 'IN_PROGRESS' status for a site.
+   * @param {Object} context of the request
+   * @returns {Promise<Response>} Array of opportunity summaries.
+   */
+  const getTopPaidOpportunities = async (context) => {
+    const siteId = context.params?.siteId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization of the site can view its opportunities');
+    }
+
+    const newOpportunities = await Opportunity.allBySiteIdAndStatus(siteId, 'NEW');
+    const inProgressOpportunities = await Opportunity.allBySiteIdAndStatus(siteId, 'IN_PROGRESS');
+    const allOpportunities = [...newOpportunities, ...inProgressOpportunities];
+
+    // temp using all these tags for testing but evenutally we will just use 'paid media'
+    const targetTags = ['paid media', 'traffic acquisition', 'engagement', 'content optimization'];
+    const filteredOpportunities = allOpportunities.filter((oppty) => {
+      const tags = oppty.getTags() || [];
+      const title = oppty.getTitle() || '';
+      const description = oppty.getDescription();
+
+      if (!description) {
+        return false;
+      }
+
+      if (title.toLowerCase().includes('report')) {
+        return false;
+      }
+
+      return tags.some((tag) => targetTags.includes(tag.toLowerCase()));
+    });
+
+    const opportunitySummaries = await Promise.all(
+      filteredOpportunities.map(async (oppty) => {
+        const suggestions = await Suggestion.allByOpportunityId(oppty.getId());
+        return OpportunitySummaryDto.toJSON(oppty, suggestions);
+      }),
+    );
+
+    const validSummaries = opportunitySummaries.filter(
+      (summary) => summary.projectedTrafficValue > 0,
+    );
+
+    validSummaries.sort((a, b) => b.projectedTrafficValue - a.projectedTrafficValue);
+
+    return ok(validSummaries);
+  };
+
   return {
     createOpportunity,
     getAllForSite,
     getByID,
     getByStatus,
+    getTopPaidOpportunities,
     patchOpportunity,
     removeOpportunity,
   };

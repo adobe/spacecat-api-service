@@ -3318,7 +3318,7 @@ describe('Suggestions Controller', () => {
       expect(s3ClientSendStub.callCount).to.be.at.least(1);
       // Verify PutObjectCommand was called for upload
       const putObjectCalls = s3ClientSendStub.getCalls().filter((call) => call.args[0].constructor.name === 'PutObjectCommand');
-      expect(putObjectCalls).to.have.length(1);
+      expect(putObjectCalls).to.have.length(2);
 
       // Verify suggestion data was updated with deployment timestamp
       const firstSugg = tokowakaSuggestions[0];
@@ -3643,20 +3643,18 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(207);
 
-      // Find the PutObjectCommand call (second call after GetObjectCommand)
-      const putObjectCall = s3ClientSendStub.getCalls().find((call) => call.args[0].constructor.name === 'PutObjectCommand');
-      expect(putObjectCall).to.exist;
-      const uploadedConfig = JSON.parse(putObjectCall.args[0].input.Body);
-
+      // Find the second PutObjectCommand call
+      const putObjectCalls = s3ClientSendStub.getCalls().filter((call) => call.args[0].constructor.name === 'PutObjectCommand');
+      expect(putObjectCalls).to.have.length.at.least(2);
+      const uploadedConfig = JSON.parse(putObjectCalls[1].args[0].input.Body);
+      console.log(JSON.stringify(uploadedConfig, null, 2));
       // Validate config structure
-      expect(uploadedConfig).to.have.property('siteId', SITE_ID);
-      expect(uploadedConfig).to.have.property('baseURL');
+      expect(uploadedConfig).to.have.property('url');
       expect(uploadedConfig).to.have.property('version', '1.0');
-      expect(uploadedConfig).to.have.property('tokowakaForceFail', false);
-      expect(uploadedConfig).to.have.property('tokowakaOptimizations');
+      expect(uploadedConfig).to.have.property('forceFail', false);
+      expect(uploadedConfig).to.have.property('patches');
 
-      // Validate patch structure
-      const { patches } = uploadedConfig.tokowakaOptimizations['/page1'];
+      const { patches } = uploadedConfig;
       expect(patches).to.have.length(2);
       expect(patches[0]).to.have.property('op', 'replace');
       expect(patches[0]).to.have.property('selector');
@@ -4507,18 +4505,17 @@ describe('Suggestions Controller', () => {
       const body2 = putCall.args[0].input.Body;
 
       // Verify preview path
-      expect(key).to.equal('preview/opportunities/test-api-key-123');
+      expect(key).to.equal('preview/opportunities/example.com/L3BhZ2Ux');
 
       // Verify uploaded config structure
       const uploadedConfig = JSON.parse(body2);
-      expect(uploadedConfig).to.have.property('siteId', SITE_ID);
-      expect(uploadedConfig).to.have.property('baseURL', 'https://example.com');
+      expect(uploadedConfig).to.have.property('url', 'https://example.com/page1');
       expect(uploadedConfig).to.have.property('version', '1.0');
-      expect(uploadedConfig).to.have.property('tokowakaForceFail', false);
-      expect(uploadedConfig).to.have.property('tokowakaOptimizations');
+      expect(uploadedConfig).to.have.property('forceFail', false);
+      expect(uploadedConfig).to.have.property('patches');
 
       // Validate patch structure
-      const { patches } = uploadedConfig.tokowakaOptimizations['/page1'];
+      const { patches } = uploadedConfig;
       expect(patches).to.have.length(2);
       expect(patches[0]).to.have.property('op', 'replace');
       expect(patches[0]).to.have.property('selector');
