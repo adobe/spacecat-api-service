@@ -25,6 +25,7 @@ import {
   detectLocale,
 } from '@adobe/spacecat-shared-utils';
 import TierClient from '@adobe/spacecat-shared-tier-client';
+import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
 import { iso6393 } from 'iso-639-3';
 import worldCountries from 'world-countries';
 
@@ -422,11 +423,66 @@ export class ErrorWithStatusCode extends Error {
   }
 }
 
-export const wwwUrlResolver = (site) => {
+/**
+ * Toggles the www subdomain in a hostname.
+ * @param {string} hostname - The hostname to toggle.
+ * @returns {string} - The hostname with www toggled.
+ */
+export function toggleWWWHostname(hostname) {
+  try {
+    const uri = new URI(`https://${hostname}`);
+    const hasSubdomain = hasText(uri.domain()) && hasText(uri.subdomain()) && uri.subdomain() !== 'www';
+    if (hasSubdomain) return hostname;
+  } catch {
+    // If URI parsing fails, continue with simple string manipulation
+  }
+  return hostname.startsWith('www.') ? hostname.replace('www.', '') : `www.${hostname}`;
+}
+
+/**
+ * Resolves the correct URL for a site by checking RUM data availability.
+ * Tries www-toggled version first, then falls back to original.
+ * @param {object} site - The site object.
+ * @param {object} context - The context object.
+ * @returns {Promise<string>} - The resolved hostname without protocol.
+ */
+export async function wwwUrlResolver(site, context) {
+  const { log } = context;
+
   const baseURL = site.getBaseURL();
   const uri = new URI(baseURL);
-  return hasText(uri.subdomain()) ? baseURL.replace(/https?:\/\//, '') : baseURL.replace(/https?:\/\//, 'www.');
-};
+  const hostname = uri.hostname();
+  const subdomain = uri.subdomain();
+
+  if (hasText(subdomain) && subdomain !== 'www') {
+    log.debug(`Resolved URL ${hostname} since ${baseURL} contains subdomain`);
+    return hostname;
+  }
+
+  const rumApiClient = RUMAPIClient.createFrom(context);
+
+  // Prioritize www version first
+  const wwwHostname = hostname.startsWith('www.') ? hostname : `www.${hostname}`;
+  const nonWwwHostname = hostname.startsWith('www.') ? hostname.replace('www.', '') : hostname;
+
+  try {
+    await rumApiClient.retrieveDomainkey(wwwHostname);
+    log.debug(`Resolved URL ${wwwHostname} for ${baseURL} using RUM API Client`);
+    return wwwHostname;
+  } catch (e) {
+    log.error(`Could not retrieve RUM domainkey for www version ${wwwHostname}: ${e.message}`);
+  }
+
+  try {
+    await rumApiClient.retrieveDomainkey(nonWwwHostname);
+    log.debug(`Resolved URL ${nonWwwHostname} for ${baseURL} using RUM API Client`);
+    return nonWwwHostname;
+  } catch (e) {
+    log.error(`Could not retrieve RUM domainkey for non-www version ${nonWwwHostname}: ${e.message}`);
+  }
+
+  throw new Error(`No RUM data found for ${baseURL} (tried both ${wwwHostname} and ${nonWwwHostname})`);
+}
 
 /**
  * Get the IMS user token from the context.

@@ -657,7 +657,7 @@ function SitesController(ctx, log, env) {
     }
 
     const rumAPIClient = RUMAPIClient.createFrom(context);
-    const domain = wwwUrlResolver(site);
+    const domain = await wwwUrlResolver(site, context);
 
     try {
       const now = new Date();
