@@ -899,8 +899,8 @@ describe('Sites Controller', () => {
     expect(context.rumApiClient.query).to.have.been.calledWith('optimization-report-graph', {
       domain: 'www.site1.com',
       urls: ['https://site1.com/page1', 'https://site1.com/page2'],
-      startDate: '2024-01-01',
-      endDate: '2024-01-31',
+      startTime: '2024-01-01',
+      endTime: '2024-01-31',
       granularity: 'day',
     });
     expect(graphData).to.deep.equal(mockGraphData);
