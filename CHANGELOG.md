@@ -1,3 +1,10 @@
+# [1.267.0](https://github.com/adobe/spacecat-api-service/compare/v1.266.1...v1.267.0) (2025-12-02)
+
+
+### Features
+
+* added POST graph API ([#1575](https://github.com/adobe/spacecat-api-service/issues/1575)) ([b7e2094](https://github.com/adobe/spacecat-api-service/commit/b7e20949403ee67b2eb262f03bbc04d60ef63029))
+
 ## [1.266.1](https://github.com/adobe/spacecat-api-service/compare/v1.266.0...v1.266.1) (2025-12-02)
 
 
