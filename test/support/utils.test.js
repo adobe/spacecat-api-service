@@ -219,15 +219,6 @@ describe('utils', () => {
       sandbox.restore();
     });
 
-    it('should return hostname for site with non-www subdomain', async () => {
-      site.getBaseURL.returns('https://blog.example.com');
-
-      const result = await wwwUrlResolver(site, context);
-
-      expect(result).to.equal('blog.example.com');
-      expect(context.log.debug).to.have.been.calledWith('Resolved URL blog.example.com since https://blog.example.com contains subdomain');
-    });
-
     it('should prioritize www version when it has RUM data', async () => {
       site.getBaseURL.returns('https://example.com');
       rumApiClient.retrieveDomainkey.withArgs('www.example.com').resolves('domain-key');

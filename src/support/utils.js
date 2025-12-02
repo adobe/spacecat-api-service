@@ -452,12 +452,6 @@ export async function wwwUrlResolver(site, context) {
   const baseURL = site.getBaseURL();
   const uri = new URI(baseURL);
   const hostname = uri.hostname();
-  const subdomain = uri.subdomain();
-
-  if (hasText(subdomain) && subdomain !== 'www') {
-    log.debug(`Resolved URL ${hostname} since ${baseURL} contains subdomain`);
-    return hostname;
-  }
 
   const rumApiClient = RUMAPIClient.createFrom(context);
 
