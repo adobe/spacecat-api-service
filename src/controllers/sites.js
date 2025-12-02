@@ -964,8 +964,8 @@ function SitesController(ctx, log, env) {
       const params = {
         domain,
         urls,
-        startDate,
-        endDate,
+        startTime: startDate,
+        endTime: endDate,
         granularity,
       };
 
