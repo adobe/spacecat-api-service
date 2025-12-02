@@ -1,3 +1,24 @@
+# [1.267.0](https://github.com/adobe/spacecat-api-service/compare/v1.266.1...v1.267.0) (2025-12-02)
+
+
+### Features
+
+* added POST graph API ([#1575](https://github.com/adobe/spacecat-api-service/issues/1575)) ([b7e2094](https://github.com/adobe/spacecat-api-service/commit/b7e20949403ee67b2eb262f03bbc04d60ef63029))
+
+## [1.266.1](https://github.com/adobe/spacecat-api-service/compare/v1.266.0...v1.266.1) (2025-12-02)
+
+
+### Bug Fixes
+
+* unblock daas by allowing set org without product selection ([#1601](https://github.com/adobe/spacecat-api-service/issues/1601)) ([246bddb](https://github.com/adobe/spacecat-api-service/commit/246bddb40fbc3a4d9b57c66754ea4fff5a9a63b8))
+
+# [1.266.0](https://github.com/adobe/spacecat-api-service/compare/v1.265.3...v1.266.0) (2025-12-02)
+
+
+### Features
+
+* llmo-1539 new endpoint to get user details ([#1585](https://github.com/adobe/spacecat-api-service/issues/1585)) ([3de93ed](https://github.com/adobe/spacecat-api-service/commit/3de93edaf4fd91a9d266d9837e1e049f8db5efc6))
+
 ## [1.265.3](https://github.com/adobe/spacecat-api-service/compare/v1.265.2...v1.265.3) (2025-12-01)
 
 

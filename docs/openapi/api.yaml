@@ -336,6 +336,8 @@ paths:
     $ref: './site-api.yaml#/site-reports'
   /sites/{siteId}/reports/{reportId}:
     $ref: './site-api.yaml#/site-report'
+  /sites/{siteId}/graph:
+    $ref: './site-api.yaml#/site-graph'
 
 components:
   securitySchemes:
