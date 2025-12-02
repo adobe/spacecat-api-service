@@ -86,7 +86,7 @@
     "@adobe/spacecat-shared-slack-client": "1.5.32",
     "@adobe/spacecat-shared-tier-client": "1.3.9",
     "@adobe/spacecat-shared-tokowaka-client": "1.2.4",
-    "@adobe/spacecat-shared-utils": "https://gist.github.com/prithipalpatwal/cfead3d7d347ac394a01b152fb49b421/raw/73cd36023673457d78ec392367c2ddc592e5207d/adobe-spacecat-shared-utils-1.81.1.tgz",
+    "@adobe/spacecat-shared-utils": "https://gist.github.com/prithipalpatwal/cfead3d7d347ac394a01b152fb49b421/raw/7621ce87011e8d80a920e54f15e05373447fd10f/adobe-spacecat-shared-utils-1.81.1.tgz",
     "@aws-sdk/client-s3": "3.940.0",
     "@aws-sdk/client-sfn": "3.940.0",
     "@aws-sdk/client-sqs": "3.940.0",
