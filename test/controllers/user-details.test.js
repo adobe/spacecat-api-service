@@ -221,9 +221,9 @@ describe('User Details Controller', () => {
       expect(mockLog.warn).to.have.been.called;
       const body = await result.json();
       expect(body).to.deep.equal({
-        firstName: 'system',
-        lastName: '',
-        email: 'system',
+        firstName: '-',
+        lastName: '-',
+        email: '',
         organizationId,
       });
     });
@@ -244,9 +244,9 @@ describe('User Details Controller', () => {
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body).to.deep.equal({
-        firstName: 'system',
-        lastName: '',
-        email: 'system',
+        firstName: '-',
+        lastName: '-',
+        email: '',
         organizationId,
       });
     });
@@ -265,8 +265,8 @@ describe('User Details Controller', () => {
       const body = await result.json();
       expect(body).to.deep.equal({
         firstName: 'system',
-        lastName: '',
-        email: 'system',
+        lastName: '-',
+        email: '',
         organizationId,
       });
     });
@@ -407,8 +407,8 @@ describe('User Details Controller', () => {
       const body = await result.json();
       expect(body['not-found-user@AdobeOrg']).to.deep.equal({
         firstName: 'system',
-        lastName: '',
-        email: 'system',
+        lastName: '-',
+        email: '',
         organizationId,
       });
     });
@@ -430,9 +430,9 @@ describe('User Details Controller', () => {
       );
       const body = await result.json();
       expect(body['not-found-user-1@AdobeOrg']).to.deep.equal({
-        firstName: 'system',
-        lastName: '',
-        email: 'system',
+        firstName: '-',
+        lastName: '-',
+        email: '',
         organizationId,
       });
     });
@@ -455,9 +455,9 @@ describe('User Details Controller', () => {
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body['incomplete-user@AdobeOrg']).to.deep.equal({
-        firstName: 'system',
-        lastName: '',
-        email: 'system',
+        firstName: '-',
+        lastName: '-',
+        email: '',
         organizationId,
       });
     });

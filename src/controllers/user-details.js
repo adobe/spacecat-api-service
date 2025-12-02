@@ -57,8 +57,8 @@ function UserDetailsController(ctx) {
       log.debug(`User is not admin, returning system defaults for ${externalUserId}`);
       return {
         firstName: 'system',
-        lastName: '',
-        email: 'system',
+        lastName: '-',
+        email: '',
         organizationId,
       };
     }
@@ -68,17 +68,17 @@ function UserDetailsController(ctx) {
       log.debug(`Admin user requesting details for ${externalUserId}, attempting IMS fallback`);
       const imsProfile = await imsClient.getImsAdminProfile(externalUserId);
       return {
-        firstName: imsProfile.first_name || 'system',
-        lastName: imsProfile.last_name || '',
-        email: imsProfile.email || 'system',
+        firstName: imsProfile.first_name || '-',
+        lastName: imsProfile.last_name || '-',
+        email: imsProfile.email || '',
         organizationId,
       };
     } catch (error) {
       log.warn(`Failed to fetch user details from IMS for ${externalUserId}: ${error.message}`);
       return {
-        firstName: 'system',
-        lastName: '',
-        email: 'system',
+        firstName: '-',
+        lastName: '-',
+        email: '',
         organizationId,
       };
     }
