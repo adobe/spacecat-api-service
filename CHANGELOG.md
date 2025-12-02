@@ -1,3 +1,10 @@
+## [1.267.1](https://github.com/adobe/spacecat-api-service/compare/v1.267.0...v1.267.1) (2025-12-02)
+
+
+### Bug Fixes
+
+* **llmo:** respect base URL when setting override ([#1602](https://github.com/adobe/spacecat-api-service/issues/1602)) ([9b0a66e](https://github.com/adobe/spacecat-api-service/commit/9b0a66ecb2b3125ec46d765e7255ab4037f346bb))
+
 # [1.267.0](https://github.com/adobe/spacecat-api-service/compare/v1.266.1...v1.267.0) (2025-12-02)
 
 
