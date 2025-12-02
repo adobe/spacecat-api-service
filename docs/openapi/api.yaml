@@ -67,6 +67,8 @@ tags:
     description: Report generation and management operations
   - name: project
     description: Project management operations
+  - name: urls
+    description: URL store management operations
 
 paths:
   /audits/latest/{auditType}:
@@ -334,6 +336,14 @@ paths:
     $ref: './site-api.yaml#/site-reports'
   /sites/{siteId}/reports/{reportId}:
     $ref: './site-api.yaml#/site-report'
+  /urls:
+    $ref: './url-store-api.yaml#/urls'
+  /urls/{urlId}:
+    $ref: './url-store-api.yaml#/url'
+  /urls/by-type/{type}:
+    $ref: './url-store-api.yaml#/urls-by-type'
+  /urls/by-status/{status}:
+    $ref: './url-store-api.yaml#/urls-by-status'
 
 components:
   securitySchemes:

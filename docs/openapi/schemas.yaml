@@ -4867,3 +4867,132 @@ PreflightResultItem:
       type: string
       enum: [identify, suggest]
       description: The step of the preflight job when this result was generated
+
+UrlType:
+  description: Type of URL entry
+  type: string
+  enum:
+    - 'scraped'
+    - 'imported'
+    - 'discovered'
+    - 'manual'
+  example: 'scraped'
+
+UrlStatus:
+  description: Status of URL entry
+  type: string
+  enum:
+    - 'active'
+    - 'inactive'
+    - 'pending'
+    - 'error'
+  example: 'active'
+
+Url:
+  type: object
+  properties:
+    id:
+      description: UUID of this URL entry
+      $ref: '#/Id'
+    url:
+      description: The actual URL string
+      type: string
+      format: uri
+      example: 'https://www.example.com/page'
+    type:
+      $ref: '#/UrlType'
+    status:
+      $ref: '#/UrlStatus'
+    siteId:
+      description: Optional UUID of the associated site
+      $ref: '#/Id'
+    metadata:
+      description: Optional metadata associated with this URL
+      type: object
+      additionalProperties: true
+      example:
+        lastChecked: '2024-01-19T14:20:30Z'
+        responseCode: 200
+    createdAt:
+      $ref: '#/DateTime'
+    updatedAt:
+      $ref: '#/DateTime'
+  required:
+    - id
+    - url
+    - type
+    - status
+    - createdAt
+    - updatedAt
+  additionalProperties: false
+
+UrlCreate:
+  type: object
+  properties:
+    url:
+      description: The actual URL string
+      type: string
+      format: uri
+      example: 'https://www.example.com/page'
+    type:
+      $ref: '#/UrlType'
+    status:
+      $ref: '#/UrlStatus'
+    siteId:
+      description: Optional UUID of the associated site
+      $ref: '#/Id'
+    metadata:
+      description: Optional metadata associated with this URL
+      type: object
+      additionalProperties: true
+  required:
+    - url
+    - type
+  additionalProperties: false
+
+UrlUpdate:
+  type: object
+  properties:
+    url:
+      description: The actual URL string
+      type: string
+      format: uri
+      example: 'https://www.example.com/page'
+    type:
+      $ref: '#/UrlType'
+    status:
+      $ref: '#/UrlStatus'
+    siteId:
+      description: Optional UUID of the associated site
+      $ref: '#/Id'
+    metadata:
+      description: Optional metadata associated with this URL
+      type: object
+      additionalProperties: true
+  additionalProperties: false
+
+UrlList:
+  type: object
+  properties:
+    urls:
+      type: array
+      items:
+        $ref: '#/Url'
+    total:
+      type: integer
+      description: Total number of URLs matching the query
+      example: 100
+    limit:
+      type: integer
+      description: Maximum number of URLs returned in this response
+      example: 50
+    offset:
+      type: integer
+      description: Number of URLs skipped
+      example: 0
+  required:
+    - urls
+    - total
+    - limit
+    - offset
+  additionalProperties: false

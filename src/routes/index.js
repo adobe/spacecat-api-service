@@ -79,6 +79,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} sandboxAuditController - The sandbox audit controller.
  * @param {Object} reportsController - The reports controller.
  * @param {Object} pta2Controller - The PTA2 controller.
+ * @param {Object} urlStoreController - The URL store controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -114,6 +115,7 @@ export default function getRouteHandlers(
   sandboxAuditController,
   reportsController,
   pta2Controller,
+  urlStoreController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -351,6 +353,15 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/reports/:reportId': reportsController.getReport,
     'PATCH /sites/:siteId/reports/:reportId': reportsController.patchReport,
     'DELETE /sites/:siteId/reports/:reportId': reportsController.deleteReport,
+
+    // URL Store
+    'GET /urls': urlStoreController.getAll,
+    'POST /urls': urlStoreController.createUrl,
+    'GET /urls/:urlId': urlStoreController.getByID,
+    'PATCH /urls/:urlId': urlStoreController.patchUrl,
+    'DELETE /urls/:urlId': urlStoreController.removeUrl,
+    'GET /urls/by-type/:type': urlStoreController.getByType,
+    'GET /urls/by-status/:status': urlStoreController.getByStatus,
 
     'GET /sites-resolve': sitesController.resolveSite,
   };

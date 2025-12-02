@@ -1,0 +1,278 @@
+urls:
+  get:
+    operationId: getAllUrls
+    summary: |
+      Retrieve a list of all URLs
+    tags:
+      - urls
+    parameters:
+      - name: limit
+        in: query
+        description: Maximum number of URLs to return
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      - name: offset
+        in: query
+        description: Number of URLs to skip
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+    responses:
+      '200':
+        description: A list of URLs
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/UrlList'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+  post:
+    operationId: createUrl
+    summary: |
+      Create a new URL entry
+    tags:
+      - urls
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/UrlCreate'
+          examples:
+            basic-url:
+              summary: Basic URL entry
+              value:
+                url: 'https://www.example.com/page'
+                type: 'scraped'
+                status: 'active'
+    responses:
+      '201':
+        description: URL created
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Url'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+url:
+  parameters:
+    - name: urlId
+      in: path
+      description: The URL ID in uuid format
+      required: true
+      schema:
+        $ref: './schemas.yaml#/Id'
+  get:
+    operationId: getUrlById
+    summary: |
+      Retrieve a specific URL by ID
+    tags:
+      - urls
+    responses:
+      '200':
+        description: URL details
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Url'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+  patch:
+    operationId: updateUrl
+    summary: |
+      Update a URL entry
+    tags:
+      - urls
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/UrlUpdate'
+          examples:
+            update-status:
+              summary: Update URL status
+              value:
+                status: 'inactive'
+    responses:
+      '200':
+        description: URL updated
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Url'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+  delete:
+    operationId: deleteUrl
+    summary: |
+      Delete a URL entry
+    tags:
+      - urls
+    responses:
+      '204':
+        description: URL deleted successfully
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+urls-by-type:
+  parameters:
+    - name: type
+      in: path
+      description: The URL type
+      required: true
+      schema:
+        $ref: './schemas.yaml#/UrlType'
+  get:
+    operationId: getUrlsByType
+    summary: |
+      Retrieve URLs filtered by type
+    tags:
+      - urls
+    parameters:
+      - name: limit
+        in: query
+        description: Maximum number of URLs to return
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      - name: offset
+        in: query
+        description: Number of URLs to skip
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+    responses:
+      '200':
+        description: A list of URLs filtered by type
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/UrlList'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+urls-by-status:
+  parameters:
+    - name: status
+      in: path
+      description: The URL status
+      required: true
+      schema:
+        $ref: './schemas.yaml#/UrlStatus'
+  get:
+    operationId: getUrlsByStatus
+    summary: |
+      Retrieve URLs filtered by status
+    tags:
+      - urls
+    parameters:
+      - name: limit
+        in: query
+        description: Maximum number of URLs to return
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      - name: offset
+        in: query
+        description: Number of URLs to skip
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+    responses:
+      '200':
+        description: A list of URLs filtered by status
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/UrlList'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+
+
+
+
