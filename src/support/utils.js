@@ -424,22 +424,6 @@ export class ErrorWithStatusCode extends Error {
 }
 
 /**
- * Toggles the www subdomain in a hostname.
- * @param {string} hostname - The hostname to toggle.
- * @returns {string} - The hostname with www toggled.
- */
-export function toggleWWWHostname(hostname) {
-  try {
-    const uri = new URI(`https://${hostname}`);
-    const hasSubdomain = hasText(uri.domain()) && hasText(uri.subdomain()) && uri.subdomain() !== 'www';
-    if (hasSubdomain) return hostname;
-  } catch {
-    // If URI parsing fails, continue with simple string manipulation
-  }
-  return hostname.startsWith('www.') ? hostname.replace('www.', '') : `www.${hostname}`;
-}
-
-/**
  * Resolves the correct URL for a site by checking RUM data availability.
  * Tries www-toggled version first, then falls back to original.
  * @param {object} site - The site object.

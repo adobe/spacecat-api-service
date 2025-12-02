@@ -17,7 +17,6 @@ import sinon from 'sinon';
 import {
   createProject,
   deriveProjectName,
-  toggleWWWHostname,
   wwwUrlResolver,
 } from '../../src/support/utils.js';
 
@@ -155,33 +154,6 @@ describe('utils', () => {
       await expect(createProject(context, slackContext, 'https://fr.example.com/', 'org123')).to.be.rejectedWith('Failed to create project');
       expect(context.log.error).to.have.been.calledWith('Error creating project: Failed to create project');
       expect(slackContext.say).to.have.been.calledWith(':x: Error creating project: Failed to create project');
-    });
-  });
-
-  describe('toggleWWWHostname', () => {
-    it('should remove www from hostname', () => {
-      const result = toggleWWWHostname('www.example.com');
-      expect(result).to.equal('example.com');
-    });
-
-    it('should add www to hostname without subdomain', () => {
-      const result = toggleWWWHostname('example.com');
-      expect(result).to.equal('www.example.com');
-    });
-
-    it('should not toggle hostname with non-www subdomain', () => {
-      const result = toggleWWWHostname('blog.example.com');
-      expect(result).to.equal('blog.example.com');
-    });
-
-    it('should not toggle hostname with multiple subdomains', () => {
-      const result = toggleWWWHostname('api.staging.example.com');
-      expect(result).to.equal('api.staging.example.com');
-    });
-
-    it('should handle invalid hostnames gracefully', () => {
-      const result = toggleWWWHostname('invalid,hostname');
-      expect(result).to.equal('www.invalid,hostname');
     });
   });
 
