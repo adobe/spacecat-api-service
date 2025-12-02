@@ -1,3 +1,10 @@
+# [1.266.0](https://github.com/adobe/spacecat-api-service/compare/v1.265.3...v1.266.0) (2025-12-02)
+
+
+### Features
+
+* llmo-1539 new endpoint to get user details ([#1585](https://github.com/adobe/spacecat-api-service/issues/1585)) ([3de93ed](https://github.com/adobe/spacecat-api-service/commit/3de93edaf4fd91a9d266d9837e1e049f8db5efc6))
+
 ## [1.265.3](https://github.com/adobe/spacecat-api-service/compare/v1.265.2...v1.265.3) (2025-12-01)
 
 
