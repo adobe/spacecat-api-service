@@ -758,15 +758,15 @@ site-graph:
               granularity:
                 type: string
                 description: Time granularity for data aggregation
-                enum: [hour, day, week, month]
-                example: "day"
+                enum: [hourly, daily]
+                example: "daily"
           example:
             urls:
               - "https://example.com/page1"
               - "https://example.com/page2"
             startDate: "2024-01-01"
             endDate: "2024-01-31"
-            granularity: "day"
+            granularity: "daily"
     responses:
       '200':
         description: Successfully retrieved graph data from RUM API
@@ -774,22 +774,188 @@ site-graph:
           application/json:
             schema:
               type: object
-              description: Graph data structure returned by the RUM API
-              additionalProperties: true
+              description: Graph data structure returned by the RUM API containing traffic metrics and time-series data
+              properties:
+                trafficData:
+                  type: array
+                  description: Aggregated traffic data across all URLs for each time period
+                  items:
+                    type: object
+                    properties:
+                      date:
+                        type: string
+                        format: date
+                        description: Date of the data point in YYYY-MM-DD format
+                      organic:
+                        type: integer
+                        description: Organic traffic count
+                      visits:
+                        type: integer
+                        description: Total number of visits
+                      pageViews:
+                        type: integer
+                        description: Total number of page views
+                      bounces:
+                        type: integer
+                        description: Total number of bounces
+                      conversions:
+                        type: integer
+                        description: Total number of conversions
+                      engagement:
+                        type: integer
+                        description: Engagement metric
+                byUrl:
+                  type: object
+                  description: Traffic data grouped by individual URLs
+                  additionalProperties:
+                    type: object
+                    properties:
+                      total:
+                        type: object
+                        description: Aggregate totals for this URL across the entire time range
+                        properties:
+                          organic:
+                            type: integer
+                            description: Total organic traffic
+                          visits:
+                            type: integer
+                            description: Total visits
+                          pageViews:
+                            type: integer
+                            description: Total page views
+                          bounces:
+                            type: integer
+                            description: Total bounces
+                          conversions:
+                            type: integer
+                            description: Total conversions
+                          engagement:
+                            type: integer
+                            description: Total engagement
+                      timeSeries:
+                        type: array
+                        description: Time-series data for this URL
+                        items:
+                          type: object
+                          properties:
+                            date:
+                              type: string
+                              format: date
+                              description: Date of the data point
+                            organic:
+                              type: integer
+                              description: Organic traffic count
+                            visits:
+                              type: integer
+                              description: Number of visits
+                            pageViews:
+                              type: integer
+                              description: Number of page views
+                            bounces:
+                              type: integer
+                              description: Number of bounces
+                            conversions:
+                              type: integer
+                              description: Number of conversions
+                            engagement:
+                              type: integer
+                              description: Engagement metric
+                totals:
+                  type: object
+                  description: Aggregate totals across all URLs and the entire time range
+                  properties:
+                    organic:
+                      type: integer
+                      description: Total organic traffic
+                    visits:
+                      type: integer
+                      description: Total visits
+                    pageViews:
+                      type: integer
+                      description: Total page views
+                    bounces:
+                      type: integer
+                      description: Total bounces
+                    conversions:
+                      type: integer
+                      description: Total conversions
+                    engagement:
+                      type: integer
+                      description: Total engagement
+                urlsFiltered:
+                  type: array
+                  description: List of URLs that were included in the data
+                  items:
+                    type: string
+                    format: uri
+                granularity:
+                  type: string
+                  description: The granularity used for the time-series data
+                  enum: [hourly, daily]
               example:
-                data:
-                  - date: "2024-01-01"
-                    value: 100
-                    metrics:
-                      lcp: 2.5
-                      fid: 0.1
-                      cls: 0.05
-                  - date: "2024-01-02"
-                    value: 150
-                    metrics:
-                      lcp: 2.3
-                      fid: 0.08
-                      cls: 0.04
+                trafficData:
+                  - date: "2025-11-24"
+                    organic: 0
+                    visits: 2600
+                    pageViews: 2600
+                    bounces: 2600
+                    conversions: 0
+                    engagement: 1300
+                  - date: "2025-11-25"
+                    organic: 0
+                    visits: 2200
+                    pageViews: 2200
+                    bounces: 2200
+                    conversions: 0
+                    engagement: 1100
+                  - date: "2025-11-29"
+                    organic: 0
+                    visits: 900
+                    pageViews: 1800
+                    bounces: 900
+                    conversions: 900
+                    engagement: 900
+                byUrl:
+                  "https://www.bamboohr.com/pl-pages/pricing":
+                    total:
+                      organic: 0
+                      visits: 5700
+                      pageViews: 6600
+                      bounces: 5700
+                      conversions: 900
+                      engagement: 3300
+                    timeSeries:
+                      - date: "2025-11-24"
+                        organic: 0
+                        visits: 2600
+                        pageViews: 2600
+                        bounces: 2600
+                        conversions: 0
+                        engagement: 1300
+                      - date: "2025-11-25"
+                        organic: 0
+                        visits: 2200
+                        pageViews: 2200
+                        bounces: 2200
+                        conversions: 0
+                        engagement: 1100
+                      - date: "2025-11-29"
+                        organic: 0
+                        visits: 900
+                        pageViews: 1800
+                        bounces: 900
+                        conversions: 900
+                        engagement: 900
+                totals:
+                  organic: 0
+                  visits: 5700
+                  pageViews: 6600
+                  bounces: 5700
+                  conversions: 900
+                  engagement: 3300
+                urlsFiltered:
+                  - "https://www.bamboohr.com/pl-pages/pricing"
+                granularity: "daily"
       '400':
         description: Bad request - validation errors
         content:
