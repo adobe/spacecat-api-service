@@ -13,6 +13,7 @@ import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { ImsPromiseClient } from '@adobe/spacecat-shared-ims-client';
+import URI from 'urijs';
 import {
   hasText,
   tracingFetch as fetch,
@@ -424,13 +425,20 @@ export class ErrorWithStatusCode extends Error {
   }
 }
 
+export const wwwUrlResolver = (site) => {
+  const baseURL = site.getBaseURL();
+  const uri = new URI(baseURL);
+  return hasText(uri.subdomain()) ? baseURL.replace(/https?:\/\//, '') : baseURL.replace(/https?:\/\//, 'www.');
+};
+
 /**
- * Wrapper function that adapts wwwUrlResolver from shared-utils to work with context.
+ * Resolves the correct hostname for a site by checking RUM data availability.
+ * Adapts wwwUrlResolver from shared-utils to work with api-service context.
  * @param {object} site - The site object.
  * @param {object} context - The context object.
  * @returns {Promise<string>} - The resolved hostname without protocol.
  */
-export async function wwwUrlResolver(site, context) {
+export async function resolveWwwUrl(site, context) {
   const { log } = context;
   const rumApiClient = RUMAPIClient.createFrom(context);
   return sharedWwwUrlResolver(site, rumApiClient, log);
