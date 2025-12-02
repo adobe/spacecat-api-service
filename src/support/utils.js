@@ -424,6 +424,32 @@ export class ErrorWithStatusCode extends Error {
 }
 
 /**
+ * Checks if a URL has a subdomain other than 'www'.
+ * @param {string} baseUrl - The URL to check.
+ * @returns {boolean} - True if the URL has a non-www subdomain, false otherwise.
+ * @throws {Error} - If the baseURL cannot be parsed.
+ */
+export function hasNonWWWSubdomain(baseUrl) {
+  try {
+    const uri = new URI(baseUrl);
+    return hasText(uri.domain()) && hasText(uri.subdomain()) && uri.subdomain() !== 'www';
+  } catch {
+    throw new Error(`Cannot parse baseURL: ${baseUrl}`);
+  }
+}
+
+/**
+ * Toggles the www subdomain in a given hostname.
+ * @param {string} hostname - The hostname to toggle the www subdomain in.
+ * @returns {string} - The hostname with the www subdomain toggled.
+ */
+export function toggleWWWHostname(hostname) {
+  /* c8 ignore next 1 */
+  if (hasNonWWWSubdomain(`https://${hostname}`)) return hostname;
+  return hostname.startsWith('www.') ? hostname.replace('www.', '') : `www.${hostname}`;
+}
+
+/**
  * Resolves the correct URL for a site by checking RUM data availability.
  * Tries www-toggled version first, then falls back to original.
  * @param {object} site - The site object.
@@ -433,33 +459,43 @@ export class ErrorWithStatusCode extends Error {
 export async function wwwUrlResolver(site, context) {
   const { log } = context;
 
+  const overrideBaseURL = site.getConfig()?.getFetchConfig()?.overrideBaseURL;
+  if (isValidUrl(overrideBaseURL)) {
+    return overrideBaseURL.replace(/^https?:\/\//, '');
+  }
+
   const baseURL = site.getBaseURL();
   const uri = new URI(baseURL);
   const hostname = uri.hostname();
+  const subdomain = uri.subdomain();
+
+  if (hasText(subdomain) && subdomain !== 'www') {
+    log.debug(`Resolved URL ${hostname} since ${baseURL} contains subdomain`);
+    return hostname;
+  }
 
   const rumApiClient = RUMAPIClient.createFrom(context);
 
-  // Prioritize www version first
-  const wwwHostname = hostname.startsWith('www.') ? hostname : `www.${hostname}`;
-  const nonWwwHostname = hostname.startsWith('www.') ? hostname.replace('www.', '') : hostname;
-
   try {
-    await rumApiClient.retrieveDomainkey(wwwHostname);
-    log.debug(`Resolved URL ${wwwHostname} for ${baseURL} using RUM API Client`);
-    return wwwHostname;
+    const wwwToggledHostname = toggleWWWHostname(hostname);
+    await rumApiClient.retrieveDomainkey(wwwToggledHostname);
+    log.debug(`Resolved URL ${wwwToggledHostname} for ${baseURL} using RUM API Client`);
+    return wwwToggledHostname;
   } catch (e) {
-    log.error(`Could not retrieve RUM domainkey for www version ${wwwHostname}: ${e.message}`);
+    log.error(`Could not retrieved RUM domainkey for ${hostname}: ${e.message}`);
   }
 
   try {
-    await rumApiClient.retrieveDomainkey(nonWwwHostname);
-    log.debug(`Resolved URL ${nonWwwHostname} for ${baseURL} using RUM API Client`);
-    return nonWwwHostname;
+    await rumApiClient.retrieveDomainkey(hostname);
+    log.debug(`Resolved URL ${hostname} for ${baseURL} using RUM API Client`);
+    return hostname;
   } catch (e) {
-    log.error(`Could not retrieve RUM domainkey for non-www version ${nonWwwHostname}: ${e.message}`);
+    log.error(`Could not retrieved RUM domainkey for ${hostname}: ${e.message}`);
   }
 
-  throw new Error(`No RUM data found for ${baseURL} (tried both ${wwwHostname} and ${nonWwwHostname})`);
+  const fallback = hostname.startsWith('www.') ? hostname : `www.${hostname}`;
+  log.debug(`Fallback to ${fallback} for URL resolution for ${baseURL}`);
+  return fallback;
 }
 
 /**
