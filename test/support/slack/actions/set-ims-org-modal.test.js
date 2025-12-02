@@ -199,8 +199,20 @@ describe('SetImsOrgModal', () => {
   });
 
   describe('setImsOrgModal', () => {
-    it('returns error if no products selected', async () => {
+    it('proceeds without entitlements if no products selected', async () => {
       const ack = sinon.stub().resolves();
+      const mockSite = {
+        getId: () => 'site123',
+        setOrganizationId: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      const mockOrg = {
+        getId: () => 'org123',
+      };
+
+      mockDataAccess.Site.findByBaseURL.resolves(mockSite);
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrg);
+
       const body = {
         view: {
           private_metadata: JSON.stringify({
@@ -232,8 +244,11 @@ describe('SetImsOrgModal', () => {
       await handler({ ack, body, client });
 
       expect(ack.calledOnce).to.be.true;
-      expect(client.chat.postMessage.calledOnce).to.be.true;
-      expect(client.chat.postMessage.getCall(0).args[0].text).to.include('Please select at least one product');
+      expect(mockSite.setOrganizationId.calledOnce).to.be.true;
+      expect(mockSite.save.calledOnce).to.be.true;
+      expect(mockCreateEntitlementsForProducts.called).to.be.false;
+      expect(mockPostEntitlementMessages.called).to.be.false;
+      expect(client.chat.postMessage.getCall(0).args[0].text).to.include('Successfully updated site');
     });
 
     it('creates new organization and entitlements when org not found', async () => {

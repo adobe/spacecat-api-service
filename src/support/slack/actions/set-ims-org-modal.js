@@ -78,13 +78,6 @@ export function setImsOrgModal(lambdaContext) {
       // Create a say function to post back to the channel
       const say = createSayFunction(client, channelId, threadTs);
 
-      // Validate that at least one product is selected
-      if (selectedProducts.length === 0) {
-        await ack();
-        await say(':warning: Please select at least one product.');
-        return;
-      }
-
       await ack();
 
       // Find the site
@@ -160,14 +153,15 @@ export function setImsOrgModal(lambdaContext) {
           + `with imsOrgId: *${userImsOrgId}*.${productsMessage}`,
         );
       }
-      // ensure entitlements and enrollments for selected products
-      const entitlementResults = await createEntitlementsForProducts(
-        lambdaContext,
-        site,
-        selectedProducts,
-      );
-
-      await postEntitlementMessages(say, entitlementResults, site.getId());
+      if (selectedProducts.length > 0) {
+        // ensure entitlements and enrollments for selected products
+        const entitlementResults = await createEntitlementsForProducts(
+          lambdaContext,
+          site,
+          selectedProducts,
+        );
+        await postEntitlementMessages(say, entitlementResults, site.getId());
+      }
     } catch (error) {
       log.error('Error handling modal submission:', error);
     }
