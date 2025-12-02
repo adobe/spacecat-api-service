@@ -14,10 +14,7 @@
 import { expect } from 'chai';
 import sinon from 'sinon';
 
-import {
-  createProject,
-  deriveProjectName,
-} from '../../src/support/utils.js';
+import { createProject, deriveProjectName } from '../../src/support/utils.js';
 
 describe('utils', () => {
   describe('deriveProjectName', () => {
