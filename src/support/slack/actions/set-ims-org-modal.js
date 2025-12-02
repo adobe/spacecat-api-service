@@ -126,8 +126,9 @@ export function setImsOrgModal(lambdaContext) {
         );
 
         // inform user that we created the org and set it
-        // Note: selectedProducts.length is always > 0 due to validation
-        const productsMessage = `\nSelected products for entitlement: *${selectedProducts.join(', ')}*`;
+        const productsMessage = selectedProducts.length > 0
+          ? `\nSelected products for entitlement: *${selectedProducts.join(', ')}*`
+          : '\n:warning: *No products selected* - No entitlements were created.';
         await say(
           `:white_check_mark: Successfully *created* a new Spacecat org (Name: *${imsOrgDetails.orgName}*) `
           + `and set it for site <${baseURL}|${baseURL}>!${productsMessage}`,
@@ -146,8 +147,9 @@ export function setImsOrgModal(lambdaContext) {
           'Set IMS Organization',
         );
 
-        // Note: selectedProducts.length is always > 0 due to validation
-        const productsMessage = `\nSelected products for entitlement: *${selectedProducts.join(', ')}*`;
+        const productsMessage = selectedProducts.length > 0
+          ? `\nSelected products for entitlement: *${selectedProducts.join(', ')}*`
+          : '\n:warning: *No products selected* - No entitlements were created.';
         await say(
           `:white_check_mark: Successfully updated site <${baseURL}|${baseURL}> to use Spacecat org `
           + `with imsOrgId: *${userImsOrgId}*.${productsMessage}`,

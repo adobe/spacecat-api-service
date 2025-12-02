@@ -199,7 +199,7 @@ describe('SetImsOrgModal', () => {
   });
 
   describe('setImsOrgModal', () => {
-    it('proceeds without entitlements if no products selected', async () => {
+    it('proceeds without entitlements if no products selected (existing org)', async () => {
       const ack = sinon.stub().resolves();
       const mockSite = {
         getId: () => 'site123',
@@ -249,6 +249,67 @@ describe('SetImsOrgModal', () => {
       expect(mockCreateEntitlementsForProducts.called).to.be.false;
       expect(mockPostEntitlementMessages.called).to.be.false;
       expect(client.chat.postMessage.getCall(0).args[0].text).to.include('Successfully updated site');
+      expect(client.chat.postMessage.getCall(0).args[0].text).to.include(':warning:');
+      expect(client.chat.postMessage.getCall(0).args[0].text).to.include('No products selected');
+    });
+
+    it('creates new org without entitlements if no products selected', async () => {
+      const ack = sinon.stub().resolves();
+      const mockSite = {
+        getId: () => 'site123',
+        setOrganizationId: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      const mockOrg = {
+        getId: () => 'org123',
+        save: sinon.stub().resolves(),
+      };
+
+      mockDataAccess.Site.findByBaseURL.resolves(mockSite);
+      mockDataAccess.Organization.findByImsOrgId.resolves(null);
+      mockDataAccess.Organization.create.returns(mockOrg);
+      mockImsClient.getImsOrganizationDetails.resolves({ orgName: 'New Test Org' });
+
+      const body = {
+        view: {
+          private_metadata: JSON.stringify({
+            baseURL: 'https://example.com',
+            imsOrgId: 'ABC123@AdobeOrg',
+            channelId: 'C123',
+            threadTs: '1234567890.123456',
+            messageTs: '1234567890.123457',
+          }),
+          state: {
+            values: {
+              products_block: {
+                aso_checkbox: { selected_options: [] },
+                llmo_checkbox: { selected_options: [] },
+              },
+            },
+          },
+        },
+        user: { id: 'U123' },
+      };
+      const client = {
+        chat: {
+          postMessage: sinon.stub().resolves(),
+          update: sinon.stub().resolves(),
+        },
+      };
+
+      const handler = setImsOrgModal(lambdaContext);
+      await handler({ ack, body, client });
+
+      expect(ack.calledOnce).to.be.true;
+      expect(mockDataAccess.Organization.create.calledOnce).to.be.true;
+      expect(mockOrg.save.calledOnce).to.be.true;
+      expect(mockSite.setOrganizationId.calledOnce).to.be.true;
+      expect(mockSite.save.calledOnce).to.be.true;
+      expect(mockCreateEntitlementsForProducts.called).to.be.false;
+      expect(mockPostEntitlementMessages.called).to.be.false;
+      expect(client.chat.postMessage.getCall(0).args[0].text).to.include('Successfully *created*');
+      expect(client.chat.postMessage.getCall(0).args[0].text).to.include(':warning:');
+      expect(client.chat.postMessage.getCall(0).args[0].text).to.include('No products selected');
     });
 
     it('creates new organization and entitlements when org not found', async () => {
