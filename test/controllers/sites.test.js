@@ -470,55 +470,6 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Only users belonging to the organization can update its sites');
   });
 
-  it('removes a site', async () => {
-    const site = sites[0];
-    site.remove = sandbox.stub();
-    const response = await sitesController.removeSite(
-      { params: { siteId: SITE_IDS[0] }, ...defaultAuthAttributes },
-    );
-
-    expect(site.remove).to.have.been.calledOnce;
-    expect(response.status).to.equal(204);
-  });
-
-  it('removes a site for a non-admin user ', async () => {
-    context.attributes.authInfo.withProfile({ is_admin: false });
-    const site = sites[0];
-    site.remove = sandbox.stub();
-    const response = await sitesController.removeSite(
-      { params: { siteId: SITE_IDS[0] }, ...defaultAuthAttributes },
-    );
-
-    expect(site.remove).to.have.not.been.called;
-    expect(response.status).to.equal(403);
-    const error = await response.json();
-    expect(error).to.have.property('message', 'Only admins can remove sites');
-  });
-
-  it('returns bad request when removing a site if id not provided', async () => {
-    const site = sites[0];
-    site.remove = sandbox.stub();
-    const response = await sitesController.removeSite({ params: {} });
-    const error = await response.json();
-
-    expect(site.remove).to.have.not.been.called;
-    expect(response.status).to.equal(400);
-    expect(error).to.have.property('message', 'Site ID required');
-  });
-
-  it('returns not found when removing a non-existing site', async () => {
-    const site = sites[0];
-    site.remove = sandbox.stub();
-    mockDataAccess.Site.findById.resolves(null);
-
-    const response = await sitesController.removeSite({ params: { siteId: SITE_IDS[0] } });
-    const error = await response.json();
-
-    expect(site.remove).to.have.not.been.called;
-    expect(response.status).to.equal(404);
-    expect(error).to.have.property('message', 'Site not found');
-  });
-
   it('gets all sites', async () => {
     mockDataAccess.Site.all.resolves(sites);
 
@@ -3135,6 +3086,15 @@ describe('Sites Controller', () => {
 
       expect(response.status).to.equal(500);
       expect(error.message).to.equal('Failed to trigger brand profile agent');
+    });
+
+    it('throw restricted operation when user try to delete site', async () => {
+      const controller = controllerFactory();
+      const response = await controller.removeSite({ params: { siteId: SITE_IDS[0] } });
+      const error = await response.json();
+
+      expect(response.status).to.equal(403);
+      expect(error.message).to.equal('Restricted Operation');
     });
   });
 });

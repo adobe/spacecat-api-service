@@ -1,3 +1,10 @@
+## [1.265.3](https://github.com/adobe/spacecat-api-service/compare/v1.265.2...v1.265.3) (2025-12-01)
+
+
+### Bug Fixes
+
+* restrict delete api for org and site ([#1545](https://github.com/adobe/spacecat-api-service/issues/1545)) ([39ca9fb](https://github.com/adobe/spacecat-api-service/commit/39ca9fb868c843f0ae3289460f62d424cb0b3eb4))
+
 ## [1.265.2](https://github.com/adobe/spacecat-api-service/compare/v1.265.1...v1.265.2) (2025-12-01)
 
 
