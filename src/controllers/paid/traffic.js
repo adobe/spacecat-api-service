@@ -287,7 +287,7 @@ function TrafficController(context, log, env) {
     const dimensionColumns = dimensions.join(', ');
     const dimensionColumnsPrefixed = dimensions.map((col) => `agg.${col}`).join(', ');
 
-    const queryParams = getTop3PagesWithTrafficLostTemplate({
+    const query = getTop3PagesWithTrafficLostTemplate({
       siteId,
       tableName,
       temporalCondition: decodedTemporalCondition,
@@ -298,10 +298,7 @@ function TrafficController(context, log, env) {
       limit,
     });
 
-    const description = `fetch top 3 pages traffic data db: ${rumMetricsDatabase}| siteKey: ${siteId} | temporalCondition: ${queryParams.temporalCondition} | groupBy: [${dimensions.join(', ')}] `;
-
-    // build query
-    const query = getTrafficAnalysisQuery(queryParams);
+    const description = `fetch top 3 pages traffic data db: ${rumMetricsDatabase}| siteKey: ${siteId} | temporalCondition: ${decodedTemporalCondition} | groupBy: [${dimensions.join(', ')}] `;
 
     // first try to get from cache
     const { cachedResultUrl, cacheKey, outPrefix } = await tryGetCacheResult(
