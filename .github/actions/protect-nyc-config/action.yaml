@@ -1,0 +1,81 @@
+name: Protect NYC config
+description: Block unauthorized edits to .nycrc.json
+
+inputs:
+  github-token:
+    description: Token with permission to read pull requests and org memberships
+    required: false
+
+runs:
+  using: composite
+  steps:
+    - name: Skip non-PR events
+      if: github.event_name != 'pull_request'
+      shell: bash
+      run: echo "Not a pull_request event; skipping Protect NYC config action."
+
+    - name: Show basic PR info
+      if: github.event_name == 'pull_request'
+      shell: bash
+      run: |
+        echo "PR number: ${{ github.event.number }}"
+        echo "PR author: ${{ github.event.pull_request.user.login }}"
+        echo "Draft: ${{ github.event.pull_request.draft }}"
+
+    - name: Detect .nycrc.json changes
+      if: github.event_name == 'pull_request'
+      id: detect
+      shell: bash
+      env:
+        FILES_API: ${{ github.api_url }}/repos/${{ github.repository }}/pulls/${{ github.event.number }}/files?per_page=100
+        GITHUB_TOKEN: ${{ inputs.github-token || github.token }}
+      run: |
+        echo "Checking PR file list for .nycrc.json changes..."
+        RESPONSE=$(curl -sS -H "Authorization: Bearer $GITHUB_TOKEN" \
+          -H "Accept: application/vnd.github+json" \
+          "$FILES_API")
+        if echo "$RESPONSE" | grep -q '"filename": ".nycrc.json"'; then
+          echo "nycrc-changed=true" >> "$GITHUB_OUTPUT"
+          echo ".nycrc.json modifications detected."
+        else
+          echo "nycrc-changed=false" >> "$GITHUB_OUTPUT"
+          echo "No .nycrc.json modifications detected."
+        fi
+
+    - name: Skip when .nycrc.json unchanged
+      if: github.event_name == 'pull_request' && steps.detect.outputs.nycrc-changed != 'true'
+      shell: bash
+      run: echo "Skipping protection check because .nycrc.json was not touched."
+
+    - name: Skip check for draft PRs
+      if: github.event_name == 'pull_request' && steps.detect.outputs.nycrc-changed == 'true' && github.event.pull_request.draft == true
+      shell: bash
+      run: echo "PR is in draft state; skipping protection check."
+
+    - name: Check if author is in adobe/spacecat-admins
+      if: github.event_name == 'pull_request' && steps.detect.outputs.nycrc-changed == 'true' && github.event.pull_request.draft == false
+      shell: bash
+      env:
+        ORG: adobe
+        TEAM_SLUG: spacecat-admins
+        USERNAME: ${{ github.event.pull_request.user.login }}
+        GITHUB_TOKEN: ${{ inputs.github-token || github.token }}
+      run: |
+        echo "Checking if $USERNAME is in team $ORG/$TEAM_SLUG"
+        STATUS_CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
+          -H "Authorization: Bearer $GITHUB_TOKEN" \
+          -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/orgs/${ORG}/teams/${TEAM_SLUG}/memberships/${USERNAME}")
+        echo "API status code: $STATUS_CODE"
+        if [ "$STATUS_CODE" -eq 200 ]; then
+          echo "User $USERNAME is a member of $ORG/$TEAM_SLUG (allowed to modify .nycrc.json)."
+        elif [ "$STATUS_CODE" -eq 404 ]; then
+          echo "User $USERNAME is NOT a member of $ORG/$TEAM_SLUG."
+          echo "Only members of $ORG/$TEAM_SLUG can modify .nycrc.json." >&2
+          exit 1
+        else
+          echo "Unexpected response from GitHub API (status $STATUS_CODE)." >&2
+          echo "Failing conservatively to avoid unauthorized changes." >&2
+          exit 1
+        fi
+

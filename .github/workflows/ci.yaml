@@ -5,13 +5,26 @@ permissions:
   contents: write
   issues: read
 
-on: [push]
+on:
+  push:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
 
 env:
   CI_BUILD_NUM: ${{ github.run_id }}
   CI_BRANCH: ${{ github.ref_name }}
   HLX_AWS_REGION: ${{ secrets.AWS_REGION }}
 jobs:
+  protect-nyc-config:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Protect NYC config
+        uses: ./.github/actions/protect-nyc-config
+
   build:
     runs-on: ubuntu-latest
     steps:
