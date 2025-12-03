@@ -245,6 +245,7 @@ describe('getRouteHandlers', () => {
     onboardCustomer: () => null,
     offboardCustomer: () => null,
     queryFiles: () => null,
+    getLlmoAthena: () => null,
   };
 
   const mockSandboxAuditController = {
@@ -569,6 +570,7 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/sandbox/audit',
       'PATCH /sites/:siteId/llmo/cdn-logs-bucket-config',
       'GET /sites/:siteId/llmo/global-sheet-data/:configName',
+      'GET /sites/:siteId/llmo/athena',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
@@ -754,6 +756,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/cdn-logs-bucket-config'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/global-sheet-data/:configName'].handler).to.equal(mockLlmoController.getLlmoGlobalSheetData);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/global-sheet-data/:configName'].paramNames).to.deep.equal(['siteId', 'configName']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/athena'].handler).to.equal(mockLlmoController.getLlmoAthena);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/athena'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:dataSource'].handler).to.equal(mockLlmoController.queryLlmoSheetData);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:dataSource'].paramNames).to.deep.equal(['siteId', 'dataSource']);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource'].handler).to.equal(mockLlmoController.queryLlmoSheetData);
