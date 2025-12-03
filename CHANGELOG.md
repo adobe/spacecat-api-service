@@ -1,3 +1,10 @@
+## [1.269.3](https://github.com/adobe/spacecat-api-service/compare/v1.269.2...v1.269.3) (2025-12-03)
+
+
+### Bug Fixes
+
+* added more logging to debug PTRv2 query ([#1614](https://github.com/adobe/spacecat-api-service/issues/1614)) ([ac997c8](https://github.com/adobe/spacecat-api-service/commit/ac997c88667e50a598fd7551e314441e1277461b))
+
 ## [1.269.2](https://github.com/adobe/spacecat-api-service/compare/v1.269.1...v1.269.2) (2025-12-03)
 
 
