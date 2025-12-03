@@ -1061,7 +1061,7 @@ function LlmoController(ctx) {
               totalDuration,
               validationDuration,
               s3ListDuration,
-              s3ObjectsFound: s3Objects.Contents.length,
+              s3ObjectsFound: s3Objects.CommonPrefixes?.length || 0,
               validAuditIds: 0,
             },
           });
@@ -1176,7 +1176,7 @@ function LlmoController(ctx) {
             s3ListDuration,
             auditProcessingDuration,
             aggregationDuration,
-            s3ObjectsFound: s3Objects.Contents.length,
+            s3ObjectsFound: s3Objects.CommonPrefixes?.length || 0,
             validAuditIds: auditIds.length,
             successfulAudits: successfulAudits.length,
             failedAudits: failedAudits.length,
