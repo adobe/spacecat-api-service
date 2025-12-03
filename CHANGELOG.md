@@ -1,3 +1,10 @@
+# [1.268.0](https://github.com/adobe/spacecat-api-service/compare/v1.267.2...v1.268.0) (2025-12-03)
+
+
+### Features
+
+* added additional endpoints for consent-banner oppty ([#1607](https://github.com/adobe/spacecat-api-service/issues/1607)) ([84eb7d7](https://github.com/adobe/spacecat-api-service/commit/84eb7d76400e74d8ecb442ea8736c63dacba7278))
+
 ## [1.267.2](https://github.com/adobe/spacecat-api-service/compare/v1.267.1...v1.267.2) (2025-12-02)
 
 
