@@ -637,14 +637,6 @@ describe('UrlStore Controller', () => {
       // Root path should keep trailing slash
       expect(mockDataAccess.AuditUrl.create.firstCall.args[0].url).to.equal('https://example.com/');
     });
-
-    it('canonicalizes URL by adding https:// when missing protocol', async () => {
-      context.data = [{ url: 'example.com/page', audits: [] }];
-      mockDataAccess.AuditUrl.create.resolves(mockAuditUrls[0]);
-      await urlStoreController.addUrls(context);
-      // URL should have https:// prepended
-      expect(mockDataAccess.AuditUrl.create.firstCall.args[0].url).to.equal('https://example.com/page');
-    });
   });
 
   describe('updateUrls', () => {

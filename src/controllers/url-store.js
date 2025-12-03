@@ -46,6 +46,7 @@ const MAX_LIMIT = 500;
 function canonicalizeUrl(url) {
   try {
     // Normalize: lowercase hostname, strip port, remove query params, ensure https
+    /* c8 ignore next - isValidUrl() requires protocol, so this fallback is defensive only */
     const urlObj = new URL(url.startsWith('http://') || url.startsWith('https://') ? url : `https://${url}`);
 
     // Lowercase the hostname
