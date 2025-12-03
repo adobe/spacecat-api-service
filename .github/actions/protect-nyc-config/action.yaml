@@ -26,7 +26,6 @@ runs:
         GITHUB_TOKEN: ${{ github.token }}
       run: |
         echo "Checking PR #${{ github.event.number }} file list for .nycrc.json changes..."
-        echo "API URL: $FILES_API"
         RESPONSE=$(curl -sS -H "Authorization: Bearer $GITHUB_TOKEN" \
           -H "Accept: application/vnd.github+json" \
           "$FILES_API")
