@@ -1,3 +1,11 @@
+## [1.269.2](https://github.com/adobe/spacecat-api-service/compare/v1.269.1...v1.269.2) (2025-12-03)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.82.0 ([#1609](https://github.com/adobe/spacecat-api-service/issues/1609)) ([966e600](https://github.com/adobe/spacecat-api-service/commit/966e6009fe1cad42c5b6147d2a65fb3a57c16231))
+* updated athena package ([#1612](https://github.com/adobe/spacecat-api-service/issues/1612)) ([f6877ad](https://github.com/adobe/spacecat-api-service/commit/f6877ad0d970901da2f592b7afeb0d223238a621))
+
 ## [1.269.1](https://github.com/adobe/spacecat-api-service/compare/v1.269.0...v1.269.1) (2025-12-03)
 
 
