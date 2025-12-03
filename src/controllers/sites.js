@@ -368,26 +368,7 @@ function SitesController(ctx, log, env) {
    * @param {object} context - Context of the request.
    * @return {Promise<Response>} Delete response.
    */
-  const removeSite = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can remove sites');
-    }
-    const siteId = context.params?.siteId;
-
-    if (!isValidUUID(siteId)) {
-      return badRequest('Site ID required');
-    }
-
-    const site = await Site.findById(siteId);
-
-    if (!site) {
-      return notFound('Site not found');
-    }
-
-    await site.remove();
-
-    return noContent();
-  };
+  const removeSite = async () => forbidden('Restricted Operation');
 
   /**
    * Updates a site
@@ -679,24 +660,49 @@ function SitesController(ctx, log, env) {
     const domain = wwwUrlResolver(site);
 
     try {
+      const now = new Date();
+      const todayUTC = new Date(Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        0,
+        0,
+        0,
+        0,
+      ));
+      const thirtyDaysAgo = new Date(todayUTC.getTime() - MONTH_DAYS * 24 * 60 * 60 * 1000);
+      const sixtyDaysAgo = new Date(todayUTC.getTime() - 2 * MONTH_DAYS * 24 * 60 * 60 * 1000);
+
       const current = await rumAPIClient.query(TOTAL_METRICS, {
         domain,
-        interval: MONTH_DAYS,
+        startTime: thirtyDaysAgo.toISOString(),
+        endTime: todayUTC.toISOString(),
       });
-      const total = await rumAPIClient.query(TOTAL_METRICS, {
+      const previous = await rumAPIClient.query(TOTAL_METRICS, {
         domain,
-        interval: 2 * MONTH_DAYS,
+        startTime: sixtyDaysAgo.toISOString(),
+        endTime: thirtyDaysAgo.toISOString(),
       });
       const organicTraffic = await getStoredMetrics(
         { siteId, metric: ORGANIC_TRAFFIC, source: AHREFS },
         context,
       );
 
-      const previousPageViews = total.totalPageViews - current.totalPageViews;
-      const previousCTR = (total.totalClicks - current.totalClicks) / previousPageViews;
-      const pageViewsChange = ((current.totalPageViews - previousPageViews)
-        / previousPageViews) * 100;
-      const ctrChange = ((current.totalCTR - previousCTR) / previousCTR) * 100;
+      const pageViewsChange = previous.totalPageViews !== 0
+        ? ((current.totalPageViews - previous.totalPageViews) / previous.totalPageViews) * 100
+        : 0;
+      const ctrChange = previous.totalCTR !== 0
+        ? ((current.totalCTR - previous.totalCTR) / previous.totalCTR) * 100
+        : 0;
+
+      const currentLCP = current.totalLCP;
+      const previousLCP = previous.totalLCP;
+
+      const currentEngagement = current.totalEngagement || 0;
+      const previousEngagement = previous.totalEngagement || 0;
+
+      const currentConversion = current.totalClicks || 0;
+      const previousConversion = previous.totalClicks || 0;
 
       let cpc = 0;
 
@@ -711,6 +717,14 @@ function SitesController(ctx, log, env) {
         pageViewsChange,
         ctrChange,
         projectedTrafficValue,
+        currentPageViews: current.totalPageViews,
+        previousPageViews: previous.totalPageViews,
+        currentLCP,
+        previousLCP,
+        currentEngagement,
+        previousEngagement,
+        currentConversion,
+        previousConversion,
       });
     } catch (error) {
       log.error(`Error getting RUM metrics for site ${siteId}: ${error.message}`);
@@ -720,6 +734,14 @@ function SitesController(ctx, log, env) {
       pageViewsChange: 0,
       ctrChange: 0,
       projectedTrafficValue: 0,
+      currentLCP: null,
+      previousPageViews: 0,
+      currentPageViews: 0,
+      currentConversion: 0,
+      previousConversion: 0,
+      previousLCP: null,
+      previousEngagement: 0,
+      currentEngagement: 0,
     });
   };
 
@@ -921,6 +943,63 @@ function SitesController(ctx, log, env) {
     }
   };
 
+  const getGraph = async (context) => {
+    const siteId = context.params?.siteId;
+    const {
+      urls, startDate, endDate, granularity,
+    } = context.data || {};
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view graph data');
+    }
+
+    // Validate required parameters
+    if (!isArray(urls) || urls.length === 0) {
+      return badRequest('urls array is required and must not be empty');
+    }
+
+    if (!hasText(startDate)) {
+      return badRequest('startDate is required');
+    }
+
+    if (!hasText(endDate)) {
+      return badRequest('endDate is required');
+    }
+
+    if (!hasText(granularity)) {
+      return badRequest('granularity is required');
+    }
+
+    const rumAPIClient = RUMAPIClient.createFrom(context);
+    const domain = wwwUrlResolver(site);
+
+    try {
+      const params = {
+        domain,
+        urls,
+        startTime: startDate,
+        endTime: endDate,
+        granularity,
+      };
+
+      const graphData = await rumAPIClient.query('optimization-report-graph', params);
+
+      return ok(graphData);
+    } catch (error) {
+      log.error(`Error getting optimization report graph for site ${siteId}: ${error.message}`);
+      return internalServerError('Failed to retrieve graph data');
+    }
+  };
+
   return {
     createSite,
     getAll,
@@ -948,6 +1027,7 @@ function SitesController(ctx, log, env) {
     getSiteMetricsBySource,
     getPageMetricsBySource,
     getLatestSiteMetrics,
+    getGraph,
   };
 }
 

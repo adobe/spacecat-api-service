@@ -133,6 +133,7 @@ describe('getRouteHandlers', () => {
     createOpportunity: sinon.stub(),
     patchOpportunity: sinon.stub(),
     removeOpportunity: sinon.stub(),
+    getTopPaidOpportunities: sinon.stub(),
   };
 
   const mockSuggestionsController = {
@@ -273,6 +274,11 @@ describe('getRouteHandlers', () => {
     createTrialUserForEmailInvite: () => null,
   };
 
+  const mockUserDetailsController = {
+    getUserDetailsByExternalUserId: () => null,
+    getUserDetailsInBulk: () => null,
+  };
+
   const mockEntitlementController = {
     getByOrganizationID: () => null,
   };
@@ -315,6 +321,7 @@ describe('getRouteHandlers', () => {
       mockUserActivityController,
       mockSiteEnrollmentController,
       mockTrialUserController,
+      mockUserDetailsController,
       mockEntitlementController,
       mockSandboxAuditController,
       mockReportsController,
@@ -390,6 +397,8 @@ describe('getRouteHandlers', () => {
       'GET /organizations/:organizationId/entitlements',
       'POST /organizations/:organizationId/entitlements',
       'GET /organizations/:organizationId/trial-users',
+      'GET /organizations/:organizationId/userDetails/:externalUserId',
+      'POST /organizations/:organizationId/userDetails',
       'POST /organizations/:organizationId/trial-user-invite',
       'GET /organizations/by-ims-org-id/:imsOrgId',
       'GET /organizations/by-ims-org-id/:imsOrgId/slack-config',
@@ -435,6 +444,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/brand-profile',
       'POST /sites/:siteId/brand-profile',
       'GET /sites/:siteId/opportunities',
+      'GET /sites/:siteId/opportunities/top-paid',
       'GET /sites/:siteId/opportunities/by-status/:status',
       'GET /sites/:siteId/opportunities/:opportunityId',
       'POST /sites/:siteId/opportunities',
@@ -461,6 +471,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/top-pages/:source',
       'GET /sites/:siteId/top-pages/:source/:geo',
       'GET /sites/:siteId/files',
+      'POST /sites/:siteId/graph',
       'POST /event/fulfillment/:eventType',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status',
@@ -613,6 +624,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['DELETE /tools/api-keys/:id'].handler).to.equal(mockApiKeyController.deleteApiKey);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities'].handler).to.equal(mockOpportunitiesController.getAllForSite);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/opportunities/top-paid'].handler).to.equal(mockOpportunitiesController.getTopPaidOpportunities);
+    expect(dynamicRoutes['GET /sites/:siteId/opportunities/top-paid'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/by-status/:status'].handler).to.equal(mockOpportunitiesController.getByStatus);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/by-status/:status'].paramNames).to.deep.equal(['siteId', 'status']);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId'].handler).to.equal(mockOpportunitiesController.getByID);

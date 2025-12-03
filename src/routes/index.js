@@ -75,6 +75,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} userActivityController - The user activity controller.
  * @param {Object} siteEnrollmentController - The site enrollment controller.
  * @param {Object} trialUserController - The trial user controller.
+ * @param {Object} userDetailsController - The user details controller.
  * @param {Object} entitlementController - The entitlement controller.
  * @param {Object} sandboxAuditController - The sandbox audit controller.
  * @param {Object} reportsController - The reports controller.
@@ -111,6 +112,7 @@ export default function getRouteHandlers(
   userActivityController,
   siteEnrollmentController,
   trialUserController,
+  userDetailsController,
   entitlementController,
   sandboxAuditController,
   reportsController,
@@ -184,6 +186,7 @@ export default function getRouteHandlers(
     'GET /sites/by-delivery-type/:deliveryType': sitesController.getAllByDeliveryType,
     'GET /sites/with-latest-audit/:auditType': sitesController.getAllWithLatestAudit,
     'GET /sites/:siteId/opportunities': opportunitiesController.getAllForSite,
+    'GET /sites/:siteId/opportunities/top-paid': opportunitiesController.getTopPaidOpportunities,
     'GET /sites/:siteId/opportunities/by-status/:status': opportunitiesController.getByStatus,
     'GET /sites/:siteId/opportunities/:opportunityId': opportunitiesController.getByID,
     'POST /sites/:siteId/opportunities': opportunitiesController.createOpportunity,
@@ -269,6 +272,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/top-pages': sitesController.getTopPages,
     'GET /sites/:siteId/top-pages/:source': sitesController.getTopPages,
     'GET /sites/:siteId/top-pages/:source/:geo': sitesController.getTopPages,
+    'POST /sites/:siteId/graph': sitesController.getGraph,
 
     // URL Store endpoints
     'GET /sites/:siteId/url-store': urlStoreController.listUrls,
@@ -277,7 +281,6 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/url-store': urlStoreController.addUrls,
     'PATCH /sites/:siteId/url-store': urlStoreController.updateUrls,
     'DELETE /sites/:siteId/url-store': urlStoreController.deleteUrls,
-
     'GET /slack/events': slackController.handleEvent,
     'POST /slack/events': slackController.handleEvent,
     'POST /slack/channels/invite-by-user-id': slackController.inviteUserToChannel,
@@ -350,6 +353,8 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/user-activities': userActivityController.createTrialUserActivity,
     'GET /sites/:siteId/site-enrollments': siteEnrollmentController.getBySiteID,
     'GET /organizations/:organizationId/trial-users': trialUserController.getByOrganizationID,
+    'GET /organizations/:organizationId/userDetails/:externalUserId': userDetailsController.getUserDetailsByExternalUserId,
+    'POST /organizations/:organizationId/userDetails': userDetailsController.getUserDetailsInBulk,
     'POST /organizations/:organizationId/trial-user-invite': trialUserController.createTrialUserForEmailInvite,
     'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
     'POST /organizations/:organizationId/entitlements': entitlementController.createEntitlement,
