@@ -1691,6 +1691,7 @@ SiteTopPageList:
 AuditUrl:
   type: object
   required:
+    - auditUrlId
     - siteId
     - url
     - byCustomer
@@ -1699,10 +1700,11 @@ AuditUrl:
     - updatedAt
     - createdBy
     - updatedBy
-  description: |
-    AuditUrl entity representing a URL to be audited.
-    Primary key is composite: siteId + url (no separate id field).
+  description: AuditUrl entity representing a URL to be audited.
   properties:
+    auditUrlId:
+      description: Unique identifier for this audit URL
+      $ref: '#/Id'
     siteId:
       description: Parent site identifier
       $ref: '#/Id'
@@ -1736,6 +1738,7 @@ AuditUrl:
       type: string
       example: user-bob
   example:
+    auditUrlId: '123e4567-e89b-12d3-a456-426614174000'
     siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
     url: 'https://example.com/documents/report.pdf'
     byCustomer: true

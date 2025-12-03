@@ -39,6 +39,7 @@ describe('UrlStore Controller', () => {
 
   // Mock AuditUrl entity
   const createMockAuditUrl = (data) => ({
+    getAuditUrlId: () => data.auditUrlId || `au-${Math.random().toString(36).substr(2, 9)}`,
     getSiteId: () => data.siteId,
     getUrl: () => data.url,
     getByCustomer: () => data.byCustomer,
@@ -57,6 +58,7 @@ describe('UrlStore Controller', () => {
 
   const mockAuditUrls = [
     createMockAuditUrl({
+      auditUrlId: 'au-001',
       siteId,
       url: 'https://example.com/page1',
       byCustomer: true,
@@ -65,6 +67,7 @@ describe('UrlStore Controller', () => {
       updatedAt: '2025-01-01T00:00:00Z',
     }),
     createMockAuditUrl({
+      auditUrlId: 'au-002',
       siteId,
       url: 'https://example.com/page2',
       byCustomer: false,

@@ -19,6 +19,7 @@ describe('AuditUrlDto', () => {
   describe('toJSON', () => {
     it('converts an AuditUrl object to JSON', () => {
       const mockAuditUrl = {
+        getAuditUrlId: () => 'au-123',
         getSiteId: () => 'site-123',
         getUrl: () => 'https://example.com/page1',
         getByCustomer: () => true,
@@ -32,6 +33,7 @@ describe('AuditUrlDto', () => {
       const result = AuditUrlDto.toJSON(mockAuditUrl);
 
       expect(result).to.deep.equal({
+        auditUrlId: 'au-123',
         siteId: 'site-123',
         url: 'https://example.com/page1',
         byCustomer: true,
@@ -45,6 +47,7 @@ describe('AuditUrlDto', () => {
 
     it('handles empty audits array', () => {
       const mockAuditUrl = {
+        getAuditUrlId: () => 'au-456',
         getSiteId: () => 'site-456',
         getUrl: () => 'https://example.com/page2',
         getByCustomer: () => false,
@@ -63,6 +66,7 @@ describe('AuditUrlDto', () => {
 
     it('handles null/undefined values from getters', () => {
       const mockAuditUrl = {
+        getAuditUrlId: () => 'au-789',
         getSiteId: () => 'site-789',
         getUrl: () => 'https://example.com/page3',
         getByCustomer: () => undefined,
@@ -75,6 +79,7 @@ describe('AuditUrlDto', () => {
 
       const result = AuditUrlDto.toJSON(mockAuditUrl);
 
+      expect(result.auditUrlId).to.equal('au-789');
       expect(result.siteId).to.equal('site-789');
       expect(result.url).to.equal('https://example.com/page3');
       expect(result.byCustomer).to.equal(undefined);
