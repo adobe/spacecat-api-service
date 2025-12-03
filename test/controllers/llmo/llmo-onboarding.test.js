@@ -1148,7 +1148,7 @@ describe('LLMO Onboarding Functions', () => {
         .withArgs('https://example.com', 1)
         .resolves({ result: { pages: [] } });
       mockAhrefsClient.getTopPages
-        .withArgs('https://www.example.com/', 1)
+        .withArgs('https://www.example.com', 1)
         .resolves({ result: { pages: [{ url: 'https://www.example.com/page1' }] } });
 
       // Use helper functions for common mocks
@@ -1216,11 +1216,11 @@ describe('LLMO Onboarding Functions', () => {
       // Verify updateFetchConfig was called with overrideBaseURL
       expect(mockSiteConfig.updateFetchConfig).to.have.been.called;
       const updateFetchConfigCall = mockSiteConfig.updateFetchConfig.getCall(0);
-      expect(updateFetchConfigCall.args[0]).to.have.property('overrideBaseURL', 'https://www.example.com/');
+      expect(updateFetchConfigCall.args[0]).to.have.property('overrideBaseURL', 'https://www.example.com');
 
       // Verify log message
       expect(mockLog.info).to.have.been.calledWith(
-        'Set overrideBaseURL to https://www.example.com/ for site site123',
+        'Set overrideBaseURL to https://www.example.com for site site123',
       );
 
       // Restore setTimeout
@@ -1274,7 +1274,7 @@ describe('LLMO Onboarding Functions', () => {
         .withArgs('https://example.com', 1)
         .resolves({ result: { pages: [{ url: 'https://example.com/page1' }] } });
       mockAhrefsClient.getTopPages
-        .withArgs('https://www.example.com/', 1)
+        .withArgs('https://www.example.com', 1)
         .resolves({ result: { pages: [{ url: 'https://www.example.com/page1' }] } });
 
       // Use helper functions for common mocks
@@ -2026,9 +2026,9 @@ describe('LLMO Onboarding Functions', () => {
         baseURL: 'https://example.com',
         responses: {
           'https://example.com': [],
-          'https://www.example.com/': [{ url: 'https://www.example.com/page1' }],
+          'https://www.example.com': [{ url: 'https://www.example.com/page1' }],
         },
-        expected: 'https://www.example.com/',
+        expected: 'https://www.example.com',
         expectedLog: { level: 'info', pattern: /Setting overrideBaseURL to https:\/\/www\.example\.com/ },
       },
       {
@@ -2036,9 +2036,9 @@ describe('LLMO Onboarding Functions', () => {
         baseURL: 'https://www.example.com',
         responses: {
           'https://www.example.com': [],
-          'https://example.com/': [{ url: 'https://example.com/page1' }],
+          'https://example.com': [{ url: 'https://example.com/page1' }],
         },
-        expected: 'https://example.com/',
+        expected: 'https://example.com',
         expectedLog: { level: 'info', pattern: /Setting overrideBaseURL/ },
       },
       {
@@ -2046,7 +2046,7 @@ describe('LLMO Onboarding Functions', () => {
         baseURL: 'https://example.com',
         responses: {
           'https://example.com': [{ url: 'https://example.com/page1' }],
-          'https://www.example.com/': [{ url: 'https://www.example.com/page1' }],
+          'https://www.example.com': [{ url: 'https://www.example.com/page1' }],
         },
         expected: null,
         expectedLog: { level: 'debug', pattern: /Both URLs succeeded, no overrideBaseURL needed/ },
@@ -2056,7 +2056,7 @@ describe('LLMO Onboarding Functions', () => {
         baseURL: 'https://example.com',
         responses: {
           'https://example.com': [{ url: 'https://example.com/page1' }],
-          'https://www.example.com/': [],
+          'https://www.example.com': [],
         },
         expected: null,
         expectedLog: { level: 'debug', pattern: /Base URL succeeded, no overrideBaseURL needed/ },
@@ -2066,7 +2066,7 @@ describe('LLMO Onboarding Functions', () => {
         baseURL: 'https://example.com',
         responses: {
           'https://example.com': [],
-          'https://www.example.com/': [],
+          'https://www.example.com': [],
         },
         expected: null,
         expectedLog: { level: 'warn', pattern: /Both URLs failed Ahrefs test/ },
@@ -2076,9 +2076,9 @@ describe('LLMO Onboarding Functions', () => {
         baseURL: 'https://example.com.au',
         responses: {
           'https://example.com.au': [],
-          'https://www.example.com.au/': [{ url: 'https://www.example.com.au/page1' }],
+          'https://www.example.com.au': [{ url: 'https://www.example.com.au/page1' }],
         },
-        expected: 'https://www.example.com.au/',
+        expected: 'https://www.example.com.au',
         expectedLog: { level: 'info', pattern: /Setting overrideBaseURL/ },
       },
       {
@@ -2086,9 +2086,9 @@ describe('LLMO Onboarding Functions', () => {
         baseURL: 'https://example.co.uk',
         responses: {
           'https://example.co.uk': [],
-          'https://www.example.co.uk/': [{ url: 'https://www.example.co.uk/page1' }],
+          'https://www.example.co.uk': [{ url: 'https://www.example.co.uk/page1' }],
         },
-        expected: 'https://www.example.co.uk/',
+        expected: 'https://www.example.co.uk',
         expectedLog: { level: 'info', pattern: /Setting overrideBaseURL/ },
       },
       {
@@ -2096,9 +2096,9 @@ describe('LLMO Onboarding Functions', () => {
         baseURL: 'https://www.example.com.au',
         responses: {
           'https://www.example.com.au': [],
-          'https://example.com.au/': [{ url: 'https://example.com.au/page1' }],
+          'https://example.com.au': [{ url: 'https://example.com.au/page1' }],
         },
-        expected: 'https://example.com.au/',
+        expected: 'https://example.com.au',
         expectedLog: { level: 'info', pattern: /Setting overrideBaseURL/ },
       },
     ];
@@ -2179,7 +2179,7 @@ describe('LLMO Onboarding Functions', () => {
         'https://example.co.uk',
         {
           'https://example.co.uk': [{ url: 'https://example.co.uk/page1' }],
-          'https://www.example.co.uk/': [{ url: 'https://www.example.co.uk/page1' }],
+          'https://www.example.co.uk': [{ url: 'https://www.example.co.uk/page1' }],
         },
       );
 
@@ -2187,6 +2187,30 @@ describe('LLMO Onboarding Functions', () => {
       // Verify Ahrefs WAS called (not skipped)
       expect(mockAhrefsClient.getTopPages).to.have.been.calledTwice;
       expect(mockLog.debug).to.have.been.calledWith('Both URLs succeeded, no overrideBaseURL needed');
+    });
+
+    it('should preserve trailing slash consistency when toggling www', async () => {
+      // Test with URL without trailing slash - result should also not have trailing slash
+      const { result: resultNoSlash } = await testOverrideBaseURL(
+        'https://example.com',
+        {
+          'https://example.com': [],
+          'https://www.example.com': [{ url: 'https://www.example.com/page1' }],
+        },
+      );
+      expect(resultNoSlash).to.equal('https://www.example.com');
+      expect(resultNoSlash.endsWith('/')).to.be.false;
+
+      // Test with URL with trailing slash - result should also have trailing slash
+      const { result: resultWithSlash } = await testOverrideBaseURL(
+        'https://example.com/',
+        {
+          'https://example.com/': [],
+          'https://www.example.com/': [{ url: 'https://www.example.com/page1' }],
+        },
+      );
+      expect(resultWithSlash).to.equal('https://www.example.com/');
+      expect(resultWithSlash.endsWith('/')).to.be.true;
     });
   });
 });
