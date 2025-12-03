@@ -148,6 +148,7 @@ describe('Suggestions Controller', () => {
     'deploySuggestionToEdge',
     'rollbackSuggestionFromEdge',
     'previewSuggestions',
+    'fetchFromEdge',
     'getByID',
     'getByStatus',
     'getByStatusPaged',
@@ -4617,6 +4618,340 @@ describe('Suggestions Controller', () => {
       const failedSuggestion = body.suggestions.find((s) => s.uuid === SUGGESTION_IDS[0]);
       expect(failedSuggestion.statusCode).to.equal(400);
       expect(failedSuggestion.message).to.include('can be deployed');
+    });
+  });
+
+  describe('fetchFromEdge', () => {
+    let fetchStub;
+
+    beforeEach(() => {
+      fetchStub = sandbox.stub(global, 'fetch');
+    });
+
+    it('should return 400 if siteId is invalid', async () => {
+      const response = await suggestionsController.fetchFromEdge({
+        ...context,
+        params: {
+          siteId: 'invalid-site-id',
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          url: 'https://www.lovesac.com/sactionals',
+        },
+      });
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.equal('Site ID required');
+    });
+
+    it('should return 400 if opportunityId is invalid', async () => {
+      const response = await suggestionsController.fetchFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: 'invalid-opportunity-id',
+        },
+        data: {
+          url: 'https://www.lovesac.com/sactionals',
+        },
+      });
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.equal('Opportunity ID required');
+    });
+
+    it('should return 400 if no data provided', async () => {
+      const response = await suggestionsController.fetchFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: null,
+      });
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.equal('No data provided');
+    });
+
+    it('should return 400 if URL is missing', async () => {
+      const response = await suggestionsController.fetchFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          url: '',
+        },
+      });
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.equal('URL is required');
+    });
+
+    it('should return 400 if URL format is invalid', async () => {
+      const response = await suggestionsController.fetchFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          url: 'not-a-valid-url',
+        },
+      });
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.equal('Invalid URL format');
+    });
+
+    it('should return 400 if URL protocol is not HTTP/HTTPS', async () => {
+      const response = await suggestionsController.fetchFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          url: 'ftp://example.com/file.txt',
+        },
+      });
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.equal('Invalid URL format: only HTTP/HTTPS URLs are allowed');
+    });
+
+    it('should return 404 if site not found', async () => {
+      mockSite.findById.withArgs(SITE_ID).resolves(null);
+
+      const response = await suggestionsController.fetchFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          url: 'https://www.lovesac.com/sactionals',
+        },
+      });
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.equal('Site not found');
+    });
+
+    it('should return 403 if user does not have access to site', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+
+      const response = await suggestionsController.fetchFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          url: 'https://www.lovesac.com/sactionals',
+        },
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.equal('User does not belong to the organization');
+    });
+
+    it('should return 404 if opportunity not found', async () => {
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(null);
+
+      const response = await suggestionsController.fetchFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          url: 'https://www.lovesac.com/sactionals',
+        },
+      });
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.equal('Opportunity not found');
+    });
+
+    it('should return 404 if opportunity does not match siteId', async () => {
+      const mismatchedOpportunity = {
+        getId: sandbox.stub().returns(OPPORTUNITY_ID),
+        getSiteId: sandbox.stub().returns('different-site-id'),
+        getType: sandbox.stub().returns('headings'),
+      };
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(mismatchedOpportunity);
+
+      const response = await suggestionsController.fetchFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          url: 'https://www.lovesac.com/sactionals',
+        },
+      });
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.equal('Opportunity not found');
+    });
+
+    it('should successfully fetch content from URL', async () => {
+      const mockContent = '<html><body>Test Content</body></html>';
+      const mockResponse = {
+        ok: true,
+        status: 200,
+        text: sandbox.stub().resolves(mockContent),
+        headers: {
+          get: sandbox.stub().withArgs('content-type').returns('text/html'),
+        },
+      };
+
+      fetchStub.resolves(mockResponse);
+
+      const response = await suggestionsController.fetchFromEdge({
+        ...context,
+        log: {
+          info: sandbox.stub(),
+          warn: sandbox.stub(),
+          error: sandbox.stub(),
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          url: 'https://www.lovesac.com/sactionals',
+        },
+      });
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.status).to.equal('success');
+      expect(body.statusCode).to.equal(200);
+      expect(body.html).to.exist;
+      expect(body.html.url).to.equal('https://www.lovesac.com/sactionals');
+      expect(body.html.content).to.equal(mockContent);
+
+      // Verify fetch was called with correct parameters
+      expect(fetchStub).to.have.been.calledOnce;
+      const fetchArgs = fetchStub.getCall(0).args;
+      expect(fetchArgs[0]).to.equal('https://www.lovesac.com/sactionals');
+      expect(fetchArgs[1].headers['User-Agent']).to.equal('Tokowaka-AI Tokowaka/1.0');
+    });
+
+    it('should handle fetch failure with 404', async () => {
+      const mockResponse = {
+        ok: false,
+        status: 404,
+        headers: {
+          get: sandbox.stub().returns(null),
+        },
+      };
+
+      fetchStub.resolves(mockResponse);
+
+      const response = await suggestionsController.fetchFromEdge({
+        ...context,
+        log: {
+          info: sandbox.stub(),
+          warn: sandbox.stub(),
+          error: sandbox.stub(),
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          url: 'https://www.lovesac.com/missing-page',
+        },
+      });
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.status).to.equal('error');
+      expect(body.statusCode).to.equal(404);
+      expect(body.html).to.exist;
+      expect(body.html.content).to.be.null;
+    });
+
+    it('should log x-tokowaka-request-id when present in error response', async () => {
+      const mockRequestId = 'req-abc-123-xyz';
+      const mockResponse = {
+        ok: false,
+        status: 503,
+        headers: {
+          get: sandbox.stub().withArgs('x-tokowaka-request-id').returns(mockRequestId),
+        },
+      };
+
+      fetchStub.resolves(mockResponse);
+
+      const warnStub = sandbox.stub();
+      const response = await suggestionsController.fetchFromEdge({
+        ...context,
+        log: {
+          info: sandbox.stub(),
+          warn: warnStub,
+          error: sandbox.stub(),
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          url: 'https://www.lovesac.com/error-page',
+        },
+      });
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.status).to.equal('error');
+      expect(body.statusCode).to.equal(503);
+      expect(warnStub).to.have.been.calledWith(
+        `Failed to fetch URL. Status: 503, x-tokowaka-request-id: ${mockRequestId}`,
+      );
+    });
+
+    it('should handle fetch exception', async () => {
+      fetchStub.rejects(new Error('Network error'));
+
+      const response = await suggestionsController.fetchFromEdge({
+        ...context,
+        log: {
+          info: sandbox.stub(),
+          warn: sandbox.stub(),
+          error: sandbox.stub(),
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          url: 'https://www.lovesac.com/sactionals',
+        },
+      });
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.status).to.equal('error');
+      expect(body.statusCode).to.equal(500);
+      expect(body.message).to.include('Network error');
+      expect(body.html).to.exist;
+      expect(body.html.content).to.be.null;
     });
   });
 });

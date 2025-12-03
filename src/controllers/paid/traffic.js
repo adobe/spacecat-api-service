@@ -20,6 +20,7 @@ import {
 import {
   AWSAthenaClient, TrafficDataResponseDto, getTrafficAnalysisQuery,
   TrafficDataWithCWVDto, getTrafficAnalysisQueryPlaceholdersFilled,
+  getTop3PagesWithTrafficLostTemplate,
 } from '@adobe/spacecat-shared-athena-client';
 import crypto from 'crypto';
 import AccessControlUtil from '../../support/access-control-util.js';
@@ -246,6 +247,122 @@ function TrafficController(context, log, env) {
     });
   }
 
+  async function fetchTop3PagesTrafficData(dimensions, disableThreshold, limit) {
+    /* c8 ignore next 1 */
+    const requestId = context.invocation?.requestId;
+    const siteId = context.params?.siteId;
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    const baseURL = await site.getBaseURL();
+    const accessControlUtil = AccessControlUtil.fromContext(context);
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view paid traffic metrics');
+    }
+
+    // validate input params
+    const {
+      temporalCondition, noCache,
+    } = context.data;
+
+    const decodedTemporalCondition = decodeURIComponent(temporalCondition);
+
+    if (!decodedTemporalCondition.includes('week')
+      || !decodedTemporalCondition.includes('year')) {
+      return badRequest('Invalid temporal condition');
+    }
+    if (decodedTemporalCondition.match(/week/g).length !== 4
+      || decodedTemporalCondition.match(/year/g).length !== 4) {
+      return badRequest('Invalid temporal condition');
+    }
+
+    const tableName = `${rumMetricsDatabase}.${rumMetricsCompactTable}`;
+
+    let pageViewThreshold = env.PAID_DATA_THRESHOLD ?? 1000;
+    if (disableThreshold) {
+      pageViewThreshold = 0;
+    }
+
+    const dimensionColumns = dimensions.join(', ');
+    const dimensionColumnsPrefixed = dimensions.map((col) => `a.${col}`).join(', ');
+
+    const query = getTop3PagesWithTrafficLostTemplate({
+      siteId,
+      tableName,
+      temporalCondition: decodedTemporalCondition,
+      dimensionColumns,
+      groupBy: dimensionColumns,
+      dimensionColumnsPrefixed,
+      pageViewThreshold,
+      limit,
+    });
+
+    log.info(`getTop3PagesWithTrafficLostTemplate Query: ${query}`);
+
+    const description = `fetch top 3 pages traffic data db: ${rumMetricsDatabase}| siteKey: ${siteId} | temporalCondition: ${decodedTemporalCondition} | groupBy: [${dimensions.join(', ')}] `;
+
+    // first try to get from cache
+    const { cachedResultUrl, cacheKey, outPrefix } = await tryGetCacheResult(
+      siteId,
+      query,
+      noCache,
+      pageViewThreshold,
+      null,
+    );
+    let thresholdConfig = {};
+    if (env.CWV_THRESHOLDS) {
+      if (typeof env.CWV_THRESHOLDS === 'string') {
+        try {
+          thresholdConfig = JSON.parse(env.CWV_THRESHOLDS);
+        } catch (e) {
+          log.warn('Invalid CWV_THRESHOLDS JSON. Falling back to defaults.');
+          thresholdConfig = {};
+        }
+      } else if (typeof env.CWV_THRESHOLDS === 'object') {
+        thresholdConfig = env.CWV_THRESHOLDS;
+      }
+    }
+
+    if (cachedResultUrl) {
+      log.info(`Successfully fetched presigned URL for cached result file: ${cacheKey}. Request ID: ${requestId}`);
+      return found(cachedResultUrl);
+    }
+
+    // if not cached, query Athena
+    const resultLocation = `${ATHENA_TEMP_FOLDER}/${outPrefix}`;
+    const athenaClient = AWSAthenaClient.fromContext(context, resultLocation);
+
+    const results = await athenaClient.query(query, rumMetricsDatabase, description);
+    const response = results.map(
+      (row) => TrafficDataWithCWVDto.toJSON(row, thresholdConfig, baseURL),
+    );
+
+    // add to cache
+    let isCached = false;
+    if (response && response.length > 0) {
+      isCached = await addResultJsonToCache(s3, cacheKey, response, log);
+      log.info(`Athena result JSON to S3 cache (${cacheKey}) successful: ${isCached}`);
+    }
+
+    if (isCached) {
+      // even though file is saved 503 are possible in short time window,
+      // verifying file is reachable before returning
+      const verifiedSignedUrl = await getSignedUrlWithRetries(s3, cacheKey, log, 5);
+      if (verifiedSignedUrl != null) {
+        log.debug(`Successfully verified file existence, returning signedUrl from key: ${isCached}.  Request ID: ${requestId}`);
+        return found(
+          verifiedSignedUrl,
+        );
+      }
+    }
+
+    log.warn(`Failed to return cache key ${cacheKey}. Returning response directly. Request ID: ${requestId}`);
+    return ok(response, {
+      'content-encoding': 'gzip',
+    });
+  }
+
   async function getPaidTrafficBySpecificPlatform(channel, withDevice = false) {
     const dimensions = ['trf_channel', 'trf_platform'];
     if (withDevice) {
@@ -336,6 +453,10 @@ function TrafficController(context, log, env) {
     getPaidTrafficTemporalSeriesByUrlChannel: async () => fetchPaidTrafficDataTemporalSeries(['path', 'trf_channel']),
     getPaidTrafficTemporalSeriesByUrlPlatform: async () => fetchPaidTrafficDataTemporalSeries(['path', 'trf_platform']),
     getPaidTrafficTemporalSeriesByUrlChannelPlatform: async () => fetchPaidTrafficDataTemporalSeries(['path', 'trf_channel', 'trf_platform']),
+
+    getImpactByPage: async () => fetchTop3PagesTrafficData(['path'], true, 3),
+    getImpactByPageDevice: async () => fetchTop3PagesTrafficData(['path', 'device'], true, null),
+    getImpactByPageTrafficTypeDevice: async () => fetchTop3PagesTrafficData(['path', 'trf_type', 'device'], true, null),
   };
 }
 
