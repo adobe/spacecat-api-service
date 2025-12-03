@@ -966,7 +966,7 @@ function LlmoController(ctx) {
   // Handles requests to the LLMO Athena endpoint
   // Checks S3 folder for specific siteId, retrieves audits and returns week stats
   const getLlmoAthena = async (context) => {
-    const { log, s3 } = context;
+    const { log, s3, env } = context;
     const { siteId } = context.params;
     const startTime = Date.now();
 
@@ -988,7 +988,7 @@ function LlmoController(ctx) {
       log.info(`[LLMO-ATHENA] S3 configuration validated for siteId: ${siteId}, bucket: ${s3.s3Bucket}`);
 
       // Check S3 folder for the specific siteId
-      const s3FolderPath = `spacecat-dev-mystique-assets/audit_data/${siteId}/`;
+      const s3FolderPath = `spacecat-${env.ENV}-mystique-assets/audit_data/${siteId}/`;
       log.info(`[LLMO-ATHENA] Checking S3 folder: ${s3FolderPath} for siteId: ${siteId}`);
 
       try {
