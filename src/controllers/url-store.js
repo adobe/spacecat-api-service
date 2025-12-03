@@ -376,13 +376,11 @@ function UrlStoreController(ctx, log) {
         let existingUrl = await AuditUrl.findBySiteIdAndUrl(siteId, canonicalUrl);
 
         if (existingUrl) {
-          // Upsert: update if user is claiming ownership
-          if (byCustomer || !existingUrl.getByCustomer || existingUrl.getByCustomer() !== true) {
-            existingUrl.setByCustomer(byCustomer);
-            existingUrl.setAudits(audits);
-            existingUrl.setUpdatedBy(userId);
-            existingUrl = await existingUrl.save();
-          }
+          // Upsert: update existing URL
+          existingUrl.setByCustomer(byCustomer);
+          existingUrl.setAudits(audits);
+          existingUrl.setUpdatedBy(userId);
+          existingUrl = await existingUrl.save();
           return { success: true, data: existingUrl };
         }
 
@@ -401,7 +399,7 @@ function UrlStoreController(ctx, log) {
         return {
           success: false,
           url: urlData.url,
-          reason: error.message || 'Internal error',
+          reason: error.message,
         };
       }
     });
@@ -508,7 +506,7 @@ function UrlStoreController(ctx, log) {
         return {
           success: false,
           url: update.url,
-          reason: error.message || 'Internal error',
+          reason: error.message,
         };
       }
     });
@@ -610,7 +608,7 @@ function UrlStoreController(ctx, log) {
         return {
           success: false,
           url,
-          reason: error.message || 'Internal error',
+          reason: error.message,
         };
       }
     });
