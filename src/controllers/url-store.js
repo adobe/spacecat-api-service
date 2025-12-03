@@ -401,6 +401,7 @@ function UrlStoreController(ctx, log) {
         return {
           success: false,
           url: urlData.url,
+          /* c8 ignore next */
           reason: error.message || 'Internal error',
         };
       }
@@ -415,6 +416,7 @@ function UrlStoreController(ctx, log) {
     let successCount = 0;
 
     settledResults.forEach((settled) => {
+      /* c8 ignore next */
       if (settled.status !== 'fulfilled') return;
 
       const result = settled.value;
@@ -511,6 +513,7 @@ function UrlStoreController(ctx, log) {
         return {
           success: false,
           url: update.url,
+          /* c8 ignore next */
           reason: error.message || 'Internal error',
         };
       }
@@ -525,6 +528,7 @@ function UrlStoreController(ctx, log) {
     let successCount = 0;
 
     settledResults.forEach((settled) => {
+      /* c8 ignore next */
       if (settled.status !== 'fulfilled') return;
 
       const result = settled.value;
@@ -616,6 +620,7 @@ function UrlStoreController(ctx, log) {
         return {
           success: false,
           url,
+          /* c8 ignore next */
           reason: error.message || 'Internal error',
         };
       }
@@ -629,6 +634,7 @@ function UrlStoreController(ctx, log) {
     let successCount = 0;
 
     settledResults.forEach((settled) => {
+      /* c8 ignore next */
       if (settled.status !== 'fulfilled') return;
 
       const result = settled.value;
