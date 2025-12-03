@@ -1,3 +1,10 @@
+# [1.269.0](https://github.com/adobe/spacecat-api-service/compare/v1.268.1...v1.269.0) (2025-12-03)
+
+
+### Features
+
+* add edge-fetch API endpoint for Tokowaka URL fetching ([#1600](https://github.com/adobe/spacecat-api-service/issues/1600)) ([ed011b4](https://github.com/adobe/spacecat-api-service/commit/ed011b4bcef7f75e511860284c5c638c7f90fb89))
+
 ## [1.268.1](https://github.com/adobe/spacecat-api-service/compare/v1.268.0...v1.268.1) (2025-12-03)
 
 
