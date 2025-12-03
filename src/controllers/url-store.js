@@ -46,11 +46,8 @@ const MAX_LIMIT = 500;
 function canonicalizeUrl(url) {
   try {
     // Normalize: lowercase hostname, strip port, remove query params, ensure https
-    // isValidUrl() requires protocol, so protocol-less fallback is defensive only
-    /* c8 ignore start */
-    const normalizedUrl = url.startsWith('http://') || url.startsWith('https://') ? url : `https://${url}`;
-    /* c8 ignore stop */
-    const urlObj = new URL(normalizedUrl);
+    // Note: isValidUrl() validates URLs before this runs, so protocol is always present
+    const urlObj = new URL(url);
 
     // Lowercase the hostname
     urlObj.hostname = urlObj.hostname.toLowerCase();
@@ -78,10 +75,12 @@ function canonicalizeUrl(url) {
     }
 
     return canonicalUrl;
-    /* c8 ignore next 3 */
+    /* c8 ignore start */
   } catch (error) {
+    // Defensive: isValidUrl() validates before canonicalizeUrl() runs
     return url;
   }
+  /* c8 ignore stop */
 }
 
 /**
@@ -129,7 +128,6 @@ function UrlStoreController(ctx, log) {
       const profile = authInfo.getProfile();
       return profile?.email || profile?.name || 'system';
     }
-    /* c8 ignore next */
     return 'system';
   }
 
@@ -355,7 +353,7 @@ function UrlStoreController(ctx, log) {
 
     const userId = getUserIdentifier(context);
 
-    // Process all URLs in parallel using Promise.allSettled
+    // Process all URLs in parallel
     const urlProcessingPromises = urls.map(async (urlData) => {
       // Validate URL
       if (!hasText(urlData.url) || !isValidUrl(urlData.url)) {
@@ -380,11 +378,13 @@ function UrlStoreController(ctx, log) {
         let existingUrl = await AuditUrl.findBySiteIdAndUrl(siteId, canonicalUrl);
 
         if (existingUrl) {
-          // Upsert: update existing URL
-          existingUrl.setByCustomer(byCustomer);
-          existingUrl.setAudits(audits);
-          existingUrl.setUpdatedBy(userId);
-          existingUrl = await existingUrl.save();
+          // Upsert: update if claiming ownership or existing is not customer-owned
+          if (byCustomer || existingUrl.getByCustomer() !== true) {
+            existingUrl.setByCustomer(byCustomer);
+            existingUrl.setAudits(audits);
+            existingUrl.setUpdatedBy(userId);
+            existingUrl = await existingUrl.save();
+          }
           return { success: true, data: existingUrl };
         }
 
@@ -408,7 +408,7 @@ function UrlStoreController(ctx, log) {
       }
     });
 
-    // Wait for all promises (they never reject due to try/catch)
+    // Wait for all promises (each has try/catch so never rejects)
     const processedResults = await Promise.all(urlProcessingPromises);
 
     // Process results
@@ -467,7 +467,7 @@ function UrlStoreController(ctx, log) {
 
     const userId = getUserIdentifier(context);
 
-    // Process all updates in parallel using Promise.allSettled
+    // Process all updates in parallel
     const updateProcessingPromises = updates.map(async (update) => {
       // Validate URL
       if (!hasText(update.url)) {
@@ -515,7 +515,7 @@ function UrlStoreController(ctx, log) {
       }
     });
 
-    // Wait for all promises (they never reject due to try/catch)
+    // Wait for all promises (each has try/catch so never rejects)
     const processedResults = await Promise.all(updateProcessingPromises);
 
     // Process results
@@ -572,7 +572,7 @@ function UrlStoreController(ctx, log) {
       return forbidden('Only users belonging to the organization can delete URLs');
     }
 
-    // Process all deletions in parallel using Promise.allSettled
+    // Process all deletions in parallel
     const deleteProcessingPromises = urls.map(async (url) => {
       // Validate URL
       if (!hasText(url)) {
@@ -617,7 +617,7 @@ function UrlStoreController(ctx, log) {
       }
     });
 
-    // Wait for all promises (they never reject due to try/catch)
+    // Wait for all promises (each has try/catch so never rejects)
     const processedResults = await Promise.all(deleteProcessingPromises);
 
     // Process results

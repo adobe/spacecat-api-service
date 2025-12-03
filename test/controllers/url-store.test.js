@@ -505,6 +505,24 @@ describe('UrlStore Controller', () => {
       expect(result.status).to.equal(201);
     });
 
+    it('does not update existing customer-owned URL when byCustomer is false', async () => {
+      // Existing URL is customer-owned (byCustomer: true), new request doesn't claim ownership
+      context.data = [{ url: 'https://example.com/page1', audits: ['accessibility'], byCustomer: false }];
+      const existingUrl = createMockAuditUrl({
+        siteId,
+        url: 'https://example.com/page1',
+        byCustomer: true, // Customer-owned
+        audits: ['broken-backlinks'],
+      });
+      mockDataAccess.AuditUrl.findBySiteIdAndUrl.resolves(existingUrl);
+      const result = await urlStoreController.addUrls(context);
+      expect(result.status).to.equal(201);
+      const body = await result.json();
+      expect(body.metadata.success).to.equal(1);
+      // save should NOT have been called since we don't modify customer-owned URLs
+      expect(existingUrl.save.called).to.be.false;
+    });
+
     it('reports invalid URL format', async () => {
       context.data = [{ url: 'not-a-valid-url', audits: [] }];
       const result = await urlStoreController.addUrls(context);
@@ -591,9 +609,8 @@ describe('UrlStore Controller', () => {
     });
 
     it('falls back to system when authInfo is not present', async () => {
-      // Set attributes to empty object (no authInfo)
+      // Set attributes to empty object (no authInfo) - but keep controller already created
       context.attributes = {};
-      urlStoreController = UrlStoreController(context, log);
 
       context.data = [{ url: 'https://example.com/page1', audits: [] }];
       mockDataAccess.AuditUrl.create.resolves(mockAuditUrls[0]);
@@ -603,9 +620,8 @@ describe('UrlStore Controller', () => {
     });
 
     it('falls back to system when attributes is undefined', async () => {
-      // Set attributes to undefined
+      // Set attributes to undefined - but keep controller already created
       context.attributes = undefined;
-      urlStoreController = UrlStoreController(context, log);
 
       context.data = [{ url: 'https://example.com/page1', audits: [] }];
       mockDataAccess.AuditUrl.create.resolves(mockAuditUrls[0]);
