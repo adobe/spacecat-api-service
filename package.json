@@ -28,6 +28,8 @@
     "docs:build": "npx @redocly/cli build-docs -o ./docs/index.html --config docs/openapi/redocly-config.yaml",
     "docs:lint": "npx @redocly/cli lint --config docs/openapi/redocly-config.yaml",
     "docs:serve": "npx @redocly/cli preview --project-dir docs/openapi --product redoc",
+    "db:up": "docker-compose up -d postgres",
+    "db:down": "docker-compose down",
     "prepare": "husky"
   },
   "hlx": {
@@ -104,11 +106,13 @@
     "iso-639-3": "3.0.1",
     "js-yaml": "4.1.1",
     "node-html-parser": "7.0.1",
+    "pg": "8.13.1",
     "slack-block-builder": "2.8.0",
     "tldts": "7.0.19",
     "tough-cookie": "6.0.0",
     "urijs": "1.19.11",
     "world-countries": "5.1.0",
+    "xlsx": "^0.18.5",
     "zod": "3.25.76"
   },
   "devDependencies": {

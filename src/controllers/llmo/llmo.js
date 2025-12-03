@@ -48,14 +48,64 @@ import { updateModifiedByDetails } from './llmo-config-metadata.js';
 const { readConfig, writeConfig } = llmo;
 const { llmoConfig: llmoConfigSchema } = schemas;
 
+const createMockSite = (context) => {
+  const { env } = context;
+  const dataFolder = env.DEV_LLMO_DATA_FOLDER || 'dev/test-site';
+  const brand = env.DEV_LLMO_BRAND || 'Test Brand';
+
+  const mockLlmoConfig = {
+    dataFolder,
+    brand,
+    questions: {
+      Human: [],
+      AI: [],
+    },
+    customerIntent: [],
+  };
+
+  const mockConfig = {
+    getLlmoConfig: () => mockLlmoConfig,
+    getLlmoHumanQuestions: () => [],
+    getLlmoAIQuestions: () => [],
+    getLlmoCustomerIntent: () => [],
+    addLlmoHumanQuestions: () => { },
+    addLlmoAIQuestions: () => { },
+    removeLlmoQuestion: () => { },
+    updateLlmoQuestion: () => { },
+    addLlmoCustomerIntent: () => { },
+    removeLlmoCustomerIntent: () => { },
+    updateLlmoCustomerIntent: () => { },
+    updateLlmoCdnlogsFilter: () => { },
+    updateLlmoCdnBucketConfig: () => { },
+    updateLlmoBrand: () => { },
+    updateLlmoDataFolder: () => { },
+  };
+
+  const mockSite = {
+    getId: () => context.params.siteId,
+    getConfig: () => mockConfig,
+    setConfig: () => { },
+    save: async () => { },
+    getOrganizationId: () => 'mock-org-id',
+    getBaseURL: () => 'https://example.com',
+  };
+
+  return { site: mockSite, config: mockConfig, llmoConfig: mockLlmoConfig };
+};
+
 function LlmoController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   // Helper function to get site and validate LLMO config
   const getSiteAndValidateLlmo = async (context) => {
     const { siteId } = context.params;
-    const { dataAccess } = context;
+    const { dataAccess, env } = context;
     const { Site } = dataAccess;
+
+    // DEV MODE BYPASS: Use mock data if ENV=dev and DEV_SKIP_DYNAMODB=true
+    if (env.ENV === 'dev' && env.DEV_SKIP_DYNAMODB === 'true') {
+      return createMockSite(context);
+    }
 
     const site = await Site.findById(siteId);
     const config = site.getConfig();
@@ -894,71 +944,91 @@ function LlmoController(ctx) {
     }
   };
 
-  // Handles requests to the LLMO Athena endpoint
-  // Checks S3 folder for specific siteId, retrieves audits and returns week stats
-  const getLlmoAthena = async (context) => {
-    const { log, s3, env } = context;
+  // Handles requests to the LLMO Aurora endpoint
+  // Tests Aurora PostgreSQL database connectivity and retrieves audit statistics
+  const getLlmoAurora = async (context) => {
+    const {
+      log, env, aurora,
+    } = context;
     const { siteId } = context.params;
     const startTime = Date.now();
 
-    log.info(`[LLMO-ATHENA] Starting request for siteId: ${siteId}`);
+    log.info(`[LLMO-AURORA] Starting request for siteId: ${siteId}`);
 
     try {
       // Validate LLMO access
-      log.info(`[LLMO-ATHENA] Validating LLMO access for siteId: ${siteId}`);
+      log.info(`[LLMO-AURORA] Validating LLMO access for siteId: ${siteId}`);
       const validationStart = Date.now();
       await getSiteAndValidateLlmo(context);
       const validationDuration = Date.now() - validationStart;
-      log.info(`[LLMO-ATHENA] LLMO access validation completed for siteId: ${siteId} - duration: ${validationDuration}ms`);
+      log.info(`[LLMO-AURORA] LLMO access validation completed for siteId: ${siteId} - duration: ${validationDuration}ms`);
 
-      if (!s3 || !s3.s3Client) {
-        log.error(`[LLMO-ATHENA] S3 configuration missing for siteId: ${siteId}`);
-        return badRequest('S3 storage is not configured for this environment');
+      // Test Aurora database connectivity
+      let dbStats = null;
+      let dbTestDuration = 0;
+      if (aurora && env.ENABLE_AURORA_QUERIES) {
+        try {
+          log.info(`[LLMO-AURORA] Testing Aurora database connectivity for siteId: ${siteId}`);
+          const dbTestStart = Date.now();
+
+          // Test 1: Simple connectivity test
+          const connected = await aurora.testConnection();
+
+          // Test 5: Query brand presence data
+          const brandPresenceData = await aurora.query(
+            `SELECT id, site_id, date, model, category, prompt, region, url, sources, citations, mentions FROM public.brand_presence
+             WHERE date = $1 AND category = $2`,
+            ['2025-11-24', 'Adobe'],
+          );
+
+          // Test 6: Count citations where citations = true
+          const citationCount = await aurora.queryOne(
+            `SELECT COUNT(*) as total_citations
+             FROM public.brand_presence
+             WHERE date = $1 AND category = $2 AND citations = true`,
+            ['2025-11-24', 'Adobe'],
+          );
+
+          dbTestDuration = Date.now() - dbTestStart;
+
+          log.info(`[LLMO-AURORA] Brand presence data: ${JSON.stringify(brandPresenceData)}`);
+          dbStats = {
+            connected,
+            brandPresence: {
+              data: brandPresenceData,
+              totalRecords: brandPresenceData.length,
+              totalCitations: citationCount ? parseInt(citationCount.total_citations, 10) : 0,
+            },
+            poolStats: aurora.getPoolStats(),
+          };
+
+          log.info(`[LLMO-AURORA] Aurora database test completed for siteId: ${siteId} - duration: ${dbTestDuration}ms, connected: ${connected}, audits found: ${dbStats.totalAudits}, brand presence records: ${brandPresenceData.length}, total citations: ${dbStats.brandPresence.totalCitations}`);
+        } catch (dbError) {
+          log.warn(`[LLMO-AURORA] Aurora database test failed for siteId: ${siteId} - error: ${dbError.message}`);
+          dbStats = {
+            connected: false,
+            error: dbError.message,
+          };
+        }
+      } else {
+        log.info(`[LLMO-AURORA] Aurora database not configured or disabled for siteId: ${siteId}`);
       }
 
-      log.info(`[LLMO-ATHENA] S3 configuration validated for siteId: ${siteId}, bucket: ${s3.s3Bucket}`);
+      const totalDuration = Date.now() - startTime;
+      log.info(`[LLMO-AURORA] Request completed for siteId: ${siteId} - total duration: ${totalDuration}ms`);
 
-      // Check S3 folder for the specific siteId
-      const s3Bucket = `spacecat-${env.ENV}-mystique-assets`;
-      const s3FolderPath = `audit_data/${siteId}/`;
-      log.info(`[LLMO-ATHENA] Checking S3 folder: ${s3FolderPath} for siteId: ${siteId}`);
-
-      try {
-        // List objects in the S3 folder - USE DELIMITER to get only immediate children
-        const listParams = {
-          Bucket: s3Bucket,
-          Prefix: s3FolderPath,
-          Delimiter: '/', // This is the key - only get immediate children
-        };
-
-        log.info(`[LLMO-ATHENA] Listing S3 objects with params: ${JSON.stringify(listParams)} for siteId: ${siteId}`);
-        const s3ListStart = Date.now();
-        const listCommand = new s3.ListObjectsV2Command(listParams);
-        const s3Objects = await s3.s3Client.send(listCommand);
-        const s3ListDuration = Date.now() - s3ListStart;
-
-        log.info(`[LLMO-ATHENA] S3 listObjectsV2 completed for siteId: ${siteId} - duration: ${s3ListDuration}ms, prefixes found: ${s3Objects.CommonPrefixes?.length || 0}, objects found: ${s3Objects.Contents?.length || 0}`);
-
-        return ok({
-          siteId,
-          message: `Found ${s3Objects.CommonPrefixes.length} audits with week statistics`,
-          audits: s3Objects.CommonPrefixes,
-          s3FolderPath,
-          processedAt: new Date().toISOString(),
-          processingStats: {
-            validationDuration,
-            s3ListDuration,
-            s3ObjectsFound: s3Objects.CommonPrefixes?.length || 0,
-          },
-        });
-      } catch (s3Error) {
-        const totalDuration = Date.now() - startTime;
-        log.error(`[LLMO-ATHENA] S3 error for siteId: ${siteId} - duration: ${totalDuration}ms, error: ${s3Error.message}, stack: ${s3Error.stack}`);
-        throw new Error(`Failed to access S3 folder: ${s3Error.message}`);
-      }
+      return ok({
+        siteId,
+        auroraStats: dbStats,
+        performance: {
+          totalDuration,
+          dbTestDuration,
+          validationDuration: validationDuration || 0,
+        },
+      });
     } catch (error) {
       const totalDuration = Date.now() - startTime;
-      log.error(`[LLMO-ATHENA] Request failed for siteId: ${siteId} - duration: ${totalDuration}ms, error: ${error.message}, stack: ${error.stack}`);
+      log.error(`[LLMO-AURORA] Request failed for siteId: ${siteId} - duration: ${totalDuration}ms, error: ${error.message}, stack: ${error.stack}`);
       return badRequest(error.message);
     }
   };
@@ -982,7 +1052,7 @@ function LlmoController(ctx) {
     onboardCustomer,
     offboardCustomer,
     queryFiles,
-    getLlmoAthena,
+    getLlmoAurora,
   };
 }
 

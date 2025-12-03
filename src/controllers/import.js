@@ -66,9 +66,13 @@ function ImportController(context) {
 
   let importConfiguration = {};
   try {
-    importConfiguration = JSON.parse(env.IMPORT_CONFIGURATION);
+    if (env.IMPORT_CONFIGURATION && env.IMPORT_CONFIGURATION !== 'undefined') {
+      importConfiguration = JSON.parse(env.IMPORT_CONFIGURATION);
+    } else {
+      log.warn('IMPORT_CONFIGURATION environment variable not set, using defaults');
+    }
   } catch (error) {
-    log.error(`Failed to parse import configuration: ${error.message}`);
+    log.error(`Failed to parse import configuration: "${env.IMPORT_CONFIGURATION}" is not valid JSON`);
   }
 
   const importSupervisor = new ImportSupervisor(services, importConfiguration);
@@ -222,7 +226,7 @@ function ImportController(context) {
       if (!scopes.some((scope) => scope.name === SCOPE.ALL_DOMAINS)) {
         const allowedDomains = scopes
           .filter((scope) => scope.name === SCOPE.WRITE
-              && scope.domains && scope.domains.length > 0)
+            && scope.domains && scope.domains.length > 0)
           .flatMap((scope) => scope.domains.map(getDomain));
 
         if (allowedDomains.length === 0) {

@@ -35,6 +35,7 @@ import {
 import { hasText, resolveSecretsName, logWrapper } from '@adobe/spacecat-shared-utils';
 
 import sqs from './support/sqs.js';
+import { auroraClientWrapper } from './support/aurora-client.js';
 import getRouteHandlers from './routes/index.js';
 import matchPath, { sanitizePath } from './utils/route-utils.js';
 
@@ -219,5 +220,6 @@ export const main = wrap(run)
   .with(s3ClientWrapper)
   .with(imsClientWrapper)
   .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
+  .with(auroraClientWrapper)
   .with(secrets, { name: resolveSecretsName })
   .with(helixStatus);
