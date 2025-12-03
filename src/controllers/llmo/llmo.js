@@ -988,13 +988,14 @@ function LlmoController(ctx) {
       log.info(`[LLMO-ATHENA] S3 configuration validated for siteId: ${siteId}, bucket: ${s3.s3Bucket}`);
 
       // Check S3 folder for the specific siteId
-      const s3FolderPath = `spacecat-${env.ENV}-mystique-assets/audit_data/${siteId}/`;
+      const s3Bucket = `spacecat-${env.ENV}-mystique-assets`;
+      const s3FolderPath = `audit_data/${siteId}/`;
       log.info(`[LLMO-ATHENA] Checking S3 folder: ${s3FolderPath} for siteId: ${siteId}`);
 
       try {
         // List objects in the S3 folder
         const listParams = {
-          Bucket: s3.s3Bucket,
+          Bucket: s3Bucket,
           Prefix: s3FolderPath,
         };
 
