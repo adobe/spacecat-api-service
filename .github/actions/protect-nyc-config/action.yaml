@@ -25,16 +25,19 @@ runs:
         FILES_API: ${{ github.api_url }}/repos/${{ github.repository }}/pulls/${{ github.event.number }}/files?per_page=100
         GITHUB_TOKEN: ${{ github.token }}
       run: |
-        echo "Checking PR file list for .nycrc.json changes..."
+        echo "Checking PR #${{ github.event.number }} file list for .nycrc.json changes..."
+        echo "API URL: $FILES_API"
         RESPONSE=$(curl -sS -H "Authorization: Bearer $GITHUB_TOKEN" \
           -H "Accept: application/vnd.github+json" \
           "$FILES_API")
-        if echo "$RESPONSE" | grep -q '"filename": ".nycrc.json"'; then
+        echo "Files in PR:"
+        echo "$RESPONSE" | jq -r '.[].filename' || echo "Failed to parse response"
+        if echo "$RESPONSE" | grep -qF '".nycrc.json"'; then
           echo "nycrc-changed=true" >> "$GITHUB_OUTPUT"
-          echo ".nycrc.json modifications detected."
+          echo "✗ .nycrc.json modifications detected - BLOCKING"
         else
           echo "nycrc-changed=false" >> "$GITHUB_OUTPUT"
-          echo "No .nycrc.json modifications detected."
+          echo "✓ No .nycrc.json modifications detected"
         fi
 
     - name: Skip when .nycrc.json unchanged
