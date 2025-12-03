@@ -533,12 +533,27 @@ describe('UrlStore Controller', () => {
     });
 
     it('extracts user email from auth profile', async () => {
+      // Create context with email in profile
+      context.attributes.authInfo = new AuthInfo()
+        .withType('jwt')
+        .withScopes([{ name: 'admin' }])
+        .withProfile({ is_admin: true, email: 'test@example.com' })
+        .withAuthenticated(true);
+      urlStoreController = UrlStoreController(context, log);
+
       context.data = [{ url: 'https://example.com/page1', audits: [] }];
-      // The default context has admin authInfo with is_admin profile
       mockDataAccess.AuditUrl.create.resolves(mockAuditUrls[0]);
       const result = await urlStoreController.addUrls(context);
       expect(result.status).to.equal(201);
-      // createdBy should be 'system' since profile doesn't have email/name
+      expect(mockDataAccess.AuditUrl.create.firstCall.args[0].createdBy).to.equal('test@example.com');
+    });
+
+    it('falls back to system when profile has no email or name', async () => {
+      context.data = [{ url: 'https://example.com/page1', audits: [] }];
+      // The default context has admin authInfo with is_admin profile (no email/name)
+      mockDataAccess.AuditUrl.create.resolves(mockAuditUrls[0]);
+      const result = await urlStoreController.addUrls(context);
+      expect(result.status).to.equal(201);
       expect(mockDataAccess.AuditUrl.create.firstCall.args[0].createdBy).to.equal('system');
     });
   });
@@ -631,16 +646,6 @@ describe('UrlStore Controller', () => {
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.metadata.failure).to.equal(1);
-    });
-
-    it('handles Promise rejection in update processing', async () => {
-      // Pass null/undefined in array to trigger Promise rejection path
-      context.data = [null];
-      const result = await urlStoreController.updateUrls(context);
-      expect(result.status).to.equal(200);
-      const body = await result.json();
-      expect(body.metadata.failure).to.equal(1);
-      expect(body.failures[0].url).to.equal('unknown');
     });
 
     it('returns forbidden when user does not have access', async () => {

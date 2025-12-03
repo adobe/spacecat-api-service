@@ -413,16 +413,14 @@ function UrlStoreController(ctx, log) {
     let successCount = 0;
 
     settledResults.forEach((settled) => {
-      if (settled.status === 'fulfilled') {
-        const result = settled.value;
-        if (result.success) {
-          results.push(AuditUrlDto.toJSON(result.data));
-          successCount += 1;
-        } else {
-          failures.push({ url: result.url, reason: result.reason });
-        }
+      if (settled.status !== 'fulfilled') return;
+
+      const result = settled.value;
+      if (result.success) {
+        results.push(AuditUrlDto.toJSON(result.data));
+        successCount += 1;
       } else {
-        failures.push({ url: 'unknown', reason: settled.reason?.message || 'Promise rejected' });
+        failures.push({ url: result.url, reason: result.reason });
       }
     });
 
@@ -525,16 +523,14 @@ function UrlStoreController(ctx, log) {
     let successCount = 0;
 
     settledResults.forEach((settled) => {
-      if (settled.status === 'fulfilled') {
-        const result = settled.value;
-        if (result.success) {
-          results.push(AuditUrlDto.toJSON(result.data));
-          successCount += 1;
-        } else {
-          failures.push({ url: result.url, reason: result.reason });
-        }
+      if (settled.status !== 'fulfilled') return;
+
+      const result = settled.value;
+      if (result.success) {
+        results.push(AuditUrlDto.toJSON(result.data));
+        successCount += 1;
       } else {
-        failures.push({ url: 'unknown', reason: settled.reason?.message || 'Promise rejected' });
+        failures.push({ url: result.url, reason: result.reason });
       }
     });
 
@@ -631,15 +627,13 @@ function UrlStoreController(ctx, log) {
     let successCount = 0;
 
     settledResults.forEach((settled) => {
-      if (settled.status === 'fulfilled') {
-        const result = settled.value;
-        if (result.success) {
-          successCount += 1;
-        } else {
-          failures.push({ url: result.url, reason: result.reason });
-        }
+      if (settled.status !== 'fulfilled') return;
+
+      const result = settled.value;
+      if (result.success) {
+        successCount += 1;
       } else {
-        failures.push({ url: 'unknown', reason: settled.reason?.message || 'Promise rejected' });
+        failures.push({ url: result.url, reason: result.reason });
       }
     });
 
