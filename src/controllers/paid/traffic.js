@@ -298,6 +298,8 @@ function TrafficController(context, log, env) {
       limit,
     });
 
+    log.info(`getTop3PagesWithTrafficLostTemplate Query: ${query}`);
+
     const description = `fetch top 3 pages traffic data db: ${rumMetricsDatabase}| siteKey: ${siteId} | temporalCondition: ${decodedTemporalCondition} | groupBy: [${dimensions.join(', ')}] `;
 
     // first try to get from cache
