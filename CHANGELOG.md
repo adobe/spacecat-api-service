@@ -1,3 +1,10 @@
+# [1.270.0](https://github.com/adobe/spacecat-api-service/compare/v1.269.3...v1.270.0) (2025-12-03)
+
+
+### Features
+
+* protect code coverage on main branch ([#1613](https://github.com/adobe/spacecat-api-service/issues/1613)) ([a7c4e29](https://github.com/adobe/spacecat-api-service/commit/a7c4e294e5a1d1061ecf6055b17b425a5e486254))
+
 ## [1.269.3](https://github.com/adobe/spacecat-api-service/compare/v1.269.2...v1.269.3) (2025-12-03)
 
 
