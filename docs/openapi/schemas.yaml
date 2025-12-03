@@ -1808,8 +1808,7 @@ AuditUrlListResponse:
           description: Number of items per page
         cursor:
           type: string
-          nullable: true
-          description: Pagination cursor for next page
+          description: Pagination cursor for next page (null when no more data)
         hasMore:
           type: boolean
           description: Whether more items are available

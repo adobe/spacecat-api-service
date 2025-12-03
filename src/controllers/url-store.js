@@ -46,7 +46,8 @@ const MAX_LIMIT = 500;
 function canonicalizeUrl(url) {
   try {
     // Normalize: lowercase hostname, strip port, remove query params, ensure https
-    const urlObj = new URL(url.startsWith('http://') || url.startsWith('https://') ? url : `https://${url}`);
+    // Note: isValidUrl() validates URLs before this runs, so protocol is always present
+    const urlObj = new URL(url);
 
     // Lowercase the hostname
     urlObj.hostname = urlObj.hostname.toLowerCase();
@@ -74,9 +75,12 @@ function canonicalizeUrl(url) {
     }
 
     return canonicalUrl;
+    /* c8 ignore start */
   } catch (error) {
-    return url; // Return original if parsing fails
+    // Defensive: isValidUrl() validates before canonicalizeUrl() runs
+    return url;
   }
+  /* c8 ignore stop */
 }
 
 /**
@@ -349,7 +353,7 @@ function UrlStoreController(ctx, log) {
 
     const userId = getUserIdentifier(context);
 
-    // Process all URLs in parallel using Promise.allSettled
+    // Process all URLs in parallel
     const urlProcessingPromises = urls.map(async (urlData) => {
       // Validate URL
       if (!hasText(urlData.url) || !isValidUrl(urlData.url)) {
@@ -374,8 +378,8 @@ function UrlStoreController(ctx, log) {
         let existingUrl = await AuditUrl.findBySiteIdAndUrl(siteId, canonicalUrl);
 
         if (existingUrl) {
-          // Upsert: update if user is claiming ownership
-          if (byCustomer || !existingUrl.getByCustomer || existingUrl.getByCustomer() !== true) {
+          // Upsert: update if claiming ownership or existing is not customer-owned
+          if (byCustomer || existingUrl.getByCustomer() !== true) {
             existingUrl.setByCustomer(byCustomer);
             existingUrl.setAudits(audits);
             existingUrl.setUpdatedBy(userId);
@@ -399,30 +403,25 @@ function UrlStoreController(ctx, log) {
         return {
           success: false,
           url: urlData.url,
-          reason: error.message || 'Internal error',
+          reason: error.message,
         };
       }
     });
 
-    // Wait for all promises to settle
-    const settledResults = await Promise.allSettled(urlProcessingPromises);
+    // Wait for all promises (each has try/catch so never rejects)
+    const processedResults = await Promise.all(urlProcessingPromises);
 
     // Process results
     const results = [];
     const failures = [];
     let successCount = 0;
 
-    settledResults.forEach((settled) => {
-      if (settled.status === 'fulfilled') {
-        const result = settled.value;
-        if (result.success) {
-          results.push(AuditUrlDto.toJSON(result.data));
-          successCount += 1;
-        } else {
-          failures.push({ url: result.url, reason: result.reason });
-        }
+    processedResults.forEach((result) => {
+      if (result.success) {
+        results.push(AuditUrlDto.toJSON(result.data));
+        successCount += 1;
       } else {
-        failures.push({ url: 'unknown', reason: settled.reason?.message || 'Promise rejected' });
+        failures.push({ url: result.url, reason: result.reason });
       }
     });
 
@@ -468,7 +467,7 @@ function UrlStoreController(ctx, log) {
 
     const userId = getUserIdentifier(context);
 
-    // Process all updates in parallel using Promise.allSettled
+    // Process all updates in parallel
     const updateProcessingPromises = updates.map(async (update) => {
       // Validate URL
       if (!hasText(update.url)) {
@@ -511,30 +510,25 @@ function UrlStoreController(ctx, log) {
         return {
           success: false,
           url: update.url,
-          reason: error.message || 'Internal error',
+          reason: error.message,
         };
       }
     });
 
-    // Wait for all promises to settle
-    const settledResults = await Promise.allSettled(updateProcessingPromises);
+    // Wait for all promises (each has try/catch so never rejects)
+    const processedResults = await Promise.all(updateProcessingPromises);
 
     // Process results
     const results = [];
     const failures = [];
     let successCount = 0;
 
-    settledResults.forEach((settled) => {
-      if (settled.status === 'fulfilled') {
-        const result = settled.value;
-        if (result.success) {
-          results.push(AuditUrlDto.toJSON(result.data));
-          successCount += 1;
-        } else {
-          failures.push({ url: result.url, reason: result.reason });
-        }
+    processedResults.forEach((result) => {
+      if (result.success) {
+        results.push(AuditUrlDto.toJSON(result.data));
+        successCount += 1;
       } else {
-        failures.push({ url: 'unknown', reason: settled.reason?.message || 'Promise rejected' });
+        failures.push({ url: result.url, reason: result.reason });
       }
     });
 
@@ -578,7 +572,7 @@ function UrlStoreController(ctx, log) {
       return forbidden('Only users belonging to the organization can delete URLs');
     }
 
-    // Process all deletions in parallel using Promise.allSettled
+    // Process all deletions in parallel
     const deleteProcessingPromises = urls.map(async (url) => {
       // Validate URL
       if (!hasText(url)) {
@@ -618,28 +612,23 @@ function UrlStoreController(ctx, log) {
         return {
           success: false,
           url,
-          reason: error.message || 'Internal error',
+          reason: error.message,
         };
       }
     });
 
-    // Wait for all promises to settle
-    const settledResults = await Promise.allSettled(deleteProcessingPromises);
+    // Wait for all promises (each has try/catch so never rejects)
+    const processedResults = await Promise.all(deleteProcessingPromises);
 
     // Process results
     const failures = [];
     let successCount = 0;
 
-    settledResults.forEach((settled) => {
-      if (settled.status === 'fulfilled') {
-        const result = settled.value;
-        if (result.success) {
-          successCount += 1;
-        } else {
-          failures.push({ url: result.url, reason: result.reason });
-        }
+    processedResults.forEach((result) => {
+      if (result.success) {
+        successCount += 1;
       } else {
-        failures.push({ url: 'unknown', reason: settled.reason?.message || 'Promise rejected' });
+        failures.push({ url: result.url, reason: result.reason });
       }
     });
 
