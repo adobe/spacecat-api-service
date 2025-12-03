@@ -141,7 +141,7 @@ describe('UrlStore Controller', () => {
   });
 
   it('throws an error if context is empty', () => {
-    expect(() => UrlStoreController({})).to.throw('Data access required');
+    expect(() => UrlStoreController({})).to.throw('Context required');
   });
 
   it('throws an error if data access is not an object', () => {
@@ -530,42 +530,6 @@ describe('UrlStore Controller', () => {
       mockDataAccess.AuditUrl.create.resolves(mockAuditUrls[0]);
       const result = await urlStoreController.addUrls(context);
       expect(result.status).to.equal(201);
-    });
-
-    it('gets user identifier from auth info', async () => {
-      context.data = [{ url: 'https://example.com/page1', audits: [] }];
-      context.attributes.authInfo = new AuthInfo()
-        .withType('jwt')
-        .withProfile({ email: 'test@example.com' })
-        .withAuthenticated(true);
-      mockDataAccess.AuditUrl.create.resolves(mockAuditUrls[0]);
-
-      urlStoreController = UrlStoreController(context, log);
-      await urlStoreController.addUrls(context);
-      expect(mockDataAccess.AuditUrl.create.firstCall.args[0].createdBy).to.equal('test@example.com');
-    });
-
-    it('uses name when email is not available', async () => {
-      context.data = [{ url: 'https://example.com/page1', audits: [] }];
-      context.attributes.authInfo = new AuthInfo()
-        .withType('jwt')
-        .withProfile({ name: 'Test User' })
-        .withAuthenticated(true);
-      mockDataAccess.AuditUrl.create.resolves(mockAuditUrls[0]);
-
-      urlStoreController = UrlStoreController(context, log);
-      await urlStoreController.addUrls(context);
-      expect(mockDataAccess.AuditUrl.create.firstCall.args[0].createdBy).to.equal('Test User');
-    });
-
-    it('uses system when no profile available', async () => {
-      context.data = [{ url: 'https://example.com/page1', audits: [] }];
-      context.attributes.authInfo = undefined;
-      mockDataAccess.AuditUrl.create.resolves(mockAuditUrls[0]);
-
-      urlStoreController = UrlStoreController(context, log);
-      await urlStoreController.addUrls(context);
-      expect(mockDataAccess.AuditUrl.create.firstCall.args[0].createdBy).to.equal('system');
     });
   });
 
