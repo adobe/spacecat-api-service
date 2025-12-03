@@ -1,3 +1,10 @@
+## [1.269.1](https://github.com/adobe/spacecat-api-service/compare/v1.269.0...v1.269.1) (2025-12-03)
+
+
+### Bug Fixes
+
+* added query log ([#1610](https://github.com/adobe/spacecat-api-service/issues/1610)) ([a7d160f](https://github.com/adobe/spacecat-api-service/commit/a7d160f01b2edf51a11ebc400bfe5e99737a458c))
+
 # [1.269.0](https://github.com/adobe/spacecat-api-service/compare/v1.268.1...v1.269.0) (2025-12-03)
 
 
