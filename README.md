@@ -129,3 +129,5 @@ The `multipartFormData` wrapper uses the following optional env variables:
 MULTIPART_FORM_FILE_COUNT_LIMIT=Maximum number of files which can be included in a multipart/form-data request (defaults to 5)
 MULTIPART_FORM_MAX_FILE_SIZE_MB=Maximum file size in MB for a single file in a multipart/form-data request (defaults to 20)
 ```
+
+<!-- Coverage test -->
