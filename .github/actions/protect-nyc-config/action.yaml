@@ -1,10 +1,5 @@
 name: Protect NYC config
-description: Block unauthorized edits to .nycrc.json
-
-inputs:
-  github-token:
-    description: Token with permission to read pull requests and org memberships
-    required: false
+description: Block all edits to .nycrc.json
 
 runs:
   using: composite
@@ -28,7 +23,7 @@ runs:
       shell: bash
       env:
         FILES_API: ${{ github.api_url }}/repos/${{ github.repository }}/pulls/${{ github.event.number }}/files?per_page=100
-        GITHUB_TOKEN: ${{ inputs.github-token || github.token }}
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
         echo "Checking PR file list for .nycrc.json changes..."
         RESPONSE=$(curl -sS -H "Authorization: Bearer $GITHUB_TOKEN" \
@@ -52,30 +47,11 @@ runs:
       shell: bash
       run: echo "PR is in draft state; skipping protection check."
 
-    - name: Check if author is in adobe/spacecat-admins
+    - name: Block .nycrc.json modifications
       if: github.event_name == 'pull_request' && steps.detect.outputs.nycrc-changed == 'true' && github.event.pull_request.draft == false
       shell: bash
-      env:
-        ORG: adobe
-        TEAM_SLUG: spacecat-admins
-        USERNAME: ${{ github.event.pull_request.user.login }}
-        GITHUB_TOKEN: ${{ inputs.github-token || github.token }}
       run: |
-        echo "Checking if $USERNAME is in team $ORG/$TEAM_SLUG"
-        STATUS_CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
-          -H "Authorization: Bearer $GITHUB_TOKEN" \
-          -H "Accept: application/vnd.github+json" \
-          "https://api.github.com/orgs/${ORG}/teams/${TEAM_SLUG}/memberships/${USERNAME}")
-        echo "API status code: $STATUS_CODE"
-        if [ "$STATUS_CODE" -eq 200 ]; then
-          echo "User $USERNAME is a member of $ORG/$TEAM_SLUG (allowed to modify .nycrc.json)."
-        elif [ "$STATUS_CODE" -eq 404 ]; then
-          echo "User $USERNAME is NOT a member of $ORG/$TEAM_SLUG."
-          echo "Only members of $ORG/$TEAM_SLUG can modify .nycrc.json." >&2
-          exit 1
-        else
-          echo "Unexpected response from GitHub API (status $STATUS_CODE)." >&2
-          echo "Failing conservatively to avoid unauthorized changes." >&2
-          exit 1
-        fi
+        echo "ERROR: Modifications to .nycrc.json are not allowed." >&2
+        echo "This file is protected and cannot be changed via pull request." >&2
+        exit 1
 
