@@ -1008,67 +1008,43 @@ function LlmoController(ctx) {
 
         log.info(`[LLMO-ATHENA] S3 listObjectsV2 completed for siteId: ${siteId} - duration: ${s3ListDuration}ms, prefixes found: ${s3Objects.CommonPrefixes?.length || 0}, objects found: ${s3Objects.Contents?.length || 0}`);
 
-        // We'll check for empty audit IDs after extraction, not here
-
-        // Log S3 structure for debugging
-        log.info(`[LLMO-ATHENA] S3 Response structure for siteId: ${siteId}:`);
-        log.info(`[LLMO-ATHENA] - CommonPrefixes count: ${s3Objects.CommonPrefixes?.length || 0}`);
-        log.info(`[LLMO-ATHENA] - Contents count: ${s3Objects.Contents?.length || 0}`);
-
-        if (s3Objects.CommonPrefixes && s3Objects.CommonPrefixes.length > 0) {
-          const samplePrefixes = s3Objects.CommonPrefixes.slice(0, 5)
-            .map((prefix) => prefix.Prefix);
-          log.info(`[LLMO-ATHENA] Sample CommonPrefixes for siteId: ${siteId}:`);
-          log.info(`${JSON.stringify(samplePrefixes)}`);
+        if (!s3Objects.CommonPrefixes || s3Objects.CommonPrefixes.length === 0) {
+          log.warn(`[LLMO-ATHENA] No S3 audit folders found in folder ${s3FolderPath} for siteId: ${siteId}`);
+          const totalDuration = Date.now() - startTime;
+          log.info(`[LLMO-ATHENA] Request completed (no data) for siteId: ${siteId} - total duration: ${totalDuration}ms`);
+          return ok({
+            siteId,
+            message: 'No audit data found in S3 folder',
+            audits: [],
+            weekStats: {},
+            s3FolderPath,
+            processedAt: new Date().toISOString(),
+            processingStats: {
+              totalDuration,
+              validationDuration,
+              s3ListDuration,
+            },
+          });
         }
 
-        if (s3Objects.Contents && s3Objects.Contents.length > 0) {
-          const sampleContents = s3Objects.Contents.slice(0, 5).map((obj) => ({
-            key: obj.Key,
-            size: obj.Size,
-          }));
-          log.info(`[LLMO-ATHENA] Sample Contents for siteId: ${siteId}: ${JSON.stringify(sampleContents, null, 2)}`);
-        }
+        // Log first few S3 prefixes for debugging
+        const samplePrefixes = s3Objects.CommonPrefixes.slice(0, 3).map((prefix) => prefix.Prefix);
+        log.info(`[LLMO-ATHENA] Sample S3 audit folder prefixes for siteId: ${siteId}: ${JSON.stringify(samplePrefixes)}`);
 
-        // Extract audit IDs - handle both folder structure and direct files
+        // Extract audit IDs from CommonPrefixes (the immediate subdirectories)
+        log.info(`[LLMO-ATHENA] Extracting audit IDs from ${s3Objects.CommonPrefixes.length} S3 prefixes for siteId: ${siteId}`);
         const auditIds = [];
+        s3Objects.CommonPrefixes.forEach((prefix) => {
+          // prefix.Prefix will be like "audit_data/siteId/auditId/"
+          const prefixPath = prefix.Prefix;
+          // Remove the s3FolderPath and trailing slash to get just the auditId
+          const auditId = prefixPath.replace(s3FolderPath, '').replace(/\/$/, '');
+          if (auditId && auditId !== '') {
+            auditIds.push(auditId);
+          }
+        });
 
-        // First, try to extract from CommonPrefixes (folder structure: audit_data/siteId/auditId/)
-        if (s3Objects.CommonPrefixes && s3Objects.CommonPrefixes.length > 0) {
-          const prefixCount = s3Objects.CommonPrefixes.length;
-          log.info(`[LLMO-ATHENA] Extracting audit IDs from ${prefixCount} S3 prefixes for siteId: ${siteId}`);
-          s3Objects.CommonPrefixes.forEach((prefix) => {
-            // prefix.Prefix will be like "audit_data/siteId/auditId/"
-            const prefixPath = prefix.Prefix;
-            // Remove the s3FolderPath and trailing slash to get just the auditId
-            const auditId = prefixPath.replace(s3FolderPath, '').replace(/\/$/, '');
-            if (auditId && auditId !== '' && !auditId.includes('/')) { // Ensure it's a direct child
-              auditIds.push(auditId);
-            }
-          });
-        }
-
-        // If no prefixes found, fall back to extracting from Contents (file structure)
-        if (auditIds.length === 0 && s3Objects.Contents && s3Objects.Contents.length > 0) {
-          const contentsCount = s3Objects.Contents.length;
-          log.info(`[LLMO-ATHENA] No prefixes found, extracting audit IDs from ${contentsCount} S3 objects for siteId: ${siteId}`);
-          s3Objects.Contents.forEach((obj) => {
-            const key = obj.Key;
-            // Skip if it's not a direct child of the siteId folder
-            const relativePath = key.replace(s3FolderPath, '');
-            const pathParts = relativePath.split('/');
-
-            // Only process direct children (no nested paths)
-            if (pathParts.length === 1 && pathParts[0].endsWith('.json')) {
-              const auditId = pathParts[0].replace('.json', '');
-              if (auditId && auditId !== '') {
-                auditIds.push(auditId);
-              }
-            }
-          });
-        }
-
-        log.info(`[LLMO-ATHENA] Final result: Extracted ${auditIds.length} audit IDs for siteId: ${siteId}`);
+        log.info(`[LLMO-ATHENA] Extracted ${auditIds.length} audit IDs from ${s3Objects.CommonPrefixes.length} S3 prefixes for siteId: ${siteId}`);
 
         if (auditIds.length === 0) {
           log.warn(`[LLMO-ATHENA] No valid audit IDs found after filtering for siteId: ${siteId}`);
@@ -1085,8 +1061,7 @@ function LlmoController(ctx) {
               totalDuration,
               validationDuration,
               s3ListDuration,
-              s3ObjectsFound: (s3Objects.CommonPrefixes?.length || 0)
-                + (s3Objects.Contents?.length || 0),
+              s3ObjectsFound: s3Objects.Contents.length,
               validAuditIds: 0,
             },
           });
