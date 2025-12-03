@@ -198,6 +198,20 @@ describe('UrlStore Controller', () => {
       expect(body.pagination).to.have.property('hasMore', false);
     });
 
+    it('handles undefined context.data', async () => {
+      context.data = undefined;
+      const result = await urlStoreController.listUrls(context);
+      expect(result.status).to.equal(200);
+    });
+
+    it('handles result with undefined items', async () => {
+      mockDataAccess.AuditUrl.allBySiteIdByCustomerSorted.resolves({ cursor: null });
+      const result = await urlStoreController.listUrls(context);
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.items).to.deep.equal([]);
+    });
+
     it('returns bad request for invalid byCustomer parameter', async () => {
       context.data = { byCustomer: 'invalid' };
       const result = await urlStoreController.listUrls(context);
@@ -327,6 +341,22 @@ describe('UrlStore Controller', () => {
       context.data = { limit: -1 };
       const result = await urlStoreController.listUrlsByAuditType(context);
       expect(result.status).to.equal(400);
+    });
+
+    it('handles undefined context.data', async () => {
+      context.params = { siteId, auditType: 'accessibility' };
+      context.data = undefined;
+      const result = await urlStoreController.listUrlsByAuditType(context);
+      expect(result.status).to.equal(200);
+    });
+
+    it('handles result with undefined items', async () => {
+      context.params = { siteId, auditType: 'accessibility' };
+      mockDataAccess.AuditUrl.allBySiteIdAndAuditType.resolves({ cursor: null });
+      const result = await urlStoreController.listUrlsByAuditType(context);
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.items).to.deep.equal([]);
     });
 
     it('handles internal server error', async () => {
@@ -606,6 +636,14 @@ describe('UrlStore Controller', () => {
       await urlStoreController.addUrls(context);
       // Root path should keep trailing slash
       expect(mockDataAccess.AuditUrl.create.firstCall.args[0].url).to.equal('https://example.com/');
+    });
+
+    it('canonicalizes URL by adding https:// when missing protocol', async () => {
+      context.data = [{ url: 'example.com/page', audits: [] }];
+      mockDataAccess.AuditUrl.create.resolves(mockAuditUrls[0]);
+      await urlStoreController.addUrls(context);
+      // URL should have https:// prepended
+      expect(mockDataAccess.AuditUrl.create.firstCall.args[0].url).to.equal('https://example.com/page');
     });
   });
 
