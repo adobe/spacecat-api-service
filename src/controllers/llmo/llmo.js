@@ -1000,7 +1000,8 @@ function LlmoController(ctx) {
 
         log.info(`[LLMO-ATHENA] Listing S3 objects with params: ${JSON.stringify(listParams)} for siteId: ${siteId}`);
         const s3ListStart = Date.now();
-        const s3Objects = await s3.s3Client.listObjectsV2(listParams).promise();
+        const listCommand = new s3.ListObjectsV2Command(listParams);
+        const s3Objects = await s3.s3Client.send(listCommand);
         const s3ListDuration = Date.now() - s3ListStart;
 
         log.info(`[LLMO-ATHENA] S3 listObjectsV2 completed for siteId: ${siteId} - duration: ${s3ListDuration}ms, objects found: ${s3Objects.Contents?.length || 0}`);
