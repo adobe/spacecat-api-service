@@ -401,25 +401,20 @@ function UrlStoreController(ctx, log) {
         return {
           success: false,
           url: urlData.url,
-          /* c8 ignore next */
           reason: error.message || 'Internal error',
         };
       }
     });
 
-    // Wait for all promises to settle
-    const settledResults = await Promise.allSettled(urlProcessingPromises);
+    // Wait for all promises (they never reject due to try/catch)
+    const processedResults = await Promise.all(urlProcessingPromises);
 
     // Process results
     const results = [];
     const failures = [];
     let successCount = 0;
 
-    settledResults.forEach((settled) => {
-      /* c8 ignore next */
-      if (settled.status !== 'fulfilled') return;
-
-      const result = settled.value;
+    processedResults.forEach((result) => {
       if (result.success) {
         results.push(AuditUrlDto.toJSON(result.data));
         successCount += 1;
@@ -513,25 +508,20 @@ function UrlStoreController(ctx, log) {
         return {
           success: false,
           url: update.url,
-          /* c8 ignore next */
           reason: error.message || 'Internal error',
         };
       }
     });
 
-    // Wait for all promises to settle
-    const settledResults = await Promise.allSettled(updateProcessingPromises);
+    // Wait for all promises (they never reject due to try/catch)
+    const processedResults = await Promise.all(updateProcessingPromises);
 
     // Process results
     const results = [];
     const failures = [];
     let successCount = 0;
 
-    settledResults.forEach((settled) => {
-      /* c8 ignore next */
-      if (settled.status !== 'fulfilled') return;
-
-      const result = settled.value;
+    processedResults.forEach((result) => {
       if (result.success) {
         results.push(AuditUrlDto.toJSON(result.data));
         successCount += 1;
@@ -620,24 +610,19 @@ function UrlStoreController(ctx, log) {
         return {
           success: false,
           url,
-          /* c8 ignore next */
           reason: error.message || 'Internal error',
         };
       }
     });
 
-    // Wait for all promises to settle
-    const settledResults = await Promise.allSettled(deleteProcessingPromises);
+    // Wait for all promises (they never reject due to try/catch)
+    const processedResults = await Promise.all(deleteProcessingPromises);
 
     // Process results
     const failures = [];
     let successCount = 0;
 
-    settledResults.forEach((settled) => {
-      /* c8 ignore next */
-      if (settled.status !== 'fulfilled') return;
-
-      const result = settled.value;
+    processedResults.forEach((result) => {
       if (result.success) {
         successCount += 1;
       } else {
