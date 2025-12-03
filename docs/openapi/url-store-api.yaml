@@ -30,7 +30,7 @@ url-store-list:
         required: false
         schema:
           type: string
-          enum: [rank, traffic, url, createdAt, updatedAt]
+          enum: [url, createdAt, updatedAt]
         description: Field to sort by
       - name: sortOrder
         in: query
@@ -183,7 +183,7 @@ url-store-get:
     summary: Add URLs (bulk operation)
     description: |
       Adds one or more URLs to the URL store. This operation is idempotent - 
-      if a URL already exists, it will be updated to source "manual".
+      if a URL already exists, it will be updated.
       
       - Maximum 100 URLs per request
       - URLs are canonicalized before storage
@@ -272,7 +272,7 @@ url-store-get:
       Removes one or more URLs from the URL store.
       
       - Maximum 100 URLs per request
-      - **Constraint**: Only URLs with source "manual" can be deleted
+      - **Constraint**: Only customer-added URLs (byCustomer: true) can be deleted
       - Returns per-item success/failure information
     operationId: deleteUrls
     requestBody:

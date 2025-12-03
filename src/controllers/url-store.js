@@ -24,31 +24,56 @@ import {
   isValidUUID,
   isNonEmptyObject,
   isArray,
+  isInteger,
 } from '@adobe/spacecat-shared-utils';
 
 import AccessControlUtil from '../support/access-control-util.js';
+import { AuditUrlDto } from '../dto/audit-url.js';
 
 const MAX_URLS_PER_REQUEST = 100;
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
 
 /**
- * Canonicalizes a URL by removing trailing slashes, converting to lowercase domain, etc.
+ * Canonicalizes a URL by:
+ * - Lowercasing the hostname
+ * - Stripping port, trailing dot, trailing slash
+ * - Removing query parameters
+ * - Prepending https:// schema if missing
  * @param {string} url - The URL to canonicalize
  * @returns {string} - Canonicalized URL
  */
 function canonicalizeUrl(url) {
   try {
-    const urlObj = new URL(url);
+    // Normalize: lowercase hostname, strip port, remove query params, ensure https
+    const urlObj = new URL(url.startsWith('http://') || url.startsWith('https://') ? url : `https://${url}`);
+
     // Lowercase the hostname
     urlObj.hostname = urlObj.hostname.toLowerCase();
-    // Remove trailing slash from pathname unless it's the root
-    if (urlObj.pathname !== '/' && urlObj.pathname.endsWith('/')) {
-      urlObj.pathname = urlObj.pathname.slice(0, -1);
+
+    // Remove port
+    urlObj.port = '';
+
+    // Remove query parameters
+    urlObj.search = '';
+
+    // Remove hash
+    urlObj.hash = '';
+
+    // Get the URL string
+    let canonicalUrl = urlObj.toString();
+
+    // Remove trailing slash (unless it's just the domain)
+    if (canonicalUrl.endsWith('/') && urlObj.pathname !== '/') {
+      canonicalUrl = canonicalUrl.slice(0, -1);
     }
-    // Sort query parameters for consistent ordering
-    urlObj.searchParams.sort();
-    return urlObj.toString();
+
+    // Ensure https
+    if (canonicalUrl.startsWith('http://')) {
+      canonicalUrl = canonicalUrl.replace('http://', 'https://');
+    }
+
+    return canonicalUrl;
   } catch (error) {
     return url; // Return original if parsing fails
   }
@@ -129,8 +154,8 @@ function UrlStoreController(ctx, log) {
     // Convert string to boolean if needed, default to true
     const byCustomerFilter = byCustomer === undefined ? true : (byCustomer === true || byCustomer === 'true');
 
-    // Validate sortBy field
-    const validSortFields = ['rank', 'traffic', 'url', 'createdAt', 'updatedAt'];
+    // Validate sortBy field (removed rank and traffic)
+    const validSortFields = ['url', 'createdAt', 'updatedAt'];
     if (sortBy && !validSortFields.includes(sortBy)) {
       return badRequest(`Invalid sortBy field. Must be one of: ${validSortFields.join(', ')}`);
     }
@@ -140,7 +165,12 @@ function UrlStoreController(ctx, log) {
       return badRequest('Invalid sortOrder. Must be "asc" or "desc"');
     }
 
-    const parsedLimit = Math.min(parseInt(limit, 10) || DEFAULT_LIMIT, MAX_LIMIT);
+    // Validate limit
+    const parsedLimit = parseInt(limit, 10);
+    if (!isInteger(parsedLimit) || parsedLimit < 1) {
+      return badRequest('Page size must be greater than 0');
+    }
+    const effectiveLimit = Math.min(parsedLimit, MAX_LIMIT);
 
     const site = await Site.findById(siteId);
     if (!site) {
@@ -154,15 +184,19 @@ function UrlStoreController(ctx, log) {
     try {
       // If byCustomer filter was explicitly provided or defaulted, filter by it
       const result = await AuditUrl.allBySiteIdByCustomerSorted(siteId, byCustomerFilter, {
-        limit: parsedLimit,
+        limit: effectiveLimit,
         cursor,
         sortBy,
         sortOrder,
       });
 
       return ok({
-        items: result.items || [],
-        cursor: result.cursor,
+        items: (result.items || []).map(AuditUrlDto.toJSON),
+        pagination: {
+          limit: effectiveLimit,
+          cursor: result.cursor ?? null,
+          hasMore: !!result.cursor,
+        },
       });
     } catch (error) {
       log.error(`Error listing URLs for site ${siteId}: ${error.message}`);
@@ -191,8 +225,8 @@ function UrlStoreController(ctx, log) {
       return badRequest('Audit type required');
     }
 
-    // Validate sortBy field
-    const validSortFields = ['rank', 'traffic', 'url', 'createdAt', 'updatedAt'];
+    // Validate sortBy field (removed rank and traffic)
+    const validSortFields = ['url', 'createdAt', 'updatedAt'];
     if (sortBy && !validSortFields.includes(sortBy)) {
       return badRequest(`Invalid sortBy field. Must be one of: ${validSortFields.join(', ')}`);
     }
@@ -202,7 +236,12 @@ function UrlStoreController(ctx, log) {
       return badRequest('Invalid sortOrder. Must be "asc" or "desc"');
     }
 
-    const parsedLimit = Math.min(parseInt(limit, 10) || DEFAULT_LIMIT, MAX_LIMIT);
+    // Validate limit
+    const parsedLimit = parseInt(limit, 10);
+    if (!isInteger(parsedLimit) || parsedLimit < 1) {
+      return badRequest('Page size must be greater than 0');
+    }
+    const effectiveLimit = Math.min(parsedLimit, MAX_LIMIT);
 
     const site = await Site.findById(siteId);
     if (!site) {
@@ -215,15 +254,23 @@ function UrlStoreController(ctx, log) {
 
     try {
       const result = await AuditUrl.allBySiteIdAndAuditType(siteId, auditType, {
-        limit: parsedLimit,
+        limit: effectiveLimit,
         cursor,
         sortBy,
         sortOrder,
       });
 
+      // Handle both array and paginated response formats
+      const items = Array.isArray(result) ? result : (result.items || []);
+      const resultCursor = Array.isArray(result) ? undefined : result.cursor;
+
       return ok({
-        items: result || [],
-        cursor: undefined,
+        items: items.map(AuditUrlDto.toJSON),
+        pagination: {
+          limit: effectiveLimit,
+          cursor: resultCursor ?? null,
+          hasMore: !!resultCursor,
+        },
       });
     } catch (error) {
       log.error(`Error listing URLs by audit type for site ${siteId}: ${error.message}`);
@@ -264,7 +311,7 @@ function UrlStoreController(ctx, log) {
         return notFound('URL not found');
       }
 
-      return ok(auditUrl);
+      return ok(AuditUrlDto.toJSON(auditUrl));
     } catch (error) {
       log.error(`Error getting URL for site ${siteId}: ${error.message}`);
       return internalServerError('Failed to get URL');
@@ -320,10 +367,6 @@ function UrlStoreController(ctx, log) {
         // Validate audits array
         const audits = isArray(urlData.audits) ? urlData.audits : [];
 
-        // Extract rank and traffic if provided
-        const rank = urlData.rank !== undefined ? urlData.rank : null;
-        const traffic = urlData.traffic !== undefined ? urlData.traffic : null;
-
         // Extract byCustomer flag, default to true
         const byCustomer = urlData.byCustomer !== undefined ? urlData.byCustomer : true;
 
@@ -335,8 +378,6 @@ function UrlStoreController(ctx, log) {
           if (byCustomer || !existingUrl.getByCustomer || existingUrl.getByCustomer() !== true) {
             existingUrl.setByCustomer(byCustomer);
             existingUrl.setAudits(audits);
-            if (rank !== null) existingUrl.setRank(rank);
-            if (traffic !== null) existingUrl.setTraffic(traffic);
             existingUrl.setUpdatedBy(userId);
             existingUrl = await existingUrl.save();
           }
@@ -349,8 +390,6 @@ function UrlStoreController(ctx, log) {
           url: canonicalUrl,
           byCustomer,
           audits,
-          rank,
-          traffic,
           createdBy: userId,
           updatedBy: userId,
         });
@@ -377,7 +416,7 @@ function UrlStoreController(ctx, log) {
       if (settled.status === 'fulfilled') {
         const result = settled.value;
         if (result.success) {
-          results.push(result.data);
+          results.push(AuditUrlDto.toJSON(result.data));
           successCount += 1;
         } else {
           failures.push({ url: result.url, reason: result.reason });
@@ -463,16 +502,6 @@ function UrlStoreController(ctx, log) {
         // Update audits (overrides existing)
         auditUrl.setAudits(update.audits);
 
-        // Update rank if provided
-        if ('rank' in update) {
-          auditUrl.setRank(update.rank);
-        }
-
-        // Update traffic if provided
-        if ('traffic' in update) {
-          auditUrl.setTraffic(update.traffic);
-        }
-
         auditUrl.setUpdatedBy(userId);
         auditUrl = await auditUrl.save();
 
@@ -499,7 +528,7 @@ function UrlStoreController(ctx, log) {
       if (settled.status === 'fulfilled') {
         const result = settled.value;
         if (result.success) {
-          results.push(result.data);
+          results.push(AuditUrlDto.toJSON(result.data));
           successCount += 1;
         } else {
           failures.push({ url: result.url, reason: result.reason });

@@ -1693,12 +1693,15 @@ AuditUrl:
   required:
     - siteId
     - url
-    - source
+    - byCustomer
     - audits
     - createdAt
     - updatedAt
     - createdBy
     - updatedBy
+  description: |
+    AuditUrl entity representing a URL to be audited.
+    Primary key is composite: siteId + url (no separate id field).
   properties:
     siteId:
       description: Parent site identifier
@@ -1714,19 +1717,10 @@ AuditUrl:
     audits:
       description: Enabled audit types
       type: array
+      uniqueItems: true
       items:
         type: string
       example: ['accessibility', 'broken-backlinks']
-    rank:
-      description: Rank or position of the URL (e.g., for sorting high-value pages)
-      type: number
-      nullable: true
-      example: 1
-    traffic:
-      description: Traffic metric for the URL (e.g., page views, visitors)
-      type: number
-      nullable: true
-      example: 50000
     createdAt:
       description: ISO 8601 timestamp when created
       $ref: '#/DateTime'
@@ -1746,8 +1740,6 @@ AuditUrl:
     url: 'https://example.com/documents/report.pdf'
     byCustomer: true
     audits: ['accessibility', 'broken-backlinks']
-    rank: 1
-    traffic: 50000
     createdAt: '2025-10-10T12:00:00Z'
     updatedAt: '2025-10-10T15:30:00Z'
     createdBy: 'user-alice'
@@ -1768,25 +1760,14 @@ AuditUrlInput:
     audits:
       description: Enabled audit types
       type: array
+      uniqueItems: true
       items:
         type: string
       example: ['accessibility', 'broken-backlinks']
-    rank:
-      description: Rank or position of the URL (optional, for sorting high-value pages)
-      type: number
-      nullable: true
-      example: 1
-    traffic:
-      description: Traffic metric for the URL (optional, e.g., page views, visitors)
-      type: number
-      nullable: true
-      example: 50000
   example:
     url: 'https://example.com/page1.html'
     byCustomer: true
     audits: ['accessibility', 'broken-backlinks']
-    rank: 1
-    traffic: 50000
 AuditUrlUpdate:
   type: object
   required:
@@ -1799,36 +1780,39 @@ AuditUrlUpdate:
     audits:
       description: Enabled audit types (overrides existing)
       type: array
+      uniqueItems: true
       items:
         type: string
       example: ['accessibility']
-    rank:
-      description: Rank or position of the URL (optional, updates if provided)
-      type: number
-      nullable: true
-      example: 2
-    traffic:
-      description: Traffic metric for the URL (optional, updates if provided)
-      type: number
-      nullable: true
-      example: 75000
   example:
     url: 'https://example.com/page1.html'
     audits: ['accessibility']
-    rank: 2
-    traffic: 75000
 AuditUrlListResponse:
   type: object
   required:
     - items
+    - pagination
   properties:
     items:
       type: array
       items:
         $ref: './schemas.yaml#/AuditUrl'
-    cursor:
-      description: Pagination cursor for next page
-      type: string
+    pagination:
+      type: object
+      required:
+        - limit
+        - hasMore
+      properties:
+        limit:
+          type: integer
+          description: Number of items per page
+        cursor:
+          type: string
+          nullable: true
+          description: Pagination cursor for next page
+        hasMore:
+          type: boolean
+          description: Whether more items are available
   example:
     items:
       - siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
@@ -1839,7 +1823,10 @@ AuditUrlListResponse:
         updatedAt: '2025-10-10T15:30:00Z'
         createdBy: 'user-alice'
         updatedBy: 'user-bob'
-    cursor: 'eyJsYXN0S2V5Ijp7InNpdGVJZCI6ImV4YW1wbGUtY29tIn19'
+    pagination:
+      limit: 100
+      cursor: 'eyJsYXN0S2V5Ijp7InNpdGVJZCI6ImV4YW1wbGUtY29tIn19'
+      hasMore: true
 AuditUrlBulkResponse:
   type: object
   required:
