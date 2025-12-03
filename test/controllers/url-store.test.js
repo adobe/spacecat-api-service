@@ -561,8 +561,20 @@ describe('UrlStore Controller', () => {
     });
 
     it('falls back to system when authInfo is not present', async () => {
-      // Remove authInfo from context
-      delete context.attributes.authInfo;
+      // Set attributes to empty object (no authInfo)
+      context.attributes = {};
+      urlStoreController = UrlStoreController(context, log);
+
+      context.data = [{ url: 'https://example.com/page1', audits: [] }];
+      mockDataAccess.AuditUrl.create.resolves(mockAuditUrls[0]);
+      const result = await urlStoreController.addUrls(context);
+      expect(result.status).to.equal(201);
+      expect(mockDataAccess.AuditUrl.create.firstCall.args[0].createdBy).to.equal('system');
+    });
+
+    it('falls back to system when attributes is undefined', async () => {
+      // Set attributes to undefined
+      context.attributes = undefined;
       urlStoreController = UrlStoreController(context, log);
 
       context.data = [{ url: 'https://example.com/page1', audits: [] }];
