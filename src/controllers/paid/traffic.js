@@ -285,7 +285,7 @@ function TrafficController(context, log, env) {
     }
 
     const dimensionColumns = dimensions.join(', ');
-    const dimensionColumnsPrefixed = dimensions.map((col) => `agg.${col}`).join(', ');
+    const dimensionColumnsPrefixed = dimensions.map((col) => `a.${col}`).join(', ');
 
     const query = getTop3PagesWithTrafficLostTemplate({
       siteId,
