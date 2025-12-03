@@ -125,6 +125,7 @@ function UrlStoreController(ctx, log) {
       const profile = authInfo.getProfile();
       return profile?.email || profile?.name || 'system';
     }
+    /* c8 ignore next */
     return 'system';
   }
 
