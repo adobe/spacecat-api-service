@@ -222,6 +222,8 @@ paths:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-status'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/auto-fix:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-auto-fix'
+  /sites/{siteId}/opportunities/{opportunityId}/suggestions/edge-live-preview:
+    $ref: './site-opportunities.yaml#/site-opportunity-suggestions-edge-live-preview'
   /sites/{siteId}/site-enrollments:
     $ref: './site-enrollments-api.yaml#/site-enrollments-by-site'
   /sites/{siteId}/user-activities:
