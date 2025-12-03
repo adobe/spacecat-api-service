@@ -293,7 +293,6 @@ export default function getRouteHandlers(
     'GET /consent-banner/:jobId': consentBannerController.getScreenshots,
     'GET /sites/:siteId/scraped-content/:type': scrapeController.listScrapedContentFiles,
     'GET /sites/:siteId/files': scrapeController.getFileByKey,
-
     // Scrape Jobs
     'POST /tools/scrape/jobs': scrapeJobController.createScrapeJob,
     'GET /tools/scrape/jobs/:jobId': scrapeJobController.getScrapeJobStatus,
