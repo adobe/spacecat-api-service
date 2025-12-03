@@ -21,6 +21,7 @@ import {
   llmoConfig as llmo,
   schemas,
   composeBaseURL,
+  isoCalendarWeek,
 } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
@@ -894,6 +895,302 @@ function LlmoController(ctx) {
     }
   };
 
+  // Helper function to get week information from audit ID
+  const getWeekFromAuditId = async (auditId, context) => {
+    const { dataAccess, log } = context;
+    const { Audit } = dataAccess;
+    const helperStart = Date.now();
+
+    log.debug(`[LLMO-ATHENA-HELPER] Starting week calculation for audit: ${auditId}`);
+
+    try {
+      // Step 1: Look up the audit
+      log.debug(`[LLMO-ATHENA-HELPER] Looking up audit ${auditId} in database`);
+      const auditLookupStart = Date.now();
+      const audit = await Audit.findById(auditId);
+      const auditLookupDuration = Date.now() - auditLookupStart;
+
+      if (!audit) {
+        log.warn(`[LLMO-ATHENA-HELPER] Audit ${auditId} not found in database - lookup duration: ${auditLookupDuration}ms`);
+        throw new Error(`Audit ${auditId} not found`);
+      }
+
+      log.debug(`[LLMO-ATHENA-HELPER] Successfully found audit ${auditId} - lookup duration: ${auditLookupDuration}ms`);
+      // Step 2: Get the auditedAt timestamp
+      const auditedAt = audit.getAuditedAt(); // ISO string like "2025-01-15T10:30:00.000Z"
+      const auditType = audit.getAuditType();
+      const siteId = audit.getSiteId();
+      log.debug(`[LLMO-ATHENA-HELPER] Audit ${auditId} details - auditedAt: ${auditedAt}, type: ${auditType}, siteId: ${siteId}`);
+
+      if (!auditedAt) {
+        log.warn(`[LLMO-ATHENA-HELPER] Audit ${auditId} has no auditedAt timestamp`);
+        throw new Error(`Audit ${auditId} has no auditedAt timestamp`);
+      }
+
+      // Step 3: Parse and calculate week number using shared utility
+      log.debug(`[LLMO-ATHENA-HELPER] Calculating ISO week for audit ${auditId} from date: ${auditedAt}`);
+      const weekCalcStart = Date.now();
+      const date = new Date(auditedAt);
+
+      if (Number.isNaN(date.getTime())) {
+        log.warn(`[LLMO-ATHENA-HELPER] Invalid date format for audit ${auditId}: ${auditedAt}`);
+        throw new Error(`Invalid date format for audit ${auditId}: ${auditedAt}`);
+      }
+
+      const { week, year } = isoCalendarWeek(date);
+      const weekCalcDuration = Date.now() - weekCalcStart;
+      const weekIdentifier = `w${String(week).padStart(2, '0')}-${year}`;
+      log.debug(
+        `[LLMO-ATHENA-HELPER] Week calculation completed for audit ${auditId} - week: ${week}, year: ${year}, identifier: ${weekIdentifier} - calc duration: ${weekCalcDuration}ms`,
+      );
+
+      const helperDuration = Date.now() - helperStart;
+      log.debug(`[LLMO-ATHENA-HELPER] Helper function completed for audit ${auditId} - total duration: ${helperDuration}ms`);
+
+      return {
+        auditId,
+        auditedAt,
+        week,
+        year,
+        weekIdentifier,
+        auditType,
+        siteId,
+      };
+    } catch (error) {
+      const helperDuration = Date.now() - helperStart;
+      log.error(`[LLMO-ATHENA-HELPER] Helper function failed for audit ${auditId} - duration: ${helperDuration}ms, error: ${error.message}`);
+      throw error;
+    }
+  };
+
+  // Handles requests to the LLMO Athena endpoint
+  // Checks S3 folder for specific siteId, retrieves audits and returns week stats
+  const getLlmoAthena = async (context) => {
+    const { log, s3 } = context;
+    const { siteId } = context.params;
+    const startTime = Date.now();
+
+    log.info(`[LLMO-ATHENA] Starting request for siteId: ${siteId}`);
+
+    try {
+      // Validate LLMO access
+      log.info(`[LLMO-ATHENA] Validating LLMO access for siteId: ${siteId}`);
+      const validationStart = Date.now();
+      await getSiteAndValidateLlmo(context);
+      const validationDuration = Date.now() - validationStart;
+      log.info(`[LLMO-ATHENA] LLMO access validation completed for siteId: ${siteId} - duration: ${validationDuration}ms`);
+
+      if (!s3 || !s3.s3Client) {
+        log.error(`[LLMO-ATHENA] S3 configuration missing for siteId: ${siteId}`);
+        return badRequest('S3 storage is not configured for this environment');
+      }
+
+      log.info(`[LLMO-ATHENA] S3 configuration validated for siteId: ${siteId}, bucket: ${s3.s3Bucket}`);
+
+      // Check S3 folder for the specific siteId
+      const s3FolderPath = `spacecat-dev-mystique-assets/audit_data/${siteId}/`;
+      log.info(`[LLMO-ATHENA] Checking S3 folder: ${s3FolderPath} for siteId: ${siteId}`);
+
+      try {
+        // List objects in the S3 folder
+        const listParams = {
+          Bucket: s3.s3Bucket,
+          Prefix: s3FolderPath,
+        };
+
+        log.info(`[LLMO-ATHENA] Listing S3 objects with params: ${JSON.stringify(listParams)} for siteId: ${siteId}`);
+        const s3ListStart = Date.now();
+        const s3Objects = await s3.s3Client.listObjectsV2(listParams).promise();
+        const s3ListDuration = Date.now() - s3ListStart;
+
+        log.info(`[LLMO-ATHENA] S3 listObjectsV2 completed for siteId: ${siteId} - duration: ${s3ListDuration}ms, objects found: ${s3Objects.Contents?.length || 0}`);
+
+        if (!s3Objects.Contents || s3Objects.Contents.length === 0) {
+          log.warn(`[LLMO-ATHENA] No S3 objects found in folder ${s3FolderPath} for siteId: ${siteId}`);
+          const totalDuration = Date.now() - startTime;
+          log.info(`[LLMO-ATHENA] Request completed (no data) for siteId: ${siteId} - total duration: ${totalDuration}ms`);
+          return ok({
+            siteId,
+            message: 'No audit data found in S3 folder',
+            audits: [],
+            weekStats: {},
+            s3FolderPath,
+            processedAt: new Date().toISOString(),
+            processingStats: {
+              totalDuration,
+              validationDuration,
+              s3ListDuration,
+            },
+          });
+        }
+
+        // Log first few S3 objects for debugging
+        const sampleObjects = s3Objects.Contents.slice(0, 3).map((obj) => obj.Key);
+        log.info(`[LLMO-ATHENA] Sample S3 object keys for siteId: ${siteId}: ${JSON.stringify(sampleObjects)}`);
+
+        // Extract audit IDs from S3 object keys
+        log.info(`[LLMO-ATHENA] Extracting audit IDs from ${s3Objects.Contents.length} S3 objects for siteId: ${siteId}`);
+        const auditIds = s3Objects.Contents
+          .map((obj) => {
+            // Extract audit ID from object key - adjust this logic based on your S3 structure
+            const keyParts = obj.Key.split('/');
+            const auditId = keyParts[keyParts.length - 1].replace('.json', '');
+            return auditId;
+          })
+          .filter((id) => id && id !== ''); // Filter out empty IDs
+
+        log.info(`[LLMO-ATHENA] Extracted ${auditIds.length} valid audit IDs from ${s3Objects.Contents.length} S3 objects for siteId: ${siteId}`);
+
+        if (auditIds.length === 0) {
+          log.warn(`[LLMO-ATHENA] No valid audit IDs found after filtering for siteId: ${siteId}`);
+          const totalDuration = Date.now() - startTime;
+          log.info(`[LLMO-ATHENA] Request completed (no valid IDs) for siteId: ${siteId} - total duration: ${totalDuration}ms`);
+          return ok({
+            siteId,
+            message: 'No valid audit IDs found in S3 folder',
+            audits: [],
+            weekStats: {},
+            s3FolderPath,
+            processedAt: new Date().toISOString(),
+            processingStats: {
+              totalDuration,
+              validationDuration,
+              s3ListDuration,
+              s3ObjectsFound: s3Objects.Contents.length,
+              validAuditIds: 0,
+            },
+          });
+        }
+
+        // Log sample audit IDs
+        const sampleAuditIds = auditIds.slice(0, 5);
+        log.info(`[LLMO-ATHENA] Sample audit IDs for siteId: ${siteId}: ${JSON.stringify(sampleAuditIds)}`);
+
+        // Get week information for each audit
+        const auditWeekData = [];
+        const weekStats = {};
+
+        // Process audits in parallel to avoid await in loop
+        log.info(`[LLMO-ATHENA] Starting parallel processing of ${auditIds.length} audits for siteId: ${siteId}`);
+        const auditProcessingStart = Date.now();
+
+        const auditPromises = auditIds.map(async (auditId) => {
+          const auditStart = Date.now();
+          try {
+            log.debug(`[LLMO-ATHENA] Processing audit ${auditId} for siteId: ${siteId}`);
+            const weekInfo = await getWeekFromAuditId(auditId, context);
+            const auditDuration = Date.now() - auditStart;
+            log.debug(`[LLMO-ATHENA] Successfully processed audit ${auditId} for siteId: ${siteId} - duration: ${auditDuration}ms`);
+            return {
+              success: true, weekInfo, auditId, duration: auditDuration,
+            };
+          } catch (auditError) {
+            const auditDuration = Date.now() - auditStart;
+            log.warn(`[LLMO-ATHENA] Failed to process audit ${auditId} for siteId: ${siteId} - duration: ${auditDuration}ms, error: ${auditError.message}`);
+            return {
+              success: false, auditId, error: auditError.message, duration: auditDuration,
+            };
+          }
+        });
+
+        const auditResults = await Promise.all(auditPromises);
+        const auditProcessingDuration = Date.now() - auditProcessingStart;
+
+        const successfulAudits = auditResults.filter((result) => result.success);
+        const failedAudits = auditResults.filter((result) => !result.success);
+
+        log.info(
+          `[LLMO-ATHENA] Audit processing completed for siteId: ${siteId} - duration: ${auditProcessingDuration}ms, successful: ${successfulAudits.length}, failed: ${failedAudits.length}`,
+        );
+
+        if (failedAudits.length > 0) {
+          const failedAuditIds = failedAudits.map((result) => result.auditId).slice(0, 10);
+          const moreFailedCount = failedAudits.length > 10 ? ` (and ${failedAudits.length - 10} more)` : '';
+          log.warn(`[LLMO-ATHENA] Failed audit IDs for siteId: ${siteId}: ${JSON.stringify(failedAuditIds)}${moreFailedCount}`);
+        }
+
+        // Process successful results
+        log.info(`[LLMO-ATHENA] Aggregating week statistics from ${successfulAudits.length} successful audits for siteId: ${siteId}`);
+        const aggregationStart = Date.now();
+
+        auditResults.forEach((result) => {
+          if (result.success) {
+            const { weekInfo } = result;
+            auditWeekData.push(weekInfo);
+
+            // Aggregate week statistics
+            const { weekIdentifier, auditType } = weekInfo;
+
+            if (!weekStats[weekIdentifier]) {
+              weekStats[weekIdentifier] = {
+                week: weekInfo.week,
+                year: weekInfo.year,
+                weekIdentifier,
+                auditCounts: {},
+                totalAudits: 0,
+              };
+              log.debug(`[LLMO-ATHENA] Created new week stats for ${weekIdentifier} for siteId: ${siteId}`);
+            }
+
+            if (!weekStats[weekIdentifier].auditCounts[auditType]) {
+              weekStats[weekIdentifier].auditCounts[auditType] = 0;
+            }
+
+            weekStats[weekIdentifier].auditCounts[auditType] += 1;
+            weekStats[weekIdentifier].totalAudits += 1;
+          }
+        });
+
+        const aggregationDuration = Date.now() - aggregationStart;
+        const totalWeeks = Object.keys(weekStats).length;
+        const totalAuditTypes = new Set(auditWeekData.map((audit) => audit.auditType)).size;
+
+        log.info(`[LLMO-ATHENA] Week statistics aggregation completed for siteId: ${siteId} - duration: ${aggregationDuration}ms, weeks: ${totalWeeks}, audit types: ${totalAuditTypes}`);
+
+        // Log week statistics summary
+        const weekSummary = Object.entries(weekStats).map(([week, stats]) => ({
+          week,
+          totalAudits: stats.totalAudits,
+          auditTypes: Object.keys(stats.auditCounts),
+        }));
+        log.info(`[LLMO-ATHENA] Week statistics summary for siteId: ${siteId}: ${JSON.stringify(weekSummary)}`);
+
+        const totalDuration = Date.now() - startTime;
+        log.info(`[LLMO-ATHENA] Request completed successfully for siteId: ${siteId} - total duration: ${totalDuration}ms, processed audits: ${auditWeekData.length}`);
+
+        return ok({
+          siteId,
+          message: `Found ${auditWeekData.length} audits with week statistics`,
+          audits: auditWeekData,
+          weekStats,
+          s3FolderPath,
+          processedAt: new Date().toISOString(),
+          processingStats: {
+            totalDuration,
+            validationDuration,
+            s3ListDuration,
+            auditProcessingDuration,
+            aggregationDuration,
+            s3ObjectsFound: s3Objects.Contents.length,
+            validAuditIds: auditIds.length,
+            successfulAudits: successfulAudits.length,
+            failedAudits: failedAudits.length,
+            totalWeeks,
+            totalAuditTypes,
+          },
+        });
+      } catch (s3Error) {
+        const totalDuration = Date.now() - startTime;
+        log.error(`[LLMO-ATHENA] S3 error for siteId: ${siteId} - duration: ${totalDuration}ms, error: ${s3Error.message}, stack: ${s3Error.stack}`);
+        throw new Error(`Failed to access S3 folder: ${s3Error.message}`);
+      }
+    } catch (error) {
+      const totalDuration = Date.now() - startTime;
+      log.error(`[LLMO-ATHENA] Request failed for siteId: ${siteId} - duration: ${totalDuration}ms, error: ${error.message}, stack: ${error.stack}`);
+      return badRequest(error.message);
+    }
+  };
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -913,6 +1210,7 @@ function LlmoController(ctx) {
     onboardCustomer,
     offboardCustomer,
     queryFiles,
+    getLlmoAthena,
   };
 }
 
