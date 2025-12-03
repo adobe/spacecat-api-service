@@ -74,9 +74,8 @@ function canonicalizeUrl(url) {
     }
 
     return canonicalUrl;
+    /* c8 ignore next 3 */
   } catch (error) {
-    /* c8 ignore next 2 */
-    // Defensive: isValidUrl() validates before canonicalizeUrl() runs
     return url;
   }
 }
