@@ -559,6 +559,42 @@ describe('UrlStore Controller', () => {
       expect(result.status).to.equal(201);
       expect(mockDataAccess.AuditUrl.create.firstCall.args[0].createdBy).to.equal('system');
     });
+
+    it('falls back to system when authInfo is not present', async () => {
+      // Remove authInfo from context
+      delete context.attributes.authInfo;
+      urlStoreController = UrlStoreController(context, log);
+
+      context.data = [{ url: 'https://example.com/page1', audits: [] }];
+      mockDataAccess.AuditUrl.create.resolves(mockAuditUrls[0]);
+      const result = await urlStoreController.addUrls(context);
+      expect(result.status).to.equal(201);
+      expect(mockDataAccess.AuditUrl.create.firstCall.args[0].createdBy).to.equal('system');
+    });
+
+    it('canonicalizes URL by removing trailing slash', async () => {
+      context.data = [{ url: 'https://example.com/page/', audits: [] }];
+      mockDataAccess.AuditUrl.create.resolves(mockAuditUrls[0]);
+      await urlStoreController.addUrls(context);
+      // URL should have trailing slash removed
+      expect(mockDataAccess.AuditUrl.create.firstCall.args[0].url).to.equal('https://example.com/page');
+    });
+
+    it('canonicalizes URL by converting HTTP to HTTPS', async () => {
+      context.data = [{ url: 'http://example.com/page', audits: [] }];
+      mockDataAccess.AuditUrl.create.resolves(mockAuditUrls[0]);
+      await urlStoreController.addUrls(context);
+      // URL should be converted to HTTPS
+      expect(mockDataAccess.AuditUrl.create.firstCall.args[0].url).to.equal('https://example.com/page');
+    });
+
+    it('keeps trailing slash for root path', async () => {
+      context.data = [{ url: 'https://example.com/', audits: [] }];
+      mockDataAccess.AuditUrl.create.resolves(mockAuditUrls[0]);
+      await urlStoreController.addUrls(context);
+      // Root path should keep trailing slash
+      expect(mockDataAccess.AuditUrl.create.firstCall.args[0].url).to.equal('https://example.com/');
+    });
   });
 
   describe('updateUrls', () => {
