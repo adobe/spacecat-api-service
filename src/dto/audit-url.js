@@ -12,6 +12,7 @@
 
 /**
  * Data transfer object for AuditUrl.
+ * Note: AuditUrl uses composite primary key (siteId + url), no separate ID field.
  */
 export const AuditUrlDto = {
 
@@ -19,7 +20,6 @@ export const AuditUrlDto = {
    * Converts an AuditUrl object into a JSON object.
    * @param {Readonly<AuditUrl>} auditUrl - AuditUrl object.
    * @returns {{
-   *  auditUrlId: string,
    *  siteId: string,
    *  url: string,
    *  byCustomer: boolean,
@@ -31,7 +31,6 @@ export const AuditUrlDto = {
    * }} JSON object.
    */
   toJSON: (auditUrl) => ({
-    auditUrlId: auditUrl.getAuditUrlId(),
     siteId: auditUrl.getSiteId(),
     url: auditUrl.getUrl(),
     byCustomer: auditUrl.getByCustomer(),

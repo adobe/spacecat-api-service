@@ -865,7 +865,7 @@ AuditResult:
     - type: object
       description: |
         The result of a product-metatags audit targeting Product Detail Pages (PDP) of commerce sites.
-        This audit specifically analyzes product pages for e-commerce optimization, scraping SKU,
+        This audit specifically analyzes product pages for e-commerce optimization, scraping SKU, 
         thumbnail images, and catalog/store view codes for later autofixing capabilities.
       properties:
         auditResult:
@@ -873,7 +873,7 @@ AuditResult:
           properties:
             productDetailPages:
               description: |
-                A mapping of product page URLs to their analysis results, including product metadata
+                A mapping of product page URLs to their analysis results, including product metadata 
                 and meta tag recommendations for commerce optimization.
               type: object
               additionalProperties:
@@ -4814,7 +4814,7 @@ SandboxAuditType:
   description: |
     Supported audit types for sandbox environments:
     - meta-tags: General meta tag analysis for all page types
-    - product-metatags: Specialized audit for Product Detail Pages (PDP) of commerce sites,
+    - product-metatags: Specialized audit for Product Detail Pages (PDP) of commerce sites, 
       analyzing product-specific meta tags and scraping SKU, thumbnail, and catalog/store view codes for autofixing
     - alt-text: Alternative text analysis for images
   enum:
