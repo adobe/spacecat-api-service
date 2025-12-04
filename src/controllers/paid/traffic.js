@@ -454,6 +454,7 @@ function TrafficController(context, log, env) {
     getPaidTrafficTemporalSeriesByUrlPlatform: async () => fetchPaidTrafficDataTemporalSeries(['path', 'trf_platform']),
     getPaidTrafficTemporalSeriesByUrlChannelPlatform: async () => fetchPaidTrafficDataTemporalSeries(['path', 'trf_channel', 'trf_platform']),
 
+    getTrafficLossByDevices: async () => fetchTop3PagesTrafficData(['device'], true, null),
     getImpactByPage: async () => fetchTop3PagesTrafficData(['path'], true, 3),
     getImpactByPageDevice: async () => fetchTop3PagesTrafficData(['path', 'device'], true, null),
     getImpactByPageTrafficTypeDevice: async () => fetchTop3PagesTrafficData(['path', 'trf_type', 'device'], true, null),
