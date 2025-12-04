@@ -268,6 +268,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/traffic/paid/impact-by-page': trafficController.getImpactByPage,
     'GET /sites/:siteId/traffic/paid/impact-by-page-device': trafficController.getImpactByPageDevice,
     'GET /sites/:siteId/traffic/paid/impact-by-page-traffic-type-device': trafficController.getImpactByPageTrafficTypeDevice,
+    'GET /sites/:siteId/traffic/paid/traffic-loss-by-devices': trafficController.getTrafficLossByDevices,
     'GET /sites/:siteId/brand-guidelines': brandsController.getBrandGuidelinesForSite,
     'GET /sites/:siteId/brand-profile': sitesController.getBrandProfile,
     'POST /sites/:siteId/brand-profile': sitesController.triggerBrandProfile,

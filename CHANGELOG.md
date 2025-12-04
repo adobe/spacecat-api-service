@@ -1,3 +1,25 @@
+## [1.272.1](https://github.com/adobe/spacecat-api-service/compare/v1.272.0...v1.272.1) (2025-12-04)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1621](https://github.com/adobe/spacecat-api-service/issues/1621)) ([0d64ad0](https://github.com/adobe/spacecat-api-service/commit/0d64ad01d2bd45085cf57eb304f937ff5ca4cbb6))
+* null trend ([#1620](https://github.com/adobe/spacecat-api-service/issues/1620)) ([27360b9](https://github.com/adobe/spacecat-api-service/commit/27360b927f8482134355c05d8c56b45c3f0f83b6))
+
+# [1.272.0](https://github.com/adobe/spacecat-api-service/compare/v1.271.0...v1.272.0) (2025-12-04)
+
+
+### Features
+
+* endpoint for traffic loss by devices ([#1619](https://github.com/adobe/spacecat-api-service/issues/1619)) ([cc14073](https://github.com/adobe/spacecat-api-service/commit/cc14073cf6981f21ea45be79d5fa5a0a6414d2f3))
+
+# [1.271.0](https://github.com/adobe/spacecat-api-service/compare/v1.270.1...v1.271.0) (2025-12-04)
+
+
+### Features
+
+* use wwwUrlResolver from shared-utils ([#1604](https://github.com/adobe/spacecat-api-service/issues/1604)) ([7b4f66a](https://github.com/adobe/spacecat-api-service/commit/7b4f66a945b4bd77cac0716092c88fd24d5e5800))
+
 ## [1.270.1](https://github.com/adobe/spacecat-api-service/compare/v1.270.0...v1.270.1) (2025-12-03)
 
 
