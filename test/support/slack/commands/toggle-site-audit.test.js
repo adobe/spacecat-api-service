@@ -740,7 +740,7 @@ describe('UpdateSitesAuditsCommand', () => {
       expect(configurationMock.disableHandlerForSite.calledWith('meta-tags', site)).to.be.true;
       expect(configurationMock.disableHandlerForSite.calledWith('broken-backlinks', site)).to.be.true;
       expect(configurationMock.save.called).to.be.true;
-      expect(slackContextMock.say.calledWith(sinon.match(/Successfully disabled 3 audits/))).to.be.true;
+      expect(slackContextMock.say.calledWith(sinon.match(/Successfully disabled all audits/))).to.be.true;
     });
 
     it('should disable all audits from specified profile', async () => {

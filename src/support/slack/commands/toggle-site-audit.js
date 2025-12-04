@@ -102,7 +102,7 @@ export default (context) => {
     phrases: [PHRASE],
     usageText: `${PHRASE} {enable/disable} {site} {auditType} for single URL, 
     or ${PHRASE} {enable/disable} {profile/auditType} with CSV file uploaded.
-    Special: ${PHRASE} disable {site} all [profile] to disable all audits from a profile.`,
+    or ${PHRASE} disable {site} all [profile] to disable all audits from a profile.`,
   });
 
   const { log, dataAccess } = context;
@@ -236,14 +236,14 @@ export default (context) => {
               return;
             }
 
-            await say(`:hourglass_flowing_sand: Disabling ${profileAuditTypes.length} audits from profile "${targetProfile}" for ${site.getBaseURL()}...`);
+            await say(`:hourglass_flowing_sand: Disabling all audits from profile "${targetProfile}" for ${site.getBaseURL()}...`);
 
             profileAuditTypes.forEach((type) => {
               configuration.disableHandlerForSite(type, site);
             });
 
             await configuration.save();
-            await say(`${SUCCESS_MESSAGE_PREFIX}Successfully disabled ${profileAuditTypes.length} audits from profile "${targetProfile}" for "${site.getBaseURL()}".\n\`\`\`${profileAuditTypes.join('\n')}\`\`\``);
+            await say(`${SUCCESS_MESSAGE_PREFIX}Successfully disabled all audits from profile "${targetProfile}" for "${site.getBaseURL()}".\n\`\`\`${profileAuditTypes.join('\n')}\`\`\``);
             return;
           }
 
