@@ -397,6 +397,13 @@ describe('UrlStore Controller', () => {
       expect(result.status).to.equal(400);
     });
 
+    it('returns bad request when decoded base64 is not a valid URL', async () => {
+      // Base64 for "not-a-valid-url" = "bm90LWEtdmFsaWQtdXJs"
+      context.params = { siteId, base64Url: 'bm90LWEtdmFsaWQtdXJs' };
+      const result = await urlStoreController.getUrl(context);
+      expect(result.status).to.equal(400);
+    });
+
     it('returns not found if site does not exist', async () => {
       context.params = { siteId, base64Url: 'aHR0cHM6Ly9leGFtcGxlLmNvbS9wYWdlMQ' };
       mockDataAccess.Site.findById.resolves(null);

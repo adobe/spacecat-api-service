@@ -99,7 +99,7 @@ url-store-by-audit:
       required: false
       schema:
         type: string
-        enum: [rank, traffic, url, createdAt, updatedAt]
+        enum: [url, createdAt, updatedAt]
       description: Field to sort by
     - name: sortOrder
       in: query

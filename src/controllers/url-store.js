@@ -44,43 +44,35 @@ const MAX_LIMIT = 500;
  * @returns {string} - Canonicalized URL
  */
 function canonicalizeUrl(url) {
-  try {
-    // Normalize: lowercase hostname, strip port, remove query params, ensure https
-    // Note: isValidUrl() validates URLs before this runs, so protocol is always present
-    const urlObj = new URL(url);
+  // Note: isValidUrl() validates URLs before this runs, so protocol is always present
+  const urlObj = new URL(url);
 
-    // Lowercase the hostname
-    urlObj.hostname = urlObj.hostname.toLowerCase();
+  // Lowercase the hostname
+  urlObj.hostname = urlObj.hostname.toLowerCase();
 
-    // Remove port
-    urlObj.port = '';
+  // Remove port
+  urlObj.port = '';
 
-    // Remove query parameters
-    urlObj.search = '';
+  // Remove query parameters
+  urlObj.search = '';
 
-    // Remove hash
-    urlObj.hash = '';
+  // Remove hash
+  urlObj.hash = '';
 
-    // Get the URL string
-    let canonicalUrl = urlObj.toString();
+  // Get the URL string
+  let canonicalUrl = urlObj.toString();
 
-    // Remove trailing slash (unless it's just the domain)
-    if (canonicalUrl.endsWith('/') && urlObj.pathname !== '/') {
-      canonicalUrl = canonicalUrl.slice(0, -1);
-    }
-
-    // Ensure https
-    if (canonicalUrl.startsWith('http://')) {
-      canonicalUrl = canonicalUrl.replace('http://', 'https://');
-    }
-
-    return canonicalUrl;
-    /* c8 ignore start */
-  } catch (error) {
-    // Defensive: isValidUrl() validates before canonicalizeUrl() runs
-    return url;
+  // Remove trailing slash (unless it's just the domain)
+  if (canonicalUrl.endsWith('/') && urlObj.pathname !== '/') {
+    canonicalUrl = canonicalUrl.slice(0, -1);
   }
-  /* c8 ignore stop */
+
+  // Ensure https
+  if (canonicalUrl.startsWith('http://')) {
+    canonicalUrl = canonicalUrl.replace('http://', 'https://');
+  }
+
+  return canonicalUrl;
 }
 
 /**
@@ -297,6 +289,12 @@ function UrlStoreController(ctx, log) {
       return badRequest('URL required');
     }
 
+    // Decode base64 URL and validate - invalid URL is a client error
+    const url = decodeBase64ToUrl(base64Url);
+    if (!isValidUrl(url)) {
+      return badRequest('Invalid URL in base64 encoding');
+    }
+
     const site = await Site.findById(siteId);
     if (!site) {
       return notFound('Site not found');
@@ -307,7 +305,6 @@ function UrlStoreController(ctx, log) {
     }
 
     try {
-      const url = decodeBase64ToUrl(base64Url);
       const canonicalUrl = canonicalizeUrl(url);
       const auditUrl = await AuditUrl.findBySiteIdAndUrl(siteId, canonicalUrl);
 
