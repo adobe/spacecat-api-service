@@ -84,6 +84,7 @@ describe('Sites Controller', () => {
             schema: {
               attributes: {
                 name: { type: 'string', name: 'name', get: (value) => value },
+                baseURL: { type: 'string', name: 'baseURL', get: (value) => value },
                 config: { type: 'any', name: 'config', get: (value) => Config(value) },
                 deliveryType: { type: 'string', name: 'deliveryType', get: (value) => value },
                 authoringType: { type: 'string', name: 'authoringType', get: (value) => value },
@@ -228,6 +229,7 @@ describe('Sites Controller', () => {
       func: { package: 'spacecat-services', version: 'ci', name: 'test' },
       rumApiClient: {
         query: sandbox.stub(),
+        retrieveDomainkey: sandbox.stub().resolves('domain-key'),
       },
       log: loggerStub,
       env: {
