@@ -1,3 +1,10 @@
+# [1.271.0](https://github.com/adobe/spacecat-api-service/compare/v1.270.1...v1.271.0) (2025-12-04)
+
+
+### Features
+
+* use wwwUrlResolver from shared-utils ([#1604](https://github.com/adobe/spacecat-api-service/issues/1604)) ([7b4f66a](https://github.com/adobe/spacecat-api-service/commit/7b4f66a945b4bd77cac0716092c88fd24d5e5800))
+
 ## [1.270.1](https://github.com/adobe/spacecat-api-service/compare/v1.270.0...v1.270.1) (2025-12-03)
 
 
