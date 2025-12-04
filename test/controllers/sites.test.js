@@ -228,7 +228,6 @@ describe('Sites Controller', () => {
       func: { package: 'spacecat-services', version: 'ci', name: 'test' },
       rumApiClient: {
         query: sandbox.stub(),
-        retrieveDomainkey: sandbox.stub().resolves('domain-key'),
       },
       log: loggerStub,
       env: {
