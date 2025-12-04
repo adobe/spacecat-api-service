@@ -328,6 +328,8 @@ paths:
     $ref: './sandbox-audit-api.yaml#/sandbox-audit'
   /sites/{siteId}/llmo/cdn-logs-bucket-config:
     $ref: './llmo-api.yaml#/llmo-cdn-logs-bucket-config'
+  /sites/{siteId}/llmo/brand-presence/filters:
+    $ref: './llmo-api.yaml#/llmo-brand-presence-filters'
   /llmo/onboard:
     $ref: './llmo-api.yaml#/llmo-onboard'
   /sites/{siteId}/llmo/offboard:
