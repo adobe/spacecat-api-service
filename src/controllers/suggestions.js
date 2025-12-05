@@ -1532,8 +1532,88 @@ function SuggestionsController(ctx, sqs, env) {
 
     let succeededSuggestions = [];
 
-    // Only attempt rollback if we have valid suggestions
-    if (isNonEmptyArray(validSuggestions)) {
+    // Separate domain-wide from regular suggestions
+    const domainWideSuggestions = validSuggestions.filter((s) => isDomainWideSuggestion(s));
+    const regularSuggestions = validSuggestions.filter((s) => !isDomainWideSuggestion(s));
+
+    // Handle domain-wide rollbacks separately (for prerender)
+    if (isNonEmptyArray(domainWideSuggestions)) {
+      try {
+        const tokowakaClient = TokowakaClient.createFrom(context);
+        const baseURL = site.getBaseURL();
+
+        for (const suggestion of domainWideSuggestions) {
+          try {
+            // Fetch existing metaconfig
+            // eslint-disable-next-line no-await-in-loop
+            const metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
+
+            if (metaconfig && metaconfig.prerender) {
+              // Remove prerender configuration from metaconfig
+              delete metaconfig.prerender;
+
+              // Upload updated metaconfig
+              // eslint-disable-next-line no-await-in-loop
+              await tokowakaClient.uploadMetaconfig(baseURL, metaconfig);
+
+              context.log.info(`Removed prerender config from metaconfig for domain-wide suggestion ${suggestion.getId()}`);
+            }
+
+            // Remove tokowakaDeployed from the domain-wide suggestion
+            const currentData = suggestion.getData();
+            delete currentData.tokowakaDeployed;
+            suggestion.setData(currentData);
+            suggestion.setUpdatedBy('tokowaka-rollback');
+            // eslint-disable-next-line no-await-in-loop
+            await suggestion.save();
+
+            succeededSuggestions.push(suggestion);
+
+            // Find and update all suggestions that were covered by this domain-wide deployment
+            const coveredSuggestions = allSuggestions.filter(
+              (s) => s.getData()?.coveredByDomainWide === suggestion.getId(),
+            );
+
+            if (isNonEmptyArray(coveredSuggestions)) {
+              context.log.info(`Rolling back ${coveredSuggestions.length} suggestions covered by domain-wide deployment`);
+
+              // eslint-disable-next-line no-await-in-loop
+              await Promise.all(
+                coveredSuggestions.map(async (coveredSuggestion) => {
+                  const coveredData = coveredSuggestion.getData();
+                  delete coveredData.tokowakaDeployed;
+                  delete coveredData.coveredByDomainWide;
+                  coveredSuggestion.setData(coveredData);
+                  coveredSuggestion.setUpdatedBy('domain-wide-rollback');
+                  return coveredSuggestion.save();
+                }),
+              );
+            }
+          } catch (error) {
+            context.log.error(`Error rolling back domain-wide suggestion ${suggestion.getId()}: ${error.message}`, error);
+            failedSuggestions.push({
+              uuid: suggestion.getId(),
+              index: suggestionIds.indexOf(suggestion.getId()),
+              message: `Rollback failed: ${error.message}`,
+              statusCode: 500,
+            });
+          }
+        }
+      } catch (error) {
+        context.log.error(`Error during domain-wide rollback: ${error.message}`, error);
+        domainWideSuggestions.forEach((suggestion) => {
+          failedSuggestions.push({
+            uuid: suggestion.getId(),
+            index: suggestionIds.indexOf(suggestion.getId()),
+            message: 'Rollback failed: Internal server error',
+            statusCode: 500,
+          });
+        });
+      }
+    }
+
+    // Only attempt rollback if we have regular (non-domain-wide) suggestions
+    if (isNonEmptyArray(regularSuggestions)) {
       try {
         const tokowakaClient = TokowakaClient.createFrom(context);
 
@@ -1541,7 +1621,7 @@ function SuggestionsController(ctx, sqs, env) {
         const result = await tokowakaClient.rollbackSuggestions(
           site,
           opportunity,
-          validSuggestions,
+          regularSuggestions,
         );
 
         // Process results
