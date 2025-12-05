@@ -107,9 +107,7 @@ export async function handleLlmoRationale(context) {
 
     log.info(`Filtered ${topics.length} topics down to ${filteredTopics.length} results`);
 
-    return ok(filteredTopics, {
-      'Content-Encoding': 'br',
-    });
+    return ok(filteredTopics);
   } catch (s3Error) {
     if (s3Error.name === 'NoSuchKey') {
       log.warn(`LLMO rationale file not found for site ${siteId} at ${s3Key}`);
