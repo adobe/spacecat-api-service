@@ -31,3 +31,47 @@ export const REPORT_TYPES = {
   OPTIMIZATION: 'optimization',
   PERFORMANCE: 'performance',
 };
+
+/**
+ * Opportunity tag mappings for different opportunity types
+ */
+export const OPPORTUNITY_TAG_MAPPINGS = {
+  // Web Performance
+  cwv: ['Core Web Vitals', 'Web Performance'],
+
+  // Traffic Acquisition - SEO
+  metatags: ['Meta Tags', 'SEO'],
+  'internal-links': ['Internal links', 'SEO', 'Engagement'],
+  'broken-backlinks': ['Backlinks', 'SEO'],
+  'broken-internal-links': ['Backlinks', 'SEO'],
+  sitemap: ['Sitemap', 'SEO'],
+  canonical: ['Canonical URLs', 'SEO'],
+  hreflang: ['Hreflang', 'SEO'],
+  'structured-data': ['Structured Data', 'SEO'],
+  'redirect-chains': ['Redirect Chains', 'SEO'],
+  headings: ['Headings', 'SEO', 'Engagement'],
+
+  // Traffic Acquisition - Paid Media
+  'consent-banner': ['Consent Banner', 'Engagement'],
+
+  // Compliance & Accessibility
+  'a11y-assistive': ['ARIA Labels', 'Accessibility'],
+  'color-contrast': ['Color Constrast', 'Accessibility', 'Engagement'],
+  'keyboard-access': ['Keyboard Access', 'Accessibility'],
+  readability: ['Readbability', 'Accessibility', 'Engagement'],
+  'screen-readers': ['Screen Readers', 'Accessibility'],
+  'alt-text': ['Alt-Text', 'Accessibility', 'SEO'],
+  'form-a11y': ['Form Accessibility', 'Accessibility', 'Engagement'],
+
+  // Engagement & Conversion
+  'high-organic-low-ctr': ['Low CTR', 'Engagement'],
+  'high-page-views-low-form-views': ['Form Visibility', 'Engagement'],
+  'high-page-views-low-form-nav': ['Form Placement', 'Engagement'],
+  'high-form-views-low-conversions': ['Form CTR', 'Conversion'],
+
+  // Security
+  'security-xss': ['Cross Site Scripting', 'Security'],
+  'security-libraries': ['3rd Party Libraries', 'Security'],
+  'security-permissions': ['Permission Settings', 'Security'],
+  'security-cors': ['CORS', 'Security'],
+};

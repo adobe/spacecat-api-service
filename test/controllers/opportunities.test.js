@@ -362,10 +362,13 @@ describe('Opportunities Controller', () => {
   });
 
   // TODO: Complete tests for OpportunitiesController
-  it('creates an opportunity', async () => {
+  it('creates an opportunity with hardcoded tags merged with existing tags', async () => {
+    // Reset the stub to track calls
+    mockOpportunity.create.resetHistory();
+
     const response = await opportunitiesController.createOpportunity({
       params: { siteId: SITE_ID },
-      data: opptys[0],
+      data: opptys[0], // This has tags: ['tag1', 'tag2']
     });
     expect(mockOpportunityDataAccess.Opportunity.create.calledOnce).to.be.true;
     expect(response.status).to.equal(201);
@@ -373,9 +376,41 @@ describe('Opportunities Controller', () => {
     const opportunity = await response.json();
     expect(opportunity).to.have.property('id', OPPORTUNITY_ID);
     expect(opportunity).to.have.property('siteId', SITE_ID);
+
+    // Verify that hardcoded tags were added to the create call
+    const createCallData = mockOpportunity.create.getCall(0).args[0];
+    expect(createCallData).to.have.property('tags').that.includes('automated');
+    expect(createCallData).to.have.property('tags').that.includes('spacecat');
+    expect(createCallData).to.have.property('tags').that.includes('tag1');
+    expect(createCallData).to.have.property('tags').that.includes('tag2');
   });
 
-  it('updates an opportunity', async () => {
+  it('creates an opportunity with hardcoded tags when no tags exist', async () => {
+    // Reset the stub to track calls
+    mockOpportunity.create.resetHistory();
+
+    // Create a copy of the opportunity data without tags
+    const opptyWithoutTags = { ...opptys[0] };
+    delete opptyWithoutTags.tags;
+
+    const response = await opportunitiesController.createOpportunity({
+      params: { siteId: SITE_ID },
+      data: opptyWithoutTags,
+    });
+    expect(mockOpportunityDataAccess.Opportunity.create.calledOnce).to.be.true;
+    expect(response.status).to.equal(201);
+
+    // Verify that only hardcoded tags were added to the create call
+    const createCallData = mockOpportunity.create.getCall(0).args[0];
+    expect(createCallData).to.have.property('tags').that.includes('automated');
+    expect(createCallData).to.have.property('tags').that.includes('spacecat');
+    expect(createCallData.tags).to.have.lengthOf(2); // Only the hardcoded tags
+  });
+
+  it('updates an opportunity and preserves hardcoded tags', async () => {
+    // Create a spy for the setTags method
+    const setTagsSpy = sandbox.spy(mockOpptyEntity, 'setTags');
+
     const response = await opportunitiesController.patchOpportunity({
       ...defaultAuthAttributes,
       params: {
@@ -397,6 +432,19 @@ describe('Opportunities Controller', () => {
         updatedBy: 'test@test.com',
       },
     });
+
+    // Verify that setTags was called
+    expect(setTagsSpy.called).to.be.true;
+
+    // Verify the tags argument contains the expected values
+    const tagsArgument = setTagsSpy.firstCall.args[0];
+    expect(tagsArgument).to.include('automated');
+    expect(tagsArgument).to.include('spacecat');
+    expect(tagsArgument).to.include('tag1');
+    expect(tagsArgument).to.include('tag2');
+    expect(tagsArgument).to.include('NEW');
+
+    setTagsSpy.restore();
 
     // Validate updated values
     expect(mockOpptyEntity.getAuditId()).to.be.equals('Audit ID NEW');
