@@ -62,6 +62,17 @@ function SuggestionsController(ctx, sqs, env) {
 
   const shouldGroupSuggestionsForAutofix = (type) => !AUTOFIX_UNGROUPED_OPPTY_TYPES.includes(type);
 
+  /**
+   * Checks if a suggestion is a domain-wide aggregate suggestion
+   * Domain-wide suggestions are configuration-level suggestions that cannot be deployed individually
+   * @param {Object} suggestion - Suggestion entity
+   * @returns {boolean} - True if suggestion is a domain-wide aggregate suggestion
+   */
+  const isDomainWideSuggestion = (suggestion) => {
+    const data = suggestion.getData();
+    return data?.isDomainWide === true || data?.isDomainWideMaster === true; // Support both for backwards compatibility
+  };
+
   const {
     Opportunity, Suggestion, Site, Configuration,
   } = dataAccess;
@@ -681,7 +692,15 @@ function SuggestionsController(ctx, sqs, env) {
     const failedSuggestions = [];
     suggestions.forEach((suggestion) => {
       if (suggestionIds.includes(suggestion.getId())) {
-        if (suggestion.getStatus() === SuggestionModel.STATUSES.NEW) {
+        // Filter out domain-wide suggestions from autofix
+        if (isDomainWideSuggestion(suggestion)) {
+          failedSuggestions.push({
+            uuid: suggestion.getId(),
+            index: suggestionIds.indexOf(suggestion.getId()),
+            message: 'Domain-wide aggregate suggestions cannot be auto-fixed individually',
+            statusCode: 400,
+          });
+        } else if (suggestion.getStatus() === SuggestionModel.STATUSES.NEW) {
           validSuggestions.push(suggestion);
         } else {
           failedSuggestions.push({
@@ -902,6 +921,14 @@ function SuggestionsController(ctx, sqs, env) {
           message: 'Suggestion not found',
           statusCode: 404,
         });
+      } else if (isDomainWideSuggestion(suggestion)) {
+        // Filter out domain-wide suggestions from preview
+        failedSuggestions.push({
+          uuid: suggestionId,
+          index,
+          message: 'Domain-wide aggregate suggestions cannot be previewed individually',
+          statusCode: 400,
+        });
       } else if (suggestion.getStatus() !== SuggestionModel.STATUSES.NEW) {
         failedSuggestions.push({
           uuid: suggestionId,
@@ -1036,7 +1063,7 @@ function SuggestionsController(ctx, sqs, env) {
     if (!isNonEmptyObject(context.data)) {
       return badRequest('No data provided');
     }
-    const { suggestionIds } = context.data;
+    const { suggestionIds, suggestionsMetadata } = context.data;
     if (!isArray(suggestionIds) || suggestionIds.length === 0) {
       return badRequest('Request body must contain a non-empty array of suggestionIds');
     }
@@ -1060,7 +1087,17 @@ function SuggestionsController(ctx, sqs, env) {
 
     // Track valid, failed, and missing suggestions
     const validSuggestions = [];
+    const domainWideSuggestions = [];
     const failedSuggestions = [];
+    let coveredSuggestionsCount = 0;
+
+    // Create a map of suggestion metadata for quick lookup
+    const metadataMap = new Map();
+    if (isNonEmptyArray(suggestionsMetadata)) {
+      suggestionsMetadata.forEach((meta) => {
+        metadataMap.set(meta.id, meta);
+      });
+    }
 
     // Check each requested suggestion (basic validation only)
     suggestionIds.forEach((suggestionId, index) => {
@@ -1073,6 +1110,19 @@ function SuggestionsController(ctx, sqs, env) {
           message: 'Suggestion not found',
           statusCode: 404,
         });
+      } else if (isDomainWideSuggestion(suggestion)) {
+        // Handle domain-wide suggestions separately
+        const metadata = metadataMap.get(suggestionId);
+        if (metadata && isNonEmptyArray(metadata.allowedRegexPatterns)) {
+          domainWideSuggestions.push({ suggestion, metadata });
+        } else {
+          failedSuggestions.push({
+            uuid: suggestionId,
+            index,
+            message: 'Domain-wide suggestion requires allowedRegexPatterns in metadata',
+            statusCode: 400,
+          });
+        }
       } else if (suggestion.getStatus() !== SuggestionModel.STATUSES.NEW) {
         failedSuggestions.push({
           uuid: suggestionId,
@@ -1084,6 +1134,65 @@ function SuggestionsController(ctx, sqs, env) {
         validSuggestions.push(suggestion);
       }
     });
+
+    // Filter out validSuggestions that are covered by domain-wide suggestions in the same deployment
+    if (isNonEmptyArray(domainWideSuggestions) && isNonEmptyArray(validSuggestions)) {
+      // Build all regex patterns from domain-wide suggestions
+      const allDomainWidePatterns = [];
+      domainWideSuggestions.forEach(({ metadata }) => {
+        if (isNonEmptyArray(metadata.allowedRegexPatterns)) {
+          metadata.allowedRegexPatterns.forEach((pattern) => {
+            try {
+              allDomainWidePatterns.push(new RegExp(pattern));
+            } catch (error) {
+              context.log.warn(`Invalid regex pattern: ${pattern}`, error);
+            }
+          });
+        }
+      });
+
+      // Filter validSuggestions to exclude those covered by domain-wide patterns
+      const filteredValidSuggestions = [];
+      const skippedSuggestions = [];
+
+      validSuggestions.forEach((suggestion) => {
+        const url = suggestion.getData()?.url;
+        if (!url) {
+          // No URL, can't check coverage - keep it
+          filteredValidSuggestions.push(suggestion);
+          return;
+        }
+
+        // Check if this URL is covered by any domain-wide pattern
+        const isCovered = allDomainWidePatterns.some((regex) => regex.test(url));
+
+        if (isCovered) {
+          // Skip this suggestion - it's covered by domain-wide
+          skippedSuggestions.push({
+            uuid: suggestion.getId(),
+            index: suggestionIds.indexOf(suggestion.getId()),
+            message: 'Skipped: URL is covered by domain-wide suggestion in this deployment',
+            statusCode: 200,
+            suggestion: SuggestionDto.toJSON(suggestion),
+          });
+          context.log.info(`Skipping suggestion ${suggestion.getId()} - covered by domain-wide pattern`);
+        } else {
+          // Not covered, include in deployment
+          filteredValidSuggestions.push(suggestion);
+        }
+      });
+
+      // Update validSuggestions to the filtered list
+      validSuggestions.length = 0;
+      validSuggestions.push(...filteredValidSuggestions);
+
+      // Add skipped suggestions to a tracking array (we'll mark them later)
+      if (isNonEmptyArray(skippedSuggestions)) {
+        // Store for later processing after domain-wide deployment
+        context.skippedDueToSameBatchDomainWide = skippedSuggestions;
+        context.log.info(`Filtered out ${skippedSuggestions.length} suggestions covered by domain-wide in same deployment`);
+      }
+    }
 
     let succeededSuggestions = [];
 
@@ -1142,6 +1251,176 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
 
+    // Handle domain-wide suggestions separately
+    if (isNonEmptyArray(domainWideSuggestions)) {
+      try {
+        const tokowakaClient = TokowakaClient.createFrom(context);
+        const baseURL = site.getBaseURL();
+        
+        // Deploy each domain-wide suggestion
+        for (const { suggestion, metadata } of domainWideSuggestions) {
+          try {
+            // Fetch existing metaconfig or create new one
+            let metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
+            
+            if (!metaconfig) {
+              metaconfig = {
+                siteId: site.getId(),
+              };
+            }
+            
+            // Update ONLY the prerender property, preserving all other properties
+            // Expected structure: { prerender: { allowList: ["/*", "/path/*"] } }
+            metaconfig.prerender = {
+              allowList: metadata.allowedRegexPatterns,
+            };
+            
+            context.log.info(`Updating metaconfig for domain-wide prerender suggestion ${suggestion.getId()}`);
+            
+            // Upload updated metaconfig
+            await tokowakaClient.uploadMetaconfig(baseURL, metaconfig);
+            
+            // Update suggestion with deployment timestamp
+            const deploymentTimestamp = Date.now();
+            const currentData = suggestion.getData();
+            suggestion.setData({
+              ...currentData,
+              tokowakaDeployed: deploymentTimestamp,
+            });
+            suggestion.setUpdatedBy('tokowaka-deployment');
+            await suggestion.save();
+            
+            succeededSuggestions.push(suggestion);
+            context.log.info(`Successfully deployed domain-wide suggestion ${suggestion.getId()}`);
+            
+            // Mark all other NEW suggestions that match the allowedRegexPatterns as fixed
+            try {
+              // Get IDs of suggestions skipped in this batch
+              const skippedInBatchIds = new Set(
+                (context.skippedDueToSameBatchDomainWide || []).map(s => s.uuid)
+              );
+
+              const regexPatterns = metadata.allowedRegexPatterns.map(pattern => new RegExp(pattern));
+              const coveredSuggestions = allSuggestions.filter((s) => {
+                // Skip the domain-wide suggestion itself
+                if (s.getId() === suggestion.getId()) {
+                  return false;
+                }
+                
+                // Skip suggestions that were already filtered out in this batch
+                if (skippedInBatchIds.has(s.getId())) {
+                  return false;
+                }
+                
+                // Only process NEW suggestions
+                if (s.getStatus() !== SuggestionModel.STATUSES.NEW) {
+                  return false;
+                }
+                
+                // Skip other domain-wide suggestions
+                if (isDomainWideSuggestion(s)) {
+                  return false;
+                }
+                
+                // Check if URL matches any of the allowed regex patterns
+                const url = s.getData()?.url;
+                if (!url) {
+                  return false;
+                }
+                
+                return regexPatterns.some(regex => regex.test(url));
+              });
+              
+              // Mark covered suggestions as deployed
+              if (isNonEmptyArray(coveredSuggestions)) {
+                context.log.info(`Marking ${coveredSuggestions.length} suggestions as covered by domain-wide deployment`);
+                
+                await Promise.all(
+                  coveredSuggestions.map(async (coveredSuggestion) => {
+                    const coveredData = coveredSuggestion.getData();
+                    coveredSuggestion.setData({
+                      ...coveredData,
+                      tokowakaDeployed: deploymentTimestamp,
+                      coveredByDomainWide: suggestion.getId(),
+                    });
+                    coveredSuggestion.setUpdatedBy('domain-wide-deployment');
+                    return coveredSuggestion.save();
+                  }),
+                );
+                
+                coveredSuggestionsCount += coveredSuggestions.length;
+                context.log.info(`Successfully marked ${coveredSuggestions.length} suggestions as covered`);
+              }
+            } catch (coverError) {
+              context.log.error(`Error marking covered suggestions: ${coverError.message}`, coverError);
+              // Don't fail the deployment if marking covered suggestions fails
+            }
+          } catch (error) {
+            context.log.error(`Error deploying domain-wide suggestion ${suggestion.getId()}: ${error.message}`, error);
+            failedSuggestions.push({
+              uuid: suggestion.getId(),
+              index: suggestionIds.indexOf(suggestion.getId()),
+              message: `Deployment failed: ${error.message}`,
+              statusCode: 500,
+            });
+          }
+        }
+      } catch (error) {
+        context.log.error(`Error deploying domain-wide suggestions: ${error.message}`, error);
+        // Mark all domain-wide suggestions as failed
+        domainWideSuggestions.forEach(({ suggestion }) => {
+          failedSuggestions.push({
+            uuid: suggestion.getId(),
+            index: suggestionIds.indexOf(suggestion.getId()),
+            message: 'Deployment failed: Internal server error',
+            statusCode: 500,
+          });
+        });
+      }
+    }
+
+    // Mark suggestions that were skipped due to domain-wide coverage in same deployment
+    if (context.skippedDueToSameBatchDomainWide && isNonEmptyArray(context.skippedDueToSameBatchDomainWide)) {
+      try {
+        const deploymentTimestamp = Date.now();
+        const skippedUUIDs = context.skippedDueToSameBatchDomainWide.map(s => s.uuid);
+        
+        // Fetch and update all skipped suggestions
+        const skippedSuggestionEntities = allSuggestions.filter(s => skippedUUIDs.includes(s.getId()));
+        
+        await Promise.all(
+          skippedSuggestionEntities.map(async (skippedSuggestion) => {
+            const currentData = skippedSuggestion.getData();
+            skippedSuggestion.setData({
+              ...currentData,
+              tokowakaDeployed: deploymentTimestamp,
+              coveredByDomainWide: 'same-batch-deployment',
+              skippedInDeployment: true,
+            });
+            skippedSuggestion.setUpdatedBy('domain-wide-deployment');
+            return skippedSuggestion.save();
+          }),
+        );
+        
+        coveredSuggestionsCount += skippedSuggestionEntities.length;
+        context.log.info(`Marked ${skippedSuggestionEntities.length} skipped suggestions as covered`);
+        
+        // Add to succeeded suggestions list for response
+        succeededSuggestions.push(...skippedSuggestionEntities);
+      } catch (error) {
+        context.log.error(`Error marking skipped suggestions: ${error.message}`, error);
+        // Add to failed if we couldn't mark them
+        context.skippedDueToSameBatchDomainWide.forEach((skipped) => {
+          failedSuggestions.push({
+            uuid: skipped.uuid,
+            index: skipped.index,
+            message: 'Failed to mark as covered by domain-wide',
+            statusCode: 500,
+          });
+        });
+      }
+    }
+
     const response = {
       suggestions: [
         ...succeededSuggestions.map((suggestion) => ({
@@ -1156,6 +1435,10 @@ function SuggestionsController(ctx, sqs, env) {
         total: suggestionIds.length,
         success: succeededSuggestions.length,
         failed: failedSuggestions.length,
+        ...(coveredSuggestionsCount > 0 && { 
+          autoCovered: coveredSuggestionsCount,
+          message: `${coveredSuggestionsCount} additional suggestion(s) automatically marked as deployed (covered by domain-wide configuration)`,
+        }),
       },
     };
     response.suggestions.sort((a, b) => a.index - b.index);
