@@ -1,3 +1,10 @@
+# [1.274.0](https://github.com/adobe/spacecat-api-service/compare/v1.273.6...v1.274.0) (2025-12-05)
+
+
+### Features
+
+* llmo rationale endpoint LLMO-1553 ([#1594](https://github.com/adobe/spacecat-api-service/issues/1594)) ([f5a842a](https://github.com/adobe/spacecat-api-service/commit/f5a842ac9bc03908aa2fda4eeb699735ea1d53f2))
+
 ## [1.273.6](https://github.com/adobe/spacecat-api-service/compare/v1.273.5...v1.273.6) (2025-12-05)
 
 
