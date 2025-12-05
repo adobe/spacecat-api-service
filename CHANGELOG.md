@@ -1,3 +1,10 @@
+## [1.274.1](https://github.com/adobe/spacecat-api-service/compare/v1.274.0...v1.274.1) (2025-12-05)
+
+
+### Bug Fixes
+
+* config summary timeout issue ([#1630](https://github.com/adobe/spacecat-api-service/issues/1630)) ([0dad1f2](https://github.com/adobe/spacecat-api-service/commit/0dad1f2fdfe0a63cd4119cc046b47d8ac1817944))
+
 # [1.274.0](https://github.com/adobe/spacecat-api-service/compare/v1.273.6...v1.274.0) (2025-12-05)
 
 
