@@ -64,13 +64,15 @@ function SuggestionsController(ctx, sqs, env) {
 
   /**
    * Checks if a suggestion is a domain-wide aggregate suggestion
-   * Domain-wide suggestions are configuration-level suggestions that cannot be deployed individually
+   * Domain-wide suggestions are configuration-level suggestions
+   * that cannot be deployed individually
    * @param {Object} suggestion - Suggestion entity
    * @returns {boolean} - True if suggestion is a domain-wide aggregate suggestion
    */
   const isDomainWideSuggestion = (suggestion) => {
     const data = suggestion.getData();
-    return data?.isDomainWide === true || data?.isDomainWideMaster === true; // Support both for backwards compatibility
+    // Support both for backwards compatibility
+    return data?.isDomainWide === true || data?.isDomainWideMaster === true;
   };
 
   const {
@@ -1135,7 +1137,8 @@ function SuggestionsController(ctx, sqs, env) {
       }
     });
 
-    // Filter out validSuggestions that are covered by domain-wide suggestions in the same deployment
+    // Filter out validSuggestions that are covered by domain-wide suggestions
+    // in the same deployment
     if (isNonEmptyArray(domainWideSuggestions) && isNonEmptyArray(validSuggestions)) {
       // Build all regex patterns from domain-wide suggestions
       const allDomainWidePatterns = [];
@@ -1256,30 +1259,36 @@ function SuggestionsController(ctx, sqs, env) {
       try {
         const tokowakaClient = TokowakaClient.createFrom(context);
         const baseURL = site.getBaseURL();
-        
+
         // Deploy each domain-wide suggestion
+        // eslint-disable-next-line no-await-in-loop
         for (const { suggestion, metadata } of domainWideSuggestions) {
           try {
             // Fetch existing metaconfig or create new one
+            // eslint-disable-next-line no-await-in-loop
             let metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
-            
+
             if (!metaconfig) {
               metaconfig = {
                 siteId: site.getId(),
               };
             }
-            
+
             // Update ONLY the prerender property, preserving all other properties
             // Expected structure: { prerender: { allowList: ["/*", "/path/*"] } }
             metaconfig.prerender = {
               allowList: metadata.allowedRegexPatterns,
             };
-            
-            context.log.info(`Updating metaconfig for domain-wide prerender suggestion ${suggestion.getId()}`);
-            
+
+            const suggestionId = suggestion.getId();
+            context.log.info(
+              `Updating metaconfig for domain-wide prerender suggestion ${suggestionId}`,
+            );
+
             // Upload updated metaconfig
+            // eslint-disable-next-line no-await-in-loop
             await tokowakaClient.uploadMetaconfig(baseURL, metaconfig);
-            
+
             // Update suggestion with deployment timestamp
             const deploymentTimestamp = Date.now();
             const currentData = suggestion.getData();
@@ -1288,53 +1297,59 @@ function SuggestionsController(ctx, sqs, env) {
               tokowakaDeployed: deploymentTimestamp,
             });
             suggestion.setUpdatedBy('tokowaka-deployment');
+            // eslint-disable-next-line no-await-in-loop
             await suggestion.save();
-            
+
             succeededSuggestions.push(suggestion);
-            context.log.info(`Successfully deployed domain-wide suggestion ${suggestion.getId()}`);
-            
-            // Mark all other NEW suggestions that match the allowedRegexPatterns as fixed
+            context.log.info(`Successfully deployed domain-wide suggestion ${suggestionId}`);
+
+            // Mark all other NEW suggestions that match allowedRegexPatterns
             try {
               // Get IDs of suggestions skipped in this batch
               const skippedInBatchIds = new Set(
-                (context.skippedDueToSameBatchDomainWide || []).map(s => s.uuid)
+                (context.skippedDueToSameBatchDomainWide || []).map((s) => s.uuid),
               );
 
-              const regexPatterns = metadata.allowedRegexPatterns.map(pattern => new RegExp(pattern));
+              const regexPatterns = metadata.allowedRegexPatterns.map(
+                (pattern) => new RegExp(pattern),
+              );
               const coveredSuggestions = allSuggestions.filter((s) => {
                 // Skip the domain-wide suggestion itself
                 if (s.getId() === suggestion.getId()) {
                   return false;
                 }
-                
+
                 // Skip suggestions that were already filtered out in this batch
                 if (skippedInBatchIds.has(s.getId())) {
                   return false;
                 }
-                
+
                 // Only process NEW suggestions
                 if (s.getStatus() !== SuggestionModel.STATUSES.NEW) {
                   return false;
                 }
-                
+
                 // Skip other domain-wide suggestions
                 if (isDomainWideSuggestion(s)) {
                   return false;
                 }
-                
+
                 // Check if URL matches any of the allowed regex patterns
                 const url = s.getData()?.url;
                 if (!url) {
                   return false;
                 }
-                
-                return regexPatterns.some(regex => regex.test(url));
+
+                return regexPatterns.some((regex) => regex.test(url));
               });
-              
+
               // Mark covered suggestions as deployed
               if (isNonEmptyArray(coveredSuggestions)) {
-                context.log.info(`Marking ${coveredSuggestions.length} suggestions as covered by domain-wide deployment`);
-                
+                const coverMsg = `Marking ${coveredSuggestions.length} suggestions `
+                  + 'as covered by domain-wide deployment';
+                context.log.info(coverMsg);
+
+                // eslint-disable-next-line no-await-in-loop
                 await Promise.all(
                   coveredSuggestions.map(async (coveredSuggestion) => {
                     const coveredData = coveredSuggestion.getData();
@@ -1347,9 +1362,11 @@ function SuggestionsController(ctx, sqs, env) {
                     return coveredSuggestion.save();
                   }),
                 );
-                
+
                 coveredSuggestionsCount += coveredSuggestions.length;
-                context.log.info(`Successfully marked ${coveredSuggestions.length} suggestions as covered`);
+                const successMsg = `Successfully marked ${coveredSuggestions.length} `
+                  + 'suggestions as covered';
+                context.log.info(successMsg);
               }
             } catch (coverError) {
               context.log.error(`Error marking covered suggestions: ${coverError.message}`, coverError);
@@ -1379,15 +1396,18 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
 
-    // Mark suggestions that were skipped due to domain-wide coverage in same deployment
-    if (context.skippedDueToSameBatchDomainWide && isNonEmptyArray(context.skippedDueToSameBatchDomainWide)) {
+    // Mark suggestions skipped due to domain-wide coverage in same deployment
+    const skippedDomainWide = context.skippedDueToSameBatchDomainWide;
+    if (skippedDomainWide && isNonEmptyArray(skippedDomainWide)) {
       try {
         const deploymentTimestamp = Date.now();
-        const skippedUUIDs = context.skippedDueToSameBatchDomainWide.map(s => s.uuid);
-        
+        const skippedUUIDs = skippedDomainWide.map((s) => s.uuid);
+
         // Fetch and update all skipped suggestions
-        const skippedSuggestionEntities = allSuggestions.filter(s => skippedUUIDs.includes(s.getId()));
-        
+        const skippedSuggestionEntities = allSuggestions.filter(
+          (s) => skippedUUIDs.includes(s.getId()),
+        );
+
         await Promise.all(
           skippedSuggestionEntities.map(async (skippedSuggestion) => {
             const currentData = skippedSuggestion.getData();
@@ -1401,10 +1421,12 @@ function SuggestionsController(ctx, sqs, env) {
             return skippedSuggestion.save();
           }),
         );
-        
+
         coveredSuggestionsCount += skippedSuggestionEntities.length;
-        context.log.info(`Marked ${skippedSuggestionEntities.length} skipped suggestions as covered`);
-        
+        const skipMsg = `Marked ${skippedSuggestionEntities.length} `
+          + 'skipped suggestions as covered';
+        context.log.info(skipMsg);
+
         // Add to succeeded suggestions list for response
         succeededSuggestions.push(...skippedSuggestionEntities);
       } catch (error) {
@@ -1435,7 +1457,7 @@ function SuggestionsController(ctx, sqs, env) {
         total: suggestionIds.length,
         success: succeededSuggestions.length,
         failed: failedSuggestions.length,
-        ...(coveredSuggestionsCount > 0 && { 
+        ...(coveredSuggestionsCount > 0 && {
           autoCovered: coveredSuggestionsCount,
           message: `${coveredSuggestionsCount} additional suggestion(s) automatically marked as deployed (covered by domain-wide configuration)`,
         }),
