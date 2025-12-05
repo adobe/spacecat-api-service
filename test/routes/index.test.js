@@ -213,6 +213,7 @@ describe('getRouteHandlers', () => {
     getImpactByPage: sinon.stub(),
     getImpactByPageDevice: sinon.stub(),
     getImpactByPageTrafficTypeDevice: sinon.stub(),
+    getTrafficLossByDevices: sinon.stub(),
   };
 
   const mockFixesController = {
@@ -536,6 +537,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/traffic/paid/impact-by-page',
       'GET /sites/:siteId/traffic/paid/impact-by-page-device',
       'GET /sites/:siteId/traffic/paid/impact-by-page-traffic-type-device',
+      'GET /sites/:siteId/traffic/paid/traffic-loss-by-devices',
       'GET /tools/scrape/jobs/:jobId',
       'GET /tools/scrape/jobs/:jobId/results',
       'GET /tools/scrape/jobs/by-date-range/:startDate/:endDate/all-jobs',
@@ -707,6 +709,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/impact-by-page-device'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/impact-by-page-traffic-type-device'].handler).to.equal(mockTrafficController.getImpactByPageTrafficTypeDevice);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/impact-by-page-traffic-type-device'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/traffic-loss-by-devices'].handler).to.equal(mockTrafficController.getTrafficLossByDevices);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/traffic-loss-by-devices'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/files'].handler).to.equal(mockScrapeController.getFileByKey);
     expect(dynamicRoutes['GET /sites/:siteId/files'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /tools/scrape/jobs/:jobId'].handler).to.equal(mockScrapeJobController.getScrapeJobStatus);

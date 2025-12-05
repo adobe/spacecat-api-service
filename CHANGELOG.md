@@ -1,3 +1,46 @@
+## [1.273.3](https://github.com/adobe/spacecat-api-service/compare/v1.273.2...v1.273.3) (2025-12-05)
+
+
+### Bug Fixes
+
+* added query logging ([#1625](https://github.com/adobe/spacecat-api-service/issues/1625)) ([87bd450](https://github.com/adobe/spacecat-api-service/commit/87bd450a961f13ea79e3e9802b31c54ba09ab13c))
+
+## [1.273.2](https://github.com/adobe/spacecat-api-service/compare/v1.273.1...v1.273.2) (2025-12-05)
+
+
+### Bug Fixes
+
+* updated athena package ([#1624](https://github.com/adobe/spacecat-api-service/issues/1624)) ([d6c2072](https://github.com/adobe/spacecat-api-service/commit/d6c207261c4f53efa76f6a494a8b3ad7ebab585a))
+
+## [1.273.1](https://github.com/adobe/spacecat-api-service/compare/v1.273.0...v1.273.1) (2025-12-05)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-rum-api-client to v2.40.1 ([#1622](https://github.com/adobe/spacecat-api-service/issues/1622)) ([51836a3](https://github.com/adobe/spacecat-api-service/commit/51836a340d827791e5244ada9f28d53fd3d0995e))
+
+# [1.273.0](https://github.com/adobe/spacecat-api-service/compare/v1.272.1...v1.273.0) (2025-12-04)
+
+
+### Features
+
+* Slack command to support disable all audits ([#1596](https://github.com/adobe/spacecat-api-service/issues/1596)) ([149b1d1](https://github.com/adobe/spacecat-api-service/commit/149b1d12d0f9943850031373b6f44a53f941f305))
+
+## [1.272.1](https://github.com/adobe/spacecat-api-service/compare/v1.272.0...v1.272.1) (2025-12-04)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1621](https://github.com/adobe/spacecat-api-service/issues/1621)) ([0d64ad0](https://github.com/adobe/spacecat-api-service/commit/0d64ad01d2bd45085cf57eb304f937ff5ca4cbb6))
+* null trend ([#1620](https://github.com/adobe/spacecat-api-service/issues/1620)) ([27360b9](https://github.com/adobe/spacecat-api-service/commit/27360b927f8482134355c05d8c56b45c3f0f83b6))
+
+# [1.272.0](https://github.com/adobe/spacecat-api-service/compare/v1.271.0...v1.272.0) (2025-12-04)
+
+
+### Features
+
+* endpoint for traffic loss by devices ([#1619](https://github.com/adobe/spacecat-api-service/issues/1619)) ([cc14073](https://github.com/adobe/spacecat-api-service/commit/cc14073cf6981f21ea45be79d5fa5a0a6414d2f3))
+
 # [1.271.0](https://github.com/adobe/spacecat-api-service/compare/v1.270.1...v1.271.0) (2025-12-04)
 
 
