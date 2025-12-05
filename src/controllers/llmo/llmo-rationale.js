@@ -81,7 +81,7 @@ export async function handleLlmoRationale(context) {
 
   // Construct the S3 key for the topics popularity reasoning cache file
   const bucketName = `spacecat-${env.ENV}-mystique-assets`;
-  const s3Key = `llm_cache/${siteId}/topics_popularity_reasoning_cache.json`;
+  const s3Key = `llm_cache/${siteId}/prompts/topics_popularity_reasoning_cache.json`;
 
   try {
     // Fetch the file from S3
