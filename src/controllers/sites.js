@@ -41,7 +41,7 @@ import { OrganizationDto } from '../dto/organization.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
 import { KeyEventDto } from '../dto/key-event.js';
-import { wwwUrlResolver } from '../support/utils.js';
+import { wwwUrlResolver, resolveWwwUrl } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 
@@ -657,7 +657,7 @@ function SitesController(ctx, log, env) {
     }
 
     const rumAPIClient = RUMAPIClient.createFrom(context);
-    const domain = wwwUrlResolver(site);
+    const domain = await resolveWwwUrl(site, context);
 
     try {
       const now = new Date();
