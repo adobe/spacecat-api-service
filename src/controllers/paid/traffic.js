@@ -187,6 +187,8 @@ function TrafficController(context, log, env) {
     // build query
     const query = getTrafficAnalysisQuery(quereyParams);
 
+    log.info(`Site '${siteId}'/${year}/${month}/${week} getTrafficAnalysisQuery Query: ${query}`);
+
     // first try to get from cache
     const { cachedResultUrl, cacheKey, outPrefix } = await tryGetCacheResult(
       siteId,
