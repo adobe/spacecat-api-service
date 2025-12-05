@@ -108,9 +108,11 @@ function PTA2Controller(context, log, env) {
     }
 
     const { yearInt, weekInt, monthInt } = temporal.values;
+    log.info(`WEEKLY-SUMMARY - yearInt: ${yearInt}, weekInt: ${weekInt}, monthInt: ${monthInt}`);
 
     const tableName = `${rumMetricsDatabase}.${rumMetricsCompactTable}`;
     const description = `fetch PTA2 Weekly Summary data db: ${rumMetricsDatabase}| siteKey: ${siteId} | year: ${year} | month: ${month} | week: ${week} } `;
+    log.info(`WEEKLY-SUMMARY - description: ${description}`);
 
     // build query
     const query = getPTASummaryWithTrendQuery({
@@ -120,6 +122,8 @@ function PTA2Controller(context, log, env) {
       siteId,
       tableName,
     });
+
+    log.info(`WEEKLY-SUMMARY - query: ${query}`);
 
     const outPrefix = getOutPrefix(query);
     const resultLocation = `${ATHENA_TEMP_FOLDER}/${outPrefix}`;

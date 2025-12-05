@@ -592,7 +592,9 @@ function toggleWWW(url) {
       urlObj.hostname = `www.${hostname}`;
     }
 
-    return urlObj.toString();
+    // Preserve trailing slash consistency with the original URL
+    const result = urlObj.toString();
+    return result.endsWith('/') && !url.endsWith('/') ? result.slice(0, -1) : result;
     /* c8 ignore next 3 */
   } catch (error) {
     return url;
