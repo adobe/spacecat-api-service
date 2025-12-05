@@ -187,7 +187,7 @@ function UrlStoreController(ctx, log) {
       });
 
       return ok({
-        items: (result.items || []).map(AuditUrlDto.toJSON),
+        items: (result.data || []).map(AuditUrlDto.toJSON),
         pagination: {
           limit: effectiveLimit,
           cursor: result.cursor ?? null,
@@ -256,9 +256,9 @@ function UrlStoreController(ctx, log) {
         sortOrder,
       });
 
-      // Handle both array and paginated response formats
-      const items = Array.isArray(result) ? result : (result.items || []);
-      const resultCursor = Array.isArray(result) ? undefined : result.cursor;
+      // Handle paginated response format (consistent with base collection)
+      const items = result.data || [];
+      const resultCursor = result.cursor;
 
       return ok({
         items: items.map(AuditUrlDto.toJSON),
