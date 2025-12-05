@@ -1,3 +1,10 @@
+## [1.273.5](https://github.com/adobe/spacecat-api-service/compare/v1.273.4...v1.273.5) (2025-12-05)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tier-client to v1.3.10 ([#1628](https://github.com/adobe/spacecat-api-service/issues/1628)) ([9cbd8e6](https://github.com/adobe/spacecat-api-service/commit/9cbd8e6aba62357a194388a4022ccce7447b2d80))
+
 ## [1.273.4](https://github.com/adobe/spacecat-api-service/compare/v1.273.3...v1.273.4) (2025-12-05)
 
 
