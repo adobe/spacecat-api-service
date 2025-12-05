@@ -19,6 +19,40 @@ const { readConfig } = llmo;
 
 const PHRASES = ['get-llmo-config-summary'];
 const EXCLUDED_IMS_ORGS = ['9E1005A551ED61CA0A490D45@AdobeOrg'];
+const MAX_CONCURRENT_SITES = 5;
+
+/**
+ * Process promises in batches with controlled concurrency
+ * Prevents resource contention and timeouts when processing many sites
+ * @param {Array} items - Items to process
+ * @param {Function} fn - Async function to process each item
+ * @param {number} concurrency - Maximum number of concurrent operations
+ * @returns {Promise<Array>} - Results array (includes nulls for failed items)
+ */
+const processBatch = async (items, fn, concurrency) => {
+  const results = [];
+  const executing = [];
+
+  for (const item of items) {
+    // Wrap in try-catch to ensure one failure doesn't break the batch
+    const promise = fn(item)
+      .catch(() => null) // Return null on error, don't propagate
+      .then((result) => {
+        executing.splice(executing.indexOf(promise), 1);
+        return result;
+      });
+
+    results.push(promise);
+    executing.push(promise);
+
+    if (executing.length >= concurrency) {
+      // eslint-disable-next-line no-await-in-loop
+      await Promise.race(executing);
+    }
+  }
+
+  return Promise.all(results);
+};
 
 function GetLlmoConfigSummaryCommand(context) {
   const baseCommand = BaseCommand({
@@ -59,7 +93,7 @@ function GetLlmoConfigSummaryCommand(context) {
   };
 
   const handleExecution = async (args, slackContext) => {
-    const { say } = slackContext;
+    const { say, channelId } = slackContext;
     const [siteInput] = args;
 
     try {
@@ -89,7 +123,9 @@ function GetLlmoConfigSummaryCommand(context) {
         return;
       }
 
-      const sitePromises = sites.map(async (site) => {
+      await say(`📊 Processing ${sites.length} site(s) with controlled concurrency...`);
+
+      const processSite = async (site) => {
         try {
           const config = await getLlmoConfig(site.getId());
           if (!config) return null;
@@ -122,19 +158,17 @@ function GetLlmoConfigSummaryCommand(context) {
           log.warn(`Failed to process site ${site.getId()}: ${siteError.message}`);
           return null;
         }
-      });
+      };
 
-      const siteResults = await Promise.allSettled(sitePromises);
-      const results = siteResults
-        .map((result) => (result.status === 'fulfilled' ? result.value : null))
-        .filter(Boolean);
+      const siteResults = await processBatch(sites, processSite, MAX_CONCURRENT_SITES);
+      const results = siteResults.filter(Boolean);
 
       if (results.length === 0) {
         await say('No valid LLMO configurations found.');
         return;
       }
 
-      // Generate and send CSV
+      // Generate and send CSV in batches to avoid timeout on large uploads
       const csvStringifier = createObjectCsvStringifier({
         header: [
           { id: 'baseURL', title: 'Site URL' },
@@ -152,12 +186,39 @@ function GetLlmoConfigSummaryCommand(context) {
         ],
       });
 
-      const csv = csvStringifier.getHeaderString() + csvStringifier.stringifyRecords(results);
-      const csvBuffer = Buffer.from(csv, 'utf8');
-      const filename = `llmo-config-summary-${Date.now()}.csv`;
+      const batchSize = 300;
+      const totalRows = results.length;
+      const pages = Math.ceil(totalRows / batchSize);
 
-      await sendFile(slackContext, csvBuffer, filename);
-      log.info(`LLMO config summary completed: ${results.length} sites processed`);
+      for (let page = 0; page < pages; page += 1) {
+        const start = page * batchSize;
+        const end = Math.min(start + batchSize, totalRows);
+        const rowsBatch = results.slice(start, end);
+
+        const csv = csvStringifier.getHeaderString()
+          + csvStringifier.stringifyRecords(rowsBatch);
+        const csvBuffer = Buffer.from(csv, 'utf8');
+
+        const part = page + 1;
+        const filename = `llmo-config-summary-${Date.now()}-part${part}.csv`;
+
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await sendFile(
+            slackContext,
+            csvBuffer,
+            filename,
+            `LLMO Config Summary (part ${part}/${pages})`,
+            `LLMO config summary report (part ${part}/${pages}) :memo:`,
+            channelId,
+          );
+        } catch (uploadError) {
+          // eslint-disable-next-line no-await-in-loop
+          await say(`:warning: Failed to upload report (part ${part}/${pages}): ${uploadError.message}`);
+        }
+      }
+
+      log.info(`LLMO config summary completed: ${results.length} sites processed in ${pages} file(s)`);
     } catch (error) {
       log.error(`Error in LLMO config summary: ${error.message}`);
       await say(`❌ Error: ${error.message}`);
