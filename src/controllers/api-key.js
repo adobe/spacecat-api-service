@@ -44,9 +44,13 @@ function ApiKeyController(context) {
 
   let apiKeyConfiguration = {};
   try {
-    apiKeyConfiguration = JSON.parse(env.API_KEY_CONFIGURATION);
+    if (env.API_KEY_CONFIGURATION && env.API_KEY_CONFIGURATION !== 'undefined') {
+      apiKeyConfiguration = JSON.parse(env.API_KEY_CONFIGURATION);
+    } else {
+      log.warn('API_KEY_CONFIGURATION environment variable not set, using defaults');
+    }
   } catch (error) {
-    log.error(`Failed to parse API Key configuration: ${error.message}`);
+    log.error(`Failed to parse API Key configuration: "${env.API_KEY_CONFIGURATION}" is not valid JSON`);
   }
 
   const { maxDomainsPerApiKey = 1, maxApiKeys = 3 } = apiKeyConfiguration;
@@ -235,7 +239,7 @@ function ApiKeyController(context) {
 
       const imsUserId = getImsUserIdFromProfile(profile);
       if (!apiKeyEntity
-          || apiKeyEntity.getImsUserId() !== imsUserId || apiKeyEntity.getImsOrgId() !== imsOrgId) {
+        || apiKeyEntity.getImsUserId() !== imsUserId || apiKeyEntity.getImsOrgId() !== imsOrgId) {
         throw new ErrorWithStatusCode('Invalid request: API key not found', STATUS_NOT_FOUND);
       }
 

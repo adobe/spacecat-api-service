@@ -2524,4 +2524,238 @@ describe('LlmoController', () => {
       );
     });
   });
+
+  describe('getBrandPresenceFilters', () => {
+    let mockAurora;
+    let contextWithAurora;
+
+    beforeEach(() => {
+      // Create mock Aurora client
+      mockAurora = {
+        query: sinon.stub(),
+        queryOne: sinon.stub(),
+        testConnection: sinon.stub().resolves(true),
+        getPoolStats: sinon.stub().returns({
+          totalCount: 1,
+          idleCount: 1,
+          waitingCount: 0,
+        }),
+      };
+
+      // Create context with Aurora
+      contextWithAurora = {
+        ...mockContext,
+        aurora: mockAurora,
+        env: {
+          ...mockEnv,
+          ENABLE_AURORA_QUERIES: true,
+        },
+        params: {
+          siteId: TEST_SITE_ID,
+        },
+      };
+    });
+
+    it('should successfully fetch distinct filter values from brand_presence table', async () => {
+      // Mock successful database queries
+      mockAurora.query
+        .onCall(0).resolves([
+          { category: 'Adobe' },
+          { category: 'Marketing' },
+          { category: 'Technology' },
+        ])
+        .onCall(1)
+        .resolves([
+          { topic: 'AI' },
+          { topic: 'Cloud Computing' },
+          { topic: 'Design' },
+        ])
+        .onCall(2)
+        .resolves([
+          { model: 'chatgpt' },
+          { model: 'gemini' },
+          { model: 'copilot' },
+        ])
+        .onCall(3)
+        .resolves([
+          { region: 'US' },
+          { region: 'EU' },
+          { region: 'APAC' },
+        ])
+        .onCall(4)
+        .resolves([
+          { origin: 'google' },
+          { origin: 'openai' },
+          { origin: 'microsoft' },
+        ]);
+
+      const result = await controller.getBrandPresenceFilters(contextWithAurora);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      expect(responseBody).to.have.property('siteId', TEST_SITE_ID);
+      expect(responseBody).to.have.property('filters');
+      expect(responseBody.filters).to.deep.equal({
+        categories: ['Adobe', 'Marketing', 'Technology'],
+        topics: ['AI', 'Cloud Computing', 'Design'],
+        models: ['chatgpt', 'gemini', 'copilot'],
+        regions: ['US', 'EU', 'APAC'],
+        origins: ['google', 'openai', 'microsoft'],
+      });
+      expect(responseBody).to.have.property('performance');
+      expect(responseBody.performance).to.have.property('totalDuration');
+      expect(responseBody.performance).to.have.property('queryDuration');
+      expect(responseBody.performance).to.have.property('validationDuration');
+
+      // Verify all query calls
+      expect(mockAurora.query).to.have.callCount(5);
+      expect(mockLog.info).to.have.been.calledWith(
+        `[BRAND-PRESENCE-FILTERS] Starting request for siteId: ${TEST_SITE_ID}`,
+      );
+      expect(mockLog.info).to.have.been.calledWith(
+        sinon.match(/\[BRAND-PRESENCE-FILTERS\] Filter values retrieved for siteId: test-site-id - categories: 3, topics: 3, models: 3, regions: 3, origins: 3/),
+      );
+    });
+
+    it('should return bad request when Aurora is not configured', async () => {
+      const contextWithoutAurora = {
+        ...mockContext,
+        aurora: null,
+        env: {
+          ...mockEnv,
+          ENABLE_AURORA_QUERIES: false,
+        },
+        params: {
+          siteId: TEST_SITE_ID,
+        },
+      };
+
+      const result = await controller.getBrandPresenceFilters(contextWithoutAurora);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Aurora database is not configured or queries are not enabled');
+      expect(mockLog.warn).to.have.been.calledWith(
+        `[BRAND-PRESENCE-FILTERS] Aurora database not configured or disabled for siteId: ${TEST_SITE_ID}`,
+      );
+    });
+
+    it('should return bad request when ENABLE_AURORA_QUERIES is false', async () => {
+      const contextWithAuroraDisabled = {
+        ...mockContext,
+        aurora: mockAurora,
+        env: {
+          ...mockEnv,
+          ENABLE_AURORA_QUERIES: false,
+        },
+        params: {
+          siteId: TEST_SITE_ID,
+        },
+      };
+
+      const result = await controller.getBrandPresenceFilters(contextWithAuroraDisabled);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Aurora database is not configured or queries are not enabled');
+    });
+
+    it('should handle database query errors gracefully', async () => {
+      mockAurora.query.rejects(new Error('Database connection failed'));
+
+      const result = await controller.getBrandPresenceFilters(contextWithAurora);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Failed to fetch filter values: Database connection failed');
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/\[BRAND-PRESENCE-FILTERS\] Database query failed for siteId: test-site-id - error: Database connection failed/),
+      );
+    });
+
+    it('should handle empty result sets correctly', async () => {
+      // Mock empty results for all queries
+      mockAurora.query
+        .onCall(0)
+        .resolves([])
+        .onCall(1)
+        .resolves([])
+        .onCall(2)
+        .resolves([])
+        .onCall(3)
+        .resolves([])
+        .onCall(4)
+        .resolves([]);
+
+      const result = await controller.getBrandPresenceFilters(contextWithAurora);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.filters).to.deep.equal({
+        categories: [],
+        topics: [],
+        models: [],
+        regions: [],
+        origins: [],
+      });
+      expect(mockLog.info).to.have.been.calledWith(
+        sinon.match(/\[BRAND-PRESENCE-FILTERS\] Filter values retrieved for siteId: test-site-id - categories: 0, topics: 0, models: 0, regions: 0, origins: 0/),
+      );
+    });
+
+    it('should return bad request when LLMO validation fails', async () => {
+      const result = await controllerWithAccessDenied.getBrandPresenceFilters(contextWithAurora);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
+    });
+
+    it('should handle validation errors properly', async () => {
+      // Create a context that will fail validation
+      const invalidContext = {
+        ...contextWithAurora,
+        dataAccess: {
+          Site: {
+            findById: sinon.stub().rejects(new Error('Site not found')),
+          },
+        },
+      };
+
+      const result = await controller.getBrandPresenceFilters(invalidContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Site not found');
+      expect(mockLog.error).to.have.been.called;
+    });
+
+    it('should log performance metrics correctly', async () => {
+      mockAurora.query
+        .onCall(0)
+        .resolves([{ category: 'Test' }])
+        .onCall(1)
+        .resolves([{ topic: 'Test' }])
+        .onCall(2)
+        .resolves([{ model: 'test-model' }])
+        .onCall(3)
+        .resolves([{ region: 'US' }])
+        .onCall(4)
+        .resolves([{ origin: 'test' }]);
+
+      const result = await controller.getBrandPresenceFilters(contextWithAurora);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.performance).to.have.property('totalDuration');
+      expect(responseBody.performance).to.have.property('queryDuration');
+      expect(responseBody.performance).to.have.property('validationDuration');
+      expect(responseBody.performance.totalDuration).to.be.a('number');
+      expect(responseBody.performance.queryDuration).to.be.a('number');
+      expect(mockLog.info).to.have.been.calledWith(
+        sinon.match(/\[BRAND-PRESENCE-FILTERS\] Request completed for siteId: test-site-id - total duration: \d+ms/),
+      );
+    });
+  });
 });
