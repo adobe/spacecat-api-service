@@ -2616,7 +2616,7 @@ describe('LlmoController', () => {
       expect(mockS3Client.send).to.have.been.calledOnce;
       const commandArg = mockS3Client.send.getCall(0).args[0];
       expect(commandArg.params.Bucket).to.equal('spacecat-dev-mystique-assets');
-      expect(commandArg.params.Key).to.equal(`llm_cache/${TEST_SITE_ID}/topics_popularity_reasoning_cache.json`);
+      expect(commandArg.params.Key).to.equal(`llm_cache/${TEST_SITE_ID}/prompts/topics_popularity_reasoning_cache.json`);
 
       expect(mockLog.info).to.have.been.calledWith(
         `Getting LLMO rationale for site ${TEST_SITE_ID} with filters - topic: Convert PDF, category: all, region: all, origin: all, popularity: all`,
@@ -2926,7 +2926,7 @@ describe('LlmoController', () => {
       expect(responseBody.message).to.equal(`Rationale file not found for site ${TEST_SITE_ID}`);
 
       expect(mockLog.warn).to.have.been.calledWith(
-        `LLMO rationale file not found for site ${TEST_SITE_ID} at llm_cache/${TEST_SITE_ID}/topics_popularity_reasoning_cache.json`,
+        `LLMO rationale file not found for site ${TEST_SITE_ID} at llm_cache/${TEST_SITE_ID}/prompts/topics_popularity_reasoning_cache.json`,
       );
     });
 
