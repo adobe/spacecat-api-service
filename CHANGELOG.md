@@ -1,3 +1,10 @@
+## [1.273.6](https://github.com/adobe/spacecat-api-service/compare/v1.273.5...v1.273.6) (2025-12-05)
+
+
+### Bug Fixes
+
+* added additional query for consent-banner audit ([#1629](https://github.com/adobe/spacecat-api-service/issues/1629)) ([5b55b20](https://github.com/adobe/spacecat-api-service/commit/5b55b20e79ab32f2fbcea7bc9cd703a66a4c0ed5))
+
 ## [1.273.5](https://github.com/adobe/spacecat-api-service/compare/v1.273.4...v1.273.5) (2025-12-05)
 
 
