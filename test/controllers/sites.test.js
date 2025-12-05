@@ -171,6 +171,7 @@ describe('Sites Controller', () => {
     'getPageMetricsBySource',
     'resolveSite',
     'triggerBrandProfile',
+    'getGraph',
   ];
 
   let mockDataAccess;
@@ -978,6 +979,7 @@ describe('Sites Controller', () => {
   it('logs error and returns zeroed metrics when rum query fails', async () => {
     const rumApiClient = {
       query: sandbox.stub().rejects(new Error('RUM query failed')),
+      retrieveDomainkey: sandbox.stub().resolves('domain-key'),
     };
 
     const result = await sitesController.getLatestSiteMetrics(
@@ -1036,6 +1038,208 @@ describe('Sites Controller', () => {
 
     expect(result.status).to.equal(403);
     expect(error).to.have.property('message', 'Only users belonging to the organization can view its metrics');
+  });
+
+  it('gets optimization report graph data successfully', async () => {
+    const mockGraphData = {
+      data: [
+        { date: '2024-01-01', value: 100 },
+        { date: '2024-01-02', value: 150 },
+      ],
+    };
+
+    context.rumApiClient.query.resolves(mockGraphData);
+
+    const result = await sitesController.getGraph({
+      ...context,
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        urls: ['https://site1.com/page1', 'https://site1.com/page2'],
+        startDate: '2024-01-01',
+        endDate: '2024-01-31',
+        granularity: 'day',
+      },
+    });
+    const graphData = await result.json();
+
+    expect(result.status).to.equal(200);
+    expect(context.rumApiClient.query).to.have.been.calledOnce;
+    expect(context.rumApiClient.query).to.have.been.calledWith('optimization-report-graph', {
+      domain: 'www.site1.com',
+      urls: ['https://site1.com/page1', 'https://site1.com/page2'],
+      startTime: '2024-01-01',
+      endTime: '2024-01-31',
+      granularity: 'day',
+    });
+    expect(graphData).to.deep.equal(mockGraphData);
+  });
+
+  it('returns bad request if site ID is not provided for graph', async () => {
+    const result = await sitesController.getGraph({
+      ...context,
+      params: {},
+      data: {
+        urls: ['https://site1.com/page1'],
+        startDate: '2024-01-01',
+        endDate: '2024-01-31',
+        granularity: 'day',
+      },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'Site ID required');
+  });
+
+  it('returns not found if site does not exist for graph', async () => {
+    mockDataAccess.Site.findById.resolves(null);
+
+    const result = await sitesController.getGraph({
+      ...context,
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        urls: ['https://site1.com/page1'],
+        startDate: '2024-01-01',
+        endDate: '2024-01-31',
+        granularity: 'day',
+      },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(404);
+    expect(error).to.have.property('message', 'Site not found');
+  });
+
+  it('returns forbidden if user does not have access for graph', async () => {
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+
+    const result = await sitesController.getGraph({
+      ...context,
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        urls: ['https://site1.com/page1'],
+        startDate: '2024-01-01',
+        endDate: '2024-01-31',
+        granularity: 'day',
+      },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only users belonging to the organization can view graph data');
+  });
+
+  it('returns bad request if urls array is missing', async () => {
+    const result = await sitesController.getGraph({
+      ...context,
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        startDate: '2024-01-01',
+        endDate: '2024-01-31',
+        granularity: 'day',
+      },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'urls array is required and must not be empty');
+  });
+
+  it('returns bad request if urls array is empty', async () => {
+    const result = await sitesController.getGraph({
+      ...context,
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        urls: [],
+        startDate: '2024-01-01',
+        endDate: '2024-01-31',
+        granularity: 'day',
+      },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'urls array is required and must not be empty');
+  });
+
+  it('returns bad request if startDate is missing', async () => {
+    const result = await sitesController.getGraph({
+      ...context,
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        urls: ['https://site1.com/page1'],
+        endDate: '2024-01-31',
+        granularity: 'day',
+      },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'startDate is required');
+  });
+
+  it('returns bad request if endDate is missing', async () => {
+    const result = await sitesController.getGraph({
+      ...context,
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        urls: ['https://site1.com/page1'],
+        startDate: '2024-01-01',
+        granularity: 'day',
+      },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'endDate is required');
+  });
+
+  it('returns bad request if granularity is missing', async () => {
+    const result = await sitesController.getGraph({
+      ...context,
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        urls: ['https://site1.com/page1'],
+        startDate: '2024-01-01',
+        endDate: '2024-01-31',
+      },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'granularity is required');
+  });
+
+  it('returns internal server error when RUM API query fails for graph', async () => {
+    context.rumApiClient.query.rejects(new Error('RUM API error'));
+
+    const result = await sitesController.getGraph({
+      ...context,
+      params: { siteId: SITE_IDS[0] },
+      data: {
+        urls: ['https://site1.com/page1'],
+        startDate: '2024-01-01',
+        endDate: '2024-01-31',
+        granularity: 'day',
+      },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(500);
+    expect(error).to.have.property('message', 'Failed to retrieve graph data');
+    expect(context.log.error).to.have.been.calledWithMatch(`Error getting optimization report graph for site ${SITE_IDS[0]}: RUM API error`);
+  });
+
+  it('returns bad request when data object is undefined for graph', async () => {
+    const result = await sitesController.getGraph({
+      ...context,
+      params: { siteId: SITE_IDS[0] },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'urls array is required and must not be empty');
   });
 
   it('gets specific audit for a site', async () => {

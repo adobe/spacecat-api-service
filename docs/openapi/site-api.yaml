@@ -702,3 +702,328 @@ site-report:
     security:
       - ims_key: [ ]
       - scoped_api_key: [ ]
+
+site-graph:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    tags:
+      - site
+      - reports
+    summary: Get optimization report graph data
+    description: |
+      Retrieves time-series graph data for optimization reports based on Real User Monitoring (RUM) metrics.
+      This endpoint queries the RUM API to fetch performance metrics over a specified time range for one or more URLs.
+      
+      The data is aggregated according to the specified granularity (e.g., daily, weekly) and can be used to
+      visualize performance trends and patterns for optimization reports.
+      
+      **Use Cases:**
+      - Displaying performance trends over time in optimization reports
+      - Comparing metrics across multiple pages
+      - Analyzing performance changes within specific date ranges
+    operationId: getSiteGraphData
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - urls
+              - startDate
+              - endDate
+              - granularity
+            properties:
+              urls:
+                type: array
+                description: Array of URLs to retrieve graph data for
+                minItems: 1
+                items:
+                  type: string
+                  format: uri
+                example: 
+                  - "https://example.com/page1"
+                  - "https://example.com/page2"
+              startDate:
+                type: string
+                pattern: '^\d{4}-\d{2}-\d{2}$'
+                description: Start date for the data range in YYYY-MM-DD format
+                example: "2024-01-01"
+              endDate:
+                type: string
+                pattern: '^\d{4}-\d{2}-\d{2}$'
+                description: End date for the data range in YYYY-MM-DD format
+                example: "2024-01-31"
+              granularity:
+                type: string
+                description: Time granularity for data aggregation
+                enum: [hourly, daily]
+                example: "daily"
+          example:
+            urls:
+              - "https://example.com/page1"
+              - "https://example.com/page2"
+            startDate: "2024-01-01"
+            endDate: "2024-01-31"
+            granularity: "daily"
+    responses:
+      '200':
+        description: Successfully retrieved graph data from RUM API
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Graph data structure returned by the RUM API containing traffic metrics and time-series data
+              properties:
+                trafficData:
+                  type: array
+                  description: Aggregated traffic data across all URLs for each time period
+                  items:
+                    type: object
+                    properties:
+                      date:
+                        type: string
+                        format: date
+                        description: Date of the data point in YYYY-MM-DD format
+                      organic:
+                        type: integer
+                        description: Organic traffic count
+                      visits:
+                        type: integer
+                        description: Total number of visits
+                      pageViews:
+                        type: integer
+                        description: Total number of page views
+                      bounces:
+                        type: integer
+                        description: Total number of bounces
+                      conversions:
+                        type: integer
+                        description: Total number of conversions
+                      engagement:
+                        type: integer
+                        description: Engagement metric
+                byUrl:
+                  type: object
+                  description: Traffic data grouped by individual URLs
+                  additionalProperties:
+                    type: object
+                    properties:
+                      total:
+                        type: object
+                        description: Aggregate totals for this URL across the entire time range
+                        properties:
+                          organic:
+                            type: integer
+                            description: Total organic traffic
+                          visits:
+                            type: integer
+                            description: Total visits
+                          pageViews:
+                            type: integer
+                            description: Total page views
+                          bounces:
+                            type: integer
+                            description: Total bounces
+                          conversions:
+                            type: integer
+                            description: Total conversions
+                          engagement:
+                            type: integer
+                            description: Total engagement
+                      timeSeries:
+                        type: array
+                        description: Time-series data for this URL
+                        items:
+                          type: object
+                          properties:
+                            date:
+                              type: string
+                              format: date
+                              description: Date of the data point
+                            organic:
+                              type: integer
+                              description: Organic traffic count
+                            visits:
+                              type: integer
+                              description: Number of visits
+                            pageViews:
+                              type: integer
+                              description: Number of page views
+                            bounces:
+                              type: integer
+                              description: Number of bounces
+                            conversions:
+                              type: integer
+                              description: Number of conversions
+                            engagement:
+                              type: integer
+                              description: Engagement metric
+                totals:
+                  type: object
+                  description: Aggregate totals across all URLs and the entire time range
+                  properties:
+                    organic:
+                      type: integer
+                      description: Total organic traffic
+                    visits:
+                      type: integer
+                      description: Total visits
+                    pageViews:
+                      type: integer
+                      description: Total page views
+                    bounces:
+                      type: integer
+                      description: Total bounces
+                    conversions:
+                      type: integer
+                      description: Total conversions
+                    engagement:
+                      type: integer
+                      description: Total engagement
+                urlsFiltered:
+                  type: array
+                  description: List of URLs that were included in the data
+                  items:
+                    type: string
+                    format: uri
+                granularity:
+                  type: string
+                  description: The granularity used for the time-series data
+                  enum: [hourly, daily]
+              example:
+                trafficData:
+                  - date: "2025-11-24"
+                    organic: 0
+                    visits: 2600
+                    pageViews: 2600
+                    bounces: 2600
+                    conversions: 0
+                    engagement: 1300
+                  - date: "2025-11-25"
+                    organic: 0
+                    visits: 2200
+                    pageViews: 2200
+                    bounces: 2200
+                    conversions: 0
+                    engagement: 1100
+                  - date: "2025-11-29"
+                    organic: 0
+                    visits: 900
+                    pageViews: 1800
+                    bounces: 900
+                    conversions: 900
+                    engagement: 900
+                byUrl:
+                  "https://www.bamboohr.com/pl-pages/pricing":
+                    total:
+                      organic: 0
+                      visits: 5700
+                      pageViews: 6600
+                      bounces: 5700
+                      conversions: 900
+                      engagement: 3300
+                    timeSeries:
+                      - date: "2025-11-24"
+                        organic: 0
+                        visits: 2600
+                        pageViews: 2600
+                        bounces: 2600
+                        conversions: 0
+                        engagement: 1300
+                      - date: "2025-11-25"
+                        organic: 0
+                        visits: 2200
+                        pageViews: 2200
+                        bounces: 2200
+                        conversions: 0
+                        engagement: 1100
+                      - date: "2025-11-29"
+                        organic: 0
+                        visits: 900
+                        pageViews: 1800
+                        bounces: 900
+                        conversions: 900
+                        engagement: 900
+                totals:
+                  organic: 0
+                  visits: 5700
+                  pageViews: 6600
+                  bounces: 5700
+                  conversions: 900
+                  engagement: 3300
+                urlsFiltered:
+                  - "https://www.bamboohr.com/pl-pages/pricing"
+                granularity: "daily"
+      '400':
+        description: Bad request - validation errors
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Error message describing the validation failure
+            examples:
+              missingSiteId:
+                summary: Site ID is required
+                value:
+                  message: "Site ID required"
+              missingUrls:
+                summary: URLs array is required
+                value:
+                  message: "urls array is required and must not be empty"
+              emptyUrls:
+                summary: URLs array is empty
+                value:
+                  message: "urls array is required and must not be empty"
+              missingStartDate:
+                summary: Start date is required
+                value:
+                  message: "startDate is required"
+              missingEndDate:
+                summary: End date is required
+                value:
+                  message: "endDate is required"
+              missingGranularity:
+                summary: Granularity is required
+                value:
+                  message: "granularity is required"
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        description: Access denied - user does not have permission to access this site
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Only users belonging to the organization can view graph data"
+      '404':
+        description: Site not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Site not found"
+      '500':
+        description: Internal server error - RUM API query failed
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  description: Error message describing the server error
+                  example: "Failed to retrieve graph data"
+    security:
+      - ims_key: [ ]
+      - scoped_api_key: [ ]

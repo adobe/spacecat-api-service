@@ -210,6 +210,10 @@ describe('getRouteHandlers', () => {
     getPaidTrafficTemporalSeriesByUrlChannel: sinon.stub(),
     getPaidTrafficTemporalSeriesByUrlPlatform: sinon.stub(),
     getPaidTrafficTemporalSeriesByUrlChannelPlatform: sinon.stub(),
+    getImpactByPage: sinon.stub(),
+    getImpactByPageDevice: sinon.stub(),
+    getImpactByPageTrafficTypeDevice: sinon.stub(),
+    getTrafficLossByDevices: sinon.stub(),
   };
 
   const mockFixesController = {
@@ -266,6 +270,11 @@ describe('getRouteHandlers', () => {
     createTrialUserForEmailInvite: () => null,
   };
 
+  const mockUserDetailsController = {
+    getUserDetailsByExternalUserId: () => null,
+    getUserDetailsInBulk: () => null,
+  };
+
   const mockEntitlementController = {
     getByOrganizationID: () => null,
   };
@@ -308,6 +317,7 @@ describe('getRouteHandlers', () => {
       mockUserActivityController,
       mockSiteEnrollmentController,
       mockTrialUserController,
+      mockUserDetailsController,
       mockEntitlementController,
       mockSandboxAuditController,
       mockReportsController,
@@ -382,6 +392,8 @@ describe('getRouteHandlers', () => {
       'GET /organizations/:organizationId/entitlements',
       'POST /organizations/:organizationId/entitlements',
       'GET /organizations/:organizationId/trial-users',
+      'GET /organizations/:organizationId/userDetails/:externalUserId',
+      'POST /organizations/:organizationId/userDetails',
       'POST /organizations/:organizationId/trial-user-invite',
       'GET /organizations/by-ims-org-id/:imsOrgId',
       'GET /organizations/by-ims-org-id/:imsOrgId/slack-config',
@@ -440,6 +452,7 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-rollback',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-preview',
+      'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-live-preview',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit/:cursor',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit',
@@ -454,6 +467,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/top-pages/:source',
       'GET /sites/:siteId/top-pages/:source/:geo',
       'GET /sites/:siteId/files',
+      'POST /sites/:siteId/graph',
       'POST /event/fulfillment/:eventType',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status',
@@ -521,6 +535,10 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/traffic/paid/temporal-series-by-url-channel',
       'GET /sites/:siteId/traffic/paid/temporal-series-by-url-platform',
       'GET /sites/:siteId/traffic/paid/temporal-series-by-url-channel-platform',
+      'GET /sites/:siteId/traffic/paid/impact-by-page',
+      'GET /sites/:siteId/traffic/paid/impact-by-page-device',
+      'GET /sites/:siteId/traffic/paid/impact-by-page-traffic-type-device',
+      'GET /sites/:siteId/traffic/paid/traffic-loss-by-devices',
       'GET /tools/scrape/jobs/:jobId',
       'GET /tools/scrape/jobs/:jobId/results',
       'GET /tools/scrape/jobs/by-date-range/:startDate/:endDate/all-jobs',
@@ -687,6 +705,14 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/temporal-series-by-url-channel'].handler).to.equal(mockTrafficController.getPaidTrafficTemporalSeriesByUrlChannel);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/temporal-series-by-url-platform'].handler).to.equal(mockTrafficController.getPaidTrafficTemporalSeriesByUrlPlatform);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/temporal-series-by-url-channel-platform'].handler).to.equal(mockTrafficController.getPaidTrafficTemporalSeriesByUrlChannelPlatform);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/impact-by-page'].handler).to.equal(mockTrafficController.getImpactByPage);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/impact-by-page'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/impact-by-page-device'].handler).to.equal(mockTrafficController.getImpactByPageDevice);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/impact-by-page-device'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/impact-by-page-traffic-type-device'].handler).to.equal(mockTrafficController.getImpactByPageTrafficTypeDevice);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/impact-by-page-traffic-type-device'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/traffic-loss-by-devices'].handler).to.equal(mockTrafficController.getTrafficLossByDevices);
+    expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/traffic-loss-by-devices'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/files'].handler).to.equal(mockScrapeController.getFileByKey);
     expect(dynamicRoutes['GET /sites/:siteId/files'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /tools/scrape/jobs/:jobId'].handler).to.equal(mockScrapeJobController.getScrapeJobStatus);
