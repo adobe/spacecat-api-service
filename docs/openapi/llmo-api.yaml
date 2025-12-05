@@ -1210,45 +1210,52 @@ llmo-rationale:
     - name: topic
       in: query
       required: true
-      description: The topic to filter prompts by (case-insensitive partial match)
+      description: The topic to filter by (case-insensitive partial match)
       schema:
         type: string
-        example: 'product recommendations'
-    - name: prompt
-      in: query
-      required: true
-      description: The prompt text to filter by (case-insensitive partial match)
-      schema:
-        type: string
-        example: 'best products for'
+        example: 'Convert PDF_Informational'
     - name: category
       in: query
       required: false
-      description: Optional category to filter prompts by (case-insensitive partial match)
+      description: Optional category to filter topics by (case-insensitive partial match)
       schema:
         type: string
-        example: 'shopping'
+        example: 'Acrobat'
     - name: region
       in: query
       required: false
-      description: Optional region to filter prompts by (case-insensitive partial match)
+      description: Optional region to filter topics by (case-insensitive partial match)
       schema:
         type: string
         example: 'US'
+    - name: origin
+      in: query
+      required: false
+      description: Optional origin to filter topics by (case-insensitive partial match)
+      schema:
+        type: string
+        example: 'HUMAN'
+    - name: popularity
+      in: query
+      required: false
+      description: Optional popularity level to filter topics by (case-insensitive partial match)
+      schema:
+        type: string
+        example: 'High'
   get:
     tags:
       - llmo
     summary: Get LLMO rationale data
     description: |
-      Retrieves filtered LLMO rationale data for a specific site. This endpoint fetches human prompts
-      popularity data from the cached S3 file and applies filtering based on the provided query parameters.
+      Retrieves filtered LLMO rationale data for a specific site. This endpoint fetches topics
+      popularity reasoning data from the cached S3 file and applies filtering based on the provided query parameters.
       
-      The endpoint requires mandatory 'topic' and 'prompt' parameters for filtering, with optional
-      'category' and 'region' parameters for additional filtering. All text matching is case-insensitive
+      The endpoint requires mandatory 'topic' parameter for filtering, with optional
+      'category', 'region', 'origin', and 'popularity' parameters for additional filtering. All text matching is case-insensitive
       and uses partial matching (contains).
       
-      The data is sourced from the human prompts popularity cache file stored in S3 at:
-      `llm_cache/{siteId}/prompts/human_prompts_popularity_cache.json`
+      The data is sourced from the topics popularity reasoning cache file stored in S3 at:
+      `llm_cache/{siteId}/topics_popularity_reasoning_cache.json`
     operationId: getLlmoRationale
     responses:
       '200':
@@ -1257,26 +1264,43 @@ llmo-rationale:
           application/json:
             schema:
               type: array
-              description: Array of filtered prompt objects matching the query criteria
+              description: Array of filtered topic objects matching the query criteria
               items:
                 type: object
                 properties:
                   topic:
                     type: string
-                    description: The topic of the prompt
-                    example: 'product recommendations'
-                  prompt:
-                    type: string
-                    description: The prompt text
-                    example: 'What are the best products for outdoor activities?'
+                    description: The topic name
+                    example: 'Convert PDF_Informational'
                   category:
                     type: string
-                    description: The category of the prompt
-                    example: 'shopping'
+                    description: The category of the topic
+                    example: 'Acrobat'
                   region:
                     type: string
-                    description: The region associated with the prompt
-                    example: 'US'
+                    description: The region associated with the topic
+                    example: 'BR'
+                  origin:
+                    type: string
+                    description: The origin of the topic
+                    example: 'HUMAN'
+                  popularity:
+                    type: string
+                    description: The popularity level of the topic
+                    example: 'Low'
+                  volume:
+                    type: number
+                    description: The volume metric for the topic
+                    example: -10
+                  reasoning:
+                    type: string
+                    description: The reasoning for the topic's popularity classification
+                    example: 'Specific informational query with minimal organic searches.'
+                  added_date:
+                    type: string
+                    format: date-time
+                    description: The date when the topic was added
+                    example: '2025-12-03T09:21:31.673898'
                 additionalProperties: true
       '400':
         description: Bad request - missing required parameters or invalid request
@@ -1290,8 +1314,6 @@ llmo-rationale:
                   examples:
                     missing_topic:
                       value: 'topic parameter is required'
-                    missing_prompt:
-                      value: 'prompt parameter is required'
                     s3_not_configured:
                       value: 'S3 storage is not configured for this environment'
                     invalid_json:

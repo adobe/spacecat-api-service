@@ -2555,40 +2555,47 @@ describe('LlmoController', () => {
       };
     });
 
-    it('should successfully retrieve and return filtered prompts from S3', async () => {
+    it('should successfully retrieve and return filtered topics from S3', async () => {
       const mockRationaleData = {
         site_id: TEST_SITE_ID,
-        prompts: [
+        topics: [
           {
-            prompt: 'are frosted mini wheats sweet?',
-            popularity: 'High',
-            volume: -30,
-            added_date: '2025-11-27T14:40:16.924824',
-            reasoning: 'Branded product with mass market recognition and consumer interest.',
-            topic: 'Frosted Mini Wheats',
-            category: 'Frosted Mini-Wheats - General',
-            region: 'US',
+            topic: 'Convert PDF_Informational',
+            category: 'Acrobat',
+            region: 'BR',
+            origin: 'HUMAN',
+            popularity: 'Low',
+            volume: -10,
+            reasoning: 'Specific informational query with minimal organic searches.',
+            added_date: '2025-12-03T09:21:31.673898',
           },
           {
-            prompt: 'Are corn flakes gluten free?',
+            topic: 'Convert PDF_Informational',
+            category: 'Acrobat',
+            region: 'DE',
+            origin: 'HUMAN',
             popularity: 'High',
             volume: -30,
-            added_date: '2025-11-27T14:40:16.925010',
-            reasoning: 'Broad product category with mass market appeal and purchase intent.',
-            topic: 'Breakfast Cereals',
-            category: 'Products',
+            reasoning: 'Common task with wide applicability and core to business services.',
+            added_date: '2025-12-03T09:21:31.673921',
+          },
+          {
+            topic: 'Another Topic',
+            category: 'Other',
             region: 'US',
+            origin: 'AI',
+            popularity: 'Medium',
+            volume: -20,
+            reasoning: 'Some other reasoning.',
+            added_date: '2025-12-03T09:21:31.673925',
           },
         ],
-        last_updated: '2025-11-27T14:40:16.925258',
-        version: '1.0',
       };
 
       const contextWithFilters = {
         ...rationaleContext,
         data: {
-          topic: 'Frosted Mini Wheats',
-          prompt: 'sweet',
+          topic: 'Convert PDF',
         },
       };
 
@@ -2600,28 +2607,26 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
 
-      // Should return only the filtered prompts array, not the full JSON
+      // Should return only the filtered topics array, not the full JSON
       expect(responseBody).to.be.an('array');
-      expect(responseBody).to.have.length(1);
-      expect(responseBody[0].prompt).to.equal('are frosted mini wheats sweet?');
-      expect(responseBody[0].topic).to.equal('Frosted Mini Wheats');
+      expect(responseBody).to.have.length(2);
+      expect(responseBody[0].topic).to.equal('Convert PDF_Informational');
+      expect(responseBody[1].topic).to.equal('Convert PDF_Informational');
 
       expect(mockS3Client.send).to.have.been.calledOnce;
       const commandArg = mockS3Client.send.getCall(0).args[0];
       expect(commandArg.params.Bucket).to.equal('spacecat-dev-mystique-assets');
-      expect(commandArg.params.Key).to.equal(`llm_cache/${TEST_SITE_ID}/prompts/human_prompts_popularity_cache.json`);
+      expect(commandArg.params.Key).to.equal(`llm_cache/${TEST_SITE_ID}/topics_popularity_reasoning_cache.json`);
 
       expect(mockLog.info).to.have.been.calledWith(
-        `Getting LLMO rationale for site ${TEST_SITE_ID} with filters - topic: Frosted Mini Wheats, prompt: sweet, category: all, region: all`,
+        `Getting LLMO rationale for site ${TEST_SITE_ID} with filters - topic: Convert PDF, category: all, region: all, origin: all, popularity: all`,
       );
     });
 
     it('should return 400 when topic parameter is missing', async () => {
       const contextWithoutTopic = {
         ...rationaleContext,
-        data: {
-          prompt: 'sweet',
-        },
+        data: {},
       };
 
       const result = await controller.getLlmoRationale(contextWithoutTopic);
@@ -2631,55 +2636,30 @@ describe('LlmoController', () => {
       expect(responseBody.message).to.equal('topic parameter is required');
     });
 
-    it('should return 400 when prompt parameter is missing', async () => {
-      const contextWithoutPrompt = {
-        ...rationaleContext,
-        data: {
-          topic: 'Frosted Mini Wheats',
-        },
-      };
-
-      const result = await controller.getLlmoRationale(contextWithoutPrompt);
-
-      expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal('prompt parameter is required');
-    });
-
-    it('should return 400 when both mandatory parameters are missing', async () => {
-      const contextWithoutParams = {
-        ...rationaleContext,
-        data: {},
-      };
-
-      const result = await controller.getLlmoRationale(contextWithoutParams);
-
-      expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal('topic parameter is required');
-    });
-
-    it('should filter prompts by topic and prompt (case-insensitive)', async () => {
+    it('should filter topics by topic (case-insensitive)', async () => {
       const mockRationaleData = {
         site_id: TEST_SITE_ID,
-        prompts: [
+        topics: [
           {
-            prompt: 'are frosted mini wheats sweet?',
-            topic: 'Frosted Mini Wheats',
-            category: 'Frosted Mini-Wheats - General',
-            region: 'US',
+            topic: 'Convert PDF_Informational',
+            category: 'Acrobat',
+            region: 'BR',
+            origin: 'HUMAN',
+            popularity: 'Low',
           },
           {
-            prompt: 'Are corn flakes gluten free?',
-            topic: 'Breakfast Cereals',
-            category: 'Products',
+            topic: 'Edit PDF_Transactional',
+            category: 'Acrobat',
             region: 'US',
+            origin: 'HUMAN',
+            popularity: 'High',
           },
           {
-            prompt: 'Compare frosted mini wheats with cornflakes',
-            topic: 'Comparisons',
-            category: 'Frosted Mini-Wheats - General',
+            topic: 'Photo Editing',
+            category: 'Photoshop',
             region: 'US',
+            origin: 'AI',
+            popularity: 'Medium',
           },
         ],
       };
@@ -2687,54 +2667,7 @@ describe('LlmoController', () => {
       const contextWithFilters = {
         ...rationaleContext,
         data: {
-          topic: 'breakfast cereals', // lowercase should match
-          prompt: 'gluten', // partial match
-        },
-      };
-
-      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
-      mockS3Client.send.resolves(mockS3Response);
-
-      const result = await controller.getLlmoRationale(contextWithFilters);
-
-      expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-      expect(responseBody).to.have.length(1);
-      expect(responseBody[0].prompt).to.equal('Are corn flakes gluten free?');
-      expect(responseBody[0].topic).to.equal('Breakfast Cereals');
-    });
-
-    it('should filter prompts with optional category filter', async () => {
-      const mockRationaleData = {
-        site_id: TEST_SITE_ID,
-        prompts: [
-          {
-            prompt: 'are frosted mini wheats sweet?',
-            topic: 'Frosted Mini Wheats',
-            category: 'Frosted Mini-Wheats - General',
-            region: 'US',
-          },
-          {
-            prompt: 'Compare frosted mini wheats with cornflakes',
-            topic: 'Frosted Mini Wheats',
-            category: 'Frosted Mini-Wheats - General',
-            region: 'US',
-          },
-          {
-            prompt: 'Are corn flakes gluten free?',
-            topic: 'Breakfast Cereals',
-            category: 'Products',
-            region: 'US',
-          },
-        ],
-      };
-
-      const contextWithFilters = {
-        ...rationaleContext,
-        data: {
-          topic: 'frosted',
-          prompt: 'mini wheats', // this will match both frosted mini wheats prompts
-          category: 'general', // should match both "General" entries
+          topic: 'pdf', // lowercase should match both PDF topics
         },
       };
 
@@ -2746,24 +2679,34 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
       expect(responseBody).to.have.length(2);
-      expect(responseBody.every((item) => item.category.toLowerCase().includes('general'))).to.be.true;
+      expect(responseBody[0].topic).to.equal('Convert PDF_Informational');
+      expect(responseBody[1].topic).to.equal('Edit PDF_Transactional');
     });
 
-    it('should filter prompts with optional region filter', async () => {
+    it('should filter topics with optional category filter', async () => {
       const mockRationaleData = {
         site_id: TEST_SITE_ID,
-        prompts: [
+        topics: [
           {
-            prompt: 'are frosted mini wheats sweet?',
-            topic: 'Frosted Mini Wheats',
-            category: 'Frosted Mini-Wheats - General',
-            region: 'US',
+            topic: 'Convert PDF_Informational',
+            category: 'Acrobat',
+            region: 'BR',
+            origin: 'HUMAN',
+            popularity: 'Low',
           },
           {
-            prompt: 'are frosted mini wheats available?',
-            topic: 'Frosted Mini Wheats',
-            category: 'Frosted Mini-Wheats - General',
-            region: 'CA',
+            topic: 'Edit Photo',
+            category: 'Photoshop',
+            region: 'US',
+            origin: 'HUMAN',
+            popularity: 'High',
+          },
+          {
+            topic: 'Edit PDF_Transactional',
+            category: 'Acrobat',
+            region: 'US',
+            origin: 'AI',
+            popularity: 'Medium',
           },
         ],
       };
@@ -2771,9 +2714,8 @@ describe('LlmoController', () => {
       const contextWithFilters = {
         ...rationaleContext,
         data: {
-          topic: 'frosted',
-          prompt: 'wheats',
-          region: 'ca', // lowercase should match CA
+          topic: 'edit',
+          category: 'acrobat', // should match only Edit PDF
         },
       };
 
@@ -2785,18 +2727,140 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
       expect(responseBody).to.have.length(1);
-      expect(responseBody[0].region).to.equal('CA');
+      expect(responseBody[0].topic).to.equal('Edit PDF_Transactional');
+      expect(responseBody[0].category).to.equal('Acrobat');
     });
 
-    it('should return empty array when no prompts match filters', async () => {
+    it('should filter topics with optional region filter', async () => {
       const mockRationaleData = {
         site_id: TEST_SITE_ID,
-        prompts: [
+        topics: [
           {
-            prompt: 'are frosted mini wheats sweet?',
-            topic: 'Frosted Mini Wheats',
-            category: 'Frosted Mini-Wheats - General',
+            topic: 'Convert PDF_Informational',
+            category: 'Acrobat',
+            region: 'BR',
+            origin: 'HUMAN',
+            popularity: 'Low',
+          },
+          {
+            topic: 'Convert PDF_Informational',
+            category: 'Acrobat',
+            region: 'DE',
+            origin: 'HUMAN',
+            popularity: 'High',
+          },
+        ],
+      };
+
+      const contextWithFilters = {
+        ...rationaleContext,
+        data: {
+          topic: 'Convert',
+          region: 'de', // lowercase should match DE
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRationale(contextWithFilters);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.have.length(1);
+      expect(responseBody[0].region).to.equal('DE');
+    });
+
+    it('should filter topics with optional origin filter', async () => {
+      const mockRationaleData = {
+        site_id: TEST_SITE_ID,
+        topics: [
+          {
+            topic: 'Convert PDF_Informational',
+            category: 'Acrobat',
+            region: 'BR',
+            origin: 'HUMAN',
+            popularity: 'Low',
+          },
+          {
+            topic: 'Edit PDF_Transactional',
+            category: 'Acrobat',
             region: 'US',
+            origin: 'AI',
+            popularity: 'High',
+          },
+        ],
+      };
+
+      const contextWithFilters = {
+        ...rationaleContext,
+        data: {
+          topic: 'pdf',
+          origin: 'human', // should match only HUMAN origin
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRationale(contextWithFilters);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.have.length(1);
+      expect(responseBody[0].origin).to.equal('HUMAN');
+    });
+
+    it('should filter topics with optional popularity filter', async () => {
+      const mockRationaleData = {
+        site_id: TEST_SITE_ID,
+        topics: [
+          {
+            topic: 'Convert PDF_Informational',
+            category: 'Acrobat',
+            region: 'BR',
+            origin: 'HUMAN',
+            popularity: 'Low',
+          },
+          {
+            topic: 'Edit PDF_Transactional',
+            category: 'Acrobat',
+            region: 'DE',
+            origin: 'HUMAN',
+            popularity: 'High',
+          },
+        ],
+      };
+
+      const contextWithFilters = {
+        ...rationaleContext,
+        data: {
+          topic: 'pdf',
+          popularity: 'high', // should match only High popularity
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRationale(contextWithFilters);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.have.length(1);
+      expect(responseBody[0].popularity).to.equal('High');
+    });
+
+    it('should return empty array when no topics match filters', async () => {
+      const mockRationaleData = {
+        site_id: TEST_SITE_ID,
+        topics: [
+          {
+            topic: 'Convert PDF_Informational',
+            category: 'Acrobat',
+            region: 'BR',
+            origin: 'HUMAN',
+            popularity: 'Low',
           },
         ],
       };
@@ -2805,7 +2869,6 @@ describe('LlmoController', () => {
         ...rationaleContext,
         data: {
           topic: 'nonexistent topic',
-          prompt: 'nonexistent prompt',
         },
       };
 
@@ -2820,19 +2883,16 @@ describe('LlmoController', () => {
       expect(responseBody).to.have.length(0);
     });
 
-    it('should handle missing prompts array gracefully', async () => {
+    it('should handle missing topics array gracefully', async () => {
       const mockRationaleData = {
         site_id: TEST_SITE_ID,
-        // No prompts array
-        last_updated: '2025-11-27T14:40:16.925258',
-        version: '1.0',
+        // No topics array
       };
 
       const contextWithFilters = {
         ...rationaleContext,
         data: {
           topic: 'any topic',
-          prompt: 'any prompt',
         },
       };
 
@@ -2845,122 +2905,6 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.be.an('array');
       expect(responseBody).to.have.length(0);
-    });
-
-    it('should filter out prompts that do not match optional category filter', async () => {
-      const mockRationaleData = {
-        site_id: TEST_SITE_ID,
-        prompts: [
-          {
-            prompt: 'are frosted mini wheats sweet?',
-            topic: 'Frosted Mini Wheats',
-            category: 'Frosted Mini-Wheats - General',
-            region: 'US',
-          },
-          {
-            prompt: 'are frosted mini wheats healthy?',
-            topic: 'Frosted Mini Wheats',
-            category: 'Products', // Different category
-            region: 'US',
-          },
-        ],
-      };
-
-      const contextWithFilters = {
-        ...rationaleContext,
-        data: {
-          topic: 'frosted',
-          prompt: 'mini wheats',
-          category: 'general', // Only matches first prompt
-        },
-      };
-
-      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
-      mockS3Client.send.resolves(mockS3Response);
-
-      const result = await controller.getLlmoRationale(contextWithFilters);
-
-      expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-      expect(responseBody).to.have.length(1);
-      expect(responseBody[0].category).to.equal('Frosted Mini-Wheats - General');
-    });
-
-    it('should filter out prompts that do not match optional region filter', async () => {
-      const mockRationaleData = {
-        site_id: TEST_SITE_ID,
-        prompts: [
-          {
-            prompt: 'are frosted mini wheats sweet?',
-            topic: 'Frosted Mini Wheats',
-            category: 'Frosted Mini-Wheats - General',
-            region: 'US',
-          },
-          {
-            prompt: 'are frosted mini wheats available?',
-            topic: 'Frosted Mini Wheats',
-            category: 'Frosted Mini-Wheats - General',
-            region: 'CA', // Different region
-          },
-        ],
-      };
-
-      const contextWithFilters = {
-        ...rationaleContext,
-        data: {
-          topic: 'frosted',
-          prompt: 'mini wheats',
-          region: 'us', // Only matches first prompt
-        },
-      };
-
-      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
-      mockS3Client.send.resolves(mockS3Response);
-
-      const result = await controller.getLlmoRationale(contextWithFilters);
-
-      expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-      expect(responseBody).to.have.length(1);
-      expect(responseBody[0].region).to.equal('US');
-    });
-
-    it('should filter out prompts that do not match mandatory prompt filter', async () => {
-      const mockRationaleData = {
-        site_id: TEST_SITE_ID,
-        prompts: [
-          {
-            prompt: 'are frosted mini wheats sweet?',
-            topic: 'Frosted Mini Wheats',
-            category: 'Frosted Mini-Wheats - General',
-            region: 'US',
-          },
-          {
-            prompt: 'what are the ingredients in corn flakes?',
-            topic: 'Frosted Mini Wheats', // Same topic
-            category: 'Frosted Mini-Wheats - General',
-            region: 'US',
-          },
-        ],
-      };
-
-      const contextWithFilters = {
-        ...rationaleContext,
-        data: {
-          topic: 'frosted',
-          prompt: 'sweet', // Only matches first prompt, not "ingredients"
-        },
-      };
-
-      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
-      mockS3Client.send.resolves(mockS3Response);
-
-      const result = await controller.getLlmoRationale(contextWithFilters);
-
-      expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-      expect(responseBody).to.have.length(1);
-      expect(responseBody[0].prompt).to.equal('are frosted mini wheats sweet?');
     });
 
     it('should return 404 when S3 file does not exist (NoSuchKey)', async () => {
@@ -2972,7 +2916,6 @@ describe('LlmoController', () => {
         ...rationaleContext,
         data: {
           topic: 'any topic',
-          prompt: 'any prompt',
         },
       };
 
@@ -2983,7 +2926,7 @@ describe('LlmoController', () => {
       expect(responseBody.message).to.equal(`Rationale file not found for site ${TEST_SITE_ID}`);
 
       expect(mockLog.warn).to.have.been.calledWith(
-        `LLMO rationale file not found for site ${TEST_SITE_ID} at llm_cache/${TEST_SITE_ID}/prompts/human_prompts_popularity_cache.json`,
+        `LLMO rationale file not found for site ${TEST_SITE_ID} at llm_cache/${TEST_SITE_ID}/topics_popularity_reasoning_cache.json`,
       );
     });
 
@@ -2996,7 +2939,6 @@ describe('LlmoController', () => {
         ...rationaleContext,
         data: {
           topic: 'any topic',
-          prompt: 'any prompt',
         },
       };
 
@@ -3017,7 +2959,6 @@ describe('LlmoController', () => {
         ...rationaleContext,
         data: {
           topic: 'any topic',
-          prompt: 'any prompt',
         },
       };
 
@@ -3041,7 +2982,6 @@ describe('LlmoController', () => {
         ...rationaleContext,
         data: {
           topic: 'any topic',
-          prompt: 'any prompt',
         },
       };
 
@@ -3062,7 +3002,6 @@ describe('LlmoController', () => {
         s3: null,
         data: {
           topic: 'any topic',
-          prompt: 'any prompt',
         },
       };
 
@@ -3081,7 +3020,6 @@ describe('LlmoController', () => {
         },
         data: {
           topic: 'any topic',
-          prompt: 'any prompt',
         },
       };
 
@@ -3098,7 +3036,6 @@ describe('LlmoController', () => {
         ...rationaleContext,
         data: {
           topic: 'any topic',
-          prompt: 'any prompt',
         },
       };
       const result = await controllerDenied.getLlmoRationale(contextWithParams);
@@ -3122,7 +3059,6 @@ describe('LlmoController', () => {
         },
         data: {
           topic: 'any topic',
-          prompt: 'any prompt',
         },
       };
 
@@ -3143,7 +3079,6 @@ describe('LlmoController', () => {
         ...rationaleContext,
         data: {
           topic: 'any topic',
-          prompt: 'any prompt',
         },
       };
 
@@ -3158,44 +3093,41 @@ describe('LlmoController', () => {
       expect(responseBody).to.have.length(0);
     });
 
-    it('should handle complex nested JSON structure with proper prompts array', async () => {
+    it('should handle complex nested JSON structure with proper topics array', async () => {
       const complexData = {
         site_id: TEST_SITE_ID,
-        prompts: [
+        topics: [
           {
-            prompt: 'Popular prompt 1',
-            topic: 'Marketing',
-            category: 'Popular',
+            topic: 'Convert PDF',
+            category: 'Acrobat',
             region: 'US',
-            score: 0.95,
+            origin: 'HUMAN',
+            popularity: 'High',
+            volume: -30,
+            reasoning: 'High demand topic.',
+            added_date: '2025-12-03T09:21:31.673898',
           },
           {
-            prompt: 'Popular prompt 2',
-            topic: 'Marketing',
-            category: 'Popular',
+            topic: 'Edit Photo',
+            category: 'Photoshop',
             region: 'US',
-            score: 0.87,
-          },
-          {
-            prompt: 'Trending prompt 1',
-            topic: 'Sales',
-            category: 'Trending',
-            region: 'US',
-            score: 0.92,
+            origin: 'AI',
+            popularity: 'Medium',
+            volume: -20,
+            reasoning: 'Moderate demand topic.',
+            added_date: '2025-12-03T09:21:31.673921',
           },
         ],
         metadata: {
-          lastUpdated: '2025-01-15T10:00:00Z',
-          totalPrompts: 3,
-          averageScore: 0.913,
+          last_updated: '2025-12-03T09:21:31.673925',
+          version: '2.0',
         },
       };
 
       const contextWithFilters = {
         ...rationaleContext,
         data: {
-          topic: 'marketing',
-          prompt: 'popular',
+          topic: 'convert',
         },
       };
 
@@ -3207,32 +3139,36 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
       expect(responseBody).to.be.an('array');
-      expect(responseBody).to.have.length(2);
-      expect(responseBody.every((item) => item.topic === 'Marketing')).to.be.true;
-      expect(responseBody.every((item) => item.prompt.toLowerCase().includes('popular'))).to.be.true;
+      expect(responseBody).to.have.length(1);
+      expect(responseBody[0].topic).to.equal('Convert PDF');
+      expect(responseBody[0].volume).to.equal(-30);
+      expect(responseBody[0].reasoning).to.equal('High demand topic.');
     });
 
-    it('should handle special characters in topic and prompt parameters', async () => {
+    it('should handle special characters in topic parameter', async () => {
       const mockRationaleData = {
         site_id: TEST_SITE_ID,
-        prompts: [
+        topics: [
           {
-            prompt: 'Food & Nutrition: healthy & tasty recipes',
-            topic: 'Food & Nutrition',
-            category: 'Health & Wellness',
+            topic: 'PDF & Document Processing',
+            category: 'Acrobat',
             region: 'US',
+            origin: 'HUMAN',
+            popularity: 'High',
           },
           {
-            prompt: 'Coffee & Tea brewing methods',
-            topic: 'Beverages & Drinks',
-            category: 'Food & Beverage',
+            topic: 'Photo & Image Editing',
+            category: 'Photoshop',
             region: 'US',
+            origin: 'AI',
+            popularity: 'Medium',
           },
           {
-            prompt: 'Regular nutrition tips',
-            topic: 'Health',
+            topic: 'Regular Document Tips',
             category: 'General',
             region: 'US',
+            origin: 'HUMAN',
+            popularity: 'Low',
           },
         ],
       };
@@ -3240,8 +3176,7 @@ describe('LlmoController', () => {
       const contextWithSpecialChars = {
         ...rationaleContext,
         data: {
-          topic: 'Food & Nutrition', // Contains & character
-          prompt: 'healthy & tasty', // Contains & character
+          topic: 'PDF & Document', // Contains & character
         },
       };
 
@@ -3253,24 +3188,24 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
       expect(responseBody).to.have.length(1);
-      expect(responseBody[0].prompt).to.equal('Food & Nutrition: healthy & tasty recipes');
-      expect(responseBody[0].topic).to.equal('Food & Nutrition');
+      expect(responseBody[0].topic).to.equal('PDF & Document Processing');
 
       // Verify that the log message handles special characters correctly
       expect(mockLog.info).to.have.been.calledWith(
-        `Getting LLMO rationale for site ${TEST_SITE_ID} with filters - topic: Food & Nutrition, prompt: healthy & tasty, category: all, region: all`,
+        `Getting LLMO rationale for site ${TEST_SITE_ID} with filters - topic: PDF & Document, category: all, region: all, origin: all, popularity: all`,
       );
     });
 
     it('should handle URL-encoded special characters in parameters', async () => {
       const mockRationaleData = {
         site_id: TEST_SITE_ID,
-        prompts: [
+        topics: [
           {
-            prompt: 'Search & Discovery: find what you need',
-            topic: 'Search & Discovery',
+            topic: 'Search & Discovery Tools',
             category: 'Technology',
             region: 'US',
+            origin: 'HUMAN',
+            popularity: 'High',
           },
         ],
       };
@@ -3279,7 +3214,6 @@ describe('LlmoController', () => {
         ...rationaleContext,
         data: {
           topic: 'Search & Discovery', // Would be %26 in URL, but should be decoded by framework
-          prompt: 'find', // Contains & character - simplified to match the prompt data
         },
       };
 
@@ -3291,7 +3225,7 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
       expect(responseBody).to.have.length(1);
-      expect(responseBody[0].topic).to.equal('Search & Discovery');
+      expect(responseBody[0].topic).to.equal('Search & Discovery Tools');
     });
   });
 });
