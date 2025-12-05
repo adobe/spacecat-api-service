@@ -123,8 +123,6 @@ function GetLlmoConfigSummaryCommand(context) {
         return;
       }
 
-      await say(`📊 Processing ${sites.length} site(s) with controlled concurrency...`);
-
       const processSite = async (site) => {
         try {
           const config = await getLlmoConfig(site.getId());
@@ -161,7 +159,8 @@ function GetLlmoConfigSummaryCommand(context) {
       };
 
       const siteResults = await processBatch(sites, processSite, MAX_CONCURRENT_SITES);
-      const results = siteResults.filter(Boolean);
+      const results = siteResults.filter(Boolean)
+        .sort((a, b) => a.baseURL.localeCompare(b.baseURL));
 
       if (results.length === 0) {
         await say('No valid LLMO configurations found.');
