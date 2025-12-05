@@ -246,6 +246,86 @@ describe('Paid TrafficController', async () => {
       expect(query).to.include('trf_type');
     });
 
+    it('getPaidTrafficTemporalSeries with MONTH parameter should use month logic not week logic', async () => {
+      // This test demonstrates the bug where week=0 causes incorrect temporal conditions
+      mockContext.data = {
+        year: 2025,
+        month: 11, // November
+        // week is undefined, which becomes 0 in validateTemporalParams
+      };
+      mockAthenaQuery.resolves([
+        {
+          trf_type: 'paid',
+          pageviews: 1000,
+          pct_pageviews: 0.5,
+          click_rate: 0.1,
+          engagement_rate: 0.2,
+          bounce_rate: 0.3,
+          p70_lcp: 2.5,
+          p70_cls: 0.1,
+          p70_inp: 200,
+        },
+      ]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficTemporalSeries();
+      expect(res.status).to.equal(200);
+      expect(mockAthenaQuery).to.have.been.calledOnce;
+
+      // Verify the query uses MONTH logic, not WEEK logic
+      const athenaCall = mockAthenaQuery.getCall(0);
+      expect(athenaCall).to.exist;
+      const query = athenaCall.args[0];
+      expect(query).to.be.a('string');
+
+      // The query should contain month conditions for November and previous months IN 2025
+      expect(query).to.include('year=2025 AND month=11'); // Current month (November 2025)
+      expect(query).to.include('year=2025 AND month=10'); // Previous month (October 2025)
+      expect(query).to.include('year=2025 AND month=9'); // 2 months ago (September 2025)
+      expect(query).to.include('year=2025 AND month=8'); // 3 months ago (August 2025)
+
+      // The query should NOT contain year=2024 (the bug behavior - wrong year!)
+      expect(query).to.not.include('year=2024');
+
+      // The query should NOT contain week conditions (the bug behavior - wrong dimension!)
+      expect(query).to.not.include('week=52');
+      expect(query).to.not.include('week=51');
+      expect(query).to.not.include('week=50');
+      expect(query).to.not.include('week=49');
+    });
+
+    it('getPaidTrafficByType with MONTH parameter should use month logic (non-temporal series)', async () => {
+      // Test the non-numSeries case (numSeries=1) to verify month logic works correctly
+      mockContext.data = {
+        year: 2025,
+        month: 11, // November
+        // week is undefined, which becomes 0 in validateTemporalParams
+      };
+      mockAthenaQuery.resolves([
+        {
+          trf_type: 'paid',
+          pageviews: 1000,
+          pct_pageviews: 0.5,
+        },
+      ]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByType();
+      expect(res.status).to.equal(200);
+      expect(mockAthenaQuery).to.have.been.calledOnce;
+
+      // Verify the query uses MONTH logic for single period
+      const athenaCall = mockAthenaQuery.getCall(0);
+      expect(athenaCall).to.exist;
+      const query = athenaCall.args[0];
+      expect(query).to.be.a('string');
+
+      // Should contain the correct year and month
+      expect(query).to.include('year=2025');
+      expect(query).to.include('month=11');
+
+      // Should NOT contain week conditions
+      expect(query).to.not.include('week=');
+    });
+
     it('does not log error if cache file is missing (known exception)', async () => {
       mockAthenaQuery.resolves(trafficTypeMock);
       const controller = TrafficController(mockContext, mockLog, mockEnv);
