@@ -169,7 +169,7 @@ function TrafficController(context, log, env) {
     }
 
     if (isWeekOverWeek) {
-      log.info(`Week over week parameters: context.data: ${context.data} / temporal: ${temporal} / trafficType: ${trafficType} / pageViewThreshold: ${pageViewThreshold}`);
+      log.info(`Week over week parameters: context.data: ${JSON.stringify(context.data)} / temporal: ${JSON.stringify(temporal)} / trafficType: ${JSON.stringify(trafficType)} / pageViewThreshold: ${pageViewThreshold}`);
     }
 
     const quereyParams = getTrafficAnalysisQueryPlaceholdersFilled({
