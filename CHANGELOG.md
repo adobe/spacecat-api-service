@@ -1,3 +1,10 @@
+## [1.274.2](https://github.com/adobe/spacecat-api-service/compare/v1.274.1...v1.274.2) (2025-12-07)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-helix-content-sdk to v1.4.33 ([#1633](https://github.com/adobe/spacecat-api-service/issues/1633)) ([20127d5](https://github.com/adobe/spacecat-api-service/commit/20127d5754fc0398541c3b8de6d435f5b2ebb1c8))
+
 ## [1.274.1](https://github.com/adobe/spacecat-api-service/compare/v1.274.0...v1.274.1) (2025-12-05)
 
 
