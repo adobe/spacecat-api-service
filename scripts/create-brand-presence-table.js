@@ -49,12 +49,12 @@ async function createBrandPresenceTable() {
       CREATE TABLE brand_presence (
         -- Auto-increment primary key
         id SERIAL PRIMARY KEY,
-        
+
         -- Keys for identification
         site_id UUID NOT NULL,
         date DATE NOT NULL,
         model VARCHAR(100) NOT NULL,  -- ai-mode, chatgpt, copilot, gemini, etc.
-        
+
         -- Data columns from "shared-all" sheet
         category VARCHAR(255),
         topics TEXT,
@@ -78,13 +78,13 @@ async function createBrandPresenceTable() {
         detected_brand_mentions TEXT,
         execution_date DATE,
         error_code TEXT,
-        
+
         -- Metadata
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+
         -- Create unique index to prevent true duplicates but allow similar rows
-        UNIQUE (site_id, date, model, category, prompt, region)
+        -- UNIQUE (site_id, date, model, category, prompt, region)
       );
     `;
 
@@ -124,9 +124,9 @@ async function createBrandPresenceTable() {
     // Verify table creation
     console.log('?? Verifying table structure...');
     const tableInfo = await auroraClient.query(`
-      SELECT 
-        column_name, 
-        data_type, 
+      SELECT
+        column_name,
+        data_type,
         is_nullable,
         column_default
       FROM information_schema.columns
