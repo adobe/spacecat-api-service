@@ -79,6 +79,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} entitlementController - The entitlement controller.
  * @param {Object} sandboxAuditController - The sandbox audit controller.
  * @param {Object} reportsController - The reports controller.
+ * @param {Object} urlStoreController - The URL store controller.
  * @param {Object} pta2Controller - The PTA2 controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
@@ -115,6 +116,7 @@ export default function getRouteHandlers(
   entitlementController,
   sandboxAuditController,
   reportsController,
+  urlStoreController,
   pta2Controller,
 ) {
   const staticRoutes = {};
@@ -264,6 +266,11 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/traffic/paid/temporal-series-by-url-channel': trafficController.getPaidTrafficTemporalSeriesByUrlChannel,
     'GET /sites/:siteId/traffic/paid/temporal-series-by-url-platform': trafficController.getPaidTrafficTemporalSeriesByUrlPlatform,
     'GET /sites/:siteId/traffic/paid/temporal-series-by-url-channel-platform': trafficController.getPaidTrafficTemporalSeriesByUrlChannelPlatform,
+    'GET /sites/:siteId/traffic/paid/impact-by-page': trafficController.getImpactByPage,
+    'GET /sites/:siteId/traffic/paid/impact-by-page-device': trafficController.getImpactByPageDevice,
+    'GET /sites/:siteId/traffic/paid/impact-by-page-traffic-type': trafficController.getImpactByPageTrafficType,
+    'GET /sites/:siteId/traffic/paid/impact-by-page-traffic-type-device': trafficController.getImpactByPageTrafficTypeDevice,
+    'GET /sites/:siteId/traffic/paid/traffic-loss-by-devices': trafficController.getTrafficLossByDevices,
     'GET /sites/:siteId/brand-guidelines': brandsController.getBrandGuidelinesForSite,
     'GET /sites/:siteId/brand-profile': sitesController.getBrandProfile,
     'POST /sites/:siteId/brand-profile': sitesController.triggerBrandProfile,
@@ -271,6 +278,14 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/top-pages/:source': sitesController.getTopPages,
     'GET /sites/:siteId/top-pages/:source/:geo': sitesController.getTopPages,
     'POST /sites/:siteId/graph': sitesController.getGraph,
+
+    // URL Store endpoints
+    'GET /sites/:siteId/url-store': urlStoreController.listUrls,
+    'GET /sites/:siteId/url-store/by-audit/:auditType': urlStoreController.listUrlsByAuditType,
+    'GET /sites/:siteId/url-store/:base64Url': urlStoreController.getUrl,
+    'POST /sites/:siteId/url-store': urlStoreController.addUrls,
+    'PATCH /sites/:siteId/url-store': urlStoreController.updateUrls,
+    'DELETE /sites/:siteId/url-store': urlStoreController.deleteUrls,
     'GET /slack/events': slackController.handleEvent,
     'POST /slack/events': slackController.handleEvent,
     'POST /slack/channels/invite-by-user-id': slackController.inviteUserToChannel,
@@ -337,6 +352,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/global-sheet-data/:configName': llmoController.getLlmoGlobalSheetData,
     'GET /sites/:siteId/llmo/brand-presence/filters': llmoController.getBrandPresenceFilters,
     'GET /sites/:siteId/llmo/brand-presence/example': llmoController.exampleEndpoint,
+    'GET /sites/:siteId/llmo/rationale': llmoController.getLlmoRationale,
     'POST /llmo/onboard': llmoController.onboardCustomer,
     'POST /sites/:siteId/llmo/offboard': llmoController.offboardCustomer,
 

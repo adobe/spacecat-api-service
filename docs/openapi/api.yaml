@@ -67,6 +67,8 @@ tags:
     description: Report generation and management operations
   - name: project
     description: Project management operations
+  - name: site urls
+    description: Site URL tracking and management operations
 
 paths:
   /audits/latest/{auditType}:
@@ -238,6 +240,12 @@ paths:
     $ref: './site-top-pages-api.yaml#/site-top-pages-by-source'
   /sites/{siteId}/top-pages/{source}/{geo}:
     $ref: './site-top-pages-api.yaml#/site-top-pages-by-source-and-geo'
+  /sites/{siteId}/url-store:
+    $ref: './url-store-api.yaml#/url-store-list'
+  /sites/{siteId}/url-store/by-audit/{auditType}:
+    $ref: './url-store-api.yaml#/url-store-by-audit'
+  /sites/{siteId}/url-store/{base64Url}:
+    $ref: './url-store-api.yaml#/url-store-get'
   /sites/{siteId}/traffic/paid:
     $ref: './site-paid.yaml#/site-traffic-paid-top-pages'
   /sites/{siteId}/traffic/paid/url-page-type:

@@ -48,6 +48,7 @@ import {
   getBrandPresenceFilters as getBrandPresenceFiltersImpl,
   exampleEndpoint as exampleEndpointImpl,
 } from './brand-presence/index.js';
+import { handleLlmoRationale } from './llmo-rationale.js';
 
 const { readConfig, writeConfig } = llmo;
 const { llmoConfig: llmoConfigSchema } = schemas;
@@ -948,6 +949,22 @@ function LlmoController(ctx) {
     }
   };
 
+  // Handles requests to the LLMO rationale endpoint
+  const getLlmoRationale = async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+    try {
+      // Validate site and LLMO access
+      await getSiteAndValidateLlmo(context);
+
+      // Delegate to the rationale handler for the actual processing
+      return await handleLlmoRationale(context);
+    } catch (error) {
+      log.error(`Error getting LLMO rationale for site ${siteId}: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
   // Wrapper for brand presence filters endpoint
   const getBrandPresenceFilters = async (context) => getBrandPresenceFiltersImpl(
     context,
@@ -981,6 +998,7 @@ function LlmoController(ctx) {
     queryFiles,
     getBrandPresenceFilters,
     exampleEndpoint,
+    getLlmoRationale,
   };
 }
 

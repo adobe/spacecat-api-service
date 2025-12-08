@@ -979,6 +979,7 @@ describe('Sites Controller', () => {
   it('logs error and returns zeroed metrics when rum query fails', async () => {
     const rumApiClient = {
       query: sandbox.stub().rejects(new Error('RUM query failed')),
+      retrieveDomainkey: sandbox.stub().resolves('domain-key'),
     };
 
     const result = await sitesController.getLatestSiteMetrics(

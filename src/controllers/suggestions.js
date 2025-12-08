@@ -1298,12 +1298,122 @@ function SuggestionsController(ctx, sqs, env) {
     return createResponse(response, 207);
   };
 
+  /**
+   * Fetches content from a URL using Tokowaka-AI User-Agent.
+   * This is a simple URL-based fetch, useful for checking deployed content.
+   * @param {Object} context of the request
+   * @returns {Promise<Response>} Fetch response with content
+   */
+  const fetchFromEdge = async (context) => {
+    const siteId = context.params?.siteId;
+    const opportunityId = context.params?.opportunityId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!isValidUUID(opportunityId)) {
+      return badRequest('Opportunity ID required');
+    }
+
+    // validate request body
+    if (!isNonEmptyObject(context.data)) {
+      return badRequest('No data provided');
+    }
+
+    const { url } = context.data;
+
+    // Validate URL
+    if (!hasText(url)) {
+      return badRequest('URL is required');
+    }
+
+    // Validate URL format
+    try {
+      const parsedUrl = new URL(url); // throws if invalid
+      if (!parsedUrl.protocol.startsWith('http')) {
+        return badRequest('Invalid URL format: only HTTP/HTTPS URLs are allowed');
+      }
+    } catch (error) {
+      return badRequest('Invalid URL format');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
+    }
+
+    const opportunity = await Opportunity.findById(opportunityId);
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound('Opportunity not found');
+    }
+
+    try {
+      context.log.info(`Fetching content from URL: ${url}`);
+
+      // Make fetch request with Tokowaka-AI User-Agent
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Tokowaka-AI Tokowaka/1.0',
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+      });
+
+      if (!response.ok) {
+        const requestId = response.headers.get('x-tokowaka-request-id');
+        const logMessage = requestId
+          ? `Failed to fetch URL. Status: ${response.status}, x-tokowaka-request-id: ${requestId}`
+          : `Failed to fetch URL. Status: ${response.status}`;
+        context.log.warn(logMessage);
+        return ok({
+          status: 'error',
+          statusCode: response.status,
+          message: `Failed to fetch content from URL: ${url}`,
+          html: {
+            url,
+            content: null,
+          },
+        });
+      }
+
+      const content = await response.text();
+
+      context.log.info(`Successfully fetched content from URL: ${url}`);
+
+      return ok({
+        status: 'success',
+        statusCode: response.status,
+        html: {
+          url,
+          content,
+        },
+      });
+    } catch (error) {
+      context.log.error(`Error fetching from URL ${url}: ${error.message}`, error);
+      return ok({
+        status: 'error',
+        statusCode: 500,
+        message: `Error fetching content: ${error.message}`,
+        html: {
+          url,
+          content: null,
+        },
+      });
+    }
+  };
+
   return {
     autofixSuggestions,
     createSuggestions,
     deploySuggestionToEdge,
     rollbackSuggestionFromEdge,
     previewSuggestions,
+    fetchFromEdge,
     getAllForOpportunity,
     getAllForOpportunityPaged,
     getByID,
