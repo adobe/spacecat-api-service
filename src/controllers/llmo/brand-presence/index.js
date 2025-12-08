@@ -13,3 +13,4 @@
 export { getBrandPresenceFilters } from './filters.js';
 export { exampleEndpoint } from './example.js';
 export { getSentimentOverview } from './sentiment-overview.js';
+export { getBrandPresenceStats } from './llmo-stat-cards.js';

@@ -13,6 +13,8 @@ services:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    # Increase shared memory to prevent "No space left on device" errors
+    shm_size: 256mb
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U spacecatuser -d spacecatdb"]
       interval: 10s
