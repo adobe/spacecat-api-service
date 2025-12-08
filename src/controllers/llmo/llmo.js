@@ -44,6 +44,7 @@ import {
 } from './llmo-onboarding.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
+import { handleLlmoRationale } from './llmo-rationale.js';
 
 const { readConfig, writeConfig } = llmo;
 const { llmoConfig: llmoConfigSchema } = schemas;
@@ -894,6 +895,22 @@ function LlmoController(ctx) {
     }
   };
 
+  // Handles requests to the LLMO rationale endpoint
+  const getLlmoRationale = async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+    try {
+      // Validate site and LLMO access
+      await getSiteAndValidateLlmo(context);
+
+      // Delegate to the rationale handler for the actual processing
+      return await handleLlmoRationale(context);
+    } catch (error) {
+      log.error(`Error getting LLMO rationale for site ${siteId}: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -913,6 +930,7 @@ function LlmoController(ctx) {
     onboardCustomer,
     offboardCustomer,
     queryFiles,
+    getLlmoRationale,
   };
 }
 
