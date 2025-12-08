@@ -38,6 +38,7 @@ const SUPPORTS_PAGE_URLS = [
   'organic-keywords-ai-overview',
   'organic-keywords-feature-snippets',
   'organic-keywords-questions',
+  'worldline-llmo-prompts-gsc',
 ];
 
 /**
@@ -237,8 +238,8 @@ function RunImportCommand(context) {
     // Date validation
     if ((startDate || endDate) && !isValidDateInterval(startDate, endDate)) {
       await say(':error: Invalid date interval. '
-      + 'Please provide valid dates in the format YYYY-MM-DD. '
-      + 'The end date must be after the start date and within a two-year range.');
+        + 'Please provide valid dates in the format YYYY-MM-DD. '
+        + 'The end date must be after the start date and within a two-year range.');
       return { success: false };
     }
 
