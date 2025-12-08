@@ -67,6 +67,8 @@ tags:
     description: Report generation and management operations
   - name: project
     description: Project management operations
+  - name: site urls
+    description: Site URL tracking and management operations
 
 paths:
   /audits/latest/{auditType}:
@@ -220,8 +222,6 @@ paths:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-status'
   /sites/{siteId}/opportunities/{opportunityId}/suggestions/auto-fix:
     $ref: './site-opportunities.yaml#/site-opportunity-suggestions-auto-fix'
-  /sites/{siteId}/opportunities/{opportunityId}/suggestions/edge-live-preview:
-    $ref: './site-opportunities.yaml#/site-opportunity-suggestions-edge-live-preview'
   /sites/{siteId}/site-enrollments:
     $ref: './site-enrollments-api.yaml#/site-enrollments-by-site'
   /sites/{siteId}/user-activities:
@@ -240,6 +240,12 @@ paths:
     $ref: './site-top-pages-api.yaml#/site-top-pages-by-source'
   /sites/{siteId}/top-pages/{source}/{geo}:
     $ref: './site-top-pages-api.yaml#/site-top-pages-by-source-and-geo'
+  /sites/{siteId}/url-store:
+    $ref: './url-store-api.yaml#/url-store-list'
+  /sites/{siteId}/url-store/by-audit/{auditType}:
+    $ref: './url-store-api.yaml#/url-store-by-audit'
+  /sites/{siteId}/url-store/{base64Url}:
+    $ref: './url-store-api.yaml#/url-store-get'
   /sites/{siteId}/traffic/paid:
     $ref: './site-paid.yaml#/site-traffic-paid-top-pages'
   /sites/{siteId}/traffic/paid/url-page-type:
