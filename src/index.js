@@ -75,6 +75,7 @@ import TrialUsersController from './controllers/trial-users.js';
 import UserDetailsController from './controllers/user-details.js';
 import EntitlementsController from './controllers/entitlements.js';
 import SandboxAuditController from './controllers/sandbox-audit.js';
+import UrlStoreController from './controllers/url-store.js';
 import PTA2Controller from './controllers/paid/pta2.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -140,6 +141,7 @@ async function run(request, context) {
     const userDetailsController = UserDetailsController(context);
     const entitlementsController = EntitlementsController(context);
     const sandboxAuditController = SandboxAuditController(context);
+    const urlStoreController = UrlStoreController(context, log);
     const pta2Controller = PTA2Controller(context, log, context.env);
 
     const routeHandlers = getRouteHandlers(
@@ -175,6 +177,7 @@ async function run(request, context) {
       entitlementsController,
       sandboxAuditController,
       reportsController,
+      urlStoreController,
       pta2Controller,
     );
 

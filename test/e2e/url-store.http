@@ -1,0 +1,287 @@
+# URL Store API Testing
+# =====================
+# This file contains HTTP requests for testing the URL Store API endpoints.
+# 
+# Prerequisites:
+# 1. Install "REST Client" extension in Cursor/VS Code
+# 2. Set your API key and site ID below
+# 3. Click "Send Request" above any request to execute
+#
+# Environment: Update these variables for your environment
+# - dev: https://spacecat-services--api-service.aem-dev.hlx.page
+# - stage: https://spacecat-services--api-service.aem-stage.hlx.page
+# - prod: https://spacecat-services--api-service.aem.hlx.page
+
+@baseUrl = https://spacecat-services--api-service.aem-dev.hlx.page
+@apiKey = YOUR_API_KEY_HERE
+@siteId = YOUR_SITE_ID_HERE
+
+# =============================================================================
+# LIST URLs
+# =============================================================================
+
+### List all customer-added URLs (default)
+GET {{baseUrl}}/sites/{{siteId}}/url-store
+x-api-key: {{apiKey}}
+
+### List all system-added URLs
+GET {{baseUrl}}/sites/{{siteId}}/url-store?byCustomer=false
+x-api-key: {{apiKey}}
+
+### List URLs with pagination
+GET {{baseUrl}}/sites/{{siteId}}/url-store?limit=10
+x-api-key: {{apiKey}}
+
+### List URLs sorted by URL ascending
+GET {{baseUrl}}/sites/{{siteId}}/url-store?sortBy=url&sortOrder=asc
+x-api-key: {{apiKey}}
+
+### List URLs sorted by creation date descending
+GET {{baseUrl}}/sites/{{siteId}}/url-store?sortBy=createdAt&sortOrder=desc
+x-api-key: {{apiKey}}
+
+# =============================================================================
+# LIST URLs BY AUDIT TYPE
+# =============================================================================
+
+### List URLs with accessibility audit enabled
+GET {{baseUrl}}/sites/{{siteId}}/url-store/by-audit/accessibility
+x-api-key: {{apiKey}}
+
+### List URLs with broken-backlinks audit enabled
+GET {{baseUrl}}/sites/{{siteId}}/url-store/by-audit/broken-backlinks
+x-api-key: {{apiKey}}
+
+### List URLs with lhs-mobile audit enabled
+GET {{baseUrl}}/sites/{{siteId}}/url-store/by-audit/lhs-mobile
+x-api-key: {{apiKey}}
+
+# =============================================================================
+# GET SPECIFIC URL
+# =============================================================================
+
+# Note: URLs must be base64 encoded (URL-safe, no padding)
+# Example: https://example.com/page1 -> aHR0cHM6Ly9leGFtcGxlLmNvbS9wYWdlMQ
+# 
+# To encode a URL:
+# - Online: https://www.base64encode.org/ (then replace + with - and / with _)
+# - Node.js: Buffer.from('https://example.com/page1').toString('base64url')
+# - bash: echo -n 'https://example.com/page1' | base64 | tr '+/' '-_' | tr -d '='
+
+### Get specific URL by base64 encoded path
+# https://example.com/page1 encoded
+GET {{baseUrl}}/sites/{{siteId}}/url-store/aHR0cHM6Ly9leGFtcGxlLmNvbS9wYWdlMQ
+x-api-key: {{apiKey}}
+
+### Get specific URL - another example
+# https://www.adobe.com/products encoded
+GET {{baseUrl}}/sites/{{siteId}}/url-store/aHR0cHM6Ly93d3cuYWRvYmUuY29tL3Byb2R1Y3Rz
+x-api-key: {{apiKey}}
+
+# =============================================================================
+# ADD URLs (Bulk)
+# =============================================================================
+
+### Add single URL with audits
+POST {{baseUrl}}/sites/{{siteId}}/url-store
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+[
+  {
+    "url": "https://example.com/page1",
+    "audits": ["accessibility", "broken-backlinks"],
+    "byCustomer": true
+  }
+]
+
+### Add multiple URLs
+POST {{baseUrl}}/sites/{{siteId}}/url-store
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+[
+  {
+    "url": "https://example.com/page1",
+    "audits": ["accessibility"],
+    "byCustomer": true
+  },
+  {
+    "url": "https://example.com/page2",
+    "audits": ["broken-backlinks", "lhs-mobile"],
+    "byCustomer": true
+  },
+  {
+    "url": "https://example.com/page3",
+    "audits": ["accessibility", "broken-backlinks", "lhs-mobile"],
+    "byCustomer": true
+  }
+]
+
+### Add URL without audits (empty array)
+POST {{baseUrl}}/sites/{{siteId}}/url-store
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+[
+  {
+    "url": "https://example.com/no-audits",
+    "audits": [],
+    "byCustomer": true
+  }
+]
+
+### Add system-added URL (byCustomer: false)
+POST {{baseUrl}}/sites/{{siteId}}/url-store
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+[
+  {
+    "url": "https://example.com/system-url",
+    "audits": ["accessibility"],
+    "byCustomer": false
+  }
+]
+
+# =============================================================================
+# UPDATE URLs (Bulk)
+# =============================================================================
+
+### Update audit configuration for a single URL
+PATCH {{baseUrl}}/sites/{{siteId}}/url-store
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+[
+  {
+    "url": "https://example.com/page1",
+    "audits": ["accessibility", "lhs-mobile", "broken-backlinks"]
+  }
+]
+
+### Update multiple URLs
+PATCH {{baseUrl}}/sites/{{siteId}}/url-store
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+[
+  {
+    "url": "https://example.com/page1",
+    "audits": ["accessibility"]
+  },
+  {
+    "url": "https://example.com/page2",
+    "audits": ["broken-backlinks"]
+  }
+]
+
+### Remove all audits from a URL
+PATCH {{baseUrl}}/sites/{{siteId}}/url-store
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+[
+  {
+    "url": "https://example.com/page1",
+    "audits": []
+  }
+]
+
+# =============================================================================
+# DELETE URLs (Bulk)
+# =============================================================================
+
+### Delete single URL
+# Note: Only customer-added URLs (byCustomer: true) can be deleted
+DELETE {{baseUrl}}/sites/{{siteId}}/url-store
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+{
+  "urls": ["https://example.com/page1"]
+}
+
+### Delete multiple URLs
+DELETE {{baseUrl}}/sites/{{siteId}}/url-store
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+{
+  "urls": [
+    "https://example.com/page1",
+    "https://example.com/page2",
+    "https://example.com/page3"
+  ]
+}
+
+# =============================================================================
+# ERROR CASES (for testing error handling)
+# =============================================================================
+
+### Invalid site ID
+GET {{baseUrl}}/sites/invalid-uuid/url-store
+x-api-key: {{apiKey}}
+
+### Missing API key (should return 401)
+GET {{baseUrl}}/sites/{{siteId}}/url-store
+
+### Invalid base64 URL encoding
+GET {{baseUrl}}/sites/{{siteId}}/url-store/not-valid-base64!!!
+x-api-key: {{apiKey}}
+
+### Add URL with invalid format
+POST {{baseUrl}}/sites/{{siteId}}/url-store
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+[
+  {
+    "url": "not-a-valid-url",
+    "audits": ["accessibility"]
+  }
+]
+
+### Update non-existent URL
+PATCH {{baseUrl}}/sites/{{siteId}}/url-store
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+[
+  {
+    "url": "https://example.com/does-not-exist",
+    "audits": ["accessibility"]
+  }
+]
+
+### Delete non-existent URL
+DELETE {{baseUrl}}/sites/{{siteId}}/url-store
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+{
+  "urls": ["https://example.com/does-not-exist"]
+}
+
+### Empty URLs array (should return 400)
+POST {{baseUrl}}/sites/{{siteId}}/url-store
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+[]
+
+# =============================================================================
+# WORKFLOW: Complete Test Scenario
+# =============================================================================
+# Run these in order to test a complete workflow:
+#
+# 1. List URLs (should be empty or show existing)
+# 2. Add URLs (create test data)
+# 3. List URLs (verify added)
+# 4. Get specific URL (verify details)
+# 5. List by audit type (verify filtering)
+# 6. Update URLs (modify audits)
+# 7. Get specific URL (verify update)
+# 8. Delete URLs (cleanup)
+# 9. List URLs (verify deleted)
+

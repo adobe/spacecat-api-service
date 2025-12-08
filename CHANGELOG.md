@@ -1,3 +1,38 @@
+## [1.275.1](https://github.com/adobe/spacecat-api-service/compare/v1.275.0...v1.275.1) (2025-12-08)
+
+
+### Bug Fixes
+
+* add logging to debug month-over-month ([#1632](https://github.com/adobe/spacecat-api-service/issues/1632)) ([3c6e267](https://github.com/adobe/spacecat-api-service/commit/3c6e267ae06f39789c04945ec818082589dd833b))
+
+# [1.275.0](https://github.com/adobe/spacecat-api-service/compare/v1.274.3...v1.275.0) (2025-12-08)
+
+
+### Features
+
+* **url-store:** add URL store API endpoints ([#1615](https://github.com/adobe/spacecat-api-service/issues/1615)) ([be0f813](https://github.com/adobe/spacecat-api-service/commit/be0f813c7e902411cc33bf0e3090e80a6bfd0711))
+
+## [1.274.3](https://github.com/adobe/spacecat-api-service/compare/v1.274.2...v1.274.3) (2025-12-08)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-athena-client to v1.9.0 ([#1634](https://github.com/adobe/spacecat-api-service/issues/1634)) ([0bf534b](https://github.com/adobe/spacecat-api-service/commit/0bf534b19efe2b0e7854bd75a12982825b9f6180))
+
+## [1.274.2](https://github.com/adobe/spacecat-api-service/compare/v1.274.1...v1.274.2) (2025-12-07)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-helix-content-sdk to v1.4.33 ([#1633](https://github.com/adobe/spacecat-api-service/issues/1633)) ([20127d5](https://github.com/adobe/spacecat-api-service/commit/20127d5754fc0398541c3b8de6d435f5b2ebb1c8))
+
+## [1.274.1](https://github.com/adobe/spacecat-api-service/compare/v1.274.0...v1.274.1) (2025-12-05)
+
+
+### Bug Fixes
+
+* config summary timeout issue ([#1630](https://github.com/adobe/spacecat-api-service/issues/1630)) ([0dad1f2](https://github.com/adobe/spacecat-api-service/commit/0dad1f2fdfe0a63cd4119cc046b47d8ac1817944))
+
 # [1.274.0](https://github.com/adobe/spacecat-api-service/compare/v1.273.6...v1.274.0) (2025-12-05)
 
 
