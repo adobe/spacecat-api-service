@@ -19,7 +19,6 @@ import {
   internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import {
-  isInteger,
   isNonEmptyArray,
   isNonEmptyObject,
 } from '@adobe/spacecat-shared-utils';
@@ -52,19 +51,6 @@ function ConfigurationController(ctx) {
   };
 
   /**
-   * Retrieves all configurations (all versions).
-   * @return {Promise<Response>} Array of configurations.
-   */
-  const getAll = async () => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can view configurations');
-    }
-    const configurations = (await Configuration.all())
-      .map((configuration) => ConfigurationDto.toJSON(configuration));
-    return ok(configurations);
-  };
-
-  /**
    * Retrieves the configuration identified by the given version.
    * @param {UniversalContext} context - Context of the request.
    * @return {Promise<Response>} Configuration response.
@@ -73,11 +59,10 @@ function ConfigurationController(ctx) {
     if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can view configurations');
     }
-    // URL parameters come as strings, so we need to parse to integer
-    const configurationVersion = parseInt(context.params?.version, 10);
+    const configurationVersion = context.params?.version;
 
-    if (!isInteger(configurationVersion) || configurationVersion < 1) {
-      return badRequest('Configuration version required to be a positive integer');
+    if (!configurationVersion) {
+      return badRequest('Configuration version is required');
     }
 
     const configuration = await Configuration.findByVersion(configurationVersion);
@@ -318,11 +303,10 @@ function ConfigurationController(ctx) {
       return forbidden('Only admins can restore configurations');
     }
 
-    // URL parameters come as strings, so we need to parse to integer
-    const versionToRestore = parseInt(context.params?.version, 10);
+    const versionToRestore = context.params?.version;
 
-    if (!isInteger(versionToRestore) || versionToRestore < 1) {
-      return badRequest('Configuration version required to be a positive integer');
+    if (!versionToRestore) {
+      return badRequest('Configuration version is required');
     }
 
     try {
@@ -370,7 +354,6 @@ function ConfigurationController(ctx) {
   };
 
   return {
-    getAll,
     getByVersion,
     getLatest,
     registerAudit,
