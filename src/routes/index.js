@@ -75,6 +75,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} userActivityController - The user activity controller.
  * @param {Object} siteEnrollmentController - The site enrollment controller.
  * @param {Object} trialUserController - The trial user controller.
+ * @param {Object} userDetailsController - The user details controller.
  * @param {Object} entitlementController - The entitlement controller.
  * @param {Object} sandboxAuditController - The sandbox audit controller.
  * @param {Object} reportsController - The reports controller.
@@ -110,6 +111,7 @@ export default function getRouteHandlers(
   userActivityController,
   siteEnrollmentController,
   trialUserController,
+  userDetailsController,
   entitlementController,
   sandboxAuditController,
   reportsController,
@@ -195,6 +197,7 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy': suggestionsController.deploySuggestionToEdge,
     'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-rollback': suggestionsController.rollbackSuggestionFromEdge,
     'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-preview': suggestionsController.previewSuggestions,
+    'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-live-preview': suggestionsController.fetchFromEdge,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status': suggestionsController.getByStatus,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit/:cursor': suggestionsController.getByStatusPaged,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit': suggestionsController.getByStatusPaged,
@@ -262,12 +265,18 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/traffic/paid/temporal-series-by-url-channel': trafficController.getPaidTrafficTemporalSeriesByUrlChannel,
     'GET /sites/:siteId/traffic/paid/temporal-series-by-url-platform': trafficController.getPaidTrafficTemporalSeriesByUrlPlatform,
     'GET /sites/:siteId/traffic/paid/temporal-series-by-url-channel-platform': trafficController.getPaidTrafficTemporalSeriesByUrlChannelPlatform,
+    'GET /sites/:siteId/traffic/paid/impact-by-page': trafficController.getImpactByPage,
+    'GET /sites/:siteId/traffic/paid/impact-by-page-device': trafficController.getImpactByPageDevice,
+    'GET /sites/:siteId/traffic/paid/impact-by-page-traffic-type': trafficController.getImpactByPageTrafficType,
+    'GET /sites/:siteId/traffic/paid/impact-by-page-traffic-type-device': trafficController.getImpactByPageTrafficTypeDevice,
+    'GET /sites/:siteId/traffic/paid/traffic-loss-by-devices': trafficController.getTrafficLossByDevices,
     'GET /sites/:siteId/brand-guidelines': brandsController.getBrandGuidelinesForSite,
     'GET /sites/:siteId/brand-profile': sitesController.getBrandProfile,
     'POST /sites/:siteId/brand-profile': sitesController.triggerBrandProfile,
     'GET /sites/:siteId/top-pages': sitesController.getTopPages,
     'GET /sites/:siteId/top-pages/:source': sitesController.getTopPages,
     'GET /sites/:siteId/top-pages/:source/:geo': sitesController.getTopPages,
+    'POST /sites/:siteId/graph': sitesController.getGraph,
     'GET /slack/events': slackController.handleEvent,
     'POST /slack/events': slackController.handleEvent,
     'POST /slack/channels/invite-by-user-id': slackController.inviteUserToChannel,
@@ -332,6 +341,7 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/llmo/cdn-logs-filter': llmoController.patchLlmoCdnLogsFilter,
     'PATCH /sites/:siteId/llmo/cdn-logs-bucket-config': llmoController.patchLlmoCdnBucketConfig,
     'GET /sites/:siteId/llmo/global-sheet-data/:configName': llmoController.getLlmoGlobalSheetData,
+    'GET /sites/:siteId/llmo/rationale': llmoController.getLlmoRationale,
     'POST /llmo/onboard': llmoController.onboardCustomer,
     'POST /sites/:siteId/llmo/offboard': llmoController.offboardCustomer,
 
@@ -340,6 +350,8 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/user-activities': userActivityController.createTrialUserActivity,
     'GET /sites/:siteId/site-enrollments': siteEnrollmentController.getBySiteID,
     'GET /organizations/:organizationId/trial-users': trialUserController.getByOrganizationID,
+    'GET /organizations/:organizationId/userDetails/:externalUserId': userDetailsController.getUserDetailsByExternalUserId,
+    'POST /organizations/:organizationId/userDetails': userDetailsController.getUserDetailsInBulk,
     'POST /organizations/:organizationId/trial-user-invite': trialUserController.createTrialUserForEmailInvite,
     'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
     'POST /organizations/:organizationId/entitlements': entitlementController.createEntitlement,
