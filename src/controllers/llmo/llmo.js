@@ -47,6 +47,7 @@ import { updateModifiedByDetails } from './llmo-config-metadata.js';
 import {
   getBrandPresenceFilters as getBrandPresenceFiltersImpl,
   exampleEndpoint as exampleEndpointImpl,
+  getSentimentOverview as getSentimentOverviewImpl,
 } from './brand-presence/index.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
 
@@ -977,6 +978,12 @@ function LlmoController(ctx) {
     getSiteAndValidateLlmo,
   );
 
+  // Wrapper for sentiment overview endpoint
+  const getSentimentOverview = async (context) => getSentimentOverviewImpl(
+    context,
+    getSiteAndValidateLlmo,
+  );
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -997,6 +1004,7 @@ function LlmoController(ctx) {
     offboardCustomer,
     queryFiles,
     getBrandPresenceFilters,
+    getSentimentOverview,
     exampleEndpoint,
     getLlmoRationale,
   };
