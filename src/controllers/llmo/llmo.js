@@ -49,6 +49,9 @@ import {
   exampleEndpoint as exampleEndpointImpl,
   getSentimentOverview as getSentimentOverviewImpl,
   getBrandPresenceStats as getBrandPresenceStatsImpl,
+  getBrandPresenceTopics as getBrandPresenceTopicsImpl,
+  getBrandPresencePrompts as getBrandPresencePromptsImpl,
+  searchBrandPresence as searchBrandPresenceImpl,
 } from './brand-presence/index.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
 
@@ -991,6 +994,24 @@ function LlmoController(ctx) {
     getSiteAndValidateLlmo,
   );
 
+  // Wrapper for brand presence topics endpoint
+  const getBrandPresenceTopics = async (context) => getBrandPresenceTopicsImpl(
+    context,
+    getSiteAndValidateLlmo,
+  );
+
+  // Wrapper for brand presence prompts endpoint
+  const getBrandPresencePrompts = async (context) => getBrandPresencePromptsImpl(
+    context,
+    getSiteAndValidateLlmo,
+  );
+
+  // Wrapper for brand presence search endpoint
+  const searchBrandPresence = async (context) => searchBrandPresenceImpl(
+    context,
+    getSiteAndValidateLlmo,
+  );
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -1015,6 +1036,9 @@ function LlmoController(ctx) {
     exampleEndpoint,
     getLlmoRationale,
     getBrandPresenceStats,
+    getBrandPresenceTopics,
+    getBrandPresencePrompts,
+    searchBrandPresence,
   };
 }
 
