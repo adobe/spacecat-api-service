@@ -198,8 +198,10 @@ configuration:
       - name: version
         in: path
         required: true
+        description: The version identifier to retrieve
         schema:
           type: string
+        example: "EqZSCYxbPdKJ0Xso9QkbS0h0ZfDbhXWe"
     responses:
       '200':
         description: Specific version of the application configuration.
@@ -230,11 +232,10 @@ configuration-restore:
       - name: version
         in: path
         required: true
-        description: The version number to restore from
+        description: The version identifier to restore from
         schema:
-          type: integer
-          minimum: 1
-        example: 2376
+          type: string
+        example: "EqZSCYxbPdKJ0Xso9QkbS0h0ZfDbhXWe"
     responses:
       '200':
         description: Configuration successfully restored
