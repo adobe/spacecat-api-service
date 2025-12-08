@@ -1,3 +1,10 @@
+## [1.275.4](https://github.com/adobe/spacecat-api-service/compare/v1.275.3...v1.275.4) (2025-12-08)
+
+
+### Bug Fixes
+
+* **configuration:** remove getAll; remove positive integer requirement for configuration version ([#1637](https://github.com/adobe/spacecat-api-service/issues/1637)) ([33b163d](https://github.com/adobe/spacecat-api-service/commit/33b163d966c36fc5423fb7c67e4e20ab5815691f))
+
 ## [1.275.3](https://github.com/adobe/spacecat-api-service/compare/v1.275.2...v1.275.3) (2025-12-08)
 
 
