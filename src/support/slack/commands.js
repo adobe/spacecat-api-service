@@ -42,6 +42,7 @@ import getEntitlementSite from './commands/get-entitlement-site.js';
 import getEntitlementImsOrg from './commands/get-entitlement-imsorg.js';
 import revokeEntitlementSite from './commands/revoke-entitlement-site.js';
 import revokeEntitlementImsOrg from './commands/revoke-entitlement-imsorg.js';
+import enrichOpportunity from './commands/enrich-opportunity.js';
 
 /**
  * Returns all commands.
@@ -82,4 +83,5 @@ export default (context) => [
   getEntitlementImsOrg(context),
   revokeEntitlementSite(context),
   revokeEntitlementImsOrg(context),
+  enrichOpportunity(context),
 ];
