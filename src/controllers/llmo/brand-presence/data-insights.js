@@ -62,6 +62,22 @@ const VALID_TOPIC_SORT_COLUMNS = {
   sources: 'sources',
   volume: 'volume',
   executions: 'executions',
+  citations: 'citations',
+};
+
+// Valid sort columns for prompts
+const VALID_PROMPT_SORT_COLUMNS = {
+  prompt: 'prompt',
+  region: 'region',
+  origin: 'origin',
+  category: 'category',
+  executions: 'executions',
+  mentions: 'mentions',
+  citations: 'citations',
+  visibility: 'visibility',
+  sentiment: 'sentiment',
+  position: 'position',
+  sources: 'sources',
 };
 
 /**
@@ -231,6 +247,10 @@ export async function getBrandPresenceTopics(context, getSiteAndValidateLlmo) {
  *
  * Query parameters:
  * - startDate, endDate, model, category, region, origin: Same filters as topics endpoint
+ * - sortBy: Column to sort by (default: 'mentions')
+ *   Valid columns: prompt, region, origin, category, executions, mentions, citations,
+ *                  visibility, sentiment, position, sources
+ * - sortOrder: 'asc' or 'desc' (default: 'desc')
  *
  * @param {object} context - The request context
  * @param {Function} getSiteAndValidateLlmo - Function to validate site and LLMO access
@@ -257,7 +277,13 @@ export async function getBrandPresencePrompts(context, getSiteAndValidateLlmo) {
       category,
       region,
       origin,
+      sortBy = 'mentions',
+      sortOrder = 'desc',
     } = context.data || {};
+
+    // Validate sort column
+    const sortColumn = VALID_PROMPT_SORT_COLUMNS[sortBy] || 'mentions';
+    const sortDirection = sortOrder.toLowerCase() === 'desc' ? 'DESC' : 'ASC';
 
     // Build WHERE clause and add topic filter
     const { whereClause, values, paramIndex } = buildBrandPresenceWhereClause(
@@ -269,6 +295,8 @@ export async function getBrandPresencePrompts(context, getSiteAndValidateLlmo) {
     const decodedTopic = decodeURIComponent(topic);
 
     // Query prompts from the prompts view
+    // Sentiment is calculated using avg_sentiment_score converted to 0-100 scale:
+    // (avg_sentiment_score + 1) * 50, then apply same thresholds as topics endpoint
     const promptsQuery = `
       SELECT
         prompt,
@@ -279,18 +307,25 @@ export async function getBrandPresencePrompts(context, getSiteAndValidateLlmo) {
         SUM(mentions_count) AS mentions,
         SUM(citations_count) AS citations,
         ROUND(AVG(avg_visibility_score), 2) AS visibility,
-        dominant_sentiment AS sentiment,
+        CASE
+          WHEN AVG(avg_sentiment_score) IS NULL THEN 'N/A'
+          WHEN (AVG(avg_sentiment_score) + 1) * 50 < 40 THEN 'Negative'
+          WHEN (AVG(avg_sentiment_score) + 1) * 50 <= 65 THEN 'Neutral'
+          ELSE 'Positive'
+        END AS sentiment,
         ROUND(AVG(avg_position), 2) AS position,
         SUM(total_sources_count) AS sources,
         MAX(latest_answer) AS answer
       FROM brand_presence_prompts_by_date
       WHERE ${whereClause} AND topics = $${paramIndex}
-      GROUP BY prompt, region, origin, category, dominant_sentiment
-      ORDER BY mentions DESC
+      GROUP BY prompt, region, origin, category
+      ORDER BY ${sortColumn} ${sortDirection} NULLS LAST
     `;
 
     const queryStart = Date.now();
-    const promptsResult = await aurora.query(promptsQuery, [...values, decodedTopic]);
+    const queryParams = [...values, decodedTopic];
+    log.info(`[BRAND-PRESENCE-PROMPTS] Executing query for siteId: ${siteId}, topic: ${topic} - query: ${promptsQuery.replace(/\s+/g, ' ').trim()}, params: ${JSON.stringify(queryParams)}`);
+    const promptsResult = await aurora.query(promptsQuery, queryParams);
     const queryDuration = Date.now() - queryStart;
 
     log.info(`[BRAND-PRESENCE-PROMPTS] Query completed for siteId: ${siteId}, topic: ${topic} - ${promptsResult.length} prompts, duration: ${queryDuration}ms`);
@@ -315,6 +350,10 @@ export async function getBrandPresencePrompts(context, getSiteAndValidateLlmo) {
       totalPrompts: promptsResult.length,
       filters: {
         startDate, endDate, model, category, region, origin,
+      },
+      sort: {
+        sortBy: sortColumn,
+        sortOrder: sortDirection.toLowerCase(),
       },
       performance: {
         totalDuration: Date.now() - startTime,
@@ -492,5 +531,3 @@ export async function searchBrandPresence(context, getSiteAndValidateLlmo) {
     return badRequest(error.message);
   }
 }
-
-
