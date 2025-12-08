@@ -1,3 +1,10 @@
+# [1.275.0](https://github.com/adobe/spacecat-api-service/compare/v1.274.3...v1.275.0) (2025-12-08)
+
+
+### Features
+
+* **url-store:** add URL store API endpoints ([#1615](https://github.com/adobe/spacecat-api-service/issues/1615)) ([be0f813](https://github.com/adobe/spacecat-api-service/commit/be0f813c7e902411cc33bf0e3090e80a6bfd0711))
+
 ## [1.274.3](https://github.com/adobe/spacecat-api-service/compare/v1.274.2...v1.274.3) (2025-12-08)
 
 
