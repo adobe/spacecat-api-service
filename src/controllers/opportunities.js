@@ -60,10 +60,8 @@ function OpportunitiesController(ctx) {
    * @returns {string[]} Array of tags for the opportunity type
    */
   function getTagsForOpportunityType(opportunityType) {
-    const defaultTags = ['automated', 'spacecat'];
     const typeSpecificTags = OPPORTUNITY_TAG_MAPPINGS[opportunityType] || [];
-
-    return [...defaultTags, ...typeSpecificTags];
+    return [...typeSpecificTags];
   }
 
   /**
@@ -196,16 +194,9 @@ function OpportunitiesController(ctx) {
 
     context.data.siteId = siteId;
 
-    // Get hardcoded tags based on opportunity type
+    // Get type-specific tags based on opportunity type
     const opportunityType = context.data.type;
-    const hardcodedTags = getTagsForOpportunityType(opportunityType);
-
-    // Merge with any existing tags from the request
-    if (Array.isArray(context.data.tags)) {
-      context.data.tags = [...new Set([...context.data.tags, ...hardcodedTags])];
-    } else {
-      context.data.tags = hardcodedTags;
-    }
+    context.data.tags = getTagsForOpportunityType(opportunityType);
 
     try {
       const oppty = await Opportunity.create(context.data);
@@ -285,16 +276,14 @@ function OpportunitiesController(ctx) {
         opportunity.setGuidance(guidance);
       }
       if (tags) {
-        // Get hardcoded tags based on opportunity type
+        // Get type-specific tags based on opportunity type
         const opportunityType = opportunity.getType();
-        const hardcodedTags = getTagsForOpportunityType(opportunityType);
+        const typeSpecificTags = getTagsForOpportunityType(opportunityType);
 
-        // Merge with provided tags
-        const mergedTags = [...new Set([...tags, ...hardcodedTags])];
-
-        if (!arrayEquals(mergedTags, opportunity.getTags())) {
+        // Use only type-specific tags
+        if (!arrayEquals(typeSpecificTags, opportunity.getTags())) {
           hasUpdates = true;
-          opportunity.setTags(mergedTags);
+          opportunity.setTags(typeSpecificTags);
         }
       }
       if (hasUpdates) {
