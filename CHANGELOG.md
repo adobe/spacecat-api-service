@@ -1,3 +1,10 @@
+## [1.275.1](https://github.com/adobe/spacecat-api-service/compare/v1.275.0...v1.275.1) (2025-12-08)
+
+
+### Bug Fixes
+
+* add logging to debug month-over-month ([#1632](https://github.com/adobe/spacecat-api-service/issues/1632)) ([3c6e267](https://github.com/adobe/spacecat-api-service/commit/3c6e267ae06f39789c04945ec818082589dd833b))
+
 # [1.275.0](https://github.com/adobe/spacecat-api-service/compare/v1.274.3...v1.275.0) (2025-12-08)
 
 
