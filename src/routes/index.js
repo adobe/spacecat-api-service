@@ -268,6 +268,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/traffic/paid/temporal-series-by-url-channel-platform': trafficController.getPaidTrafficTemporalSeriesByUrlChannelPlatform,
     'GET /sites/:siteId/traffic/paid/impact-by-page': trafficController.getImpactByPage,
     'GET /sites/:siteId/traffic/paid/impact-by-page-device': trafficController.getImpactByPageDevice,
+    'GET /sites/:siteId/traffic/paid/impact-by-page-traffic-type': trafficController.getImpactByPageTrafficType,
     'GET /sites/:siteId/traffic/paid/impact-by-page-traffic-type-device': trafficController.getImpactByPageTrafficTypeDevice,
     'GET /sites/:siteId/traffic/paid/traffic-loss-by-devices': trafficController.getTrafficLossByDevices,
     'GET /sites/:siteId/brand-guidelines': brandsController.getBrandGuidelinesForSite,
@@ -349,6 +350,7 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/llmo/cdn-logs-filter': llmoController.patchLlmoCdnLogsFilter,
     'PATCH /sites/:siteId/llmo/cdn-logs-bucket-config': llmoController.patchLlmoCdnBucketConfig,
     'GET /sites/:siteId/llmo/global-sheet-data/:configName': llmoController.getLlmoGlobalSheetData,
+    'GET /sites/:siteId/llmo/rationale': llmoController.getLlmoRationale,
     'POST /llmo/onboard': llmoController.onboardCustomer,
     'POST /sites/:siteId/llmo/offboard': llmoController.offboardCustomer,
 

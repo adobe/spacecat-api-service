@@ -187,6 +187,8 @@ function TrafficController(context, log, env) {
     // build query
     const query = getTrafficAnalysisQuery(quereyParams);
 
+    log.info(`Site '${siteId}'/${year}/${month}/${week} getTrafficAnalysisQuery Query: ${query}`);
+
     // first try to get from cache
     const { cachedResultUrl, cacheKey, outPrefix } = await tryGetCacheResult(
       siteId,
@@ -456,6 +458,7 @@ function TrafficController(context, log, env) {
 
     getTrafficLossByDevices: async () => fetchTop3PagesTrafficData(['device'], true, null),
     getImpactByPage: async () => fetchTop3PagesTrafficData(['path'], true, 3),
+    getImpactByPageTrafficType: async () => fetchTop3PagesTrafficData(['path', 'trf_type'], true, null),
     getImpactByPageDevice: async () => fetchTop3PagesTrafficData(['path', 'device'], true, null),
     getImpactByPageTrafficTypeDevice: async () => fetchTop3PagesTrafficData(['path', 'trf_type', 'device'], true, null),
   };
