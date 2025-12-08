@@ -19,6 +19,7 @@ import {
   internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import {
+  hasText,
   isNonEmptyArray,
   isNonEmptyObject,
 } from '@adobe/spacecat-shared-utils';
@@ -61,7 +62,7 @@ function ConfigurationController(ctx) {
     }
     const configurationVersion = context.params?.version;
 
-    if (!configurationVersion) {
+    if (!hasText(configurationVersion)) {
       return badRequest('Configuration version is required');
     }
 
@@ -189,7 +190,7 @@ function ConfigurationController(ctx) {
     const { jobType } = context.params;
     const properties = context.data;
 
-    if (!jobType) {
+    if (!hasText(jobType)) {
       return badRequest('Job type is required');
     }
 
@@ -226,7 +227,7 @@ function ConfigurationController(ctx) {
     const { handlerType } = context.params;
     const properties = context.data;
 
-    if (!handlerType) {
+    if (!hasText(handlerType)) {
       return badRequest('Handler type is required');
     }
 
@@ -305,7 +306,7 @@ function ConfigurationController(ctx) {
 
     const versionToRestore = context.params?.version;
 
-    if (!versionToRestore) {
+    if (!hasText(versionToRestore)) {
       return badRequest('Configuration version is required');
     }
 
