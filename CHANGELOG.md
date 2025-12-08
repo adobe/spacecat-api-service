@@ -1,3 +1,10 @@
+## [1.275.2](https://github.com/adobe/spacecat-api-service/compare/v1.275.1...v1.275.2) (2025-12-08)
+
+
+### Bug Fixes
+
+* upgrade athena ([#1636](https://github.com/adobe/spacecat-api-service/issues/1636)) ([6ab4ec8](https://github.com/adobe/spacecat-api-service/commit/6ab4ec814f7116b2a5f13f9299abd83d464ab4d7))
+
 ## [1.275.1](https://github.com/adobe/spacecat-api-service/compare/v1.275.0...v1.275.1) (2025-12-08)
 
 
