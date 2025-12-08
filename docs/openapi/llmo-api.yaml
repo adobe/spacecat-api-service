@@ -1169,6 +1169,32 @@ llmo-cdn-logs-filter:
     security:
       - api_key: [ ]
 
+llmo-cdn-logs-bucket-config:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  patch:
+    tags:
+      - llmo
+    summary: Update LLMO CDN bucket config configuration
+    description: |
+      Updates the CDN bucket config configuration for a specific site.
+    operationId: patchLlmoCdnBucketConfig
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              cdnBucketConfig:
+                $ref: './schemas.yaml#/LlmoCdnBucketConfig'
+    responses:
+      '200':
+        description: LLMO CDN bucket config updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/LlmoCdnBucketConfig'
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -1178,126 +1204,134 @@ llmo-cdn-logs-filter:
     security:
       - api_key: [ ]
 
-llmo-brand-presence-filters:
+llmo-rationale:
   parameters:
     - $ref: './parameters.yaml#/siteId'
+    - name: topic
+      in: query
+      required: true
+      description: The topic to filter by (case-insensitive partial match)
+      schema:
+        type: string
+        example: 'Convert PDF_Informational'
+    - name: category
+      in: query
+      required: false
+      description: Optional category to filter topics by (case-insensitive partial match)
+      schema:
+        type: string
+        example: 'Acrobat'
+    - name: region
+      in: query
+      required: false
+      description: Optional region to filter topics by (case-insensitive partial match)
+      schema:
+        type: string
+        example: 'US'
+    - name: origin
+      in: query
+      required: false
+      description: Optional origin to filter topics by (case-insensitive partial match)
+      schema:
+        type: string
+        example: 'HUMAN'
+    - name: popularity
+      in: query
+      required: false
+      description: Optional popularity level to filter topics by (case-insensitive partial match)
+      schema:
+        type: string
+        example: 'High'
   get:
     tags:
       - llmo
-      - brand-presence
-    summary: Get distinct brand presence filter values
+    summary: Get LLMO rationale data
     description: |
-      Retrieves all distinct values for each filter dimension from the brand_presence table in the Aurora PostgreSQL database.
-      This endpoint returns unique categories, topics, models (platforms), regions, and origins that can be used to
-      populate filter dropdowns in the UI, enabling optimal filter selection without loading all data on the client side.
+      Retrieves filtered LLMO rationale data for a specific site. This endpoint fetches topics
+      popularity reasoning data from the cached S3 file and applies filtering based on the provided query parameters.
       
-      This is part of the performance optimization for the brand presence dashboard, where instead of fetching all data
-      and computing filter values on the client, we make a targeted database query to get only the distinct values needed.
+      The endpoint requires mandatory 'topic' parameter for filtering, with optional
+      'category', 'region', 'origin', and 'popularity' parameters for additional filtering. All text matching is case-insensitive
+      and uses partial matching (contains).
       
-      **Prerequisites:**
-      - Aurora/PostgreSQL database must be configured
-      - `ENABLE_AURORA_QUERIES` environment variable must be set to `true`
-      - Site must have LLMO enabled and user must have access to the site
-      
-      **Performance:**
-      - Uses optimized queries with DISTINCT and proper indexing
-      - Returns performance metrics for monitoring and optimization
-    operationId: getBrandPresenceFilters
+      The data is sourced from the topics popularity reasoning cache file stored in S3 at:
+      `llm_cache/{siteId}/topics_popularity_reasoning_cache.json`
+    operationId: getLlmoRationale
     responses:
       '200':
-        description: Filter values retrieved successfully
+        description: LLMO rationale data retrieved and filtered successfully
+        content:
+          application/json:
+            schema:
+              type: array
+              description: Array of filtered topic objects matching the query criteria
+              items:
+                type: object
+                properties:
+                  topic:
+                    type: string
+                    description: The topic name
+                    example: 'Convert PDF_Informational'
+                  category:
+                    type: string
+                    description: The category of the topic
+                    example: 'Acrobat'
+                  region:
+                    type: string
+                    description: The region associated with the topic
+                    example: 'BR'
+                  origin:
+                    type: string
+                    description: The origin of the topic
+                    example: 'HUMAN'
+                  popularity:
+                    type: string
+                    description: The popularity level of the topic
+                    example: 'Low'
+                  volume:
+                    type: number
+                    description: The volume metric for the topic
+                    example: -10
+                  reasoning:
+                    type: string
+                    description: The reasoning for the topic's popularity classification
+                    example: 'Specific informational query with minimal organic searches.'
+                  added_date:
+                    type: string
+                    format: date-time
+                    description: The date when the topic was added
+                    example: '2025-12-03T09:21:31.673898'
+                additionalProperties: true
+      '400':
+        description: Bad request - missing required parameters or invalid request
         content:
           application/json:
             schema:
               type: object
-              required:
-                - siteId
-                - filters
-                - performance
               properties:
-                siteId:
+                error:
                   type: string
-                  format: uuid
-                  description: The site ID that the filters were retrieved for
-                  example: 'c2473d89-e997-458d-a86d-b4096649c12b'
-                filters:
-                  type: object
-                  required:
-                    - categories
-                    - topics
-                    - models
-                    - regions
-                    - origins
-                  properties:
-                    categories:
-                      type: array
-                      items:
-                        type: string
-                      description: Distinct category values available for filtering
-                      example: ['Adobe', 'Marketing', 'Technology']
-                    topics:
-                      type: array
-                      items:
-                        type: string
-                      description: Distinct topic values available for filtering (extracted from comma-separated topics field)
-                      example: ['AI', 'Cloud Computing', 'Design']
-                    models:
-                      type: array
-                      items:
-                        type: string
-                      description: Distinct model/platform values available for filtering
-                      example: ['chatgpt', 'gemini', 'copilot', 'perplexity']
-                    regions:
-                      type: array
-                      items:
-                        type: string
-                      description: Distinct region values available for filtering
-                      example: ['US', 'EU', 'APAC']
-                    origins:
-                      type: array
-                      items:
-                        type: string
-                      description: Distinct origin values available for filtering
-                      example: ['google', 'openai', 'microsoft']
-                performance:
-                  type: object
-                  required:
-                    - totalDuration
-                    - queryDuration
-                    - validationDuration
-                  properties:
-                    totalDuration:
-                      type: number
-                      description: Total request duration in milliseconds
-                      example: 125
-                    queryDuration:
-                      type: number
-                      description: Database query duration in milliseconds
-                      example: 95
-                    validationDuration:
-                      type: number
-                      description: LLMO access validation duration in milliseconds
-                      example: 15
-      '400':
-        $ref: './responses.yaml#/400'
-        description: |
-          Bad request. Possible reasons:
-          - Aurora database is not configured
-          - ENABLE_AURORA_QUERIES is not enabled
-          - Database query failed
-          - Site not found
+                  examples:
+                    missing_topic:
+                      value: 'topic parameter is required'
+                    s3_not_configured:
+                      value: 'S3 storage is not configured for this environment'
+                    invalid_json:
+                      value: 'Invalid JSON format in rationale file'
+                    bucket_not_found:
+                      value: 'Storage bucket not found: spacecat-env-mystique-assets'
       '401':
         $ref: './responses.yaml#/401'
-      '403':
-        description: Forbidden - User does not have access to the site
+      '404':
+        description: Rationale file not found for the specified site
         content:
           application/json:
             schema:
               type: object
               properties:
-                message:
+                error:
                   type: string
-                  example: 'Only users belonging to the organization can view its sites'
+                  example: 'Rationale file not found for site 123e4567-e89b-12d3-a456-426614174000'
       '500':
         $ref: './responses.yaml#/500'
     security:

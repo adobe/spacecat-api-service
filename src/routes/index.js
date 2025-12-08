@@ -335,8 +335,8 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/llmo/cdn-logs-filter': llmoController.patchLlmoCdnLogsFilter,
     'PATCH /sites/:siteId/llmo/cdn-logs-bucket-config': llmoController.patchLlmoCdnBucketConfig,
     'GET /sites/:siteId/llmo/global-sheet-data/:configName': llmoController.getLlmoGlobalSheetData,
-    'GET /sites/:siteId/llmo/aurora': llmoController.getLlmoAurora,
     'GET /sites/:siteId/llmo/brand-presence/filters': llmoController.getBrandPresenceFilters,
+    'GET /sites/:siteId/llmo/brand-presence/example': llmoController.exampleEndpoint,
     'POST /llmo/onboard': llmoController.onboardCustomer,
     'POST /sites/:siteId/llmo/offboard': llmoController.offboardCustomer,
 
