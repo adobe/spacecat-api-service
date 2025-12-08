@@ -107,7 +107,7 @@ function EnrichOpportunityCommand(context) {
       };
 
       await sqsClient.send(new SendMessageCommand({
-        QueueUrl: env.SQS_QUEUE_URL,
+        QueueUrl: env.TASK_PROCESSOR_QUEUE_URL,
         MessageBody: JSON.stringify(message),
       }));
 
