@@ -63,16 +63,14 @@ function SuggestionsController(ctx, sqs, env) {
   const shouldGroupSuggestionsForAutofix = (type) => !AUTOFIX_UNGROUPED_OPPTY_TYPES.includes(type);
 
   /**
-   * Checks if a suggestion is a domain-wide aggregate suggestion
-   * Domain-wide suggestions are configuration-level suggestions
-   * that cannot be deployed individually
+   * Checks if a suggestion is a domain-wide auto generated suggestion
    * @param {Object} suggestion - Suggestion entity
    * @returns {boolean} - True if suggestion is a domain-wide aggregate suggestion
    */
   const isDomainWideSuggestion = (suggestion) => {
     const data = suggestion.getData();
     // Support both for backwards compatibility
-    return data?.isDomainWide === true || data?.isDomainWideMaster === true;
+    return data?.isDomainWide === true;
   };
 
   const {
@@ -1069,7 +1067,7 @@ function SuggestionsController(ctx, sqs, env) {
     if (!isNonEmptyObject(context.data)) {
       return badRequest('No data provided');
     }
-    const { suggestionIds, suggestionsMetadata } = context.data;
+    const { suggestionIds } = context.data;
     if (!isArray(suggestionIds) || suggestionIds.length === 0) {
       return badRequest('Request body must contain a non-empty array of suggestionIds');
     }
@@ -1097,14 +1095,6 @@ function SuggestionsController(ctx, sqs, env) {
     const failedSuggestions = [];
     let coveredSuggestionsCount = 0;
 
-    // Create a map of suggestion metadata for quick lookup
-    const metadataMap = new Map();
-    if (isNonEmptyArray(suggestionsMetadata)) {
-      suggestionsMetadata.forEach((meta) => {
-        metadataMap.set(meta.id, meta);
-      });
-    }
-
     // Check each requested suggestion (basic validation only)
     suggestionIds.forEach((suggestionId, index) => {
       const suggestion = allSuggestions.find((s) => s.getId() === suggestionId);
@@ -1117,15 +1107,17 @@ function SuggestionsController(ctx, sqs, env) {
           statusCode: 404,
         });
       } else if (isDomainWideSuggestion(suggestion)) {
-        // Handle domain-wide suggestions separately
-        const metadata = metadataMap.get(suggestionId);
-        if (metadata && isNonEmptyArray(metadata.allowedRegexPatterns)) {
-          domainWideSuggestions.push({ suggestion, metadata });
+        const data = suggestion.getData();
+        if (isNonEmptyArray(data.allowedRegexPatterns)) {
+          domainWideSuggestions.push({
+            suggestion,
+            allowedRegexPatterns: data.allowedRegexPatterns,
+          });
         } else {
           failedSuggestions.push({
             uuid: suggestionId,
             index,
-            message: 'Domain-wide suggestion requires allowedRegexPatterns in metadata',
+            message: 'Domain-wide suggestion missing allowedRegexPatterns',
             statusCode: 400,
           });
         }
@@ -1146,9 +1138,9 @@ function SuggestionsController(ctx, sqs, env) {
     if (isNonEmptyArray(domainWideSuggestions) && isNonEmptyArray(validSuggestions)) {
       // Build all regex patterns from domain-wide suggestions
       const allDomainWidePatterns = [];
-      domainWideSuggestions.forEach(({ metadata }) => {
-        if (isNonEmptyArray(metadata.allowedRegexPatterns)) {
-          metadata.allowedRegexPatterns.forEach((pattern) => {
+      domainWideSuggestions.forEach(({ allowedRegexPatterns }) => {
+        if (isNonEmptyArray(allowedRegexPatterns)) {
+          allowedRegexPatterns.forEach((pattern) => {
             try {
               allDomainWidePatterns.push(new RegExp(pattern));
             } catch (error) {
@@ -1266,7 +1258,7 @@ function SuggestionsController(ctx, sqs, env) {
 
         // Deploy each domain-wide suggestion
         // eslint-disable-next-line no-await-in-loop
-        for (const { suggestion, metadata } of domainWideSuggestions) {
+        for (const { suggestion, allowedRegexPatterns } of domainWideSuggestions) {
           try {
             // Fetch existing metaconfig or create new one
             // eslint-disable-next-line no-await-in-loop
@@ -1281,7 +1273,7 @@ function SuggestionsController(ctx, sqs, env) {
             // Update ONLY the prerender property, preserving all other properties
             // Expected structure: { prerender: { allowList: ["/*", "/path/*"] } }
             metaconfig.prerender = {
-              allowList: metadata.allowedRegexPatterns,
+              allowList: allowedRegexPatterns,
             };
 
             const suggestionId = suggestion.getId();
@@ -1314,7 +1306,7 @@ function SuggestionsController(ctx, sqs, env) {
                 (context.skippedDueToSameBatchDomainWide || []).map((s) => s.uuid),
               );
 
-              const regexPatterns = metadata.allowedRegexPatterns.map(
+              const regexPatterns = allowedRegexPatterns.map(
                 (pattern) => new RegExp(pattern),
               );
               const coveredSuggestions = allSuggestions.filter((s) => {

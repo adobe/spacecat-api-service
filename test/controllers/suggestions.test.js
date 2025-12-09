@@ -3804,12 +3804,6 @@ describe('Suggestions Controller', () => {
           },
           data: {
             suggestionIds: [SUGGESTION_IDS[0]],
-            suggestionsMetadata: [
-              {
-                id: SUGGESTION_IDS[0],
-                allowedRegexPatterns: ['https://example\\.com/.*'],
-              },
-            ],
           },
         });
 
@@ -3844,12 +3838,6 @@ describe('Suggestions Controller', () => {
           },
           data: {
             suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1], SUGGESTION_IDS[2]],
-            suggestionsMetadata: [
-              {
-                id: SUGGESTION_IDS[0],
-                allowedRegexPatterns: ['https://example\\.com/.*'],
-              },
-            ],
           },
         });
 
@@ -3879,12 +3867,6 @@ describe('Suggestions Controller', () => {
           },
           data: {
             suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1], SUGGESTION_IDS[2]],
-            suggestionsMetadata: [
-              {
-                id: SUGGESTION_IDS[0],
-                allowedRegexPatterns: ['https://example\\.com/.*'],
-              },
-            ],
           },
         });
 
@@ -3986,12 +3968,6 @@ describe('Suggestions Controller', () => {
           },
           data: {
             suggestionIds: [SUGGESTION_IDS[0]],
-            suggestionsMetadata: [
-              {
-                id: SUGGESTION_IDS[0],
-                allowedRegexPatterns: ['https://example\\.com/.*'],
-              },
-            ],
           },
         });
 
@@ -4030,12 +4006,6 @@ describe('Suggestions Controller', () => {
           },
           data: {
             suggestionIds: [SUGGESTION_IDS[0]],
-            suggestionsMetadata: [
-              {
-                id: SUGGESTION_IDS[0],
-                allowedRegexPatterns: ['https://example\\.com/.*'],
-              },
-            ],
           },
         });
 
@@ -4055,12 +4025,6 @@ describe('Suggestions Controller', () => {
           },
           data: {
             suggestionIds: [SUGGESTION_IDS[0]],
-            suggestionsMetadata: [
-              {
-                id: SUGGESTION_IDS[0],
-                allowedRegexPatterns: ['https://example\\.com/.*'],
-              },
-            ],
           },
         });
 
@@ -4092,12 +4056,6 @@ describe('Suggestions Controller', () => {
           },
           data: {
             suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1], SUGGESTION_IDS[2]],
-            suggestionsMetadata: [
-              {
-                id: SUGGESTION_IDS[0],
-                allowedRegexPatterns: ['https://example\\.com/.*'],
-              },
-            ],
           },
         });
 
@@ -4144,12 +4102,6 @@ describe('Suggestions Controller', () => {
           },
           data: {
             suggestionIds: [SUGGESTION_IDS[0]],
-            suggestionsMetadata: [
-              {
-                id: SUGGESTION_IDS[0],
-                allowedRegexPatterns: ['https://example\\.com/.*'],
-              },
-            ],
           },
         });
 
@@ -4176,12 +4128,6 @@ describe('Suggestions Controller', () => {
           },
           data: {
             suggestionIds: [SUGGESTION_IDS[0]],
-            suggestionsMetadata: [
-              {
-                id: SUGGESTION_IDS[0],
-                allowedRegexPatterns: ['https://example\\.com/.*'],
-              },
-            ],
           },
         });
 
@@ -4213,12 +4159,6 @@ describe('Suggestions Controller', () => {
           },
           data: {
             suggestionIds: [SUGGESTION_IDS[0]],
-            suggestionsMetadata: [
-              {
-                id: SUGGESTION_IDS[0],
-                allowedRegexPatterns: ['https://example\\.com/.*'],
-              },
-            ],
           },
         });
 
@@ -4268,12 +4208,6 @@ describe('Suggestions Controller', () => {
           },
           data: {
             suggestionIds: [SUGGESTION_IDS[0]],
-            suggestionsMetadata: [
-              {
-                id: SUGGESTION_IDS[0],
-                allowedRegexPatterns: ['https://example\\.com/.*'],
-              },
-            ],
           },
         });
 
@@ -4315,12 +4249,6 @@ describe('Suggestions Controller', () => {
           },
           data: {
             suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[3]],
-            suggestionsMetadata: [
-              {
-                id: SUGGESTION_IDS[0],
-                allowedRegexPatterns: ['https://example\\.com/.*'],
-              },
-            ],
           },
         });
 
@@ -4364,12 +4292,6 @@ describe('Suggestions Controller', () => {
           },
           data: {
             suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[4]],
-            suggestionsMetadata: [
-              {
-                id: SUGGESTION_IDS[0],
-                allowedRegexPatterns: ['https://example\\.com/.*'],
-              },
-            ],
           },
         });
 
@@ -4383,6 +4305,25 @@ describe('Suggestions Controller', () => {
       });
 
       it('should fail domain-wide suggestion without allowedRegexPatterns', async () => {
+        const missingPatternsId = 'missing-patterns-uuid';
+
+        // Mock domain-wide suggestion WITHOUT allowedRegexPatterns in its data
+        const domainWideWithoutPatterns = {
+          getId: () => missingPatternsId,
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 999999,
+          getData: () => ({
+            url: 'https://example.com/* (All Domain URLs)',
+            isDomainWide: true,
+            // Missing allowedRegexPatterns
+          }),
+          save: sandbox.stub().returnsThis(),
+        };
+
+        mockSuggestion.allByOpportunityId.resolves([domainWideWithoutPatterns]);
+
         const response = await suggestionsController.deploySuggestionToEdge({
           ...context,
           params: {
@@ -4390,13 +4331,7 @@ describe('Suggestions Controller', () => {
             opportunityId: OPPORTUNITY_ID,
           },
           data: {
-            suggestionIds: [SUGGESTION_IDS[0]],
-            suggestionsMetadata: [
-              {
-                id: SUGGESTION_IDS[0],
-                // Missing allowedRegexPatterns
-              },
-            ],
+            suggestionIds: [missingPatternsId],
           },
         });
 
@@ -4405,12 +4340,50 @@ describe('Suggestions Controller', () => {
 
         // Domain-wide suggestion should fail due to missing allowedRegexPatterns
         expect(body.metadata.failed).to.equal(1);
-        expect(body.suggestions[0].uuid).to.equal(SUGGESTION_IDS[0]);
+        expect(body.suggestions[0].uuid).to.equal(missingPatternsId);
         expect(body.suggestions[0].statusCode).to.equal(400);
         expect(body.suggestions[0].message).to.include('allowedRegexPatterns');
       });
 
       it('should handle invalid regex patterns gracefully', async () => {
+        const invalidRegexId = 'invalid-regex-uuid';
+        const regularId = 'regular-suggestion-uuid';
+
+        // Mock domain-wide suggestion WITH invalid regex patterns in its data
+        const domainWideWithInvalidRegex = {
+          getId: () => invalidRegexId,
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 999999,
+          getData: () => ({
+            url: 'https://example.com/* (All Domain URLs)',
+            isDomainWide: true,
+            allowedRegexPatterns: ['[invalid(regex'], // Invalid regex
+          }),
+          save: sandbox.stub().returnsThis(),
+        };
+
+        const regularSuggestion = {
+          getId: () => regularId,
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 2,
+          getData: () => ({
+            url: 'https://example.com/page1',
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().returnsThis(),
+        };
+
+        mockSuggestion.allByOpportunityId.resolves([domainWideWithInvalidRegex, regularSuggestion]);
+
         const response = await suggestionsController.deploySuggestionToEdge({
           ...context,
           params: {
@@ -4418,13 +4391,7 @@ describe('Suggestions Controller', () => {
             opportunityId: OPPORTUNITY_ID,
           },
           data: {
-            suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
-            suggestionsMetadata: [
-              {
-                id: SUGGESTION_IDS[0],
-                allowedRegexPatterns: ['[invalid(regex'], // Invalid regex
-              },
-            ],
+            suggestionIds: [invalidRegexId, regularId],
           },
         });
 
