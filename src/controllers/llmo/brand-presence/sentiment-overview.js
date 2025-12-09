@@ -153,10 +153,10 @@ export async function getSentimentOverview(context, getSiteAndValidateLlmo) {
             prompts_with_sentiment::int AS "promptsWithSentiment",
             json_build_object(
               'positive', CASE WHEN sentiment_total > 0 THEN ROUND((positive_count::numeric / sentiment_total) * 100) ELSE 0 END,
-              'neutral', CASE WHEN sentiment_total > 0 THEN ROUND((neutral_count::numeric / sentiment_total) * 100) ELSE 0 END,
-              'negative', CASE WHEN sentiment_total > 0 THEN 
-                100 - (ROUND((positive_count::numeric / sentiment_total) * 100) + ROUND((neutral_count::numeric / sentiment_total) * 100))
-              ELSE 0 END
+              'neutral', CASE WHEN sentiment_total > 0 THEN 
+                100 - (ROUND((positive_count::numeric / sentiment_total) * 100) + ROUND((negative_count::numeric / sentiment_total) * 100))
+              ELSE 0 END,
+              'negative', CASE WHEN sentiment_total > 0 THEN ROUND((negative_count::numeric / sentiment_total) * 100) ELSE 0 END
             ) AS sentiment
           FROM weekly_stats
           ORDER BY week

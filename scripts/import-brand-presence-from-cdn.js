@@ -29,7 +29,7 @@ const BASE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
 const QUERY_INDEX_URL = `${BASE_URL}/adobe/query-index.json`;
 
 // Authentication token - replace with actual token
-const AUTH_TOKEN = '';
+const AUTH_TOKEN = 'hlxtst_eyJhbGciOiJSUzI1NiJ9.eyJhdWQiOiJwcm9qZWN0LWVsbW8tdWktZGF0YS0tYWRvYmUuYWVtLnBhZ2UiLCJzdWIiOiJoamVuQGFkb2JlLmNvbSIsImV4cCI6MTc2NTI5MjA3Nn0.dgpkKCRH_xxRpjkGqKn7sY3R_jxaaPWVzFw_wg0OiPRWYMD7j3orDO_D9Vg06M_uw8oX1DtHjajtSNAVpvLRh5Snzow2ZY7SORRhEgF_PeuQP4t_plLEngcJ5dWiqfiJEtVl3Bq_Pw1ASIyydEGQhQVxegfWbJRDCEcphtmu2hwd1GCuz_nN9WbTGE0mSUaOXgfckp-8XCeP4bqZq8-wSMXE3vYJ07-4sUrbBMng3N7muFzMZ6W0_xFBLGpuDxt8XFZSIAA9wU1HohFnZIAIHHaiB0mE1-TbspPUChBSYzyYXOnL_bGjCsM9n3C0AhXUdJj6X-QVP983UcTuxBHT4w';
 
 // Week filters - only process entries containing these paths
 const WEEK_FILTERS = [

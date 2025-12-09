@@ -17,3 +17,4 @@ export { searchBrandPresence } from './data-insights.js';
 export { exampleEndpoint } from './example.js';
 export { getSentimentOverview } from './sentiment-overview.js';
 export { getBrandPresenceStats } from './llmo-stat-cards.js';
+export { getCompetitorComparison } from './competitor-comparison.js';

@@ -353,6 +353,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/brand-presence/filters': llmoController.getBrandPresenceFilters,
     'GET /sites/:siteId/llmo/brand-presence/sentiment-overview': llmoController.getSentimentOverview,
     'GET /sites/:siteId/llmo/brand-presence/stats': llmoController.getBrandPresenceStats,
+    'GET /sites/:siteId/llmo/brand-presence/competitor-comparison': llmoController.getCompetitorComparison,
     'GET /sites/:siteId/llmo/brand-presence/example': llmoController.exampleEndpoint,
     'GET /sites/:siteId/llmo/brand-presence/topics': llmoController.getBrandPresenceTopics,
     'GET /sites/:siteId/llmo/brand-presence/topics/:topic/prompts': llmoController.getBrandPresencePrompts,

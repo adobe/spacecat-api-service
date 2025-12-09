@@ -105,6 +105,11 @@ async function createBrandPresenceTable() {
     console.log('  ? Created index on date');
 
     await auroraClient.query(`
+      CREATE INDEX idx_brand_presence_execution_date ON brand_presence(execution_date);
+    `);
+    console.log('  ? Created index on execution_date');
+
+    await auroraClient.query(`
       CREATE INDEX idx_brand_presence_category ON brand_presence(category);
     `);
     console.log('  ? Created index on category');

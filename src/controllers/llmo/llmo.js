@@ -52,6 +52,7 @@ import {
   getBrandPresenceTopics as getBrandPresenceTopicsImpl,
   getBrandPresencePrompts as getBrandPresencePromptsImpl,
   searchBrandPresence as searchBrandPresenceImpl,
+  getCompetitorComparison as getCompetitorComparisonImpl,
 } from './brand-presence/index.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
 
@@ -1012,6 +1013,12 @@ function LlmoController(ctx) {
     getSiteAndValidateLlmo,
   );
 
+  // Wrapper for competitor comparison endpoint
+  const getCompetitorComparison = async (context) => getCompetitorComparisonImpl(
+    context,
+    getSiteAndValidateLlmo,
+  );
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -1039,6 +1046,7 @@ function LlmoController(ctx) {
     getBrandPresenceTopics,
     getBrandPresencePrompts,
     searchBrandPresence,
+    getCompetitorComparison,
   };
 }
 
