@@ -139,7 +139,9 @@ export async function getBrandPresenceTopics(context, getSiteAndValidateLlmo) {
 
     // Build WHERE clause
     const { whereClause, values, paramIndex } = buildBrandPresenceWhereClause(
-      { startDate, endDate, model, category, region, origin },
+      {
+        startDate, endDate, model, category, region, origin,
+      },
       siteId,
     );
 
@@ -287,7 +289,9 @@ export async function getBrandPresencePrompts(context, getSiteAndValidateLlmo) {
 
     // Build WHERE clause and add topic filter
     const { whereClause, values, paramIndex } = buildBrandPresenceWhereClause(
-      { startDate, endDate, model, category, region, origin },
+      {
+        startDate, endDate, model, category, region, origin,
+      },
       siteId,
     );
 
@@ -415,7 +419,9 @@ export async function searchBrandPresence(context, getSiteAndValidateLlmo) {
 
     // Build WHERE clause
     const { whereClause, values, paramIndex } = buildBrandPresenceWhereClause(
-      { startDate, endDate, model, category, region, origin },
+      {
+        startDate, endDate, model, category, region, origin,
+      },
       siteId,
     );
 

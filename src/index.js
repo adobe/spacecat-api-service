@@ -14,7 +14,6 @@ import wrap from '@adobe/helix-shared-wrap';
 import { helixStatus } from '@adobe/helix-status';
 import secrets from '@adobe/helix-shared-secrets';
 import bodyData from '@adobe/helix-shared-body-data';
-import dataAccess from '@adobe/spacecat-shared-data-access';
 import {
   badRequest,
   internalServerError,
@@ -36,6 +35,7 @@ import { hasText, resolveSecretsName, logWrapper } from '@adobe/spacecat-shared-
 
 import sqs from './support/sqs.js';
 import { auroraClientWrapper } from './support/aurora-client.js';
+import dataAccess from './support/data-access-wrapper.js';
 import getRouteHandlers from './routes/index.js';
 import matchPath, { sanitizePath } from './utils/route-utils.js';
 
