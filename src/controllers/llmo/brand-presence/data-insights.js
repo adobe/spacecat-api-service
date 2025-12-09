@@ -253,6 +253,7 @@ export async function getBrandPresenceTopics(context, getSiteAndValidateLlmo) {
  *   Valid columns: prompt, region, origin, category, executions, mentions, citations,
  *                  visibility, sentiment, position, sources
  * - sortOrder: 'asc' or 'desc' (default: 'desc')
+ * - q: Optional search query to filter prompts (searches in prompt text)
  *
  * @param {object} context - The request context
  * @param {Function} getSiteAndValidateLlmo - Function to validate site and LLMO access
@@ -281,6 +282,7 @@ export async function getBrandPresencePrompts(context, getSiteAndValidateLlmo) {
       origin,
       sortBy = 'mentions',
       sortOrder = 'desc',
+      q: searchQuery,
     } = context.data || {};
 
     // Validate sort column
@@ -297,6 +299,19 @@ export async function getBrandPresencePrompts(context, getSiteAndValidateLlmo) {
 
     // Decode the topic (it's URL-encoded)
     const decodedTopic = decodeURIComponent(topic);
+
+    // Build search condition if search query is provided
+    let searchCondition = '';
+    let currentParamIndex = paramIndex;
+    const queryParams = [...values, decodedTopic];
+    currentParamIndex += 1;
+
+    if (searchQuery && searchQuery.trim().length >= 2) {
+      const searchPattern = `%${searchQuery.trim().toLowerCase()}%`;
+      searchCondition = ` AND LOWER(prompt) LIKE $${currentParamIndex}`;
+      queryParams.push(searchPattern);
+      currentParamIndex += 1;
+    }
 
     // Query prompts from the prompts view
     // Sentiment is calculated using avg_sentiment_score converted to 0-100 scale:
@@ -321,14 +336,13 @@ export async function getBrandPresencePrompts(context, getSiteAndValidateLlmo) {
         SUM(total_sources_count) AS sources,
         MAX(latest_answer) AS answer
       FROM brand_presence_prompts_by_date
-      WHERE ${whereClause} AND topics = $${paramIndex}
+      WHERE ${whereClause} AND topics = $${paramIndex}${searchCondition}
       GROUP BY prompt, region, origin, category
       ORDER BY ${sortColumn} ${sortDirection} NULLS LAST
     `;
 
     const queryStart = Date.now();
-    const queryParams = [...values, decodedTopic];
-    log.info(`[BRAND-PRESENCE-PROMPTS] Executing query for siteId: ${siteId}, topic: ${topic} - query: ${promptsQuery.replace(/\s+/g, ' ').trim()}, params: ${JSON.stringify(queryParams)}`);
+    log.info(`[BRAND-PRESENCE-PROMPTS] Executing query for siteId: ${siteId}, topic: ${topic}${searchQuery ? `, search: ${searchQuery}` : ''} - query: ${promptsQuery.replace(/\s+/g, ' ').trim()}, params: ${JSON.stringify(queryParams)}`);
     const promptsResult = await aurora.query(promptsQuery, queryParams);
     const queryDuration = Date.now() - queryStart;
 
@@ -337,6 +351,7 @@ export async function getBrandPresencePrompts(context, getSiteAndValidateLlmo) {
     return ok({
       siteId,
       topic: decodedTopic,
+      searchQuery: searchQuery || null,
       prompts: promptsResult.map((row) => ({
         prompt: row.prompt,
         region: row.region,
@@ -485,6 +500,8 @@ export async function searchBrandPresence(context, getSiteAndValidateLlmo) {
             AND LOWER(p.prompt) LIKE $${paramIndex}
         ))
     `;
+
+    log.info(`[BRAND-PRESENCE-SEARCH] Executing query: ${searchQuerySql}, params: ${JSON.stringify([...values, searchPattern, parseInt(pageSize, 10), offset])}`);
 
     const queryStart = Date.now();
 
