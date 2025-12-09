@@ -124,7 +124,6 @@ export default function getRouteHandlers(
 
   const routeDefinitions = {
     'GET /audits/latest/:auditType': auditsController.getAllLatest,
-    'GET /configurations': configurationController.getAll,
     'GET /configurations/latest': configurationController.getLatest,
     'PATCH /configurations/latest': configurationController.updateConfiguration,
     'POST /configurations/:version/restore': configurationController.restoreVersion,

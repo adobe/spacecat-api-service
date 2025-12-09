@@ -336,7 +336,6 @@ describe('getRouteHandlers', () => {
     );
 
     expect(staticRoutes).to.have.all.keys(
-      'GET /configurations',
       'GET /configurations/latest',
       'PATCH /configurations/latest',
       'POST /configurations/audits',
@@ -365,7 +364,6 @@ describe('getRouteHandlers', () => {
       'GET /sites-resolve',
     );
 
-    expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
     expect(staticRoutes['PATCH /configurations/latest']).to.equal(mockConfigurationController.updateConfiguration);
     expect(staticRoutes['POST /configurations/audits']).to.equal(mockConfigurationController.registerAudit);

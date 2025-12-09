@@ -1,3 +1,31 @@
+## [1.275.5](https://github.com/adobe/spacecat-api-service/compare/v1.275.4...v1.275.5) (2025-12-09)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1635](https://github.com/adobe/spacecat-api-service/issues/1635)) ([44b0f5f](https://github.com/adobe/spacecat-api-service/commit/44b0f5fa923e7311235379f99b8cbedd1d9efc05))
+
+## [1.275.4](https://github.com/adobe/spacecat-api-service/compare/v1.275.3...v1.275.4) (2025-12-08)
+
+
+### Bug Fixes
+
+* **configuration:** remove getAll; remove positive integer requirement for configuration version ([#1637](https://github.com/adobe/spacecat-api-service/issues/1637)) ([33b163d](https://github.com/adobe/spacecat-api-service/commit/33b163d966c36fc5423fb7c67e4e20ab5815691f))
+
+## [1.275.3](https://github.com/adobe/spacecat-api-service/compare/v1.275.2...v1.275.3) (2025-12-08)
+
+
+### Bug Fixes
+
+* adapt to S3 config ([#1638](https://github.com/adobe/spacecat-api-service/issues/1638)) ([a5e6dd2](https://github.com/adobe/spacecat-api-service/commit/a5e6dd27c526dde858c27c86bf6b173f95903297))
+
+## [1.275.2](https://github.com/adobe/spacecat-api-service/compare/v1.275.1...v1.275.2) (2025-12-08)
+
+
+### Bug Fixes
+
+* upgrade athena ([#1636](https://github.com/adobe/spacecat-api-service/issues/1636)) ([6ab4ec8](https://github.com/adobe/spacecat-api-service/commit/6ab4ec814f7116b2a5f13f9299abd83d464ab4d7))
+
 ## [1.275.1](https://github.com/adobe/spacecat-api-service/compare/v1.275.0...v1.275.1) (2025-12-08)
 
 

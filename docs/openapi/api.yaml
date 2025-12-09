@@ -79,8 +79,6 @@ paths:
     $ref: './auth-api.yaml#/google-auth-status'
   /auth/login:
     $ref: './auth-api.yaml#/login'
-  /configurations:
-    $ref: './configurations-api.yaml#/configurations'
   /configurations/latest:
     $ref: './configuration-api.yaml#/latest-configuration'
   /configurations/latest/queues:
