@@ -3684,7 +3684,7 @@ describe('Suggestions Controller', () => {
           getData: () => ({
             url: 'https://example.com/* (All Domain URLs)',
             isDomainWide: true,
-            allowedRegexPatterns: ['https://example\\.com/.*'],
+            allowedRegexPatterns: ['/*'],
             pathPattern: '/*',
             scope: 'domain-wide',
           }),
@@ -3917,7 +3917,7 @@ describe('Suggestions Controller', () => {
             suggestionsMetadata: [
               {
                 id: SUGGESTION_IDS[0],
-                allowedRegexPatterns: ['https://example\\.com/.*'],
+                allowedRegexPatterns: ['/*'],
               },
             ],
           },
@@ -4183,7 +4183,7 @@ describe('Suggestions Controller', () => {
           getData: () => ({
             url: 'https://example.com/subdomain/* (Subdomain)',
             isDomainWide: true,
-            allowedRegexPatterns: ['https://example\\.com/subdomain/.*'],
+            allowedRegexPatterns: ['/subdomain/*'],
           }),
           getKpiDeltas: () => ({}),
           getCreatedAt: () => '2025-01-15T10:00:00Z',
