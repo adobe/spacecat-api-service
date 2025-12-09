@@ -88,7 +88,6 @@ function mergeWeeklyData(brandData, competitorData) {
       year,
       mentions: parseInt(brandRow.mentions || 0, 10),
       citations: parseInt(brandRow.citations || 0, 10),
-      visibilityScore: parseInt(brandRow.visibility_score || 0, 10),
       competitors: competitorsByWeek[brandRow.week] || [],
     };
   });
@@ -232,8 +231,7 @@ export async function getCompetitorComparison(context, getSiteAndValidateLlmo) {
         SELECT
           week,
           SUM(mentions_count)::int AS mentions,
-          SUM(citations_count)::int AS citations,
-          0 AS visibility_score
+          SUM(citations_count)::int AS citations
         FROM public.brand_metrics_weekly
         WHERE ${weeklyConditions.join(' AND ')}
         GROUP BY 1
