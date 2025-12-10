@@ -177,7 +177,7 @@ export async function getBrandPresenceTopics(context, getSiteAndValidateLlmo) {
     if (sortColumn === 'sources') {
       // FULL SCAN STRATEGY: Required when sorting by sources
       // Must calculate source counts for ALL topics to determine sort order
-      log.info(`[BRAND-PRESENCE-TOPICS] Using full-scan strategy (sorting by sources)`);
+      log.info('[BRAND-PRESENCE-TOPICS] Using full-scan strategy (sorting by sources)');
 
       const topicsQuery = `
         WITH topic_metrics AS (
