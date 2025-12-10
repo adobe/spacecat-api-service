@@ -4829,6 +4829,260 @@ describe('Suggestions Controller', () => {
     });
   });
 
+  describe('rollbackSuggestionFromEdge - domain-wide rollback', () => {
+    let domainWideSuggestion;
+    let coveredSuggestions;
+    let prerenderOpportunity;
+    let tokowakaClientStub;
+
+    beforeEach(() => {
+      // Create a domain-wide suggestion that has been deployed
+      domainWideSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'prerender',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          url: 'https://example.com/* (All Domain URLs)',
+          isDomainWide: true,
+          allowedRegexPatterns: ['/*'],
+          pathPattern: '/*',
+          scope: 'domain-wide',
+          tokowakaDeployed: Date.now(),
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+
+      // Create suggestions that were covered by the domain-wide deployment
+      coveredSuggestions = [
+        {
+          getId: () => SUGGESTION_IDS[1],
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 2,
+          getData: () => ({
+            url: 'https://example.com/page1',
+            tokowakaDeployed: Date.now(),
+            coveredByDomainWide: SUGGESTION_IDS[0],
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().resolves(),
+        },
+        {
+          getId: () => SUGGESTION_IDS[2],
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 3,
+          getData: () => ({
+            url: 'https://example.com/page2',
+            tokowakaDeployed: Date.now(),
+            coveredByDomainWide: SUGGESTION_IDS[0],
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().resolves(),
+        },
+      ];
+
+      prerenderOpportunity = {
+        getId: sandbox.stub().returns(OPPORTUNITY_ID),
+        getSiteId: sandbox.stub().returns(SITE_ID),
+        getType: sandbox.stub().returns('prerender'),
+      };
+
+      site.getConfig = sandbox.stub().returns({
+        getTokowakaConfig: () => ({ apiKey: 'test-api-key-123' }),
+      });
+      site.getBaseURL = sandbox.stub().returns('https://example.com');
+      site.getId = sandbox.stub().returns(SITE_ID);
+
+      mockOpportunity.findById.resetBehavior();
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(prerenderOpportunity);
+
+      const allSuggestions = [domainWideSuggestion, ...coveredSuggestions];
+      mockSuggestion.allByOpportunityId.resolves(allSuggestions);
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(domainWideSuggestion);
+      coveredSuggestions.forEach((suggestion, index) => {
+        mockSuggestion.findById
+          .withArgs(SUGGESTION_IDS[index + 1])
+          .resolves(suggestion);
+      });
+
+      // Mock TokowakaClient
+      tokowakaClientStub = {
+        fetchMetaconfig: sandbox.stub().resolves({
+          prerender: {
+            enabled: true,
+            patterns: ['/*'],
+          },
+        }),
+        uploadMetaconfig: sandbox.stub().resolves(),
+      };
+
+      sandbox.stub(TokowakaClient, 'createFrom').returns(tokowakaClientStub);
+
+      context.env = {
+        TOKOWAKA_SITE_CONFIG_BUCKET: 'test-tokowaka-bucket',
+        TOKOWAKA_PREVIEW_BUCKET: 'test-tokowaka-preview-bucket',
+        TOKOWAKA_CDN_PROVIDER: 'test-cdn-provider',
+        TOKOWAKA_EDGE_URL: 'https://edge-dev.tokowaka.now',
+      };
+
+      context.log = {
+        info: sandbox.stub(),
+        warn: sandbox.stub(),
+        error: sandbox.stub(),
+        debug: sandbox.stub(),
+      };
+    });
+
+    it('should rollback domain-wide suggestion and covered suggestions', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      // Should successfully rollback domain-wide suggestion
+      expect(body.metadata.success).to.equal(1);
+      expect(body.metadata.failed).to.equal(0);
+
+      // Verify metaconfig was updated (prerender removed)
+      expect(tokowakaClientStub.fetchMetaconfig.calledOnce).to.be.true;
+      expect(tokowakaClientStub.uploadMetaconfig.calledOnce).to.be.true;
+      const uploadedMetaconfig = tokowakaClientStub.uploadMetaconfig.firstCall.args[1];
+      expect(uploadedMetaconfig).to.not.have.property('prerender');
+
+      // Verify domain-wide suggestion data was updated
+      expect(domainWideSuggestion.setData.calledOnce).to.be.true;
+      const domainWideData = domainWideSuggestion.setData.firstCall.args[0];
+      expect(domainWideData).to.not.have.property('tokowakaDeployed');
+      expect(domainWideSuggestion.setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
+      expect(domainWideSuggestion.save.calledOnce).to.be.true;
+
+      // Verify covered suggestions were also rolled back
+      coveredSuggestions.forEach((suggestion) => {
+        expect(suggestion.setData.calledOnce).to.be.true;
+        const suggestionData = suggestion.setData.firstCall.args[0];
+        expect(suggestionData).to.not.have.property('tokowakaDeployed');
+        expect(suggestionData).to.not.have.property('coveredByDomainWide');
+        expect(suggestion.setUpdatedBy.calledWith('domain-wide-rollback')).to.be.true;
+        expect(suggestion.save.calledOnce).to.be.true;
+      });
+    });
+
+    it('should handle error when metaconfig fetch fails', async () => {
+      tokowakaClientStub.fetchMetaconfig.rejects(new Error('Failed to fetch metaconfig'));
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      expect(body.metadata.success).to.equal(0);
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0].statusCode).to.equal(500);
+      expect(body.suggestions[0].message).to.include('Rollback failed');
+    });
+
+    it('should continue with domain-wide rollback even if metaconfig has no prerender config', async () => {
+      // Return metaconfig without prerender property
+      tokowakaClientStub.fetchMetaconfig.resolves({
+        someOtherConfig: true,
+      });
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      // Should still succeed
+      expect(body.metadata.success).to.equal(1);
+      expect(body.metadata.failed).to.equal(0);
+
+      // Verify metaconfig fetch was attempted but upload was not called (no prerender to remove)
+      expect(tokowakaClientStub.fetchMetaconfig.calledOnce).to.be.true;
+      expect(tokowakaClientStub.uploadMetaconfig.called).to.be.false;
+
+      // Verify domain-wide suggestion was still rolled back
+      expect(domainWideSuggestion.save.calledOnce).to.be.true;
+    });
+
+    it('should handle error when TokowakaClient.createFrom fails', async () => {
+      // Make TokowakaClient.createFrom throw an error
+      TokowakaClient.createFrom.restore();
+      sandbox.stub(TokowakaClient, 'createFrom').throws(new Error('Failed to create Tokowaka client'));
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      // Should fail all domain-wide suggestions
+      expect(body.metadata.success).to.equal(0);
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0].uuid).to.equal(SUGGESTION_IDS[0]);
+      expect(body.suggestions[0].statusCode).to.equal(500);
+      expect(body.suggestions[0].message).to.include('Rollback failed: Internal server error');
+
+      // Verify error was logged
+      expect(context.log.error.called).to.be.true;
+    });
+  });
+
   describe('previewSuggestions (Tokowaka Preview)', () => {
     let s3ClientSendStub;
     let tokowakaSuggestions;
