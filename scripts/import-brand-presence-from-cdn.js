@@ -29,7 +29,7 @@ const BASE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
 const QUERY_INDEX_URL = `${BASE_URL}/adobe/query-index.json`;
 
 // Authentication token - replace with actual token
-const AUTH_TOKEN = 'hlxtst_eyJhbGciOiJSUzI1NiJ9.eyJhdWQiOiJwcm9qZWN0LWVsbW8tdWktZGF0YS0tYWRvYmUuYWVtLnBhZ2UiLCJzdWIiOiJoamVuQGFkb2JlLmNvbSIsImV4cCI6MTc2NTI5MjA3Nn0.dgpkKCRH_xxRpjkGqKn7sY3R_jxaaPWVzFw_wg0OiPRWYMD7j3orDO_D9Vg06M_uw8oX1DtHjajtSNAVpvLRh5Snzow2ZY7SORRhEgF_PeuQP4t_plLEngcJ5dWiqfiJEtVl3Bq_Pw1ASIyydEGQhQVxegfWbJRDCEcphtmu2hwd1GCuz_nN9WbTGE0mSUaOXgfckp-8XCeP4bqZq8-wSMXE3vYJ07-4sUrbBMng3N7muFzMZ6W0_xFBLGpuDxt8XFZSIAA9wU1HohFnZIAIHHaiB0mE1-TbspPUChBSYzyYXOnL_bGjCsM9n3C0AhXUdJj6X-QVP983UcTuxBHT4w';
+const AUTH_TOKEN = ''
 
 // Week filters - only process entries containing these paths
 const WEEK_FILTERS = [
@@ -226,15 +226,18 @@ async function fetchWithAuth(url) {
 }
 
 /**
- * Fetch a brand presence file with pagination
- * Fetches in batches of FETCH_BATCH_SIZE due to Lambda limits
- * Returns combined data from all batches
+ * Fetch a brand presence file with pagination for a specific section
+ * @param {string} baseUrl - Base URL for the file
+ * @param {string} section - Section to paginate ('all' or 'brand_vs_competitors')
+ * @param {object} combinedData - Existing combined data object to append to
+ * @returns {object} Combined data with all records for the section
  */
-async function fetchFileWithPagination(baseUrl) {
+async function fetchSectionWithPagination(baseUrl, section, combinedData) {
   let offset = 0;
   let total = null;
-  let combinedData = null;
   let iterations = 0;
+  // eslint-disable-next-line no-param-reassign
+  let result = combinedData;
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
@@ -242,31 +245,42 @@ async function fetchFileWithPagination(baseUrl) {
 
     // Safety check to prevent infinite loops
     if (iterations > MAX_PAGINATION_ITERATIONS) {
-      logError(`     ⚠️  Reached max pagination iterations (${MAX_PAGINATION_ITERATIONS}), stopping`);
+      logError(`     ⚠️  [${section}] Reached max pagination iterations (${MAX_PAGINATION_ITERATIONS}), stopping`);
       break;
     }
 
     const url = `${baseUrl}?offset=${offset}&limit=${FETCH_BATCH_SIZE}`;
-    log(`     Fetching offset=${offset}, limit=${FETCH_BATCH_SIZE}...`);
+    log(`     [${section}] Fetching offset=${offset}, limit=${FETCH_BATCH_SIZE}...`);
 
     // eslint-disable-next-line no-await-in-loop
     const response = await fetchWithAuth(url);
 
     // On first fetch, initialize the combined data structure
-    if (combinedData === null) {
-      combinedData = response;
-      // Get total from the 'all' section if it exists
-      if (response.all && typeof response.all.total === 'number') {
-        total = response.all.total;
-        log(`     Total records to fetch: ${total}`);
+    if (result === null) {
+      result = response;
+    }
+
+    // Get total from the section if it exists
+    if (total === null && response[section] && typeof response[section].total === 'number') {
+      total = response[section].total;
+      log(`     [${section}] Total records to fetch: ${total}`);
+    }
+
+    // Append data from this fetch to the section's data array
+    if (response[section] && Array.isArray(response[section].data)) {
+      if (iterations === 1) {
+        // First fetch - data is already in result
+        if (!result[section]) {
+          result[section] = response[section];
+        }
+      } else {
+        // Subsequent fetches - append data
+        result[section].data.push(...response[section].data);
       }
-    } else if (response.all && Array.isArray(response.all.data)) {
-      // Append data from subsequent fetches to the 'all.data' array
-      combinedData.all.data.push(...response.all.data);
     }
 
     // Check if we've fetched all records
-    const fetchedCount = response.all?.data?.length || 0;
+    const fetchedCount = response[section]?.data?.length || 0;
     offset += fetchedCount;
 
     // Stop if we got fewer records than requested (end of data)
@@ -280,13 +294,41 @@ async function fetchFileWithPagination(baseUrl) {
   }
 
   // Update the metadata to reflect combined data
-  if (combinedData?.all) {
-    combinedData.all.offset = 0;
-    combinedData.all.limit = combinedData.all.data.length;
+  if (result?.[section]) {
+    result[section].offset = 0;
+    result[section].limit = result[section].data?.length || 0;
   }
 
-  const totalFetched = combinedData?.all?.data?.length || 0;
-  log(`     Fetched ${totalFetched} total records${total ? ` (of ${total})` : ''}`);
+  const totalFetched = result?.[section]?.data?.length || 0;
+  log(`     [${section}] Fetched ${totalFetched} total records${total ? ` (of ${total})` : ''}`);
+
+  return result;
+}
+
+/**
+ * Fetch a brand presence file with pagination
+ * Fetches in batches of FETCH_BATCH_SIZE due to Lambda limits
+ * Returns combined data from all batches for both 'all' and 'brand_vs_competitors' sections
+ */
+async function fetchFileWithPagination(baseUrl) {
+  let combinedData = null;
+
+  // Fetch 'all' section with pagination
+  combinedData = await fetchSectionWithPagination(baseUrl, 'all', combinedData);
+
+  // Fetch 'brand_vs_competitors' section with pagination if it exists
+  if (combinedData?.brand_vs_competitors) {
+    const bvcTotal = combinedData.brand_vs_competitors.total;
+    const bvcFetched = combinedData.brand_vs_competitors.data?.length || 0;
+
+    // Only paginate if there are more records to fetch
+    if (bvcTotal && bvcFetched < bvcTotal) {
+      log(`     [brand_vs_competitors] Need to fetch more records (have ${bvcFetched} of ${bvcTotal})`);
+      combinedData = await fetchSectionWithPagination(baseUrl, 'brand_vs_competitors', combinedData);
+    } else {
+      log(`     [brand_vs_competitors] All ${bvcFetched} records already fetched`);
+    }
+  }
 
   return combinedData;
 }
