@@ -125,6 +125,20 @@ async function createBrandPresenceViews() {
       'CREATE INDEX idx_bps_owned_lookup (partial index for owned sources)',
     );
 
+    // Add index for all sources lookup (used for joining to count unique sources)
+    // Note: We only index brand_presence_id since URLs can be too long for B-tree
+    // The COUNT(DISTINCT url) will still work but won't use the URL in the index
+    await executeWithLogging(
+      auroraClient,
+      `DROP INDEX IF EXISTS idx_bps_all_sources_lookup;`,
+      'DROP INDEX idx_bps_all_sources_lookup',
+    );
+    await executeWithLogging(
+      auroraClient,
+      `CREATE INDEX idx_bps_all_sources_lookup ON brand_presence_sources(brand_presence_id);`,
+      'CREATE INDEX idx_bps_all_sources_lookup (for all sources JOIN)',
+    );
+
     stepDurations.step1 = Date.now() - step1Start;
     console.log(`\n✅ STEP 1 completed (${formatDuration(stepDurations.step1)})\n`);
 
@@ -156,9 +170,6 @@ async function createBrandPresenceViews() {
         -- Execution count
         COUNT(*) AS executions_count,
 
-        -- Unique prompts in this grouping (for reference)
-        COUNT(DISTINCT bp.prompt) AS unique_prompts_in_group,
-
         -- Mentions: count where mentions = true
         COUNT(*) FILTER (WHERE bp.mentions = TRUE) AS mentions_count,
 
@@ -186,32 +197,10 @@ async function createBrandPresenceViews() {
           2
         ) AS avg_position,
 
-        -- Sentiment counts
+        -- Sentiment counts (used for weighted sentiment calculation)
         COUNT(*) FILTER (WHERE LOWER(bp.sentiment) = 'positive') AS sentiment_positive,
         COUNT(*) FILTER (WHERE LOWER(bp.sentiment) = 'neutral') AS sentiment_neutral,
         COUNT(*) FILTER (WHERE LOWER(bp.sentiment) = 'negative') AS sentiment_negative,
-        COUNT(*) FILTER (WHERE bp.sentiment IS NOT NULL AND bp.sentiment != '') AS sentiment_total,
-
-        -- Average sentiment score (-1 to 1)
-        ROUND(
-          AVG(
-            CASE
-              WHEN LOWER(bp.sentiment) = 'positive' THEN 1.0
-              WHEN LOWER(bp.sentiment) = 'neutral' THEN 0.0
-              WHEN LOWER(bp.sentiment) = 'negative' THEN -1.0
-              ELSE NULL
-            END
-          ),
-          2
-        ) AS avg_sentiment_score,
-
-        -- Sources count (total across all executions)
-        SUM(
-          CASE
-            WHEN bp.sources IS NULL OR bp.sources = '' THEN 0
-            ELSE array_length(string_to_array(bp.sources, ';'), 1)
-          END
-        ) AS total_sources_count,
 
         -- Volume for popularity (application will calculate category)
         ROUND(AVG(bp.volume), 2) AS avg_volume
@@ -253,11 +242,7 @@ async function createBrandPresenceViews() {
     const step3Start = Date.now();
 
 
-    await executeWithLogging(
-      auroraClient,
-      `DROP VIEW IF EXISTS brand_presence_prompts_by_date CASCADE;`,
-      '',
-    );
+    // Drop the materialized view (handles both materialized and regular views via CASCADE)
     await executeWithLogging(
       auroraClient,
       `DROP MATERIALIZED VIEW IF EXISTS brand_presence_prompts_by_date CASCADE;`,
@@ -308,10 +293,7 @@ async function createBrandPresenceViews() {
           2
         ) AS avg_position,
 
-        -- Dominant sentiment (mode)
-        MODE() WITHIN GROUP (ORDER BY bp.sentiment) AS dominant_sentiment,
-
-        -- Average sentiment score
+        -- Average sentiment score (used for sentiment classification)
         ROUND(
           AVG(
             CASE
@@ -324,19 +306,8 @@ async function createBrandPresenceViews() {
           2
         ) AS avg_sentiment_score,
 
-        -- Sources count
-        SUM(
-          CASE
-            WHEN bp.sources IS NULL OR bp.sources = '' THEN 0
-            ELSE array_length(string_to_array(bp.sources, ';'), 1)
-          END
-        ) AS total_sources_count,
-
         -- Latest answer (for detail view)
-        (ARRAY_AGG(bp.answer ORDER BY bp.date DESC))[1] AS latest_answer,
-
-        -- Latest sources (for detail view)
-        (ARRAY_AGG(bp.sources ORDER BY bp.date DESC))[1] AS latest_sources
+        (ARRAY_AGG(bp.answer ORDER BY bp.date DESC))[1] AS latest_answer
 
       FROM brand_presence bp
       LEFT JOIN (

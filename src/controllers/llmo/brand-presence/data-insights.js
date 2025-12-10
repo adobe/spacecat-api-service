@@ -13,38 +13,40 @@
 import { ok, badRequest } from '@adobe/spacecat-shared-http-utils';
 
 // Helper to build WHERE clause from filters
-const buildBrandPresenceWhereClause = (params, siteId) => {
-  const conditions = ['site_id = $1'];
+// Optional tableAlias parameter to prefix column names (e.g., 'bp' -> 'bp.site_id')
+const buildBrandPresenceWhereClause = (params, siteId, tableAlias = '') => {
+  const prefix = tableAlias ? `${tableAlias}.` : '';
+  const conditions = [`${prefix}site_id = $1`];
   const values = [siteId];
   let paramIndex = 2;
 
   if (params.startDate) {
-    conditions.push(`date >= $${paramIndex}`);
+    conditions.push(`${prefix}date >= $${paramIndex}`);
     values.push(params.startDate);
     paramIndex += 1;
   }
   if (params.endDate) {
-    conditions.push(`date <= $${paramIndex}`);
+    conditions.push(`${prefix}date <= $${paramIndex}`);
     values.push(params.endDate);
     paramIndex += 1;
   }
   if (params.model && params.model !== 'all') {
-    conditions.push(`model = $${paramIndex}`);
+    conditions.push(`${prefix}model = $${paramIndex}`);
     values.push(params.model);
     paramIndex += 1;
   }
   if (params.category && params.category !== 'all') {
-    conditions.push(`category = $${paramIndex}`);
+    conditions.push(`${prefix}category = $${paramIndex}`);
     values.push(params.category);
     paramIndex += 1;
   }
   if (params.region && params.region !== 'all') {
-    conditions.push(`region = $${paramIndex}`);
+    conditions.push(`${prefix}region = $${paramIndex}`);
     values.push(params.region);
     paramIndex += 1;
   }
   if (params.origin && params.origin !== 'all') {
-    conditions.push(`origin = $${paramIndex}`);
+    conditions.push(`${prefix}origin = $${paramIndex}`);
     values.push(params.origin);
     paramIndex += 1;
   }
@@ -137,52 +139,27 @@ export async function getBrandPresenceTopics(context, getSiteAndValidateLlmo) {
     const sortColumn = VALID_TOPIC_SORT_COLUMNS[sortBy] || 'mentions';
     const sortDirection = sortOrder.toLowerCase() === 'desc' ? 'DESC' : 'ASC';
 
-    // Build WHERE clause
+    const filterParams = {
+      startDate, endDate, model, category, region, origin,
+    };
+
+    // Build WHERE clause for materialized view (no table alias)
     const { whereClause, values, paramIndex } = buildBrandPresenceWhereClause(
-      {
-        startDate, endDate, model, category, region, origin,
-      },
+      filterParams,
       siteId,
+    );
+
+    // Build WHERE clause for raw brand_presence table (with 'bp' alias)
+    const { whereClause: rawWhereClause } = buildBrandPresenceWhereClause(
+      filterParams,
+      siteId,
+      'bp',
     );
 
     // Calculate offset
     const offset = (parseInt(page, 10) - 1) * parseInt(pageSize, 10);
 
-    // Build the main query using the materialized view
-    const topicsQuery = `
-      SELECT
-        topics,
-        ROUND(AVG(avg_visibility_score)) AS visibility,
-        SUM(mentions_count) AS mentions,
-        CASE
-          WHEN SUM(sentiment_positive) + SUM(sentiment_neutral) + SUM(sentiment_negative) = 0 THEN 'N/A'
-          WHEN (
-            SUM(sentiment_positive) * 100 + SUM(sentiment_neutral) * 50
-          )::NUMERIC / (
-            SUM(sentiment_positive) + SUM(sentiment_neutral) + SUM(sentiment_negative)
-          ) < 40 THEN 'Negative'
-          WHEN (
-            SUM(sentiment_positive) * 100 + SUM(sentiment_neutral) * 50
-          )::NUMERIC / (
-            SUM(sentiment_positive) + SUM(sentiment_neutral) + SUM(sentiment_negative)
-          ) <= 65 THEN 'Neutral'
-          ELSE 'Positive'
-        END AS sentiment,
-        ROUND(AVG(avg_position), 2) AS position,
-        SUM(total_sources_count) AS sources,
-        AVG(avg_volume) AS volume,
-        SUM(executions_count) AS executions,
-        SUM(citations_count) AS citations,
-        COUNT(DISTINCT category) AS category_count,
-        COUNT(DISTINCT region) AS region_count
-      FROM brand_presence_topics_by_date
-      WHERE ${whereClause}
-      GROUP BY topics
-      ORDER BY ${sortColumn} ${sortDirection} NULLS LAST
-      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
-    `;
-
-    // Count query for pagination
+    // Count query for pagination (same for both strategies)
     const countQuery = `
       SELECT COUNT(DISTINCT topics) AS total
       FROM brand_presence_topics_by_date
@@ -190,11 +167,150 @@ export async function getBrandPresenceTopics(context, getSiteAndValidateLlmo) {
     `;
 
     const queryStart = Date.now();
+    let topicsResult;
+    let countResult;
 
-    const [topicsResult, countResult] = await Promise.all([
-      aurora.query(topicsQuery, [...values, parseInt(pageSize, 10), offset]),
-      aurora.query(countQuery, values),
-    ]);
+    // Use different query strategies based on sort column
+    // When sorting by 'sources', we need to scan all topics to determine sort order
+    // For all other columns, we can optimize by first determining paginated topics,
+    // then only calculating sources for those specific topics (~40x fewer rows scanned)
+    if (sortColumn === 'sources') {
+      // FULL SCAN STRATEGY: Required when sorting by sources
+      // Must calculate source counts for ALL topics to determine sort order
+      log.info(`[BRAND-PRESENCE-TOPICS] Using full-scan strategy (sorting by sources)`);
+
+      const topicsQuery = `
+        WITH topic_metrics AS (
+          SELECT
+            topics,
+            ROUND(AVG(avg_visibility_score)) AS visibility,
+            SUM(mentions_count) AS mentions,
+            CASE
+              WHEN SUM(sentiment_positive) + SUM(sentiment_neutral) + SUM(sentiment_negative) = 0 THEN 'N/A'
+              WHEN (
+                SUM(sentiment_positive) * 100 + SUM(sentiment_neutral) * 50
+              )::NUMERIC / (
+                SUM(sentiment_positive) + SUM(sentiment_neutral) + SUM(sentiment_negative)
+              ) < 40 THEN 'Negative'
+              WHEN (
+                SUM(sentiment_positive) * 100 + SUM(sentiment_neutral) * 50
+              )::NUMERIC / (
+                SUM(sentiment_positive) + SUM(sentiment_neutral) + SUM(sentiment_negative)
+              ) <= 65 THEN 'Neutral'
+              ELSE 'Positive'
+            END AS sentiment,
+            ROUND(AVG(avg_position), 2) AS position,
+            AVG(avg_volume) AS volume,
+            SUM(executions_count) AS executions,
+            SUM(citations_count) AS citations,
+            COUNT(DISTINCT category) AS category_count,
+            COUNT(DISTINCT region) AS region_count
+          FROM brand_presence_topics_by_date
+          WHERE ${whereClause}
+          GROUP BY topics
+        ),
+        source_counts AS (
+          SELECT
+            bp.topics,
+            COUNT(DISTINCT bps.url) AS sources
+          FROM brand_presence bp
+          JOIN brand_presence_sources bps ON bp.id = bps.brand_presence_id
+          WHERE ${rawWhereClause}
+          GROUP BY bp.topics
+        )
+        SELECT
+          tm.topics,
+          tm.visibility,
+          tm.mentions,
+          tm.sentiment,
+          tm.position,
+          COALESCE(sc.sources, 0) AS sources,
+          tm.volume,
+          tm.executions,
+          tm.citations,
+          tm.category_count,
+          tm.region_count
+        FROM topic_metrics tm
+        LEFT JOIN source_counts sc ON tm.topics = sc.topics
+        ORDER BY sources ${sortDirection} NULLS LAST
+        LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+      `;
+
+      [topicsResult, countResult] = await Promise.all([
+        aurora.query(topicsQuery, [...values, parseInt(pageSize, 10), offset]),
+        aurora.query(countQuery, values),
+      ]);
+    } else {
+      // OPTIMIZED STRATEGY: First get paginated topics, then only calculate sources for those
+      // This dramatically reduces the rows scanned in brand_presence/brand_presence_sources
+      log.info(`[BRAND-PRESENCE-TOPICS] Using optimized strategy (sorting by ${sortColumn})`);
+
+      const topicsQuery = `
+        WITH paginated_topics AS (
+          -- First: determine which topics will be on this page (from materialized view - fast)
+          SELECT
+            topics,
+            ROUND(AVG(avg_visibility_score)) AS visibility,
+            SUM(mentions_count) AS mentions,
+            CASE
+              WHEN SUM(sentiment_positive) + SUM(sentiment_neutral) + SUM(sentiment_negative) = 0 THEN 'N/A'
+              WHEN (
+                SUM(sentiment_positive) * 100 + SUM(sentiment_neutral) * 50
+              )::NUMERIC / (
+                SUM(sentiment_positive) + SUM(sentiment_neutral) + SUM(sentiment_negative)
+              ) < 40 THEN 'Negative'
+              WHEN (
+                SUM(sentiment_positive) * 100 + SUM(sentiment_neutral) * 50
+              )::NUMERIC / (
+                SUM(sentiment_positive) + SUM(sentiment_neutral) + SUM(sentiment_negative)
+              ) <= 65 THEN 'Neutral'
+              ELSE 'Positive'
+            END AS sentiment,
+            ROUND(AVG(avg_position), 2) AS position,
+            AVG(avg_volume) AS volume,
+            SUM(executions_count) AS executions,
+            SUM(citations_count) AS citations,
+            COUNT(DISTINCT category) AS category_count,
+            COUNT(DISTINCT region) AS region_count
+          FROM brand_presence_topics_by_date
+          WHERE ${whereClause}
+          GROUP BY topics
+          ORDER BY ${sortColumn === 'topics' ? 'topics' : sortColumn} ${sortDirection} NULLS LAST
+          LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+        ),
+        source_counts AS (
+          -- Only calculate sources for the topics on this page (optimized)
+          SELECT
+            bp.topics,
+            COUNT(DISTINCT bps.url) AS sources
+          FROM brand_presence bp
+          JOIN brand_presence_sources bps ON bp.id = bps.brand_presence_id
+          WHERE ${rawWhereClause}
+            AND bp.topics IN (SELECT topics FROM paginated_topics)
+          GROUP BY bp.topics
+        )
+        SELECT
+          pt.topics,
+          pt.visibility,
+          pt.mentions,
+          pt.sentiment,
+          pt.position,
+          COALESCE(sc.sources, 0) AS sources,
+          pt.volume,
+          pt.executions,
+          pt.citations,
+          pt.category_count,
+          pt.region_count
+        FROM paginated_topics pt
+        LEFT JOIN source_counts sc ON pt.topics = sc.topics
+        ORDER BY ${sortColumn === 'topics' ? 'pt.topics' : sortColumn} ${sortDirection} NULLS LAST
+      `;
+
+      [topicsResult, countResult] = await Promise.all([
+        aurora.query(topicsQuery, [...values, parseInt(pageSize, 10), offset]),
+        aurora.query(countQuery, values),
+      ]);
+    }
 
     const queryDuration = Date.now() - queryStart;
     const totalItems = parseInt(countResult[0]?.total || 0, 10);
@@ -289,12 +405,21 @@ export async function getBrandPresencePrompts(context, getSiteAndValidateLlmo) {
     const sortColumn = VALID_PROMPT_SORT_COLUMNS[sortBy] || 'mentions';
     const sortDirection = sortOrder.toLowerCase() === 'desc' ? 'DESC' : 'ASC';
 
-    // Build WHERE clause and add topic filter
+    const filterParams = {
+      startDate, endDate, model, category, region, origin,
+    };
+
+    // Build WHERE clause for materialized view (no table alias)
     const { whereClause, values, paramIndex } = buildBrandPresenceWhereClause(
-      {
-        startDate, endDate, model, category, region, origin,
-      },
+      filterParams,
       siteId,
+    );
+
+    // Build WHERE clause for raw brand_presence table (with 'bp' alias)
+    const { whereClause: rawWhereClause } = buildBrandPresenceWhereClause(
+      filterParams,
+      siteId,
+      'bp',
     );
 
     // Decode the topic (it's URL-encoded)
@@ -302,6 +427,7 @@ export async function getBrandPresencePrompts(context, getSiteAndValidateLlmo) {
 
     // Build search condition if search query is provided
     let searchCondition = '';
+    let rawSearchCondition = '';
     let currentParamIndex = paramIndex;
     const queryParams = [...values, decodedTopic];
     currentParamIndex += 1;
@@ -309,36 +435,65 @@ export async function getBrandPresencePrompts(context, getSiteAndValidateLlmo) {
     if (searchQuery && searchQuery.trim().length >= 2) {
       const searchPattern = `%${searchQuery.trim().toLowerCase()}%`;
       searchCondition = ` AND LOWER(prompt) LIKE $${currentParamIndex}`;
+      rawSearchCondition = ` AND LOWER(bp.prompt) LIKE $${currentParamIndex}`;
       queryParams.push(searchPattern);
       currentParamIndex += 1;
     }
 
-    // Query prompts from the prompts view
+    // Query prompts from the prompts view with separate source count from raw tables
     // Sentiment is calculated using avg_sentiment_score converted to 0-100 scale:
     // (avg_sentiment_score + 1) * 50, then apply same thresholds as topics endpoint
     const promptsQuery = `
+      WITH prompt_metrics AS (
+        SELECT
+          prompt,
+          region,
+          origin,
+          category,
+          SUM(executions_count) AS executions,
+          SUM(mentions_count) AS mentions,
+          SUM(citations_count) AS citations,
+          ROUND(AVG(avg_visibility_score), 2) AS visibility,
+          CASE
+            WHEN AVG(avg_sentiment_score) IS NULL THEN 'N/A'
+            WHEN (AVG(avg_sentiment_score) + 1) * 50 < 40 THEN 'Negative'
+            WHEN (AVG(avg_sentiment_score) + 1) * 50 <= 65 THEN 'Neutral'
+            ELSE 'Positive'
+          END AS sentiment,
+          ROUND(AVG(avg_position), 2) AS position,
+          MAX(latest_answer) AS answer
+        FROM brand_presence_prompts_by_date
+        WHERE ${whereClause} AND topics = $${paramIndex}${searchCondition}
+        GROUP BY prompt, region, origin, category
+      ),
+      source_counts AS (
+        SELECT
+          bp.prompt,
+          bp.region,
+          bp.origin,
+          bp.category,
+          COUNT(DISTINCT bps.url) AS sources
+        FROM brand_presence bp
+        JOIN brand_presence_sources bps ON bp.id = bps.brand_presence_id
+        WHERE ${rawWhereClause} AND bp.topics = $${paramIndex}${rawSearchCondition}
+        GROUP BY bp.prompt, bp.region, bp.origin, bp.category
+      )
       SELECT
-        prompt,
-        region,
-        origin,
-        category,
-        SUM(executions_count) AS executions,
-        SUM(mentions_count) AS mentions,
-        SUM(citations_count) AS citations,
-        ROUND(AVG(avg_visibility_score), 2) AS visibility,
-        CASE
-          WHEN AVG(avg_sentiment_score) IS NULL THEN 'N/A'
-          WHEN (AVG(avg_sentiment_score) + 1) * 50 < 40 THEN 'Negative'
-          WHEN (AVG(avg_sentiment_score) + 1) * 50 <= 65 THEN 'Neutral'
-          ELSE 'Positive'
-        END AS sentiment,
-        ROUND(AVG(avg_position), 2) AS position,
-        SUM(total_sources_count) AS sources,
-        MAX(latest_answer) AS answer
-      FROM brand_presence_prompts_by_date
-      WHERE ${whereClause} AND topics = $${paramIndex}${searchCondition}
-      GROUP BY prompt, region, origin, category
-      ORDER BY ${sortColumn} ${sortDirection} NULLS LAST
+        pm.prompt,
+        pm.region,
+        pm.origin,
+        pm.category,
+        pm.executions,
+        pm.mentions,
+        pm.citations,
+        pm.visibility,
+        pm.sentiment,
+        pm.position,
+        COALESCE(sc.sources, 0) AS sources,
+        pm.answer
+      FROM prompt_metrics pm
+      LEFT JOIN source_counts sc ON pm.prompt = sc.prompt AND pm.region = sc.region AND pm.origin = sc.origin AND pm.category = sc.category
+      ORDER BY ${sortColumn === 'prompt' ? 'pm.prompt' : sortColumn} ${sortDirection} NULLS LAST
     `;
 
     const queryStart = Date.now();
@@ -432,59 +587,93 @@ export async function searchBrandPresence(context, getSiteAndValidateLlmo) {
       return badRequest('Search query must be at least 2 characters');
     }
 
-    // Build WHERE clause
+    const filterParams = {
+      startDate, endDate, model, category, region, origin,
+    };
+
+    // Build WHERE clause for materialized view (no table alias)
     const { whereClause, values, paramIndex } = buildBrandPresenceWhereClause(
-      {
-        startDate, endDate, model, category, region, origin,
-      },
+      filterParams,
       siteId,
+    );
+
+    // Build WHERE clause for raw brand_presence table (with 'bp' alias)
+    const { whereClause: rawWhereClause } = buildBrandPresenceWhereClause(
+      filterParams,
+      siteId,
+      'bp',
     );
 
     const searchPattern = `%${searchQuery.trim().toLowerCase()}%`;
     const offset = (parseInt(page, 10) - 1) * parseInt(pageSize, 10);
 
     // Search in both topics and prompts, return topics that match
+    // Uses CTE to calculate true unique source counts from raw tables
     const searchQuerySql = `
-      SELECT DISTINCT
-        topics,
-        ROUND(AVG(avg_visibility_score)) AS visibility,
-        SUM(mentions_count) AS mentions,
-        CASE
-          WHEN SUM(sentiment_positive) + SUM(sentiment_neutral) + SUM(sentiment_negative) = 0 THEN 'N/A'
-          WHEN (
-            SUM(sentiment_positive) * 100 + SUM(sentiment_neutral) * 50
-          )::NUMERIC / (
-            SUM(sentiment_positive) + SUM(sentiment_neutral) + SUM(sentiment_negative)
-          ) < 40 THEN 'Negative'
-          WHEN (
-            SUM(sentiment_positive) * 100 + SUM(sentiment_neutral) * 50
-          )::NUMERIC / (
-            SUM(sentiment_positive) + SUM(sentiment_neutral) + SUM(sentiment_negative)
-          ) <= 65 THEN 'Neutral'
-          ELSE 'Positive'
-        END AS sentiment,
-        ROUND(AVG(avg_position), 2) AS position,
-        SUM(total_sources_count) AS sources,
-        AVG(avg_volume) AS volume,
-        SUM(executions_count) AS executions,
-        SUM(citations_count) AS citations,
-        BOOL_OR(LOWER(topics) LIKE $${paramIndex}) AS topic_match,
-        COUNT(*) FILTER (WHERE EXISTS (
-          SELECT 1 FROM brand_presence_prompts_by_date p
-          WHERE p.topics = brand_presence_topics_by_date.topics
-            AND p.site_id = brand_presence_topics_by_date.site_id
-            AND LOWER(p.prompt) LIKE $${paramIndex}
-        )) > 0 AS has_prompt_match
-      FROM brand_presence_topics_by_date
-      WHERE ${whereClause}
-        AND (LOWER(topics) LIKE $${paramIndex} OR EXISTS (
-          SELECT 1 FROM brand_presence_prompts_by_date p
-          WHERE p.topics = brand_presence_topics_by_date.topics
-            AND p.site_id = brand_presence_topics_by_date.site_id
-            AND LOWER(p.prompt) LIKE $${paramIndex}
-        ))
-      GROUP BY topics
-      ORDER BY mentions DESC
+      WITH topic_metrics AS (
+        SELECT
+          topics,
+          ROUND(AVG(avg_visibility_score)) AS visibility,
+          SUM(mentions_count) AS mentions,
+          CASE
+            WHEN SUM(sentiment_positive) + SUM(sentiment_neutral) + SUM(sentiment_negative) = 0 THEN 'N/A'
+            WHEN (
+              SUM(sentiment_positive) * 100 + SUM(sentiment_neutral) * 50
+            )::NUMERIC / (
+              SUM(sentiment_positive) + SUM(sentiment_neutral) + SUM(sentiment_negative)
+            ) < 40 THEN 'Negative'
+            WHEN (
+              SUM(sentiment_positive) * 100 + SUM(sentiment_neutral) * 50
+            )::NUMERIC / (
+              SUM(sentiment_positive) + SUM(sentiment_neutral) + SUM(sentiment_negative)
+            ) <= 65 THEN 'Neutral'
+            ELSE 'Positive'
+          END AS sentiment,
+          ROUND(AVG(avg_position), 2) AS position,
+          AVG(avg_volume) AS volume,
+          SUM(executions_count) AS executions,
+          SUM(citations_count) AS citations,
+          BOOL_OR(LOWER(topics) LIKE $${paramIndex}) AS topic_match,
+          COUNT(*) FILTER (WHERE EXISTS (
+            SELECT 1 FROM brand_presence_prompts_by_date p
+            WHERE p.topics = brand_presence_topics_by_date.topics
+              AND p.site_id = brand_presence_topics_by_date.site_id
+              AND LOWER(p.prompt) LIKE $${paramIndex}
+          )) > 0 AS has_prompt_match
+        FROM brand_presence_topics_by_date
+        WHERE ${whereClause}
+          AND (LOWER(topics) LIKE $${paramIndex} OR EXISTS (
+            SELECT 1 FROM brand_presence_prompts_by_date p
+            WHERE p.topics = brand_presence_topics_by_date.topics
+              AND p.site_id = brand_presence_topics_by_date.site_id
+              AND LOWER(p.prompt) LIKE $${paramIndex}
+          ))
+        GROUP BY topics
+      ),
+      source_counts AS (
+        SELECT
+          bp.topics,
+          COUNT(DISTINCT bps.url) AS sources
+        FROM brand_presence bp
+        JOIN brand_presence_sources bps ON bp.id = bps.brand_presence_id
+        WHERE ${rawWhereClause}
+        GROUP BY bp.topics
+      )
+      SELECT
+        tm.topics,
+        tm.visibility,
+        tm.mentions,
+        tm.sentiment,
+        tm.position,
+        COALESCE(sc.sources, 0) AS sources,
+        tm.volume,
+        tm.executions,
+        tm.citations,
+        tm.topic_match,
+        tm.has_prompt_match
+      FROM topic_metrics tm
+      LEFT JOIN source_counts sc ON tm.topics = sc.topics
+      ORDER BY tm.mentions DESC
       LIMIT $${paramIndex + 1} OFFSET $${paramIndex + 2}
     `;
 
