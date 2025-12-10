@@ -1,3 +1,80 @@
+# [1.276.0](https://github.com/adobe/spacecat-api-service/compare/v1.275.8...v1.276.0) (2025-12-10)
+
+
+### Features
+
+* **geo-brand-presence:** add `-paid` and `-free` for scheduling ([#1645](https://github.com/adobe/spacecat-api-service/issues/1645)) ([07d80ee](https://github.com/adobe/spacecat-api-service/commit/07d80ee5d8e35ee6f873f6440a794f2251a72ce2))
+
+## [1.275.8](https://github.com/adobe/spacecat-api-service/compare/v1.275.7...v1.275.8) (2025-12-10)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.91.0 ([#1644](https://github.com/adobe/spacecat-api-service/issues/1644)) ([f97ffdc](https://github.com/adobe/spacecat-api-service/commit/f97ffdc412b0b9a90d53296b61751d42f1326516))
+
+## [1.275.7](https://github.com/adobe/spacecat-api-service/compare/v1.275.6...v1.275.7) (2025-12-10)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1643](https://github.com/adobe/spacecat-api-service/issues/1643)) ([817d3fe](https://github.com/adobe/spacecat-api-service/commit/817d3fec85f26cf63d4ab67b89a7958ab24b6431))
+
+## [1.275.6](https://github.com/adobe/spacecat-api-service/compare/v1.275.5...v1.275.6) (2025-12-09)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1640](https://github.com/adobe/spacecat-api-service/issues/1640)) ([07150d0](https://github.com/adobe/spacecat-api-service/commit/07150d08f6d8b39777811f490756b4178cc7eb52))
+
+## [1.275.5](https://github.com/adobe/spacecat-api-service/compare/v1.275.4...v1.275.5) (2025-12-09)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1635](https://github.com/adobe/spacecat-api-service/issues/1635)) ([44b0f5f](https://github.com/adobe/spacecat-api-service/commit/44b0f5fa923e7311235379f99b8cbedd1d9efc05))
+
+## [1.275.4](https://github.com/adobe/spacecat-api-service/compare/v1.275.3...v1.275.4) (2025-12-08)
+
+
+### Bug Fixes
+
+* **configuration:** remove getAll; remove positive integer requirement for configuration version ([#1637](https://github.com/adobe/spacecat-api-service/issues/1637)) ([33b163d](https://github.com/adobe/spacecat-api-service/commit/33b163d966c36fc5423fb7c67e4e20ab5815691f))
+
+## [1.275.3](https://github.com/adobe/spacecat-api-service/compare/v1.275.2...v1.275.3) (2025-12-08)
+
+
+### Bug Fixes
+
+* adapt to S3 config ([#1638](https://github.com/adobe/spacecat-api-service/issues/1638)) ([a5e6dd2](https://github.com/adobe/spacecat-api-service/commit/a5e6dd27c526dde858c27c86bf6b173f95903297))
+
+## [1.275.2](https://github.com/adobe/spacecat-api-service/compare/v1.275.1...v1.275.2) (2025-12-08)
+
+
+### Bug Fixes
+
+* upgrade athena ([#1636](https://github.com/adobe/spacecat-api-service/issues/1636)) ([6ab4ec8](https://github.com/adobe/spacecat-api-service/commit/6ab4ec814f7116b2a5f13f9299abd83d464ab4d7))
+
+## [1.275.1](https://github.com/adobe/spacecat-api-service/compare/v1.275.0...v1.275.1) (2025-12-08)
+
+
+### Bug Fixes
+
+* add logging to debug month-over-month ([#1632](https://github.com/adobe/spacecat-api-service/issues/1632)) ([3c6e267](https://github.com/adobe/spacecat-api-service/commit/3c6e267ae06f39789c04945ec818082589dd833b))
+
+# [1.275.0](https://github.com/adobe/spacecat-api-service/compare/v1.274.3...v1.275.0) (2025-12-08)
+
+
+### Features
+
+* **url-store:** add URL store API endpoints ([#1615](https://github.com/adobe/spacecat-api-service/issues/1615)) ([be0f813](https://github.com/adobe/spacecat-api-service/commit/be0f813c7e902411cc33bf0e3090e80a6bfd0711))
+
+## [1.274.3](https://github.com/adobe/spacecat-api-service/compare/v1.274.2...v1.274.3) (2025-12-08)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-athena-client to v1.9.0 ([#1634](https://github.com/adobe/spacecat-api-service/issues/1634)) ([0bf534b](https://github.com/adobe/spacecat-api-service/commit/0bf534b19efe2b0e7854bd75a12982825b9f6180))
+
 ## [1.274.2](https://github.com/adobe/spacecat-api-service/compare/v1.274.1...v1.274.2) (2025-12-07)
 
 

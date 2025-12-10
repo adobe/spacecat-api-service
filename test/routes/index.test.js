@@ -54,6 +54,15 @@ describe('getRouteHandlers', () => {
     getPTAWeeklySummary: sinon.stub(),
   };
 
+  const mockUrlStoreController = {
+    listUrls: sinon.stub(),
+    listUrlsByAuditType: sinon.stub(),
+    getUrl: sinon.stub(),
+    addUrls: sinon.stub(),
+    updateUrls: sinon.stub(),
+    deleteUrls: sinon.stub(),
+  };
+
   const mockExperimentsController = {
     getExperiments: sinon.stub(),
   };
@@ -322,11 +331,11 @@ describe('getRouteHandlers', () => {
       mockEntitlementController,
       mockSandboxAuditController,
       mockReportsController,
+      mockUrlStoreController,
       mockPTA2Controller,
     );
 
     expect(staticRoutes).to.have.all.keys(
-      'GET /configurations',
       'GET /configurations/latest',
       'PATCH /configurations/latest',
       'POST /configurations/audits',
@@ -355,7 +364,6 @@ describe('getRouteHandlers', () => {
       'GET /sites-resolve',
     );
 
-    expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
     expect(staticRoutes['PATCH /configurations/latest']).to.equal(mockConfigurationController.updateConfiguration);
     expect(staticRoutes['POST /configurations/audits']).to.equal(mockConfigurationController.registerAudit);
@@ -453,7 +461,6 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-rollback',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-preview',
-      'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-live-preview',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit/:cursor',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit',
@@ -582,6 +589,12 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/llmo/cdn-logs-bucket-config',
       'GET /sites/:siteId/llmo/global-sheet-data/:configName',
       'GET /sites/:siteId/llmo/rationale',
+      'GET /sites/:siteId/url-store',
+      'GET /sites/:siteId/url-store/by-audit/:auditType',
+      'GET /sites/:siteId/url-store/:base64Url',
+      'POST /sites/:siteId/url-store',
+      'PATCH /sites/:siteId/url-store',
+      'DELETE /sites/:siteId/url-store',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
@@ -793,5 +806,17 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/llmo/data/:sheetType/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'dataSource']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/data/:sheetType/:week/:dataSource'].handler).to.equal(mockLlmoController.queryFiles);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/data/:sheetType/:week/:dataSource'].paramNames).to.deep.equal(['siteId', 'sheetType', 'week', 'dataSource']);
+    expect(dynamicRoutes['GET /sites/:siteId/url-store'].handler).to.equal(mockUrlStoreController.listUrls);
+    expect(dynamicRoutes['GET /sites/:siteId/url-store'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/url-store/by-audit/:auditType'].handler).to.equal(mockUrlStoreController.listUrlsByAuditType);
+    expect(dynamicRoutes['GET /sites/:siteId/url-store/by-audit/:auditType'].paramNames).to.deep.equal(['siteId', 'auditType']);
+    expect(dynamicRoutes['GET /sites/:siteId/url-store/:base64Url'].handler).to.equal(mockUrlStoreController.getUrl);
+    expect(dynamicRoutes['GET /sites/:siteId/url-store/:base64Url'].paramNames).to.deep.equal(['siteId', 'base64Url']);
+    expect(dynamicRoutes['POST /sites/:siteId/url-store'].handler).to.equal(mockUrlStoreController.addUrls);
+    expect(dynamicRoutes['POST /sites/:siteId/url-store'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['PATCH /sites/:siteId/url-store'].handler).to.equal(mockUrlStoreController.updateUrls);
+    expect(dynamicRoutes['PATCH /sites/:siteId/url-store'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['DELETE /sites/:siteId/url-store'].handler).to.equal(mockUrlStoreController.deleteUrls);
+    expect(dynamicRoutes['DELETE /sites/:siteId/url-store'].paramNames).to.deep.equal(['siteId']);
   });
 });

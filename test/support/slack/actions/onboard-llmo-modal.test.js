@@ -424,8 +424,9 @@ describe('onboard-llmo-modal', () => {
       expect(siteConfig.enableImport).to.have.been.calledWith('llmo-prompts-ahrefs', { limit: 25 });
       const config = await lambdaCtx.dataAccess.Configuration.findLatest();
       expect(config.enableHandlerForSite).to.have.been.calledWith('llmo-referral-traffic', mockSite);
-      expect(config.enableHandlerForSite).to.have.been.calledWith('geo-brand-presence', mockSite);
+      expect(config.enableHandlerForSite).to.have.been.calledWith('geo-brand-presence-free', mockSite);
       expect(config.disableHandlerForSite).to.have.been.calledWith('geo-brand-presence-daily', mockSite);
+      expect(config.disableHandlerForSite).to.have.been.calledWith('geo-brand-presence-paid', mockSite);
       expect(config.enableHandlerForSite).to.have.been.calledWith('cdn-logs-report', mockSite);
       expect(config.enableHandlerForSite).to.have.been.calledWith('llmo-customer-analysis', mockSite);
       expect(config.enableHandlerForSite).to.have.been.calledWith('headings', mockSite);
@@ -1316,6 +1317,78 @@ example-com:
       });
     });
 
+    it('should handle weekly-paid cadence and enable correct handlers', async () => {
+      // Mock data
+      const input = {
+        baseURL: 'https://example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        deliveryType: 'aem_edge',
+        brandPresenceCadence: 'weekly-paid',
+      };
+
+      // Use default mocks
+      const mockSite = createDefaultMockSite(sandbox);
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSite });
+      const slackCtx = createDefaultMockSlackCtx(sandbox);
+      const sayStub = slackCtx.say;
+
+      // Mock fetch for admin.hlx.page calls
+      global.fetch = createDefaultMockFetch(sandbox);
+
+      // Execute the function
+      await onboardSite(input, lambdaCtx, slackCtx);
+
+      expect(sayStub).to.have.been.calledWith(':gear: Test Brand onboarding started...');
+      expect(sayStub).to.have.been.calledWith(sinon.match(':white_check_mark: *LLMO onboarding completed successfully!*'));
+      expect(sayStub).to.have.been.calledWith(sinon.match(':calendar: *Brand Presence Cadence:* weekly-paid'));
+
+      // Verify that the correct handlers were enabled/disabled
+      const config = await lambdaCtx.dataAccess.Configuration.findLatest();
+      expect(config.disableHandlerForSite).to.have.been.calledWith('geo-brand-presence-daily', mockSite);
+      expect(config.enableHandlerForSite).to.have.been.calledWith('geo-brand-presence-paid', mockSite);
+      expect(config.disableHandlerForSite).to.have.been.calledWith('geo-brand-presence-free', mockSite);
+
+      // Verify log message
+      expect(lambdaCtx.log.info).to.have.been.calledWith(sinon.match('Enabling weekly-paid brand presence audit and disabling daily'));
+    });
+
+    it('should handle daily cadence and enable correct handlers', async () => {
+      // Mock data
+      const input = {
+        baseURL: 'https://example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+        deliveryType: 'aem_edge',
+        brandPresenceCadence: 'daily',
+      };
+
+      // Use default mocks
+      const mockSite = createDefaultMockSite(sandbox);
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSite });
+      const slackCtx = createDefaultMockSlackCtx(sandbox);
+      const sayStub = slackCtx.say;
+
+      // Mock fetch for admin.hlx.page calls
+      global.fetch = createDefaultMockFetch(sandbox);
+
+      // Execute the function
+      await onboardSite(input, lambdaCtx, slackCtx);
+
+      expect(sayStub).to.have.been.calledWith(':gear: Test Brand onboarding started...');
+      expect(sayStub).to.have.been.calledWith(sinon.match(':white_check_mark: *LLMO onboarding completed successfully!*'));
+      expect(sayStub).to.have.been.calledWith(sinon.match(':calendar: *Brand Presence Cadence:* daily'));
+
+      // Verify that the correct handlers were enabled/disabled
+      const config = await lambdaCtx.dataAccess.Configuration.findLatest();
+      expect(config.enableHandlerForSite).to.have.been.calledWith('geo-brand-presence-daily', mockSite);
+      expect(config.disableHandlerForSite).to.have.been.calledWith('geo-brand-presence-free', mockSite);
+      expect(config.disableHandlerForSite).to.have.been.calledWith('geo-brand-presence-paid', mockSite);
+
+      // Verify log message
+      expect(lambdaCtx.log.info).to.have.been.calledWith(sinon.match('Enabling daily brand presence audit and disabling weekly'));
+    });
+
     it('should default to weekly when brand presence cadence is not provided', async () => {
       const mockBody = {
         view: {
@@ -1743,7 +1816,7 @@ example-com:
       });
 
       expect(mockAck).to.have.been.called;
-      expect(lambdaCtx.log.debug).to.have.been.calledWith('Site site123 current brand presence config: weekly=false, daily=true, detected cadence=daily');
+      expect(lambdaCtx.log.debug).to.have.been.calledWith('Site site123 current brand presence config: weekly-free=false, weekly-paid=false, daily=true, detected cadence=daily');
       expect(mockClient.views.open).to.have.been.called;
 
       // Verify that the modal was opened with daily as the initial option
