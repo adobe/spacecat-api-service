@@ -693,7 +693,6 @@ function SuggestionsController(ctx, sqs, env) {
     suggestions.forEach((suggestion) => {
       if (suggestionIds.includes(suggestion.getId())) {
         // Filter out domain-wide suggestions from autofix
-        /* c8 ignore start */
         if (isDomainWideSuggestion(suggestion)) {
           failedSuggestions.push({
             uuid: suggestion.getId(),
@@ -701,7 +700,6 @@ function SuggestionsController(ctx, sqs, env) {
             message: 'Domain-wide aggregate suggestions cannot be auto-fixed individually',
             statusCode: 400,
           });
-        /* c8 ignore end */
         } else if (suggestion.getStatus() === SuggestionModel.STATUSES.NEW) {
           validSuggestions.push(suggestion);
         } else {
@@ -923,7 +921,6 @@ function SuggestionsController(ctx, sqs, env) {
           message: 'Suggestion not found',
           statusCode: 404,
         });
-      /* c8 ignore start */
       } else if (isDomainWideSuggestion(suggestion)) {
         // Filter out domain-wide suggestions from preview
         failedSuggestions.push({
@@ -932,7 +929,6 @@ function SuggestionsController(ctx, sqs, env) {
           message: 'Domain-wide aggregate suggestions cannot be previewed individually',
           statusCode: 400,
         });
-      /* c8 ignore end */
       } else if (suggestion.getStatus() !== SuggestionModel.STATUSES.NEW) {
         failedSuggestions.push({
           uuid: suggestionId,

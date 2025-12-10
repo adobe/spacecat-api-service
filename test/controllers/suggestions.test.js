@@ -5695,4 +5695,175 @@ describe('Suggestions Controller', () => {
       expect(body.html.content).to.be.null;
     });
   });
+
+  describe('autofixSuggestions with domain-wide suggestions', () => {
+    it('should reject autofix for domain-wide suggestions', async () => {
+      const domainWideSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getData: () => ({
+          url: 'https://example.com/* (All Domain URLs)',
+          isDomainWide: true,
+          allowedRegexPatterns: ['/*'],
+        }),
+      };
+
+      const regularSuggestion = {
+        getId: () => SUGGESTION_IDS[1],
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getData: () => ({
+          url: 'https://example.com/page1',
+        }),
+      };
+
+      mockSuggestion.allByOpportunityId
+        .withArgs(OPPORTUNITY_ID)
+        .resolves([domainWideSuggestion, regularSuggestion]);
+
+      mockSuggestion.bulkUpdateStatus.resolves([regularSuggestion]);
+
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves({
+        getId: () => OPPORTUNITY_ID,
+        getSiteId: () => SITE_ID,
+        getType: () => 'prerender',
+        getData: () => ({}),
+      });
+
+      mockConfiguration.findLatest.resolves({
+        isHandlerEnabledForSite: () => true,
+      });
+
+      context.env = {
+        AUTOFIX_JOBS_QUEUE: 'test-queue-url',
+      };
+
+      context.log = {
+        info: sandbox.stub(),
+        warn: sandbox.stub(),
+        error: sandbox.stub(),
+        debug: sandbox.stub(),
+      };
+
+      const mockSqs = {
+        sendMessage: sandbox.stub().resolves(),
+      };
+
+      const response = await suggestionsController.autofixSuggestions({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      expect(body.metadata.total).to.equal(2);
+      expect(body.metadata.success).to.equal(1); // Only regular suggestion
+      expect(body.metadata.failed).to.equal(1); // Domain-wide rejected
+
+      const failedSuggestion = body.suggestions.find((s) => s.uuid === SUGGESTION_IDS[0]);
+      expect(failedSuggestion).to.exist;
+      expect(failedSuggestion.statusCode).to.equal(400);
+      expect(failedSuggestion.message).to.equal('Domain-wide aggregate suggestions cannot be auto-fixed individually');
+    });
+  });
+
+  describe('previewSuggestions with domain-wide suggestions', () => {
+    it('should reject preview for domain-wide suggestions', async () => {
+      const domainWideSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getType: () => 'prerender',
+        getRank: () => 1,
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        getData: () => ({
+          url: 'https://example.com/* (All Domain URLs)',
+          isDomainWide: true,
+          allowedRegexPatterns: ['/*'],
+        }),
+      };
+
+      const regularSuggestion = {
+        getId: () => SUGGESTION_IDS[1],
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getType: () => 'prerender',
+        getRank: () => 2,
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        getData: () => ({
+          url: 'https://example.com/page1',
+        }),
+      };
+
+      mockSuggestion.allByOpportunityId
+        .withArgs(OPPORTUNITY_ID)
+        .resolves([domainWideSuggestion, regularSuggestion]);
+
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves({
+        getId: () => OPPORTUNITY_ID,
+        getSiteId: () => SITE_ID,
+        getType: () => 'prerender',
+        getData: () => ({}),
+      });
+
+      // Mock TokowakaClient.previewSuggestions for the regular suggestion
+      const mockTokowakaClient = {
+        previewSuggestions: sandbox.stub().resolves({
+          succeededSuggestions: [regularSuggestion],
+          failedSuggestions: [],
+          html: {
+            url: 'https://example.com/page1',
+            originalHtml: '<html>original</html>',
+            optimizedHtml: '<html>optimized</html>',
+          },
+        }),
+      };
+
+      sandbox.stub(TokowakaClient, 'createFrom').returns(mockTokowakaClient);
+
+      context.log = {
+        info: sandbox.stub(),
+        warn: sandbox.stub(),
+        error: sandbox.stub(),
+        debug: sandbox.stub(),
+      };
+
+      const response = await suggestionsController.previewSuggestions({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      expect(body.metadata.total).to.equal(2);
+      expect(body.metadata.success).to.equal(1); // Only regular suggestion
+      expect(body.metadata.failed).to.equal(1); // Domain-wide rejected
+
+      const failedSuggestion = body.suggestions.find((s) => s.uuid === SUGGESTION_IDS[0]);
+      expect(failedSuggestion).to.exist;
+      expect(failedSuggestion.statusCode).to.equal(400);
+      expect(failedSuggestion.message).to.equal('Domain-wide aggregate suggestions cannot be previewed individually');
+    });
+  });
 });
