@@ -524,8 +524,8 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
     if (brandPresenceCadence === 'daily') {
       log.info(`Enabling daily brand presence audit and disabling weekly for site ${siteId}`);
       configuration.enableHandlerForSite(GEO_BRAND_PRESENCE_DAILY, site);
-      configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_FREE, site);
       configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_PAID, site);
+      configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_FREE, site);
     } else {
       log.info(`Enabling ${brandPresenceCadence} brand presence audit and disabling daily for site ${siteId}`);
       if (brandPresenceCadence === 'weekly-paid') {
