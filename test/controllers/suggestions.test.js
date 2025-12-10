@@ -5698,6 +5698,9 @@ describe('Suggestions Controller', () => {
 
   describe('autofixSuggestions with domain-wide suggestions', () => {
     it('should reject autofix for domain-wide suggestions', async () => {
+      // Stub AccessControlUtil
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+
       const domainWideSuggestion = {
         getId: () => SUGGESTION_IDS[0],
         getOpportunityId: () => OPPORTUNITY_ID,
@@ -5749,6 +5752,7 @@ describe('Suggestions Controller', () => {
       const mockSqs = {
         sendMessage: sandbox.stub().resolves(),
       };
+      context.sqs = mockSqs;
 
       const response = await suggestionsController.autofixSuggestions({
         ...context,
