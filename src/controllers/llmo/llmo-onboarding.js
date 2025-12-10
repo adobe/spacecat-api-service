@@ -772,6 +772,7 @@ export async function removeLlmoConfig(site, config, context) {
     'geo-brand-presence',
     'geo-brand-presence-free',
     'geo-brand-presence-paid',
+    'geo-brand-presence-daily',
   ];
 
   // Update configuration to disable audits
