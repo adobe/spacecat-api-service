@@ -85,7 +85,7 @@
     "@adobe/spacecat-shared-scrape-client": "2.3.6",
     "@adobe/spacecat-shared-slack-client": "1.5.32",
     "@adobe/spacecat-shared-tier-client": "1.3.10",
-    "@adobe/spacecat-shared-tokowaka-client": "1.3.0",
+    "@adobe/spacecat-shared-tokowaka-client": "https://gist.github.com/anagarwa/1d638693a6b647878d4adf125d928397/raw/ce65037b1fa9b48db484905822ea55041a10731d/adobe-spacecat-shared-tokowaka-client-1.3.0.tgz",
     "@adobe/spacecat-shared-utils": "1.82.2",
     "@aws-sdk/client-s3": "3.940.0",
     "@aws-sdk/client-sfn": "3.940.0",
