@@ -139,7 +139,7 @@ describe('GetLlmoConfigSummaryCommand', () => {
     await command.handleExecution([], slackContext);
 
     expect(sendFileStub.called).to.be.true;
-    expect(context.log.info.calledWith(sinon.match('LLMO config summary completed: 1 sites processed'))).to.be.true;
+    expect(context.log.info.calledWith(sinon.match('LLMO config summary completed: 1 sites processed in 1 file(s)'))).to.be.true;
   });
 
   it('successfully generates CSV for missing IMS org name', async () => {
@@ -167,7 +167,7 @@ describe('GetLlmoConfigSummaryCommand', () => {
     await command.handleExecution([], slackContext);
 
     expect(sendFileStub.called).to.be.true;
-    expect(context.log.info.calledWith(sinon.match('LLMO config summary completed: 1 sites processed'))).to.be.true;
+    expect(context.log.info.calledWith(sinon.match('LLMO config summary completed: 1 sites processed in 1 file(s)'))).to.be.true;
   });
 
   it('successfully generates CSV for ims Org names with special characters', async () => {
@@ -195,7 +195,7 @@ describe('GetLlmoConfigSummaryCommand', () => {
     await command.handleExecution([], slackContext);
 
     expect(sendFileStub.called).to.be.true;
-    expect(context.log.info.calledWith(sinon.match('LLMO config summary completed: 1 sites processed'))).to.be.true;
+    expect(context.log.info.calledWith(sinon.match('LLMO config summary completed: 1 sites processed in 1 file(s)'))).to.be.true;
   });
 
   it('handles errors gracefully', async () => {
@@ -271,5 +271,55 @@ describe('GetLlmoConfigSummaryCommand', () => {
     await command.handleExecution([], slackContext);
 
     expect(sendFileStub.called).to.be.true;
+  });
+
+  it('handles concurrent processing with more sites than concurrency limit', async () => {
+    const mockSites = Array.from({ length: 8 }, (_, i) => ({
+      getId: () => `site-${i}`,
+      getBaseURL: () => `https://test${i}.com`,
+      getOrganizationId: () => `org-${i}`,
+      getConfig: () => ({ getLlmoConfig: () => ({ llmo: true }) }),
+    }));
+
+    context.dataAccess.Site.all.resolves(mockSites);
+    context.dataAccess.Organization.findById.resolves({
+      getImsOrgId: () => 'valid@AdobeOrg',
+      getName: () => 'Valid Org',
+    });
+    readConfigStub.resolves({
+      config: { categories: { cat1: {} }, topics: { topic1: { prompts: ['p1'] } } },
+      exists: true,
+    });
+
+    const command = GetLlmoConfigSummaryCommand(context);
+    await command.handleExecution([], slackContext);
+
+    expect(sendFileStub.called).to.be.true;
+    expect(context.log.info.calledWith(sinon.match('8 sites processed'))).to.be.true;
+  });
+
+  it('handles sendFile failure gracefully', async () => {
+    const mockSites = [{
+      getId: () => 'site-1',
+      getBaseURL: () => 'https://test.com',
+      getOrganizationId: () => 'org-1',
+      getConfig: () => ({ getLlmoConfig: () => ({ llmo: true }) }),
+    }];
+
+    context.dataAccess.Site.all.resolves(mockSites);
+    context.dataAccess.Organization.findById.resolves({
+      getImsOrgId: () => 'valid@AdobeOrg',
+      getName: () => 'Valid Org',
+    });
+    readConfigStub.resolves({
+      config: { categories: { cat1: {} } },
+      exists: true,
+    });
+    sendFileStub.rejects(new Error('Upload failed'));
+
+    const command = GetLlmoConfigSummaryCommand(context);
+    await command.handleExecution([], slackContext);
+
+    expect(slackContext.say.calledWith(sinon.match(':warning: Failed to upload report'))).to.be.true;
   });
 });

@@ -610,6 +610,114 @@ site-opportunity-suggestion:
     security:
       - ims_key: [ ]
 
+site-opportunity-suggestions-edge-live-preview:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+  post:
+    operationId: edgeLivePreview
+    summary: |
+      Fetch live content from a URL using Tokowaka-AI User-Agent
+    description: |
+      Fetches live content from a given URL using the Tokowaka-AI User-Agent.
+      This is useful for previewing what content is currently deployed or accessible
+      from a specific URL.
+    tags:
+      - opportunity-suggestions
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - url
+            properties:
+              url:
+                type: string
+                format: uri
+                description: The URL to fetch content from
+                example: https://www.lovesac.com/sactionals
+    responses:
+      '200':
+        description: Successfully fetched content from the URL
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [success, error]
+                  description: Fetch status
+                statusCode:
+                  type: integer
+                  description: HTTP status code from the URL
+                message:
+                  type: string
+                  description: Error message if fetch failed
+                html:
+                  type: object
+                  description: HTML content object (similar to edge-preview response)
+                  properties:
+                    url:
+                      type: string
+                      description: The requested URL
+                    content:
+                      type: string
+                      description: The fetched HTML content (null if fetch failed)
+              example:
+                status: success
+                statusCode: 200
+                html:
+                  url: https://www.lovesac.com/sactionals
+                  content: "<html>...</html>"
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+site-opportunity-suggestion-fixes:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+    - $ref: './parameters.yaml#/suggestionId'
+  get:
+    operationId: getSiteOpportunitySuggestionFixes
+    summary: |
+      Retrieve a list of all fixes for a specific suggestion
+    tags:
+      - opportunity-suggestions
+    responses:
+      '200':
+        description: A list of fixes associated with the suggestion
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/FixListResponse'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
 site-opportunity-fixes:
   parameters:
     - $ref: './parameters.yaml#/siteId'
@@ -643,6 +751,10 @@ site-opportunity-fixes:
     operationId: createSiteOpportunityFixes
     summary: |
       Create and add a list of one or more fixes to an opportunity in one transaction
+    description: |
+      Creates one or more fix entities for a given opportunity. Each fix can optionally include 
+      an array of suggestionIds to associate existing suggestions with the fix. This allows you 
+      to link fixes to the suggestions they address in a single transaction.
     tags:
       - opportunity-fixes
     requestBody:
@@ -651,6 +763,9 @@ site-opportunity-fixes:
         application/json:
           schema:
             $ref: './schemas.yaml#/FixCreateList'
+          examples:
+            fix-create-list:
+              $ref: './examples.yaml#/fix-create-list'
     responses:
       '207':
         description: |
@@ -660,6 +775,9 @@ site-opportunity-fixes:
           application/json:
             schema:
               $ref: './schemas.yaml#/FixCreateListResponse'
+            examples:
+              fix-create-list-response:
+                $ref: './examples.yaml#/fix-create-list-response'
     security:
       - ims_key: [ ]
 
@@ -734,6 +852,10 @@ site-opportunity-fix:
     operationId: updateSiteOpportunityFix
     summary: |
       Update specific attributes of an existing fix
+    description: |
+      Updates one or more attributes of an existing fix. This includes the ability to update 
+      the suggestionIds array to associate or reassociate suggestions with the fix. When updating 
+      suggestionIds, the new array replaces any existing associations.
     tags:
       - opportunity-fixes
     requestBody:

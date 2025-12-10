@@ -110,7 +110,6 @@ describe('Configurations Controller', () => {
   ];
 
   const configurationFunctions = [
-    'getAll',
     'getLatest',
     'getByVersion',
     'registerAudit',
@@ -129,7 +128,6 @@ describe('Configurations Controller', () => {
   beforeEach(() => {
     mockDataAccess = {
       Configuration: {
-        all: sandbox.stub().resolves(configurations),
         findLatest: sandbox.stub().resolves(configurations[1]),
         findByVersion: sandbox.stub().resolves(configurations[0]),
       },
@@ -190,24 +188,6 @@ describe('Configurations Controller', () => {
     expect(() => ConfigurationsController({ dataAccess: {} }))
       .to
       .throw('Data access required');
-  });
-
-  it('gets all configurations', async () => {
-    const result = await configurationsController.getAll();
-    const resultConfigurations = await result.json();
-
-    expect(mockDataAccess.Configuration.all.calledOnce).to.be.true;
-    expect(resultConfigurations).to.be.an('array').with.lengthOf(2);
-    expect(resultConfigurations[0]).to.deep.equal(ConfigurationDto.toJSON(configurations[0]));
-    expect(resultConfigurations[1]).to.deep.equal(ConfigurationDto.toJSON(configurations[1]));
-  });
-
-  it('gets all configurations for non admin users', async () => {
-    context.attributes.authInfo.withProfile({ is_admin: false });
-    const result = await configurationsController.getAll();
-    const error = await result.json();
-    expect(result.status).to.equal(403);
-    expect(error).to.have.property('message', 'Only admins can view configurations');
   });
 
   it('gets latest configuration', async () => {
@@ -314,10 +294,10 @@ describe('Configurations Controller', () => {
   });
 
   it('gets an configuration by version', async () => {
-    const result = await configurationsController.getByVersion({ params: { version: 1 } });
+    const result = await configurationsController.getByVersion({ params: { version: '1' } });
     const configuration = await result.json();
 
-    expect(mockDataAccess.Configuration.findByVersion).to.have.been.calledOnceWith(1);
+    expect(mockDataAccess.Configuration.findByVersion).to.have.been.calledOnceWith('1');
 
     expect(configuration).to.be.an('object');
     expect(configuration).to.deep.equal(ConfigurationDto.toJSON(configurations[0]));
@@ -325,7 +305,7 @@ describe('Configurations Controller', () => {
 
   it('gets an configuration by version for non admin users', async () => {
     context.attributes.authInfo.withProfile({ is_admin: false });
-    const result = await configurationsController.getByVersion({ params: { version: 1 } });
+    const result = await configurationsController.getByVersion({ params: { version: '1' } });
     const error = await result.json();
 
     expect(result.status).to.equal(403);
@@ -335,18 +315,21 @@ describe('Configurations Controller', () => {
   it('returns not found when a configuration is not found by version', async () => {
     mockDataAccess.Configuration.findByVersion.resolves(null);
 
-    const result = await configurationsController.getByVersion({ params: { version: 4 } });
+    const result = await configurationsController.getByVersion({ params: { version: '4' } });
     const error = await result.json();
 
     expect(result.status).to.equal(404);
     expect(error).to.have.property('message', 'Configuration not found');
   });
 
-  it('gets configuration by version when version is a string (from URL param)', async () => {
-    const result = await configurationsController.getByVersion({ params: { version: '2' } });
+  it('gets configuration by S3 version string', async () => {
+    const s3VersionId = 'EqZSCYxbPdKJ0Xso9QkbS0h0ZfDbhXWe';
+    const result = await configurationsController.getByVersion({
+      params: { version: s3VersionId },
+    });
     const configuration = await result.json();
 
-    expect(mockDataAccess.Configuration.findByVersion).to.have.been.calledOnceWith(2);
+    expect(mockDataAccess.Configuration.findByVersion).to.have.been.calledOnceWith(s3VersionId);
     expect(configuration).to.be.an('object');
     expect(configuration).to.deep.equal(ConfigurationDto.toJSON(configurations[0]));
   });
@@ -356,31 +339,15 @@ describe('Configurations Controller', () => {
     const error = await result.json();
 
     expect(result.status).to.equal(400);
-    expect(error).to.have.property('message', 'Configuration version required to be a positive integer');
+    expect(error).to.have.property('message', 'Configuration version is required');
   });
 
-  it('returns bad request if configuration version is invalid string', async () => {
-    const result = await configurationsController.getByVersion({ params: { version: 'invalid' } });
+  it('returns bad request if configuration version is empty string', async () => {
+    const result = await configurationsController.getByVersion({ params: { version: '' } });
     const error = await result.json();
 
     expect(result.status).to.equal(400);
-    expect(error).to.have.property('message', 'Configuration version required to be a positive integer');
-  });
-
-  it('returns bad request if configuration version is negative', async () => {
-    const result = await configurationsController.getByVersion({ params: { version: '-5' } });
-    const error = await result.json();
-
-    expect(result.status).to.equal(400);
-    expect(error).to.have.property('message', 'Configuration version required to be a positive integer');
-  });
-
-  it('returns bad request if configuration version is zero', async () => {
-    const result = await configurationsController.getByVersion({ params: { version: '0' } });
-    const error = await result.json();
-
-    expect(result.status).to.equal(400);
-    expect(error).to.have.property('message', 'Configuration version required to be a positive integer');
+    expect(error).to.have.property('message', 'Configuration version is required');
   });
 
   it('restores configuration to a specific version', async () => {
@@ -402,16 +369,16 @@ describe('Configurations Controller', () => {
     });
     const response = await result.json();
 
-    expect(mockDataAccess.Configuration.findByVersion).to.have.been.calledOnceWith(1);
+    expect(mockDataAccess.Configuration.findByVersion).to.have.been.calledOnceWith('1');
     expect(mockDataAccess.Configuration.findLatest).to.have.been.calledOnce;
     expect(mockSetSlackRoles).to.have.been.calledOnce;
     expect(mockSave).to.have.been.calledOnce;
     expect(result.status).to.equal(200);
-    expect(response).to.have.property('restoredFrom', 1);
+    expect(response).to.have.property('restoredFrom', '1');
     expect(response).to.have.property('message', 'Configuration successfully restored from version 1');
   });
 
-  it('restores configuration when version is a string (from URL param)', async () => {
+  it('restores configuration with S3 version string', async () => {
     const mockSave = sandbox.stub().resolves();
     const mockSetSlackRoles = sandbox.stub();
     const mockUpdateConfiguration = sandbox.stub();
@@ -424,15 +391,16 @@ describe('Configurations Controller', () => {
     mockDataAccess.Configuration.findLatest.resolves(latestConfig);
     mockDataAccess.Configuration.findByVersion.resolves(configurations[0]);
 
+    const s3VersionId = 'EqZSCYxbPdKJ0Xso9QkbS0h0ZfDbhXWe';
     const result = await configurationsController.restoreVersion({
-      params: { version: '2376' },
+      params: { version: s3VersionId },
       attributes: context.attributes,
     });
     const response = await result.json();
 
-    expect(mockDataAccess.Configuration.findByVersion).to.have.been.calledOnceWith(2376);
+    expect(mockDataAccess.Configuration.findByVersion).to.have.been.calledOnceWith(s3VersionId);
     expect(result.status).to.equal(200);
-    expect(response).to.have.property('restoredFrom', 2376);
+    expect(response).to.have.property('restoredFrom', s3VersionId);
   });
 
   it('returns forbidden when non-admin tries to restore configuration', async () => {
@@ -465,28 +433,20 @@ describe('Configurations Controller', () => {
     expect(error).to.have.property('message', 'Latest configuration not found');
   });
 
-  it('returns bad request if restore version is invalid', async () => {
-    const result = await configurationsController.restoreVersion({ params: { version: 'invalid' } });
+  it('returns bad request if restore version is not provided', async () => {
+    const result = await configurationsController.restoreVersion({ params: {} });
     const error = await result.json();
 
     expect(result.status).to.equal(400);
-    expect(error).to.have.property('message', 'Configuration version required to be a positive integer');
+    expect(error).to.have.property('message', 'Configuration version is required');
   });
 
-  it('returns bad request if restore version is negative', async () => {
-    const result = await configurationsController.restoreVersion({ params: { version: '-5' } });
+  it('returns bad request if restore version is empty string', async () => {
+    const result = await configurationsController.restoreVersion({ params: { version: '' } });
     const error = await result.json();
 
     expect(result.status).to.equal(400);
-    expect(error).to.have.property('message', 'Configuration version required to be a positive integer');
-  });
-
-  it('returns bad request if restore version is zero', async () => {
-    const result = await configurationsController.restoreVersion({ params: { version: '0' } });
-    const error = await result.json();
-
-    expect(result.status).to.equal(400);
-    expect(error).to.have.property('message', 'Configuration version required to be a positive integer');
+    expect(error).to.have.property('message', 'Configuration version is required');
   });
 
   it('handles restore when old configuration has no slackRoles', async () => {

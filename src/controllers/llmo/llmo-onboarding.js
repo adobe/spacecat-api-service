@@ -15,7 +15,9 @@ import { createFrom } from '@adobe/spacecat-helix-content-sdk';
 import { Octokit } from '@octokit/rest';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import TierClient from '@adobe/spacecat-shared-tier-client';
-import { composeBaseURL, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
+import { composeBaseURL, tracingFetch as fetch, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
+import AhrefsAPIClient from '@adobe/spacecat-shared-ahrefs-client';
+import { parse as parseDomain } from 'tldts';
 
 // LLMO Constants
 const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
@@ -539,6 +541,138 @@ export async function createOrFindOrganization(imsOrgId, context, say = () => {}
 }
 
 /**
+ * Checks if a hostname has a non-www subdomain using the tldts library.
+ * This properly handles all TLDs including multi-part TLDs like .co.uk, .com.au, etc.
+ *
+ * @param {string} hostname - The hostname to check (e.g., "blog.example.com")
+ * @returns {boolean} - True if the hostname has a subdomain other than www
+ *
+ * @example
+ * hasNonWWWSubdomain('example.com')           // false - apex domain
+ * hasNonWWWSubdomain('www.example.com')       // false - only www subdomain
+ * hasNonWWWSubdomain('blog.example.com')      // true - has subdomain
+ * hasNonWWWSubdomain('blog.example.co.uk')    // true - has subdomain (multi-part TLD)
+ * hasNonWWWSubdomain('example.co.uk')         // false - apex domain (multi-part TLD)
+ */
+function hasNonWWWSubdomain(hostname) {
+  const parsed = parseDomain(hostname);
+
+  // If parsing failed, be conservative and assume it's a subdomain
+  /* c8 ignore next 3 */
+  if (!parsed || !parsed.domain) {
+    return true;
+  }
+
+  const subdomain = parsed.subdomain || '';
+  return subdomain !== '' && subdomain !== 'www';
+}
+
+/**
+ * Toggles the www subdomain in a given URL.
+ * If the URL has www, it removes it. If it doesn't have www, it adds it.
+ * Only works for URLs without other subdomains (e.g., blog.example.com).
+ * For URLs with non-www subdomains, returns the original URL unchanged.
+ *
+ * @param {string} url - The URL to toggle (e.g., "https://example.com" or "https://www.example.com")
+ * @returns {string} - The URL with www toggled, or the original URL if it has a subdomain
+ */
+function toggleWWW(url) {
+  try {
+    const urlObj = new URL(url);
+    const { hostname } = urlObj;
+
+    if (hasNonWWWSubdomain(hostname)) {
+      return url;
+    }
+
+    // Safe to toggle www for apex domains
+    if (hostname.startsWith('www.')) {
+      urlObj.hostname = hostname.replace('www.', '');
+    } else {
+      urlObj.hostname = `www.${hostname}`;
+    }
+
+    // Preserve trailing slash consistency with the original URL
+    const result = urlObj.toString();
+    return result.endsWith('/') && !url.endsWith('/') ? result.slice(0, -1) : result;
+    /* c8 ignore next 3 */
+  } catch (error) {
+    return url;
+  }
+}
+
+/**
+ * Tests a URL against the Ahrefs top pages endpoint to see if it returns data.
+ * @param {string} url - The URL to test
+ * @param {object} ahrefsClient - The Ahrefs API client
+ * @param {object} log - Logger instance
+ * @returns {Promise<boolean>} - True if the URL returns top pages data, false otherwise
+ */
+async function testAhrefsTopPages(url, ahrefsClient, log) {
+  try {
+    const { result } = await ahrefsClient.getTopPages(url, 1);
+    const hasData = isNonEmptyArray(result?.pages);
+    log.debug(`Ahrefs top pages test for ${url}: ${hasData ? 'SUCCESS' : 'NO DATA'}`);
+    return hasData;
+  } catch (error) {
+    log.debug(`Ahrefs top pages test for ${url}: FAILED - ${error.message}`);
+    return false;
+  }
+}
+
+/**
+ * Determines if overrideBaseURL should be set based on Ahrefs top pages data.
+ * Tests both the base URL and its www-variant. If only the alternate variation succeeds,
+ * returns that variation as the overrideBaseURL.
+ *
+ * @param {string} baseURL - The site's base URL
+ * @param {object} context - The request context
+ * @returns {Promise<string|null>} - The overrideBaseURL if needed, null otherwise
+ */
+export async function determineOverrideBaseURL(baseURL, context) {
+  const { log } = context;
+
+  try {
+    log.info(`Determining overrideBaseURL for ${baseURL}`);
+    const ahrefsClient = AhrefsAPIClient.createFrom(context);
+    const alternateURL = toggleWWW(baseURL);
+
+    // If toggleWWW returns the same URL, it means the URL has a subdomain
+    // and we shouldn't try to toggle www (would create invalid nested subdomain)
+    if (alternateURL === baseURL) {
+      log.info(`Skipping overrideBaseURL detection for subdomain URL: ${baseURL}`);
+      return null;
+    }
+
+    log.debug(`Testing base URL: ${baseURL} and alternate: ${alternateURL}`);
+
+    const [baseURLSuccess, alternateURLSuccess] = await Promise.all([
+      testAhrefsTopPages(baseURL, ahrefsClient, log),
+      testAhrefsTopPages(alternateURL, ahrefsClient, log),
+    ]);
+
+    if (!baseURLSuccess && alternateURLSuccess) {
+      log.info(`Setting overrideBaseURL to ${alternateURL} (base URL failed, alternate succeeded)`);
+      return alternateURL;
+    }
+
+    if (baseURLSuccess && alternateURLSuccess) {
+      log.debug('Both URLs succeeded, no overrideBaseURL needed');
+    } else if (baseURLSuccess && !alternateURLSuccess) {
+      log.debug('Base URL succeeded, no overrideBaseURL needed');
+    } else {
+      log.warn('Both URLs failed Ahrefs test, no overrideBaseURL set');
+    }
+
+    return null;
+  } catch (error) {
+    log.error(`Error determining overrideBaseURL: ${error.message}`, error);
+    // Don't fail onboarding if this check fails
+    return null;
+  }
+}
+
+/**
  * Creates or finds a site based on baseURL.
  * @param {string} baseURL - The base URL of the site
  * @param {string} organizationId - The organization ID if we create a new site
@@ -777,6 +911,24 @@ export async function performLlmoOnboarding(params, context) {
     // Update brand and data directory
     siteConfig.updateLlmoBrand(brandName.trim());
     siteConfig.updateLlmoDataFolder(dataFolder.trim());
+
+    // Determine and set overrideBaseURL if needed
+    /* c8 ignore next */
+    const currentFetchConfig = siteConfig.getFetchConfig() || {};
+
+    // Only determine override if one doesn't already exist
+    if (!currentFetchConfig.overrideBaseURL) {
+      const overrideBaseURL = await determineOverrideBaseURL(baseURL, context);
+      if (overrideBaseURL) {
+        siteConfig.updateFetchConfig({
+          ...currentFetchConfig,
+          overrideBaseURL,
+        });
+        log.info(`Set overrideBaseURL to ${overrideBaseURL} for site ${site.getId()}`);
+      }
+    } else {
+      log.info(`Site ${site.getId()} already has overrideBaseURL: ${currentFetchConfig.overrideBaseURL}, skipping auto-detection`);
+    }
 
     // update the site config object
     site.setConfig(Config.toDynamoItem(siteConfig));

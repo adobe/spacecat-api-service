@@ -66,12 +66,42 @@ describe('LlmoController', () => {
   let writeConfigStub;
   let llmoConfigSchemaStub;
   let triggerBrandProfileAgentStub;
+  let updateModifiedByDetailsStub;
+
+  const mockHttpUtils = {
+    ok: (data, headers = {}) => ({
+      status: 200,
+      headers: new Map(Object.entries(headers)),
+      json: async () => data,
+    }),
+    badRequest: (message) => ({
+      status: 400,
+      json: async () => ({ message }),
+    }),
+    forbidden: (message) => ({
+      status: 403,
+      json: async () => ({ message }),
+    }),
+    notFound: (message) => ({
+      status: 404,
+      json: async () => ({ message }),
+    }),
+    createResponse: (data, status) => ({
+      status,
+      json: async () => data,
+    }),
+  };
 
   before(async () => {
     triggerBrandProfileAgentStub = sinon.stub().resolves('exec-123');
+    updateModifiedByDetailsStub = sinon.stub();
 
     // Set up esmock once for all tests
     LlmoController = await esmock('../../../src/controllers/llmo/llmo.js', {
+      '../../../src/controllers/llmo/llmo-config-metadata.js': {
+        updateModifiedByDetails: updateModifiedByDetailsStub,
+      },
+      '@adobe/spacecat-shared-http-utils': mockHttpUtils,
       '@adobe/spacecat-shared-utils': {
         SPACECAT_USER_AGENT: TEST_USER_AGENT,
         tracingFetch: (...args) => tracingFetchStub(...args),
@@ -91,19 +121,15 @@ describe('LlmoController', () => {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
       },
       '../../../src/support/access-control-util.js': {
-        default: class MockAccessControlUtil {
-          static fromContext(context) {
-            return new MockAccessControlUtil(context);
-          }
-
-          constructor(context) {
-            this.log = context.log;
-          }
-
-          // eslint-disable-next-line class-methods-use-this
-          async hasAccess() {
-            return true;
-          }
+        default: {
+          fromContext(context) {
+            return {
+              log: context.log,
+              async hasAccess() {
+                return true;
+              },
+            };
+          },
         },
       },
       '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
@@ -116,6 +142,7 @@ describe('LlmoController', () => {
       '../../../src/support/access-control-util.js': {
         default: createMockAccessControlUtil(false),
       },
+      '@adobe/spacecat-shared-http-utils': mockHttpUtils,
       '../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
       },
@@ -125,6 +152,19 @@ describe('LlmoController', () => {
 
   beforeEach(async () => {
     triggerBrandProfileAgentStub.resetHistory();
+    updateModifiedByDetailsStub.resetHistory();
+    updateModifiedByDetailsStub.callsFake((config) => ({
+      newConfig: config,
+      stats: {
+        categories: { total: 0, modified: 0 },
+        topics: { total: 0, modified: 0 },
+        prompts: { total: 0, modified: 0 },
+        brandAliases: { total: 0, modified: 0 },
+        competitors: { total: 0, modified: 0 },
+        deletedPrompts: { total: 0, modified: 0 },
+        categoryUrls: { total: 0 },
+      },
+    }));
     mockLlmoConfig = {
       dataFolder: TEST_FOLDER,
       brand: TEST_BRAND,
@@ -275,7 +315,7 @@ describe('LlmoController', () => {
           }),
         },
       },
-      pathInfo: { method: 'GET', suffix: '/llmo/sheet-data' },
+      pathInfo: { method: 'GET', suffix: '/llmo/sheet-data', headers: {} },
     };
 
     tracingFetchStub = sinon.stub();
@@ -1051,6 +1091,7 @@ describe('LlmoController', () => {
       const result = await controller.getLlmoConfig(mockContext);
 
       expect(result.status).to.equal(200);
+      expect(result.headers.get('Content-Encoding')).to.equal('br');
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({ config: expectedConfig, version: 'v123' });
     });
@@ -1084,6 +1125,7 @@ describe('LlmoController', () => {
       const result = await controller.getLlmoConfig(mockContext);
 
       expect(result.status).to.equal(200);
+      expect(result.headers.get('Content-Encoding')).to.equal('br');
       const responseBody = await result.json();
       expect(responseBody.version).to.equal('v123');
     });
@@ -1218,12 +1260,13 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
     });
 
-    it('should trigger llmo-customer-analysis audit after writing config', async () => {
+    it('should trigger llmo-customer-analysis audit after writing config when X-Trigger-Audits header is present', async () => {
       readConfigStub.resolves({
         config: llmoConfig.defaultConfig(),
         exists: true,
         version: 'v0',
       });
+      mockContext.pathInfo.headers = { 'x-trigger-audits': 'true' };
 
       await controller.updateLlmoConfig(mockContext);
 
@@ -1238,6 +1281,19 @@ describe('LlmoController', () => {
           },
         },
       );
+    });
+
+    it('should not trigger llmo-customer-analysis audit when X-Trigger-Audits header is missing', async () => {
+      readConfigStub.resolves({
+        config: llmoConfig.defaultConfig(),
+        exists: true,
+        version: 'v0',
+      });
+      mockContext.pathInfo.headers = {};
+
+      await controller.updateLlmoConfig(mockContext);
+
+      expect(mockContext.sqs.sendMessage).to.not.have.been.called;
     });
 
     it('should return bad request when payload is not an object', async () => {
@@ -1338,23 +1394,36 @@ describe('LlmoController', () => {
       };
       mockContext.data = configWithAllFields;
       llmoConfigSchemaStub.safeParse.returns({ success: true, data: configWithAllFields });
+      updateModifiedByDetailsStub.callsFake((config) => ({
+        newConfig: config,
+        stats: {
+          categories: { total: 1, modified: 1 },
+          topics: { total: 1, modified: 1 },
+          aiTopics: { total: 0, modified: 0 },
+          prompts: { total: 2, modified: 2 },
+          brandAliases: { total: 1, modified: 1 },
+          competitors: { total: 1, modified: 1 },
+          deletedPrompts: { total: 2, modified: 2 },
+          categoryUrls: { total: 2 },
+        },
+      }));
 
       const result = await controller.updateLlmoConfig(mockContext);
 
       expect(result.status).to.equal(200);
       expect(mockLog.info).to.have.been.calledWith(
         sinon.match(/User test-user-id modifying customer configuration/)
-          .and(sinon.match(/2 prompts/))
-          .and(sinon.match(/1 categories/))
-          .and(sinon.match(/1 topics/))
-          .and(sinon.match(/1 brand aliases/))
-          .and(sinon.match(/1 competitors/))
-          .and(sinon.match(/2 deleted prompts/))
+          .and(sinon.match(/2 prompts \(2 modified\)/))
+          .and(sinon.match(/1 categories \(1 modified\)/))
+          .and(sinon.match(/1 topics \(1 modified\)/))
+          .and(sinon.match(/1 brand aliases \(1 modified\)/))
+          .and(sinon.match(/1 competitors \(1 modified\)/))
+          .and(sinon.match(/2 deleted prompts \(2 modified\)/))
           .and(sinon.match(/2 category URLs/)),
       );
     });
 
-    it('should use "unknown" as userId when sub is missing from profile', async () => {
+    it('should use "system" as userId when sub is missing from profile', async () => {
       // Override getProfile to return profile without sub
       mockContext.attributes.authInfo.getProfile = () => ({
         email: 'test@example.com',
@@ -1368,11 +1437,11 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       expect(mockLog.info).to.have.been.calledWith(
-        sinon.match(/User unknown modifying customer configuration/),
+        sinon.match(/User system modifying customer configuration/),
       );
     });
 
-    it('should use "unknown" as userId in error when authInfo is missing', async () => {
+    it('should use "system" as userId in error when authInfo is missing', async () => {
       // Remove authInfo
       mockContext.attributes = {};
       writeConfigStub.rejects(new Error('S3 write failed'));
@@ -1386,7 +1455,7 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(400);
       expect(mockLog.error).to.have.been.calledWith(
-        sinon.match(/User unknown error updating llmo config/),
+        sinon.match(/User system error updating llmo config/),
       );
     });
 
@@ -1421,6 +1490,18 @@ describe('LlmoController', () => {
       };
       mockContext.data = configWithCategoryUrls;
       llmoConfigSchemaStub.safeParse.returns({ success: true, data: configWithCategoryUrls });
+      updateModifiedByDetailsStub.callsFake((config) => ({
+        newConfig: config,
+        stats: {
+          categories: { total: 3, modified: 3 },
+          topics: { total: 0, modified: 0 },
+          prompts: { total: 0, modified: 0 },
+          brandAliases: { total: 0, modified: 0 },
+          competitors: { total: 0, modified: 0 },
+          deletedPrompts: { total: 0, modified: 0 },
+          categoryUrls: { total: 4 },
+        },
+      }));
 
       const result = await controller.updateLlmoConfig(mockContext);
 
@@ -1446,6 +1527,18 @@ describe('LlmoController', () => {
       };
       mockContext.data = configWithoutUrls;
       llmoConfigSchemaStub.safeParse.returns({ success: true, data: configWithoutUrls });
+      updateModifiedByDetailsStub.callsFake((config) => ({
+        newConfig: config,
+        stats: {
+          categories: { total: 1, modified: 1 },
+          topics: { total: 0, modified: 0 },
+          prompts: { total: 0, modified: 0 },
+          brandAliases: { total: 0, modified: 0 },
+          competitors: { total: 0, modified: 0 },
+          deletedPrompts: { total: 0, modified: 0 },
+          categoryUrls: { total: 0 },
+        },
+      }));
 
       const result = await controller.updateLlmoConfig(mockContext);
 
@@ -1475,6 +1568,18 @@ describe('LlmoController', () => {
       };
       mockContext.data = configWithEmptyPrompts;
       llmoConfigSchemaStub.safeParse.returns({ success: true, data: configWithEmptyPrompts });
+      updateModifiedByDetailsStub.callsFake((config) => ({
+        newConfig: config,
+        stats: {
+          categories: { total: 1, modified: 1 },
+          topics: { total: 2, modified: 2 },
+          prompts: { total: 0, modified: 0 },
+          brandAliases: { total: 0, modified: 0 },
+          competitors: { total: 0, modified: 0 },
+          deletedPrompts: { total: 0, modified: 0 },
+          categoryUrls: { total: 0 },
+        },
+      }));
 
       const result = await controller.updateLlmoConfig(mockContext);
 
@@ -1482,805 +1587,6 @@ describe('LlmoController', () => {
       expect(mockLog.info).to.have.been.calledWith(
         sinon.match(/0 prompts/),
       );
-    });
-
-    describe('areChangesAICategorizationOnly (via updateLlmoConfig)', () => {
-      const aiCategoryId = 'ai-category-123';
-      const aiTopicId = 'ai-topic-456';
-
-      it('should NOT skip audit when there are no config changes', async () => {
-        readConfigStub.resolves({
-          config: llmoConfig.defaultConfig(),
-          exists: true,
-          version: 'v0',
-        });
-        mockContext.data = llmoConfig.defaultConfig();
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: llmoConfig.defaultConfig() });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-      });
-
-      it('should NOT skip audit when adding new category with human prompts', async () => {
-        readConfigStub.resolves({
-          config: llmoConfig.defaultConfig(),
-          exists: true,
-          version: 'v0',
-        });
-
-        const newConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [aiCategoryId]: { name: 'Human Category', region: ['us'] },
-          },
-          topics: {
-            [aiTopicId]: {
-              name: 'Human Topic',
-              category: aiCategoryId,
-              prompts: [{
-                prompt: 'What is this?',
-                regions: ['us'],
-                origin: 'human', // Human origin
-                source: 'config',
-              }],
-            },
-          },
-        };
-
-        mockContext.data = newConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: newConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-        const sqsCall = mockContext.sqs.sendMessage.getCall(0);
-        expect(sqsCall.args[1].auditContext.skipBrandPresenceTrigger).to.be.undefined;
-      });
-
-      it('should skip audit when adding new category with ONLY AI prompts', async () => {
-        readConfigStub.resolves({
-          config: llmoConfig.defaultConfig(),
-          exists: true,
-          version: 'v0',
-        });
-
-        const newConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [aiCategoryId]: { name: 'AI Category', region: ['us'] },
-          },
-          topics: {
-            [aiTopicId]: {
-              name: 'AI Topic',
-              category: aiCategoryId,
-              prompts: [{
-                prompt: 'AI generated prompt',
-                regions: ['us'],
-                origin: 'ai', // AI origin
-                source: 'mystique',
-              }],
-            },
-          },
-        };
-
-        mockContext.data = newConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: newConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
-          mockContext.env.AUDIT_JOBS_QUEUE_URL,
-          {
-            type: 'geo-brand-presence-trigger-refresh',
-            siteId: mockSite.getId(),
-            auditContext: {
-              configVersion: 'v1',
-            },
-          },
-        );
-      });
-
-      it('should NOT skip audit when adding multiple prompts with mixed origins', async () => {
-        readConfigStub.resolves({
-          config: llmoConfig.defaultConfig(),
-          exists: true,
-          version: 'v0',
-        });
-
-        const newConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [aiCategoryId]: { name: 'Mixed Category', region: ['us'] },
-          },
-          topics: {
-            [aiTopicId]: {
-              name: 'Mixed Topic',
-              category: aiCategoryId,
-              prompts: [
-                {
-                  prompt: 'AI prompt 1',
-                  regions: ['us'],
-                  origin: 'ai',
-                  source: 'mystique',
-                },
-                {
-                  prompt: 'Human prompt',
-                  regions: ['us'],
-                  origin: 'human', // Mixed with human
-                  source: 'config',
-                },
-              ],
-            },
-          },
-        };
-
-        mockContext.data = newConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: newConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-      });
-
-      it('should skip audit when modifying existing topic by adding ONLY AI prompts', async () => {
-        const existingConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [CATEGORY_ID]: { name: 'Existing Category', region: ['us'] },
-          },
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [{
-                prompt: 'Original prompt',
-                regions: ['us'],
-                origin: 'human',
-                source: 'config',
-              }],
-            },
-          },
-        };
-
-        readConfigStub.resolves({
-          config: existingConfig,
-          exists: true,
-          version: 'v0',
-        });
-
-        const updatedConfig = {
-          ...existingConfig,
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [
-                {
-                  prompt: 'Original prompt',
-                  regions: ['us'],
-                  origin: 'human',
-                  source: 'config',
-                },
-                {
-                  prompt: 'New AI prompt',
-                  regions: ['us'],
-                  origin: 'ai', // Only adding AI prompts
-                  source: 'mystique',
-                },
-              ],
-            },
-          },
-        };
-
-        mockContext.data = updatedConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
-          mockContext.env.AUDIT_JOBS_QUEUE_URL,
-          {
-            type: 'geo-brand-presence-trigger-refresh',
-            siteId: mockSite.getId(),
-            auditContext: {
-              configVersion: 'v1',
-            },
-          },
-        );
-      });
-
-      it('should NOT skip audit when modifying existing topic by adding human prompts', async () => {
-        const existingConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [CATEGORY_ID]: { name: 'Existing Category', region: ['us'] },
-          },
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [{
-                prompt: 'Original prompt',
-                regions: ['us'],
-                origin: 'human',
-                source: 'config',
-              }],
-            },
-          },
-        };
-
-        readConfigStub.resolves({
-          config: existingConfig,
-          exists: true,
-          version: 'v0',
-        });
-
-        const updatedConfig = {
-          ...existingConfig,
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [
-                {
-                  prompt: 'Original prompt',
-                  regions: ['us'],
-                  origin: 'human',
-                  source: 'config',
-                },
-                {
-                  prompt: 'New human prompt',
-                  regions: ['us'],
-                  origin: 'human', // Adding human prompts
-                  source: 'config',
-                },
-              ],
-            },
-          },
-        };
-
-        mockContext.data = updatedConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-      });
-
-      it('should NOT skip audit when there is no previous config (first-time onboarding)', async () => {
-        readConfigStub.resolves({
-          config: llmoConfig.defaultConfig(),
-          exists: false,
-          version: null,
-        });
-
-        const newConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [aiCategoryId]: { name: 'AI Category', region: ['us'] },
-          },
-          topics: {
-            [aiTopicId]: {
-              name: 'AI Topic',
-              category: aiCategoryId,
-              prompts: [{
-                prompt: 'AI generated prompt',
-                regions: ['us'],
-                origin: 'ai',
-                source: 'mystique',
-              }],
-            },
-          },
-        };
-
-        mockContext.data = newConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: newConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-      });
-
-      it('should NOT skip audit when brands or competitors are modified', async () => {
-        const existingConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [CATEGORY_ID]: { name: 'Category', region: ['us'] },
-          },
-          brands: {
-            aliases: [{ aliases: ['brand1'], category: CATEGORY_ID, region: ['us'] }],
-          },
-        };
-
-        readConfigStub.resolves({
-          config: existingConfig,
-          exists: true,
-          version: 'v0',
-        });
-
-        const updatedConfig = {
-          ...existingConfig,
-          brands: {
-            aliases: [
-              { aliases: ['brand1'], category: CATEGORY_ID, region: ['us'] },
-              { aliases: ['brand2'], category: CATEGORY_ID, region: ['us'] }, // New brand
-            ],
-          },
-        };
-
-        mockContext.data = updatedConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-      });
-
-      it('should skip audit when multiple categories and topics with ONLY AI prompts are added', async () => {
-        readConfigStub.resolves({
-          config: llmoConfig.defaultConfig(),
-          exists: true,
-          version: 'v0',
-        });
-
-        const newConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            'ai-cat-1': { name: 'AI Category 1', region: ['us'] },
-            'ai-cat-2': { name: 'AI Category 2', region: ['eu'] },
-          },
-          topics: {
-            'ai-topic-1': {
-              name: 'AI Topic 1',
-              category: 'ai-cat-1',
-              prompts: [
-                {
-                  prompt: 'AI prompt 1', regions: ['us'], origin: 'ai', source: 'mystique',
-                },
-                {
-                  prompt: 'AI prompt 2', regions: ['us'], origin: 'ai', source: 'mystique',
-                },
-              ],
-            },
-            'ai-topic-2': {
-              name: 'AI Topic 2',
-              category: 'ai-cat-2',
-              prompts: [
-                {
-                  prompt: 'AI prompt 3', regions: ['eu'], origin: 'ai', source: 'mystique',
-                },
-              ],
-            },
-          },
-        };
-
-        mockContext.data = newConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: newConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
-          mockContext.env.AUDIT_JOBS_QUEUE_URL,
-          {
-            type: 'geo-brand-presence-trigger-refresh',
-            siteId: mockSite.getId(),
-            auditContext: {
-              configVersion: 'v1',
-            },
-          },
-        );
-      });
-
-      it('should NOT skip audit when existing topic prompts are modified but no new prompts added', async () => {
-        const existingConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [CATEGORY_ID]: { name: 'Existing Category', region: ['us'] },
-          },
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [{
-                prompt: 'Original prompt',
-                regions: ['us'],
-                origin: 'human',
-                source: 'config',
-              }],
-            },
-          },
-        };
-
-        readConfigStub.resolves({
-          config: existingConfig,
-          exists: true,
-          version: 'v0',
-        });
-
-        // Prompts array changes but no new prompts actually added (same prompt text)
-        const updatedConfig = {
-          ...existingConfig,
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [{
-                prompt: 'Original prompt',
-                regions: ['eu'], // Only region changed
-                origin: 'human',
-                source: 'config',
-              }],
-            },
-          },
-        };
-
-        mockContext.data = updatedConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        // Should trigger brand presence refresh since only regions changed
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
-          mockContext.env.AUDIT_JOBS_QUEUE_URL,
-          {
-            type: 'geo-brand-presence-trigger-refresh',
-            siteId: mockSite.getId(),
-            auditContext: {
-              configVersion: 'v1',
-            },
-          },
-        );
-      });
-
-      it('should NOT skip audit when prompt order changes but prompts are identical', async () => {
-        const existingConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [CATEGORY_ID]: { name: 'Existing Category', region: ['us'] },
-          },
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [
-                {
-                  prompt: 'Prompt A', regions: ['us'], origin: 'human', source: 'config',
-                },
-                {
-                  prompt: 'Prompt B', regions: ['us'], origin: 'human', source: 'config',
-                },
-              ],
-            },
-          },
-        };
-
-        readConfigStub.resolves({
-          config: existingConfig,
-          exists: true,
-          version: 'v0',
-        });
-
-        // Same prompts but in different order
-        const updatedConfig = {
-          ...existingConfig,
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [
-                {
-                  prompt: 'Prompt B', regions: ['us'], origin: 'human', source: 'config',
-                },
-                {
-                  prompt: 'Prompt A', regions: ['us'], origin: 'human', source: 'config',
-                },
-              ],
-            },
-          },
-        };
-
-        mockContext.data = updatedConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        // Should NOT send message since prompts are identical (just reordered)
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-      });
-
-      it('should handle prompts with regions in different order as equal', async () => {
-        const existingConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [CATEGORY_ID]: { name: 'Existing Category', region: ['us'] },
-          },
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [{
-                prompt: 'Multi-region prompt',
-                regions: ['us', 'eu', 'asia'],
-                origin: 'ai',
-                source: 'mystique',
-              }],
-            },
-          },
-        };
-
-        readConfigStub.resolves({
-          config: existingConfig,
-          exists: true,
-          version: 'v0',
-        });
-
-        // Same prompt but regions in different order
-        const updatedConfig = {
-          ...existingConfig,
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [{
-                prompt: 'Multi-region prompt',
-                regions: ['asia', 'us', 'eu'], // Different order
-                origin: 'ai',
-                source: 'mystique',
-              }],
-            },
-          },
-        };
-
-        mockContext.data = updatedConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        // Should trigger brand presence refresh since only region order changed (AI-only)
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
-          mockContext.env.AUDIT_JOBS_QUEUE_URL,
-          {
-            type: 'geo-brand-presence-trigger-refresh',
-            siteId: mockSite.getId(),
-            auditContext: {
-              configVersion: 'v1',
-            },
-          },
-        );
-      });
-
-      it('should NOT skip audit when prompts array has different length', async () => {
-        const existingConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [CATEGORY_ID]: { name: 'Existing Category', region: ['us'] },
-          },
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [{
-                prompt: 'AI prompt 1',
-                regions: ['us'],
-                origin: 'ai',
-                source: 'mystique',
-              }],
-            },
-          },
-        };
-
-        readConfigStub.resolves({
-          config: existingConfig,
-          exists: true,
-          version: 'v0',
-        });
-
-        // Add a second AI prompt (different length array)
-        const updatedConfig = {
-          ...existingConfig,
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [
-                {
-                  prompt: 'AI prompt 1',
-                  regions: ['us'],
-                  origin: 'ai',
-                  source: 'mystique',
-                },
-                {
-                  prompt: 'AI prompt 2',
-                  regions: ['us'],
-                  origin: 'ai',
-                  source: 'mystique',
-                },
-              ],
-            },
-          },
-        };
-
-        mockContext.data = updatedConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        // Should trigger brand presence refresh since only AI prompts added
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
-          mockContext.env.AUDIT_JOBS_QUEUE_URL,
-          {
-            type: 'geo-brand-presence-trigger-refresh',
-            siteId: mockSite.getId(),
-            auditContext: {
-              configVersion: 'v1',
-            },
-          },
-        );
-      });
-
-      it('should handle topics without prompts property', async () => {
-        const existingConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [CATEGORY_ID]: { name: 'Existing Category', region: ['us'] },
-          },
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              // No prompts property
-            },
-          },
-        };
-
-        readConfigStub.resolves({
-          config: existingConfig,
-          exists: true,
-          version: 'v0',
-        });
-
-        // Add a topic with prompts
-        const updatedConfig = {
-          ...existingConfig,
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [{
-                prompt: 'AI prompt 1',
-                regions: ['us'],
-                origin: 'ai',
-                source: 'mystique',
-              }],
-            },
-          },
-        };
-
-        mockContext.data = updatedConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        // Should trigger brand presence refresh since only AI prompts added
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
-          mockContext.env.AUDIT_JOBS_QUEUE_URL,
-          {
-            type: 'geo-brand-presence-trigger-refresh',
-            siteId: mockSite.getId(),
-            auditContext: {
-              configVersion: 'v1',
-            },
-          },
-        );
-      });
-
-      it('should handle new category with topic missing prompts property', async () => {
-        readConfigStub.resolves({
-          config: llmoConfig.defaultConfig(),
-          exists: true,
-          version: 'v0',
-        });
-
-        const newCategoryId = 'new-category';
-        const newTopicId = 'new-topic';
-
-        const newConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [newCategoryId]: { name: 'New Category', region: ['us'] },
-          },
-          topics: {
-            [newTopicId]: {
-              name: 'New Topic',
-              category: newCategoryId,
-              // No prompts property - should be treated as empty array
-            },
-          },
-        };
-
-        mockContext.data = newConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: newConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        // Should trigger brand presence refresh (empty prompts array means no non-AI prompts)
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
-          mockContext.env.AUDIT_JOBS_QUEUE_URL,
-          {
-            type: 'geo-brand-presence-trigger-refresh',
-            siteId: mockSite.getId(),
-            auditContext: {
-              configVersion: 'v1',
-            },
-          },
-        );
-      });
-
-      it('should handle changed topic with new topic missing prompts property', async () => {
-        const existingConfig = {
-          ...llmoConfig.defaultConfig(),
-          categories: {
-            [CATEGORY_ID]: { name: 'Existing Category', region: ['us'] },
-          },
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Existing Topic',
-              category: CATEGORY_ID,
-              prompts: [{
-                prompt: 'Original prompt',
-                regions: ['us'],
-                origin: 'ai',
-                source: 'mystique',
-              }],
-            },
-          },
-        };
-
-        readConfigStub.resolves({
-          config: existingConfig,
-          exists: true,
-          version: 'v0',
-        });
-
-        // Update with topic that has no prompts property
-        const updatedConfig = {
-          ...existingConfig,
-          topics: {
-            [TOPIC_ID]: {
-              name: 'Updated Topic',
-              category: CATEGORY_ID,
-              // No prompts property
-            },
-          },
-        };
-
-        mockContext.data = updatedConfig;
-        llmoConfigSchemaStub.safeParse.returns({ success: true, data: updatedConfig });
-
-        await controller.updateLlmoConfig(mockContext);
-
-        // Should trigger brand presence refresh (no new prompts added, all removed are AI)
-        expect(mockContext.sqs.sendMessage).to.have.been.calledOnce;
-        expect(mockContext.sqs.sendMessage).to.have.been.calledWith(
-          mockContext.env.AUDIT_JOBS_QUEUE_URL,
-          {
-            type: 'geo-brand-presence-trigger-refresh',
-            siteId: mockSite.getId(),
-            auditContext: {
-              configVersion: 'v1',
-            },
-          },
-        );
-      });
     });
   });
 
@@ -3212,6 +2518,714 @@ describe('LlmoController', () => {
       expect(mockLog.error).to.have.been.calledWith(
         `Error during LLMO cached query for site ${TEST_SITE_ID}: Cache query failed`,
       );
+    });
+  });
+
+  describe('getLlmoRationale', () => {
+    let mockS3Client;
+    let mockS3Response;
+    let rationaleContext;
+
+    beforeEach(() => {
+      mockS3Response = {
+        Body: {
+          transformToString: sinon.stub(),
+        },
+      };
+
+      mockS3Client = {
+        send: sinon.stub(),
+      };
+
+      rationaleContext = {
+        ...mockContext,
+        params: {
+          siteId: TEST_SITE_ID,
+        },
+        env: {
+          ...mockEnv,
+          ENV: 'dev',
+        },
+        s3: {
+          s3Client: mockS3Client,
+          GetObjectCommand: function MockGetObjectCommand(params) {
+            this.params = params;
+          },
+        },
+      };
+    });
+
+    it('should successfully retrieve and return filtered topics from S3', async () => {
+      const mockRationaleData = {
+        site_id: TEST_SITE_ID,
+        topics: [
+          {
+            topic: 'Convert PDF_Informational',
+            category: 'Acrobat',
+            region: 'BR',
+            origin: 'HUMAN',
+            popularity: 'Low',
+            volume: -10,
+            reasoning: 'Specific informational query with minimal organic searches.',
+            added_date: '2025-12-03T09:21:31.673898',
+          },
+          {
+            topic: 'Convert PDF_Informational',
+            category: 'Acrobat',
+            region: 'DE',
+            origin: 'HUMAN',
+            popularity: 'High',
+            volume: -30,
+            reasoning: 'Common task with wide applicability and core to business services.',
+            added_date: '2025-12-03T09:21:31.673921',
+          },
+          {
+            topic: 'Another Topic',
+            category: 'Other',
+            region: 'US',
+            origin: 'AI',
+            popularity: 'Medium',
+            volume: -20,
+            reasoning: 'Some other reasoning.',
+            added_date: '2025-12-03T09:21:31.673925',
+          },
+        ],
+      };
+
+      const contextWithFilters = {
+        ...rationaleContext,
+        data: {
+          topic: 'Convert PDF',
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRationale(contextWithFilters);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+
+      // Should return only the filtered topics array, not the full JSON
+      expect(responseBody).to.be.an('array');
+      expect(responseBody).to.have.length(2);
+      expect(responseBody[0].topic).to.equal('Convert PDF_Informational');
+      expect(responseBody[1].topic).to.equal('Convert PDF_Informational');
+
+      expect(mockS3Client.send).to.have.been.calledOnce;
+      const commandArg = mockS3Client.send.getCall(0).args[0];
+      expect(commandArg.params.Bucket).to.equal('spacecat-dev-mystique-assets');
+      expect(commandArg.params.Key).to.equal(`llm_cache/${TEST_SITE_ID}/prompts/topics_popularity_reasoning_cache.json`);
+
+      expect(mockLog.info).to.have.been.calledWith(
+        `Getting LLMO rationale for site ${TEST_SITE_ID} with filters - topic: Convert PDF, category: all, region: all, origin: all, popularity: all`,
+      );
+    });
+
+    it('should return 400 when topic parameter is missing', async () => {
+      const contextWithoutTopic = {
+        ...rationaleContext,
+        data: {},
+      };
+
+      const result = await controller.getLlmoRationale(contextWithoutTopic);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('topic parameter is required');
+    });
+
+    it('should filter topics by topic (case-insensitive)', async () => {
+      const mockRationaleData = {
+        site_id: TEST_SITE_ID,
+        topics: [
+          {
+            topic: 'Convert PDF_Informational',
+            category: 'Acrobat',
+            region: 'BR',
+            origin: 'HUMAN',
+            popularity: 'Low',
+          },
+          {
+            topic: 'Edit PDF_Transactional',
+            category: 'Acrobat',
+            region: 'US',
+            origin: 'HUMAN',
+            popularity: 'High',
+          },
+          {
+            topic: 'Photo Editing',
+            category: 'Photoshop',
+            region: 'US',
+            origin: 'AI',
+            popularity: 'Medium',
+          },
+        ],
+      };
+
+      const contextWithFilters = {
+        ...rationaleContext,
+        data: {
+          topic: 'pdf', // lowercase should match both PDF topics
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRationale(contextWithFilters);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.have.length(2);
+      expect(responseBody[0].topic).to.equal('Convert PDF_Informational');
+      expect(responseBody[1].topic).to.equal('Edit PDF_Transactional');
+    });
+
+    it('should filter topics with optional category filter', async () => {
+      const mockRationaleData = {
+        site_id: TEST_SITE_ID,
+        topics: [
+          {
+            topic: 'Convert PDF_Informational',
+            category: 'Acrobat',
+            region: 'BR',
+            origin: 'HUMAN',
+            popularity: 'Low',
+          },
+          {
+            topic: 'Edit Photo',
+            category: 'Photoshop',
+            region: 'US',
+            origin: 'HUMAN',
+            popularity: 'High',
+          },
+          {
+            topic: 'Edit PDF_Transactional',
+            category: 'Acrobat',
+            region: 'US',
+            origin: 'AI',
+            popularity: 'Medium',
+          },
+        ],
+      };
+
+      const contextWithFilters = {
+        ...rationaleContext,
+        data: {
+          topic: 'edit',
+          category: 'acrobat', // should match only Edit PDF
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRationale(contextWithFilters);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.have.length(1);
+      expect(responseBody[0].topic).to.equal('Edit PDF_Transactional');
+      expect(responseBody[0].category).to.equal('Acrobat');
+    });
+
+    it('should filter topics with optional region filter', async () => {
+      const mockRationaleData = {
+        site_id: TEST_SITE_ID,
+        topics: [
+          {
+            topic: 'Convert PDF_Informational',
+            category: 'Acrobat',
+            region: 'BR',
+            origin: 'HUMAN',
+            popularity: 'Low',
+          },
+          {
+            topic: 'Convert PDF_Informational',
+            category: 'Acrobat',
+            region: 'DE',
+            origin: 'HUMAN',
+            popularity: 'High',
+          },
+        ],
+      };
+
+      const contextWithFilters = {
+        ...rationaleContext,
+        data: {
+          topic: 'Convert',
+          region: 'de', // lowercase should match DE
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRationale(contextWithFilters);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.have.length(1);
+      expect(responseBody[0].region).to.equal('DE');
+    });
+
+    it('should filter topics with optional origin filter', async () => {
+      const mockRationaleData = {
+        site_id: TEST_SITE_ID,
+        topics: [
+          {
+            topic: 'Convert PDF_Informational',
+            category: 'Acrobat',
+            region: 'BR',
+            origin: 'HUMAN',
+            popularity: 'Low',
+          },
+          {
+            topic: 'Edit PDF_Transactional',
+            category: 'Acrobat',
+            region: 'US',
+            origin: 'AI',
+            popularity: 'High',
+          },
+        ],
+      };
+
+      const contextWithFilters = {
+        ...rationaleContext,
+        data: {
+          topic: 'pdf',
+          origin: 'human', // should match only HUMAN origin
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRationale(contextWithFilters);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.have.length(1);
+      expect(responseBody[0].origin).to.equal('HUMAN');
+    });
+
+    it('should filter topics with optional popularity filter', async () => {
+      const mockRationaleData = {
+        site_id: TEST_SITE_ID,
+        topics: [
+          {
+            topic: 'Convert PDF_Informational',
+            category: 'Acrobat',
+            region: 'BR',
+            origin: 'HUMAN',
+            popularity: 'Low',
+          },
+          {
+            topic: 'Edit PDF_Transactional',
+            category: 'Acrobat',
+            region: 'DE',
+            origin: 'HUMAN',
+            popularity: 'High',
+          },
+        ],
+      };
+
+      const contextWithFilters = {
+        ...rationaleContext,
+        data: {
+          topic: 'pdf',
+          popularity: 'high', // should match only High popularity
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRationale(contextWithFilters);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.have.length(1);
+      expect(responseBody[0].popularity).to.equal('High');
+    });
+
+    it('should return empty array when no topics match filters', async () => {
+      const mockRationaleData = {
+        site_id: TEST_SITE_ID,
+        topics: [
+          {
+            topic: 'Convert PDF_Informational',
+            category: 'Acrobat',
+            region: 'BR',
+            origin: 'HUMAN',
+            popularity: 'Low',
+          },
+        ],
+      };
+
+      const contextWithFilters = {
+        ...rationaleContext,
+        data: {
+          topic: 'nonexistent topic',
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRationale(contextWithFilters);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.be.an('array');
+      expect(responseBody).to.have.length(0);
+    });
+
+    it('should handle missing topics array gracefully', async () => {
+      const mockRationaleData = {
+        site_id: TEST_SITE_ID,
+        // No topics array
+      };
+
+      const contextWithFilters = {
+        ...rationaleContext,
+        data: {
+          topic: 'any topic',
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRationale(contextWithFilters);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.be.an('array');
+      expect(responseBody).to.have.length(0);
+    });
+
+    it('should return 404 when S3 file does not exist (NoSuchKey)', async () => {
+      const noSuchKeyError = new Error('The specified key does not exist');
+      noSuchKeyError.name = 'NoSuchKey';
+      mockS3Client.send.rejects(noSuchKeyError);
+
+      const contextWithParams = {
+        ...rationaleContext,
+        data: {
+          topic: 'any topic',
+        },
+      };
+
+      const result = await controller.getLlmoRationale(contextWithParams);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal(`Rationale file not found for site ${TEST_SITE_ID}`);
+
+      expect(mockLog.warn).to.have.been.calledWith(
+        `LLMO rationale file not found for site ${TEST_SITE_ID} at llm_cache/${TEST_SITE_ID}/prompts/topics_popularity_reasoning_cache.json`,
+      );
+    });
+
+    it('should return 400 when S3 bucket does not exist (NoSuchBucket)', async () => {
+      const noSuchBucketError = new Error('The specified bucket does not exist');
+      noSuchBucketError.name = 'NoSuchBucket';
+      mockS3Client.send.rejects(noSuchBucketError);
+
+      const contextWithParams = {
+        ...rationaleContext,
+        data: {
+          topic: 'any topic',
+        },
+      };
+
+      const result = await controller.getLlmoRationale(contextWithParams);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Storage bucket not found: spacecat-dev-mystique-assets');
+
+      expect(mockLog.error).to.have.been.calledWith('S3 bucket spacecat-dev-mystique-assets not found');
+    });
+
+    it('should return 400 when JSON parsing fails', async () => {
+      mockS3Response.Body.transformToString.resolves('invalid json content');
+      mockS3Client.send.resolves(mockS3Response);
+
+      const contextWithParams = {
+        ...rationaleContext,
+        data: {
+          topic: 'any topic',
+        },
+      };
+
+      const result = await controller.getLlmoRationale(contextWithParams);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Invalid JSON format in rationale file');
+
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(`Invalid JSON in rationale file for site ${TEST_SITE_ID}:`),
+      );
+    });
+
+    it('should return 400 for other S3 errors', async () => {
+      const genericS3Error = new Error('Access denied');
+      genericS3Error.name = 'AccessDenied';
+      mockS3Client.send.rejects(genericS3Error);
+
+      const contextWithParams = {
+        ...rationaleContext,
+        data: {
+          topic: 'any topic',
+        },
+      };
+
+      const result = await controller.getLlmoRationale(contextWithParams);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Error retrieving rationale: Access denied');
+
+      expect(mockLog.error).to.have.been.calledWith(
+        `S3 error retrieving rationale for site ${TEST_SITE_ID}: Access denied`,
+      );
+    });
+
+    it('should return 400 when S3 is not configured', async () => {
+      const contextWithoutS3 = {
+        ...rationaleContext,
+        s3: null,
+        data: {
+          topic: 'any topic',
+        },
+      };
+
+      const result = await controller.getLlmoRationale(contextWithoutS3);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('S3 storage is not configured for this environment');
+    });
+
+    it('should return 400 when S3 client is not configured', async () => {
+      const contextWithoutS3Client = {
+        ...rationaleContext,
+        s3: {
+          s3Client: null,
+        },
+        data: {
+          topic: 'any topic',
+        },
+      };
+
+      const result = await controller.getLlmoRationale(contextWithoutS3Client);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('S3 storage is not configured for this environment');
+    });
+
+    it('should return 400 when LLMO access validation fails', async () => {
+      const controllerDenied = controllerWithAccessDenied(mockContext);
+      const contextWithParams = {
+        ...rationaleContext,
+        data: {
+          topic: 'any topic',
+        },
+      };
+      const result = await controllerDenied.getLlmoRationale(contextWithParams);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
+
+      expect(mockLog.error).to.have.been.calledWith(
+        `Error getting LLMO rationale for site ${TEST_SITE_ID}: Only users belonging to the organization can view its sites`,
+      );
+    });
+
+    it('should return 400 when site validation fails', async () => {
+      const contextWithInvalidSite = {
+        ...rationaleContext,
+        dataAccess: {
+          Site: {
+            findById: sinon.stub().resolves(null),
+          },
+        },
+        data: {
+          topic: 'any topic',
+        },
+      };
+
+      const result = await controller.getLlmoRationale(contextWithInvalidSite);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Cannot read properties of null');
+
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(`Error getting LLMO rationale for site ${TEST_SITE_ID}:`),
+      );
+    });
+
+    it('should handle empty JSON file correctly', async () => {
+      const emptyData = {};
+      const contextWithFilters = {
+        ...rationaleContext,
+        data: {
+          topic: 'any topic',
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(emptyData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRationale(contextWithFilters);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.be.an('array');
+      expect(responseBody).to.have.length(0);
+    });
+
+    it('should handle complex nested JSON structure with proper topics array', async () => {
+      const complexData = {
+        site_id: TEST_SITE_ID,
+        topics: [
+          {
+            topic: 'Convert PDF',
+            category: 'Acrobat',
+            region: 'US',
+            origin: 'HUMAN',
+            popularity: 'High',
+            volume: -30,
+            reasoning: 'High demand topic.',
+            added_date: '2025-12-03T09:21:31.673898',
+          },
+          {
+            topic: 'Edit Photo',
+            category: 'Photoshop',
+            region: 'US',
+            origin: 'AI',
+            popularity: 'Medium',
+            volume: -20,
+            reasoning: 'Moderate demand topic.',
+            added_date: '2025-12-03T09:21:31.673921',
+          },
+        ],
+        metadata: {
+          last_updated: '2025-12-03T09:21:31.673925',
+          version: '2.0',
+        },
+      };
+
+      const contextWithFilters = {
+        ...rationaleContext,
+        data: {
+          topic: 'convert',
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(complexData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRationale(contextWithFilters);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.be.an('array');
+      expect(responseBody).to.have.length(1);
+      expect(responseBody[0].topic).to.equal('Convert PDF');
+      expect(responseBody[0].volume).to.equal(-30);
+      expect(responseBody[0].reasoning).to.equal('High demand topic.');
+    });
+
+    it('should handle special characters in topic parameter', async () => {
+      const mockRationaleData = {
+        site_id: TEST_SITE_ID,
+        topics: [
+          {
+            topic: 'PDF & Document Processing',
+            category: 'Acrobat',
+            region: 'US',
+            origin: 'HUMAN',
+            popularity: 'High',
+          },
+          {
+            topic: 'Photo & Image Editing',
+            category: 'Photoshop',
+            region: 'US',
+            origin: 'AI',
+            popularity: 'Medium',
+          },
+          {
+            topic: 'Regular Document Tips',
+            category: 'General',
+            region: 'US',
+            origin: 'HUMAN',
+            popularity: 'Low',
+          },
+        ],
+      };
+
+      const contextWithSpecialChars = {
+        ...rationaleContext,
+        data: {
+          topic: 'PDF & Document', // Contains & character
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRationale(contextWithSpecialChars);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.have.length(1);
+      expect(responseBody[0].topic).to.equal('PDF & Document Processing');
+
+      // Verify that the log message handles special characters correctly
+      expect(mockLog.info).to.have.been.calledWith(
+        `Getting LLMO rationale for site ${TEST_SITE_ID} with filters - topic: PDF & Document, category: all, region: all, origin: all, popularity: all`,
+      );
+    });
+
+    it('should handle URL-encoded special characters in parameters', async () => {
+      const mockRationaleData = {
+        site_id: TEST_SITE_ID,
+        topics: [
+          {
+            topic: 'Search & Discovery Tools',
+            category: 'Technology',
+            region: 'US',
+            origin: 'HUMAN',
+            popularity: 'High',
+          },
+        ],
+      };
+
+      const contextWithEncodedChars = {
+        ...rationaleContext,
+        data: {
+          topic: 'Search & Discovery', // Would be %26 in URL, but should be decoded by framework
+        },
+      };
+
+      mockS3Response.Body.transformToString.resolves(JSON.stringify(mockRationaleData));
+      mockS3Client.send.resolves(mockS3Response);
+
+      const result = await controller.getLlmoRationale(contextWithEncodedChars);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.have.length(1);
+      expect(responseBody[0].topic).to.equal('Search & Discovery Tools');
     });
   });
 });
