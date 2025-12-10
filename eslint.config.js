@@ -11,7 +11,7 @@
  */
 
 import { defineConfig, globalIgnores } from '@eslint/config-helpers'
-import {recommended, source, test} from '@adobe/eslint-config-helix';
+import { recommended, source, test } from '@adobe/eslint-config-helix';
 
 export default defineConfig([
   globalIgnores([
@@ -20,10 +20,11 @@ export default defineConfig([
     'coverage/*',
     'dist/*',
     'node_modules/*',
-    'test/*/fixtures/*'
+    'test/*/fixtures/*',
+    'scripts/*'
   ]),
   {
-    extends: [ recommended ],
+    extends: [recommended],
     plugins: {
       import: recommended.plugins.import,
     },

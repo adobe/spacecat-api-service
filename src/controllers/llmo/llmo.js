@@ -44,10 +44,65 @@ import {
 } from './llmo-onboarding.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
+import {
+  getBrandPresenceFilters as getBrandPresenceFiltersImpl,
+  exampleEndpoint as exampleEndpointImpl,
+  getSentimentOverview as getSentimentOverviewImpl,
+  getBrandPresenceStats as getBrandPresenceStatsImpl,
+  getBrandPresenceTopics as getBrandPresenceTopicsImpl,
+  getBrandPresencePrompts as getBrandPresencePromptsImpl,
+  searchBrandPresence as searchBrandPresenceImpl,
+  getCompetitorComparison as getCompetitorComparisonImpl,
+} from './brand-presence/index.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
 
 const { readConfig, writeConfig } = llmo;
 const { llmoConfig: llmoConfigSchema } = schemas;
+
+const createMockSite = (context) => {
+  const { env } = context;
+  const dataFolder = env.DEV_LLMO_DATA_FOLDER || 'dev/test-site';
+  const brand = env.DEV_LLMO_BRAND || 'Test Brand';
+
+  const mockLlmoConfig = {
+    dataFolder,
+    brand,
+    questions: {
+      Human: [],
+      AI: [],
+    },
+    customerIntent: [],
+  };
+
+  const mockConfig = {
+    getLlmoConfig: () => mockLlmoConfig,
+    getLlmoHumanQuestions: () => [],
+    getLlmoAIQuestions: () => [],
+    getLlmoCustomerIntent: () => [],
+    addLlmoHumanQuestions: () => { },
+    addLlmoAIQuestions: () => { },
+    removeLlmoQuestion: () => { },
+    updateLlmoQuestion: () => { },
+    addLlmoCustomerIntent: () => { },
+    removeLlmoCustomerIntent: () => { },
+    updateLlmoCustomerIntent: () => { },
+    updateLlmoCdnlogsFilter: () => { },
+    updateLlmoCdnBucketConfig: () => { },
+    updateLlmoBrand: () => { },
+    updateLlmoDataFolder: () => { },
+  };
+
+  const mockSite = {
+    getId: () => context.params.siteId,
+    getConfig: () => mockConfig,
+    setConfig: () => { },
+    save: async () => { },
+    getOrganizationId: () => 'mock-org-id',
+    getBaseURL: () => 'https://example.com',
+  };
+
+  return { site: mockSite, config: mockConfig, llmoConfig: mockLlmoConfig };
+};
 
 function LlmoController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
@@ -55,8 +110,13 @@ function LlmoController(ctx) {
   // Helper function to get site and validate LLMO config
   const getSiteAndValidateLlmo = async (context) => {
     const { siteId } = context.params;
-    const { dataAccess } = context;
+    const { dataAccess, env } = context;
     const { Site } = dataAccess;
+
+    // DEV MODE BYPASS: Use mock data if ENV=dev and DEV_SKIP_DYNAMODB=true
+    if (env.ENV === 'dev' && env.DEV_SKIP_DYNAMODB === 'true') {
+      return createMockSite(context);
+    }
 
     const site = await Site.findById(siteId);
     const config = site.getConfig();
@@ -911,6 +971,54 @@ function LlmoController(ctx) {
     }
   };
 
+  // Wrapper for brand presence filters endpoint
+  const getBrandPresenceFilters = async (context) => getBrandPresenceFiltersImpl(
+    context,
+    getSiteAndValidateLlmo,
+  );
+
+  // Wrapper for brand presence example endpoint
+  const exampleEndpoint = async (context) => exampleEndpointImpl(
+    context,
+    getSiteAndValidateLlmo,
+  );
+
+  // Wrapper for sentiment overview endpoint
+  const getSentimentOverview = async (context) => getSentimentOverviewImpl(
+    context,
+    getSiteAndValidateLlmo,
+  );
+
+  // Wrapper for brand presence stats endpoint
+  const getBrandPresenceStats = async (context) => getBrandPresenceStatsImpl(
+    context,
+    getSiteAndValidateLlmo,
+  );
+
+  // Wrapper for brand presence topics endpoint
+  const getBrandPresenceTopics = async (context) => getBrandPresenceTopicsImpl(
+    context,
+    getSiteAndValidateLlmo,
+  );
+
+  // Wrapper for brand presence prompts endpoint
+  const getBrandPresencePrompts = async (context) => getBrandPresencePromptsImpl(
+    context,
+    getSiteAndValidateLlmo,
+  );
+
+  // Wrapper for brand presence search endpoint
+  const searchBrandPresence = async (context) => searchBrandPresenceImpl(
+    context,
+    getSiteAndValidateLlmo,
+  );
+
+  // Wrapper for competitor comparison endpoint
+  const getCompetitorComparison = async (context) => getCompetitorComparisonImpl(
+    context,
+    getSiteAndValidateLlmo,
+  );
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -930,7 +1038,15 @@ function LlmoController(ctx) {
     onboardCustomer,
     offboardCustomer,
     queryFiles,
+    getBrandPresenceFilters,
+    getSentimentOverview,
+    exampleEndpoint,
     getLlmoRationale,
+    getBrandPresenceStats,
+    getBrandPresenceTopics,
+    getBrandPresencePrompts,
+    searchBrandPresence,
+    getCompetitorComparison,
   };
 }
 

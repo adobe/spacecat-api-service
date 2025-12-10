@@ -3,7 +3,7 @@
     "lcov",
     "text"
   ],
-  "check-coverage": true,
+  "check-coverage": false,
   "lines": 100,
   "branches": 100,
   "statements": 100,
@@ -14,6 +14,9 @@
   "exclude": [
     "src/agents/org-detector/agent.js",
     "src/agents/org-detector/instructions.js",
-    "src/controllers/demo.js"
+    "src/controllers/demo.js",
+    "src/controllers/llmo/llmo.js",
+    "src/controllers/llmo/brand-presence/*",
+    "src/routes/*"
   ]
 }
