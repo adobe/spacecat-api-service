@@ -73,7 +73,7 @@ export async function getSentimentOverview(context, getSiteAndValidateLlmo) {
       const queryStart = Date.now();
 
       // Build dynamic WHERE conditions
-      const conditions = ['site_id = $1', 'execution_date >= $2', 'execution_date <= $3'];
+      const conditions = ['site_id = $1', 'date >= $2', 'date <= $3'];
       const params = [siteId, startDate, endDate];
       let idx = 4;
 
@@ -119,7 +119,7 @@ export async function getSentimentOverview(context, getSiteAndValidateLlmo) {
       const sql = `
           WITH distinct_prompts AS (
             SELECT 
-              TO_CHAR(execution_date, 'IYYY-"W"IW') AS week,
+              TO_CHAR(date, 'IYYY-"W"IW') AS week,
               prompt,
               region,
               topics,
