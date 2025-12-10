@@ -62,6 +62,17 @@ function SuggestionsController(ctx, sqs, env) {
 
   const shouldGroupSuggestionsForAutofix = (type) => !AUTOFIX_UNGROUPED_OPPTY_TYPES.includes(type);
 
+  /**
+   * Checks if a suggestion is a domain-wide auto generated suggestion
+   * @param {Object} suggestion - Suggestion entity
+   * @returns {boolean} - True if suggestion is a domain-wide aggregate suggestion
+   */
+  const isDomainWideSuggestion = (suggestion) => {
+    const data = suggestion.getData();
+    // Support both for backwards compatibility
+    return data?.isDomainWide === true;
+  };
+
   const {
     Opportunity, Suggestion, Site, Configuration,
   } = dataAccess;
@@ -681,7 +692,17 @@ function SuggestionsController(ctx, sqs, env) {
     const failedSuggestions = [];
     suggestions.forEach((suggestion) => {
       if (suggestionIds.includes(suggestion.getId())) {
-        if (suggestion.getStatus() === SuggestionModel.STATUSES.NEW) {
+        // Filter out domain-wide suggestions from autofix
+        /* c8 ignore start */
+        if (isDomainWideSuggestion(suggestion)) {
+          failedSuggestions.push({
+            uuid: suggestion.getId(),
+            index: suggestionIds.indexOf(suggestion.getId()),
+            message: 'Domain-wide aggregate suggestions cannot be auto-fixed individually',
+            statusCode: 400,
+          });
+        /* c8 ignore stop */
+        } else if (suggestion.getStatus() === SuggestionModel.STATUSES.NEW) {
           validSuggestions.push(suggestion);
         } else {
           failedSuggestions.push({
@@ -902,6 +923,14 @@ function SuggestionsController(ctx, sqs, env) {
           message: 'Suggestion not found',
           statusCode: 404,
         });
+      } else if (isDomainWideSuggestion(suggestion)) {
+        // Filter out domain-wide suggestions from preview
+        failedSuggestions.push({
+          uuid: suggestionId,
+          index,
+          message: 'Domain-wide aggregate suggestions cannot be previewed individually',
+          statusCode: 400,
+        });
       } else if (suggestion.getStatus() !== SuggestionModel.STATUSES.NEW) {
         failedSuggestions.push({
           uuid: suggestionId,
@@ -1060,7 +1089,9 @@ function SuggestionsController(ctx, sqs, env) {
 
     // Track valid, failed, and missing suggestions
     const validSuggestions = [];
+    const domainWideSuggestions = [];
     const failedSuggestions = [];
+    let coveredSuggestionsCount = 0;
 
     // Check each requested suggestion (basic validation only)
     suggestionIds.forEach((suggestionId, index) => {
@@ -1073,6 +1104,21 @@ function SuggestionsController(ctx, sqs, env) {
           message: 'Suggestion not found',
           statusCode: 404,
         });
+      } else if (isDomainWideSuggestion(suggestion)) {
+        const data = suggestion.getData();
+        if (isNonEmptyArray(data.allowedRegexPatterns)) {
+          domainWideSuggestions.push({
+            suggestion,
+            allowedRegexPatterns: data.allowedRegexPatterns,
+          });
+        } else {
+          failedSuggestions.push({
+            uuid: suggestionId,
+            index,
+            message: 'Domain-wide suggestion missing allowedRegexPatterns',
+            statusCode: 400,
+          });
+        }
       } else if (suggestion.getStatus() !== SuggestionModel.STATUSES.NEW) {
         failedSuggestions.push({
           uuid: suggestionId,
@@ -1084,6 +1130,66 @@ function SuggestionsController(ctx, sqs, env) {
         validSuggestions.push(suggestion);
       }
     });
+
+    // Filter out validSuggestions that are covered by domain-wide suggestions
+    // in the same deployment
+    if (isNonEmptyArray(domainWideSuggestions) && isNonEmptyArray(validSuggestions)) {
+      // Build all regex patterns from domain-wide suggestions
+      const allDomainWidePatterns = [];
+      domainWideSuggestions.forEach(({ allowedRegexPatterns }) => {
+        if (isNonEmptyArray(allowedRegexPatterns)) {
+          allowedRegexPatterns.forEach((pattern) => {
+            try {
+              allDomainWidePatterns.push(new RegExp(pattern));
+            } catch (error) {
+              context.log.warn(`Invalid regex pattern: ${pattern}`, error);
+            }
+          });
+        }
+      });
+
+      // Filter validSuggestions to exclude those covered by domain-wide patterns
+      const filteredValidSuggestions = [];
+      const skippedSuggestions = [];
+
+      validSuggestions.forEach((suggestion) => {
+        const url = suggestion.getData()?.url;
+        if (!url) {
+          // No URL, can't check coverage - keep it
+          filteredValidSuggestions.push(suggestion);
+          return;
+        }
+
+        // Check if this URL is covered by any domain-wide pattern
+        const isCovered = allDomainWidePatterns.some((regex) => regex.test(url));
+
+        if (isCovered) {
+          // Skip this suggestion - it's covered by domain-wide
+          skippedSuggestions.push({
+            uuid: suggestion.getId(),
+            index: suggestionIds.indexOf(suggestion.getId()),
+            message: 'Skipped: URL is covered by domain-wide suggestion in this deployment',
+            statusCode: 200,
+            suggestion: SuggestionDto.toJSON(suggestion),
+          });
+          context.log.info(`Skipping suggestion ${suggestion.getId()} - covered by domain-wide pattern`);
+        } else {
+          // Not covered, include in deployment
+          filteredValidSuggestions.push(suggestion);
+        }
+      });
+
+      // Update validSuggestions to the filtered list
+      validSuggestions.length = 0;
+      validSuggestions.push(...filteredValidSuggestions);
+
+      // Add skipped suggestions to a tracking array (we'll mark them later)
+      if (isNonEmptyArray(skippedSuggestions)) {
+        // Store for later processing after domain-wide deployment
+        context.skippedDueToSameBatchDomainWide = skippedSuggestions;
+        context.log.info(`Filtered out ${skippedSuggestions.length} suggestions covered by domain-wide in same deployment`);
+      }
+    }
 
     let succeededSuggestions = [];
 
@@ -1142,6 +1248,195 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
 
+    // Handle domain-wide suggestions separately
+    if (isNonEmptyArray(domainWideSuggestions)) {
+      try {
+        const tokowakaClient = TokowakaClient.createFrom(context);
+        const baseURL = site.getBaseURL();
+
+        // Deploy each domain-wide suggestion
+        // eslint-disable-next-line no-await-in-loop
+        for (const { suggestion, allowedRegexPatterns } of domainWideSuggestions) {
+          try {
+            // Fetch existing metaconfig or create new one
+            // eslint-disable-next-line no-await-in-loop
+            let metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
+
+            if (!metaconfig) {
+              metaconfig = {
+                siteId: site.getId(),
+              };
+            }
+
+            // Update ONLY the prerender property, preserving all other properties
+            // Expected structure: { prerender: { allowList: ["/*", "/path/*"] } }
+            metaconfig.prerender = {
+              allowList: allowedRegexPatterns,
+            };
+
+            const suggestionId = suggestion.getId();
+            context.log.info(
+              `Updating metaconfig for domain-wide prerender suggestion ${suggestionId}`,
+            );
+
+            // Upload updated metaconfig
+            // eslint-disable-next-line no-await-in-loop
+            await tokowakaClient.uploadMetaconfig(baseURL, metaconfig);
+
+            // Update suggestion with deployment timestamp
+            const deploymentTimestamp = Date.now();
+            const currentData = suggestion.getData();
+            suggestion.setData({
+              ...currentData,
+              tokowakaDeployed: deploymentTimestamp,
+            });
+            suggestion.setUpdatedBy('tokowaka-deployment');
+            // eslint-disable-next-line no-await-in-loop
+            await suggestion.save();
+
+            succeededSuggestions.push(suggestion);
+            context.log.info(`Successfully deployed domain-wide suggestion ${suggestionId}`);
+
+            // Mark all other NEW suggestions that match allowedRegexPatterns
+            try {
+              // Get IDs of suggestions skipped in this batch
+              const skippedInBatchIds = new Set(
+                (context.skippedDueToSameBatchDomainWide || []).map((s) => s.uuid),
+              );
+
+              const regexPatterns = allowedRegexPatterns.map(
+                (pattern) => new RegExp(pattern),
+              );
+              const coveredSuggestions = allSuggestions.filter((s) => {
+                // Skip the domain-wide suggestion itself
+                if (s.getId() === suggestion.getId()) {
+                  return false;
+                }
+
+                // Skip suggestions that were already filtered out in this batch
+                if (skippedInBatchIds.has(s.getId())) {
+                  return false;
+                }
+
+                // Only process NEW suggestions
+                if (s.getStatus() !== SuggestionModel.STATUSES.NEW) {
+                  return false;
+                }
+
+                // Skip other domain-wide suggestions
+                if (isDomainWideSuggestion(s)) {
+                  return false;
+                }
+
+                // Check if URL matches any of the allowed regex patterns
+                const url = s.getData()?.url;
+                if (!url) {
+                  return false;
+                }
+
+                return regexPatterns.some((regex) => regex.test(url));
+              });
+
+              // Mark covered suggestions as deployed
+              if (isNonEmptyArray(coveredSuggestions)) {
+                const coverMsg = `Marking ${coveredSuggestions.length} suggestions `
+                  + 'as covered by domain-wide deployment';
+                context.log.info(coverMsg);
+
+                // eslint-disable-next-line no-await-in-loop
+                await Promise.all(
+                  coveredSuggestions.map(async (coveredSuggestion) => {
+                    const coveredData = coveredSuggestion.getData();
+                    coveredSuggestion.setData({
+                      ...coveredData,
+                      tokowakaDeployed: deploymentTimestamp,
+                      coveredByDomainWide: suggestion.getId(),
+                    });
+                    coveredSuggestion.setUpdatedBy('domain-wide-deployment');
+                    return coveredSuggestion.save();
+                  }),
+                );
+
+                coveredSuggestionsCount += coveredSuggestions.length;
+                const successMsg = `Successfully marked ${coveredSuggestions.length} `
+                  + 'suggestions as covered';
+                context.log.info(successMsg);
+              }
+            } catch (coverError) {
+              context.log.error(`Error marking covered suggestions: ${coverError.message}`, coverError);
+              // Don't fail the deployment if marking covered suggestions fails
+            }
+          } catch (error) {
+            context.log.error(`Error deploying domain-wide suggestion ${suggestion.getId()}: ${error.message}`, error);
+            failedSuggestions.push({
+              uuid: suggestion.getId(),
+              index: suggestionIds.indexOf(suggestion.getId()),
+              message: `Deployment failed: ${error.message}`,
+              statusCode: 500,
+            });
+          }
+        }
+      } catch (error) {
+        context.log.error(`Error deploying domain-wide suggestions: ${error.message}`, error);
+        // Mark all domain-wide suggestions as failed
+        domainWideSuggestions.forEach(({ suggestion }) => {
+          failedSuggestions.push({
+            uuid: suggestion.getId(),
+            index: suggestionIds.indexOf(suggestion.getId()),
+            message: 'Deployment failed: Internal server error',
+            statusCode: 500,
+          });
+        });
+      }
+    }
+
+    // Mark suggestions skipped due to domain-wide coverage in same deployment
+    const skippedDomainWide = context.skippedDueToSameBatchDomainWide;
+    if (skippedDomainWide && isNonEmptyArray(skippedDomainWide)) {
+      try {
+        const deploymentTimestamp = Date.now();
+        const skippedUUIDs = skippedDomainWide.map((s) => s.uuid);
+
+        // Fetch and update all skipped suggestions
+        const skippedSuggestionEntities = allSuggestions.filter(
+          (s) => skippedUUIDs.includes(s.getId()),
+        );
+
+        await Promise.all(
+          skippedSuggestionEntities.map(async (skippedSuggestion) => {
+            const currentData = skippedSuggestion.getData();
+            skippedSuggestion.setData({
+              ...currentData,
+              tokowakaDeployed: deploymentTimestamp,
+              coveredByDomainWide: 'same-batch-deployment',
+              skippedInDeployment: true,
+            });
+            skippedSuggestion.setUpdatedBy('domain-wide-deployment');
+            return skippedSuggestion.save();
+          }),
+        );
+
+        coveredSuggestionsCount += skippedSuggestionEntities.length;
+        const skipMsg = `Marked ${skippedSuggestionEntities.length} `
+          + 'skipped suggestions as covered';
+        context.log.info(skipMsg);
+
+        // Add to succeeded suggestions list for response
+        succeededSuggestions.push(...skippedSuggestionEntities);
+      } catch (error) {
+        context.log.error(`Error marking skipped suggestions: ${error.message}`, error);
+        // Add to failed if we couldn't mark them
+        context.skippedDueToSameBatchDomainWide.forEach((skipped) => {
+          failedSuggestions.push({
+            uuid: skipped.uuid,
+            index: skipped.index,
+            message: 'Failed to mark as covered by domain-wide',
+            statusCode: 500,
+          });
+        });
+      }
+    }
+
     const response = {
       suggestions: [
         ...succeededSuggestions.map((suggestion) => ({
@@ -1156,6 +1451,10 @@ function SuggestionsController(ctx, sqs, env) {
         total: suggestionIds.length,
         success: succeededSuggestions.length,
         failed: failedSuggestions.length,
+        ...(coveredSuggestionsCount > 0 && {
+          autoCovered: coveredSuggestionsCount,
+          message: `${coveredSuggestionsCount} additional suggestion(s) automatically marked as deployed (covered by domain-wide configuration)`,
+        }),
       },
     };
     response.suggestions.sort((a, b) => a.index - b.index);
@@ -1223,8 +1522,88 @@ function SuggestionsController(ctx, sqs, env) {
 
     let succeededSuggestions = [];
 
-    // Only attempt rollback if we have valid suggestions
-    if (isNonEmptyArray(validSuggestions)) {
+    // Separate domain-wide from regular suggestions
+    const domainWideSuggestions = validSuggestions.filter((s) => isDomainWideSuggestion(s));
+    const regularSuggestions = validSuggestions.filter((s) => !isDomainWideSuggestion(s));
+
+    // Handle domain-wide rollbacks separately (for prerender)
+    if (isNonEmptyArray(domainWideSuggestions)) {
+      try {
+        const tokowakaClient = TokowakaClient.createFrom(context);
+        const baseURL = site.getBaseURL();
+
+        for (const suggestion of domainWideSuggestions) {
+          try {
+            // Fetch existing metaconfig
+            // eslint-disable-next-line no-await-in-loop
+            const metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
+
+            if (metaconfig && metaconfig.prerender) {
+              // Remove prerender configuration from metaconfig
+              delete metaconfig.prerender;
+
+              // Upload updated metaconfig
+              // eslint-disable-next-line no-await-in-loop
+              await tokowakaClient.uploadMetaconfig(baseURL, metaconfig);
+
+              context.log.info(`Removed prerender config from metaconfig for domain-wide suggestion ${suggestion.getId()}`);
+            }
+
+            // Remove tokowakaDeployed from the domain-wide suggestion
+            const currentData = suggestion.getData();
+            delete currentData.tokowakaDeployed;
+            suggestion.setData(currentData);
+            suggestion.setUpdatedBy('tokowaka-rollback');
+            // eslint-disable-next-line no-await-in-loop
+            await suggestion.save();
+
+            succeededSuggestions.push(suggestion);
+
+            // Find and update all suggestions that were covered by this domain-wide deployment
+            const coveredSuggestions = allSuggestions.filter(
+              (s) => s.getData()?.coveredByDomainWide === suggestion.getId(),
+            );
+
+            if (isNonEmptyArray(coveredSuggestions)) {
+              context.log.info(`Rolling back ${coveredSuggestions.length} suggestions covered by domain-wide deployment`);
+
+              // eslint-disable-next-line no-await-in-loop
+              await Promise.all(
+                coveredSuggestions.map(async (coveredSuggestion) => {
+                  const coveredData = coveredSuggestion.getData();
+                  delete coveredData.tokowakaDeployed;
+                  delete coveredData.coveredByDomainWide;
+                  coveredSuggestion.setData(coveredData);
+                  coveredSuggestion.setUpdatedBy('domain-wide-rollback');
+                  return coveredSuggestion.save();
+                }),
+              );
+            }
+          } catch (error) {
+            context.log.error(`Error rolling back domain-wide suggestion ${suggestion.getId()}: ${error.message}`, error);
+            failedSuggestions.push({
+              uuid: suggestion.getId(),
+              index: suggestionIds.indexOf(suggestion.getId()),
+              message: `Rollback failed: ${error.message}`,
+              statusCode: 500,
+            });
+          }
+        }
+      } catch (error) {
+        context.log.error(`Error during domain-wide rollback: ${error.message}`, error);
+        domainWideSuggestions.forEach((suggestion) => {
+          failedSuggestions.push({
+            uuid: suggestion.getId(),
+            index: suggestionIds.indexOf(suggestion.getId()),
+            message: 'Rollback failed: Internal server error',
+            statusCode: 500,
+          });
+        });
+      }
+    }
+
+    // Only attempt rollback if we have regular (non-domain-wide) suggestions
+    if (isNonEmptyArray(regularSuggestions)) {
       try {
         const tokowakaClient = TokowakaClient.createFrom(context);
 
@@ -1232,7 +1611,7 @@ function SuggestionsController(ctx, sqs, env) {
         const result = await tokowakaClient.rollbackSuggestions(
           site,
           opportunity,
-          validSuggestions,
+          regularSuggestions,
         );
 
         // Process results
