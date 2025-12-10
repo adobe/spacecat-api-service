@@ -5951,14 +5951,54 @@ describe('Suggestions Controller', () => {
   });
 
   describe('autofixSuggestions with domain-wide suggestions', () => {
+    let suggestionsControllerWithMock;
+    
+    beforeEach(async () => {
+      const mockPromiseToken = {
+        promise_token: 'promiseTokenExample',
+        expires_in: 14399,
+        token_type: 'promise_token',
+      };
+
+      const suggestionControllerWithMock = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/utils.js': {
+          getIMSPromiseToken: async () => mockPromiseToken,
+        },
+      });
+      
+      suggestionsControllerWithMock = suggestionControllerWithMock({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'abcd' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    });
+
+    afterEach(() => {
+      sandbox.restore();
+    });
+
     it('should reject autofix for domain-wide suggestions', async () => {
       // Stub AccessControlUtil
       sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
 
+      opportunity.getType = sandbox.stub().returns('prerender');
+      
+      const isHandlerEnabledForSite = sandbox.stub();
+      isHandlerEnabledForSite.withArgs('prerender-auto-fix', site).returns(true);
+      mockConfiguration.findLatest.resolves({
+        isHandlerEnabledForSite,
+      });
+      
       const domainWideSuggestion = {
         getId: () => SUGGESTION_IDS[0],
         getOpportunityId: () => OPPORTUNITY_ID,
         getStatus: () => 'NEW',
+        getType: () => 'prerender',
+        getRank: () => 1,
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
         getData: () => ({
           url: 'https://example.com/* (All Domain URLs)',
           isDomainWide: true,
@@ -5970,6 +6010,12 @@ describe('Suggestions Controller', () => {
         getId: () => SUGGESTION_IDS[1],
         getOpportunityId: () => OPPORTUNITY_ID,
         getStatus: () => 'NEW',
+        getType: () => 'prerender',
+        getRank: () => 2,
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
         getData: () => ({
           url: 'https://example.com/page1',
         }),
@@ -5981,35 +6027,7 @@ describe('Suggestions Controller', () => {
 
       mockSuggestion.bulkUpdateStatus.resolves([regularSuggestion]);
 
-      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves({
-        getId: () => OPPORTUNITY_ID,
-        getSiteId: () => SITE_ID,
-        getType: () => 'prerender',
-        getData: () => ({}),
-      });
-
-      mockConfiguration.findLatest.resolves({
-        isHandlerEnabledForSite: () => true,
-      });
-
-      context.env = {
-        AUTOFIX_JOBS_QUEUE: 'test-queue-url',
-      };
-
-      context.log = {
-        info: sandbox.stub(),
-        warn: sandbox.stub(),
-        error: sandbox.stub(),
-        debug: sandbox.stub(),
-      };
-
-      const mockSqs = {
-        sendMessage: sandbox.stub().resolves(),
-      };
-      context.sqs = mockSqs;
-
-      const response = await suggestionsController.autofixSuggestions({
-        ...context,
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
         params: {
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,

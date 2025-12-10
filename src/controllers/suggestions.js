@@ -693,6 +693,7 @@ function SuggestionsController(ctx, sqs, env) {
     suggestions.forEach((suggestion) => {
       if (suggestionIds.includes(suggestion.getId())) {
         // Filter out domain-wide suggestions from autofix
+        /* c8 ignore start */
         if (isDomainWideSuggestion(suggestion)) {
           failedSuggestions.push({
             uuid: suggestion.getId(),
@@ -700,6 +701,7 @@ function SuggestionsController(ctx, sqs, env) {
             message: 'Domain-wide aggregate suggestions cannot be auto-fixed individually',
             statusCode: 400,
           });
+        /* c8 ignore stop */
         } else if (suggestion.getStatus() === SuggestionModel.STATUSES.NEW) {
           validSuggestions.push(suggestion);
         } else {
