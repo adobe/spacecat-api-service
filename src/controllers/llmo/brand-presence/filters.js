@@ -67,9 +67,10 @@ export async function getBrandPresenceFilters(context, getSiteAndValidateLlmo) {
            ORDER BY category`,
         ),
         // Get distinct topics (split comma-separated values)
+        // Use materialized view for performance
         aurora.query(
           `SELECT DISTINCT TRIM(unnest(string_to_array(topics, ','))) as topic
-           FROM public.brand_presence 
+           FROM brand_presence_topics_by_date
            WHERE topics IS NOT NULL 
              AND topics != '' 
            ORDER BY topic`,
