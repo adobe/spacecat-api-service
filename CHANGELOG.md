@@ -1,3 +1,10 @@
+# [1.276.0](https://github.com/adobe/spacecat-api-service/compare/v1.275.8...v1.276.0) (2025-12-10)
+
+
+### Features
+
+* **geo-brand-presence:** add `-paid` and `-free` for scheduling ([#1645](https://github.com/adobe/spacecat-api-service/issues/1645)) ([07d80ee](https://github.com/adobe/spacecat-api-service/commit/07d80ee5d8e35ee6f873f6440a794f2251a72ce2))
+
 ## [1.275.8](https://github.com/adobe/spacecat-api-service/compare/v1.275.7...v1.275.8) (2025-12-10)
 
 
