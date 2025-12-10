@@ -327,6 +327,7 @@ export async function getCompetitorComparison(context, getSiteAndValidateLlmo) {
           validationDuration,
         },
       }, {
+        'Content-Encoding': 'br',
         'access-control-allow-origin': '*',
         'access-control-allow-methods': 'GET, OPTIONS',
         'access-control-allow-headers': 'x-api-key, authorization, content-type',
