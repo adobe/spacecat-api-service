@@ -83,6 +83,96 @@ const VALID_PROMPT_SORT_COLUMNS = {
 };
 
 /**
+ * Calculate trend direction from weekly metric values.
+ * Compares the oldest week to the newest week in the dataset.
+ *
+ * @param {Array} weeklyValues - Array of objects with 'week' and metric value properties
+ * @param {string} valueKey - Key to extract the value from each week's data
+ * @returns {Object} Trend indicator with direction and hasValidComparison
+ */
+const calculateTrend = (weeklyValues, valueKey) => {
+  const defaultTrend = { direction: 'neutral', hasValidComparison: false };
+
+  if (!weeklyValues || !Array.isArray(weeklyValues) || weeklyValues.length < 2) {
+    return defaultTrend;
+  }
+
+  // Sort by week (ISO week format: "2025-W49")
+  const sorted = [...weeklyValues].sort((a, b) => {
+    const weekA = a.week || '';
+    const weekB = b.week || '';
+    return weekA.localeCompare(weekB);
+  });
+
+  const oldest = sorted[0];
+  const newest = sorted[sorted.length - 1];
+
+  const oldestValue = parseFloat(oldest[valueKey]) || 0;
+  const newestValue = parseFloat(newest[valueKey]) || 0;
+
+  // If oldest value is 0, we can't calculate a meaningful percentage change
+  if (oldestValue === 0) {
+    // Special case: if newest > 0, it's still an upward trend
+    if (newestValue > 0) {
+      return { direction: 'up', hasValidComparison: true };
+    }
+    return defaultTrend;
+  }
+
+  const change = newestValue - oldestValue;
+
+  if (change > 0) {
+    return { direction: 'up', hasValidComparison: true };
+  }
+  if (change < 0) {
+    return { direction: 'down', hasValidComparison: true };
+  }
+  return { direction: 'neutral', hasValidComparison: true };
+};
+
+/**
+ * Build trend indicators object from weekly metrics array.
+ * Creates trend indicators for visibility, mentions, and citations.
+ *
+ * @param {Array} weeklyMetrics - Array of weekly metric objects
+ * @returns {Object} Trend indicators for each metric
+ */
+const buildTrendIndicators = (weeklyMetrics) => {
+  if (!weeklyMetrics || !Array.isArray(weeklyMetrics)) {
+    const defaultTrend = { direction: 'neutral', hasValidComparison: false, weeklyValues: [] };
+    return {
+      visibility: defaultTrend,
+      mentions: defaultTrend,
+      citations: defaultTrend,
+    };
+  }
+
+  return {
+    visibility: {
+      ...calculateTrend(weeklyMetrics, 'visibility'),
+      weeklyValues: weeklyMetrics.map((w) => ({
+        week: w.week,
+        value: parseFloat(w.visibility) || 0,
+      })),
+    },
+    mentions: {
+      ...calculateTrend(weeklyMetrics, 'mentions'),
+      weeklyValues: weeklyMetrics.map((w) => ({
+        week: w.week,
+        value: parseInt(w.mentions, 10) || 0,
+      })),
+    },
+    citations: {
+      ...calculateTrend(weeklyMetrics, 'citations'),
+      weeklyValues: weeklyMetrics.map((w) => ({
+        week: w.week,
+        value: parseInt(w.citations, 10) || 0,
+      })),
+    },
+  };
+};
+
+/**
  * GET /sites/:siteId/llmo/brand-presence/topics
  * Returns paginated, filtered, sorted list of topics from brand_presence_topics_by_date view
  *
@@ -180,7 +270,34 @@ export async function getBrandPresenceTopics(context, getSiteAndValidateLlmo) {
       log.info('[BRAND-PRESENCE-TOPICS] Using full-scan strategy (sorting by sources)');
 
       const topicsQuery = `
-        WITH topic_metrics AS (
+        WITH weekly_breakdown AS (
+          -- Aggregate metrics by ISO week for trend calculation
+          SELECT
+            topics,
+            TO_CHAR(date, 'IYYY-"W"IW') AS week,
+            ROUND(AVG(avg_visibility_score), 2) AS visibility,
+            SUM(mentions_count) AS mentions,
+            SUM(citations_count) AS citations
+          FROM brand_presence_topics_by_date
+          WHERE ${whereClause}
+          GROUP BY topics, TO_CHAR(date, 'IYYY-"W"IW')
+        ),
+        topic_weekly AS (
+          -- Aggregate weekly data into JSON array per topic
+          SELECT
+            topics,
+            JSON_AGG(
+              JSON_BUILD_OBJECT(
+                'week', week,
+                'visibility', visibility,
+                'mentions', mentions,
+                'citations', citations
+              ) ORDER BY week
+            ) AS weekly_metrics
+          FROM weekly_breakdown
+          GROUP BY topics
+        ),
+        topic_metrics AS (
           SELECT
             topics,
             ROUND(AVG(avg_visibility_score)) AS visibility,
@@ -229,9 +346,11 @@ export async function getBrandPresenceTopics(context, getSiteAndValidateLlmo) {
           tm.executions,
           tm.citations,
           tm.category_count,
-          tm.region_count
+          tm.region_count,
+          tw.weekly_metrics
         FROM topic_metrics tm
         LEFT JOIN source_counts sc ON tm.topics = sc.topics
+        LEFT JOIN topic_weekly tw ON tm.topics = tw.topics
         ORDER BY sources ${sortDirection} NULLS LAST
         LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
       `;
@@ -278,6 +397,34 @@ export async function getBrandPresenceTopics(context, getSiteAndValidateLlmo) {
           ORDER BY ${sortColumn === 'topics' ? 'topics' : sortColumn} ${sortDirection} NULLS LAST
           LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
         ),
+        weekly_breakdown AS (
+          -- Aggregate metrics by ISO week for trend calculation (only for paginated topics)
+          SELECT
+            topics,
+            TO_CHAR(date, 'IYYY-"W"IW') AS week,
+            ROUND(AVG(avg_visibility_score), 2) AS visibility,
+            SUM(mentions_count) AS mentions,
+            SUM(citations_count) AS citations
+          FROM brand_presence_topics_by_date
+          WHERE ${whereClause}
+            AND topics IN (SELECT topics FROM paginated_topics)
+          GROUP BY topics, TO_CHAR(date, 'IYYY-"W"IW')
+        ),
+        topic_weekly AS (
+          -- Aggregate weekly data into JSON array per topic
+          SELECT
+            topics,
+            JSON_AGG(
+              JSON_BUILD_OBJECT(
+                'week', week,
+                'visibility', visibility,
+                'mentions', mentions,
+                'citations', citations
+              ) ORDER BY week
+            ) AS weekly_metrics
+          FROM weekly_breakdown
+          GROUP BY topics
+        ),
         source_counts AS (
           -- Only calculate sources for the topics on this page (optimized)
           SELECT
@@ -300,9 +447,11 @@ export async function getBrandPresenceTopics(context, getSiteAndValidateLlmo) {
           pt.executions,
           pt.citations,
           pt.category_count,
-          pt.region_count
+          pt.region_count,
+          tw.weekly_metrics
         FROM paginated_topics pt
         LEFT JOIN source_counts sc ON pt.topics = sc.topics
+        LEFT JOIN topic_weekly tw ON pt.topics = tw.topics
         ORDER BY ${sortColumn === 'topics' ? 'pt.topics' : sortColumn} ${sortDirection} NULLS LAST
       `;
 
@@ -320,17 +469,30 @@ export async function getBrandPresenceTopics(context, getSiteAndValidateLlmo) {
 
     return ok({
       siteId,
-      topics: topicsResult.map((row) => ({
-        topic: row.topics,
-        visibility: parseFloat(row.visibility) || 0,
-        mentions: parseInt(row.mentions, 10) || 0,
-        sentiment: row.sentiment,
-        position: parseFloat(row.position) || 0,
-        sources: parseInt(row.sources, 10) || 0,
-        volume: parseFloat(row.volume) || 0,
-        executions: parseInt(row.executions, 10) || 0,
-        citations: parseInt(row.citations, 10) || 0,
-      })),
+      topics: topicsResult.map((row) => {
+        // Parse weekly_metrics from JSON (PostgreSQL returns it as a JSON string or object)
+        let weeklyMetrics = row.weekly_metrics;
+        if (typeof weeklyMetrics === 'string') {
+          try {
+            weeklyMetrics = JSON.parse(weeklyMetrics);
+          } catch (e) {
+            weeklyMetrics = [];
+          }
+        }
+
+        return {
+          topic: row.topics,
+          visibility: parseFloat(row.visibility) || 0,
+          mentions: parseInt(row.mentions, 10) || 0,
+          sentiment: row.sentiment,
+          position: parseFloat(row.position) || 0,
+          sources: parseInt(row.sources, 10) || 0,
+          volume: parseFloat(row.volume) || 0,
+          executions: parseInt(row.executions, 10) || 0,
+          citations: parseInt(row.citations, 10) || 0,
+          trendIndicators: buildTrendIndicators(weeklyMetrics),
+        };
+      }),
       pagination: {
         page: parseInt(page, 10),
         pageSize: parseInt(pageSize, 10),
@@ -444,7 +606,40 @@ export async function getBrandPresencePrompts(context, getSiteAndValidateLlmo) {
     // Sentiment is calculated using avg_sentiment_score converted to 0-100 scale:
     // (avg_sentiment_score + 1) * 50, then apply same thresholds as topics endpoint
     const promptsQuery = `
-      WITH prompt_metrics AS (
+      WITH weekly_breakdown AS (
+        -- Aggregate metrics by ISO week for trend calculation
+        SELECT
+          prompt,
+          region,
+          origin,
+          category,
+          TO_CHAR(date, 'IYYY-"W"IW') AS week,
+          ROUND(AVG(avg_visibility_score), 2) AS visibility,
+          SUM(mentions_count) AS mentions,
+          SUM(citations_count) AS citations
+        FROM brand_presence_prompts_by_date
+        WHERE ${whereClause} AND topics = $${paramIndex}${searchCondition}
+        GROUP BY prompt, region, origin, category, TO_CHAR(date, 'IYYY-"W"IW')
+      ),
+      prompt_weekly AS (
+        -- Aggregate weekly data into JSON array per prompt
+        SELECT
+          prompt,
+          region,
+          origin,
+          category,
+          JSON_AGG(
+            JSON_BUILD_OBJECT(
+              'week', week,
+              'visibility', visibility,
+              'mentions', mentions,
+              'citations', citations
+            ) ORDER BY week
+          ) AS weekly_metrics
+        FROM weekly_breakdown
+        GROUP BY prompt, region, origin, category
+      ),
+      prompt_metrics AS (
         SELECT
           prompt,
           region,
@@ -490,9 +685,11 @@ export async function getBrandPresencePrompts(context, getSiteAndValidateLlmo) {
         pm.sentiment,
         pm.position,
         COALESCE(sc.sources, 0) AS sources,
-        pm.answer
+        pm.answer,
+        pw.weekly_metrics
       FROM prompt_metrics pm
       LEFT JOIN source_counts sc ON pm.prompt = sc.prompt AND pm.region = sc.region AND pm.origin = sc.origin AND pm.category = sc.category
+      LEFT JOIN prompt_weekly pw ON pm.prompt = pw.prompt AND pm.region = pw.region AND pm.origin = pw.origin AND pm.category = pw.category
       ORDER BY ${sortColumn === 'prompt' ? 'pm.prompt' : sortColumn} ${sortDirection} NULLS LAST
     `;
 
@@ -507,20 +704,33 @@ export async function getBrandPresencePrompts(context, getSiteAndValidateLlmo) {
       siteId,
       topic: decodedTopic,
       searchQuery: searchQuery || null,
-      prompts: promptsResult.map((row) => ({
-        prompt: row.prompt,
-        region: row.region,
-        origin: row.origin,
-        category: row.category,
-        executions: parseInt(row.executions, 10) || 0,
-        mentions: parseInt(row.mentions, 10) || 0,
-        citations: parseInt(row.citations, 10) || 0,
-        visibility: parseFloat(row.visibility) || 0,
-        sentiment: row.sentiment || 'N/A',
-        position: parseFloat(row.position) || 0,
-        sources: parseInt(row.sources, 10) || 0,
-        answer: row.answer || '',
-      })),
+      prompts: promptsResult.map((row) => {
+        // Parse weekly_metrics from JSON (PostgreSQL returns it as a JSON string or object)
+        let weeklyMetrics = row.weekly_metrics;
+        if (typeof weeklyMetrics === 'string') {
+          try {
+            weeklyMetrics = JSON.parse(weeklyMetrics);
+          } catch (e) {
+            weeklyMetrics = [];
+          }
+        }
+
+        return {
+          prompt: row.prompt,
+          region: row.region,
+          origin: row.origin,
+          category: row.category,
+          executions: parseInt(row.executions, 10) || 0,
+          mentions: parseInt(row.mentions, 10) || 0,
+          citations: parseInt(row.citations, 10) || 0,
+          visibility: parseFloat(row.visibility) || 0,
+          sentiment: row.sentiment || 'N/A',
+          position: parseFloat(row.position) || 0,
+          sources: parseInt(row.sources, 10) || 0,
+          answer: row.answer || '',
+          trendIndicators: buildTrendIndicators(weeklyMetrics),
+        };
+      }),
       totalPrompts: promptsResult.length,
       filters: {
         startDate, endDate, model, category, region, origin,
@@ -610,7 +820,47 @@ export async function searchBrandPresence(context, getSiteAndValidateLlmo) {
     // Search in both topics and prompts, return topics that match
     // Uses CTE to calculate true unique source counts from raw tables
     const searchQuerySql = `
-      WITH topic_metrics AS (
+      WITH matching_topics AS (
+        -- First, identify topics that match the search criteria
+        SELECT DISTINCT topics
+        FROM brand_presence_topics_by_date
+        WHERE ${whereClause}
+          AND (LOWER(topics) LIKE $${paramIndex} OR EXISTS (
+            SELECT 1 FROM brand_presence_prompts_by_date p
+            WHERE p.topics = brand_presence_topics_by_date.topics
+              AND p.site_id = brand_presence_topics_by_date.site_id
+              AND LOWER(p.prompt) LIKE $${paramIndex}
+          ))
+      ),
+      weekly_breakdown AS (
+        -- Aggregate metrics by ISO week for trend calculation (only for matching topics)
+        SELECT
+          topics,
+          TO_CHAR(date, 'IYYY-"W"IW') AS week,
+          ROUND(AVG(avg_visibility_score), 2) AS visibility,
+          SUM(mentions_count) AS mentions,
+          SUM(citations_count) AS citations
+        FROM brand_presence_topics_by_date
+        WHERE ${whereClause}
+          AND topics IN (SELECT topics FROM matching_topics)
+        GROUP BY topics, TO_CHAR(date, 'IYYY-"W"IW')
+      ),
+      topic_weekly AS (
+        -- Aggregate weekly data into JSON array per topic
+        SELECT
+          topics,
+          JSON_AGG(
+            JSON_BUILD_OBJECT(
+              'week', week,
+              'visibility', visibility,
+              'mentions', mentions,
+              'citations', citations
+            ) ORDER BY week
+          ) AS weekly_metrics
+        FROM weekly_breakdown
+        GROUP BY topics
+      ),
+      topic_metrics AS (
         SELECT
           topics,
           ROUND(AVG(avg_visibility_score)) AS visibility,
@@ -642,12 +892,7 @@ export async function searchBrandPresence(context, getSiteAndValidateLlmo) {
           )) > 0 AS has_prompt_match
         FROM brand_presence_topics_by_date
         WHERE ${whereClause}
-          AND (LOWER(topics) LIKE $${paramIndex} OR EXISTS (
-            SELECT 1 FROM brand_presence_prompts_by_date p
-            WHERE p.topics = brand_presence_topics_by_date.topics
-              AND p.site_id = brand_presence_topics_by_date.site_id
-              AND LOWER(p.prompt) LIKE $${paramIndex}
-          ))
+          AND topics IN (SELECT topics FROM matching_topics)
         GROUP BY topics
       ),
       source_counts AS (
@@ -657,6 +902,7 @@ export async function searchBrandPresence(context, getSiteAndValidateLlmo) {
         FROM brand_presence bp
         JOIN brand_presence_sources bps ON bp.id = bps.brand_presence_id
         WHERE ${rawWhereClause}
+          AND bp.topics IN (SELECT topics FROM matching_topics)
         GROUP BY bp.topics
       )
       SELECT
@@ -670,9 +916,11 @@ export async function searchBrandPresence(context, getSiteAndValidateLlmo) {
         tm.executions,
         tm.citations,
         tm.topic_match,
-        tm.has_prompt_match
+        tm.has_prompt_match,
+        tw.weekly_metrics
       FROM topic_metrics tm
       LEFT JOIN source_counts sc ON tm.topics = sc.topics
+      LEFT JOIN topic_weekly tw ON tm.topics = tw.topics
       ORDER BY tm.mentions DESC
       LIMIT $${paramIndex + 1} OFFSET $${paramIndex + 2}
     `;
@@ -708,18 +956,31 @@ export async function searchBrandPresence(context, getSiteAndValidateLlmo) {
     return ok({
       siteId,
       searchQuery,
-      topics: searchResult.map((row) => ({
-        topic: row.topics,
-        visibility: parseFloat(row.visibility) || 0,
-        mentions: parseInt(row.mentions, 10) || 0,
-        sentiment: row.sentiment,
-        position: parseFloat(row.position) || 0,
-        sources: parseInt(row.sources, 10) || 0,
-        volume: parseFloat(row.volume) || 0,
-        executions: parseInt(row.executions, 10) || 0,
-        citations: parseInt(row.citations, 10) || 0,
-        matchType: row.topic_match ? 'topic' : 'prompt',
-      })),
+      topics: searchResult.map((row) => {
+        // Parse weekly_metrics from JSON (PostgreSQL returns it as a JSON string or object)
+        let weeklyMetrics = row.weekly_metrics;
+        if (typeof weeklyMetrics === 'string') {
+          try {
+            weeklyMetrics = JSON.parse(weeklyMetrics);
+          } catch (e) {
+            weeklyMetrics = [];
+          }
+        }
+
+        return {
+          topic: row.topics,
+          visibility: parseFloat(row.visibility) || 0,
+          mentions: parseInt(row.mentions, 10) || 0,
+          sentiment: row.sentiment,
+          position: parseFloat(row.position) || 0,
+          sources: parseInt(row.sources, 10) || 0,
+          volume: parseFloat(row.volume) || 0,
+          executions: parseInt(row.executions, 10) || 0,
+          citations: parseInt(row.citations, 10) || 0,
+          matchType: row.topic_match ? 'topic' : 'prompt',
+          trendIndicators: buildTrendIndicators(weeklyMetrics),
+        };
+      }),
       pagination: {
         page: parseInt(page, 10),
         pageSize: parseInt(pageSize, 10),
