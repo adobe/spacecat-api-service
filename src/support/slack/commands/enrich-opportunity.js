@@ -10,11 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
-import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import BaseCommand from './base.js';
 import { extractURLFromSlackInput, postSiteNotFoundMessage } from '../../../utils/slack/base.js';
-
-const sqsClient = new SQSClient({});
 
 const PHRASES = ['enrich'];
 const SUPPORTED_AUDIT_TYPES = [
@@ -56,10 +53,10 @@ function EnrichOpportunityCommand(context) {
     usageText: `${PHRASES[0]} {site} {auditType}`,
   });
 
-  const { dataAccess, log, env } = context;
+  const { dataAccess, log, sqs } = context;
   const { Site } = dataAccess;
 
-  async function handler(args, slackContext) {
+  const handleExecution = async (args, slackContext) => {
     const { say } = slackContext;
 
     try {
@@ -106,10 +103,8 @@ function EnrichOpportunityCommand(context) {
         },
       };
 
-      await sqsClient.send(new SendMessageCommand({
-        QueueUrl: env.TASK_PROCESSOR_QUEUE_URL,
-        MessageBody: JSON.stringify(message),
-      }));
+      // Send to Task Processor queue using queue name (auto-resolves to URL)
+      await sqs.sendMessage('spacecat-task-processor-jobs', message);
 
       // Immediate response to user
       await say(':robot_face: *AI Enrichment Started!*\n\n'
@@ -121,11 +116,13 @@ function EnrichOpportunityCommand(context) {
       log.error(`Failed to queue enrichment: ${error.message}`, error);
       await say(`:x: Failed to start AI enrichment: ${error.message}`);
     }
-  }
+  };
+
+  baseCommand.init(context);
 
   return {
     ...baseCommand,
-    handler,
+    handleExecution,
   };
 }
 /* c8 ignore stop */
