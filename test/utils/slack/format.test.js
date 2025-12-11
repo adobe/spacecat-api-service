@@ -121,7 +121,7 @@ describe('Utility Functions', () => {
     it('prints details for a site with audits disabled', () => {
       mockSite.getBaseURL.returns('https://example.com');
 
-      const expectedOutput = `:warning: Audits have been disabled for site or strategy! This is usually done when PSI audits experience errors due to the target having issues (e.g. DNS or 404).
+      const expectedOutput = `:warning: LHS audits have been disabled for site or strategy! This is usually done when PSI audits experience errors due to the target having issues (e.g. DNS or 404).
 
       :identification_card: some-id
       :cat-egory-white: aem_edge

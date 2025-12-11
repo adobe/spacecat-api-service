@@ -1,3 +1,38 @@
+## [1.276.5](https://github.com/adobe/spacecat-api-service/compare/v1.276.4...v1.276.5) (2025-12-11)
+
+
+### Bug Fixes
+
+* update lhs audit message in slack ([#1647](https://github.com/adobe/spacecat-api-service/issues/1647)) ([816b5e5](https://github.com/adobe/spacecat-api-service/commit/816b5e563b19ff2297ec0497d34f5c4748c73e02))
+
+## [1.276.4](https://github.com/adobe/spacecat-api-service/compare/v1.276.3...v1.276.4) (2025-12-11)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1652](https://github.com/adobe/spacecat-api-service/issues/1652)) ([6218380](https://github.com/adobe/spacecat-api-service/commit/62183802a85564a4c9a371c10defdb0fd72eb7d1))
+
+## [1.276.3](https://github.com/adobe/spacecat-api-service/compare/v1.276.2...v1.276.3) (2025-12-11)
+
+
+### Bug Fixes
+
+* restore edge-live-preview route ([#1651](https://github.com/adobe/spacecat-api-service/issues/1651)) ([a0bf7a4](https://github.com/adobe/spacecat-api-service/commit/a0bf7a44076b4be5581c2c6e9d9d51f6c0bc9243))
+
+## [1.276.2](https://github.com/adobe/spacecat-api-service/compare/v1.276.1...v1.276.2) (2025-12-11)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tokowaka-client to v1.3.2 ([#1650](https://github.com/adobe/spacecat-api-service/issues/1650)) ([2dffb17](https://github.com/adobe/spacecat-api-service/commit/2dffb17729cf03dbfb76eaff7e9751376bc8d21d))
+
+## [1.276.1](https://github.com/adobe/spacecat-api-service/compare/v1.276.0...v1.276.1) (2025-12-10)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1648](https://github.com/adobe/spacecat-api-service/issues/1648)) ([84e744f](https://github.com/adobe/spacecat-api-service/commit/84e744f24436f1e3a952c7d49d890f784b03e42d))
+
 # [1.276.0](https://github.com/adobe/spacecat-api-service/compare/v1.275.8...v1.276.0) (2025-12-10)
 
 
