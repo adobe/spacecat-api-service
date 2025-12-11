@@ -10,12 +10,17 @@
  * governing permissions and limitations under the License.
  */
 
-export { getBrandPresenceFilters } from './filters.js';
-export { getBrandPresenceTopics } from './data-insights.js';
-export { getBrandPresencePrompts } from './data-insights.js';
-export { searchBrandPresence } from './data-insights.js';
-export { exampleEndpoint } from './example.js';
-export { getSentimentOverview } from './sentiment-overview.js';
-export { getBrandPresenceStats } from './llmo-stat-cards.js';
-export { getCompetitorComparison } from './competitor-comparison.js';
-export { handleBrandPresenceOptions } from './options-handler.js';
+import { BRAND_PRESENCE_CORS_HEADERS } from './cors.js';
+
+/**
+ * Handles OPTIONS preflight requests for brand presence endpoints
+ * Returns 200 OK with CORS headers
+ * @param {object} context - The request context
+ * @returns {Promise<Response>} The response with CORS headers
+ */
+export async function handleBrandPresenceOptions() {
+  return new Response('', {
+    status: 200,
+    headers: BRAND_PRESENCE_CORS_HEADERS,
+  });
+}

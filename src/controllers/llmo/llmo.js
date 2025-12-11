@@ -53,6 +53,7 @@ import {
   getBrandPresencePrompts as getBrandPresencePromptsImpl,
   searchBrandPresence as searchBrandPresenceImpl,
   getCompetitorComparison as getCompetitorComparisonImpl,
+  handleBrandPresenceOptions,
 } from './brand-presence/index.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
 
@@ -1047,6 +1048,7 @@ function LlmoController(ctx) {
     getBrandPresencePrompts,
     searchBrandPresence,
     getCompetitorComparison,
+    handleBrandPresenceOptions,
   };
 }
 
