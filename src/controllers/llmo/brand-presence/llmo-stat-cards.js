@@ -11,6 +11,7 @@
  */
 
 import { ok, badRequest } from '@adobe/spacecat-shared-http-utils';
+import { BRAND_PRESENCE_CORS_HEADERS } from './cors.js';
 
 /**
  * Calculate Week-over-Week trend from weekly data
@@ -82,7 +83,7 @@ export async function getBrandPresenceStats(context, getSiteAndValidateLlmo) {
     // Check if Aurora is configured and enabled
     if (!aurora || !env.ENABLE_AURORA_QUERIES) {
       log.warn(`[BRAND-PRESENCE-STATS] Aurora database not configured or disabled for siteId: ${siteId}`);
-      return badRequest('Aurora database is not configured or queries are not enabled');
+      return badRequest('Aurora database is not configured or queries are not enabled', BRAND_PRESENCE_CORS_HEADERS);
     }
 
     // Parse query parameters
@@ -99,7 +100,7 @@ export async function getBrandPresenceStats(context, getSiteAndValidateLlmo) {
 
     // Validate required parameters
     if (!startDate || !endDate) {
-      return badRequest('start_date and end_date are required query parameters');
+      return badRequest('start_date and end_date are required query parameters', BRAND_PRESENCE_CORS_HEADERS);
     }
 
     log.info(`[BRAND-PRESENCE-STATS] Query parameters - siteId: ${siteId}, startDate: ${startDate}, endDate: ${endDate}, topic: ${topic}, category: ${category}, region: ${region}, origin: ${origin}, promptBranding: ${promptBranding}, model: ${model}`);
@@ -293,7 +294,7 @@ export async function getBrandPresenceStats(context, getSiteAndValidateLlmo) {
       });
     } catch (dbError) {
       log.error(`[BRAND-PRESENCE-STATS] Database query failed for siteId: ${siteId} - error: ${dbError.message}, stack: ${dbError.stack}`);
-      return badRequest(`Failed to fetch brand presence stats: ${dbError.message}`);
+      return badRequest(`Failed to fetch brand presence stats: ${dbError.message}`, BRAND_PRESENCE_CORS_HEADERS);
     }
   } catch (error) {
     const totalDuration = Date.now() - startTime;

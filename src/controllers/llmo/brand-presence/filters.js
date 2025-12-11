@@ -11,6 +11,7 @@
  */
 
 import { ok, badRequest } from '@adobe/spacecat-shared-http-utils';
+import { BRAND_PRESENCE_CORS_HEADERS } from './cors.js';
 
 /**
  * Handles requests to get distinct filter values from brand_presence table
@@ -39,7 +40,7 @@ export async function getBrandPresenceFilters(context, getSiteAndValidateLlmo) {
     // Check if Aurora is configured and enabled
     if (!aurora || !env.ENABLE_AURORA_QUERIES) {
       log.warn(`[BRAND-PRESENCE-FILTERS] Aurora database not configured or disabled for siteId: ${siteId}`);
-      return badRequest('Aurora database is not configured or queries are not enabled');
+      return badRequest('Aurora database is not configured or queries are not enabled', BRAND_PRESENCE_CORS_HEADERS);
     }
 
     let filterValues = null;
@@ -115,7 +116,7 @@ export async function getBrandPresenceFilters(context, getSiteAndValidateLlmo) {
       log.info(`[BRAND-PRESENCE-FILTERS] Filter values retrieved for siteId: ${siteId} - categories: ${filterValues.categories.length}, topics: ${filterValues.topics.length}, models: ${filterValues.models.length}, regions: ${filterValues.regions.length}, origins: ${filterValues.origins.length}`);
     } catch (dbError) {
       log.error(`[BRAND-PRESENCE-FILTERS] Database query failed for siteId: ${siteId} - error: ${dbError.message}`);
-      return badRequest(`Failed to fetch filter values: ${dbError.message}`);
+      return badRequest(`Failed to fetch filter values: ${dbError.message}`, BRAND_PRESENCE_CORS_HEADERS);
     }
 
     const totalDuration = Date.now() - startTime;
@@ -137,6 +138,6 @@ export async function getBrandPresenceFilters(context, getSiteAndValidateLlmo) {
   } catch (error) {
     const totalDuration = Date.now() - startTime;
     log.error(`[BRAND-PRESENCE-FILTERS] Request failed for siteId: ${siteId} - duration: ${totalDuration}ms, error: ${error.message}`);
-    return badRequest(error.message);
+    return badRequest(error.message, BRAND_PRESENCE_CORS_HEADERS);
   }
 }

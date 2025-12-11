@@ -11,6 +11,7 @@
  */
 
 import { ok, badRequest } from '@adobe/spacecat-shared-http-utils';
+import { BRAND_PRESENCE_CORS_HEADERS } from './cors.js';
 
 // Helper to build WHERE clause from filters
 // Optional tableAlias parameter to prefix column names (e.g., 'bp' -> 'bp.site_id')
@@ -208,7 +209,7 @@ export async function getBrandPresenceTopics(context, getSiteAndValidateLlmo) {
     log.info(`[BRAND-PRESENCE-TOPICS] LLMO access validation completed for siteId: ${siteId} - duration: ${validationDuration}ms`);
 
     if (!aurora || !env.ENABLE_AURORA_QUERIES) {
-      return badRequest('Aurora database is not configured or queries are not enabled');
+      return badRequest('Aurora database is not configured or queries are not enabled', BRAND_PRESENCE_CORS_HEADERS);
     }
 
     // Extract query parameters
@@ -548,7 +549,7 @@ export async function getBrandPresencePrompts(context, getSiteAndValidateLlmo) {
     await getSiteAndValidateLlmo(context);
 
     if (!aurora || !env.ENABLE_AURORA_QUERIES) {
-      return badRequest('Aurora database is not configured or queries are not enabled');
+      return badRequest('Aurora database is not configured or queries are not enabled', BRAND_PRESENCE_CORS_HEADERS);
     }
 
     const {
@@ -778,7 +779,7 @@ export async function searchBrandPresence(context, getSiteAndValidateLlmo) {
     await getSiteAndValidateLlmo(context);
 
     if (!aurora || !env.ENABLE_AURORA_QUERIES) {
-      return badRequest('Aurora database is not configured or queries are not enabled');
+      return badRequest('Aurora database is not configured or queries are not enabled', BRAND_PRESENCE_CORS_HEADERS);
     }
 
     const {
@@ -794,7 +795,7 @@ export async function searchBrandPresence(context, getSiteAndValidateLlmo) {
     } = context.data || {};
 
     if (!searchQuery || searchQuery.trim().length < 2) {
-      return badRequest('Search query must be at least 2 characters');
+      return badRequest('Search query must be at least 2 characters', BRAND_PRESENCE_CORS_HEADERS);
     }
 
     const filterParams = {

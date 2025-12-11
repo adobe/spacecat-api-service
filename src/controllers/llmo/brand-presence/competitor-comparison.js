@@ -11,6 +11,7 @@
  */
 
 import { ok, badRequest } from '@adobe/spacecat-shared-http-utils';
+import { BRAND_PRESENCE_CORS_HEADERS } from './cors.js';
 
 /**
  * Parse week string (YYYY-WNN) to extract year and week number
@@ -175,7 +176,7 @@ export async function getCompetitorComparison(context, getSiteAndValidateLlmo) {
   // Validate required params
   if (!startDate || !endDate) {
     log.warn(`[COMPETITOR-COMPARISON] Missing required params for siteId: ${siteId} - startDate: ${startDate}, endDate: ${endDate}`);
-    return badRequest('startDate and endDate are required');
+    return badRequest('startDate and endDate are required', BRAND_PRESENCE_CORS_HEADERS);
   }
 
   try {
@@ -189,7 +190,7 @@ export async function getCompetitorComparison(context, getSiteAndValidateLlmo) {
     // Check if Aurora is configured and enabled
     if (!aurora || !env.ENABLE_AURORA_QUERIES) {
       log.warn(`[COMPETITOR-COMPARISON] Aurora database not configured or disabled for siteId: ${siteId}`);
-      return badRequest('Aurora database is not configured or queries are not enabled');
+      return badRequest('Aurora database is not configured or queries are not enabled', BRAND_PRESENCE_CORS_HEADERS);
     }
 
     const filters = { category, region, model };
@@ -334,7 +335,7 @@ export async function getCompetitorComparison(context, getSiteAndValidateLlmo) {
       });
     } catch (dbError) {
       log.error(`[COMPETITOR-COMPARISON] Database query failed for siteId: ${siteId} - error: ${dbError.message}`);
-      return badRequest(`Failed to fetch competitor comparison data: ${dbError.message}`);
+      return badRequest(`Failed to fetch competitor comparison data: ${dbError.message}`, BRAND_PRESENCE_CORS_HEADERS);
     }
   } catch (error) {
     const totalDuration = Date.now() - startTime;

@@ -11,6 +11,7 @@
  */
 
 import { ok, badRequest } from '@adobe/spacecat-shared-http-utils';
+import { BRAND_PRESENCE_CORS_HEADERS } from './cors.js';
 
 /**
  * Handles requests to get weekly sentiment overview from brand_presence table
@@ -42,13 +43,13 @@ export async function getSentimentOverview(context, getSiteAndValidateLlmo) {
   // Validate required params
   if (!startDate || !endDate) {
     log.warn(`[SENTIMENT-OVERVIEW] Missing required params for siteId: ${siteId} - startDate: ${startDate}, endDate: ${endDate}`);
-    return badRequest('startDate and endDate are required');
+    return badRequest('startDate and endDate are required', BRAND_PRESENCE_CORS_HEADERS);
   }
 
   // Validate promptBranding requires brandName
   if (promptBranding && promptBranding !== 'all' && !brandName) {
     log.warn(`[SENTIMENT-OVERVIEW] brandName required when promptBranding filter is set for siteId: ${siteId}`);
-    return badRequest('brandName is required when promptBranding filter is set');
+    return badRequest('brandName is required when promptBranding filter is set', BRAND_PRESENCE_CORS_HEADERS);
   }
 
   try {
@@ -62,7 +63,7 @@ export async function getSentimentOverview(context, getSiteAndValidateLlmo) {
     // Check if Aurora is configured and enabled
     if (!aurora || !env.ENABLE_AURORA_QUERIES) {
       log.warn(`[SENTIMENT-OVERVIEW] Aurora database not configured or disabled for siteId: ${siteId}`);
-      return badRequest('Aurora database is not configured or queries are not enabled');
+      return badRequest('Aurora database is not configured or queries are not enabled', BRAND_PRESENCE_CORS_HEADERS);
     }
 
     let sentimentData = null;
@@ -170,7 +171,7 @@ export async function getSentimentOverview(context, getSiteAndValidateLlmo) {
       log.info(`[SENTIMENT-OVERVIEW] Sentiment data retrieved for siteId: ${siteId} - weeks: ${sentimentData.length}, queryDuration: ${queryDuration}ms`);
     } catch (dbError) {
       log.error(`[SENTIMENT-OVERVIEW] Database query failed for siteId: ${siteId} - error: ${dbError.message}`);
-      return badRequest(`Failed to fetch sentiment overview: ${dbError.message}`);
+      return badRequest(`Failed to fetch sentiment overview: ${dbError.message}`, BRAND_PRESENCE_CORS_HEADERS);
     }
 
     const totalDuration = Date.now() - startTime;
