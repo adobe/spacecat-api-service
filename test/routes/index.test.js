@@ -461,6 +461,7 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-rollback',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-preview',
+      'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-live-preview',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit/:cursor',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit',
