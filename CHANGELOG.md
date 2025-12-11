@@ -1,3 +1,10 @@
+## [1.276.5](https://github.com/adobe/spacecat-api-service/compare/v1.276.4...v1.276.5) (2025-12-11)
+
+
+### Bug Fixes
+
+* update lhs audit message in slack ([#1647](https://github.com/adobe/spacecat-api-service/issues/1647)) ([816b5e5](https://github.com/adobe/spacecat-api-service/commit/816b5e563b19ff2297ec0497d34f5c4748c73e02))
+
 ## [1.276.4](https://github.com/adobe/spacecat-api-service/compare/v1.276.3...v1.276.4) (2025-12-11)
 
 
