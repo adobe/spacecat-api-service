@@ -198,6 +198,7 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy': suggestionsController.deploySuggestionToEdge,
     'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-rollback': suggestionsController.rollbackSuggestionFromEdge,
     'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-preview': suggestionsController.previewSuggestions,
+    'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-live-preview': suggestionsController.fetchFromEdge,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status': suggestionsController.getByStatus,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit/:cursor': suggestionsController.getByStatusPaged,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit': suggestionsController.getByStatusPaged,
