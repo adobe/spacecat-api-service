@@ -1,3 +1,31 @@
+# [1.278.0](https://github.com/adobe/spacecat-api-service/compare/v1.277.0...v1.278.0) (2025-12-12)
+
+
+### Features
+
+* fastly cache invalidation in edge apis ([#1656](https://github.com/adobe/spacecat-api-service/issues/1656)) ([77d109b](https://github.com/adobe/spacecat-api-service/commit/77d109b99418e029b488bcdae12bd9eff2c4772d))
+
+# [1.277.0](https://github.com/adobe/spacecat-api-service/compare/v1.276.7...v1.277.0) (2025-12-12)
+
+
+### Features
+
+* add slack command to run page urls on demand for citability ([#1657](https://github.com/adobe/spacecat-api-service/issues/1657)) ([cadfc46](https://github.com/adobe/spacecat-api-service/commit/cadfc46a3ca315932b7d71c9928fd5f779368a55))
+
+## [1.276.7](https://github.com/adobe/spacecat-api-service/compare/v1.276.6...v1.276.7) (2025-12-12)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.85.2 ([#1655](https://github.com/adobe/spacecat-api-service/issues/1655)) ([70e1217](https://github.com/adobe/spacecat-api-service/commit/70e12171b9d56c0c049fa49189f7f15058000cce))
+
+## [1.276.6](https://github.com/adobe/spacecat-api-service/compare/v1.276.5...v1.276.6) (2025-12-11)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.85.1 ([#1653](https://github.com/adobe/spacecat-api-service/issues/1653)) ([1f5e9b5](https://github.com/adobe/spacecat-api-service/commit/1f5e9b566b8b9a4a84b25d2c659805de9fea5486))
+
 ## [1.276.5](https://github.com/adobe/spacecat-api-service/compare/v1.276.4...v1.276.5) (2025-12-11)
 
 

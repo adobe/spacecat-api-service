@@ -3252,8 +3252,22 @@ describe('Suggestions Controller', () => {
       mockSuggestion.allByOpportunityId.resolves(tokowakaSuggestions);
 
       s3ClientSendStub = sandbox.stub().callsFake((command) => {
-        // Handle GetObjectCommand (fetchConfig) - return NoSuchKey to simulate no existing config
+        // Handle GetObjectCommand
         if (command.constructor.name === 'GetObjectCommand') {
+          const { Key } = command.input;
+          // If fetching metaconfig (path ends with /config without base64 path)
+          if (Key && Key.match(/^opportunities\/[^/]+\/config$/)) {
+            // Return existing metaconfig
+            return Promise.resolve({
+              Body: {
+                transformToString: async () => JSON.stringify({
+                  siteId: SITE_ID,
+                  prerender: false,
+                }),
+              },
+            });
+          }
+          // For URL configs (with base64 path), return NoSuchKey to simulate no existing config
           const error = new Error('NoSuchKey');
           error.name = 'NoSuchKey';
           return Promise.reject(error);
@@ -3315,11 +3329,12 @@ describe('Suggestions Controller', () => {
       expect(body.suggestions[1].uuid).to.equal(SUGGESTION_IDS[1]);
       expect(body.suggestions[1].statusCode).to.equal(200);
 
-      // Verify S3 was called (GET to fetch existing config, PUT to upload)
+      // Verify S3 was called (GET to fetch metaconfig and config, PUT to upload config)
       expect(s3ClientSendStub.callCount).to.be.at.least(1);
       // Verify PutObjectCommand was called for upload
+      // Both suggestions are for same URL, so only 1 config file is created
       const putObjectCalls = s3ClientSendStub.getCalls().filter((call) => call.args[0].constructor.name === 'PutObjectCommand');
-      expect(putObjectCalls).to.have.length(2);
+      expect(putObjectCalls).to.have.length(1);
 
       // Verify suggestion data was updated with deployment timestamp
       const firstSugg = tokowakaSuggestions[0];
@@ -3644,10 +3659,10 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(207);
 
-      // Find the second PutObjectCommand call
+      // Find the PutObjectCommand call (both suggestions for same URL, so 1 config file)
       const putObjectCalls = s3ClientSendStub.getCalls().filter((call) => call.args[0].constructor.name === 'PutObjectCommand');
-      expect(putObjectCalls).to.have.length.at.least(2);
-      const uploadedConfig = JSON.parse(putObjectCalls[1].args[0].input.Body);
+      expect(putObjectCalls).to.have.length(1);
+      const uploadedConfig = JSON.parse(putObjectCalls[0].args[0].input.Body);
       console.log(JSON.stringify(uploadedConfig, null, 2));
       // Validate config structure
       expect(uploadedConfig).to.have.property('url');
@@ -5196,8 +5211,22 @@ describe('Suggestions Controller', () => {
       mockSuggestion.allByOpportunityId.resolves(tokowakaSuggestions);
 
       s3ClientSendStub = sandbox.stub().callsFake((command) => {
-        // Handle GetObjectCommand (fetchConfig) - return NoSuchKey to simulate no existing config
+        // Handle GetObjectCommand
         if (command.constructor.name === 'GetObjectCommand') {
+          const { Key } = command.input;
+          // If fetching metaconfig (path ends with /config without base64 path)
+          if (Key && Key.match(/^(preview\/)?opportunities\/[^/]+\/config$/)) {
+            // Return existing metaconfig
+            return Promise.resolve({
+              Body: {
+                transformToString: async () => JSON.stringify({
+                  siteId: SITE_ID,
+                  prerender: false,
+                }),
+              },
+            });
+          }
+          // For URL configs (with base64 path), return NoSuchKey to simulate no existing config
           const error = new Error('NoSuchKey');
           error.name = 'NoSuchKey';
           return Promise.reject(error);
