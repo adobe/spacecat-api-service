@@ -1,3 +1,10 @@
+# [1.277.0](https://github.com/adobe/spacecat-api-service/compare/v1.276.7...v1.277.0) (2025-12-12)
+
+
+### Features
+
+* add slack command to run page urls on demand for citability ([#1657](https://github.com/adobe/spacecat-api-service/issues/1657)) ([cadfc46](https://github.com/adobe/spacecat-api-service/commit/cadfc46a3ca315932b7d71c9928fd5f779368a55))
+
 ## [1.276.7](https://github.com/adobe/spacecat-api-service/compare/v1.276.6...v1.276.7) (2025-12-12)
 
 
