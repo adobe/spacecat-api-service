@@ -3285,6 +3285,7 @@ describe('Suggestions Controller', () => {
         TOKOWAKA_PREVIEW_BUCKET: 'test-tokowaka-preview-bucket',
         TOKOWAKA_CDN_PROVIDER: 'test-cdn-provider',
         TOKOWAKA_EDGE_URL: 'https://edge-dev.tokowaka.now',
+        TOKOWAKA_PREVIEW_API_KEY: 'test-preview-api-key-123',
         TOKOWAKA_CDN_CONFIG: JSON.stringify({
           cloudfront: {
             distributionId: 'E123456',
@@ -3795,6 +3796,7 @@ describe('Suggestions Controller', () => {
           TOKOWAKA_PREVIEW_BUCKET: 'test-tokowaka-preview-bucket',
           TOKOWAKA_CDN_PROVIDER: 'test-cdn-provider',
           TOKOWAKA_EDGE_URL: 'https://edge-dev.tokowaka.now',
+          TOKOWAKA_PREVIEW_API_KEY: 'test-preview-api-key-123',
           TOKOWAKA_CDN_CONFIG: JSON.stringify({
             cloudfront: {
               distributionId: 'E123456',
@@ -4553,6 +4555,7 @@ describe('Suggestions Controller', () => {
         TOKOWAKA_PREVIEW_BUCKET: 'test-tokowaka-preview-bucket',
         TOKOWAKA_CDN_PROVIDER: 'test-cdn-provider',
         TOKOWAKA_EDGE_URL: 'https://edge-dev.tokowaka.now',
+        TOKOWAKA_PREVIEW_API_KEY: 'test-preview-api-key-123',
         TOKOWAKA_CDN_CONFIG: JSON.stringify({
           cloudfront: {
             distributionId: 'E123456',
@@ -4959,6 +4962,7 @@ describe('Suggestions Controller', () => {
         TOKOWAKA_PREVIEW_BUCKET: 'test-tokowaka-preview-bucket',
         TOKOWAKA_CDN_PROVIDER: 'test-cdn-provider',
         TOKOWAKA_EDGE_URL: 'https://edge-dev.tokowaka.now',
+        TOKOWAKA_PREVIEW_API_KEY: 'test-preview-api-key-123',
       };
 
       context.log = {
@@ -5244,6 +5248,7 @@ describe('Suggestions Controller', () => {
         TOKOWAKA_PREVIEW_BUCKET: 'test-tokowaka-preview-bucket',
         TOKOWAKA_CDN_PROVIDER: 'test-cdn-provider',
         TOKOWAKA_EDGE_URL: 'https://edge-dev.tokowaka.now',
+        TOKOWAKA_PREVIEW_API_KEY: 'test-preview-api-key-123',
         TOKOWAKA_CDN_CONFIG: JSON.stringify({
           cloudfront: {
             distributionId: 'E123456',
