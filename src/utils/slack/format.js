@@ -76,7 +76,7 @@ const printSiteDetails = (site, isAuditEnabled, psiStrategy = 'mobile', latestAu
     : '';
   const runPSILink = `<https://psi.experiencecloud.live?url=${site.getBaseURL()}&strategy=${psiStrategy}|Run PSI Check>`;
 
-  const auditDisabledText = !isAuditEnabled ? ':warning: Audits have been disabled for site or strategy! This is usually done when PSI audits experience errors due to the target having issues (e.g. DNS or 404).\n' : '';
+  const auditDisabledText = !isAuditEnabled ? ':warning: LHS audits have been disabled for site or strategy! This is usually done when PSI audits experience errors due to the target having issues (e.g. DNS or 404).\n' : '';
 
   return `${auditDisabledText}
       :identification_card: ${site.getId()}
