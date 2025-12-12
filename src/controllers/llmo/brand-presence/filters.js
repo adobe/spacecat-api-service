@@ -38,10 +38,16 @@ export async function getBrandPresenceFilters(context, getSiteAndValidateLlmo) {
     log.info(`[BRAND-PRESENCE-FILTERS] LLMO access validation completed for siteId: ${siteId} - duration: ${validationDuration}ms`);
 
     // Check if Aurora is configured and enabled
-    if (!aurora || !env.ENABLE_AURORA_QUERIES) {
-      log.warn(`[BRAND-PRESENCE-FILTERS] Aurora database not configured or disabled for siteId: ${siteId}`);
-      return badRequest('Aurora database is not configured or queries are not enabled', BRAND_PRESENCE_CORS_HEADERS);
+    if (!aurora) {
+      log.error(`[BRAND-PRESENCE-FILTERS] Aurora client is NOT initialized for siteId: ${siteId}`);
+      return badRequest('Aurora client is not initialized - check AURORA_HOST environment variable', BRAND_PRESENCE_CORS_HEADERS);
     }
+    if (!env.ENABLE_AURORA_QUERIES) {
+      log.error(`[BRAND-PRESENCE-FILTERS] ENABLE_AURORA_QUERIES is: ${env.ENABLE_AURORA_QUERIES} for siteId: ${siteId}`);
+      return badRequest('Aurora queries are not enabled - check ENABLE_AURORA_QUERIES environment variable', BRAND_PRESENCE_CORS_HEADERS);
+    }
+
+    log.info(`[BRAND-PRESENCE-FILTERS] Aurora check passed - aurora client exists: ${!!aurora}, ENABLE_AURORA_QUERIES: ${env.ENABLE_AURORA_QUERIES}`);
 
     let filterValues = null;
     let queryDuration = 0;
