@@ -1,3 +1,10 @@
+## [1.278.1](https://github.com/adobe/spacecat-api-service/compare/v1.278.0...v1.278.1) (2025-12-12)
+
+
+### Bug Fixes
+
+* expanded configuration of detect-bot-blocker command ([#1661](https://github.com/adobe/spacecat-api-service/issues/1661)) ([741d766](https://github.com/adobe/spacecat-api-service/commit/741d766f249ed761f3b6fcd6e75a7d29066049d0))
+
 # [1.278.0](https://github.com/adobe/spacecat-api-service/compare/v1.277.0...v1.278.0) (2025-12-12)
 
 
