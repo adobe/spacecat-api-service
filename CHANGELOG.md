@@ -1,3 +1,10 @@
+# [1.278.0](https://github.com/adobe/spacecat-api-service/compare/v1.277.0...v1.278.0) (2025-12-12)
+
+
+### Features
+
+* fastly cache invalidation in edge apis ([#1656](https://github.com/adobe/spacecat-api-service/issues/1656)) ([77d109b](https://github.com/adobe/spacecat-api-service/commit/77d109b99418e029b488bcdae12bd9eff2c4772d))
+
 # [1.277.0](https://github.com/adobe/spacecat-api-service/compare/v1.276.7...v1.277.0) (2025-12-12)
 
 
