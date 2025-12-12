@@ -20,6 +20,20 @@ const { Pool } = pg;
  */
 export class AuroraClient {
   constructor(config) {
+    // Determine SSL configuration
+    let sslConfig;
+    const isLocalhost = config.host === 'localhost' || config.host === '127.0.0.1';
+    if (config.ssl === false || isLocalhost) {
+      sslConfig = false;
+    } else if (typeof config.ssl === 'object') {
+      // If ssl is already an object, use it as-is
+      sslConfig = config.ssl;
+    } else {
+      // For Aurora/RDS, use SSL but don't verify the certificate (PoC setting)
+      // In production, you'd want to provide the RDS CA certificate
+      sslConfig = { rejectUnauthorized: false };
+    }
+
     this.config = {
       host: config.host || 'localhost',
       port: config.port || 5432,
@@ -28,9 +42,8 @@ export class AuroraClient {
       password: config.password || 'spacecatpassword',
       max: config.max || 20, // Maximum number of connections in pool
       idleTimeoutMillis: config.idleTimeoutMillis || 30000,
-      connectionTimeoutMillis: config.connectionTimeoutMillis || 2000,
-      // For Aurora, enable SSL
-      ssl: config.ssl !== undefined ? config.ssl : (config.host !== 'localhost'),
+      connectionTimeoutMillis: config.connectionTimeoutMillis || 5000, // Increased for VPC Lambda
+      ssl: sslConfig,
     };
 
     this.pool = new Pool(this.config);
@@ -52,10 +65,10 @@ export class AuroraClient {
     // Determine SSL setting: use POSTGRES_SSL for local, AURORA_SSL for Aurora
     let sslSetting;
     if (env.POSTGRES_HOST && !env.AURORA_HOST) {
-      // Using local PostgreSQL
+      // Using local PostgreSQL - SSL off by default
       sslSetting = env.POSTGRES_SSL === 'true';
     } else {
-      // Using Aurora
+      // Using Aurora - SSL on by default (set to 'false' to disable)
       sslSetting = env.AURORA_SSL !== 'false';
     }
 
@@ -66,7 +79,7 @@ export class AuroraClient {
       user: env.AURORA_USER || env.POSTGRES_USER,
       password: env.AURORA_PASSWORD || env.POSTGRES_PASSWORD,
       max: parseInt(env.AURORA_MAX_CONNECTIONS || '20', 10),
-      ssl: sslSetting,
+      ssl: sslSetting, // Constructor handles conversion to { rejectUnauthorized: false }
     });
   }
 
