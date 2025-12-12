@@ -22,7 +22,7 @@ function DetectBotBlockerCommand(context) {
   const baseCommand = BaseCommand({
     id: COMMAND_ID,
     name: 'Detect Bot Blocker',
-    description: 'Detects bot blocker technology on a website (Cloudflare, Imperva, HTTP/2 blocks).',
+    description: 'Detects bot blocker technology on a website (Cloudflare, Imperva, Akamai, Fastly, CloudFront, HTTP/2 blocks).',
     phrases: PHRASES,
     usageText: `${PHRASES[0]} {baseURL}`,
   });
@@ -44,6 +44,14 @@ function DetectBotBlockerCommand(context) {
     let typeLabel = type;
     if (type === 'cloudflare') typeLabel = 'Cloudflare';
     else if (type === 'imperva') typeLabel = 'Imperva/Incapsula';
+    else if (type === 'akamai') typeLabel = 'Akamai';
+    else if (type === 'fastly') typeLabel = 'Fastly';
+    else if (type === 'cloudfront') typeLabel = 'AWS CloudFront';
+    else if (type === 'cloudflare-allowed') typeLabel = 'Cloudflare (Allowed)';
+    else if (type === 'imperva-allowed') typeLabel = 'Imperva (Allowed)';
+    else if (type === 'akamai-allowed') typeLabel = 'Akamai (Allowed)';
+    else if (type === 'fastly-allowed') typeLabel = 'Fastly (Allowed)';
+    else if (type === 'cloudfront-allowed') typeLabel = 'AWS CloudFront (Allowed)';
     else if (type === 'http2-block') typeLabel = 'HTTP/2 Stream Error';
     else if (type === 'none') typeLabel = 'No Blocker Detected';
     else if (type === 'unknown') typeLabel = 'Unknown';
