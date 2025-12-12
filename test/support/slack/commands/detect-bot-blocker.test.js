@@ -207,4 +207,124 @@ describe('DetectBotBlockerCommand', () => {
 
     expect(slackContext.say).to.have.been.calledWithMatch(':question:');
   });
+
+  it('detects Akamai bot blocker', async () => {
+    detectBotBlockerStub.resolves({
+      crawlable: false,
+      type: 'akamai',
+      confidence: 0.99,
+    });
+
+    const command = DetectBotBlockerCommand(context);
+    await command.handleExecution(['https://example.com'], slackContext);
+
+    expect(slackContext.say).to.have.been.calledWithMatch('Akamai');
+    expect(slackContext.say).to.have.been.calledWithMatch('99%');
+    expect(slackContext.say).to.have.been.calledWithMatch(':no_entry:');
+  });
+
+  it('detects Fastly bot blocker', async () => {
+    detectBotBlockerStub.resolves({
+      crawlable: false,
+      type: 'fastly',
+      confidence: 0.99,
+    });
+
+    const command = DetectBotBlockerCommand(context);
+    await command.handleExecution(['https://example.com'], slackContext);
+
+    expect(slackContext.say).to.have.been.calledWithMatch('Fastly');
+    expect(slackContext.say).to.have.been.calledWithMatch('99%');
+    expect(slackContext.say).to.have.been.calledWithMatch(':no_entry:');
+  });
+
+  it('detects CloudFront bot blocker', async () => {
+    detectBotBlockerStub.resolves({
+      crawlable: false,
+      type: 'cloudfront',
+      confidence: 0.99,
+    });
+
+    const command = DetectBotBlockerCommand(context);
+    await command.handleExecution(['https://example.com'], slackContext);
+
+    expect(slackContext.say).to.have.been.calledWithMatch('AWS CloudFront');
+    expect(slackContext.say).to.have.been.calledWithMatch('99%');
+    expect(slackContext.say).to.have.been.calledWithMatch(':no_entry:');
+  });
+
+  it('detects Cloudflare infrastructure (allowed)', async () => {
+    detectBotBlockerStub.resolves({
+      crawlable: true,
+      type: 'cloudflare-allowed',
+      confidence: 1.0,
+    });
+
+    const command = DetectBotBlockerCommand(context);
+    await command.handleExecution(['https://example.com'], slackContext);
+
+    expect(slackContext.say).to.have.been.calledWithMatch('Cloudflare (Allowed)');
+    expect(slackContext.say).to.have.been.calledWithMatch('100%');
+    expect(slackContext.say).to.have.been.calledWithMatch(':white_check_mark:');
+  });
+
+  it('detects Imperva infrastructure (allowed)', async () => {
+    detectBotBlockerStub.resolves({
+      crawlable: true,
+      type: 'imperva-allowed',
+      confidence: 1.0,
+    });
+
+    const command = DetectBotBlockerCommand(context);
+    await command.handleExecution(['https://example.com'], slackContext);
+
+    expect(slackContext.say).to.have.been.calledWithMatch('Imperva (Allowed)');
+    expect(slackContext.say).to.have.been.calledWithMatch('100%');
+    expect(slackContext.say).to.have.been.calledWithMatch(':white_check_mark:');
+  });
+
+  it('detects Akamai infrastructure (allowed)', async () => {
+    detectBotBlockerStub.resolves({
+      crawlable: true,
+      type: 'akamai-allowed',
+      confidence: 1.0,
+    });
+
+    const command = DetectBotBlockerCommand(context);
+    await command.handleExecution(['https://example.com'], slackContext);
+
+    expect(slackContext.say).to.have.been.calledWithMatch('Akamai (Allowed)');
+    expect(slackContext.say).to.have.been.calledWithMatch('100%');
+    expect(slackContext.say).to.have.been.calledWithMatch(':white_check_mark:');
+  });
+
+  it('detects Fastly infrastructure (allowed)', async () => {
+    detectBotBlockerStub.resolves({
+      crawlable: true,
+      type: 'fastly-allowed',
+      confidence: 1.0,
+    });
+
+    const command = DetectBotBlockerCommand(context);
+    await command.handleExecution(['https://example.com'], slackContext);
+
+    expect(slackContext.say).to.have.been.calledWithMatch('Fastly (Allowed)');
+    expect(slackContext.say).to.have.been.calledWithMatch('100%');
+    expect(slackContext.say).to.have.been.calledWithMatch(':white_check_mark:');
+  });
+
+  it('detects CloudFront infrastructure (allowed)', async () => {
+    detectBotBlockerStub.resolves({
+      crawlable: true,
+      type: 'cloudfront-allowed',
+      confidence: 1.0,
+    });
+
+    const command = DetectBotBlockerCommand(context);
+    await command.handleExecution(['https://example.com'], slackContext);
+
+    expect(slackContext.say).to.have.been.calledWithMatch('AWS CloudFront (Allowed)');
+    expect(slackContext.say).to.have.been.calledWithMatch('100%');
+    expect(slackContext.say).to.have.been.calledWithMatch(':white_check_mark:');
+  });
 });
