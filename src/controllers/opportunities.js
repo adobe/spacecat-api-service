@@ -29,6 +29,7 @@ import { ValidationError } from '@adobe/spacecat-shared-data-access';
 import { OpportunityDto } from '../dto/opportunity.js';
 import { OpportunitySummaryDto } from '../dto/opportunity-summary.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { OPPORTUNITY_TAG_MAPPINGS } from '../utils/constants.js';
 
 /**
  * Opportunities controller.
@@ -52,6 +53,16 @@ function OpportunitiesController(ctx) {
   const { Site } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
+
+  /**
+   * Gets tags for an opportunity type
+   * @param {string} opportunityType - The type of opportunity
+   * @returns {string[]} Array of tags for the opportunity type
+   */
+  function getTagsForOpportunityType(opportunityType) {
+    const typeSpecificTags = OPPORTUNITY_TAG_MAPPINGS[opportunityType] || [];
+    return [...typeSpecificTags];
+  }
 
   /**
    * returns a response for a data access error.
@@ -182,6 +193,11 @@ function OpportunitiesController(ctx) {
     }
 
     context.data.siteId = siteId;
+
+    // Get type-specific tags based on opportunity type
+    const opportunityType = context.data.type;
+    context.data.tags = getTagsForOpportunityType(opportunityType);
+
     try {
       const oppty = await Opportunity.create(context.data);
       return createResponse(OpportunityDto.toJSON(oppty), 201);
@@ -259,9 +275,16 @@ function OpportunitiesController(ctx) {
         hasUpdates = true;
         opportunity.setGuidance(guidance);
       }
-      if (tags && !arrayEquals(tags, opportunity.getTags())) {
-        hasUpdates = true;
-        opportunity.setTags(tags);
+      if (tags) {
+        // Get type-specific tags based on opportunity type
+        const opportunityType = opportunity.getType();
+        const typeSpecificTags = getTagsForOpportunityType(opportunityType);
+
+        // Use only type-specific tags
+        if (!arrayEquals(typeSpecificTags, opportunity.getTags())) {
+          hasUpdates = true;
+          opportunity.setTags(typeSpecificTags);
+        }
       }
       if (hasUpdates) {
         opportunity.setUpdatedBy(profile.email || 'system');
