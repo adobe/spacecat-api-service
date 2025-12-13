@@ -158,111 +158,103 @@ export async function getBrandPresenceStats(context, getSiteAndValidateLlmo) {
     try {
       const queryStart = Date.now();
 
-      // Optimized single query using materialized view brand_presence_prompts_by_date
-      // This combines all 4 previous queries into one efficient query
-      const combinedQuery = `
-        WITH filtered_data AS (
-          -- Apply all filters to the materialized view
+      // Query 1: Calculate overall visibility score
+      // Group by unique prompt (prompt|region|topics) and average, then average all prompts
+      const visibilityScoreQuery = `
+        SELECT ROUND(AVG(avg_score)::numeric, 0) as visibility_score
+        FROM (
+          SELECT AVG(visibility_score) as avg_score
+          FROM public.brand_presence
+          WHERE ${whereClause}
+            AND visibility_score IS NOT NULL
+          GROUP BY prompt, region, topics
+        ) as unique_prompts
+      `;
+
+      // Query 2: Count distinct brand mentions
+      // Unique prompt = prompt + region + topics
+      const brandMentionsQuery = `
+        SELECT COUNT(DISTINCT (prompt || '|' || COALESCE(region, 'Unknown') || '|' || COALESCE(topics, 'Unknown'))) as brand_mentions
+        FROM public.brand_presence
+        WHERE ${whereClause}
+          AND mentions = true
+      `;
+
+      // Query 3: Count distinct citations
+      // Unique prompt = prompt + region + topics
+      const citationsQuery = `
+        SELECT COUNT(DISTINCT (prompt || '|' || COALESCE(region, 'Unknown') || '|' || COALESCE(topics, 'Unknown'))) as citations
+        FROM public.brand_presence
+        WHERE ${whereClause}
+          AND citations = true
+      `;
+
+      // Query 4: Get weekly breakdown for mini charts
+      // Extract ISO week from date and calculate metrics per week
+      const weeklyDataQuery = `
+        WITH weekly_stats AS (
           SELECT
-            date,
+            TO_CHAR(date, 'IYYY-"W"IW') as week,
             prompt,
             region,
             topics,
-            avg_visibility_score,
-            mentions_count,
-            citations_count
-          FROM brand_presence_prompts_by_date
+            visibility_score,
+            mentions,
+            citations
+          FROM public.brand_presence
           WHERE ${whereClause}
-        ),
-        unique_prompts AS (
-          -- Calculate unique prompt metrics (prompt|region|topics)
-          -- Group by unique prompt to get average visibility and presence of mentions/citations
-          SELECT
-            prompt || '|' || COALESCE(region, 'Unknown') || '|' || COALESCE(topics, 'Unknown') AS unique_prompt,
-            AVG(avg_visibility_score) AS avg_visibility,
-            BOOL_OR(mentions_count > 0) AS has_mentions,
-            BOOL_OR(citations_count > 0) AS has_citations
-          FROM filtered_data
-          GROUP BY prompt, region, topics
-        ),
-        weekly_breakdown AS (
-          -- Calculate weekly metrics per unique prompt
-          SELECT
-            TO_CHAR(date, 'IYYY-"W"IW') AS week,
-            prompt || '|' || COALESCE(region, 'Unknown') || '|' || COALESCE(topics, 'Unknown') AS unique_prompt,
-            AVG(avg_visibility_score) AS avg_visibility,
-            BOOL_OR(mentions_count > 0) AS has_mentions,
-            BOOL_OR(citations_count > 0) AS has_citations
-          FROM filtered_data
-          GROUP BY week, prompt, region, topics
-        ),
-        weekly_aggregated AS (
-          -- Aggregate weekly data across all unique prompts
-          SELECT
-            week,
-            ROUND(AVG(avg_visibility)::numeric, 0) AS visibility_score,
-            COUNT(DISTINCT CASE WHEN has_mentions THEN unique_prompt END) AS mentions,
-            COUNT(DISTINCT CASE WHEN has_citations THEN unique_prompt END) AS citations
-          FROM weekly_breakdown
-          GROUP BY week
-        ),
-        overall_stats AS (
-          -- Calculate overall stats from unique prompts
-          SELECT
-            ROUND(AVG(avg_visibility)::numeric, 0) AS visibility_score,
-            COUNT(*) FILTER (WHERE has_mentions) AS brand_mentions,
-            COUNT(*) FILTER (WHERE has_citations) AS citations
-          FROM unique_prompts
         )
         SELECT
-          -- Overall metrics
-          (SELECT visibility_score FROM overall_stats) AS visibility_score,
-          (SELECT brand_mentions FROM overall_stats) AS brand_mentions,
-          (SELECT citations FROM overall_stats) AS citations,
-          -- Weekly breakdown as JSON array
-          COALESCE(
-            (SELECT JSON_AGG(
-              JSON_BUILD_OBJECT(
-                'week', week,
-                'visibilityScore', visibility_score,
-                'mentions', mentions,
-                'citations', citations
-              ) ORDER BY week
-            ) FROM weekly_aggregated),
-            '[]'::json
-          ) AS weekly_data;
+          week,
+          ROUND(AVG(avg_visibility)::numeric, 0) as visibility_score,
+          COUNT(DISTINCT CASE WHEN mentions = true THEN (prompt || '|' || COALESCE(region, 'Unknown') || '|' || COALESCE(topics, 'Unknown')) END) as mentions,
+          COUNT(DISTINCT CASE WHEN citations = true THEN (prompt || '|' || COALESCE(region, 'Unknown') || '|' || COALESCE(topics, 'Unknown')) END) as citations
+        FROM (
+          SELECT
+            week,
+            prompt,
+            region,
+            topics,
+            AVG(visibility_score) as avg_visibility,
+            BOOL_OR(mentions) as mentions,
+            BOOL_OR(citations) as citations
+          FROM weekly_stats
+          WHERE visibility_score IS NOT NULL
+          GROUP BY week, prompt, region, topics
+        ) as unique_prompts_per_week
+        GROUP BY week
+        ORDER BY week ASC
       `;
 
-      log.info(`[BRAND-PRESENCE-STATS] Combined query: ${combinedQuery} with params: ${JSON.stringify(params)}`);
+      // Execute all queries in parallel
+      const [
+        visibilityScoreResult,
+        brandMentionsResult,
+        citationsResult,
+        weeklyDataResult,
+      ] = await Promise.all([
+        aurora.queryOne(visibilityScoreQuery, params),
+        aurora.queryOne(brandMentionsQuery, params),
+        aurora.queryOne(citationsQuery, params),
+        aurora.query(weeklyDataQuery, params),
+      ]);
 
-      const queryResult = await aurora.queryOne(combinedQuery, params);
       const queryDuration = Date.now() - queryStart;
 
       // Extract stats
       const stats = {
-        visibilityScore: parseInt(queryResult?.visibility_score || 0, 10),
-        brandMentions: parseInt(queryResult?.brand_mentions || 0, 10),
-        citations: parseInt(queryResult?.citations || 0, 10),
+        visibilityScore: parseInt(visibilityScoreResult?.visibility_score || 0, 10),
+        brandMentions: parseInt(brandMentionsResult?.brand_mentions || 0, 10),
+        citations: parseInt(citationsResult?.citations || 0, 10),
       };
 
-      // Parse weekly data from JSON array
-      let weeklyData = [];
-      if (queryResult?.weekly_data) {
-        try {
-          const parsedWeekly = Array.isArray(queryResult.weekly_data)
-            ? queryResult.weekly_data
-            : JSON.parse(queryResult.weekly_data);
-          weeklyData = parsedWeekly.map((row) => ({
-            week: row.week,
-            visibilityScore: parseInt(row.visibilityScore || 0, 10),
-            mentions: parseInt(row.mentions || 0, 10),
-            citations: parseInt(row.citations || 0, 10),
-          }));
-        } catch (parseError) {
-          log.warn(`[BRAND-PRESENCE-STATS] Failed to parse weekly_data JSON for siteId: ${siteId} - error: ${parseError.message}`);
-          weeklyData = [];
-        }
-      }
+      // Format weekly data
+      const weeklyData = weeklyDataResult.map((row) => ({
+        week: row.week,
+        visibilityScore: parseInt(row.visibility_score || 0, 10),
+        mentions: parseInt(row.mentions || 0, 10),
+        citations: parseInt(row.citations || 0, 10),
+      }));
 
       // Calculate WoW trends
       const wowTrends = {
