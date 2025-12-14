@@ -20,6 +20,7 @@ const SUPPORTED_AUDIT_TYPES = [
   'broken-internal-links',
   'broken-backlinks',
   'meta-tags',
+  'alt-text',
 ];
 
 /**
@@ -38,6 +39,7 @@ const SUPPORTED_AUDIT_TYPES = [
  * - broken-internal-links
  * - broken-backlinks
  * - meta-tags
+ * - alt-text
  *
  * @param {Object} context - The context object.
  * @returns {EnrichOpportunityCommand} The EnrichOpportunityCommand object.
