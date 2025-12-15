@@ -11,7 +11,6 @@
  */
 
 import { ok, badRequest } from '@adobe/spacecat-shared-http-utils';
-import { BRAND_PRESENCE_CORS_HEADERS } from './cors.js';
 
 /**
  * Calculate Week-over-Week trend from weekly data
@@ -487,7 +486,7 @@ export async function getBrandPresenceStats(context, getSiteAndValidateLlmo) {
       });
     } catch (dbError) {
       log.error(`[BRAND-PRESENCE-STATS] Database query failed for siteId: ${siteId} - error: ${dbError.message}, stack: ${dbError.stack}`);
-      return badRequest(`Failed to fetch brand presence stats: ${dbError.message}`, BRAND_PRESENCE_CORS_HEADERS);
+      return badRequest(`Failed to fetch brand presence stats: ${dbError.message}`);
     }
   } catch (error) {
     const totalDuration = Date.now() - startTime;
