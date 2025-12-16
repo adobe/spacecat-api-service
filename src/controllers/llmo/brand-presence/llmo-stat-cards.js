@@ -235,7 +235,7 @@ export async function getBrandPresenceStats(context, getSiteAndValidateLlmo) {
             SUM(avg_visibility_score * executions_count) / NULLIF(SUM(executions_count), 0) as avg_score
           FROM brand_presence_prompts_by_date
           WHERE ${singleWhereClause}
-          GROUP BY 
+          GROUP BY
             COALESCE(NULLIF(prompt, ''), 'Unknown'),
             COALESCE(NULLIF(region, ''), 'Unknown'),
             COALESCE(NULLIF(topics, ''), 'Unknown')
@@ -269,7 +269,7 @@ export async function getBrandPresenceStats(context, getSiteAndValidateLlmo) {
               SUM(citations_count) as total_citations
             FROM brand_presence_prompts_by_date
             WHERE ${singleWhereClause}
-            GROUP BY 
+            GROUP BY
               COALESCE(NULLIF(prompt, ''), 'Unknown'),
               COALESCE(NULLIF(region, ''), 'Unknown'),
               COALESCE(NULLIF(topics, ''), 'Unknown')
@@ -288,12 +288,12 @@ export async function getBrandPresenceStats(context, getSiteAndValidateLlmo) {
               BOOL_OR(bp.mentions) as mentions,
               BOOL_OR(bps.id IS NOT NULL) as citations
             FROM public.brand_presence bp
-            LEFT JOIN public.brand_presence_sources bps 
-              ON bp.id = bps.brand_presence_id 
+            LEFT JOIN public.brand_presence_sources bps
+              ON bp.id = bps.brand_presence_id
               AND bps.is_owned = true
               AND bps.site_id = $1
             WHERE ${joinedWhereClause}
-            GROUP BY 
+            GROUP BY
               COALESCE(NULLIF(bp.prompt, ''), 'Unknown'),
               COALESCE(NULLIF(bp.region, ''), 'Unknown'),
               COALESCE(NULLIF(bp.topics, ''), 'Unknown')
@@ -401,16 +401,52 @@ export async function getBrandPresenceStats(context, getSiteAndValidateLlmo) {
         weeklyDataParams = joinedParams;
       }
 
-      // Execute queries in parallel
-      const queries = [
-        aurora.queryOne(visibilityScoreQuery, singleParams),
-        aurora.queryOne(mentionsCitationsQuery, mentionsCitationsParams),
-        aurora.query(weeklyDataQuery, weeklyDataParams),
+      // Execute queries in parallel with logging
+      const queryMetadata = [
+        {
+          name: 'visibilityScore',
+          sql: visibilityScoreQuery,
+          params: singleParams,
+          promise: aurora.queryOne(visibilityScoreQuery, singleParams),
+        },
+        {
+          name: 'mentionsCitations',
+          sql: mentionsCitationsQuery,
+          params: mentionsCitationsParams,
+          promise: aurora.queryOne(mentionsCitationsQuery, mentionsCitationsParams),
+        },
+        {
+          name: 'weeklyData',
+          sql: weeklyDataQuery,
+          params: weeklyDataParams,
+          promise: aurora.query(weeklyDataQuery, weeklyDataParams),
+        },
       ];
 
       if (useFastMetrics && weeklyVisibilityQuery) {
-        queries.push(aurora.query(weeklyVisibilityQuery, singleParams));
+        queryMetadata.push({
+          name: 'weeklyVisibility',
+          sql: weeklyVisibilityQuery,
+          params: singleParams,
+          promise: aurora.query(weeklyVisibilityQuery, singleParams),
+        });
       }
+
+      // Wrap each query to log execution time
+      const queries = queryMetadata.map((meta) => {
+        const queryStartTime = Date.now();
+        return meta.promise
+          .then((result) => {
+            const duration = Date.now() - queryStartTime;
+            log.info(`[BRAND-PRESENCE-STATS] Query "${meta.name}" completed - duration: ${duration}ms, sql: ${meta.sql}, params: ${JSON.stringify(meta.params)}`);
+            return result;
+          })
+          .catch((error) => {
+            const duration = Date.now() - queryStartTime;
+            log.error(`[BRAND-PRESENCE-STATS] Query "${meta.name}" failed - duration: ${duration}ms, sql: ${meta.sql}, params: ${JSON.stringify(meta.params)}, error: ${error.message}`);
+            throw error;
+          });
+      });
 
       const results = await Promise.all(queries);
 
