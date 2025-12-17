@@ -56,6 +56,7 @@ describe('TopPaidOpportunitiesController', () => {
 
     mockSuggestion = {
       allByOpportunityId: sandbox.stub().resolves([]),
+      allByOpportunityIdAndStatus: sandbox.stub().resolves([]),
     };
 
     mockSite = {
@@ -180,7 +181,7 @@ describe('TopPaidOpportunitiesController', () => {
         .withArgs(SITE_ID, 'NEW').resolves([validOppty, zeroValueOppty])
         .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
 
-      mockSuggestion.allByOpportunityId.resolves([]);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves([]);
 
       const response = await topPaidController.getTopPaidOpportunities({
         params: { siteId: SITE_ID },
@@ -216,7 +217,7 @@ describe('TopPaidOpportunitiesController', () => {
         },
       ];
 
-      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
 
       const response = await topPaidController.getTopPaidOpportunities({
         params: { siteId: SITE_ID },
@@ -246,7 +247,7 @@ describe('TopPaidOpportunitiesController', () => {
         .withArgs(SITE_ID, 'NEW').resolves([consentBannerOppty])
         .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
 
-      mockSuggestion.allByOpportunityId.resolves([]);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves([]);
 
       const response = await topPaidController.getTopPaidOpportunities({
         params: { siteId: SITE_ID },
@@ -280,7 +281,7 @@ describe('TopPaidOpportunitiesController', () => {
         .withArgs(SITE_ID, 'NEW').resolves([noctaOppty])
         .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
 
-      mockSuggestion.allByOpportunityId.resolves([]);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves([]);
 
       const response = await topPaidController.getTopPaidOpportunities({
         params: { siteId: SITE_ID },
@@ -318,7 +319,7 @@ describe('TopPaidOpportunitiesController', () => {
         },
       ];
 
-      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
 
       const mockAthenaClient = {
         query: sandbox.stub().resolves([
@@ -364,7 +365,7 @@ describe('TopPaidOpportunitiesController', () => {
         .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
         .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
 
-      mockSuggestion.allByOpportunityId.resolves([]);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves([]);
 
       // Athena returns empty array (no poor CWV URLs)
       const mockAthenaClient = {
@@ -407,7 +408,7 @@ describe('TopPaidOpportunitiesController', () => {
         },
       ];
 
-      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
 
       const mockAthenaClient = {
         query: sandbox.stub().resolves([
@@ -461,7 +462,7 @@ describe('TopPaidOpportunitiesController', () => {
         },
       ];
 
-      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
 
       const mockAthenaClient = {
         query: sandbox.stub().resolves([
@@ -520,7 +521,7 @@ describe('TopPaidOpportunitiesController', () => {
         },
       ];
 
-      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
 
       const mockAthenaClient = {
         query: sandbox.stub().resolves([
@@ -543,7 +544,7 @@ describe('TopPaidOpportunitiesController', () => {
       });
 
       // Should only be called once during matching, not again during DTO conversion
-      expect(mockSuggestion.allByOpportunityId.callCount).to.equal(1);
+      expect(mockSuggestion.allByOpportunityIdAndStatus.callCount).to.equal(1);
     });
 
     it('continues without CWV filtering when Athena query fails', async () => {
@@ -573,7 +574,7 @@ describe('TopPaidOpportunitiesController', () => {
         .withArgs(SITE_ID, 'NEW').resolves([cwvOppty, paidOppty])
         .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
 
-      mockSuggestion.allByOpportunityId.resolves([]);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves([]);
 
       const mockAthenaClient = {
         query: sandbox.stub().rejects(new Error('Athena query failed')),
@@ -631,7 +632,7 @@ describe('TopPaidOpportunitiesController', () => {
         .withArgs(SITE_ID, 'NEW').resolves([oppty1, oppty2, oppty3])
         .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
 
-      mockSuggestion.allByOpportunityId.resolves([]);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves([]);
 
       const response = await topPaidController.getTopPaidOpportunities({
         params: { siteId: SITE_ID },
@@ -670,7 +671,7 @@ describe('TopPaidOpportunitiesController', () => {
         },
       ];
 
-      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
 
       const mockAthenaClient = {
         query: sandbox.stub().resolves([
@@ -720,7 +721,7 @@ describe('TopPaidOpportunitiesController', () => {
         },
       ];
 
-      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
 
       const mockAthenaClient = {
         query: sandbox.stub().resolves([
@@ -774,7 +775,7 @@ describe('TopPaidOpportunitiesController', () => {
         .withArgs(SITE_ID, 'NEW').resolves([validOppty, noDescOppty])
         .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
 
-      mockSuggestion.allByOpportunityId.resolves([]);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves([]);
 
       const response = await topPaidController.getTopPaidOpportunities({
         params: { siteId: SITE_ID },
@@ -810,7 +811,7 @@ describe('TopPaidOpportunitiesController', () => {
         },
       ];
 
-      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
 
       const mockAthenaClient = {
         query: sandbox.stub().resolves([
@@ -869,7 +870,7 @@ describe('TopPaidOpportunitiesController', () => {
         },
       ];
 
-      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
 
       const mockAthenaClient = {
         query: sandbox.stub().resolves([
@@ -931,7 +932,7 @@ describe('TopPaidOpportunitiesController', () => {
         .withArgs(SITE_ID, 'NEW').resolves([validOppty, reportOppty])
         .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
 
-      mockSuggestion.allByOpportunityId.resolves([]);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves([]);
 
       const response = await topPaidController.getTopPaidOpportunities({
         params: { siteId: SITE_ID },
@@ -960,7 +961,7 @@ describe('TopPaidOpportunitiesController', () => {
         .withArgs(SITE_ID, 'NEW').resolves([opptyWithNullTags])
         .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
 
-      mockSuggestion.allByOpportunityId.resolves([]);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves([]);
 
       const response = await topPaidController.getTopPaidOpportunities({
         params: { siteId: SITE_ID },
@@ -988,7 +989,7 @@ describe('TopPaidOpportunitiesController', () => {
         .withArgs(SITE_ID, 'NEW').resolves([opptyWithNullData])
         .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
 
-      mockSuggestion.allByOpportunityId.resolves([]);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves([]);
 
       const response = await topPaidController.getTopPaidOpportunities({
         params: { siteId: SITE_ID },
@@ -1023,7 +1024,7 @@ describe('TopPaidOpportunitiesController', () => {
         },
       ];
 
-      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
 
       const mockAthenaClient = {
         query: sandbox.stub().resolves([
@@ -1071,7 +1072,7 @@ describe('TopPaidOpportunitiesController', () => {
         },
       ];
 
-      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
 
       const mockAthenaClient = {
         query: sandbox.stub().resolves([
@@ -1119,7 +1120,7 @@ describe('TopPaidOpportunitiesController', () => {
         },
       ];
 
-      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
 
       const mockAthenaClient = {
         query: sandbox.stub().resolves([
@@ -1169,7 +1170,7 @@ describe('TopPaidOpportunitiesController', () => {
         },
       ];
 
-      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
 
       const mockAthenaClient = {
         query: sandbox.stub().resolves([
@@ -1225,7 +1226,7 @@ describe('TopPaidOpportunitiesController', () => {
         },
       ];
 
-      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
 
       const mockAthenaClient = {
         query: sandbox.stub().resolves([
@@ -1277,7 +1278,7 @@ describe('TopPaidOpportunitiesController', () => {
         },
       ];
 
-      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
 
       const mockAthenaClient = {
         query: sandbox.stub().resolves([
@@ -1331,7 +1332,7 @@ describe('TopPaidOpportunitiesController', () => {
         },
       ];
 
-      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
 
       const mockAthenaClient = {
         query: sandbox.stub().resolves([
@@ -1393,7 +1394,7 @@ describe('TopPaidOpportunitiesController', () => {
         },
       ];
 
-      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
 
       const mockAthenaClient = {
         query: sandbox.stub().resolves([
@@ -1443,7 +1444,7 @@ describe('TopPaidOpportunitiesController', () => {
         },
       ];
 
-      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
 
       const mockAthenaClient = {
         query: sandbox.stub().resolves([
@@ -1491,7 +1492,7 @@ describe('TopPaidOpportunitiesController', () => {
         },
       ];
 
-      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
 
       const mockAthenaClient = {
         query: sandbox.stub().resolves([
@@ -1539,7 +1540,7 @@ describe('TopPaidOpportunitiesController', () => {
         },
       ];
 
-      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
 
       const mockAthenaClient = {
         query: sandbox.stub().resolves([

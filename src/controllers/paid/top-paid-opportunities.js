@@ -159,7 +159,7 @@ async function matchCwvOpportunitiesWithUrls(
   });
 
   const suggestionsPromises = cwvOpportunities.map(
-    (opportunity) => Suggestion.allByOpportunityId(opportunity.getId()),
+    (opportunity) => Suggestion.allByOpportunityIdAndStatus(opportunity.getId(), 'NEW'),
   );
   const allSuggestions = await Promise.all(suggestionsPromises);
 
@@ -190,7 +190,7 @@ async function matchCwvOpportunitiesWithUrls(
     });
 
     if (matchedPaidUrlsMap.size > 0) {
-      // Sort by pageviews descending and limit to topUrlsLimit
+      // Sort by pageviews descending
       const urlsWithPageviews = Array.from(matchedPaidUrlsMap.entries())
         .map(([url, pageviews]) => ({ url, pageviews }))
         .sort((a, b) => b.pageviews - a.pageviews);
@@ -350,8 +350,10 @@ function TopPaidOpportunitiesController(ctx, env = {}) {
       filteredOpportunities.map(async (opportunity) => {
         const opportunityId = opportunity.getId();
         const paidUrlsData = paidUrlsMap.get(opportunityId);
-        // Only fetch suggestions if not a CWV opportunity (no paidUrlsData)
-        const suggestions = paidUrlsData ? [] : await Suggestion.allByOpportunityId(opportunityId);
+        // Only fetch NEW suggestions if not a CWV opportunity (no paidUrlsData)
+        const suggestions = paidUrlsData
+          ? []
+          : await Suggestion.allByOpportunityIdAndStatus(opportunityId, 'NEW');
         return OpportunitySummaryDto.toJSON(opportunity, suggestions, paidUrlsData, TOP_URLS_LIMIT);
       }),
     );
