@@ -93,7 +93,7 @@ async function fetchPaidTrafficData(athenaClient, siteId, baseURL, temporal, con
   return results.map((row) => TrafficDataWithCWVDto.toJSON(row, thresholdConfig, baseURL));
 }
 
-function filterHighTrafficPoorCwv(trafficData, pageViewThreshold, topUrlsLimit, log) {
+function filterHighTrafficPoorCwv(trafficData, pageViewThreshold, log) {
   const filtered = trafficData.filter((item) => {
     const pageViews = item.pageviews;
     const cwvScore = item.overall_cwv_score;
@@ -106,8 +106,7 @@ function filterHighTrafficPoorCwv(trafficData, pageViewThreshold, topUrlsLimit, 
   }
 
   const sorted = filtered
-    .sort((a, b) => (b.pageviews) - (a.pageviews))
-    .slice(0, topUrlsLimit);
+    .sort((a, b) => (b.pageviews) - (a.pageviews));
 
   log.info(`Found ${sorted.length} high-traffic paid URLs with poor or needs-improvement CWV (pageviews >= ${pageViewThreshold})`);
 
@@ -137,7 +136,12 @@ function normalizeUrl(url) {
     .replace(/\/$/, '');
 }
 
-async function matchCwvOpportunitiesWithUrls(cwvOpportunities, topPoorCwvData, Suggestion, log) {
+async function matchCwvOpportunitiesWithUrls(
+  cwvOpportunities,
+  topPoorCwvData,
+  Suggestion,
+  log,
+) {
   if (cwvOpportunities.length === 0 || topPoorCwvData.length === 0) {
     log.info(`No matching needed: cwvOpportunities=${cwvOpportunities.length}, topPoorCwvData=${topPoorCwvData.length}`);
     return { matched: [], paidUrlsMap: new Map() };
@@ -186,7 +190,7 @@ async function matchCwvOpportunitiesWithUrls(cwvOpportunities, topPoorCwvData, S
     });
 
     if (matchedPaidUrlsMap.size > 0) {
-      // Sort by pageviews descending
+      // Sort by pageviews descending and limit to topUrlsLimit
       const urlsWithPageviews = Array.from(matchedPaidUrlsMap.entries())
         .map(([url, pageviews]) => ({ url, pageviews }))
         .sort((a, b) => b.pageviews - a.pageviews);
@@ -312,7 +316,6 @@ function TopPaidOpportunitiesController(ctx, env = {}) {
         topPoorCwvData = filterHighTrafficPoorCwv(
           trafficData,
           PAGE_VIEW_THRESHOLD,
-          TOP_URLS_LIMIT,
           log,
         );
       } catch (error) {
@@ -349,7 +352,7 @@ function TopPaidOpportunitiesController(ctx, env = {}) {
         const paidUrlsData = paidUrlsMap.get(opportunityId);
         // Only fetch suggestions if not a CWV opportunity (no paidUrlsData)
         const suggestions = paidUrlsData ? [] : await Suggestion.allByOpportunityId(opportunityId);
-        return OpportunitySummaryDto.toJSON(opportunity, suggestions, paidUrlsData);
+        return OpportunitySummaryDto.toJSON(opportunity, suggestions, paidUrlsData, TOP_URLS_LIMIT);
       }),
     );
 

@@ -35,7 +35,7 @@ export const OpportunitySummaryDto = {
    *  projectedTrafficValue: number
    * }} JSON object.
    */
-  toJSON: (opportunity, suggestions = [], paidUrlsData = null) => {
+  toJSON: (opportunity, suggestions = [], paidUrlsData = null, topUrlsLimit = 20) => {
     // Extract unique URLs from suggestions
     const urls = new Set();
     let totalPageViews = 0;
@@ -82,7 +82,7 @@ export const OpportunitySummaryDto = {
 
     return {
       opportunityId: opportunity.getId(),
-      urls: Array.from(urls).slice(0, 10),
+      urls: Array.from(urls).slice(0, topUrlsLimit),
       name: opportunity.getTitle(),
       type: null,
       description: null,
