@@ -1095,6 +1095,62 @@ describe('TopPaidOpportunitiesController', () => {
 
       expect(response.status).to.equal(200);
     });
+
+    it('uses default PAGE_VIEW_THRESHOLD when PAID_DATA_THRESHOLD is not set', async () => {
+      const cwvOppty = {
+        getId: () => 'cwv-1',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'CWV Opportunity',
+        getDescription: () => 'Fix CWV issues',
+        getType: () => 'cwv',
+        getStatus: () => 'NEW',
+        getTags: () => [],
+        getData: () => ({ projectedTrafficLost: 3000, projectedTrafficValue: 10000 }),
+      };
+
+      mockOpportunity.allBySiteIdAndStatus
+        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
+        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+
+      const mockSuggestions = [
+        {
+          getData: () => ({ url: 'https://example.com/page1' }),
+          getRank: () => 0,
+        },
+      ];
+
+      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+
+      const mockAthenaClient = {
+        query: sandbox.stub().resolves([
+          {
+            url: 'https://example.com/page1',
+            pageviews: '1500',
+            overall_cwv_score: 'poor',
+            lcp_score: 'poor',
+            inp_score: 'good',
+            cls_score: 'good',
+          },
+        ]),
+      };
+
+      AWSAthenaClient.fromContext.returns(mockAthenaClient);
+
+      const envWithoutThreshold = {
+        ...mockEnv,
+        PAID_DATA_THRESHOLD: undefined,
+      };
+
+      const controller = TopPaidOpportunitiesController(mockContext, envWithoutThreshold);
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+        data: { year: 2025, week: 1 },
+      });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      expect(opportunities).to.be.an('array').with.lengthOf(1);
+    });
   });
 
   describe('URL normalization for matching', () => {

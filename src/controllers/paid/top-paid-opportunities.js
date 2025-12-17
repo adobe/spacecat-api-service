@@ -151,7 +151,7 @@ async function matchCwvOpportunitiesWithUrls(cwvOpportunities, topPoorCwvData, S
   const normalizedUrlToPageViewsMap = new Map();
   topPoorCwvData.forEach((item) => {
     const normalized = normalizeUrl(item.url);
-    const pageviews = parseInt(item.pageviews, 10) || 0;
+    const pageviews = parseInt(item.pageviews, 10);
     normalizedUrlToPageViewsMap.set(normalized, pageviews);
   });
 
@@ -173,7 +173,7 @@ async function matchCwvOpportunitiesWithUrls(cwvOpportunities, topPoorCwvData, S
     const urlFields = ['url', 'url_from', 'urlFrom', 'url_to', 'urlTo'];
 
     suggestions.forEach((suggestion) => {
-      const suggestionData = suggestion.getData() || {};
+      const suggestionData = suggestion.getData();
       urlFields.forEach((field) => {
         if (suggestionData[field]) {
           const normalized = normalizeUrl(suggestionData[field]);
@@ -295,7 +295,7 @@ function TopPaidOpportunitiesController(ctx, env = {}) {
           {
             rumMetricsDatabase: env.RUM_METRICS_DATABASE,
             rumMetricsCompactTable: env.RUM_METRICS_COMPACT_TABLE,
-            pageViewThreshold: env.PAID_DATA_THRESHOLD ?? 1000,
+            pageViewThreshold: PAGE_VIEW_THRESHOLD,
             thresholdConfig,
           },
           log,
