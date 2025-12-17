@@ -146,12 +146,12 @@ async function matchCwvOpportunitiesWithUrls(cwvOpportunities, topPoorCwvData, S
   const topPoorCwvUrls = topPoorCwvData.map((item) => item.url);
   log.info(`Matching ${cwvOpportunities.length} CWV opportunities against ${topPoorCwvUrls.length} poor CWV URLs from paid traffic`);
 
-  // Create a map of normalized URL -> pageviews for fast lookup
-  const normalizedUrlToPageViewsMap = new Map();
+  // Create a map of normalized URL -> { url, pageviews } for fast lookup
+  const normalizedUrlToDataMap = new Map();
   topPoorCwvData.forEach((item) => {
     const normalized = normalizeUrl(item.url);
     const pageviews = parseInt(item.pageviews, 10);
-    normalizedUrlToPageViewsMap.set(normalized, pageviews);
+    normalizedUrlToDataMap.set(normalized, { url: item.url, pageviews });
   });
 
   const suggestionsPromises = cwvOpportunities.map(
@@ -166,26 +166,35 @@ async function matchCwvOpportunitiesWithUrls(cwvOpportunities, topPoorCwvData, S
     const suggestions = allSuggestions[index];
     const opportunityId = opportunity.getId();
 
-    // Collect all URLs from suggestions that match poor CWV from paid traffic
-    const paidUrls = [];
-    let totalPageViews = 0;
+    // Collect all URLs from paid traffic that match NEW suggestions only
+    const matchedPaidUrlsMap = new Map();
     const urlFields = ['url', 'url_from', 'urlFrom', 'url_to', 'urlTo'];
 
     suggestions.forEach((suggestion) => {
       const suggestionData = suggestion.getData();
       urlFields.forEach((field) => {
         if (suggestionData[field]) {
-          const normalized = normalizeUrl(suggestionData[field]);
-          if (normalizedUrlToPageViewsMap.has(normalized)) {
-            paidUrls.push(suggestionData[field]);
-            totalPageViews += normalizedUrlToPageViewsMap.get(normalized);
+          const suggestionUrl = suggestionData[field];
+          const normalized = normalizeUrl(suggestionUrl);
+          if (normalizedUrlToDataMap.has(normalized)) {
+            const paidUrlData = normalizedUrlToDataMap.get(normalized);
+            // Store suggestion URL with pageviews from paid traffic
+            matchedPaidUrlsMap.set(suggestionUrl, paidUrlData.pageviews);
           }
         }
       });
     });
 
-    if (paidUrls.length > 0) {
-      paidUrlsMap.set(opportunityId, { urls: paidUrls, pageViews: totalPageViews });
+    if (matchedPaidUrlsMap.size > 0) {
+      // Sort by pageviews descending
+      const urlsWithPageviews = Array.from(matchedPaidUrlsMap.entries())
+        .map(([url, pageviews]) => ({ url, pageviews }))
+        .sort((a, b) => b.pageviews - a.pageviews);
+
+      const sortedUrls = urlsWithPageviews.map((item) => item.url);
+      const totalPageViews = urlsWithPageviews.reduce((sum, item) => sum + item.pageviews, 0);
+
+      paidUrlsMap.set(opportunityId, { urls: sortedUrls, pageViews: totalPageViews });
       matched.push(opportunity);
     }
   });

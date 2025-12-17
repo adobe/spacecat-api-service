@@ -1322,11 +1322,11 @@ describe('TopPaidOpportunitiesController', () => {
 
       const mockSuggestions = [
         {
-          getData: () => ({ url: 'https://www.example.com/page1' }),
+          getData: () => ({ url: 'https://example.com/page1' }),
           getRank: () => 0,
         },
         {
-          getData: () => ({ url: 'https://www.example.com/page2' }),
+          getData: () => ({ url: 'https://example.com/page2' }),
           getRank: () => 1,
         },
       ];
@@ -1364,12 +1364,62 @@ describe('TopPaidOpportunitiesController', () => {
       expect(opportunities).to.be.an('array').with.lengthOf(1);
       expect(opportunities[0].opportunityId).to.equal('cwv-1');
       // Should only include page2 (poor score), not page1 (good score)
-      expect(opportunities[0].urls).to.deep.equal(['https://www.example.com/page2']);
-      expect(opportunities[0].urls).to.not.include('https://www.example.com/page1');
+      expect(opportunities[0].urls).to.deep.equal(['https://example.com/page2']);
+      expect(opportunities[0].urls).to.not.include('https://example.com/page1');
     });
   });
 
   describe('URL normalization for matching', () => {
+    it('does not match partial URLs (exact match required)', async () => {
+      const cwvOppty = {
+        getId: () => 'cwv-1',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'CWV Opportunity',
+        getDescription: () => 'Fix CWV issues',
+        getType: () => 'cwv',
+        getStatus: () => 'NEW',
+        getTags: () => [],
+        getData: () => ({ projectedTrafficLost: 2000, projectedTrafficValue: 8000 }),
+      };
+
+      mockOpportunity.allBySiteIdAndStatus
+        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
+        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+
+      const mockSuggestions = [
+        {
+          getData: () => ({ url: 'https://www.bulk.com/de/products/pure-whey-protein-de' }),
+          getRank: () => 0,
+        },
+      ];
+
+      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+
+      const mockAthenaClient = {
+        query: sandbox.stub().resolves([
+          {
+            path: '/de/products/pure-whey-protein-de/bpb-wpc8-0000',
+            pageviews: '5000',
+            p70_lcp: 5000,
+            p70_cls: 0.3,
+            p70_inp: 600,
+          },
+        ]),
+      };
+
+      AWSAthenaClient.fromContext.returns(mockAthenaClient);
+
+      const response = await topPaidController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+        data: { year: 2025, week: 1 },
+      });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      // Should return 0 opportunities because URLs don't match exactly
+      expect(opportunities).to.be.an('array').with.lengthOf(0);
+    });
+
     it('matches URLs with www prefix differences', async () => {
       const cwvOppty = {
         getId: () => 'cwv-1',
