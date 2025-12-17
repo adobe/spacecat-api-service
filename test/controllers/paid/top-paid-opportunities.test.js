@@ -1151,6 +1151,58 @@ describe('TopPaidOpportunitiesController', () => {
       const opportunities = await response.json();
       expect(opportunities).to.be.an('array').with.lengthOf(1);
     });
+
+    it('includes CWV opportunities with "needs improvement" score', async () => {
+      const cwvOppty = {
+        getId: () => 'cwv-1',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'CWV Opportunity',
+        getDescription: () => 'Fix CWV issues',
+        getType: () => 'cwv',
+        getStatus: () => 'NEW',
+        getTags: () => [],
+        getData: () => ({ projectedTrafficLost: 2000, projectedTrafficValue: 8000 }),
+      };
+
+      mockOpportunity.allBySiteIdAndStatus
+        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
+        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+
+      const mockSuggestions = [
+        {
+          getData: () => ({ url: 'https://example.com/page1' }),
+          getRank: () => 0,
+        },
+      ];
+
+      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+
+      const mockAthenaClient = {
+        query: sandbox.stub().resolves([
+          {
+            url: 'https://example.com/page1',
+            pageviews: '3000',
+            overall_cwv_score: 'needs improvement',
+            lcp_score: 'needs improvement',
+            inp_score: 'good',
+            cls_score: 'good',
+          },
+        ]),
+      };
+
+      AWSAthenaClient.fromContext.returns(mockAthenaClient);
+
+      const response = await topPaidController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+        data: { year: 2025, week: 1 },
+      });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      expect(opportunities).to.be.an('array').with.lengthOf(1);
+      expect(opportunities[0].opportunityId).to.equal('cwv-1');
+      expect(opportunities[0].pageViews).to.equal(3000);
+    });
   });
 
   describe('URL normalization for matching', () => {
