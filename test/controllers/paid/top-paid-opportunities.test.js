@@ -943,6 +943,158 @@ describe('TopPaidOpportunitiesController', () => {
       expect(opportunities).to.be.an('array').with.lengthOf(1);
       expect(opportunities[0].opportunityId).to.equal('oppty-1');
     });
+
+    it('handles opportunities with null getTags()', async () => {
+      const opptyWithNullTags = {
+        getId: () => 'oppty-1',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'Opportunity',
+        getDescription: () => 'Description',
+        getType: () => 'broken-backlinks',
+        getStatus: () => 'NEW',
+        getTags: () => null,
+        getData: () => ({ projectedTrafficValue: 1000 }),
+      };
+
+      mockOpportunity.allBySiteIdAndStatus
+        .withArgs(SITE_ID, 'NEW').resolves([opptyWithNullTags])
+        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+
+      mockSuggestion.allByOpportunityId.resolves([]);
+
+      const response = await topPaidController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+        data: {},
+      });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      expect(opportunities).to.be.an('array').with.lengthOf(0);
+    });
+
+    it('handles opportunities with null getData()', async () => {
+      const opptyWithNullData = {
+        getId: () => 'oppty-1',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'Opportunity',
+        getDescription: () => 'Description',
+        getType: () => 'broken-backlinks',
+        getStatus: () => 'NEW',
+        getTags: () => ['paid media'],
+        getData: () => null,
+      };
+
+      mockOpportunity.allBySiteIdAndStatus
+        .withArgs(SITE_ID, 'NEW').resolves([opptyWithNullData])
+        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+
+      mockSuggestion.allByOpportunityId.resolves([]);
+
+      const response = await topPaidController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+        data: {},
+      });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      expect(opportunities).to.be.an('array').with.lengthOf(0);
+    });
+
+    it('handles context.data being null', async () => {
+      const cwvOppty = {
+        getId: () => 'cwv-1',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'CWV Opportunity',
+        getDescription: () => 'Fix CWV issues',
+        getType: () => 'cwv',
+        getStatus: () => 'NEW',
+        getTags: () => [],
+        getData: () => ({ projectedTrafficLost: 3000, projectedTrafficValue: 10000 }),
+      };
+
+      mockOpportunity.allBySiteIdAndStatus
+        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
+        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+
+      const mockSuggestions = [
+        {
+          getData: () => ({ url: 'https://example.com/page1' }),
+          getRank: () => 0,
+        },
+      ];
+
+      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+
+      const mockAthenaClient = {
+        query: sandbox.stub().resolves([
+          {
+            url: 'https://example.com/page1',
+            pageviews: '5000',
+            overall_cwv_score: 'poor',
+            lcp_score: 'poor',
+            inp_score: 'good',
+            cls_score: 'good',
+          },
+        ]),
+      };
+
+      AWSAthenaClient.fromContext.returns(mockAthenaClient);
+
+      const response = await topPaidController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+        data: null,
+      });
+
+      expect(response.status).to.equal(200);
+    });
+
+    it('uses month parameter when provided', async () => {
+      const cwvOppty = {
+        getId: () => 'cwv-1',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'CWV Opportunity',
+        getDescription: () => 'Fix CWV issues',
+        getType: () => 'cwv',
+        getStatus: () => 'NEW',
+        getTags: () => [],
+        getData: () => ({ projectedTrafficLost: 3000, projectedTrafficValue: 10000 }),
+      };
+
+      mockOpportunity.allBySiteIdAndStatus
+        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
+        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+
+      const mockSuggestions = [
+        {
+          getData: () => ({ url: 'https://example.com/page1' }),
+          getRank: () => 0,
+        },
+      ];
+
+      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+
+      const mockAthenaClient = {
+        query: sandbox.stub().resolves([
+          {
+            url: 'https://example.com/page1',
+            pageviews: '5000',
+            overall_cwv_score: 'poor',
+            lcp_score: 'poor',
+            inp_score: 'good',
+            cls_score: 'good',
+          },
+        ]),
+      };
+
+      AWSAthenaClient.fromContext.returns(mockAthenaClient);
+
+      const response = await topPaidController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+        data: { year: 2025, month: 6 },
+      });
+
+      expect(response.status).to.equal(200);
+    });
   });
 
   describe('URL normalization for matching', () => {

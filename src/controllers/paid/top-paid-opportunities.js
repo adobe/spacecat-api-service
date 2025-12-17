@@ -241,7 +241,7 @@ function TopPaidOpportunitiesController(ctx, env = {}) {
 
       const tags = opportunity.getTags() || [];
       const type = opportunity.getType();
-      const opportunityData = opportunity.getData() || {};
+      const opportunityData = opportunity.getData();
 
       // Check if has 'paid media' tag (case-insensitive)
       const hasPaidMediaTag = tags.some((tag) => tag.toLowerCase() === TARGET_TAG);
@@ -329,8 +329,8 @@ function TopPaidOpportunitiesController(ctx, env = {}) {
 
     // Sort by projectedTrafficValue descending
     filteredOpportunities.sort((a, b) => {
-      const aValue = (a.getData() || {}).projectedTrafficValue || 0;
-      const bValue = (b.getData() || {}).projectedTrafficValue || 0;
+      const aValue = a.getData().projectedTrafficValue;
+      const bValue = b.getData().projectedTrafficValue;
       return bValue - aValue;
     });
 
