@@ -18,7 +18,7 @@ import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
-import { AWSAthenaClient, TrafficDataWithCWVDto } from '@adobe/spacecat-shared-athena-client';
+import { AWSAthenaClient } from '@adobe/spacecat-shared-athena-client';
 import { Site } from '@adobe/spacecat-shared-data-access';
 import TopPaidOpportunitiesController from '../../../src/controllers/paid/top-paid-opportunities.js';
 
@@ -1322,11 +1322,11 @@ describe('TopPaidOpportunitiesController', () => {
 
       const mockSuggestions = [
         {
-          getData: () => ({ url: 'https://example.com/page1' }),
+          getData: () => ({ url: 'https://www.example.com/page1' }),
           getRank: () => 0,
         },
         {
-          getData: () => ({ url: 'https://example.com/page2' }),
+          getData: () => ({ url: 'https://www.example.com/page2' }),
           getRank: () => 1,
         },
       ];
@@ -1336,28 +1336,23 @@ describe('TopPaidOpportunitiesController', () => {
       const mockAthenaClient = {
         query: sandbox.stub().resolves([
           {
-            url: 'https://example.com/page1',
+            path: '/page1',
             pageviews: '5000',
-            overall_cwv_score: 'good',
-            lcp_score: 'good',
-            inp_score: 'good',
-            cls_score: 'good',
+            p70_lcp: 1500,
+            p70_cls: 0.05,
+            p70_inp: 100,
           },
           {
-            url: 'https://example.com/page2',
+            path: '/page2',
             pageviews: '3000',
-            overall_cwv_score: 'poor',
-            lcp_score: 'poor',
-            inp_score: 'good',
-            cls_score: 'good',
+            p70_lcp: 5000,
+            p70_cls: 0.3,
+            p70_inp: 600,
           },
         ]),
       };
 
       AWSAthenaClient.fromContext.returns(mockAthenaClient);
-
-      // Stub the DTO to pass through the data as-is
-      sandbox.stub(TrafficDataWithCWVDto, 'toJSON').callsFake((row) => row);
 
       const response = await topPaidController.getTopPaidOpportunities({
         params: { siteId: SITE_ID },
@@ -1369,8 +1364,8 @@ describe('TopPaidOpportunitiesController', () => {
       expect(opportunities).to.be.an('array').with.lengthOf(1);
       expect(opportunities[0].opportunityId).to.equal('cwv-1');
       // Should only include page2 (poor score), not page1 (good score)
-      expect(opportunities[0].urls).to.deep.equal(['https://example.com/page2']);
-      expect(opportunities[0].urls).to.not.include('https://example.com/page1');
+      expect(opportunities[0].urls).to.deep.equal(['https://www.example.com/page2']);
+      expect(opportunities[0].urls).to.not.include('https://www.example.com/page1');
     });
   });
 
