@@ -18,7 +18,7 @@ import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
-import { AWSAthenaClient } from '@adobe/spacecat-shared-athena-client';
+import { AWSAthenaClient, TrafficDataWithCWVDto } from '@adobe/spacecat-shared-athena-client';
 import { Site } from '@adobe/spacecat-shared-data-access';
 import TopPaidOpportunitiesController from '../../../src/controllers/paid/top-paid-opportunities.js';
 
@@ -1096,6 +1096,56 @@ describe('TopPaidOpportunitiesController', () => {
       expect(response.status).to.equal(200);
     });
 
+    it('uses provided week when year and week are both provided', async () => {
+      const cwvOppty = {
+        getId: () => 'cwv-1',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'CWV Opportunity',
+        getDescription: () => 'Fix CWV issues',
+        getType: () => 'cwv',
+        getStatus: () => 'NEW',
+        getTags: () => [],
+        getData: () => ({ projectedTrafficLost: 3000, projectedTrafficValue: 10000 }),
+      };
+
+      mockOpportunity.allBySiteIdAndStatus
+        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
+        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+
+      const mockSuggestions = [
+        {
+          getData: () => ({ url: 'https://example.com/page1' }),
+          getRank: () => 0,
+        },
+      ];
+
+      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+
+      const mockAthenaClient = {
+        query: sandbox.stub().resolves([
+          {
+            url: 'https://example.com/page1',
+            pageviews: '5000',
+            overall_cwv_score: 'poor',
+            lcp_score: 'poor',
+            inp_score: 'good',
+            cls_score: 'good',
+          },
+        ]),
+      };
+
+      AWSAthenaClient.fromContext.returns(mockAthenaClient);
+
+      const response = await topPaidController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+        data: { year: 2025, week: 10 },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(mockLogger.warn).to.not.have.been.calledWith(sinon.match(/No year provided/));
+      expect(mockLogger.warn).to.not.have.been.calledWith(sinon.match(/No week or month provided/));
+    });
+
     it('uses default PAGE_VIEW_THRESHOLD when PAID_DATA_THRESHOLD is not set', async () => {
       const cwvOppty = {
         getId: () => 'cwv-1',
@@ -1202,6 +1252,125 @@ describe('TopPaidOpportunitiesController', () => {
       expect(opportunities).to.be.an('array').with.lengthOf(1);
       expect(opportunities[0].opportunityId).to.equal('cwv-1');
       expect(opportunities[0].pageViews).to.equal(3000);
+    });
+
+    it('excludes CWV URLs below pageview threshold even if poor score', async () => {
+      const cwvOppty = {
+        getId: () => 'cwv-1',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'CWV Opportunity',
+        getDescription: () => 'Fix CWV issues',
+        getType: () => 'cwv',
+        getStatus: () => 'NEW',
+        getTags: () => [],
+        getData: () => ({ projectedTrafficLost: 2000, projectedTrafficValue: 8000 }),
+      };
+
+      mockOpportunity.allBySiteIdAndStatus
+        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
+        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+
+      const mockSuggestions = [
+        {
+          getData: () => ({ url: 'https://example.com/page1' }),
+          getRank: () => 0,
+        },
+      ];
+
+      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+
+      const mockAthenaClient = {
+        query: sandbox.stub().resolves([
+          {
+            url: 'https://example.com/page1',
+            pageviews: '500',
+            overall_cwv_score: 'poor',
+            lcp_score: 'poor',
+            inp_score: 'good',
+            cls_score: 'good',
+          },
+        ]),
+      };
+
+      AWSAthenaClient.fromContext.returns(mockAthenaClient);
+
+      const response = await topPaidController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+        data: { year: 2025, week: 1 },
+      });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      expect(opportunities).to.be.an('array').with.lengthOf(0);
+    });
+
+    it('excludes CWV URLs with good score even if high traffic', async () => {
+      const cwvOppty = {
+        getId: () => 'cwv-1',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'CWV Opportunity',
+        getDescription: () => 'Fix CWV issues',
+        getType: () => 'cwv',
+        getStatus: () => 'NEW',
+        getTags: () => [],
+        getData: () => ({ projectedTrafficLost: 2000, projectedTrafficValue: 8000 }),
+      };
+
+      mockOpportunity.allBySiteIdAndStatus
+        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
+        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+
+      const mockSuggestions = [
+        {
+          getData: () => ({ url: 'https://example.com/page1' }),
+          getRank: () => 0,
+        },
+        {
+          getData: () => ({ url: 'https://example.com/page2' }),
+          getRank: () => 1,
+        },
+      ];
+
+      mockSuggestion.allByOpportunityId.resolves(mockSuggestions);
+
+      const mockAthenaClient = {
+        query: sandbox.stub().resolves([
+          {
+            url: 'https://example.com/page1',
+            pageviews: '5000',
+            overall_cwv_score: 'good',
+            lcp_score: 'good',
+            inp_score: 'good',
+            cls_score: 'good',
+          },
+          {
+            url: 'https://example.com/page2',
+            pageviews: '3000',
+            overall_cwv_score: 'poor',
+            lcp_score: 'poor',
+            inp_score: 'good',
+            cls_score: 'good',
+          },
+        ]),
+      };
+
+      AWSAthenaClient.fromContext.returns(mockAthenaClient);
+
+      // Stub the DTO to pass through the data as-is
+      sandbox.stub(TrafficDataWithCWVDto, 'toJSON').callsFake((row) => row);
+
+      const response = await topPaidController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+        data: { year: 2025, week: 1 },
+      });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      expect(opportunities).to.be.an('array').with.lengthOf(1);
+      expect(opportunities[0].opportunityId).to.equal('cwv-1');
+      // Should only include page2 (poor score), not page1 (good score)
+      expect(opportunities[0].urls).to.deep.equal(['https://example.com/page2']);
+      expect(opportunities[0].urls).to.not.include('https://example.com/page1');
     });
   });
 
