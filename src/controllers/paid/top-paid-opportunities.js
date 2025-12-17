@@ -95,7 +95,7 @@ async function fetchPaidTrafficData(athenaClient, siteId, baseURL, temporal, con
 
 function filterHighTrafficPoorCwv(trafficData, pageViewThreshold, topUrlsLimit, log) {
   const filtered = trafficData.filter((item) => {
-    const pageViews = item.pageviews || 0;
+    const pageViews = item.pageviews;
     const cwvScore = item.overall_cwv_score;
     return pageViews >= pageViewThreshold && (cwvScore === 'poor' || cwvScore === 'needs improvement');
   });
@@ -106,7 +106,7 @@ function filterHighTrafficPoorCwv(trafficData, pageViewThreshold, topUrlsLimit, 
   }
 
   const sorted = filtered
-    .sort((a, b) => (b.pageviews || 0) - (a.pageviews || 0))
+    .sort((a, b) => (b.pageviews) - (a.pageviews))
     .slice(0, topUrlsLimit);
 
   log.info(`Found ${sorted.length} high-traffic paid URLs with poor or needs-improvement CWV (pageviews >= ${pageViewThreshold})`);
@@ -115,7 +115,7 @@ function filterHighTrafficPoorCwv(trafficData, pageViewThreshold, topUrlsLimit, 
 }
 
 function shouldIncludeOpportunity(opportunity) {
-  const title = opportunity.getTitle() || '';
+  const title = opportunity.getTitle();
   const description = opportunity.getDescription();
   const data = opportunity.getData() || {};
   const projectedTrafficValue = data.projectedTrafficValue || 0;
@@ -132,7 +132,6 @@ function shouldIncludeOpportunity(opportunity) {
 }
 
 function normalizeUrl(url) {
-  if (!url) return '';
   return url
     .replace(/^https?:\/\/www\./, 'https://')
     .replace(/\/$/, '');
