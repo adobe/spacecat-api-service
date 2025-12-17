@@ -69,6 +69,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} scrapeJobController - The scrape job controller.
  * @param {Object} mcpController - The MCP controller.
  * @param {Object} paidController - The paid controller.
+ * @param {Object} topPaidOpportunitiesController - The top paid opportunities controller.
  * @param {Object} trafficController - The traffic controller.
  * @param {FixesController} fixesController - The fixes controller.
  * @param {Object} llmoController - The LLMO controller.
@@ -106,6 +107,7 @@ export default function getRouteHandlers(
   scrapeController,
   scrapeJobController,
   paidController,
+  topPaidOpportunitiesController,
   trafficController,
   fixesController,
   llmoController,
@@ -185,7 +187,7 @@ export default function getRouteHandlers(
     'GET /sites/by-delivery-type/:deliveryType': sitesController.getAllByDeliveryType,
     'GET /sites/with-latest-audit/:auditType': sitesController.getAllWithLatestAudit,
     'GET /sites/:siteId/opportunities': opportunitiesController.getAllForSite,
-    'GET /sites/:siteId/opportunities/top-paid': opportunitiesController.getTopPaidOpportunities,
+    'GET /sites/:siteId/opportunities/top-paid': topPaidOpportunitiesController.getTopPaidOpportunities,
     'GET /sites/:siteId/opportunities/by-status/:status': opportunitiesController.getByStatus,
     'GET /sites/:siteId/opportunities/:opportunityId': opportunitiesController.getByID,
     'POST /sites/:siteId/opportunities': opportunitiesController.createOpportunity,
