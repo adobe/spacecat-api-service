@@ -2887,6 +2887,8 @@ Suggestion:
       description: UUID of the opportunity this suggestion belongs to
       $ref: '#/Id'
     type:
+      description: Type of this suggestion (read-only, cannot be updated via PATCH)
+      readOnly: true
       $ref: '#/SuggestionType'
     rank:
       description: Type-specific numeric rank value (e.g., "domainTraffic" for a broken-backlink) helps sorting
@@ -2907,7 +2909,8 @@ Suggestion:
         - $ref: '#/BrokenBacklinksKpiDeltas'
         - $ref: '#/BrokenInternalLinksKpiDeltas'
     status:
-      description: Status of this suggestion; status reflects overall fix execution, flagged here for optimization
+      description: Status of this suggestion; can only be updated via the batch status endpoint (PATCH /suggestions/status)
+      readOnly: true
       $ref: '#/SuggestionStatus'
     createdAt:
       description: UTC timestamp of when the suggestion was created
