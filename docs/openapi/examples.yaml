@@ -142,18 +142,28 @@ broken-backlinks-suggestions-status-update-response:
   description: Example for broken backlinks suggestions status update response
   value:
     suggestions:
-      - id: '213e4567-f543-12d3-a456-426614174000'
+      - uuid: '213e4567-f543-12d3-a456-426614174000'
         index: 0
         statusCode: 200
-        message: "Successfully updated"
-      - id: '945e4567-f543-12d3-a456-426614174010'
+        suggestion:
+          id: '213e4567-f543-12d3-a456-426614174000'
+          opportunityId: '456e4567-e89b-12d3-a456-426614174001'
+          type: 'redirect'
+          status: 'APPROVED'
+          rank: 12300
+          data:
+            url: 'https://example.com/broken-link'
+            domainTraffic: 12300
+          createdAt: '2024-01-15T10:30:00Z'
+          updatedAt: '2024-01-15T14:45:00Z'
+      - uuid: '945e4567-f543-12d3-a456-426614174010'
         index: 1
         statusCode: 400
-        message: 'Validation failed in suggestion: status must be one of NEW,APPROVED,SKIPPED,FIXED,ERROR'
+        message: 'Validation failed in suggestion: status must be one of NEW,PENDING_VALIDATION,APPROVED,SKIPPED,FIXED,ERROR,IN_PROGRESS,OUTDATED'
     metadata:
       total: 2
       success: 1
-      failure: 1
+      failed: 1
 generic-audit:
   summary: Example for a generic audit
   value:

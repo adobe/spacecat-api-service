@@ -447,7 +447,20 @@ site-opportunity-suggestions-status:
   patch:
     operationId: updateSiteOpportunitySuggestionsStatus
     summary: |
-      Update the status of one or multiple suggestions in one transaction
+      Batch update suggestion status
+    description: |
+      Update the status of one or more suggestions in a single transaction.
+      
+      This is the **only** endpoint that allows updating suggestion status.
+      The individual suggestion PATCH endpoint (`/suggestions/{suggestionId}`) 
+      does not support status updates.
+      
+      Each request item must include:
+      - `id`: The UUID of the suggestion to update
+      - `status`: The new status value
+      
+      Returns a 207 Multi-Status response with individual results for each suggestion,
+      including success/failure status codes and any error messages.
     tags:
       - opportunity-suggestions
     requestBody:
@@ -462,8 +475,9 @@ site-opportunity-suggestions-status:
     responses:
       '207':
         description: |
-          A list of suggestions updated,
-          or the status code and error message for the ones failed.
+          Multi-Status - Batch operation completed with individual results.
+          Each item in the response includes the suggestion UUID, index, status code,
+          and either the updated suggestion data (on success) or an error message (on failure).
         content:
           application/json:
             schema:
@@ -471,6 +485,18 @@ site-opportunity-suggestions-status:
             examples:
               broken-backlinks-suggestions-status-update-response:
                 $ref: './examples.yaml#/broken-backlinks-suggestions-status-update-response'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
     security:
       - ims_key: [ ]
 
@@ -552,6 +578,13 @@ site-opportunity-suggestion:
     operationId: updateSiteOpportunitySuggestion
     summary: |
       Update specific attributes of an existing suggestion
+    description: |
+      Update suggestion properties such as rank, data, and kpiDeltas.
+      
+      **Important:** The `status` and `type` fields are READ-ONLY via this endpoint.
+      
+      To update suggestion status, use the batch status endpoint:
+      `PATCH /sites/{siteId}/opportunities/{opportunityId}/suggestions/status`
     tags:
       - opportunity-suggestions
     requestBody:
