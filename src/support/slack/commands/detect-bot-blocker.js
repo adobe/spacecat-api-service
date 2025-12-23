@@ -10,10 +10,11 @@
  * governing permissions and limitations under the License.
  */
 
-import { detectBotBlocker, isValidUrl } from '@adobe/spacecat-shared-utils';
+import { isValidUrl } from '@adobe/spacecat-shared-utils';
 
 import BaseCommand from './base.js';
 import { extractURLFromSlackInput, postErrorMessage } from '../../../utils/slack/base.js';
+import { checkBotProtectionDuringOnboarding } from '../../utils/bot-protection-check.js';
 
 const COMMAND_ID = 'detect-bot-blocker';
 const PHRASES = ['detect bot-blocker', 'detect bot blocker', 'check bot blocker'];
@@ -30,8 +31,13 @@ function DetectBotBlockerCommand(context) {
   const { log } = context;
 
   const formatResult = (result) => {
-    const { crawlable, type, confidence } = result;
-    const confidencePercent = (confidence * 100).toFixed(0);
+    const {
+      blocked, type, confidence, reason,
+    } = result;
+    const crawlable = !blocked;
+    const confidencePercent = (typeof confidence === 'number')
+      ? `${(confidence * 100).toFixed(0)}%`
+      : 'Unknown';
     const crawlableEmoji = crawlable ? ':white_check_mark:' : ':no_entry:';
 
     let confidenceEmoji = ':question:';
@@ -42,23 +48,82 @@ function DetectBotBlockerCommand(context) {
     }
 
     let typeLabel = type;
-    if (type === 'cloudflare') typeLabel = 'Cloudflare';
-    else if (type === 'imperva') typeLabel = 'Imperva/Incapsula';
-    else if (type === 'akamai') typeLabel = 'Akamai';
-    else if (type === 'fastly') typeLabel = 'Fastly';
-    else if (type === 'cloudfront') typeLabel = 'AWS CloudFront';
-    else if (type === 'cloudflare-allowed') typeLabel = 'Cloudflare (Allowed)';
-    else if (type === 'imperva-allowed') typeLabel = 'Imperva (Allowed)';
-    else if (type === 'akamai-allowed') typeLabel = 'Akamai (Allowed)';
-    else if (type === 'fastly-allowed') typeLabel = 'Fastly (Allowed)';
-    else if (type === 'cloudfront-allowed') typeLabel = 'AWS CloudFront (Allowed)';
-    else if (type === 'http2-block') typeLabel = 'HTTP/2 Stream Error';
-    else if (type === 'none') typeLabel = 'No Blocker Detected';
-    else if (type === 'unknown') typeLabel = 'Unknown';
+    let crawlableExplanation = '';
 
-    return `${crawlableEmoji} *Crawlable:* ${crawlable ? 'Yes' : 'No'}\n`
+    if (type === 'cloudflare') {
+      typeLabel = 'Cloudflare';
+      crawlableExplanation = ' (Blocked by bot protection)';
+    } else if (type === 'imperva') {
+      typeLabel = 'Imperva/Incapsula';
+      crawlableExplanation = ' (Blocked by bot protection)';
+    } else if (type === 'akamai') {
+      typeLabel = 'Akamai';
+      crawlableExplanation = ' (Blocked by bot protection)';
+    } else if (type === 'fastly') {
+      typeLabel = 'Fastly';
+      crawlableExplanation = ' (Blocked by bot protection)';
+    } else if (type === 'cloudfront') {
+      typeLabel = 'AWS CloudFront';
+      crawlableExplanation = ' (Blocked by bot protection)';
+    } else if (type === 'cloudflare-allowed') {
+      typeLabel = 'Cloudflare (Allowed)';
+      crawlableExplanation = ' (Infrastructure present, allowing requests)';
+    } else if (type === 'imperva-allowed') {
+      typeLabel = 'Imperva (Allowed)';
+      crawlableExplanation = ' (Infrastructure present, allowing requests)';
+    } else if (type === 'akamai-allowed') {
+      typeLabel = 'Akamai (Allowed)';
+      crawlableExplanation = ' (Infrastructure present, allowing requests)';
+    } else if (type === 'fastly-allowed') {
+      typeLabel = 'Fastly (Allowed)';
+      crawlableExplanation = ' (Infrastructure present, allowing requests)';
+    } else if (type === 'cloudfront-allowed') {
+      typeLabel = 'AWS CloudFront (Allowed)';
+      crawlableExplanation = ' (Infrastructure present, allowing requests)';
+    } else if (type === 'http2-block') {
+      typeLabel = 'HTTP/2 Stream Error';
+      crawlableExplanation = ' (Connection rejected)';
+    } else if (type === 'http-error') {
+      typeLabel = 'HTTP Error (Possible Bot Protection)';
+      crawlableExplanation = ' (Access denied)';
+    } else if (type === 'none') {
+      typeLabel = 'No Blocker Detected';
+      crawlableExplanation = ' (No protection infrastructure found)';
+    } else if (type === 'unknown') {
+      typeLabel = 'Unknown';
+      crawlableExplanation = crawlable ? ' (No protection detected)' : ' (Unable to access)';
+    }
+
+    let message = `${crawlableEmoji} *Crawlable:* ${crawlable ? 'Yes' : 'No'}${crawlableExplanation}\n`
       + `:shield: *Blocker Type:* ${typeLabel}\n`
-      + `${confidenceEmoji} *Confidence:* ${confidencePercent}%`;
+      + `${confidenceEmoji} *Confidence:* ${confidencePercent}`;
+
+    // Add confidence explanation
+    if (typeof confidence === 'number') {
+      if (confidence >= 0.95) {
+        message += ' - Very confident in detection';
+      } else if (confidence >= 0.7) {
+        message += ' - Moderate confidence';
+      } else if (confidence > 0) {
+        message += ' - Low confidence, may need manual verification';
+      }
+    }
+
+    if (reason) {
+      message += `\n:information_source: *Reason:* ${reason}`;
+    }
+
+    if (result.details) {
+      message += '\n\n*Details:*';
+      if (result.details.httpStatus) {
+        message += `\n• HTTP Status: ${result.details.httpStatus}`;
+      }
+      if (result.details.htmlSize) {
+        message += `\n• HTML Size: ${result.details.htmlSize} bytes`;
+      }
+    }
+
+    return message;
   };
 
   const handleExecution = async (args, slackContext) => {
@@ -79,7 +144,7 @@ function DetectBotBlockerCommand(context) {
     await say(`:mag: Checking bot blocker for \`${baseURL}\`...`);
 
     try {
-      const result = await detectBotBlocker({ baseUrl: baseURL });
+      const result = await checkBotProtectionDuringOnboarding(baseURL, log);
       const formattedResult = formatResult(result);
 
       await say(`:robot_face: *Bot Blocker Detection Results for* \`${baseURL}\`\n\n${formattedResult}`);

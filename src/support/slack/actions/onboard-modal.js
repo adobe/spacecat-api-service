@@ -15,6 +15,8 @@ import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-acc
 import { onboardSingleSite as sharedOnboardSingleSite } from '../../utils.js';
 import { triggerBrandProfileAgent } from '../../brand-profile-trigger.js';
 import { loadProfileConfig } from '../../../utils/slack/base.js';
+import { checkBotProtectionDuringOnboarding } from '../../utils/bot-protection-check.js';
+import { formatBotProtectionSlackMessage } from './commons.js';
 
 export const AEM_CS_HOST = /^author-p(\d+)-e(\d+)/i;
 
@@ -691,6 +693,94 @@ export function onboardSiteModal(lambdaContext) {
         text: `:gear: Starting onboarding for site ${siteUrl}...`,
         thread_ts: responseThreadTs,
       });
+
+      const botProtectionResult = await checkBotProtectionDuringOnboarding(siteUrl, log);
+
+      // Check if Cloudflare/bot protection infrastructure is present
+      const hasProtectionInfrastructure = botProtectionResult.type
+        && (botProtectionResult.type.includes('cloudflare')
+          || botProtectionResult.type.includes('imperva')
+          || botProtectionResult.type.includes('akamai'));
+
+      // Confidence threshold for stopping onboarding
+      // Stop if blocked flag is true OR if confidence is above 70% that bot protection exists
+      const CONFIDENCE_THRESHOLD = 0.7;
+      const shouldStopOnboarding = botProtectionResult.blocked
+        || (botProtectionResult.confidence >= CONFIDENCE_THRESHOLD && !botProtectionResult.type?.includes('-allowed'));
+
+      if (shouldStopOnboarding) {
+        log.warn(`Bot protection detected for ${siteUrl} - stopping onboarding`, {
+          blocked: botProtectionResult.blocked,
+          confidence: botProtectionResult.confidence,
+          type: botProtectionResult.type,
+        });
+
+        const environment = env.AWS_REGION?.includes('us-east') ? 'prod' : 'dev';
+        const botProtectionMessage = formatBotProtectionSlackMessage({
+          siteUrl,
+          botProtection: botProtectionResult,
+          environment,
+        });
+
+        const warningTitle = botProtectionResult.blocked
+          ? `:warning: *Bot Protection Detected for ${siteUrl}*`
+          : `:warning: *Likely Bot Protection Detected for ${siteUrl}*`;
+
+        await client.chat.postMessage({
+          channel: responseChannel,
+          text: warningTitle,
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: botProtectionMessage,
+              },
+            },
+          ],
+          thread_ts: responseThreadTs,
+        });
+
+        await client.chat.postMessage({
+          channel: responseChannel,
+          text: ':x: *Onboarding stopped.* Please allowlist SpaceCat IPs and User-Agent as shown above, then re-run the onboard command.',
+          thread_ts: responseThreadTs,
+        });
+
+        return;
+      }
+
+      if (hasProtectionInfrastructure && !botProtectionResult.blocked) {
+        log.info(`Bot protection infrastructure detected for ${siteUrl} but currently allowed`, botProtectionResult);
+
+        const environment = env.AWS_REGION?.includes('us-east') ? 'prod' : 'dev';
+        const botProtectionMessage = formatBotProtectionSlackMessage({
+          siteUrl,
+          botProtection: botProtectionResult,
+          environment,
+        });
+
+        await client.chat.postMessage({
+          channel: responseChannel,
+          text: `:information_source: *Bot Protection Infrastructure Detected for ${siteUrl}*`,
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: botProtectionMessage,
+              },
+            },
+          ],
+          thread_ts: responseThreadTs,
+        });
+
+        await client.chat.postMessage({
+          channel: responseChannel,
+          text: ':white_check_mark: SpaceCat can currently access the site, but if audits fail, please verify the allowlist configuration above.',
+          thread_ts: responseThreadTs,
+        });
+      }
 
       const reportLine = await onboardSingleSiteFromModal(
         siteUrl,
