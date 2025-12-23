@@ -16,6 +16,7 @@ import { analyzeBotProtection, SPACECAT_BOT_USER_AGENT } from '@adobe/spacecat-s
  * Performs a lightweight bot protection check by fetching the homepage.
  * This is a minimal check used during onboarding to determine if audits should be skipped.
  * Uses the same detection logic as the content scraper but only checks the homepage.
+ * Also makes additional requests to common endpoints to detect HTTP/2 blocking patterns.
  *
  * @param {string} baseUrl - Site base URL
  * @param {object} log - Logger
@@ -25,16 +26,123 @@ export async function checkBotProtectionDuringOnboarding(baseUrl, log) {
   log.info(`Performing lightweight bot protection check for ${baseUrl}`);
 
   try {
-    const response = await fetch(baseUrl, {
-      method: 'GET',
-      headers: {
-        'User-Agent': SPACECAT_BOT_USER_AGENT,
-      },
-      signal: AbortSignal.timeout(10000), // 10 second timeout
-    });
+    // Make multiple requests to detect HTTP/2 blocking patterns
+    // Some sites allow the first request but block subsequent automated requests
+    const requests = [
+      { url: baseUrl, name: 'homepage' },
+      { url: new URL('/robots.txt', baseUrl).toString(), name: 'robots.txt' },
+      { url: new URL('/sitemap.xml', baseUrl).toString(), name: 'sitemap.xml' },
+    ];
 
-    const html = await response.text();
+    const results = await Promise.allSettled(
+      requests.map(async (req) => {
+        try {
+          const response = await fetch(req.url, {
+            method: 'GET',
+            headers: {
+              'User-Agent': SPACECAT_BOT_USER_AGENT,
+            },
+            signal: AbortSignal.timeout(10000), // 10 second timeout
+          });
 
+          // Try to read response body
+          const html = await response.text();
+
+          return {
+            name: req.name,
+            url: req.url,
+            success: true,
+            response,
+            html,
+          };
+        } catch (error) {
+          // Check for HTTP/2 errors
+          const errorCode = error?.code || '';
+          const errorMessage = error?.message || '';
+          const isHttp2Error = errorCode === 'NGHTTP2_INTERNAL_ERROR'
+            || errorCode === 'ERR_HTTP2_STREAM_ERROR'
+            || errorCode === 'ERR_HTTP2_STREAM_CANCEL'
+            || errorMessage.includes('NGHTTP2_INTERNAL_ERROR')
+            || errorMessage.includes('HTTP2_STREAM_ERROR');
+
+          log.debug(`Fetch failed for ${req.name}: code=${errorCode}, message=${errorMessage}, isHttp2=${isHttp2Error}`);
+
+          return {
+            name: req.name,
+            url: req.url,
+            success: false,
+            error,
+            isHttp2Error,
+          };
+        }
+      }),
+    );
+
+    // Check if any requests failed with HTTP/2 errors
+    const http2Failures = results.filter(
+      (r) => r.status === 'fulfilled' && r.value && r.value.success === false && r.value.isHttp2Error === true,
+    );
+
+    if (http2Failures.length > 0) {
+      log.warn(`HTTP/2 errors detected for ${baseUrl} - likely bot protection`);
+      const firstFailure = http2Failures[0].value;
+      return {
+        blocked: true,
+        type: 'http2-block',
+        confidence: 0.9,
+        reason: `HTTP/2 connection error: ${firstFailure.error?.message || 'bot blocking detected'}`,
+        details: {
+          failedRequests: http2Failures.map((f) => ({
+            name: f.value.name,
+            url: f.value.url,
+            error: f.value.error?.message,
+            code: f.value.error?.code,
+          })),
+        },
+      };
+    }
+
+    // Get the homepage response for content analysis
+    const homepageResult = results[0];
+    if (homepageResult.status === 'rejected' || !homepageResult.value?.success) {
+      // Homepage fetch failed completely
+      const error = homepageResult.reason || homepageResult.value?.error;
+
+      // Check if this is an HTTP/2 error before throwing
+      if (error) {
+        const errorCode = error.code || '';
+        const errorMessage = error.message || '';
+        const isHttp2Error = errorCode === 'NGHTTP2_INTERNAL_ERROR'
+          || errorCode === 'ERR_HTTP2_STREAM_ERROR'
+          || errorCode === 'ERR_HTTP2_STREAM_CANCEL'
+          || errorMessage.includes('NGHTTP2_INTERNAL_ERROR')
+          || errorMessage.includes('HTTP2_STREAM_ERROR');
+
+        /* c8 ignore start */
+        // Defensive check - in practice, HTTP/2 errors are caught by the first filter
+        // (lines 80-100). This serves as a safety net in case the error object structure changes.
+        if (isHttp2Error) {
+          log.warn(`HTTP/2 error detected on homepage for ${baseUrl} - likely bot protection`);
+          return {
+            blocked: true,
+            type: 'http2-block',
+            confidence: 0.9,
+            reason: `HTTP/2 connection error: ${errorMessage}`,
+            details: {
+              error: errorMessage,
+              code: errorCode,
+            },
+          };
+        }
+        /* c8 ignore stop */
+      }
+
+      throw error;
+    }
+
+    const { response, html } = homepageResult.value;
+
+    // Analyze homepage content for bot protection patterns
     const botProtection = analyzeBotProtection({
       status: response.status,
       headers: response.headers,
@@ -60,8 +168,30 @@ export async function checkBotProtectionDuringOnboarding(baseUrl, log) {
   } catch (error) {
     log.error(`Bot protection check failed for ${baseUrl}:`, error);
 
-    // Check if error suggests bot blocking (403, 401, etc.)
+    // Check for HTTP/2 errors in the caught error
+    const errorCode = error.code || '';
     const errorMessage = error.message || '';
+    const isHttp2Error = errorCode === 'NGHTTP2_INTERNAL_ERROR'
+      || errorCode === 'ERR_HTTP2_STREAM_ERROR'
+      || errorCode === 'ERR_HTTP2_STREAM_CANCEL'
+      || errorMessage.includes('NGHTTP2_INTERNAL_ERROR')
+      || errorMessage.includes('HTTP2_STREAM_ERROR');
+
+    if (isHttp2Error) {
+      log.warn(`HTTP/2 error detected for ${baseUrl} - likely bot protection`);
+      return {
+        blocked: true,
+        type: 'http2-block',
+        confidence: 0.9,
+        reason: `HTTP/2 connection error: ${errorMessage}`,
+        details: {
+          error: errorMessage,
+          code: errorCode,
+        },
+      };
+    }
+
+    // Check if error suggests bot blocking (403, 401, etc.)
     const isBotBlocking = errorMessage.includes('403')
       || errorMessage.includes('401')
       || errorMessage.includes('Forbidden')
