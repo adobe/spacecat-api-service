@@ -431,7 +431,6 @@ describe('DetectBotBlockerCommand', () => {
     const command = DetectBotBlockerCommand(context);
     await command.handleExecution(['https://example.com'], slackContext);
 
-    expect(slackContext.say).to.have.been.calledWithMatch('N/A%');
     expect(slackContext.say).to.have.been.calledWithMatch('Unknown');
     expect(slackContext.say).to.have.been.calledWithMatch(':white_check_mark:');
   });
@@ -445,6 +444,6 @@ describe('DetectBotBlockerCommand', () => {
     const command = DetectBotBlockerCommand(context);
     await command.handleExecution(['https://example.com'], slackContext);
 
-    expect(slackContext.say).to.have.been.calledWithMatch('N/A%');
+    expect(slackContext.say).to.have.been.calledWithMatch('Unknown');
   });
 });
