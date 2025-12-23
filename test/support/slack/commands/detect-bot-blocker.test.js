@@ -446,4 +446,72 @@ describe('DetectBotBlockerCommand', () => {
 
     expect(slackContext.say).to.have.been.calledWithMatch('Unknown');
   });
+
+  it('includes explanatory text for allowed infrastructure', async () => {
+    checkBotProtectionStub.resolves({
+      blocked: false,
+      type: 'cloudflare-allowed',
+      confidence: 1.0,
+    });
+
+    const command = DetectBotBlockerCommand(context);
+    await command.handleExecution(['https://example.com'], slackContext);
+
+    expect(slackContext.say).to.have.been.calledWithMatch('Infrastructure present, allowing requests');
+    expect(slackContext.say).to.have.been.calledWithMatch('Very confident in detection');
+  });
+
+  it('includes explanatory text for blocked infrastructure', async () => {
+    checkBotProtectionStub.resolves({
+      blocked: true,
+      type: 'cloudflare',
+      confidence: 0.95,
+    });
+
+    const command = DetectBotBlockerCommand(context);
+    await command.handleExecution(['https://example.com'], slackContext);
+
+    expect(slackContext.say).to.have.been.calledWithMatch('Blocked by bot protection');
+    expect(slackContext.say).to.have.been.calledWithMatch('Very confident in detection');
+  });
+
+  it('includes confidence explanation for moderate confidence', async () => {
+    checkBotProtectionStub.resolves({
+      blocked: true,
+      type: 'http2-block',
+      confidence: 0.75,
+    });
+
+    const command = DetectBotBlockerCommand(context);
+    await command.handleExecution(['https://example.com'], slackContext);
+
+    expect(slackContext.say).to.have.been.calledWithMatch('Moderate confidence');
+  });
+
+  it('includes confidence explanation for low confidence', async () => {
+    checkBotProtectionStub.resolves({
+      blocked: false,
+      type: 'unknown',
+      confidence: 0.3,
+    });
+
+    const command = DetectBotBlockerCommand(context);
+    await command.handleExecution(['https://example.com'], slackContext);
+
+    expect(slackContext.say).to.have.been.calledWithMatch('Low confidence, may need manual verification');
+  });
+
+  it('shows "Unable to access" for unknown blocked sites', async () => {
+    checkBotProtectionStub.resolves({
+      blocked: true,
+      type: 'unknown',
+      confidence: 0.5,
+    });
+
+    const command = DetectBotBlockerCommand(context);
+    await command.handleExecution(['https://example.com'], slackContext);
+
+    expect(slackContext.say).to.have.been.calledWithMatch('Unable to access');
+    expect(slackContext.say).to.have.been.calledWithMatch(':no_entry:');
+  });
 });

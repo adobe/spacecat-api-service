@@ -1400,5 +1400,95 @@ describe('onboard-modal', () => {
       expect(infrastructureCall).to.exist;
       expect(infrastructureCall.args[0].blocks[0].text.text).to.include('Production IPs');
     });
+
+    it('should stop onboarding when confidence is above threshold (70%) even if not explicitly blocked', async () => {
+      checkBotProtectionStub.resolves({
+        blocked: false,
+        type: 'http2-block',
+        confidence: 0.75, // Above 70% threshold
+      });
+
+      const onboardSiteModalAction = onboardSiteModal(context);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.called;
+
+      // Should stop onboarding
+      const calls = clientMock.chat.postMessage.getCalls();
+      const stoppedCall = calls.find(
+        (call) => call.args[0].text && call.args[0].text.includes('Onboarding stopped'),
+      );
+      expect(stoppedCall).to.exist;
+
+      // Should show "Likely Bot Protection" message
+      const alertCall = calls.find(
+        (call) => call.args[0].text && call.args[0].text.includes('Likely Bot Protection Detected'),
+      );
+      expect(alertCall).to.exist;
+    });
+
+    it('should not stop onboarding when confidence is below threshold (70%)', async () => {
+      checkBotProtectionStub.resolves({
+        blocked: false,
+        type: 'unknown',
+        confidence: 0.5, // Below 70% threshold
+      });
+
+      const onboardSiteModalAction = onboardSiteModal(context);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.called;
+
+      // Should NOT stop onboarding
+      const calls = clientMock.chat.postMessage.getCalls();
+      const stoppedCall = calls.find(
+        (call) => call.args[0].text && call.args[0].text.includes('Onboarding stopped'),
+      );
+      expect(stoppedCall).to.not.exist;
+
+      // Should proceed with onboarding (verified by ack being called and no stop message)
+      expect(clientMock.chat.postMessage).to.have.been.called;
+    });
+
+    it('should not stop onboarding for allowed infrastructure even with high confidence', async () => {
+      checkBotProtectionStub.resolves({
+        blocked: false,
+        type: 'cloudflare-allowed',
+        confidence: 0.95, // High confidence but allowed
+      });
+
+      const onboardSiteModalAction = onboardSiteModal(context);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.called;
+
+      // Should NOT stop onboarding (allowed infrastructure)
+      const calls = clientMock.chat.postMessage.getCalls();
+      const stoppedCall = calls.find(
+        (call) => call.args[0].text && call.args[0].text.includes('Onboarding stopped'),
+      );
+      expect(stoppedCall).to.not.exist;
+
+      // Should still warn about infrastructure
+      const infrastructureCall = calls.find(
+        (call) => call.args[0].text && call.args[0].text.includes('Bot Protection Infrastructure Detected'),
+      );
+      expect(infrastructureCall).to.exist;
+    });
   });
 });
