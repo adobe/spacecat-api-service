@@ -15,6 +15,8 @@ import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-acc
 import { onboardSingleSite as sharedOnboardSingleSite } from '../../utils.js';
 import { triggerBrandProfileAgent } from '../../brand-profile-trigger.js';
 import { loadProfileConfig } from '../../../utils/slack/base.js';
+import { checkBotProtectionDuringOnboarding } from '../../utils/bot-protection-check.js';
+import { formatBotProtectionSlackMessage } from './commons.js';
 
 export const AEM_CS_HOST = /^author-p(\d+)-e(\d+)/i;
 
@@ -691,6 +693,42 @@ export function onboardSiteModal(lambdaContext) {
         text: `:gear: Starting onboarding for site ${siteUrl}...`,
         thread_ts: responseThreadTs,
       });
+
+      const botProtectionResult = await checkBotProtectionDuringOnboarding(siteUrl, log);
+
+      if (botProtectionResult.blocked) {
+        log.warn(`Bot protection detected for ${siteUrl} - stopping onboarding`, botProtectionResult);
+
+        const environment = env.AWS_REGION?.includes('us-east') ? 'prod' : 'dev';
+        const botProtectionMessage = formatBotProtectionSlackMessage({
+          siteUrl,
+          botProtection: botProtectionResult,
+          environment,
+        });
+
+        await client.chat.postMessage({
+          channel: responseChannel,
+          text: `:warning: *Bot Protection Detected for ${siteUrl}*`,
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: botProtectionMessage,
+              },
+            },
+          ],
+          thread_ts: responseThreadTs,
+        });
+
+        await client.chat.postMessage({
+          channel: responseChannel,
+          text: ':x: *Onboarding stopped.* Please allowlist SpaceCat IPs and User-Agent as shown above, then re-run the onboard command.',
+          thread_ts: responseThreadTs,
+        });
+
+        return;
+      }
 
       const reportLine = await onboardSingleSiteFromModal(
         siteUrl,

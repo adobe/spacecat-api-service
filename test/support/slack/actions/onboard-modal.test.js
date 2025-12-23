@@ -27,6 +27,7 @@ let startOnboarding;
 let onboardSiteModal;
 let extractDeliveryConfigFromPreviewUrl;
 let triggerBrandProfileAgentStub;
+let checkBotProtectionStub;
 
 describe('onboard-modal', () => {
   let sandbox;
@@ -34,6 +35,11 @@ describe('onboard-modal', () => {
   before(async () => {
     // Mock the network-dependent modules before importing
     triggerBrandProfileAgentStub = sinon.stub().resolves('exec-123');
+    checkBotProtectionStub = sinon.stub().resolves({
+      blocked: false,
+      type: 'none',
+      confidence: 0,
+    });
 
     const mockedModule = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
       '../../../../src/utils/slack/base.js': {
@@ -64,6 +70,9 @@ describe('onboard-modal', () => {
       '../../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
       },
+      '../../../../src/support/utils/bot-protection-check.js': {
+        checkBotProtectionDuringOnboarding: (...args) => checkBotProtectionStub(...args),
+      },
     });
 
     ({ startOnboarding, onboardSiteModal, extractDeliveryConfigFromPreviewUrl } = mockedModule);
@@ -74,6 +83,12 @@ describe('onboard-modal', () => {
     nock.disableNetConnect();
     sandbox = sinon.createSandbox();
     triggerBrandProfileAgentStub.resetHistory();
+    checkBotProtectionStub.resetHistory();
+    checkBotProtectionStub.resolves({
+      blocked: false,
+      type: 'none',
+      confidence: 0,
+    });
   });
 
   afterEach(() => {
@@ -1105,6 +1120,137 @@ describe('onboard-modal', () => {
       });
 
       expect(ackMock).to.have.been.called;
+    });
+
+    it('should detect bot protection and stop onboarding', async () => {
+      // Mock bot protection detected
+      checkBotProtectionStub.resolves({
+        blocked: true,
+        type: 'cloudflare',
+        confidence: 0.95,
+        reason: 'Challenge page detected',
+        details: {
+          httpStatus: 200,
+          htmlSize: 5000,
+        },
+      });
+
+      const onboardSiteModalAction = onboardSiteModal(context);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      // Should NOT call ack() since we return early
+      expect(checkBotProtectionStub).to.have.been.calledOnce;
+      expect(checkBotProtectionStub).to.have.been.calledWith('https://example.com', sinon.match.object);
+
+      // Verify Slack messages posted
+      expect(clientMock.chat.postMessage).to.have.been.called;
+
+      // Find the bot protection alert message
+      const botProtectionCall = clientMock.chat.postMessage.getCalls().find(
+        (call) => call.args[0].text && call.args[0].text.includes('Bot Protection Detected'),
+      );
+      expect(botProtectionCall).to.exist;
+      expect(botProtectionCall.args[0].blocks).to.exist;
+      expect(botProtectionCall.args[0].blocks[0].text.text).to.include('cloudflare');
+      expect(botProtectionCall.args[0].blocks[0].text.text).to.include('95%');
+
+      // Verify "Onboarding stopped" message was sent
+      const calls = clientMock.chat.postMessage.getCalls();
+      const hasStoppedMessage = calls.some(
+        (call) => call.args[0].text && call.args[0].text.includes('Onboarding stopped'),
+      );
+      expect(hasStoppedMessage).to.be.true;
+
+      // Verify allowlist instructions in stopped message
+      const stoppedCall = calls.find(
+        (call) => call.args[0].text && call.args[0].text.includes('Onboarding stopped'),
+      );
+      expect(stoppedCall.args[0].text).to.include('allowlist SpaceCat');
+      expect(stoppedCall.args[0].text).to.include('re-run the onboard command');
+    });
+
+    it('should proceed normally when no bot protection detected', async () => {
+      // Mock no bot protection detected (default behavior)
+      checkBotProtectionStub.resolves({
+        blocked: false,
+        type: 'none',
+        confidence: 0,
+      });
+
+      const onboardSiteModalAction = onboardSiteModal(context);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.called;
+      expect(checkBotProtectionStub).to.have.been.calledOnce;
+
+      // Should still post success message (from onboardSingleSite success path)
+      expect(clientMock.chat.postMessage).to.have.been.called;
+    });
+
+    it('should use correct environment for bot protection message', async () => {
+      // Set prod environment
+      context.env.AWS_REGION = 'us-east-1';
+
+      checkBotProtectionStub.resolves({
+        blocked: true,
+        type: 'cloudflare',
+        confidence: 0.95,
+      });
+
+      const onboardSiteModalAction = onboardSiteModal(context);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.called;
+
+      // Verify the bot protection message was sent
+      const botProtectionCall = clientMock.chat.postMessage.getCalls().find(
+        (call) => call.args[0].text && call.args[0].text.includes('Bot Protection Detected'),
+      );
+      expect(botProtectionCall).to.exist;
+      expect(botProtectionCall.args[0].blocks[0].text.text).to.include('Production IPs');
+    });
+
+    it('should use dev environment when AWS_REGION does not include us-east', async () => {
+      // Set dev environment
+      context.env.AWS_REGION = 'us-west-2';
+
+      checkBotProtectionStub.resolves({
+        blocked: true,
+        type: 'imperva',
+        confidence: 0.85,
+      });
+
+      const onboardSiteModalAction = onboardSiteModal(context);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.called;
+
+      // Verify dev environment message
+      const botProtectionCall = clientMock.chat.postMessage.getCalls().find(
+        (call) => call.args[0].text && call.args[0].text.includes('Bot Protection Detected'),
+      );
+      expect(botProtectionCall).to.exist;
+      expect(botProtectionCall.args[0].blocks[0].text.text).to.include('Development IPs');
     });
   });
 });
