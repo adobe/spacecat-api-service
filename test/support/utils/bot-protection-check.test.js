@@ -38,6 +38,7 @@ describe('Bot Protection Check', () => {
     log = {
       info: sinon.stub(),
       error: sinon.stub(),
+      warn: sinon.stub(),
     };
 
     fetchStub = sinon.stub();
@@ -152,6 +153,50 @@ describe('Bot Protection Check', () => {
       expect(result.error).to.equal('The operation was aborted');
     });
 
+    it('treats 403 fetch errors as bot protection', async () => {
+      const baseUrl = 'https://zepbound.lilly.com';
+      const error = new Error('fetch failed with status 403');
+      error.status = 403;
+
+      fetchStub.rejects(error);
+
+      const result = await checkBotProtectionDuringOnboarding(baseUrl, log);
+
+      expect(result.blocked).to.be.true;
+      expect(result.type).to.equal('http-error');
+      expect(result.confidence).to.equal(0.7);
+      expect(result.reason).to.include('HTTP error suggests bot protection');
+      expect(log.error).to.have.been.calledOnce;
+    });
+
+    it('treats 401 fetch errors as bot protection', async () => {
+      const baseUrl = 'https://example.com';
+      const error = new Error('401 Unauthorized');
+
+      fetchStub.rejects(error);
+
+      const result = await checkBotProtectionDuringOnboarding(baseUrl, log);
+
+      expect(result.blocked).to.be.true;
+      expect(result.type).to.equal('http-error');
+      expect(result.confidence).to.equal(0.7);
+      expect(result.reason).to.include('HTTP error suggests bot protection');
+    });
+
+    it('treats Forbidden errors as bot protection', async () => {
+      const baseUrl = 'https://example.com';
+      const error = new Error('Forbidden');
+
+      fetchStub.rejects(error);
+
+      const result = await checkBotProtectionDuringOnboarding(baseUrl, log);
+
+      expect(result.blocked).to.be.true;
+      expect(result.type).to.equal('http-error');
+      expect(result.confidence).to.equal(0.7);
+      expect(result.reason).to.include('HTTP error suggests bot protection');
+    });
+
     it('includes reason when provided by analyzeBotProtection', async () => {
       const baseUrl = 'https://example.com';
       const challengeHtml = '<html><head><title>Just a moment...</title></head><body>Challenge page</body></html>';
@@ -168,6 +213,36 @@ describe('Bot Protection Check', () => {
 
       expect(result.blocked).to.be.true;
       expect(result.reason).to.exist;
+    });
+
+    it('handles errors with undefined message', async () => {
+      const baseUrl = 'https://example.com';
+      const error = new Error();
+      delete error.message; // Make message undefined
+
+      fetchStub.rejects(error);
+
+      const result = await checkBotProtectionDuringOnboarding(baseUrl, log);
+
+      expect(result.blocked).to.be.false;
+      expect(result.type).to.equal('unknown');
+      expect(result.confidence).to.equal(0);
+      expect(result.error).to.equal('');
+    });
+
+    it('handles errors with null message', async () => {
+      const baseUrl = 'https://example.com';
+      const error = new Error();
+      error.message = null;
+
+      fetchStub.rejects(error);
+
+      const result = await checkBotProtectionDuringOnboarding(baseUrl, log);
+
+      expect(result.blocked).to.be.false;
+      expect(result.type).to.equal('unknown');
+      expect(result.confidence).to.equal(0);
+      expect(result.error).to.equal('');
     });
   });
 });

@@ -69,8 +69,9 @@ export function formatBotProtectionSlackMessage({
   const ipList = ips.map((ip) => `• \`${ip}\``).join('\n');
 
   const envLabel = environment === 'prod' ? 'Production' : 'Development';
+  const isAllowed = botProtection.type && botProtection.type.includes('-allowed');
 
-  let message = ':warning: *Bot Protection Detected*\n\n'
+  let message = `:${isAllowed ? 'information_source' : 'warning'}: *Bot Protection${isAllowed ? ' Infrastructure' : ''} Detected*\n\n`
     + `*Site:* ${siteUrl}\n`
     + `*Protection Type:* ${botProtection.type}\n`
     + `*Confidence:* ${(botProtection.confidence * 100).toFixed(0)}%\n`;
@@ -79,22 +80,45 @@ export function formatBotProtectionSlackMessage({
     message += `*Reason:* ${botProtection.reason}\n`;
   }
 
-  message += '\n'
-    + '*Onboarding stopped due to the following reasons:*\n'
-    + '• SpaceCat bot cannot access the site due to bot protection\n'
-    + '• Scraper would receive challenge pages instead of real content\n'
-    + '• Audits and opportunities cannot be generated without site access\n'
-    + '\n'
-    + '*Action Required:*\n'
-    + `Customer must allowlist SpaceCat in their ${botProtection.type} configuration:\n`
-    + '\n'
-    + '*User-Agent to allowlist:*\n'
-    + `\`${SPACECAT_BOT_USER_AGENT}\`\n`
-    + '\n'
-    + `*${envLabel} IPs to allowlist:*\n`
-    + `${ipList}\n`
-    + '\n'
-    + '_After allowlisting, re-run the onboard command to complete onboarding._';
+  if (isAllowed) {
+    // Site is currently accessible - provide informational message
+    message += '\n'
+      + '*Current Status:*\n'
+      + '• SpaceCat can currently access the site\n'
+      + '• Bot protection infrastructure is present but allowing requests\n'
+      + '• This suggests AWS Lambda IPs may be allowlisted\n'
+      + '\n'
+      + '*Important Notes:*\n'
+      + '• If audits fail or return incorrect results, verify allowlist configuration\n'
+      + '• Ensure allowlist is permanent and covers all required IPs\n'
+      + '• Some protection types may still affect specific audit types\n'
+      + '\n'
+      + '*If you need to update allowlist:*\n'
+      + '\n'
+      + '*User-Agent to allowlist:*\n'
+      + `\`${SPACECAT_BOT_USER_AGENT}\`\n`
+      + '\n'
+      + `*${envLabel} IPs to allowlist:*\n`
+      + `${ipList}\n`;
+  } else {
+    // Site is blocked - provide action required message
+    message += '\n'
+      + '*Onboarding stopped due to the following reasons:*\n'
+      + '• SpaceCat bot cannot access the site due to bot protection\n'
+      + '• Scraper would receive challenge pages instead of real content\n'
+      + '• Audits and opportunities cannot be generated without site access\n'
+      + '\n'
+      + '*Action Required:*\n'
+      + `Customer must allowlist SpaceCat in their ${botProtection.type} configuration:\n`
+      + '\n'
+      + '*User-Agent to allowlist:*\n'
+      + `\`${SPACECAT_BOT_USER_AGENT}\`\n`
+      + '\n'
+      + `*${envLabel} IPs to allowlist:*\n`
+      + `${ipList}\n`
+      + '\n'
+      + '_After allowlisting, re-run the onboard command to complete onboarding._';
+  }
 
   return message;
 }

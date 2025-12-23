@@ -696,6 +696,12 @@ export function onboardSiteModal(lambdaContext) {
 
       const botProtectionResult = await checkBotProtectionDuringOnboarding(siteUrl, log);
 
+      // Check if Cloudflare/bot protection infrastructure is present
+      const hasProtectionInfrastructure = botProtectionResult.type
+        && (botProtectionResult.type.includes('cloudflare')
+          || botProtectionResult.type.includes('imperva')
+          || botProtectionResult.type.includes('akamai'));
+
       if (botProtectionResult.blocked) {
         log.warn(`Bot protection detected for ${siteUrl} - stopping onboarding`, botProtectionResult);
 
@@ -728,6 +734,38 @@ export function onboardSiteModal(lambdaContext) {
         });
 
         return;
+      }
+
+      if (hasProtectionInfrastructure && !botProtectionResult.blocked) {
+        log.info(`Bot protection infrastructure detected for ${siteUrl} but currently allowed`, botProtectionResult);
+
+        const environment = env.AWS_REGION?.includes('us-east') ? 'prod' : 'dev';
+        const botProtectionMessage = formatBotProtectionSlackMessage({
+          siteUrl,
+          botProtection: botProtectionResult,
+          environment,
+        });
+
+        await client.chat.postMessage({
+          channel: responseChannel,
+          text: `:information_source: *Bot Protection Infrastructure Detected for ${siteUrl}*`,
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: botProtectionMessage,
+              },
+            },
+          ],
+          thread_ts: responseThreadTs,
+        });
+
+        await client.chat.postMessage({
+          channel: responseChannel,
+          text: ':white_check_mark: SpaceCat can currently access the site, but if audits fail, please verify the allowlist configuration above.',
+          thread_ts: responseThreadTs,
+        });
       }
 
       const reportLine = await onboardSingleSiteFromModal(

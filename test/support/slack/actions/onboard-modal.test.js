@@ -1252,5 +1252,153 @@ describe('onboard-modal', () => {
       expect(botProtectionCall).to.exist;
       expect(botProtectionCall.args[0].blocks[0].text.text).to.include('Development IPs');
     });
+
+    it('should warn when bot protection infrastructure detected but allowed', async () => {
+      checkBotProtectionStub.resolves({
+        blocked: false,
+        type: 'cloudflare-allowed',
+        confidence: 1.0,
+        reason: 'Cloudflare detected but allowing requests',
+      });
+
+      const onboardSiteModalAction = onboardSiteModal(context);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.called;
+      expect(checkBotProtectionStub).to.have.been.calledOnce;
+
+      // Should post informational message
+      const calls = clientMock.chat.postMessage.getCalls();
+      const infrastructureCall = calls.find(
+        (call) => call.args[0].text && call.args[0].text.includes('Bot Protection Infrastructure Detected'),
+      );
+      expect(infrastructureCall).to.exist;
+
+      // Should include informational message about current access
+      const accessMessageCall = calls.find(
+        (call) => call.args[0].text && call.args[0].text.includes('SpaceCat can currently access the site'),
+      );
+      expect(accessMessageCall).to.exist;
+      expect(accessMessageCall.args[0].text).to.include('verify the allowlist configuration');
+
+      // Should NOT stop onboarding
+      const stoppedCall = calls.find(
+        (call) => call.args[0].text && call.args[0].text.includes('Onboarding stopped'),
+      );
+      expect(stoppedCall).to.not.exist;
+    });
+
+    it('should warn for imperva-allowed infrastructure', async () => {
+      checkBotProtectionStub.resolves({
+        blocked: false,
+        type: 'imperva-allowed',
+        confidence: 1.0,
+      });
+
+      const onboardSiteModalAction = onboardSiteModal(context);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.called;
+
+      // Should post informational message
+      const calls = clientMock.chat.postMessage.getCalls();
+      const infrastructureCall = calls.find(
+        (call) => call.args[0].text && call.args[0].text.includes('Bot Protection Infrastructure Detected'),
+      );
+      expect(infrastructureCall).to.exist;
+    });
+
+    it('should warn for akamai-allowed infrastructure', async () => {
+      checkBotProtectionStub.resolves({
+        blocked: false,
+        type: 'akamai-allowed',
+        confidence: 1.0,
+      });
+
+      const onboardSiteModalAction = onboardSiteModal(context);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.called;
+
+      // Should post informational message
+      const calls = clientMock.chat.postMessage.getCalls();
+      const infrastructureCall = calls.find(
+        (call) => call.args[0].text && call.args[0].text.includes('Bot Protection Infrastructure Detected'),
+      );
+      expect(infrastructureCall).to.exist;
+    });
+
+    it('should use dev environment for allowed infrastructure warning', async () => {
+      // Set dev environment
+      context.env.AWS_REGION = 'us-west-2';
+
+      checkBotProtectionStub.resolves({
+        blocked: false,
+        type: 'cloudflare-allowed',
+        confidence: 1.0,
+      });
+
+      const onboardSiteModalAction = onboardSiteModal(context);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.called;
+
+      // Verify dev environment IPs in message
+      const calls = clientMock.chat.postMessage.getCalls();
+      const infrastructureCall = calls.find(
+        (call) => call.args[0].text && call.args[0].text.includes('Bot Protection Infrastructure Detected'),
+      );
+      expect(infrastructureCall).to.exist;
+      expect(infrastructureCall.args[0].blocks[0].text.text).to.include('Development IPs');
+    });
+
+    it('should use prod environment for allowed infrastructure warning', async () => {
+      // Set prod environment
+      context.env.AWS_REGION = 'us-east-1';
+
+      checkBotProtectionStub.resolves({
+        blocked: false,
+        type: 'imperva-allowed',
+        confidence: 1.0,
+      });
+
+      const onboardSiteModalAction = onboardSiteModal(context);
+
+      await onboardSiteModalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.called;
+
+      // Verify prod environment IPs in message
+      const calls = clientMock.chat.postMessage.getCalls();
+      const infrastructureCall = calls.find(
+        (call) => call.args[0].text && call.args[0].text.includes('Bot Protection Infrastructure Detected'),
+      );
+      expect(infrastructureCall).to.exist;
+      expect(infrastructureCall.args[0].blocks[0].text.text).to.include('Production IPs');
+    });
   });
 });

@@ -150,5 +150,44 @@ describe('Slack action commons', () => {
       expect(result).to.include('*User-Agent to allowlist:*');
       expect(result).to.include('re-run the onboard command');
     });
+
+    it('should format informational message for allowed bot protection', () => {
+      const result = formatBotProtectionSlackMessage({
+        siteUrl: 'https://example.com',
+        botProtection: {
+          type: 'cloudflare-allowed',
+          confidence: 1.0,
+          reason: 'Cloudflare detected but allowing requests',
+        },
+        environment: 'dev',
+      });
+
+      expect(result).to.include('*Site:*');
+      expect(result).to.include('cloudflare-allowed');
+      expect(result).to.include('*Current Status:*');
+      expect(result).to.include('can currently access the site');
+      expect(result).to.include('Bot protection infrastructure is present');
+      expect(result).to.include('AWS Lambda IPs may be allowlisted');
+      expect(result).to.include('If audits fail');
+      expect(result).to.include('*User-Agent to allowlist:*');
+      expect(result).to.not.include('*Onboarding stopped');
+      expect(result).to.not.include('*Action Required:*');
+    });
+
+    it('should format message for imperva-allowed', () => {
+      const result = formatBotProtectionSlackMessage({
+        siteUrl: 'https://example.com',
+        botProtection: {
+          type: 'imperva-allowed',
+          confidence: 1.0,
+        },
+        environment: 'prod',
+      });
+
+      expect(result).to.include('imperva-allowed');
+      expect(result).to.include('*Current Status:*');
+      expect(result).to.include('can currently access');
+      expect(result).to.not.include('*Onboarding stopped');
+    });
   });
 });

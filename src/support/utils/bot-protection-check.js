@@ -60,13 +60,35 @@ export async function checkBotProtectionDuringOnboarding(baseUrl, log) {
   } catch (error) {
     log.error(`Bot protection check failed for ${baseUrl}:`, error);
 
-    // On error, assume not blocked (fail open)
+    // Check if error suggests bot blocking (403, 401, etc.)
+    const errorMessage = error.message || '';
+    const isBotBlocking = errorMessage.includes('403')
+      || errorMessage.includes('401')
+      || errorMessage.includes('Forbidden')
+      || error.status === 403
+      || error.status === 401;
+
+    if (isBotBlocking) {
+      // Fetch failed with 403/401 - likely bot protection
+      log.warn(`HTTP error suggests bot protection for ${baseUrl}`);
+      return {
+        blocked: true,
+        type: 'http-error',
+        confidence: 0.7,
+        reason: `HTTP error suggests bot protection: ${errorMessage}`,
+        details: {
+          error: errorMessage,
+        },
+      };
+    }
+
+    // Other errors (timeout, DNS, network) - fail open
     // Better to try audits than block unnecessarily
     return {
       blocked: false,
       type: 'unknown',
       confidence: 0,
-      error: error.message,
+      error: errorMessage,
     };
   }
 }
