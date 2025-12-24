@@ -5137,9 +5137,46 @@ PreflightResultItem:
       enum: [identify, suggest]
       description: The step of the preflight job when this result was generated
 
+AgenticTrafficJobCreatedResponse:
+  type: object
+  description: Response when an agentic traffic aggregation job is created
+  properties:
+    jobId:
+      type: string
+      format: uuid
+      description: Unique identifier for the async job
+      example: '123e4567-e89b-12d3-a456-426614174000'
+    status:
+      type: string
+      enum:
+        - IN_PROGRESS
+      description: Initial status of the job (always IN_PROGRESS when created)
+      example: 'IN_PROGRESS'
+    date:
+      type: string
+      format: date
+      description: The date for which traffic is being aggregated
+      example: '2025-01-15'
+    pollUrl:
+      type: string
+      format: uri
+      description: URL to poll for job status
+      example: '/sites/123e4567-e89b-12d3-a456-426614174000/llmo/agentic-traffic/jobs/456e7890-e89b-12d3-a456-426614174001'
+    startedAt:
+      type: string
+      format: date-time
+      description: When the job was started
+      example: '2025-01-16T10:30:00Z'
+  required:
+    - jobId
+    - status
+    - date
+    - pollUrl
+    - startedAt
+
 AgenticTrafficJobResponse:
   type: object
-  description: Agentic traffic aggregation job status
+  description: Agentic traffic aggregation job status (returned when polling)
   properties:
     jobId:
       type: string

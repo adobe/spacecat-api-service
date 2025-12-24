@@ -1371,7 +1371,7 @@ llmo-agentic-traffic:
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/AgenticTrafficJobResponse'
+              $ref: './schemas.yaml#/AgenticTrafficJobCreatedResponse'
       '400':
         description: Invalid request - bad date format, date in future, or date older than 90 days
         content:
