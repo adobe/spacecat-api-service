@@ -1336,3 +1336,102 @@ llmo-rationale:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+
+llmo-agentic-traffic:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: date
+      in: query
+      required: false
+      description: |
+        The date to retrieve AI traffic aggregates for in YYYY-MM-DD format (UTC).
+        If not provided, defaults to yesterday (UTC).
+        Must be within the last 90 days and not in the future.
+      schema:
+        type: string
+        format: date
+        pattern: '^\d{4}-\d{2}-\d{2}$'
+        example: '2025-01-15'
+  post:
+    tags:
+      - llmo
+    summary: Start agentic traffic aggregation job
+    description: |
+      Initiates an asynchronous job to aggregate daily CDN traffic data from AI/LLM agents
+      (such as GPTBot, ChatGPT, Claude, Perplexity, Gemini, etc.) for a specific site.
+
+      The endpoint starts a query to aggregate hourly CDN log data for the specified
+      date and returns immediately with a job ID for polling.
+
+      Use the returned jobId to poll the job status endpoint.
+    operationId: startAgenticTrafficJob
+    responses:
+      '202':
+        description: Job accepted and started
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficJobCreatedResponse'
+      '400':
+        description: Invalid request - bad date format, date in future, or date older than 90 days
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: 'Invalid date format. Expected YYYY-MM-DD'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - scoped_api_key: [ ]
+
+llmo-agentic-traffic-job:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/agenticTrafficJobId'
+  get:
+    tags:
+      - llmo
+    summary: Get agentic traffic job status
+    description: |
+      Retrieves the status of an agentic traffic aggregation job.
+
+      When the job completes successfully, the response includes a `resultUrl`
+      containing a pre-signed S3 URL (valid for 1 hour) to download the aggregated
+      traffic data as JSON.
+
+      **Polling recommendation:** Poll every 5 seconds until status is COMPLETED or FAILED.
+    operationId: getAgenticTrafficJobStatus
+    responses:
+      '200':
+        description: Job status retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/AgenticTrafficJobResponse'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        description: Job not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: 'Job not found'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - scoped_api_key: [ ]
