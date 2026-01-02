@@ -91,7 +91,7 @@
     "@aws-sdk/client-sfn": "3.940.0",
     "@aws-sdk/client-sqs": "3.940.0",
     "@aws-sdk/s3-request-presigner": "3.940.0",
-    "@langchain/core": "0.3.79",
+    "@langchain/core": "0.3.80",
     "@langchain/langgraph": "0.4.9",
     "@langchain/openai": "0.6.16",
     "@octokit/rest": "22.0.1",
