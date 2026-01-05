@@ -1,3 +1,17 @@
+## [1.278.4](https://github.com/adobe/spacecat-api-service/compare/v1.278.3...v1.278.4) (2026-01-02)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1662](https://github.com/adobe/spacecat-api-service/issues/1662)) ([c21af35](https://github.com/adobe/spacecat-api-service/commit/c21af35c6b87c3aa7bcaa61cd8bb840d554db8c9))
+
+## [1.278.3](https://github.com/adobe/spacecat-api-service/compare/v1.278.2...v1.278.3) (2026-01-02)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @langchain/core to v0.3.80 [security] ([#1669](https://github.com/adobe/spacecat-api-service/issues/1669)) ([37d23eb](https://github.com/adobe/spacecat-api-service/commit/37d23eb48a635024533c880f79d24f9fa9bcf9ba))
+
 ## [1.278.2](https://github.com/adobe/spacecat-api-service/compare/v1.278.1...v1.278.2) (2025-12-12)
 
 
