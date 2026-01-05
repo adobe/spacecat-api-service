@@ -1,3 +1,10 @@
+## [1.279.1](https://github.com/adobe/spacecat-api-service/compare/v1.279.0...v1.279.1) (2026-01-05)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tokowaka-client to v1.4.4 ([#1671](https://github.com/adobe/spacecat-api-service/issues/1671)) ([c0da5d3](https://github.com/adobe/spacecat-api-service/commit/c0da5d3db91647bd212a523e6125a5e61a960b0a))
+
 # [1.279.0](https://github.com/adobe/spacecat-api-service/compare/v1.278.5...v1.279.0) (2026-01-05)
 
 
