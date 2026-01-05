@@ -1,3 +1,10 @@
+## [1.278.5](https://github.com/adobe/spacecat-api-service/compare/v1.278.4...v1.278.5) (2026-01-05)
+
+
+### Bug Fixes
+
+* add site and LLMO access validation in LlmoController.  VULN-33517 ([#1666](https://github.com/adobe/spacecat-api-service/issues/1666)) ([40208d2](https://github.com/adobe/spacecat-api-service/commit/40208d28e424500b0856f3aa1db98170a4b00f2f))
+
 ## [1.278.4](https://github.com/adobe/spacecat-api-service/compare/v1.278.3...v1.278.4) (2026-01-02)
 
 
