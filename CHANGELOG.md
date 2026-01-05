@@ -1,3 +1,10 @@
+# [1.279.0](https://github.com/adobe/spacecat-api-service/compare/v1.278.5...v1.279.0) (2026-01-05)
+
+
+### Features
+
+* disable the canonical audit from paid customers ([#1663](https://github.com/adobe/spacecat-api-service/issues/1663)) ([bc580bf](https://github.com/adobe/spacecat-api-service/commit/bc580bfa006378e029fd088b7e3b9484022dfa9d))
+
 ## [1.278.5](https://github.com/adobe/spacecat-api-service/compare/v1.278.4...v1.278.5) (2026-01-05)
 
 
