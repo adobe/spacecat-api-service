@@ -120,31 +120,19 @@ function RunAuditCommand(context) {
       }
 
       if (auditType === 'all') {
-        // const enabledAudits = configuration.getEnabledAuditsForSite(site);
-        const enabledAudits = ALL_AUDITS.filter(
-          (audit) => configuration.isHandlerEnabledForSite(audit, site),
-        );
-
-        if (!isNonEmptyArray(enabledAudits)) {
-          await say(`:warning: No audits configured for site \`${baseURL}\``);
-          return;
-        }
-
+        // Run all available audits without checking enabled status
         await Promise.all(
-          enabledAudits.map(async (enabledAuditType) => {
+          ALL_AUDITS.map(async (auditToRun) => {
             try {
-              await triggerAuditForSite(site, enabledAuditType, undefined, slackContext, context);
+              await triggerAuditForSite(site, auditToRun, undefined, slackContext, context);
             } catch (error) {
-              log.error(`Error running audit ${enabledAuditType.id} for site ${baseURL}`, error);
+              log.error(`Error running audit ${auditToRun} for site ${baseURL}`, error);
               await postErrorMessage(say, error);
             }
           }),
         );
       } else {
-        if (!configuration.isHandlerEnabledForSite(auditType, site)) {
-          await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
-          return;
-        }
+        // Removed enabled check - Slack one-off audits can run without being enabled
         const handler = configuration.getHandlers()?.[auditType];
         // Exit early with error if handler has no product codes configured
         if (!isNonEmptyArray(handler?.productCodes)) {
