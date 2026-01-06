@@ -240,13 +240,6 @@ export async function getBrandPresenceTopics(context, getSiteAndValidateLlmo) {
       siteId,
     );
 
-    // Build WHERE clause for raw brand_presence table (with 'bp' alias)
-    const { whereClause: rawWhereClause } = buildBrandPresenceWhereClause(
-      filterParams,
-      siteId,
-      'bp',
-    );
-
     // Calculate offset
     const offset = (parseInt(page, 10) - 1) * parseInt(pageSize, 10);
 
@@ -263,8 +256,8 @@ export async function getBrandPresenceTopics(context, getSiteAndValidateLlmo) {
 
     // Use different query strategies based on sort column
     // When sorting by 'sources', we need to scan all topics to determine sort order
-    // For all other columns, we can optimize by first determining paginated topics,
-    // then only calculating sources for those specific topics (~40x fewer rows scanned)
+    // For all other columns, we can optimize by first determining paginated topics
+    // Note: sources_count is now pre-computed in the materialized view for fast access
     if (sortColumn === 'sources') {
       // FULL SCAN STRATEGY: Required when sorting by sources
       // Must calculate source counts for ALL topics to determine sort order
@@ -318,6 +311,7 @@ export async function getBrandPresenceTopics(context, getSiteAndValidateLlmo) {
               ELSE 'Positive'
             END AS sentiment,
             ROUND(AVG(avg_position), 2) AS position,
+            SUM(sources_count) AS sources,
             AVG(avg_volume) AS volume,
             SUM(executions_count) AS executions,
             SUM(citations_count) AS citations,
@@ -326,15 +320,6 @@ export async function getBrandPresenceTopics(context, getSiteAndValidateLlmo) {
           FROM brand_presence_topics_by_date
           WHERE ${whereClause}
           GROUP BY topics
-        ),
-        source_counts AS (
-          SELECT
-            bp.topics,
-            COUNT(DISTINCT bps.url) AS sources
-          FROM brand_presence bp
-          JOIN brand_presence_sources bps ON bp.id = bps.brand_presence_id
-          WHERE ${rawWhereClause}
-          GROUP BY bp.topics
         )
         SELECT
           tm.topics,
@@ -342,7 +327,7 @@ export async function getBrandPresenceTopics(context, getSiteAndValidateLlmo) {
           tm.mentions,
           tm.sentiment,
           tm.position,
-          COALESCE(sc.sources, 0) AS sources,
+          COALESCE(tm.sources, 0) AS sources,
           tm.volume,
           tm.executions,
           tm.citations,
@@ -350,7 +335,6 @@ export async function getBrandPresenceTopics(context, getSiteAndValidateLlmo) {
           tm.region_count,
           tw.weekly_metrics
         FROM topic_metrics tm
-        LEFT JOIN source_counts sc ON tm.topics = sc.topics
         LEFT JOIN topic_weekly tw ON tm.topics = tw.topics
         ORDER BY sources ${sortDirection} NULLS LAST
         LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
@@ -361,8 +345,8 @@ export async function getBrandPresenceTopics(context, getSiteAndValidateLlmo) {
         aurora.query(countQuery, values),
       ]);
     } else {
-      // OPTIMIZED STRATEGY: First get paginated topics, then only calculate sources for those
-      // This dramatically reduces the rows scanned in brand_presence/brand_presence_sources
+      // OPTIMIZED STRATEGY: Use pre-computed sources_count from materialized view
+      // No expensive JOIN to brand_presence/brand_presence_sources needed
       log.info(`[BRAND-PRESENCE-TOPICS] Using optimized strategy (sorting by ${sortColumn})`);
 
       const topicsQuery = `
@@ -387,6 +371,7 @@ export async function getBrandPresenceTopics(context, getSiteAndValidateLlmo) {
               ELSE 'Positive'
             END AS sentiment,
             ROUND(AVG(avg_position), 2) AS position,
+            SUM(sources_count) AS sources,
             AVG(avg_volume) AS volume,
             SUM(executions_count) AS executions,
             SUM(citations_count) AS citations,
@@ -425,17 +410,6 @@ export async function getBrandPresenceTopics(context, getSiteAndValidateLlmo) {
             ) AS weekly_metrics
           FROM weekly_breakdown
           GROUP BY topics
-        ),
-        source_counts AS (
-          -- Only calculate sources for the topics on this page (optimized)
-          SELECT
-            bp.topics,
-            COUNT(DISTINCT bps.url) AS sources
-          FROM brand_presence bp
-          JOIN brand_presence_sources bps ON bp.id = bps.brand_presence_id
-          WHERE ${rawWhereClause}
-            AND bp.topics IN (SELECT topics FROM paginated_topics)
-          GROUP BY bp.topics
         )
         SELECT
           pt.topics,
@@ -443,7 +417,7 @@ export async function getBrandPresenceTopics(context, getSiteAndValidateLlmo) {
           pt.mentions,
           pt.sentiment,
           pt.position,
-          COALESCE(sc.sources, 0) AS sources,
+          COALESCE(pt.sources, 0) AS sources,
           pt.volume,
           pt.executions,
           pt.citations,
@@ -451,7 +425,6 @@ export async function getBrandPresenceTopics(context, getSiteAndValidateLlmo) {
           pt.region_count,
           tw.weekly_metrics
         FROM paginated_topics pt
-        LEFT JOIN source_counts sc ON pt.topics = sc.topics
         LEFT JOIN topic_weekly tw ON pt.topics = tw.topics
         ORDER BY ${sortColumn === 'topics' ? 'pt.topics' : sortColumn} ${sortDirection} NULLS LAST
       `;
