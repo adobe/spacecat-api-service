@@ -35,9 +35,7 @@ function DetectBotBlockerCommand(context) {
       blocked, type, confidence, reason,
     } = result;
     const crawlable = !blocked;
-    const confidencePercent = (typeof confidence === 'number')
-      ? `${(confidence * 100).toFixed(0)}%`
-      : 'Unknown';
+    const confidencePercent = confidence ? (confidence * 100).toFixed(0) : 'N/A';
     const crawlableEmoji = crawlable ? ':white_check_mark:' : ':no_entry:';
 
     let confidenceEmoji = ':question:';
@@ -48,66 +46,24 @@ function DetectBotBlockerCommand(context) {
     }
 
     let typeLabel = type;
-    let crawlableExplanation = '';
+    if (type === 'cloudflare') typeLabel = 'Cloudflare';
+    else if (type === 'imperva') typeLabel = 'Imperva/Incapsula';
+    else if (type === 'akamai') typeLabel = 'Akamai';
+    else if (type === 'fastly') typeLabel = 'Fastly';
+    else if (type === 'cloudfront') typeLabel = 'AWS CloudFront';
+    else if (type === 'cloudflare-allowed') typeLabel = 'Cloudflare (Allowed)';
+    else if (type === 'imperva-allowed') typeLabel = 'Imperva (Allowed)';
+    else if (type === 'akamai-allowed') typeLabel = 'Akamai (Allowed)';
+    else if (type === 'fastly-allowed') typeLabel = 'Fastly (Allowed)';
+    else if (type === 'cloudfront-allowed') typeLabel = 'AWS CloudFront (Allowed)';
+    else if (type === 'http2-block') typeLabel = 'HTTP/2 Stream Error';
+    else if (type === 'http-error') typeLabel = 'HTTP Error (Possible Bot Protection)';
+    else if (type === 'none') typeLabel = 'No Blocker Detected';
+    else if (type === 'unknown') typeLabel = 'Unknown';
 
-    if (type === 'cloudflare') {
-      typeLabel = 'Cloudflare';
-      crawlableExplanation = ' (Blocked by bot protection)';
-    } else if (type === 'imperva') {
-      typeLabel = 'Imperva/Incapsula';
-      crawlableExplanation = ' (Blocked by bot protection)';
-    } else if (type === 'akamai') {
-      typeLabel = 'Akamai';
-      crawlableExplanation = ' (Blocked by bot protection)';
-    } else if (type === 'fastly') {
-      typeLabel = 'Fastly';
-      crawlableExplanation = ' (Blocked by bot protection)';
-    } else if (type === 'cloudfront') {
-      typeLabel = 'AWS CloudFront';
-      crawlableExplanation = ' (Blocked by bot protection)';
-    } else if (type === 'cloudflare-allowed') {
-      typeLabel = 'Cloudflare (Allowed)';
-      crawlableExplanation = ' (Infrastructure present, allowing requests)';
-    } else if (type === 'imperva-allowed') {
-      typeLabel = 'Imperva (Allowed)';
-      crawlableExplanation = ' (Infrastructure present, allowing requests)';
-    } else if (type === 'akamai-allowed') {
-      typeLabel = 'Akamai (Allowed)';
-      crawlableExplanation = ' (Infrastructure present, allowing requests)';
-    } else if (type === 'fastly-allowed') {
-      typeLabel = 'Fastly (Allowed)';
-      crawlableExplanation = ' (Infrastructure present, allowing requests)';
-    } else if (type === 'cloudfront-allowed') {
-      typeLabel = 'AWS CloudFront (Allowed)';
-      crawlableExplanation = ' (Infrastructure present, allowing requests)';
-    } else if (type === 'http2-block') {
-      typeLabel = 'HTTP/2 Stream Error';
-      crawlableExplanation = ' (Connection rejected)';
-    } else if (type === 'http-error') {
-      typeLabel = 'HTTP Error (Possible Bot Protection)';
-      crawlableExplanation = ' (Access denied)';
-    } else if (type === 'none') {
-      typeLabel = 'No Blocker Detected';
-      crawlableExplanation = ' (No protection infrastructure found)';
-    } else if (type === 'unknown') {
-      typeLabel = 'Unknown';
-      crawlableExplanation = crawlable ? ' (No protection detected)' : ' (Unable to access)';
-    }
-
-    let message = `${crawlableEmoji} *Crawlable:* ${crawlable ? 'Yes' : 'No'}${crawlableExplanation}\n`
+    let message = `${crawlableEmoji} *Crawlable:* ${crawlable ? 'Yes' : 'No'}\n`
       + `:shield: *Blocker Type:* ${typeLabel}\n`
-      + `${confidenceEmoji} *Confidence:* ${confidencePercent}`;
-
-    // Add confidence explanation
-    if (typeof confidence === 'number') {
-      if (confidence >= 0.95) {
-        message += ' - Very confident in detection';
-      } else if (confidence >= 0.7) {
-        message += ' - Moderate confidence';
-      } else if (confidence > 0) {
-        message += ' - Low confidence, may need manual verification';
-      }
-    }
+      + `${confidenceEmoji} *Confidence:* ${confidencePercent}%`;
 
     if (reason) {
       message += `\n:information_source: *Reason:* ${reason}`;

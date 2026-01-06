@@ -28,13 +28,10 @@ export async function checkBotProtectionDuringOnboarding(baseUrl, log) {
   try {
     // Make multiple requests to detect HTTP/2 blocking patterns
     // Some sites allow the first request but block subsequent automated requests
-    // Also test common locale paths since some sites block these specifically
     const requests = [
       { url: baseUrl, name: 'homepage' },
       { url: new URL('/robots.txt', baseUrl).toString(), name: 'robots.txt' },
       { url: new URL('/sitemap.xml', baseUrl).toString(), name: 'sitemap.xml' },
-      { url: new URL('/en/', baseUrl).toString(), name: 'locale-en', optional: true },
-      { url: new URL('/fr/', baseUrl).toString(), name: 'locale-fr', optional: true },
     ];
 
     const results = await Promise.allSettled(
@@ -87,29 +84,13 @@ export async function checkBotProtectionDuringOnboarding(baseUrl, log) {
     );
 
     if (http2Failures.length > 0) {
-      // Determine if this is critical (homepage/robots) or just locale paths
-      const criticalFailures = http2Failures.filter((f) => {
-        const requestIndex = requests.findIndex((req) => req.name === f.value.name);
-        return requestIndex >= 0 && !requests[requestIndex].optional;
-      });
-
-      const onlyOptionalFailures = http2Failures.length > 0 && criticalFailures.length === 0;
-
-      log.warn(`HTTP/2 errors detected for ${baseUrl} - likely bot protection`, {
-        totalFailures: http2Failures.length,
-        criticalFailures: criticalFailures.length,
-        onlyOptionalFailures,
-      });
-
+      log.warn(`HTTP/2 errors detected for ${baseUrl} - likely bot protection`);
       const firstFailure = http2Failures[0].value;
       return {
         blocked: true,
         type: 'http2-block',
-        // Lower confidence if only optional paths fail
-        confidence: onlyOptionalFailures ? 0.7 : 0.9,
-        reason: onlyOptionalFailures
-          ? `HTTP/2 errors on locale paths (${http2Failures.map((f) => f.value.name).join(', ')})`
-          : `HTTP/2 connection error: ${firstFailure.error?.message || 'bot blocking detected'}`,
+        confidence: 0.9,
+        reason: `HTTP/2 connection error: ${firstFailure.error?.message || 'bot blocking detected'}`,
         details: {
           failedRequests: http2Failures.map((f) => ({
             name: f.value.name,

@@ -702,18 +702,8 @@ export function onboardSiteModal(lambdaContext) {
           || botProtectionResult.type.includes('imperva')
           || botProtectionResult.type.includes('akamai'));
 
-      // Confidence threshold for stopping onboarding
-      // Stop if blocked flag is true OR if confidence is above 70% that bot protection exists
-      const CONFIDENCE_THRESHOLD = 0.7;
-      const shouldStopOnboarding = botProtectionResult.blocked
-        || (botProtectionResult.confidence >= CONFIDENCE_THRESHOLD && !botProtectionResult.type?.includes('-allowed'));
-
-      if (shouldStopOnboarding) {
-        log.warn(`Bot protection detected for ${siteUrl} - stopping onboarding`, {
-          blocked: botProtectionResult.blocked,
-          confidence: botProtectionResult.confidence,
-          type: botProtectionResult.type,
-        });
+      if (botProtectionResult.blocked) {
+        log.warn(`Bot protection detected for ${siteUrl} - stopping onboarding`, botProtectionResult);
 
         const environment = env.AWS_REGION?.includes('us-east') ? 'prod' : 'dev';
         const botProtectionMessage = formatBotProtectionSlackMessage({
@@ -722,13 +712,9 @@ export function onboardSiteModal(lambdaContext) {
           environment,
         });
 
-        const warningTitle = botProtectionResult.blocked
-          ? `:warning: *Bot Protection Detected for ${siteUrl}*`
-          : `:warning: *Likely Bot Protection Detected for ${siteUrl}*`;
-
         await client.chat.postMessage({
           channel: responseChannel,
-          text: warningTitle,
+          text: `:warning: *Bot Protection Detected for ${siteUrl}*`,
           blocks: [
             {
               type: 'section',

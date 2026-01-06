@@ -837,21 +837,6 @@ export const onboardSingleSite = async (
         log.error(`Error detecting locale for site ${baseURL}: ${error.message}`);
         await say(`:x: Error detecting locale for site ${baseURL}: ${error.message}`);
 
-        // Check if this is an HTTP/2 error (bot protection)
-        const errorCode = error.code || '';
-        const errorMessage = error.message || '';
-        const isHttp2Error = errorCode === 'NGHTTP2_INTERNAL_ERROR'
-          || errorCode === 'ERR_HTTP2_STREAM_ERROR'
-          || errorCode === 'ERR_HTTP2_STREAM_CANCEL'
-          || errorMessage.includes('NGHTTP2_INTERNAL_ERROR')
-          || errorMessage.includes('HTTP2_STREAM_ERROR');
-
-        if (isHttp2Error) {
-          log.warn(`HTTP/2 error during locale detection for ${baseURL} - likely bot protection`);
-          await say(':warning: *Bot protection detected during onboarding process*\nHTTP/2 connection errors indicate the site is blocking automated requests. Please allowlist SpaceCat bot before onboarding.');
-          throw new Error(`Bot protection detected: ${errorMessage}`);
-        }
-
         // Fallback to default language and region
         language = 'en';
         region = 'US';

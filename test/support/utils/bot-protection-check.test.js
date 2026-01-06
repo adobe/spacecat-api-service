@@ -708,59 +708,5 @@ describe('Bot Protection Check', () => {
       expect(result.confidence).to.equal(0.9);
       expect(result.reason).to.include('bot blocking detected');
     });
-
-    it('detects HTTP/2 errors on locale paths with lower confidence', async () => {
-      const baseUrl = 'https://example.com';
-      const normalHtml = '<html><body>Content</body></html>';
-      const http2Error = new Error('Stream closed');
-      http2Error.code = 'ERR_HTTP2_STREAM_CANCEL';
-
-      fetchStub.callsFake((url) => {
-        if (url.includes('/fr/') || url.includes('/en/')) {
-          // Locale paths fail with HTTP/2 error
-          return Promise.reject(http2Error);
-        }
-        // Homepage and other paths succeed
-        return Promise.resolve({
-          status: 200,
-          headers: new Headers({}),
-          text: sinon.stub().resolves(normalHtml),
-        });
-      });
-
-      const result = await checkBotProtectionDuringOnboarding(baseUrl, log);
-
-      expect(result.blocked).to.be.true;
-      expect(result.type).to.equal('http2-block');
-      expect(result.confidence).to.equal(0.7); // Lower confidence since only optional paths fail
-      expect(result.reason).to.include('HTTP/2 errors on locale paths');
-    });
-
-    it('prioritizes critical path failures over optional path failures', async () => {
-      const baseUrl = 'https://example.com';
-      const normalHtml = '<html><body>Content</body></html>';
-      const http2Error = new Error('Stream closed');
-      http2Error.code = 'NGHTTP2_INTERNAL_ERROR';
-
-      fetchStub.callsFake((url) => {
-        if (url.includes('/robots.txt') || url.includes('/fr/')) {
-          // Critical path (robots.txt) and optional path (locale) fail
-          return Promise.reject(http2Error);
-        }
-        // Homepage succeeds
-        return Promise.resolve({
-          status: 200,
-          headers: new Headers({}),
-          text: sinon.stub().resolves(normalHtml),
-        });
-      });
-
-      const result = await checkBotProtectionDuringOnboarding(baseUrl, log);
-
-      expect(result.blocked).to.be.true;
-      expect(result.type).to.equal('http2-block');
-      expect(result.confidence).to.equal(0.9); // Higher confidence due to critical path failure
-      expect(result.reason).not.to.include('only optional'); // Should not say "only optional"
-    });
   });
 });
