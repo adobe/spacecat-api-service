@@ -454,6 +454,7 @@ describe('onboard-modal', () => {
           SiteEnrollment: siteEnrollmentMock,
         },
         env: {
+          AWS_REGION: 'us-east-1',
           DEMO_IMS_ORG: '1234567894ABCDEF12345678@AdobeOrg',
           WORKFLOW_WAIT_TIME_IN_SECONDS: 300,
           ONBOARD_WORKFLOW_STATE_MACHINE_ARN: 'arn:aws:states:us-east-1:123456789012:stateMachine:onboard-workflow',
@@ -1105,6 +1106,187 @@ describe('onboard-modal', () => {
       });
 
       expect(ackMock).to.have.been.called;
+    });
+
+    describe('Bot Protection Integration', () => {
+      let originalFetch;
+
+      beforeEach(() => {
+        // Save original fetch
+        originalFetch = global.fetch;
+      });
+
+      afterEach(() => {
+        // Restore original fetch
+        if (originalFetch) {
+          global.fetch = originalFetch;
+        }
+      });
+
+      it('should stop onboarding when bot protection blocks access', async () => {
+        // Mock fetch to simulate bot protection blocking
+        global.fetch = sandbox.stub().callsFake((url) => {
+          if (url === 'https://example.com'
+              || url === 'https://example.com/robots.txt'
+              || url === 'https://example.com/sitemap.xml') {
+            const headers = new Headers();
+            headers.set('cf-ray', '12345-SJC');
+            headers.set('server', 'cloudflare');
+            return Promise.resolve({
+              ok: false,
+              status: 403,
+              headers,
+              text: () => Promise.resolve('<html><head><title>Just a moment...</title></head></html>'),
+            });
+          }
+          return Promise.reject(new Error('Unexpected URL'));
+        });
+
+        const onboardSiteModalAction = onboardSiteModal(context);
+
+        await onboardSiteModalAction({
+          ack: ackMock,
+          body,
+          client: clientMock,
+        });
+
+        expect(ackMock).to.have.been.calledOnce;
+
+        // Should have posted the starting message
+        expect(clientMock.chat.postMessage).to.have.been.calledWith({
+          channel: 'C12345',
+          text: ':gear: Starting onboarding for site https://example.com...',
+          thread_ts: '1234567890.123456',
+        });
+
+        // Should have posted bot protection warning
+        const calls = clientMock.chat.postMessage.getCalls();
+        const botProtectionWarning = calls.find((call) => call.args[0].text?.includes('Bot Protection Detected'));
+        expect(botProtectionWarning).to.exist;
+
+        // Should have posted onboarding stopped message
+        const stoppedMessage = calls.find((call) => call.args[0].text?.includes('Onboarding stopped'));
+        expect(stoppedMessage).to.exist;
+      });
+
+      it('should show informational message when bot protection infrastructure detected but access allowed', async () => {
+        // Mock fetch to simulate bot protection infrastructure but access allowed
+        global.fetch = sandbox.stub().callsFake((url) => {
+          if (url === 'https://example.com'
+              || url === 'https://example.com/robots.txt'
+              || url === 'https://example.com/sitemap.xml') {
+            const headers = new Headers();
+            headers.set('cf-ray', '12345-SJC');
+            headers.set('server', 'cloudflare');
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              headers,
+              text: () => Promise.resolve('<html><body>Normal content</body></html>'),
+            });
+          }
+          return Promise.reject(new Error('Unexpected URL'));
+        });
+
+        const onboardSiteModalAction = onboardSiteModal(context);
+
+        await onboardSiteModalAction({
+          ack: ackMock,
+          body,
+          client: clientMock,
+        });
+
+        expect(ackMock).to.have.been.called;
+
+        // Should have posted bot protection infrastructure detected message
+        const calls = clientMock.chat.postMessage.getCalls();
+        const infrastructureMessage = calls.find((call) => call.args[0].text?.includes('Bot Protection Infrastructure Detected'));
+        expect(infrastructureMessage).to.exist;
+
+        // Should have posted access allowed message
+        const accessMessage = calls.find((call) => call.args[0].text?.includes('SpaceCat can currently access the site'));
+        expect(accessMessage).to.exist;
+
+        // Should continue with onboarding
+        const successMessage = calls.find((call) => call.args[0].text?.includes('Onboarding triggered successfully'));
+        expect(successMessage).to.exist;
+      });
+
+      it('should use dev environment when AWS_REGION is not us-east', async () => {
+        // Override AWS_REGION to test dev environment branch
+        context.env.AWS_REGION = 'eu-west-1';
+
+        // Mock fetch to simulate bot protection blocking
+        global.fetch = sandbox.stub().callsFake((url) => {
+          if (url === 'https://example.com'
+              || url === 'https://example.com/robots.txt'
+              || url === 'https://example.com/sitemap.xml') {
+            const headers = new Headers();
+            headers.set('cf-ray', '12345-LHR');
+            headers.set('server', 'cloudflare');
+            return Promise.resolve({
+              ok: false,
+              status: 403,
+              headers,
+              text: () => Promise.resolve('<html><head><title>Just a moment...</title></head></html>'),
+            });
+          }
+          return Promise.reject(new Error('Unexpected URL'));
+        });
+
+        const onboardSiteModalAction = onboardSiteModal(context);
+
+        await onboardSiteModalAction({
+          ack: ackMock,
+          body,
+          client: clientMock,
+        });
+
+        expect(ackMock).to.have.been.calledOnce;
+
+        // Should have posted bot protection warning
+        const calls = clientMock.chat.postMessage.getCalls();
+        const botProtectionWarning = calls.find((call) => call.args[0].text?.includes('Bot Protection Detected'));
+        expect(botProtectionWarning).to.exist;
+      });
+
+      it('should use dev environment for infrastructure detected with non-us-east region', async () => {
+        // Override AWS_REGION to test dev environment branch
+        context.env.AWS_REGION = 'ap-south-1';
+
+        // Mock fetch to simulate bot protection infrastructure but access allowed
+        global.fetch = sandbox.stub().callsFake((url) => {
+          if (url === 'https://example.com'
+              || url === 'https://example.com/robots.txt'
+              || url === 'https://example.com/sitemap.xml') {
+            const headers = new Headers();
+            headers.set('cf-ray', '12345-BOM');
+            headers.set('server', 'cloudflare');
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              headers,
+              text: () => Promise.resolve('<html><body>Normal content</body></html>'),
+            });
+          }
+          return Promise.reject(new Error('Unexpected URL'));
+        });
+
+        const onboardSiteModalAction = onboardSiteModal(context);
+
+        await onboardSiteModalAction({
+          ack: ackMock,
+          body,
+          client: clientMock,
+        });
+
+        expect(ackMock).to.have.been.called;
+
+        // Should have posted bot protection infrastructure detected message
+        const calls = clientMock.chat.postMessage.getCalls();
+        const infrastructureMessage = calls.find((call) => call.args[0].text?.includes('Bot Protection Infrastructure Detected'));
+        expect(infrastructureMessage).to.exist;
+      });
     });
   });
 });
