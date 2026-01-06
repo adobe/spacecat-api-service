@@ -336,7 +336,6 @@ describe('getRouteHandlers', () => {
     );
 
     expect(staticRoutes).to.have.all.keys(
-      'GET /configurations',
       'GET /configurations/latest',
       'PATCH /configurations/latest',
       'POST /configurations/audits',
@@ -365,7 +364,6 @@ describe('getRouteHandlers', () => {
       'GET /sites-resolve',
     );
 
-    expect(staticRoutes['GET /configurations']).to.equal(mockConfigurationController.getAll);
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
     expect(staticRoutes['PATCH /configurations/latest']).to.equal(mockConfigurationController.updateConfiguration);
     expect(staticRoutes['POST /configurations/audits']).to.equal(mockConfigurationController.registerAudit);
@@ -463,6 +461,7 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-rollback',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-preview',
+      'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-live-preview',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit/:cursor',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit',

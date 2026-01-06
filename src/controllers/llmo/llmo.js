@@ -405,6 +405,9 @@ function LlmoController(ctx) {
     const { siteId } = context.params;
     const version = context.data?.version;
     try {
+      // Validate site and LLMO access
+      await getSiteAndValidateLlmo(context);
+
       if (!s3 || !s3.s3Client) {
         return badRequest('LLMO config storage is not configured for this environment');
       }
@@ -441,6 +444,9 @@ function LlmoController(ctx) {
     const userId = context.attributes?.authInfo?.getProfile()?.sub || 'system';
 
     try {
+      // Validate site and LLMO access
+      await getSiteAndValidateLlmo(context);
+
       if (!isObject(data)) {
         return badRequest('LLMO config update must be provided as an object');
       }

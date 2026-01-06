@@ -79,8 +79,6 @@ paths:
     $ref: './auth-api.yaml#/google-auth-status'
   /auth/login:
     $ref: './auth-api.yaml#/login'
-  /configurations:
-    $ref: './configurations-api.yaml#/configurations'
   /configurations/latest:
     $ref: './configuration-api.yaml#/latest-configuration'
   /configurations/latest/queues:
@@ -272,6 +270,106 @@ paths:
     $ref: './site-paid.yaml#/site-traffic-paid-type'
   /sites/{siteId}/traffic/paid/pta2/weekly-summary:
     $ref: './site-paid.yaml#/site-traffic-paid-pta2-weekly-summary'
+  /sites/{siteId}/traffic/paid/page-type:
+    $ref: './site-paid.yaml#/site-traffic-paid-page-type'
+  /sites/{siteId}/traffic/paid/page-type-platform-campaign:
+    $ref: './site-paid.yaml#/site-traffic-paid-page-type-platform-campaign'
+  /sites/{siteId}/traffic/paid/url-page-type-campaign-device:
+    $ref: './site-paid.yaml#/site-traffic-paid-url-page-type-campaign-device'
+  /sites/{siteId}/traffic/paid/url-page-type-device:
+    $ref: './site-paid.yaml#/site-traffic-paid-url-page-type-device'
+  /sites/{siteId}/traffic/paid/url-page-type-campaign:
+    $ref: './site-paid.yaml#/site-traffic-paid-url-page-type-campaign'
+  /sites/{siteId}/traffic/paid/url-page-type-platform:
+    $ref: './site-paid.yaml#/site-traffic-paid-url-page-type-platform'
+  /sites/{siteId}/traffic/paid/url-page-type-campaign-platform:
+    $ref: './site-paid.yaml#/site-traffic-paid-url-page-type-campaign-platform'
+  /sites/{siteId}/traffic/paid/url-page-type-platform-device:
+    $ref: './site-paid.yaml#/site-traffic-paid-url-page-type-platform-device'
+  /sites/{siteId}/traffic/paid/page-type-campaign-device:
+    $ref: './site-paid.yaml#/site-traffic-paid-page-type-campaign-device'
+  /sites/{siteId}/traffic/paid/page-type-device:
+    $ref: './site-paid.yaml#/site-traffic-paid-page-type-device'
+  /sites/{siteId}/traffic/paid/page-type-campaign:
+    $ref: './site-paid.yaml#/site-traffic-paid-page-type-campaign'
+  /sites/{siteId}/traffic/paid/page-type-platform:
+    $ref: './site-paid.yaml#/site-traffic-paid-page-type-platform'
+  /sites/{siteId}/traffic/paid/page-type-platform-device:
+    $ref: './site-paid.yaml#/site-traffic-paid-page-type-platform-device'
+  /sites/{siteId}/traffic/paid/type-device:
+    $ref: './site-paid.yaml#/site-traffic-paid-type-device'
+  /sites/{siteId}/traffic/paid/type-device-channel:
+    $ref: './site-paid.yaml#/site-traffic-paid-type-device-channel'
+  /sites/{siteId}/traffic/paid/channel:
+    $ref: './site-paid.yaml#/site-traffic-paid-channel'
+  /sites/{siteId}/traffic/paid/channel-device:
+    $ref: './site-paid.yaml#/site-traffic-paid-channel-device'
+  /sites/{siteId}/traffic/paid/channel-platform-device:
+    $ref: './site-paid.yaml#/site-traffic-paid-channel-platform-device'
+  /sites/{siteId}/traffic/paid/social-platform:
+    $ref: './site-paid.yaml#/site-traffic-paid-social-platform'
+  /sites/{siteId}/traffic/paid/social-platform-device:
+    $ref: './site-paid.yaml#/site-traffic-paid-social-platform-device'
+  /sites/{siteId}/traffic/paid/search-platform:
+    $ref: './site-paid.yaml#/site-traffic-paid-search-platform'
+  /sites/{siteId}/traffic/paid/search-platform-device:
+    $ref: './site-paid.yaml#/site-traffic-paid-search-platform-device'
+  /sites/{siteId}/traffic/paid/display-platform:
+    $ref: './site-paid.yaml#/site-traffic-paid-display-platform'
+  /sites/{siteId}/traffic/paid/display-platform-device:
+    $ref: './site-paid.yaml#/site-traffic-paid-display-platform-device'
+  /sites/{siteId}/traffic/paid/video-platform:
+    $ref: './site-paid.yaml#/site-traffic-paid-video-platform'
+  /sites/{siteId}/traffic/paid/video-platform-device:
+    $ref: './site-paid.yaml#/site-traffic-paid-video-platform-device'
+  /sites/{siteId}/traffic/paid/url:
+    $ref: './site-paid.yaml#/site-traffic-paid-url'
+  /sites/{siteId}/traffic/paid/url-channel:
+    $ref: './site-paid.yaml#/site-traffic-paid-url-channel'
+  /sites/{siteId}/traffic/paid/url-channel-device:
+    $ref: './site-paid.yaml#/site-traffic-paid-url-channel-device'
+  /sites/{siteId}/traffic/paid/url-channel-platform-device:
+    $ref: './site-paid.yaml#/site-traffic-paid-url-channel-platform-device'
+  /sites/{siteId}/traffic/paid/campaign-channel-device:
+    $ref: './site-paid.yaml#/site-traffic-paid-campaign-channel-device'
+  /sites/{siteId}/traffic/paid/campaign-channel-platform:
+    $ref: './site-paid.yaml#/site-traffic-paid-campaign-channel-platform'
+  /sites/{siteId}/traffic/paid/campaign-channel-platform-device:
+    $ref: './site-paid.yaml#/site-traffic-paid-campaign-channel-platform-device'
+  /sites/{siteId}/traffic/paid/temporal-series:
+    $ref: './site-paid.yaml#/site-traffic-paid-temporal-series'
+  /sites/{siteId}/traffic/paid/temporal-series-by-campaign:
+    $ref: './site-paid.yaml#/site-traffic-paid-temporal-series-by-campaign'
+  /sites/{siteId}/traffic/paid/temporal-series-by-channel:
+    $ref: './site-paid.yaml#/site-traffic-paid-temporal-series-by-channel'
+  /sites/{siteId}/traffic/paid/temporal-series-by-platform:
+    $ref: './site-paid.yaml#/site-traffic-paid-temporal-series-by-platform'
+  /sites/{siteId}/traffic/paid/temporal-series-by-campaign-channel:
+    $ref: './site-paid.yaml#/site-traffic-paid-temporal-series-by-campaign-channel'
+  /sites/{siteId}/traffic/paid/temporal-series-by-campaign-platform:
+    $ref: './site-paid.yaml#/site-traffic-paid-temporal-series-by-campaign-platform'
+  /sites/{siteId}/traffic/paid/temporal-series-by-campaign-channel-platform:
+    $ref: './site-paid.yaml#/site-traffic-paid-temporal-series-by-campaign-channel-platform'
+  /sites/{siteId}/traffic/paid/temporal-series-by-channel-platform:
+    $ref: './site-paid.yaml#/site-traffic-paid-temporal-series-by-channel-platform'
+  /sites/{siteId}/traffic/paid/temporal-series-by-url:
+    $ref: './site-paid.yaml#/site-traffic-paid-temporal-series-by-url'
+  /sites/{siteId}/traffic/paid/temporal-series-by-url-channel:
+    $ref: './site-paid.yaml#/site-traffic-paid-temporal-series-by-url-channel'
+  /sites/{siteId}/traffic/paid/temporal-series-by-url-platform:
+    $ref: './site-paid.yaml#/site-traffic-paid-temporal-series-by-url-platform'
+  /sites/{siteId}/traffic/paid/temporal-series-by-url-channel-platform:
+    $ref: './site-paid.yaml#/site-traffic-paid-temporal-series-by-url-channel-platform'
+  /sites/{siteId}/traffic/paid/impact-by-page:
+    $ref: './site-paid.yaml#/site-traffic-paid-impact-by-page'
+  /sites/{siteId}/traffic/paid/impact-by-page-device:
+    $ref: './site-paid.yaml#/site-traffic-paid-impact-by-page-device'
+  /sites/{siteId}/traffic/paid/impact-by-page-traffic-type:
+    $ref: './site-paid.yaml#/site-traffic-paid-impact-by-page-traffic-type'
+  /sites/{siteId}/traffic/paid/impact-by-page-traffic-type-device:
+    $ref: './site-paid.yaml#/site-traffic-paid-impact-by-page-traffic-type-device'
+  /sites/{siteId}/traffic/paid/traffic-loss-by-devices:
+    $ref: './site-paid.yaml#/site-traffic-paid-traffic-loss-by-devices'
   /sites/{siteId}/metrics/{metric}/{source}:
     $ref: './site-metrics-api.yaml#/site-metrics-by-source'
   /sites/{siteId}/metrics/{metric}/{source}/by-url/{base64PageUrl}:

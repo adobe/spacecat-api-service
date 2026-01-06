@@ -131,18 +131,20 @@ export default class AccessControlUtil {
   }
 
   async hasAccess(entity, subService = '', productCode = '') {
-    if (hasText(productCode) && this.xProductHeader !== productCode) {
-      this.log.error(`Unauthorized request for product ${productCode}, x-product header: ${this.xProductHeader}`);
-      throw new Error('[Error] Unauthorized request');
-    }
-
     if (!isNonEmptyObject(entity)) {
       throw new Error('Missing entity');
     }
 
     const { authInfo } = this;
+    // Check admin access first - admins bypass product code validation
     if (this.hasAdminAccess()) {
       return true;
+    }
+
+    // For non-admin users, validate x-product header
+    if (hasText(productCode) && this.xProductHeader !== productCode) {
+      this.log.error(`Unauthorized request for product ${productCode}, x-product header: ${this.xProductHeader}`);
+      throw new Error('[Error] Unauthorized request');
     }
 
     let imsOrgId;

@@ -1006,3 +1006,1688 @@ PaidTrafficPageTypeData:
     overall_cwv_score:
       type: string
       description: Overall Core Web Vitals score (good, needs improvement, poor)
+
+# Additional Page Type Endpoints
+
+site-traffic-paid-page-type-platform-campaign:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-page-type
+    summary: Get paid traffic data grouped by page type, platform, and campaign
+    description: Returns paid traffic data for a site, grouped by page type, platform, and campaign for a given week or month and year.
+    operationId: getPaidTrafficByPageTypePlatformCampaign
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-url-page-type-campaign-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-page-type
+    summary: Get paid traffic data grouped by URL, page type, campaign, and device
+    description: Returns paid traffic data for a site, grouped by URL, page type, campaign, and device for a given week or month and year.
+    operationId: getPaidTrafficByUrlPageTypeCampaignDevice
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-url-page-type-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-page-type
+    summary: Get paid traffic data grouped by URL, page type, and device
+    description: Returns paid traffic data for a site, grouped by URL, page type, and device for a given week or month and year.
+    operationId: getPaidTrafficByUrlPageTypeDevice
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-url-page-type-campaign:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-page-type
+    summary: Get paid traffic data grouped by URL, page type, and campaign
+    description: Returns paid traffic data for a site, grouped by URL, page type, and campaign for a given week or month and year.
+    operationId: getPaidTrafficByUrlPageTypeCampaign
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-url-page-type-platform:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-page-type
+    summary: Get paid traffic data grouped by URL, page type, and platform
+    description: Returns paid traffic data for a site, grouped by URL, page type, and platform for a given week or month and year.
+    operationId: getPaidTrafficByUrlPageTypePlatform
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-url-page-type-campaign-platform:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-page-type
+    summary: Get paid traffic data grouped by URL, page type, campaign, and platform
+    description: Returns paid traffic data for a site, grouped by URL, page type, campaign, and platform for a given week or month and year.
+    operationId: getPaidTrafficByUrlPageTypeCampaignPlatform
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-url-page-type-platform-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-page-type
+    summary: Get paid traffic data grouped by URL, page type, platform, and device
+    description: Returns paid traffic data for a site, grouped by URL, page type, platform, and device for a given week or month and year.
+    operationId: getPaidTrafficByUrlPageTypePlatformDevice
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-page-type-campaign-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-page-type
+    summary: Get paid traffic data grouped by page type, campaign, and device
+    description: Returns paid traffic data for a site, grouped by page type, campaign, and device for a given week or month and year.
+    operationId: getPaidTrafficByPageTypeCampaignDevice
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-page-type-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-page-type
+    summary: Get paid traffic data grouped by page type and device
+    description: Returns paid traffic data for a site, grouped by page type and device for a given week or month and year.
+    operationId: getPaidTrafficByPageTypeDevice
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-page-type-campaign:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-page-type
+    summary: Get paid traffic data grouped by page type and campaign
+    description: Returns paid traffic data for a site, grouped by page type and campaign for a given week or month and year.
+    operationId: getPaidTrafficByPageTypeCampaign
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-page-type-platform:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-page-type
+    summary: Get paid traffic data grouped by page type and platform
+    description: Returns paid traffic data for a site, grouped by page type and platform for a given week or month and year.
+    operationId: getPaidTrafficByPageTypePlatform
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-page-type-platform-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-page-type
+    summary: Get paid traffic data grouped by page type, platform, and device
+    description: Returns paid traffic data for a site, grouped by page type, platform, and device for a given week or month and year.
+    operationId: getPaidTrafficByPageTypePlatformDevice
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+# Channel and Type Endpoints
+
+site-traffic-paid-type-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'all'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-channel
+    summary: Get paid traffic data grouped by type and device
+    description: Returns paid traffic data for a site, grouped by type and device for a given week or month and year.
+    operationId: getPaidTrafficByTypeDevice
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-type-device-channel:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'all'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-channel
+    summary: Get paid traffic data grouped by type, device, and channel
+    description: Returns paid traffic data for a site, grouped by type, device, and channel for a given week or month and year.
+    operationId: getPaidTrafficByTypeDeviceChannel
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-channel:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-channel
+    summary: Get paid traffic data grouped by channel
+    description: Returns paid traffic data for a site, grouped by channel for a given week or month and year.
+    operationId: getPaidTrafficByChannel
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-channel-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-channel
+    summary: Get paid traffic data grouped by channel and device
+    description: Returns paid traffic data for a site, grouped by channel and device for a given week or month and year.
+    operationId: getPaidTrafficByChannelDevice
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-channel-platform-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-channel
+    summary: Get paid traffic data grouped by channel, platform, and device
+    description: Returns paid traffic data for a site, grouped by channel, platform, and device for a given week or month and year.
+    operationId: getPaidTrafficByChannelPlatformDevice
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+# Platform-Specific Endpoints
+
+site-traffic-paid-social-platform:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-platform
+    summary: Get paid social platform traffic data
+    description: Returns paid traffic data for a site from social platforms, grouped by platform for a given week or month and year.
+    operationId: getPaidTrafficBySocialPlatform
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-social-platform-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-platform
+    summary: Get paid social platform traffic data by device
+    description: Returns paid traffic data for a site from social platforms, grouped by platform and device for a given week or month and year.
+    operationId: getPaidTrafficBySocialPlatformDevice
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-search-platform:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-platform
+    summary: Get paid search platform traffic data
+    description: Returns paid traffic data for a site from search platforms, grouped by platform for a given week or month and year.
+    operationId: getPaidTrafficBySearchPlatform
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-search-platform-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-platform
+    summary: Get paid search platform traffic data by device
+    description: Returns paid traffic data for a site from search platforms, grouped by platform and device for a given week or month and year.
+    operationId: getPaidTrafficBySearchPlatformDevice
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-display-platform:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-platform
+    summary: Get paid display platform traffic data
+    description: Returns paid traffic data for a site from display platforms, grouped by platform for a given week or month and year.
+    operationId: getPaidTrafficByDisplayPlatform
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-display-platform-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-platform
+    summary: Get paid display platform traffic data by device
+    description: Returns paid traffic data for a site from display platforms, grouped by platform and device for a given week or month and year.
+    operationId: getPaidTrafficByDisplayPlatformDevice
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-video-platform:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-platform
+    summary: Get paid video platform traffic data
+    description: Returns paid traffic data for a site from video platforms, grouped by platform for a given week or month and year.
+    operationId: getPaidTrafficByVideoPlatform
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-video-platform-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-platform
+    summary: Get paid video platform traffic data by device
+    description: Returns paid traffic data for a site from video platforms, grouped by platform and device for a given week or month and year.
+    operationId: getPaidTrafficByVideoPlatformDevice
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+# URL-Based Endpoints
+
+site-traffic-paid-url:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-url
+    summary: Get paid traffic data grouped by URL
+    description: Returns paid traffic data for a site, grouped by URL for a given week or month and year.
+    operationId: getPaidTrafficByUrl
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-url-channel:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-url
+    summary: Get paid traffic data grouped by URL and channel
+    description: Returns paid traffic data for a site, grouped by URL and channel for a given week or month and year.
+    operationId: getPaidTrafficByUrlChannel
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-url-channel-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-url
+    summary: Get paid traffic data grouped by URL, channel, and device
+    description: Returns paid traffic data for a site, grouped by URL, channel, and device for a given week or month and year.
+    operationId: getPaidTrafficByUrlChannelDevice
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-url-channel-platform-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-url
+    summary: Get paid traffic data grouped by URL, channel, platform, and device
+    description: Returns paid traffic data for a site, grouped by URL, channel, platform, and device for a given week or month and year.
+    operationId: getPaidTrafficByUrlChannelPlatformDevice
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+# Campaign with Channel/Platform Endpoints
+
+site-traffic-paid-campaign-channel-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-campaign
+    summary: Get paid traffic data grouped by campaign, channel, and device
+    description: Returns paid traffic data for a site, grouped by campaign, channel, and device for a given week or month and year.
+    operationId: getPaidTrafficByCampaignChannelDevice
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-campaign-channel-platform:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-campaign
+    summary: Get paid traffic data grouped by campaign, channel, and platform
+    description: Returns paid traffic data for a site, grouped by campaign, channel, and platform for a given week or month and year.
+    operationId: getPaidTrafficByCampaignChannelPlatform
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-campaign-channel-platform-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-campaign
+    summary: Get paid traffic data grouped by campaign, channel, platform, and device
+    description: Returns paid traffic data for a site, grouped by campaign, channel, platform, and device for a given week or month and year.
+    operationId: getPaidTrafficByCampaignChannelPlatformDevice
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+# Temporal Series Endpoints
+
+site-traffic-paid-temporal-series:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-temporal
+    summary: Get paid traffic temporal series data
+    description: Returns paid traffic data over time (4-week series) for a site, providing week-over-week comparison.
+    operationId: getPaidTrafficTemporalSeries
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array with temporal series data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-temporal-series-by-campaign:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-temporal
+    summary: Get paid traffic temporal series data by campaign
+    description: Returns paid traffic data over time (4-week series) for a site, grouped by campaign.
+    operationId: getPaidTrafficTemporalSeriesByCampaign
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array with temporal series data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-temporal-series-by-channel:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-temporal
+    summary: Get paid traffic temporal series data by channel
+    description: Returns paid traffic data over time (4-week series) for a site, grouped by channel.
+    operationId: getPaidTrafficTemporalSeriesByChannel
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array with temporal series data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-temporal-series-by-platform:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-temporal
+    summary: Get paid traffic temporal series data by platform
+    description: Returns paid traffic data over time (4-week series) for a site, grouped by platform.
+    operationId: getPaidTrafficTemporalSeriesByPlatform
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array with temporal series data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-temporal-series-by-campaign-channel:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-temporal
+    summary: Get paid traffic temporal series data by campaign and channel
+    description: Returns paid traffic data over time (4-week series) for a site, grouped by campaign and channel.
+    operationId: getPaidTrafficTemporalSeriesByCampaignChannel
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array with temporal series data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-temporal-series-by-campaign-platform:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-temporal
+    summary: Get paid traffic temporal series data by campaign and platform
+    description: Returns paid traffic data over time (4-week series) for a site, grouped by campaign and platform.
+    operationId: getPaidTrafficTemporalSeriesByCampaignPlatform
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array with temporal series data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-temporal-series-by-campaign-channel-platform:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-temporal
+    summary: Get paid traffic temporal series data by campaign, channel, and platform
+    description: Returns paid traffic data over time (4-week series) for a site, grouped by campaign, channel, and platform.
+    operationId: getPaidTrafficTemporalSeriesByCampaignChannelPlatform
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array with temporal series data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-temporal-series-by-channel-platform:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-temporal
+    summary: Get paid traffic temporal series data by channel and platform
+    description: Returns paid traffic data over time (4-week series) for a site, grouped by channel and platform.
+    operationId: getPaidTrafficTemporalSeriesByChannelPlatform
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array with temporal series data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-temporal-series-by-url:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-temporal
+    summary: Get paid traffic temporal series data by URL
+    description: Returns paid traffic data over time (4-week series) for a site, grouped by URL.
+    operationId: getPaidTrafficTemporalSeriesByUrl
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array with temporal series data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-temporal-series-by-url-channel:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-temporal
+    summary: Get paid traffic temporal series data by URL and channel
+    description: Returns paid traffic data over time (4-week series) for a site, grouped by URL and channel.
+    operationId: getPaidTrafficTemporalSeriesByUrlChannel
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array with temporal series data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-temporal-series-by-url-platform:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-temporal
+    summary: Get paid traffic temporal series data by URL and platform
+    description: Returns paid traffic data over time (4-week series) for a site, grouped by URL and platform.
+    operationId: getPaidTrafficTemporalSeriesByUrlPlatform
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array with temporal series data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-temporal-series-by-url-channel-platform:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/weekNumber'
+    - $ref: './parameters.yaml#/month'
+    - $ref: './parameters.yaml#/year'
+    - $ref: './parameters.yaml#/trafficType'
+      description: Defaults to 'paid'
+  get:
+    tags:
+      - site
+      - paid
+      - paid-temporal
+    summary: Get paid traffic temporal series data by URL, channel, and platform
+    description: Returns paid traffic data over time (4-week series) for a site, grouped by URL, channel, and platform.
+    operationId: getPaidTrafficTemporalSeriesByUrlChannelPlatform
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array with temporal series data.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+# Impact Analysis Endpoints
+
+site-traffic-paid-impact-by-page:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: temporalCondition
+      in: query
+      required: true
+      schema:
+        type: string
+      description: Temporal condition specifying the 4-week period for analysis
+  get:
+    tags:
+      - site
+      - paid
+      - paid-impact
+    summary: Get top 3 pages with traffic impact
+    description: Returns the top 3 pages that experienced the most traffic loss or gain, showing impact analysis.
+    operationId: getImpactByPage
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array with impact metrics.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-impact-by-page-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: temporalCondition
+      in: query
+      required: true
+      schema:
+        type: string
+      description: Temporal condition specifying the 4-week period for analysis
+  get:
+    tags:
+      - site
+      - paid
+      - paid-impact
+    summary: Get traffic impact by page and device
+    description: Returns pages with traffic impact, grouped by page and device.
+    operationId: getImpactByPageDevice
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array with impact metrics.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-impact-by-page-traffic-type:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: temporalCondition
+      in: query
+      required: true
+      schema:
+        type: string
+      description: Temporal condition specifying the 4-week period for analysis
+  get:
+    tags:
+      - site
+      - paid
+      - paid-impact
+    summary: Get traffic impact by page and traffic type
+    description: Returns pages with traffic impact, grouped by page and traffic type.
+    operationId: getImpactByPageTrafficType
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array with impact metrics.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-impact-by-page-traffic-type-device:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: temporalCondition
+      in: query
+      required: true
+      schema:
+        type: string
+      description: Temporal condition specifying the 4-week period for analysis
+  get:
+    tags:
+      - site
+      - paid
+      - paid-impact
+    summary: Get traffic impact by page, traffic type, and device
+    description: Returns pages with traffic impact, grouped by page, traffic type, and device.
+    operationId: getImpactByPageTrafficTypeDevice
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array with impact metrics.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
+site-traffic-paid-traffic-loss-by-devices:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: temporalCondition
+      in: query
+      required: true
+      schema:
+        type: string
+      description: Temporal condition specifying the 4-week period for analysis
+  get:
+    tags:
+      - site
+      - paid
+      - paid-impact
+    summary: Get traffic loss analysis by device
+    description: Returns traffic loss metrics grouped by device type, showing which devices experienced the most traffic decrease.
+    operationId: getTrafficLossByDevices
+    responses:
+      '302':
+        description: |
+          Redirect to signed S3 URL containing the result data as a JSON array with traffic loss metrics.
+        headers:
+          Location:
+            description: The signed S3 URL where the result data can be downloaded
+            schema:
+              type: string
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
