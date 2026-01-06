@@ -209,6 +209,8 @@ describe('GetPromptUsageCommand', () => {
       const expectedMessage = '*Prompt usage for IMS Org ID* `test@AdobeOrg`:\n'
         + '   :ims: *IMS Org Name:* Test Org\n'
         + '   :paid: *Tier:* FREE_TRIAL\n'
+        + '   :bust_in_silhouette: *Human prompts:* 3\n'
+        + '   :robot_face: *AI prompts:* 0\n'
         + '   :elmo: *Total number of prompts in use:* 3';
 
       dataAccessStub.Organization.findByImsOrgId.resolves(mockOrganization);
@@ -228,6 +230,105 @@ describe('GetPromptUsageCommand', () => {
       expect(
         dataAccessStub.Entitlement.allByOrganizationId,
       ).to.have.been.calledWith('test-org-id');
+    });
+
+    it('retrieves prompt usage including AI prompts for a single IMS org ID', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('test-org-id'),
+        getName: sinon.stub().returns('Test Org'),
+      };
+
+      const mockSite1 = { getId: sinon.stub().returns('test-site-id1') };
+
+      const mockEntitlement = {
+        getId: () => 'ent',
+        getOrganizationId: () => 'test-org-id',
+        getProductCode: () => 'LLMO',
+        getTier: () => 'FREE_TRIAL',
+        getStatus: () => 'ACTIVE',
+        getQuotas: () => ({}),
+        getCreatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedBy: () => 'user@example.com',
+      };
+
+      const categoryId = '123e4567-e89b-12d3-a456-426614174000';
+      const topicId = '456e7890-e89b-12d3-a456-426614174001';
+      const aiTopicId = '789e0123-e89b-12d3-a456-426614174002';
+
+      const expectedConfig = {
+        ...llmoConfig.defaultConfig(),
+        categories: {
+          [categoryId]: {
+            name: 'test-category',
+            region: ['us'],
+          },
+        },
+        topics: {
+          [topicId]: {
+            name: 'test-topic',
+            category: categoryId,
+            prompts: [
+              {
+                prompt: 'What is the main topic?',
+                regions: ['us'],
+                origin: 'human',
+                source: 'config',
+              },
+            ],
+          },
+        },
+        aiTopics: {
+          [aiTopicId]: {
+            name: 'ai-topic',
+            category: categoryId,
+            prompts: [
+              {
+                prompt: 'AI generated prompt 1',
+                regions: ['us'],
+                origin: 'ai',
+                source: 'config',
+              },
+              {
+                prompt: 'AI generated prompt 2',
+                regions: ['us'],
+                origin: 'ai',
+                source: 'config',
+              },
+            ],
+          },
+          // Topic without prompts property to cover || 0 fallback branch
+          'topic-without-prompts': {
+            name: 'ai-topic-no-prompts',
+            category: categoryId,
+          },
+        },
+      };
+
+      readConfigStub.withArgs(mockSite1.getId(), s3Client).resolves({
+        config: expectedConfig,
+        exists: true,
+        version: 'v123',
+      });
+
+      const expectedMessage = '*Prompt usage for IMS Org ID* `test@AdobeOrg`:\n'
+        + '   :ims: *IMS Org Name:* Test Org\n'
+        + '   :paid: *Tier:* FREE_TRIAL\n'
+        + '   :bust_in_silhouette: *Human prompts:* 1\n'
+        + '   :robot_face: *AI prompts:* 2\n'
+        + '   :elmo: *Total number of prompts in use:* 3';
+
+      dataAccessStub.Organization.findByImsOrgId.resolves(mockOrganization);
+      dataAccessStub.Entitlement.allByOrganizationId.resolves([mockEntitlement]);
+      dataAccessStub.Site.allByOrganizationId.resolves([mockSite1]);
+
+      const args = [imsOrgID];
+      const command = GetPromptUsageCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      expect(slackContext.say.firstCall.args[0]).to.equal(expectedMessage);
     });
 
     it('returns an error when IMS org ID does not exist', async () => {
@@ -368,6 +469,8 @@ describe('GetPromptUsageCommand', () => {
       const expectedMessage = '*Prompt usage for IMS Org ID* `test@AdobeOrg`:\n'
        + '   :ims: *IMS Org Name:* Test Org\n'
        + '   :paid: *Tier:* FREE_TRIAL\n'
+       + '   :bust_in_silhouette: *Human prompts:* 0\n'
+       + '   :robot_face: *AI prompts:* 0\n'
        + '   :elmo: *Total number of prompts in use:* 0';
 
       const args = [imsOrgID];
@@ -605,11 +708,11 @@ describe('GetPromptUsageCommand', () => {
       const csvString = Buffer.isBuffer(csvBuffer) ? csvBuffer.toString('utf8') : String(csvBuffer);
       const lines = csvString.trim().split(/\r?\n/);
 
-      expect(lines[0]).to.equal('IMS Org Name,IMS Org ID,Tier,Total number of prompts in use');
+      expect(lines[0]).to.equal('IMS Org Name,IMS Org ID,Tier,Human Prompts,AI Prompts,Total Prompts');
 
-      expect(lines[1]).to.equal('Test Org 1,test-org-1@AdobeOrg,FREE_TRIAL,2');
+      expect(lines[1]).to.equal('Test Org 1,test-org-1@AdobeOrg,FREE_TRIAL,2,0,2');
 
-      expect(lines[2]).to.equal('Test Org 3,test-org-3@AdobeOrg,PAID,0');
+      expect(lines[2]).to.equal('Test Org 3,test-org-3@AdobeOrg,PAID,0,0,0');
 
       expect(dataAccessStub.Organization.findByImsOrgId).to.have.been.calledWith('test-org-1@AdobeOrg');
       expect(dataAccessStub.Organization.findByImsOrgId).to.have.been.calledWith('test-org-2@AdobeOrg');
@@ -715,6 +818,8 @@ describe('GetPromptUsageCommand', () => {
         topics: {},
       };
 
+      const aiTopicIdSite3 = '789e0123-e89b-12d3-a456-426614174006';
+
       const expectedConfigSite3 = {
         ...llmoConfig.defaultConfig(),
         categories: {
@@ -746,6 +851,20 @@ describe('GetPromptUsageCommand', () => {
             name: 'test-topic2',
             category: categoryIdSite1,
             prompts: [],
+          },
+        },
+        aiTopics: {
+          [aiTopicIdSite3]: {
+            name: 'ai-topic',
+            category: categoryIdSite3,
+            prompts: [
+              {
+                prompt: 'AI generated prompt',
+                regions: ['us'],
+                origin: 'ai',
+                source: 'config',
+              },
+            ],
           },
         },
       };
@@ -835,9 +954,10 @@ describe('GetPromptUsageCommand', () => {
         : String(csvBuffer);
       const lines = csvString.trim().split(/\r?\n/);
 
-      expect(lines[0]).to.equal('IMS Org Name,IMS Org ID,Tier,Total number of prompts in use');
-      expect(lines[1]).to.equal('Test Org 3,test-org-3@AdobeOrg,PAID,2');
-      expect(lines[2]).to.equal('Test Org 1,test-org-1@AdobeOrg,FREE_TRIAL,1');
+      expect(lines[0]).to.equal('IMS Org Name,IMS Org ID,Tier,Human Prompts,AI Prompts,Total Prompts');
+      // Site3 has 2 human prompts + 1 AI prompt = 3 total
+      expect(lines[1]).to.equal('Test Org 3,test-org-3@AdobeOrg,PAID,2,1,3');
+      expect(lines[2]).to.equal('Test Org 1,test-org-1@AdobeOrg,FREE_TRIAL,1,0,1');
 
       expect(
         dataAccessStub.Organization.findByImsOrgId,
@@ -1472,10 +1592,10 @@ describe('GetPromptUsageCommand', () => {
       const linesBatch1 = csvStringBatch1.trim().split(/\r?\n/);
 
       expect(linesBatch1[0]).to.equal(
-        'IMS Org Name,IMS Org ID,Tier,Total number of prompts in use',
+        'IMS Org Name,IMS Org ID,Tier,Human Prompts,AI Prompts,Total Prompts',
       );
-      expect(linesBatch1[1]).to.equal('Test Org 1,test-org-1@AdobeOrg,FREE_TRIAL,2');
-      expect(linesBatch1[2]).to.equal('Test Org 2,test-org-2@AdobeOrg,PAID,1');
+      expect(linesBatch1[1]).to.equal('Test Org 1,test-org-1@AdobeOrg,FREE_TRIAL,2,0,2');
+      expect(linesBatch1[2]).to.equal('Test Org 2,test-org-2@AdobeOrg,PAID,1,0,1');
 
       const [
         providedSlackContextBatch2,
@@ -1503,9 +1623,9 @@ describe('GetPromptUsageCommand', () => {
       const linesBatch2 = csvStringBatch2.trim().split(/\r?\n/);
 
       expect(linesBatch2[0]).to.equal(
-        'IMS Org Name,IMS Org ID,Tier,Total number of prompts in use',
+        'IMS Org Name,IMS Org ID,Tier,Human Prompts,AI Prompts,Total Prompts',
       );
-      expect(linesBatch2[1]).to.equal('Test Org 3,test-org-3@AdobeOrg,PAID,1');
+      expect(linesBatch2[1]).to.equal('Test Org 3,test-org-3@AdobeOrg,PAID,1,0,1');
 
       expect(
         dataAccessStub.Organization.findByImsOrgId,
@@ -1747,10 +1867,10 @@ describe('GetPromptUsageCommand', () => {
       const lines = csvStringBatch.trim().split(/\r?\n/);
 
       expect(lines[0]).to.equal(
-        'IMS Org Name,IMS Org ID,Tier,Total number of prompts in use',
+        'IMS Org Name,IMS Org ID,Tier,Human Prompts,AI Prompts,Total Prompts',
       );
-      expect(lines[1]).to.equal('Test Org 1,test-org-1@AdobeOrg,FREE_TRIAL,2');
-      expect(lines[2]).to.equal('Test Org 2,test-org-2@AdobeOrg,PAID,1');
+      expect(lines[1]).to.equal('Test Org 1,test-org-1@AdobeOrg,FREE_TRIAL,2,0,2');
+      expect(lines[2]).to.equal('Test Org 2,test-org-2@AdobeOrg,PAID,1,0,1');
       expect(lines.length).to.equal(3);
 
       expect(
