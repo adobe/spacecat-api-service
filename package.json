@@ -1,6 +1,6 @@
 {
   "name": "@adobe/spacecat-api-service",
-  "version": "1.279.1",
+  "version": "1.279.2",
   "description": "SpaceCat API Service",
   "main": "src/index.js",
   "type": "module",
@@ -115,7 +115,7 @@
     "@adobe/eslint-config-helix": "3.0.15",
     "@adobe/helix-deploy": "13.2.6",
     "@adobe/helix-universal": "5.3.0",
-    "@adobe/helix-universal-devserver": "1.1.144",
+    "@adobe/helix-universal-devserver": "1.1.145",
     "@adobe/semantic-release-coralogix": "1.1.40",
     "@adobe/semantic-release-skms-cmr": "1.1.5",
     "@eslint/config-helpers": "0.5.0",

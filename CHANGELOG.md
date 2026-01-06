@@ -1,3 +1,10 @@
+## [1.279.2](https://github.com/adobe/spacecat-api-service/compare/v1.279.1...v1.279.2) (2026-01-05)
+
+
+### Bug Fixes
+
+* allow admin users to bypass x-product header validation ([#1672](https://github.com/adobe/spacecat-api-service/issues/1672)) ([71145e2](https://github.com/adobe/spacecat-api-service/commit/71145e24748f1d2a154f5f380b57b19975fa87a9))
+
 ## [1.279.1](https://github.com/adobe/spacecat-api-service/compare/v1.279.0...v1.279.1) (2026-01-05)
 
 
