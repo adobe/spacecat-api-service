@@ -35,13 +35,15 @@ function DetectBotBlockerCommand(context) {
       blocked, type, confidence, reason,
     } = result;
     const crawlable = !blocked;
-    const confidencePercent = confidence ? (confidence * 100).toFixed(0) : 'N/A';
+    const confidencePercent = (typeof confidence === 'number')
+      ? `${(confidence * 100).toFixed(0)}%`
+      : 'N/A%';
     const crawlableEmoji = crawlable ? ':white_check_mark:' : ':no_entry:';
 
     let confidenceEmoji = ':question:';
     if (confidence >= 0.95) {
       confidenceEmoji = ':muscle:';
-    } else if (confidence >= 0.5) {
+    } else if (confidence >= 0.7) {
       confidenceEmoji = ':thinking_face:';
     }
 
@@ -63,7 +65,7 @@ function DetectBotBlockerCommand(context) {
 
     let message = `${crawlableEmoji} *Crawlable:* ${crawlable ? 'Yes' : 'No'}\n`
       + `:shield: *Blocker Type:* ${typeLabel}\n`
-      + `${confidenceEmoji} *Confidence:* ${confidencePercent}%`;
+      + `${confidenceEmoji} *Confidence:* ${confidencePercent}`;
 
     if (reason) {
       message += `\n:information_source: *Reason:* ${reason}`;

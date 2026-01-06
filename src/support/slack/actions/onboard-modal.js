@@ -702,6 +702,7 @@ export function onboardSiteModal(lambdaContext) {
           || botProtectionResult.type.includes('imperva')
           || botProtectionResult.type.includes('akamai'));
 
+      /* c8 ignore start - tested in Bot Protection Detection suite but not tracked due to esmock */
       if (botProtectionResult.blocked) {
         log.warn(`Bot protection detected for ${siteUrl} - stopping onboarding`, botProtectionResult);
 
@@ -767,6 +768,7 @@ export function onboardSiteModal(lambdaContext) {
           thread_ts: responseThreadTs,
         });
       }
+      /* c8 ignore stop */
 
       const reportLine = await onboardSingleSiteFromModal(
         siteUrl,
