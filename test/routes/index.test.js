@@ -237,6 +237,10 @@ describe('getRouteHandlers', () => {
     removeFix: () => null,
   };
 
+  const mockTopPaidOpportunitiesController = {
+    getTopPaidOpportunities: sinon.stub(),
+  };
+
   const mockConsentBannerController = {
     getScreenshots: () => null,
     takeScreenshots: () => null,
@@ -321,6 +325,7 @@ describe('getRouteHandlers', () => {
       mockScrapeController,
       mockScrapeJobController,
       mockPaidController,
+      mockTopPaidOpportunitiesController,
       mockTrafficController,
       mockFixesController,
       mockLlmoController,
@@ -635,7 +640,7 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['DELETE /tools/api-keys/:id'].handler).to.equal(mockApiKeyController.deleteApiKey);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities'].handler).to.equal(mockOpportunitiesController.getAllForSite);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities'].paramNames).to.deep.equal(['siteId']);
-    expect(dynamicRoutes['GET /sites/:siteId/opportunities/top-paid'].handler).to.equal(mockOpportunitiesController.getTopPaidOpportunities);
+    expect(dynamicRoutes['GET /sites/:siteId/opportunities/top-paid'].handler).to.equal(mockTopPaidOpportunitiesController.getTopPaidOpportunities);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/top-paid'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/by-status/:status'].handler).to.equal(mockOpportunitiesController.getByStatus);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/by-status/:status'].paramNames).to.deep.equal(['siteId', 'status']);

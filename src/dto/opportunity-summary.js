@@ -20,6 +20,7 @@ export const OpportunitySummaryDto = {
    * Converts an Opportunity object with its suggestions into a summary JSON object.
    * @param {Readonly<Opportunity>} opportunity - Opportunity object.
    * @param {Array<Readonly<Suggestion>>} suggestions - Array of suggestion objects.
+   * @param {Object} paidUrlsData - Optional object with urls and pageViews for CWV opportunities.
    * @returns {{
    *  opportunityId: string,
    *  urls: Array<string>,
@@ -34,34 +35,45 @@ export const OpportunitySummaryDto = {
    *  projectedTrafficValue: number
    * }} JSON object.
    */
-  toJSON: (opportunity, suggestions = []) => {
+  toJSON: (opportunity, suggestions = [], paidUrlsData = null, topUrlsLimit = 20) => {
     // Extract unique URLs from suggestions
     const urls = new Set();
     let totalPageViews = 0;
 
-    suggestions.forEach((suggestion) => {
-      const data = suggestion.getData();
-      // Handle different URL field names in suggestion data
-      if (data.url_from) urls.add(data.url_from);
-      if (data.url_to) urls.add(data.url_to);
-      if (data.urlFrom) urls.add(data.urlFrom);
-      if (data.urlTo) urls.add(data.urlTo);
-      if (data.url) urls.add(data.url);
+    // If paidUrlsData provided, use those URLs and pageViews
+    // (for CWV opportunities from paid traffic)
+    if (paidUrlsData && paidUrlsData.urls) {
+      paidUrlsData.urls.forEach((url) => urls.add(url));
+      totalPageViews = paidUrlsData.pageViews || 0;
+    } else {
+      // Otherwise, extract all URLs from suggestion data (for paid media opportunities)
+      suggestions.forEach((suggestion) => {
+        const data = suggestion.getData();
+        // Handle different URL field names in suggestion data
+        if (data.url_from) urls.add(data.url_from);
+        if (data.url_to) urls.add(data.url_to);
+        if (data.urlFrom) urls.add(data.urlFrom);
+        if (data.urlTo) urls.add(data.urlTo);
+        if (data.url) urls.add(data.url);
+      });
 
       // Aggregate page views from rank (which often represents traffic)
-      const rank = suggestion.getRank();
-      if (rank && typeof rank === 'number') {
-        totalPageViews += rank;
-      }
+      suggestions.forEach((suggestion) => {
+        const data = suggestion.getData();
+        const rank = suggestion.getRank();
+        if (rank && typeof rank === 'number') {
+          totalPageViews += rank;
+        }
 
-      // Also check for traffic_domain or trafficDomain in data
-      if (data.traffic_domain && typeof data.traffic_domain === 'number') {
-        totalPageViews += data.traffic_domain;
-      }
-      if (data.trafficDomain && typeof data.trafficDomain === 'number') {
-        totalPageViews += data.trafficDomain;
-      }
-    });
+        // Also check for traffic_domain or trafficDomain in data
+        if (data.traffic_domain && typeof data.traffic_domain === 'number') {
+          totalPageViews += data.traffic_domain;
+        }
+        if (data.trafficDomain && typeof data.trafficDomain === 'number') {
+          totalPageViews += data.trafficDomain;
+        }
+      });
+    }
 
     // Get projected traffic data from opportunity data
     const opportunityData = opportunity.getData() || {};
@@ -70,7 +82,7 @@ export const OpportunitySummaryDto = {
 
     return {
       opportunityId: opportunity.getId(),
-      urls: Array.from(urls).slice(0, 10),
+      urls: Array.from(urls).slice(0, topUrlsLimit),
       name: opportunity.getTitle(),
       type: null,
       description: null,
