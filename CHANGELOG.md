@@ -1,3 +1,10 @@
+# [1.280.0](https://github.com/adobe/spacecat-api-service/compare/v1.279.3...v1.280.0) (2026-01-07)
+
+
+### Features
+
+* top paid opportunites v2 ([#1664](https://github.com/adobe/spacecat-api-service/issues/1664)) ([d516a2a](https://github.com/adobe/spacecat-api-service/commit/d516a2a33823718400a1dc674605fe21570e1419))
+
 ## [1.279.3](https://github.com/adobe/spacecat-api-service/compare/v1.279.2...v1.279.3) (2026-01-07)
 
 
