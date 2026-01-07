@@ -78,17 +78,32 @@ function GetLlmoConfigSummaryCommand(context) {
   const calculateStats = (config) => {
     const categories = Object.keys(config.categories || {}).length;
     const topics = Object.keys(config.topics || {}).length;
-    const prompts = Object.values(config.topics || {}).reduce(
+    // Count prompts within topics (human prompts)
+    const humanPrompts = Object.values(config.topics || {}).reduce(
       (total, topic) => total + (topic.prompts?.length || 0),
       0,
     );
+    // Count prompts within aiTopics (AI prompts)
+    const aiPrompts = Object.values(config.aiTopics || {}).reduce(
+      (total, topic) => total + (topic.prompts?.length || 0),
+      0,
+    );
+    const totalPrompts = humanPrompts + aiPrompts;
     const brandAliases = config.brands?.aliases?.length || 0;
     const competitors = config.competitors?.competitors?.length || 0;
     const deletedPrompts = Object.keys(config.deleted?.prompts || {}).length;
     const cdnProvider = config.cdnBucketConfig?.cdnProvider || 'N/A';
 
     return {
-      categories, topics, prompts, brandAliases, competitors, deletedPrompts, cdnProvider,
+      categories,
+      topics,
+      humanPrompts,
+      aiPrompts,
+      totalPrompts,
+      brandAliases,
+      competitors,
+      deletedPrompts,
+      cdnProvider,
     };
   };
 
@@ -177,7 +192,9 @@ function GetLlmoConfigSummaryCommand(context) {
           { id: 'imsOrgId', title: 'IMS Org ID' },
           { id: 'categories', title: 'Categories' },
           { id: 'topics', title: 'Topics' },
-          { id: 'prompts', title: 'Prompts' },
+          { id: 'humanPrompts', title: 'Human Prompts' },
+          { id: 'aiPrompts', title: 'AI Prompts' },
+          { id: 'totalPrompts', title: 'Total Prompts' },
           { id: 'brandAliases', title: 'Brand Aliases' },
           { id: 'competitors', title: 'Competitors' },
           { id: 'deletedPrompts', title: 'Deleted Prompts' },

@@ -1,3 +1,24 @@
+# [1.281.0](https://github.com/adobe/spacecat-api-service/compare/v1.280.0...v1.281.0) (2026-01-07)
+
+
+### Features
+
+* update llmo slack command to include human, ai and total prompt… ([#1676](https://github.com/adobe/spacecat-api-service/issues/1676)) ([25c5e45](https://github.com/adobe/spacecat-api-service/commit/25c5e451c687901cc1d9b1dd36a7d2d2dc7cce02))
+
+# [1.280.0](https://github.com/adobe/spacecat-api-service/compare/v1.279.3...v1.280.0) (2026-01-07)
+
+
+### Features
+
+* top paid opportunites v2 ([#1664](https://github.com/adobe/spacecat-api-service/issues/1664)) ([d516a2a](https://github.com/adobe/spacecat-api-service/commit/d516a2a33823718400a1dc674605fe21570e1419))
+
+## [1.279.3](https://github.com/adobe/spacecat-api-service/compare/v1.279.2...v1.279.3) (2026-01-07)
+
+
+### Bug Fixes
+
+* edge apis - fetch s3 api key and fix invalidation sequence ([#1679](https://github.com/adobe/spacecat-api-service/issues/1679)) ([b7811b0](https://github.com/adobe/spacecat-api-service/commit/b7811b00867344c1a0f0483365bdc7ace1091c95))
+
 ## [1.279.2](https://github.com/adobe/spacecat-api-service/compare/v1.279.1...v1.279.2) (2026-01-05)
 
 
