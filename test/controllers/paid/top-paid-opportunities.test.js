@@ -1565,4 +1565,180 @@ describe('TopPaidOpportunitiesController', () => {
       expect(response.status).to.equal(200);
     });
   });
+
+  describe('Forms opportunity filtering', () => {
+    it('returns forms opportunities when URLs match paid traffic', async () => {
+      const formsOppty = {
+        getId: () => 'forms-1',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'Forms Opportunity',
+        getDescription: () => 'Fix form accessibility issues',
+        getType: () => 'form-accessibility',
+        getStatus: () => 'NEW',
+        getTags: () => [],
+        getData: () => ({ projectedTrafficLost: 2000, projectedTrafficValue: 8000 }),
+      };
+
+      mockOpportunity.allBySiteIdAndStatus
+        .withArgs(SITE_ID, 'NEW').resolves([formsOppty])
+        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+
+      const mockSuggestions = [
+        {
+          getData: () => ({ url: 'https://example.com/contact-form' }),
+          getRank: () => 0,
+        },
+      ];
+
+      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
+
+      const mockAthenaClient = {
+        query: sandbox.stub().resolves([
+          {
+            url: 'https://example.com/contact-form',
+            pageviews: '3000',
+            overall_cwv_score: 'good',
+            lcp_score: 'good',
+            inp_score: 'good',
+            cls_score: 'good',
+          },
+        ]),
+      };
+
+      AWSAthenaClient.fromContext.returns(mockAthenaClient);
+
+      const response = await topPaidController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+        data: { year: 2025, week: 1 },
+      });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      expect(opportunities).to.be.an('array').with.lengthOf(1);
+      expect(opportunities[0].opportunityId).to.equal('forms-1');
+      expect(opportunities[0].system_type).to.equal('form-accessibility');
+      expect(opportunities[0].pageViews).to.equal(3000);
+    });
+
+    it('does not return forms opportunities when URLs do not match paid traffic', async () => {
+      const formsOppty = {
+        getId: () => 'forms-2',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'Forms Opportunity',
+        getDescription: () => 'Fix form conversion issues',
+        getType: () => 'high-form-views-low-conversions',
+        getStatus: () => 'NEW',
+        getTags: () => [],
+        getData: () => ({ projectedTrafficLost: 1500, projectedTrafficValue: 6000 }),
+      };
+
+      mockOpportunity.allBySiteIdAndStatus
+        .withArgs(SITE_ID, 'NEW').resolves([formsOppty])
+        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+
+      const mockSuggestions = [
+        {
+          getData: () => ({ url: 'https://example.com/signup-form' }),
+          getRank: () => 0,
+        },
+      ];
+
+      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
+
+      const mockAthenaClient = {
+        query: sandbox.stub().resolves([
+          {
+            url: 'https://example.com/different-page',
+            pageviews: '2000',
+            overall_cwv_score: 'good',
+            lcp_score: 'good',
+            inp_score: 'good',
+            cls_score: 'good',
+          },
+        ]),
+      };
+
+      AWSAthenaClient.fromContext.returns(mockAthenaClient);
+
+      const response = await topPaidController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+        data: { year: 2025, week: 1 },
+      });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      expect(opportunities).to.be.an('array').with.lengthOf(0);
+    });
+
+    it('handles multiple forms opportunity types', async () => {
+      const formsOppty1 = {
+        getId: () => 'forms-3',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'Low Form Navigation',
+        getDescription: () => 'Improve form navigation',
+        getType: () => 'high-page-views-low-form-nav',
+        getStatus: () => 'NEW',
+        getTags: () => [],
+        getData: () => ({ projectedTrafficLost: 1000, projectedTrafficValue: 4000 }),
+      };
+
+      const formsOppty2 = {
+        getId: () => 'forms-4',
+        getSiteId: () => SITE_ID,
+        getTitle: () => 'Low Form Views',
+        getDescription: () => 'Increase form visibility',
+        getType: () => 'high-page-views-low-form-views',
+        getStatus: () => 'NEW',
+        getTags: () => [],
+        getData: () => ({ projectedTrafficLost: 800, projectedTrafficValue: 3000 }),
+      };
+
+      mockOpportunity.allBySiteIdAndStatus
+        .withArgs(SITE_ID, 'NEW').resolves([formsOppty1, formsOppty2])
+        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+
+      mockSuggestion.allByOpportunityIdAndStatus
+        .withArgs('forms-3', 'NEW').resolves([
+          { getData: () => ({ url: 'https://example.com/form1' }), getRank: () => 0 },
+        ])
+        .withArgs('forms-4', 'NEW').resolves([
+          { getData: () => ({ url: 'https://example.com/form2' }), getRank: () => 0 },
+        ]);
+
+      const mockAthenaClient = {
+        query: sandbox.stub().resolves([
+          {
+            url: 'https://example.com/form1',
+            pageviews: '2500',
+            overall_cwv_score: 'good',
+            lcp_score: 'good',
+            inp_score: 'good',
+            cls_score: 'good',
+          },
+          {
+            url: 'https://example.com/form2',
+            pageviews: '1800',
+            overall_cwv_score: 'good',
+            lcp_score: 'good',
+            inp_score: 'good',
+            cls_score: 'good',
+          },
+        ]),
+      };
+
+      AWSAthenaClient.fromContext.returns(mockAthenaClient);
+
+      const response = await topPaidController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+        data: { year: 2025, week: 1 },
+      });
+
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      expect(opportunities).to.be.an('array').with.lengthOf(2);
+      // Should be sorted by projectedTrafficValue descending
+      expect(opportunities[0].opportunityId).to.equal('forms-3');
+      expect(opportunities[1].opportunityId).to.equal('forms-4');
+    });
+  });
 });

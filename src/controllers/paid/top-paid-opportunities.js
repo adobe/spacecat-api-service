@@ -136,29 +136,30 @@ function normalizeUrl(url) {
     .replace(/\/$/, '');
 }
 
-async function matchCwvOpportunitiesWithUrls(
-  cwvOpportunities,
-  topPoorCwvData,
+async function matchOpportunitiesWithPaidUrls(
+  opportunities,
+  paidTrafficData,
   Suggestion,
   log,
+  opportunityTypeName = 'opportunities',
 ) {
-  if (cwvOpportunities.length === 0 || topPoorCwvData.length === 0) {
-    log.info(`No matching needed: cwvOpportunities=${cwvOpportunities.length}, topPoorCwvData=${topPoorCwvData.length}`);
+  if (opportunities.length === 0 || paidTrafficData.length === 0) {
+    log.info(`No matching needed: ${opportunityTypeName}=${opportunities.length}, paidTrafficData=${paidTrafficData.length}`);
     return { matched: [], paidUrlsMap: new Map() };
   }
 
-  const topPoorCwvUrls = topPoorCwvData.map((item) => item.url);
-  log.info(`Matching ${cwvOpportunities.length} CWV opportunities against ${topPoorCwvUrls.length} poor CWV URLs from paid traffic`);
+  const paidUrls = paidTrafficData.map((item) => item.url);
+  log.info(`Matching ${opportunities.length} ${opportunityTypeName} against ${paidUrls.length} URLs from paid traffic`);
 
   // Create a map of normalized URL -> { url, pageviews } for fast lookup
   const normalizedUrlToDataMap = new Map();
-  topPoorCwvData.forEach((item) => {
+  paidTrafficData.forEach((item) => {
     const normalized = normalizeUrl(item.url);
     const pageviews = parseInt(item.pageviews, 10);
     normalizedUrlToDataMap.set(normalized, { url: item.url, pageviews });
   });
 
-  const suggestionsPromises = cwvOpportunities.map(
+  const suggestionsPromises = opportunities.map(
     (opportunity) => Suggestion.allByOpportunityIdAndStatus(opportunity.getId(), 'NEW'),
   );
   const allSuggestions = await Promise.all(suggestionsPromises);
@@ -166,7 +167,7 @@ async function matchCwvOpportunitiesWithUrls(
   const matched = [];
   const paidUrlsMap = new Map();
 
-  cwvOpportunities.forEach((opportunity, index) => {
+  opportunities.forEach((opportunity, index) => {
     const suggestions = allSuggestions[index];
     const opportunityId = opportunity.getId();
 
@@ -203,9 +204,69 @@ async function matchCwvOpportunitiesWithUrls(
     }
   });
 
-  log.info(`Matched ${matched.length} CWV opportunities with poor CWV URLs from paid traffic`);
+  log.info(`Matched ${matched.length} ${opportunityTypeName} with URLs from paid traffic`);
   return { matched, paidUrlsMap };
 }
+
+/**
+ * Configuration for opportunity type handlers.
+ * Each handler defines how to categorize opportunities and what data filtering they need.
+ */
+const OPPORTUNITY_TYPE_CONFIGS = [
+  {
+    // Paid media opportunities - included directly without URL matching
+    category: 'paidMedia',
+    displayName: 'paid media',
+    requiresUrlMatching: false,
+    requiresAthenaQuery: false,
+    matcher: (opportunity) => {
+      const tags = opportunity.getTags() || [];
+      const type = opportunity.getType();
+      const opportunityData = opportunity.getData();
+
+      // Has 'paid media' tag (case-insensitive)
+      const hasPaidMediaTag = tags.some((tag) => tag.toLowerCase() === 'paid media');
+
+      // Or is a specific type that should be treated as paid media
+      const isPaidMediaType = type === 'consent-banner'
+        || opportunityData.opportunityType === 'no-cta-above-the-fold';
+
+      return hasPaidMediaTag || isPaidMediaType;
+    },
+  },
+  {
+    // CWV opportunities - require URL matching with poor CWV from paid traffic
+    category: 'cwv',
+    displayName: 'CWV',
+    requiresUrlMatching: true,
+    requiresAthenaQuery: true,
+    matcher: (opportunity) => opportunity.getType() === 'cwv',
+    // Custom data filter - only match URLs with poor CWV scores
+    dataFilter: (trafficData, pageViewThreshold, log) => filterHighTrafficPoorCwv(
+      trafficData,
+      pageViewThreshold,
+      log,
+    ),
+  },
+  {
+    // Forms opportunities - require URL matching with any paid traffic
+    category: 'forms',
+    displayName: 'forms',
+    requiresUrlMatching: true,
+    requiresAthenaQuery: true,
+    matcher: (opportunity) => {
+      const formTypes = [
+        'high-form-views-low-conversions',
+        'high-page-views-low-form-nav',
+        'high-page-views-low-form-views',
+        'form-accessibility',
+      ];
+      return formTypes.includes(opportunity.getType());
+    },
+    // No custom filter - use all paid traffic data
+    dataFilter: null,
+  },
+];
 
 /**
  * Top Paid Opportunities controller.
@@ -231,8 +292,6 @@ function TopPaidOpportunitiesController(ctx, env = {}) {
 
     const PAGE_VIEW_THRESHOLD = env.PAID_DATA_THRESHOLD ?? 1000;
     const TOP_URLS_LIMIT = 20;
-    const TARGET_TAG = 'paid media';
-    const CWV_TYPE = 'cwv';
 
     // Fetch all opportunities with NEW or IN_PROGRESS status first
     const [newOpportunities, inProgressOpportunities] = await Promise.all([
@@ -242,8 +301,11 @@ function TopPaidOpportunitiesController(ctx, env = {}) {
 
     const allOpportunities = [...newOpportunities, ...inProgressOpportunities];
 
-    const paidMediaOpportunities = [];
-    const cwvOpportunities = [];
+    // Categorize opportunities using configuration
+    const categorizedOpportunities = new Map();
+    OPPORTUNITY_TYPE_CONFIGS.forEach((config) => {
+      categorizedOpportunities.set(config.category, []);
+    });
 
     for (const opportunity of allOpportunities) {
       if (!shouldIncludeOpportunity(opportunity)) {
@@ -251,28 +313,26 @@ function TopPaidOpportunitiesController(ctx, env = {}) {
         continue;
       }
 
-      const tags = opportunity.getTags() || [];
-      const type = opportunity.getType();
-      const opportunityData = opportunity.getData();
+      // Find the first matching category for this opportunity
+      const matchingConfig = OPPORTUNITY_TYPE_CONFIGS.find(
+        (config) => config.matcher(opportunity),
+      );
 
-      // Check if has 'paid media' tag (case-insensitive)
-      const hasPaidMediaTag = tags.some((tag) => tag.toLowerCase() === TARGET_TAG);
-
-      // Check if type is one that should be treated as paid media
-      const isPaidMediaType = type === 'consent-banner'
-        || opportunityData.opportunityType === 'no-cta-above-the-fold';
-
-      if (hasPaidMediaTag || isPaidMediaType) {
-        paidMediaOpportunities.push(opportunity);
-      } else if (type === CWV_TYPE) {
-        cwvOpportunities.push(opportunity);
+      if (matchingConfig) {
+        categorizedOpportunities.get(matchingConfig.category).push(opportunity);
       }
     }
 
-    let topPoorCwvData = [];
+    // Check if any opportunity types require Athena query
+    const configsRequiringAthena = OPPORTUNITY_TYPE_CONFIGS.filter(
+      (config) => config.requiresAthenaQuery
+        && categorizedOpportunities.get(config.category).length > 0,
+    );
 
-    // if there are cwv opportunities, find which of them are from paid traffic by querying Athena
-    if (cwvOpportunities.length > 0) {
+    let allPaidTrafficData = [];
+
+    // Query Athena if any opportunity types need it
+    if (configsRequiringAthena.length > 0) {
       try {
         // Get temporal parameters with defaults
         const { month } = context.data || {};
@@ -313,30 +373,70 @@ function TopPaidOpportunitiesController(ctx, env = {}) {
           log,
         );
 
-        topPoorCwvData = filterHighTrafficPoorCwv(
-          trafficData,
-          PAGE_VIEW_THRESHOLD,
-          log,
-        );
+        allPaidTrafficData = trafficData;
       } catch (error) {
-        log.error(`Failed to query Athena for paid traffic CWV data: ${error.message}`);
-        // Continue without CWV filtering - will only return 'paid media' tagged opportunities
+        log.error(`Failed to query Athena for paid traffic data: ${error.message}`);
+        // Continue without filtering - will only return 'paid media' tagged opportunities
       }
     } else {
-      log.info(`No CWV opportunities found for site ${siteId}, skipping Athena query for paid traffic`);
+      const categoryNames = OPPORTUNITY_TYPE_CONFIGS
+        .filter((config) => config.requiresAthenaQuery)
+        .map((config) => config.displayName)
+        .join(', ');
+      log.info(`No ${categoryNames} opportunities found for site ${siteId}, skipping Athena query`);
     }
 
-    // Match CWV opportunities with poor CWV URLs from paid traffic
-    const matchResult = await matchCwvOpportunitiesWithUrls(
-      cwvOpportunities,
-      topPoorCwvData,
-      Suggestion,
-      log,
+    // Process each opportunity type that requires URL matching
+    const configsRequiringMatching = OPPORTUNITY_TYPE_CONFIGS.filter(
+      (config) => config.requiresUrlMatching
+        && categorizedOpportunities.get(config.category).length > 0,
     );
-    const { matched: matchedCwvOpportunities, paidUrlsMap } = matchResult;
 
-    // Combine all filtered opportunities: paid media tag OR matched CWV from paid traffic
-    const filteredOpportunities = [...paidMediaOpportunities, ...matchedCwvOpportunities];
+    const matchingPromises = configsRequiringMatching.map((config) => {
+      const opportunities = categorizedOpportunities.get(config.category);
+
+      // Apply custom data filter if defined, otherwise use all traffic data
+      const filteredData = config.dataFilter
+        ? config.dataFilter(allPaidTrafficData, PAGE_VIEW_THRESHOLD, log)
+        : allPaidTrafficData;
+
+      return matchOpportunitiesWithPaidUrls(
+        opportunities,
+        filteredData,
+        Suggestion,
+        log,
+        `${config.displayName} opportunities`,
+      ).then((result) => ({ config, result }));
+    });
+
+    const matchingResults = await Promise.all(matchingPromises);
+
+    const matchResults = new Map();
+    const paidUrlsMaps = [];
+
+    matchingResults.forEach(({ config, result }) => {
+      matchResults.set(config.category, result.matched);
+      paidUrlsMaps.push(result.paidUrlsMap);
+    });
+
+    // Combine all paid URLs maps
+    const paidUrlsMap = new Map(
+      paidUrlsMaps.flatMap((map) => Array.from(map.entries())),
+    );
+
+    // Combine all opportunities: direct inclusion + matched from URL filtering
+    const filteredOpportunities = [];
+
+    for (const config of OPPORTUNITY_TYPE_CONFIGS) {
+      if (config.requiresUrlMatching) {
+        // Add matched opportunities from URL filtering
+        const matched = matchResults.get(config.category) || [];
+        filteredOpportunities.push(...matched);
+      } else {
+        // Add opportunities that don't require URL matching (e.g., paid media tag)
+        filteredOpportunities.push(...categorizedOpportunities.get(config.category));
+      }
+    }
 
     // Sort by projectedTrafficValue descending
     filteredOpportunities.sort((a, b) => {
