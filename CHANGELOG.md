@@ -1,3 +1,10 @@
+## [1.279.3](https://github.com/adobe/spacecat-api-service/compare/v1.279.2...v1.279.3) (2026-01-07)
+
+
+### Bug Fixes
+
+* edge apis - fetch s3 api key and fix invalidation sequence ([#1679](https://github.com/adobe/spacecat-api-service/issues/1679)) ([b7811b0](https://github.com/adobe/spacecat-api-service/commit/b7811b00867344c1a0f0483365bdc7ace1091c95))
+
 ## [1.279.2](https://github.com/adobe/spacecat-api-service/compare/v1.279.1...v1.279.2) (2026-01-05)
 
 
