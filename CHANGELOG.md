@@ -1,3 +1,10 @@
+# [1.281.0](https://github.com/adobe/spacecat-api-service/compare/v1.280.0...v1.281.0) (2026-01-07)
+
+
+### Features
+
+* update llmo slack command to include human, ai and total prompt… ([#1676](https://github.com/adobe/spacecat-api-service/issues/1676)) ([25c5e45](https://github.com/adobe/spacecat-api-service/commit/25c5e451c687901cc1d9b1dd36a7d2d2dc7cce02))
+
 # [1.280.0](https://github.com/adobe/spacecat-api-service/compare/v1.279.3...v1.280.0) (2026-01-07)
 
 
