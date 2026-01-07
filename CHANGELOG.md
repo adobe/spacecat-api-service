@@ -1,3 +1,52 @@
+## [1.279.3](https://github.com/adobe/spacecat-api-service/compare/v1.279.2...v1.279.3) (2026-01-07)
+
+
+### Bug Fixes
+
+* edge apis - fetch s3 api key and fix invalidation sequence ([#1679](https://github.com/adobe/spacecat-api-service/issues/1679)) ([b7811b0](https://github.com/adobe/spacecat-api-service/commit/b7811b00867344c1a0f0483365bdc7ace1091c95))
+
+## [1.279.2](https://github.com/adobe/spacecat-api-service/compare/v1.279.1...v1.279.2) (2026-01-05)
+
+
+### Bug Fixes
+
+* allow admin users to bypass x-product header validation ([#1672](https://github.com/adobe/spacecat-api-service/issues/1672)) ([71145e2](https://github.com/adobe/spacecat-api-service/commit/71145e24748f1d2a154f5f380b57b19975fa87a9))
+
+## [1.279.1](https://github.com/adobe/spacecat-api-service/compare/v1.279.0...v1.279.1) (2026-01-05)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tokowaka-client to v1.4.4 ([#1671](https://github.com/adobe/spacecat-api-service/issues/1671)) ([c0da5d3](https://github.com/adobe/spacecat-api-service/commit/c0da5d3db91647bd212a523e6125a5e61a960b0a))
+
+# [1.279.0](https://github.com/adobe/spacecat-api-service/compare/v1.278.5...v1.279.0) (2026-01-05)
+
+
+### Features
+
+* disable the canonical audit from paid customers ([#1663](https://github.com/adobe/spacecat-api-service/issues/1663)) ([bc580bf](https://github.com/adobe/spacecat-api-service/commit/bc580bfa006378e029fd088b7e3b9484022dfa9d))
+
+## [1.278.5](https://github.com/adobe/spacecat-api-service/compare/v1.278.4...v1.278.5) (2026-01-05)
+
+
+### Bug Fixes
+
+* add site and LLMO access validation in LlmoController.  VULN-33517 ([#1666](https://github.com/adobe/spacecat-api-service/issues/1666)) ([40208d2](https://github.com/adobe/spacecat-api-service/commit/40208d28e424500b0856f3aa1db98170a4b00f2f))
+
+## [1.278.4](https://github.com/adobe/spacecat-api-service/compare/v1.278.3...v1.278.4) (2026-01-02)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1662](https://github.com/adobe/spacecat-api-service/issues/1662)) ([c21af35](https://github.com/adobe/spacecat-api-service/commit/c21af35c6b87c3aa7bcaa61cd8bb840d554db8c9))
+
+## [1.278.3](https://github.com/adobe/spacecat-api-service/compare/v1.278.2...v1.278.3) (2026-01-02)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @langchain/core to v0.3.80 [security] ([#1669](https://github.com/adobe/spacecat-api-service/issues/1669)) ([37d23eb](https://github.com/adobe/spacecat-api-service/commit/37d23eb48a635024533c880f79d24f9fa9bcf9ba))
+
 ## [1.278.2](https://github.com/adobe/spacecat-api-service/compare/v1.278.1...v1.278.2) (2025-12-12)
 
 
