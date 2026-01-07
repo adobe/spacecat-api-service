@@ -59,6 +59,7 @@ import { multipartFormData } from './support/multipart-form-data.js';
 import ApiKeyController from './controllers/api-key.js';
 import OpportunitiesController from './controllers/opportunities.js';
 import PaidController from './controllers/paid.js';
+import TopPaidOpportunitiesController from './controllers/paid/top-paid-opportunities.js';
 import TrafficController from './controllers/paid/traffic.js';
 import SuggestionsController from './controllers/suggestions.js';
 import BrandsController from './controllers/brands.js';
@@ -126,6 +127,7 @@ async function run(request, context) {
     const suggestionsController = SuggestionsController(context, context.sqs, context.env);
     const brandsController = BrandsController(context, log, context.env);
     const paidController = PaidController(context);
+    const topPaidOpportunitiesController = TopPaidOpportunitiesController(context, context.env);
     const trafficController = TrafficController(context, log, context.env);
     const preflightController = PreflightController(context, log, context.env);
     const demoController = DemoController(context);
@@ -167,6 +169,7 @@ async function run(request, context) {
       scrapeController,
       scrapeJobController,
       paidController,
+      topPaidOpportunitiesController,
       trafficController,
       fixesController,
       llmoController,
