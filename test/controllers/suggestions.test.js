@@ -3263,6 +3263,7 @@ describe('Suggestions Controller', () => {
                 transformToString: async () => JSON.stringify({
                   siteId: SITE_ID,
                   prerender: false,
+                  apiKeys: ['test-api-key-123'],
                 }),
               },
             });
@@ -5202,6 +5203,16 @@ describe('Suggestions Controller', () => {
 
       site.getConfig = sandbox.stub().returns({
         getTokowakaConfig: () => ({ apiKey: 'test-api-key-123', forwardedHost: 'example.com' }),
+        getSlackConfig: () => undefined,
+        getHandlers: () => undefined,
+        getContentAiConfig: () => undefined,
+        getImports: () => [],
+        getFetchConfig: () => undefined,
+        getBrandConfig: () => undefined,
+        getBrandProfile: () => undefined,
+        getCdnLogsConfig: () => undefined,
+        getLlmoConfig: () => undefined,
+        getEdgeOptimizeConfig: () => undefined,
       });
       site.getBaseURL = sandbox.stub().returns('https://example.com');
       site.getId = sandbox.stub().returns(SITE_ID);
@@ -5222,6 +5233,7 @@ describe('Suggestions Controller', () => {
                 transformToString: async () => JSON.stringify({
                   siteId: SITE_ID,
                   prerender: false,
+                  apiKeys: ['test-api-key-123'],
                 }),
               },
             });
