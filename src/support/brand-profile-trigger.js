@@ -78,7 +78,7 @@ export const triggerBrandProfileAgent = async ({
   }
 
   const idempotencyKey = `${AGENT_ID}-${resolvedSiteId}-${reason}-${Date.now()}`;
-  const executionName = `${AGENT_ID}-${resolvedSiteId}-${reason}`.slice(0, 80);
+  const executionName = `${AGENT_ID}-${resolvedSiteId}-${reason}-${Date.now()}`.slice(0, 80);
 
   try {
     const payload = {
