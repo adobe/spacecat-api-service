@@ -11,7 +11,7 @@
  */
 
 import { Blocks, Message } from 'slack-block-builder';
-import { SPACECAT_BOT_USER_AGENT, SPACECAT_BOT_IPS } from '@adobe/spacecat-shared-utils';
+import { formatAllowlistMessage, SPACECAT_BOT_USER_AGENT } from '@adobe/spacecat-shared-utils';
 import { BUTTON_LABELS } from '../../../controllers/hooks.js';
 
 export function extractURLFromSlackMessage(inputString) {
@@ -55,20 +55,26 @@ export function composeReply(opts) {
  * @param {Object} options - Options
  * @param {string} options.siteUrl - Site URL
  * @param {Object} options.botProtection - Bot protection details
- * @param {string} [options.environment='prod'] - Environment ('prod' or 'dev')
+ * @param {string} [options.botIps] - Comma-separated bot IPs from environment (SPACECAT_BOT_IPS)
  * @returns {string} Formatted Slack message
  */
 export function formatBotProtectionSlackMessage({
   siteUrl,
   botProtection,
-  environment = 'prod',
+  botIps,
 }) {
-  const ips = environment === 'prod'
-    ? SPACECAT_BOT_IPS.production
-    : SPACECAT_BOT_IPS.development;
-  const ipList = ips.map((ip) => `• \`${ip}\``).join('\n');
+  let allowlistInfo;
+  try {
+    allowlistInfo = formatAllowlistMessage(botIps);
+  } catch (error) {
+    // If IPs not configured, use generic message
+    allowlistInfo = {
+      ips: ['IP addresses not configured'],
+      userAgent: SPACECAT_BOT_USER_AGENT,
+    };
+  }
 
-  const envLabel = environment === 'prod' ? 'Production' : 'Development';
+  const ipList = allowlistInfo.ips.map((ip) => `• \`${ip}\``).join('\n');
   const isAllowed = botProtection.type && botProtection.type.includes('-allowed');
 
   let message = `:${isAllowed ? 'information_source' : 'warning'}: *Bot Protection${isAllowed ? ' Infrastructure' : ''} Detected*\n\n`
@@ -96,9 +102,9 @@ export function formatBotProtectionSlackMessage({
       + '*If you need to update allowlist:*\n'
       + '\n'
       + '*User-Agent to allowlist:*\n'
-      + `\`${SPACECAT_BOT_USER_AGENT}\`\n`
+      + `\`${allowlistInfo.userAgent}\`\n`
       + '\n'
-      + `*${envLabel} IPs to allowlist:*\n`
+      + '*IPs to allowlist:*\n'
       + `${ipList}\n`;
   } else {
     // Site is blocked - provide action required message
@@ -112,9 +118,9 @@ export function formatBotProtectionSlackMessage({
       + `Customer must allowlist SpaceCat in their ${botProtection.type} configuration:\n`
       + '\n'
       + '*User-Agent to allowlist:*\n'
-      + `\`${SPACECAT_BOT_USER_AGENT}\`\n`
+      + `\`${allowlistInfo.userAgent}\`\n`
       + '\n'
-      + `*${envLabel} IPs to allowlist:*\n`
+      + '*IPs to allowlist:*\n'
       + `${ipList}\n`
       + '\n'
       + '_After allowlisting, re-run the onboard command to complete onboarding._';

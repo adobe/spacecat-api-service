@@ -65,7 +65,7 @@ describe('Slack action commons', () => {
   });
 
   describe('formatBotProtectionSlackMessage', () => {
-    it('formats blocked bot protection message for production', () => {
+    it('formats blocked bot protection message with production IPs', () => {
       const result = formatBotProtectionSlackMessage({
         siteUrl: 'https://example.com',
         botProtection: {
@@ -73,7 +73,7 @@ describe('Slack action commons', () => {
           confidence: 0.99,
           reason: 'Challenge page detected',
         },
-        environment: 'prod',
+        botIps: '3.218.16.42,52.55.82.37,54.172.145.38',
       });
 
       expect(result).to.include('Bot Protection Detected');
@@ -81,30 +81,31 @@ describe('Slack action commons', () => {
       expect(result).to.include('cloudflare');
       expect(result).to.include('99%');
       expect(result).to.include('Challenge page detected');
-      expect(result).to.include('Production IPs');
       expect(result).to.include('Onboarding stopped');
       expect(result).to.include('`3.218.16.42`');
+      expect(result).to.include('`52.55.82.37`');
+      expect(result).to.include('`54.172.145.38`');
     });
 
-    it('formats blocked bot protection message for development', () => {
+    it('formats blocked bot protection message with development IPs', () => {
       const result = formatBotProtectionSlackMessage({
         siteUrl: 'https://dev-example.com',
         botProtection: {
           type: 'imperva',
           confidence: 0.95,
         },
-        environment: 'dev',
+        botIps: '44.218.57.115,54.87.205.187',
       });
 
       expect(result).to.include('Bot Protection Detected');
       expect(result).to.include('https://dev-example.com');
       expect(result).to.include('imperva');
       expect(result).to.include('95%');
-      expect(result).to.include('Development IPs');
       expect(result).to.include('`44.218.57.115`');
+      expect(result).to.include('`54.87.205.187`');
     });
 
-    it('formats allowed infrastructure message for production', () => {
+    it('formats allowed infrastructure message with production IPs', () => {
       const result = formatBotProtectionSlackMessage({
         siteUrl: 'https://allowed.com',
         botProtection: {
@@ -112,7 +113,7 @@ describe('Slack action commons', () => {
           confidence: 1.0,
           reason: 'Infrastructure present but allowing requests',
         },
-        environment: 'prod',
+        botIps: '3.218.16.42,52.55.82.37,54.172.145.38',
       });
 
       expect(result).to.include('Bot Protection Infrastructure Detected');
@@ -121,19 +122,18 @@ describe('Slack action commons', () => {
       expect(result).to.include('100%');
       expect(result).to.include('Infrastructure present but allowing requests');
       expect(result).to.include('SpaceCat can currently access the site');
-      expect(result).to.include('Production IPs');
       expect(result).to.include('`3.218.16.42`');
       expect(result).to.not.include('Onboarding stopped');
     });
 
-    it('formats allowed infrastructure message for development', () => {
+    it('formats allowed infrastructure message with development IPs', () => {
       const result = formatBotProtectionSlackMessage({
         siteUrl: 'https://allowed-dev.com',
         botProtection: {
           type: 'akamai-allowed',
           confidence: 1.0,
         },
-        environment: 'dev',
+        botIps: '44.218.57.115,54.87.205.187',
       });
 
       expect(result).to.include('Bot Protection Infrastructure Detected');
@@ -141,7 +141,6 @@ describe('Slack action commons', () => {
       expect(result).to.include('akamai-allowed');
       expect(result).to.include('100%');
       expect(result).to.include('SpaceCat can currently access the site');
-      expect(result).to.include('Development IPs');
       expect(result).to.include('`44.218.57.115`');
     });
 
@@ -152,7 +151,7 @@ describe('Slack action commons', () => {
           type: 'http2-block',
           confidence: 0.9,
         },
-        environment: 'prod',
+        botIps: '3.218.16.42,52.55.82.37,54.172.145.38',
       });
 
       expect(result).to.include('Bot Protection Detected');
@@ -162,17 +161,18 @@ describe('Slack action commons', () => {
       expect(result).to.not.include('Reason:');
     });
 
-    it('defaults to production environment when not specified', () => {
+    it('handles missing bot IPs gracefully', () => {
       const result = formatBotProtectionSlackMessage({
-        siteUrl: 'https://default-env.com',
+        siteUrl: 'https://no-ips.com',
         botProtection: {
           type: 'cloudflare',
           confidence: 0.99,
         },
+        botIps: undefined,
       });
 
-      expect(result).to.include('Production IPs');
-      expect(result).to.include('`3.218.16.42`');
+      expect(result).to.include('Bot Protection Detected');
+      expect(result).to.include('IP addresses not configured');
     });
   });
 });

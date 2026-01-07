@@ -705,11 +705,10 @@ export function onboardSiteModal(lambdaContext) {
       if (botProtectionResult.blocked) {
         log.warn(`Bot protection detected for ${siteUrl} - stopping onboarding`, botProtectionResult);
 
-        const environment = env.AWS_REGION?.includes('us-east') ? 'prod' : 'dev';
         const botProtectionMessage = formatBotProtectionSlackMessage({
           siteUrl,
           botProtection: botProtectionResult,
-          environment,
+          botIps: env.SPACECAT_BOT_IPS,
         });
 
         await client.chat.postMessage({
@@ -739,11 +738,10 @@ export function onboardSiteModal(lambdaContext) {
       if (hasProtectionInfrastructure && !botProtectionResult.blocked) {
         log.info(`Bot protection infrastructure detected for ${siteUrl} but currently allowed`, botProtectionResult);
 
-        const environment = env.AWS_REGION?.includes('us-east') ? 'prod' : 'dev';
         const botProtectionMessage = formatBotProtectionSlackMessage({
           siteUrl,
           botProtection: botProtectionResult,
-          environment,
+          botIps: env.SPACECAT_BOT_IPS,
         });
 
         await client.chat.postMessage({
