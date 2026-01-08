@@ -45,7 +45,9 @@ describe('AddRepoCommand', () => {
       getBaseURL: sinon.stub(),
       getGitHubURL: sinon.stub(),
       getOrganizationId: sinon.stub().returns('org-123'),
-      getImsOrgId: sinon.stub().returns('ims-org-456'),
+      getOrganization: sinon.stub().resolves({
+        getImsOrgId: () => 'ims-org-456',
+      }),
       getIsLive: sinon.stub(),
       updateGitHubURL: sinon.stub(),
       getAuditConfig: sinon.stub().returns({
@@ -166,8 +168,8 @@ describe('AddRepoCommand', () => {
         + '      :identification_card: some-id\n'
         + '      :cat-egory-white: aem_edge\n'
         + '      :github-4173: _not set_\n'
-        + '      :office: org-123\n'
-        + '      :id: ims-org-456\n'
+        + '      :space-cat: org-123\n'
+        + '      :ims: ims-org-456\n'
         + '      :submarine: Is not live\n'
         + '      :lighthouse: <https://psi.experiencecloud.live?url=undefined&strategy=mobile|Run PSI Check>\n'
         + '    \n'

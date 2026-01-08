@@ -94,7 +94,9 @@ describe('Utility Functions', () => {
         getBaseURL: sinon.stub(),
         getGitHubURL: sinon.stub(),
         getOrganizationId: sinon.stub().returns('org-123'),
-        getImsOrgId: sinon.stub().returns('ims-org-456'),
+        getOrganization: sinon.stub().resolves({
+          getImsOrgId: () => 'ims-org-456',
+        }),
         getIsLive: sinon.stub(),
         getIsLiveToggledAt: sinon.stub().returns('2011-10-05T14:48:00.000Z'),
       };
@@ -104,7 +106,7 @@ describe('Utility Functions', () => {
       sinon.restore();
     });
 
-    it('prints details for a live site with GitHub URL', () => {
+    it('prints details for a live site with GitHub URL', async () => {
       mockSite.getBaseURL.returns('https://example.com');
       mockSite.getGitHubURL.returns('https://github.com/example/repo');
       mockSite.getIsLive.returns(true);
@@ -113,16 +115,16 @@ describe('Utility Functions', () => {
       :identification_card: some-id
       :cat-egory-white: aem_edge
       :github-4173: https://github.com/example/repo
-      :office: org-123
-      :id: ims-org-456
+      :space-cat: org-123
+      :ims: ims-org-456
       :rocket: Is live (2011-10-05 14:48:00)
       :lighthouse: <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
     `;
 
-      expect(printSiteDetails(mockSite, true, 'mobile')).to.equal(expectedOutput);
+      expect(await printSiteDetails(mockSite, true, 'mobile', null)).to.equal(expectedOutput);
     });
 
-    it('prints details for a site with audits disabled', () => {
+    it('prints details for a site with audits disabled', async () => {
       mockSite.getBaseURL.returns('https://example.com');
 
       const expectedOutput = `:warning: LHS audits have been disabled for site or strategy! This is usually done when PSI audits experience errors due to the target having issues (e.g. DNS or 404).
@@ -130,16 +132,16 @@ describe('Utility Functions', () => {
       :identification_card: some-id
       :cat-egory-white: aem_edge
       :github-4173: _not set_
-      :office: org-123
-      :id: ims-org-456
+      :space-cat: org-123
+      :ims: ims-org-456
       :submarine: Is not live
       :lighthouse: <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
     `;
 
-      expect(printSiteDetails(mockSite, false, 'mobile')).to.equal(expectedOutput);
+      expect(await printSiteDetails(mockSite, false, 'mobile', null)).to.equal(expectedOutput);
     });
 
-    it('prints details for a site with latest audit error', () => {
+    it('prints details for a site with latest audit error', async () => {
       mockSite.getBaseURL.returns('https://example.com');
       mockSite.getGitHubURL.returns('https://github.com/example/repo');
       mockSite.getIsLive.returns(true);
@@ -153,16 +155,16 @@ describe('Utility Functions', () => {
       :identification_card: some-id
       :cat-egory-white: aem_edge
       :github-4173: https://github.com/example/repo
-      :office: org-123
-      :id: ims-org-456
+      :space-cat: org-123
+      :ims: ims-org-456
       :rocket: Is live (2011-10-05 14:48:00)
       :lighthouse: :warning: <https://googlechrome.github.io/lighthouse/viewer/?jsonurl=https://psi-result/1|View Latest Audit> or <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
     `;
 
-      expect(printSiteDetails(mockSite, true, 'mobile', mockAudit)).to.equal(expectedOutput);
+      expect(await printSiteDetails(mockSite, true, 'mobile', mockAudit)).to.equal(expectedOutput);
     });
 
-    it('prints details for a site with latest audit', () => {
+    it('prints details for a site with latest audit', async () => {
       mockSite.getBaseURL.returns('https://example.com');
       mockSite.getGitHubURL.returns('https://github.com/example/repo');
       mockSite.getIsLive.returns(true);
@@ -176,16 +178,16 @@ describe('Utility Functions', () => {
       :identification_card: some-id
       :cat-egory-white: aem_edge
       :github-4173: https://github.com/example/repo
-      :office: org-123
-      :id: ims-org-456
+      :space-cat: org-123
+      :ims: ims-org-456
       :rocket: Is live (2011-10-05 14:48:00)
       :lighthouse: <https://googlechrome.github.io/lighthouse/viewer/?jsonurl=https://psi-result/1|View Latest Audit> or <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
     `;
 
-      expect(printSiteDetails(mockSite, true, 'mobile', mockAudit)).to.equal(expectedOutput);
+      expect(await printSiteDetails(mockSite, true, 'mobile', mockAudit)).to.equal(expectedOutput);
     });
 
-    it('prints details for a non-live site without GitHub URL', () => {
+    it('prints details for a non-live site without GitHub URL', async () => {
       mockSite.getBaseURL.returns('https://example.com');
       mockSite.getGitHubURL.returns(null);
       mockSite.getIsLive.returns(false);
@@ -194,13 +196,13 @@ describe('Utility Functions', () => {
       :identification_card: some-id
       :cat-egory-white: aem_edge
       :github-4173: _not set_
-      :office: org-123
-      :id: ims-org-456
+      :space-cat: org-123
+      :ims: ims-org-456
       :submarine: Is not live
       :lighthouse: <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
     `;
 
-      expect(printSiteDetails(mockSite, 'mobile')).to.equal(expectedOutput);
+      expect(await printSiteDetails(mockSite, true, 'mobile', null)).to.equal(expectedOutput);
     });
   });
 

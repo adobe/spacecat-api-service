@@ -72,7 +72,9 @@ describe('MartechImpactCommand', () => {
         getDeliveryType: () => 'aem_edge',
         getGitHubURL: () => '',
         getOrganizationId: () => 'org-123',
-        getImsOrgId: () => 'ims-org-456',
+        getOrganization: sinon.stub().resolves({
+          getImsOrgId: () => 'ims-org-456',
+        }),
         getIsLive: () => true,
         getIsLiveToggledAt: () => '2011-10-05T14:48:00.000Z',
         getAuditConfig: () => ({

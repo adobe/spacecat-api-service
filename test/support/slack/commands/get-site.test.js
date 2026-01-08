@@ -77,7 +77,9 @@ describe('GetSiteCommand', () => {
       getBaseURL: () => 'example.com',
       getGitHubURL: () => '',
       getOrganizationId: () => 'org-123',
-      getImsOrgId: () => 'ims-org-456',
+      getOrganization: sinon.stub().resolves({
+        getImsOrgId: () => 'ims-org-456',
+      }),
       getIsLive: () => true,
       getIsLiveToggledAt: () => '2011-10-05T14:48:00.000Z',
       getAuditsByAuditType: sinon.stub(),
@@ -193,7 +195,7 @@ describe('GetSiteCommand', () => {
 
     it('handles missing organization ID and IMS org gracefully', async () => {
       site.getOrganizationId = () => null;
-      site.getImsOrgId = () => null;
+      site.getOrganization = sinon.stub().resolves(null);
       site.getAuditsByAuditType.resolves(generateMockAudits(1));
 
       const args = ['example.com', 'mobile'];

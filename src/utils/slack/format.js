@@ -70,7 +70,7 @@ function formatScore(score) {
   return `${Math.round(score * PERCENT_MULTIPLIER)}`;
 }
 
-const printSiteDetails = (site, isAuditEnabled, psiStrategy = 'mobile', latestAudit = null) => {
+const printSiteDetails = async (site, isAuditEnabled = true, psiStrategy = 'mobile', latestAudit = null) => {
   const viewPSILink = latestAudit
     ? `${latestAudit.getIsError() ? ':warning: ' : ''}<https://googlechrome.github.io/lighthouse/viewer/?jsonurl=${latestAudit.getFullAuditRef()}|View Latest Audit> or `
     : '';
@@ -78,12 +78,16 @@ const printSiteDetails = (site, isAuditEnabled, psiStrategy = 'mobile', latestAu
 
   const auditDisabledText = !isAuditEnabled ? ':warning: LHS audits have been disabled for site or strategy! This is usually done when PSI audits experience errors due to the target having issues (e.g. DNS or 404).\n' : '';
 
+  // Fetch organization to get IMS Org ID
+  const organization = await site.getOrganization();
+  const imsOrgId = organization?.getImsOrgId();
+
   return `${auditDisabledText}
       :identification_card: ${site.getId()}
       :cat-egory-white: ${site.getDeliveryType()}
       :github-4173: ${site.getGitHubURL() || '_not set_'}
-      :office: ${site.getOrganizationId() || '_not set_'}
-      :id: ${site.getImsOrgId() || '_not set_'}
+      :space-cat: ${site.getOrganizationId() || '_not set_'}
+      :ims: ${imsOrgId || '_not set_'}
       ${site.getIsLive() ? `:rocket: Is live (${formatDate(site.getIsLiveToggledAt())})` : ':submarine: Is not live'}
       :lighthouse: ${viewPSILink}${runPSILink}
     `;
