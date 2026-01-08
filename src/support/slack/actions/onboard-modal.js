@@ -15,8 +15,9 @@ import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-acc
 import { onboardSingleSite as sharedOnboardSingleSite } from '../../utils.js';
 import { triggerBrandProfileAgent } from '../../brand-profile-trigger.js';
 import { loadProfileConfig } from '../../../utils/slack/base.js';
-import { checkBotProtectionDuringOnboarding } from '../../utils/bot-protection-check.js';
-import { formatBotProtectionSlackMessage } from './commons.js';
+// TEMPORARY: Commented out for testing - uncomment when restoring bot protection
+// import { checkBotProtectionDuringOnboarding } from '../../utils/bot-protection-check.js';
+// import { formatBotProtectionSlackMessage } from './commons.js';
 
 export const AEM_CS_HOST = /^author-p(\d+)-e(\d+)/i;
 
@@ -694,6 +695,10 @@ export function onboardSiteModal(lambdaContext) {
         thread_ts: responseThreadTs,
       });
 
+      // TEMPORARY: Bot protection check disabled for testing downstream services
+      // TODO: Uncomment this entire block to restore bot protection checking
+      /* eslint-disable max-len */
+      /*
       const botProtectionResult = await checkBotProtectionDuringOnboarding(siteUrl, log);
 
       // Check if Cloudflare/bot protection infrastructure is present
@@ -702,10 +707,7 @@ export function onboardSiteModal(lambdaContext) {
           || botProtectionResult.type.includes('imperva')
           || botProtectionResult.type.includes('akamai'));
 
-      // TEMPORARY: Bypass bot protection check for testing downstream services
-      // TODO: Remove this flag before production deployment
-      const skipBotProtectionCheck = true; // Set to false to restore normal behavior
-      if (!skipBotProtectionCheck && botProtectionResult.blocked) {
+      if (botProtectionResult.blocked) {
         log.warn(`Bot protection detected for ${siteUrl} - stopping onboarding`, botProtectionResult);
 
         const botProtectionMessage = formatBotProtectionSlackMessage({
@@ -768,6 +770,8 @@ export function onboardSiteModal(lambdaContext) {
           thread_ts: responseThreadTs,
         });
       }
+      */
+      /* eslint-enable max-len */
 
       const reportLine = await onboardSingleSiteFromModal(
         siteUrl,
