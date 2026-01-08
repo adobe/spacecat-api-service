@@ -93,6 +93,8 @@ describe('Utility Functions', () => {
         getDeliveryType: sinon.stub().returns('aem_edge'),
         getBaseURL: sinon.stub(),
         getGitHubURL: sinon.stub(),
+        getOrganizationId: sinon.stub().returns('org-123'),
+        getImsOrgId: sinon.stub().returns('ims-org-456'),
         getIsLive: sinon.stub(),
         getIsLiveToggledAt: sinon.stub().returns('2011-10-05T14:48:00.000Z'),
       };
@@ -111,6 +113,8 @@ describe('Utility Functions', () => {
       :identification_card: some-id
       :cat-egory-white: aem_edge
       :github-4173: https://github.com/example/repo
+      :office: org-123
+      :id: ims-org-456
       :rocket: Is live (2011-10-05 14:48:00)
       :lighthouse: <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
     `;
@@ -126,6 +130,8 @@ describe('Utility Functions', () => {
       :identification_card: some-id
       :cat-egory-white: aem_edge
       :github-4173: _not set_
+      :office: org-123
+      :id: ims-org-456
       :submarine: Is not live
       :lighthouse: <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
     `;
@@ -147,6 +153,8 @@ describe('Utility Functions', () => {
       :identification_card: some-id
       :cat-egory-white: aem_edge
       :github-4173: https://github.com/example/repo
+      :office: org-123
+      :id: ims-org-456
       :rocket: Is live (2011-10-05 14:48:00)
       :lighthouse: :warning: <https://googlechrome.github.io/lighthouse/viewer/?jsonurl=https://psi-result/1|View Latest Audit> or <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
     `;
@@ -168,6 +176,8 @@ describe('Utility Functions', () => {
       :identification_card: some-id
       :cat-egory-white: aem_edge
       :github-4173: https://github.com/example/repo
+      :office: org-123
+      :id: ims-org-456
       :rocket: Is live (2011-10-05 14:48:00)
       :lighthouse: <https://googlechrome.github.io/lighthouse/viewer/?jsonurl=https://psi-result/1|View Latest Audit> or <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
     `;
@@ -184,6 +194,8 @@ describe('Utility Functions', () => {
       :identification_card: some-id
       :cat-egory-white: aem_edge
       :github-4173: _not set_
+      :office: org-123
+      :id: ims-org-456
       :submarine: Is not live
       :lighthouse: <https://psi.experiencecloud.live?url=https://example.com&strategy=mobile|Run PSI Check>
     `;
