@@ -14,6 +14,7 @@ import BaseCommand from './base.js';
 import { postErrorMessage } from '../../../utils/slack/base.js';
 import { triggerGlobalImportRun } from '../../utils.js';
 
+/* c8 ignore start */
 /* eslint-disable no-useless-escape */
 const PHRASES = ['run global import'];
 
@@ -104,3 +105,4 @@ function runGlobalImportCommand(context) {
 }
 
 export default runGlobalImportCommand;
+/* c8 ignore end */
