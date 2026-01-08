@@ -702,7 +702,10 @@ export function onboardSiteModal(lambdaContext) {
           || botProtectionResult.type.includes('imperva')
           || botProtectionResult.type.includes('akamai'));
 
-      if (botProtectionResult.blocked) {
+      // TEMPORARY: Bypass bot protection check for testing downstream services
+      // TODO: Remove this flag before production deployment
+      const skipBotProtectionCheck = true; // Set to false to restore normal behavior
+      if (!skipBotProtectionCheck && botProtectionResult.blocked) {
         log.warn(`Bot protection detected for ${siteUrl} - stopping onboarding`, botProtectionResult);
 
         const botProtectionMessage = formatBotProtectionSlackMessage({

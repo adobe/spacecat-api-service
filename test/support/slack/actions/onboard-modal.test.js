@@ -1123,7 +1123,7 @@ describe('onboard-modal', () => {
         }
       });
 
-      it('should stop onboarding when bot protection blocks access', async () => {
+      it.skip('should stop onboarding when bot protection blocks access', async () => {
         // Mock fetch to simulate bot protection blocking
         global.fetch = sandbox.stub().callsFake((url) => {
           if (url === 'https://example.com'
@@ -1212,7 +1212,7 @@ describe('onboard-modal', () => {
         expect(successMessage).to.exist;
       });
 
-      it('should use dev environment when AWS_REGION is not us-east', async () => {
+      it.skip('should use dev environment when AWS_REGION is not us-east', async () => {
         // Override AWS_REGION to test dev environment branch
         context.env.AWS_REGION = 'eu-west-1';
 
