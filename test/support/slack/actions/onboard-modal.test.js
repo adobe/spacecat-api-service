@@ -64,6 +64,13 @@ describe('onboard-modal', () => {
       '../../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
       },
+      '../../../../src/support/utils/bot-protection-check.js': {
+        checkBotProtectionDuringOnboarding: sinon.stub().resolves({
+          blocked: false,
+          type: 'unknown',
+          confidence: 0,
+        }),
+      },
     });
 
     ({ startOnboarding, onboardSiteModal, extractDeliveryConfigFromPreviewUrl } = mockedModule);
@@ -1108,184 +1115,136 @@ describe('onboard-modal', () => {
       expect(ackMock).to.have.been.called;
     });
 
-    describe('Bot Protection Integration', () => {
-      let originalFetch;
-
-      beforeEach(() => {
-        // Save original fetch
-        originalFetch = global.fetch;
-      });
-
-      afterEach(() => {
-        // Restore original fetch
-        if (originalFetch) {
-          global.fetch = originalFetch;
-        }
-      });
-
-      it.skip('should stop onboarding when bot protection blocks access', async () => {
-        // Mock fetch to simulate bot protection blocking
-        global.fetch = sandbox.stub().callsFake((url) => {
-          if (url === 'https://example.com'
-              || url === 'https://example.com/robots.txt'
-              || url === 'https://example.com/sitemap.xml') {
-            const headers = new Headers();
-            headers.set('cf-ray', '12345-SJC');
-            headers.set('server', 'cloudflare');
-            return Promise.resolve({
-              ok: false,
-              status: 403,
-              headers,
-              text: () => Promise.resolve('<html><head><title>Just a moment...</title></head></html>'),
-            });
-          }
-          return Promise.reject(new Error('Unexpected URL'));
+    describe('Bot Protection Detection', () => {
+      it('should warn about advanced bot protection (http2-block) but continue onboarding', async () => {
+        // Create a custom mock module for this test
+        const testModule = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+          '../../../../src/utils/slack/base.js': {
+            loadProfileConfig: sinon.stub().resolves({
+              audits: ['scrape-top-pages'],
+              imports: ['organic-traffic'],
+              profile: 'demo',
+            }),
+          },
+          '../../../../src/support/utils.js': {
+            onboardSingleSite: sinon.stub().resolves({
+              siteId: 'site123',
+              errors: [],
+            }),
+          },
+          '../../../../src/support/brand-profile-trigger.js': {
+            triggerBrandProfileAgent: sinon.stub().resolves('exec-123'),
+          },
+          '../../../../src/support/utils/bot-protection-check.js': {
+            checkBotProtectionDuringOnboarding: sinon.stub().resolves({
+              blocked: true,
+              type: 'http2-block',
+              confidence: 0.95,
+              reason: 'HTTP/2 connection error',
+            }),
+          },
         });
 
-        const onboardSiteModalAction = onboardSiteModal(context);
+        const modalAction = testModule.onboardSiteModal(context);
 
-        await onboardSiteModalAction({
+        await modalAction({
           ack: ackMock,
           body,
           client: clientMock,
         });
 
-        expect(ackMock).to.have.been.calledOnce;
-
-        // Should have posted the starting message
-        expect(clientMock.chat.postMessage).to.have.been.calledWith({
-          channel: 'C12345',
-          text: ':gear: Starting onboarding for site https://example.com...',
-          thread_ts: '1234567890.123456',
-        });
-
-        // Should have posted bot protection warning
         const calls = clientMock.chat.postMessage.getCalls();
-        const botProtectionWarning = calls.find((call) => call.args[0].text?.includes('Bot Protection Detected'));
-        expect(botProtectionWarning).to.exist;
+        const advancedWarning = calls.find((call) => call.args[0].text?.includes('Advanced Bot Protection Detected'));
+        expect(advancedWarning).to.exist;
 
-        // Should have posted onboarding stopped message
-        const stoppedMessage = calls.find((call) => call.args[0].text?.includes('Onboarding stopped'));
-        expect(stoppedMessage).to.exist;
-      });
-
-      it.skip('should show informational message when bot protection infrastructure detected but access allowed', async () => {
-        // Mock fetch to simulate bot protection infrastructure but access allowed
-        global.fetch = sandbox.stub().callsFake((url) => {
-          if (url === 'https://example.com'
-              || url === 'https://example.com/robots.txt'
-              || url === 'https://example.com/sitemap.xml') {
-            const headers = new Headers();
-            headers.set('cf-ray', '12345-SJC');
-            headers.set('server', 'cloudflare');
-            return Promise.resolve({
-              ok: true,
-              status: 200,
-              headers,
-              text: () => Promise.resolve('<html><body>Normal content</body></html>'),
-            });
-          }
-          return Promise.reject(new Error('Unexpected URL'));
-        });
-
-        const onboardSiteModalAction = onboardSiteModal(context);
-
-        await onboardSiteModalAction({
-          ack: ackMock,
-          body,
-          client: clientMock,
-        });
-
-        expect(ackMock).to.have.been.called;
-
-        // Should have posted bot protection infrastructure detected message
-        const calls = clientMock.chat.postMessage.getCalls();
-        const infrastructureMessage = calls.find((call) => call.args[0].text?.includes('Bot Protection Infrastructure Detected'));
-        expect(infrastructureMessage).to.exist;
-
-        // Should have posted access allowed message
-        const accessMessage = calls.find((call) => call.args[0].text?.includes('SpaceCat can currently access the site'));
-        expect(accessMessage).to.exist;
-
-        // Should continue with onboarding
         const successMessage = calls.find((call) => call.args[0].text?.includes('Onboarding triggered successfully'));
         expect(successMessage).to.exist;
       });
 
-      it.skip('should use dev environment when AWS_REGION is not us-east', async () => {
-        // Override AWS_REGION to test dev environment branch
-        context.env.AWS_REGION = 'eu-west-1';
-
-        // Mock fetch to simulate bot protection blocking
-        global.fetch = sandbox.stub().callsFake((url) => {
-          if (url === 'https://example.com'
-              || url === 'https://example.com/robots.txt'
-              || url === 'https://example.com/sitemap.xml') {
-            const headers = new Headers();
-            headers.set('cf-ray', '12345-LHR');
-            headers.set('server', 'cloudflare');
-            return Promise.resolve({
-              ok: false,
-              status: 403,
-              headers,
-              text: () => Promise.resolve('<html><head><title>Just a moment...</title></head></html>'),
-            });
-          }
-          return Promise.reject(new Error('Unexpected URL'));
+      it('should warn about advanced bot protection (imperva) but continue onboarding', async () => {
+        const testModule = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+          '../../../../src/utils/slack/base.js': {
+            loadProfileConfig: sinon.stub().resolves({
+              audits: ['scrape-top-pages'],
+              imports: ['organic-traffic'],
+              profile: 'demo',
+            }),
+          },
+          '../../../../src/support/utils.js': {
+            onboardSingleSite: sinon.stub().resolves({
+              siteId: 'site123',
+              errors: [],
+            }),
+          },
+          '../../../../src/support/brand-profile-trigger.js': {
+            triggerBrandProfileAgent: sinon.stub().resolves('exec-123'),
+          },
+          '../../../../src/support/utils/bot-protection-check.js': {
+            checkBotProtectionDuringOnboarding: sinon.stub().resolves({
+              blocked: true,
+              type: 'imperva',
+              confidence: 0.92,
+              reason: 'Imperva blocking detected',
+            }),
+          },
         });
 
-        const onboardSiteModalAction = onboardSiteModal(context);
+        const modalAction = testModule.onboardSiteModal(context);
 
-        await onboardSiteModalAction({
+        await modalAction({
           ack: ackMock,
           body,
           client: clientMock,
         });
 
-        expect(ackMock).to.have.been.calledOnce;
-
-        // Should have posted bot protection warning
         const calls = clientMock.chat.postMessage.getCalls();
-        const botProtectionWarning = calls.find((call) => call.args[0].text?.includes('Bot Protection Detected'));
-        expect(botProtectionWarning).to.exist;
+        const advancedWarning = calls.find((call) => call.args[0].text?.includes('Advanced Bot Protection Detected'));
+        expect(advancedWarning).to.exist;
       });
 
-      it.skip('should use dev environment for infrastructure detected with non-us-east region', async () => {
-        // Override AWS_REGION to test dev environment branch
-        context.env.AWS_REGION = 'ap-south-1';
-
-        // Mock fetch to simulate bot protection infrastructure but access allowed
-        global.fetch = sandbox.stub().callsFake((url) => {
-          if (url === 'https://example.com'
-              || url === 'https://example.com/robots.txt'
-              || url === 'https://example.com/sitemap.xml') {
-            const headers = new Headers();
-            headers.set('cf-ray', '12345-BOM');
-            headers.set('server', 'cloudflare');
-            return Promise.resolve({
-              ok: true,
-              status: 200,
-              headers,
-              text: () => Promise.resolve('<html><body>Normal content</body></html>'),
-            });
-          }
-          return Promise.reject(new Error('Unexpected URL'));
+      it('should warn about basic bot protection but continue onboarding', async () => {
+        const testModule = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+          '../../../../src/utils/slack/base.js': {
+            loadProfileConfig: sinon.stub().resolves({
+              audits: ['scrape-top-pages'],
+              imports: ['organic-traffic'],
+              profile: 'demo',
+            }),
+          },
+          '../../../../src/support/utils.js': {
+            onboardSingleSite: sinon.stub().resolves({
+              siteId: 'site123',
+              errors: [],
+            }),
+          },
+          '../../../../src/support/brand-profile-trigger.js': {
+            triggerBrandProfileAgent: sinon.stub().resolves('exec-123'),
+          },
+          '../../../../src/support/utils/bot-protection-check.js': {
+            checkBotProtectionDuringOnboarding: sinon.stub().resolves({
+              blocked: true,
+              type: 'cloudflare',
+              confidence: 0.85,
+              reason: 'Challenge page detected',
+            }),
+          },
         });
 
-        const onboardSiteModalAction = onboardSiteModal(context);
+        const modalAction = testModule.onboardSiteModal(context);
 
-        await onboardSiteModalAction({
+        await modalAction({
           ack: ackMock,
           body,
           client: clientMock,
         });
 
-        expect(ackMock).to.have.been.called;
-
-        // Should have posted bot protection infrastructure detected message
         const calls = clientMock.chat.postMessage.getCalls();
-        const infrastructureMessage = calls.find((call) => call.args[0].text?.includes('Bot Protection Infrastructure Detected'));
-        expect(infrastructureMessage).to.exist;
+        const basicWarning = calls.find((call) => call.args[0].text?.includes('Bot Protection Detected')
+          && call.args[0].text?.includes('browser-based scraper can typically bypass'));
+        expect(basicWarning).to.exist;
+
+        const successMessage = calls.find((call) => call.args[0].text?.includes('Onboarding triggered successfully'));
+        expect(successMessage).to.exist;
       });
     });
   });

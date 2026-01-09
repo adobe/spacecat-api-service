@@ -107,15 +107,15 @@ export function formatBotProtectionSlackMessage({
       + '*IPs to allowlist:*\n'
       + `${ipList}\n`;
   } else {
-    // Site is blocked - provide action required message
+    // Site is blocked - provide allowlist information
     message += '\n'
-      + '*Onboarding stopped due to the following reasons:*\n'
-      + '• SpaceCat bot cannot access the site due to bot protection\n'
-      + '• Scraper would receive challenge pages instead of real content\n'
-      + '• Audits and opportunities cannot be generated without site access\n'
+      + '*Detection Details:*\n'
+      + '• Simple HTTP requests are being blocked\n'
+      + '• Our browser-based scraper may be able to bypass basic protection\n'
+      + '• Advanced protection may still block automated access\n'
       + '\n'
-      + '*Action Required:*\n'
-      + `Customer must allowlist SpaceCat in their ${botProtection.type} configuration:\n`
+      + '*Recommended Action:*\n'
+      + `Allowlist SpaceCat in your ${botProtection.type} configuration for best results:\n`
       + '\n'
       + '*User-Agent to allowlist:*\n'
       + `\`${allowlistInfo.userAgent}\`\n`
@@ -123,7 +123,7 @@ export function formatBotProtectionSlackMessage({
       + '*IPs to allowlist:*\n'
       + `${ipList}\n`
       + '\n'
-      + '_After allowlisting, re-run the onboard command to complete onboarding._';
+      + '_If audits fail, allowlisting will be required for the site to be monitored._';
   }
 
   return message;

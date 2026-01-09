@@ -15,9 +15,8 @@ import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-acc
 import { onboardSingleSite as sharedOnboardSingleSite } from '../../utils.js';
 import { triggerBrandProfileAgent } from '../../brand-profile-trigger.js';
 import { loadProfileConfig } from '../../../utils/slack/base.js';
-// TEMPORARY: Commented out for testing - uncomment when restoring bot protection
-// import { checkBotProtectionDuringOnboarding } from '../../utils/bot-protection-check.js';
-// import { formatBotProtectionSlackMessage } from './commons.js';
+import { checkBotProtectionDuringOnboarding } from '../../utils/bot-protection-check.js';
+import { formatBotProtectionSlackMessage } from './commons.js';
 
 export const AEM_CS_HOST = /^author-p(\d+)-e(\d+)/i;
 
@@ -695,20 +694,22 @@ export function onboardSiteModal(lambdaContext) {
         thread_ts: responseThreadTs,
       });
 
-      // TEMPORARY: Bot protection check disabled for testing downstream services
-      // TODO: Uncomment this entire block to restore bot protection checking
-      /* eslint-disable max-len */
-      /*
+      // Check for bot protection (informational only - does not block onboarding)
       const botProtectionResult = await checkBotProtectionDuringOnboarding(siteUrl, log);
 
-      // Check if Cloudflare/bot protection infrastructure is present
-      const hasProtectionInfrastructure = botProtectionResult.type
-        && (botProtectionResult.type.includes('cloudflare')
-          || botProtectionResult.type.includes('imperva')
-          || botProtectionResult.type.includes('akamai'));
+      // Determine protection severity
+      const isAdvancedProtection = botProtectionResult.blocked
+        && (botProtectionResult.type === 'http2-block'
+          || botProtectionResult.type === 'imperva'
+          || botProtectionResult.type === 'perimeterx'
+          || botProtectionResult.type === 'datadome'
+          || botProtectionResult.confidence >= 0.95);
 
-      if (botProtectionResult.blocked) {
-        log.warn(`Bot protection detected for ${siteUrl} - stopping onboarding`, botProtectionResult);
+      const isBasicProtection = botProtectionResult.blocked && !isAdvancedProtection;
+
+      if (isAdvancedProtection) {
+        // Advanced protection detected - likely to block scraper too
+        log.warn(`Advanced bot protection detected for ${siteUrl} - audits may fail`, botProtectionResult);
 
         const botProtectionMessage = formatBotProtectionSlackMessage({
           siteUrl,
@@ -718,7 +719,7 @@ export function onboardSiteModal(lambdaContext) {
 
         await client.chat.postMessage({
           channel: responseChannel,
-          text: `:warning: *Bot Protection Detected for ${siteUrl}*`,
+          text: `:warning: *Advanced Bot Protection Detected for ${siteUrl}*`,
           blocks: [
             {
               type: 'section',
@@ -733,45 +734,28 @@ export function onboardSiteModal(lambdaContext) {
 
         await client.chat.postMessage({
           channel: responseChannel,
-          text: ':x: *Onboarding stopped.* Please allowlist SpaceCat IPs and User-Agent as shown above, then re-run the onboard command.',
+          text: ':information_source: *Onboarding will continue*, but audits will likely fail without allowlisting.\n'
+                + 'Our browser-based scraper may not be able to bypass this advanced protection.\n'
+                + 'Please allowlist SpaceCat IPs and User-Agent as shown above for best results.',
           thread_ts: responseThreadTs,
         });
-
-        return;
-      }
-
-      if (hasProtectionInfrastructure && !botProtectionResult.blocked) {
-        log.info(`Bot protection infrastructure detected for ${siteUrl} but currently allowed`, botProtectionResult);
-
-        const botProtectionMessage = formatBotProtectionSlackMessage({
-          siteUrl,
-          botProtection: botProtectionResult,
-          botIps: env.SPACECAT_BOT_IPS,
-        });
+      } else if (isBasicProtection) {
+        // Basic protection detected - scraper can likely bypass
+        log.info(`Basic bot protection detected for ${siteUrl} - scraper should bypass`, botProtectionResult);
 
         await client.chat.postMessage({
           channel: responseChannel,
-          text: `:information_source: *Bot Protection Infrastructure Detected for ${siteUrl}*`,
-          blocks: [
-            {
-              type: 'section',
-              text: {
-                type: 'mrkdwn',
-                text: botProtectionMessage,
-              },
-            },
-          ],
-          thread_ts: responseThreadTs,
-        });
-
-        await client.chat.postMessage({
-          channel: responseChannel,
-          text: ':white_check_mark: SpaceCat can currently access the site, but if audits fail, please verify the allowlist configuration above.',
+          text: `:information_source: *Bot Protection Detected for ${siteUrl}*\n`
+                + `• Type: ${botProtectionResult.type}\n`
+                + `• Confidence: ${Math.round(botProtectionResult.confidence * 100)}%\n`
+                + '\n'
+                + ':white_check_mark: *Onboarding will continue.*\n'
+                + 'Our browser-based scraper can typically bypass basic protection.\n'
+                + 'If audits fail, allowlist instructions will be provided.',
           thread_ts: responseThreadTs,
         });
       }
-      */
-      /* eslint-enable max-len */
+      // If no protection detected, proceed silently
 
       const reportLine = await onboardSingleSiteFromModal(
         siteUrl,

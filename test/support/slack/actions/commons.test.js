@@ -81,7 +81,10 @@ describe('Slack action commons', () => {
       expect(result).to.include('cloudflare');
       expect(result).to.include('99%');
       expect(result).to.include('Challenge page detected');
-      expect(result).to.include('Onboarding stopped');
+      expect(result).to.include('Detection Details');
+      expect(result).to.include('Recommended Action');
+      expect(result).to.include('browser-based scraper may be able to bypass');
+      expect(result).to.include('If audits fail, allowlisting will be required');
       expect(result).to.include('`3.218.16.42`');
       expect(result).to.include('`52.55.82.37`');
       expect(result).to.include('`54.172.145.38`');
@@ -101,6 +104,8 @@ describe('Slack action commons', () => {
       expect(result).to.include('https://dev-example.com');
       expect(result).to.include('imperva');
       expect(result).to.include('95%');
+      expect(result).to.include('Detection Details');
+      expect(result).to.include('Recommended Action');
       expect(result).to.include('`44.218.57.115`');
       expect(result).to.include('`54.87.205.187`');
     });
