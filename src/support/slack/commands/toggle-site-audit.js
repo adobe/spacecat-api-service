@@ -24,73 +24,6 @@ const PHRASE = 'audit';
 const SUCCESS_MESSAGE_PREFIX = ':white_check_mark: ';
 const ERROR_MESSAGE_PREFIX = ':x: ';
 
-/**
- * Posts a message with a button to configure preflight audit requirements
- * @param {Object} slackContext - The Slack context object
- * @param {Object} site - The site object
- * @param {string} auditType - The audit type (should be 'preflight')
- */
-const promptPreflightConfig = async (slackContext, site, auditType) => {
-  const { say } = slackContext;
-
-  const currentAuthoringType = site.getAuthoringType();
-  const currentDeliveryConfig = site.getDeliveryConfig() || {};
-  const currentHelixConfig = site.getHlxConfig() || {};
-
-  const missingItems = [];
-  if (!currentAuthoringType) {
-    missingItems.push('Authoring Type');
-    missingItems.push('Preview URL');
-  } else if (currentAuthoringType === 'documentauthoring') {
-    // Document authoring require helix config
-    const hasHelixConfig = currentHelixConfig.rso;
-    if (!hasHelixConfig) {
-      missingItems.push('Helix Preview URL');
-    }
-  } else if (currentAuthoringType === 'cs' || currentAuthoringType === 'cs/crosswalk') {
-    // CS authoring types require delivery config
-    const hasDeliveryConfig = currentDeliveryConfig.programId
-      && currentDeliveryConfig.environmentId;
-    if (!hasDeliveryConfig) {
-      missingItems.push('AEM CS Preview URL');
-    }
-  } else if (currentAuthoringType === 'ams' && !currentDeliveryConfig.authorURL) {
-    missingItems.push('AMS URL');
-  }
-
-  return say({
-    text: `:warning: Preflight audit requires additional configuration for \`${site.getBaseURL()}\``,
-    blocks: [
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: `:warning: *Preflight audit requires additional configuration for:*\n\`${site.getBaseURL()}\`\n\n*Missing:*\n${missingItems.map((item) => `• ${item}`)
-            .join('\n')}`,
-        },
-      },
-      {
-        type: 'actions',
-        elements: [
-          {
-            type: 'button',
-            text: {
-              type: 'plain_text',
-              text: 'Configure & Enable',
-            },
-            style: 'primary',
-            action_id: 'open_preflight_config',
-            value: JSON.stringify({
-              siteId: site.getId(),
-              auditType,
-            }),
-          },
-        ],
-      },
-    ],
-  });
-};
-
 export default (context) => {
   const baseCommand = BaseCommand({
     id: 'configurations-sites--toggle-site-audit',
@@ -190,6 +123,16 @@ export default (context) => {
       const auditTypeOrProfile = auditTypeOrProfileInput
         ? auditTypeOrProfileInput.toLowerCase() : null;
 
+      // Show deprecation message for "enable" command
+      if (isEnableAudit) {
+        await say(
+          ':warning: *The `audit enable` command is being discontinued.*\n\n'
+          + ':bulb: *Good news!* You can now run audits without enabling sites first.\n\n'
+          + '*New way:* Just use `run audit {site} {auditType}` to trigger audits directly.',
+        );
+        return;
+      }
+
       const configuration = await Configuration.findLatest();
 
       // single URL behavior
@@ -216,11 +159,7 @@ export default (context) => {
 
           // Handle "all" keyword to disable all audits from a profile
           if (auditType === 'all') {
-            if (isEnableAudit) {
-              await say(`${ERROR_MESSAGE_PREFIX}Enable all is not supported. Please enable audits individually or use a profile with CSV upload.`);
-              return;
-            }
-
+            // Note: Enable is handled by early return deprecation message above
             const targetProfile = profileName || 'demo';
 
             let profile;
@@ -253,51 +192,15 @@ export default (context) => {
             return;
           }
 
-          if (isEnableAudit) {
-            if (auditType === 'preflight') {
-              const authoringType = site.getAuthoringType();
-              const deliveryConfig = site.getDeliveryConfig();
-              const helixConfig = site.getHlxConfig();
-
-              let configMissing = false;
-
-              if (!authoringType) {
-                configMissing = true;
-              } else if (authoringType === 'documentauthoring' || authoringType === 'ue') {
-                // Document authoring and UE require helix config
-                const hasHelixConfig = helixConfig
-                  && helixConfig.rso && Object.keys(helixConfig.rso).length > 0;
-                if (!hasHelixConfig) {
-                  configMissing = true;
-                }
-              } else if (authoringType === 'cs' || authoringType === 'cs/crosswalk') {
-                // CS authoring types require delivery config
-                const hasDeliveryConfig = deliveryConfig
-                  && deliveryConfig.programId && deliveryConfig.environmentId;
-                if (!hasDeliveryConfig) {
-                  configMissing = true;
-                }
-              } else if (authoringType === 'ams' && !deliveryConfig?.authorURL) {
-                configMissing = true;
-              }
-
-              if (configMissing) {
-                // Prompt user to configure missing requirements
-                await promptPreflightConfig(slackContext, site, auditType);
-                return;
-              }
-            }
-
-            configuration.enableHandlerForSite(auditType, site);
-          } else {
-            configuration.disableHandlerForSite(auditType, site);
-          }
+          // Note: Enable is handled by early return deprecation message above
+          // Only disable logic remains active
+          configuration.disableHandlerForSite(auditType, site);
 
           await configuration.save();
-          await say(`${SUCCESS_MESSAGE_PREFIX}The audit "${auditType}" has been *${enableAudit}d* for "${site.getBaseURL()}".`);
+          await say(`${SUCCESS_MESSAGE_PREFIX}The audit "${auditType}" has been *disabled* for "${site.getBaseURL()}".`);
         } catch (error) {
           log.error(error);
-          await say(`${ERROR_MESSAGE_PREFIX}An error occurred while trying to enable or disable audits: ${error.message}`);
+          await say(`${ERROR_MESSAGE_PREFIX}An error occurred while trying to disable audits: ${error.message}`);
         }
         return;
       }
@@ -370,12 +273,10 @@ export default (context) => {
             return { baseURL, success: false, error: 'Site not found' };
           }
 
+          // Note: Enable is handled by early return deprecation message above
+          // Only disable logic remains active
           auditTypes.forEach((auditType) => {
-            if (isEnableAudit) {
-              configuration.enableHandlerForSite(auditType, site);
-            } else {
-              configuration.disableHandlerForSite(auditType, site);
-            }
+            configuration.disableHandlerForSite(auditType, site);
           });
 
           return { baseURL, success: true };
@@ -396,6 +297,8 @@ export default (context) => {
 
       await configuration.save();
 
+      // Note: Enable is handled by early return deprecation message above
+      // Only disable logic remains active
       let message = ':clipboard: *Bulk Update Results*\n';
       if (isProfile) {
         message += `\nProfile: \`${auditTypeOrProfile}\` with ${auditTypes.length} audit types:`;
@@ -405,7 +308,7 @@ export default (context) => {
       }
 
       if (isNonEmptyArray(results.successful)) {
-        message += `\n${SUCCESS_MESSAGE_PREFIX}Successfully ${enableAudit}d for ${results.successful.length} sites:`;
+        message += `\n${SUCCESS_MESSAGE_PREFIX}Successfully disabled for ${results.successful.length} sites:`;
         message += `\n\`\`\`${results.successful.join('\n')}\`\`\``;
       }
 
@@ -421,7 +324,7 @@ export default (context) => {
       await say(message);
     } catch (error) {
       log.error(error);
-      await say(`${ERROR_MESSAGE_PREFIX}An error occurred while trying to enable or disable audits: ${error.message}`);
+      await say(`${ERROR_MESSAGE_PREFIX}An error occurred while trying to disable audits: ${error.message}`);
     }
   };
 

@@ -104,13 +104,16 @@ describe('RunAuditCommand', () => {
       expect(sqsStub.sendMessage).called;
     });
 
-    it('does not trigger an audit when audit for type is disabled', async () => {
+    it('triggers audit even when audit type is disabled (Slack bypass)', async () => {
       const site = {
         getId: () => '123',
       };
       dataAccessStub.Site.findByBaseURL.resolves(site);
       dataAccessStub.Configuration.findLatest.resolves({
         isHandlerEnabledForSite: sinon.stub().returns(false),
+        getHandlers: () => ({
+          'lhs-mobile': { productCodes: ['LLMO'] },
+        }),
       });
       const command = RunAuditCommand(context);
 
@@ -118,8 +121,7 @@ describe('RunAuditCommand', () => {
 
       expect(slackContext.say.called).to.be.true;
       expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering lhs-mobile audit for https://validsite.com');
-      expect(slackContext.say.secondCall.args[0]).to.include(':x: Will not audit site \'https://validsite.com\' because audits of type \'lhs-mobile\' are disabled for this site.');
-      expect(sqsStub.sendMessage.called).to.be.false;
+      expect(sqsStub.sendMessage.called).to.be.true;
     });
 
     it('responds with a warning for an invalid site url', async () => {
@@ -253,13 +255,17 @@ describe('RunAuditCommand', () => {
       expect(slackContext.say.calledWith(':warning: Invalid URL found in CSV file: invalid-url')).to.be.true;
     });
 
-    it('handles site with no enable audits', async () => {
+    it('triggers all audits even when none are enabled (Slack bypass)', async () => {
       const handlerEnabledStub = sinon.stub().onCall(0).returns(false);
       dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
       });
       dataAccessStub.Configuration.findLatest.resolves({
         isHandlerEnabledForSite: handlerEnabledStub,
+        getHandlers: () => ({
+          'lhs-mobile': {},
+          cwv: {},
+        }),
       });
 
       const command = RunAuditCommand(context);
@@ -267,7 +273,7 @@ describe('RunAuditCommand', () => {
 
       expect(slackContext.say.called).to.be.true;
       expect(slackContext.say.firstCall.args[0]).to.equal(':adobe-run: Triggering all audit for https://validsite.com');
-      expect(slackContext.say.secondCall.args[0]).to.equal(':warning: No audits configured for site `https://validsite.com`');
+      expect(sqsStub.sendMessage.called).to.be.true;
     });
 
     it('handles error while triggering audits', async () => {
