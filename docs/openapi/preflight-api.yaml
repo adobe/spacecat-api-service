@@ -8,8 +8,13 @@ preflight-jobs:
     summary: Submit a new preflight async job
     description: |
       This endpoint is useful for submitting a new preflight async job.
-      The job will process the provided URL and return the results.
+      The job will process the provided URLs and return the results.
       The jobId can be used to poll for the status of the job.
+      
+      The checks that will be executed are automatically determined based on the site configuration.
+      Available checks include: canonical, links, metatags, body-size, lorem-ipsum, h1-count, 
+      accessibility, readability, and headings. The actual checks performed will be included 
+      in the job metadata once processing begins.
     operationId: submitPreflightJob
     requestBody:
       required: true
@@ -23,18 +28,16 @@ preflight-jobs:
                 items:
                   type: string
                   format: uri
-                description: Array of URLs to be processed by the job
+                description: Array of URLs to be processed by the job. All URLs must belong to the same website.
                 minItems: 1
               step:
                 type: string
                 enum: [identify, suggest]
                 description: The audit step to be performed
-              checks:
-                type: array
-                items:
-                  type: string
-                  enum: [canonical, links, metatags, body-size, lorem-ipsum, h1-count, readability, accessibility]
-                description: Optional array of specific checks to run. If not provided, all checks will be run.
+              siteId:
+                type: string
+                format: uuid
+                description: Optional site ID. If not provided, the site will be determined from the preview URL.
             required:
               - urls
               - step
