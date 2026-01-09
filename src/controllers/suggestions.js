@@ -51,16 +51,21 @@ function SuggestionsController(ctx, sqs, env) {
     throw new Error('Data access required');
   }
 
-  const AUTOFIX_UNGROUPED_OPPTY_TYPES = [
-    'broken-backlinks',
-    'form-accessibility',
-    'product-metatags',
-    'security-permissions-redundant',
+  /**
+   * Opportunity types that use URL-based suggestion grouping for auto-fix.
+   * Suggestions are grouped by URL and sent as separate auto-fix messages per URL.
+   * Add here only when URL grouping is needed.
+   */
+  const URL_GROUPED_OPPORTUNITY_TYPES = [
+    'alt-text',
+    'broken-internal-links',
+    'high-organic-low-ctr',
+    'meta-tags',
   ];
 
   const DEFAULT_PAGE_SIZE = 100;
 
-  const shouldGroupSuggestionsForAutofix = (type) => !AUTOFIX_UNGROUPED_OPPTY_TYPES.includes(type);
+  const shouldGroupSuggestionsForAutofix = (type) => URL_GROUPED_OPPORTUNITY_TYPES.includes(type);
 
   /**
    * Checks if a suggestion is a domain-wide auto generated suggestion
