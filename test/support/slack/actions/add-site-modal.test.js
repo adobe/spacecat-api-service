@@ -179,9 +179,10 @@ describe('AddSiteModal', () => {
       const actionsBlock = view.blocks.find((b) => b.type === 'actions');
 
       expect(actionsBlock).to.exist;
-      expect(actionsBlock.elements).to.have.lengthOf(2);
+      expect(actionsBlock.elements).to.have.lengthOf(3);
       expect(actionsBlock.elements[0].type).to.equal('checkboxes');
       expect(actionsBlock.elements[1].type).to.equal('checkboxes');
+      expect(actionsBlock.elements[2].type).to.equal('checkboxes');
     });
 
     it('handles errors when opening modal', async () => {

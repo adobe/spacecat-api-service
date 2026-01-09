@@ -15,6 +15,7 @@ import TierClient from '@adobe/spacecat-shared-tier-client';
 export const PRODUCTS_BLOCK_ID = 'products_block';
 export const ASO_ACTION_ID = 'aso_checkbox';
 export const LLMO_ACTION_ID = 'llmo_checkbox';
+export const ACO_ACTION_ID = 'aco_checkbox';
 
 /**
  * Creates a product selection modal view
@@ -79,6 +80,19 @@ export function createProductSelectionModal(callbackId, metadata, title, descrip
                   text: EntitlementModel.PRODUCT_CODES.LLMO,
                 },
                 value: EntitlementModel.PRODUCT_CODES.LLMO,
+              },
+            ],
+          },
+          {
+            type: 'checkboxes',
+            action_id: ACO_ACTION_ID,
+            options: [
+              {
+                text: {
+                  type: 'plain_text',
+                  text: EntitlementModel.PRODUCT_CODES.ACO,
+                },
+                value: EntitlementModel.PRODUCT_CODES.ACO,
               },
             ],
           },
