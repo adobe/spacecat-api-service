@@ -77,8 +77,11 @@ export const triggerBrandProfileAgent = async ({
     return null;
   }
 
-  const idempotencyKey = `${AGENT_ID}-${resolvedSiteId}-${reason}-${Date.now()}`;
-  const executionName = `${AGENT_ID}-${resolvedSiteId}-${reason}`.slice(0, 80);
+  const uniqueSuffix = Date.now().toString(36);
+  const idempotencyKey = `${AGENT_ID}-${resolvedSiteId}-${reason}-${uniqueSuffix}`;
+  // Step Functions execution names must be unique for a long retention window (~90 days),
+  // so include a short suffix to avoid ExecutionAlreadyExists when triggered repeatedly.
+  const executionName = `${AGENT_ID}-${resolvedSiteId}-${reason}-${uniqueSuffix}`.slice(0, 80);
 
   try {
     const payload = {

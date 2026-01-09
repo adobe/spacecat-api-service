@@ -1,3 +1,17 @@
+## [1.281.2](https://github.com/adobe/spacecat-api-service/compare/v1.281.1...v1.281.2) (2026-01-09)
+
+
+### Bug Fixes
+
+* **org-detection:** make openai api version variable ([#1686](https://github.com/adobe/spacecat-api-service/issues/1686)) ([d59eb27](https://github.com/adobe/spacecat-api-service/commit/d59eb2762d7d8ae7b3909bdb70689047befd19f7))
+
+## [1.281.1](https://github.com/adobe/spacecat-api-service/compare/v1.281.0...v1.281.1) (2026-01-09)
+
+
+### Bug Fixes
+
+* make brand profile exec names unique ([#1685](https://github.com/adobe/spacecat-api-service/issues/1685)) ([0f1fb65](https://github.com/adobe/spacecat-api-service/commit/0f1fb6554176facb2478cfeda9cf394bf4223d94))
+
 # [1.281.0](https://github.com/adobe/spacecat-api-service/compare/v1.280.0...v1.281.0) (2026-01-07)
 
 
