@@ -5136,3 +5136,152 @@ PreflightResultItem:
       type: string
       enum: [identify, suggest]
       description: The step of the preflight job when this result was generated
+
+AgenticTrafficJobCreatedResponse:
+  type: object
+  description: Response when an agentic traffic aggregation job is created
+  properties:
+    jobId:
+      type: string
+      format: uuid
+      description: Unique identifier for the async job
+      example: '123e4567-e89b-12d3-a456-426614174000'
+    status:
+      type: string
+      enum:
+        - IN_PROGRESS
+      description: Initial status of the job (always IN_PROGRESS when created)
+      example: 'IN_PROGRESS'
+    date:
+      type: string
+      format: date
+      description: The date for which traffic is being aggregated
+      example: '2025-01-15'
+    pollUrl:
+      type: string
+      format: uri
+      description: URL to poll for job status
+      example: '/sites/123e4567-e89b-12d3-a456-426614174000/llmo/agentic-traffic/jobs/456e7890-e89b-12d3-a456-426614174001'
+    startedAt:
+      type: string
+      format: date-time
+      description: When the job was started
+      example: '2025-01-16T10:30:00Z'
+  required:
+    - jobId
+    - status
+    - date
+    - pollUrl
+    - startedAt
+
+AgenticTrafficJobResponse:
+  type: object
+  description: Agentic traffic aggregation job status (returned when polling)
+  properties:
+    jobId:
+      type: string
+      format: uuid
+      description: Unique identifier for the async job
+      example: '123e4567-e89b-12d3-a456-426614174000'
+    status:
+      type: string
+      enum:
+        - IN_PROGRESS
+        - COMPLETED
+        - FAILED
+        - CANCELLED
+      description: Current status of the job
+      example: 'COMPLETED'
+    date:
+      type: string
+      format: date
+      description: The date for which traffic is being aggregated
+      example: '2025-01-15'
+    resultUrl:
+      type: string
+      format: uri
+      description: |
+        Pre-signed S3 URL to download the results (only present when status is COMPLETED).
+        Valid for 1 hour.
+      example: 'https://s3.amazonaws.com/bucket/path/aggregates.json?X-Amz-...'
+    resultData:
+      type: array
+      description: |
+        Schema of the data returned by the presigned URL (FOR DOCUMENTATION PURPOSES ONLY).
+        This property is NOT INCLUDED in the API response - the actual data is retrieved
+        by making a GET request to the `resultUrl`.
+      items:
+        $ref: '#/AgenticTrafficAggregate'
+    error:
+      type: object
+      description: Error details (only present when status is FAILED)
+      properties:
+        code:
+          type: string
+          description: Error code
+          example: 'QUERY_FAILED'
+        message:
+          type: string
+          description: Human-readable error message
+          example: 'Query execution failed due to timeout'
+    startedAt:
+      type: string
+      format: date-time
+      description: When the job was started
+      example: '2025-01-16T10:30:00Z'
+    endedAt:
+      type: string
+      format: date-time
+      description: When the job completed (only present for terminal states)
+      example: '2025-01-16T10:30:45Z'
+  required:
+    - jobId
+    - status
+    - date
+    - startedAt
+
+AgenticTrafficAggregate:
+  type: object
+  description: Aggregated AI agent traffic record for a URL
+  properties:
+    url:
+      type: string
+      description: The URL path that was accessed
+      example: '/products/widget'
+    user_agent:
+      type: string
+      description: The AI/LLM user agent that made the request
+      example: 'GPTBot/1.0'
+    status:
+      type: integer
+      description: HTTP response status code
+      example: 200
+    referer:
+      type: string
+      description: The referring host (extracted from referer header)
+      example: 'example.com'
+    host:
+      type: string
+      description: The target host
+      example: 'example.com'
+    time_to_first_byte:
+      type: number
+      format: double
+      description: Average time to first byte in milliseconds
+      example: 45.2
+    count:
+      type: integer
+      format: int64
+      description: Number of requests matching this combination
+      example: 1523
+    cdn_provider:
+      type: string
+      description: The CDN provider that served the request
+      example: 'akamai'
+  required:
+    - url
+    - user_agent
+    - status
+    - host
+    - count
+    - cdn_provider

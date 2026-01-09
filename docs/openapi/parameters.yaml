@@ -379,3 +379,11 @@ cursor:
   schema:
     type: string
     example: "eyJzayI6IjIwMjQtMDEtMTVUMTI6MzA6MDBaIiwiaWQiOiIxMjNlNDU2Ny1lODliLTEyZDMtYTQ1Ni00MjY2MTQxNzQwMDAifQ=="
+
+agenticTrafficJobId:
+  name: jobId
+  description: The agentic traffic async job ID in uuid format
+  in: path
+  required: true
+  schema:
+    $ref: './schemas.yaml#/Id'
