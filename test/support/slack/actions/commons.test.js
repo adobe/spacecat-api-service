@@ -13,7 +13,11 @@
 /* eslint-env mocha */
 
 import { expect } from 'chai';
-import { composeReply, extractURLFromSlackMessage } from '../../../../src/support/slack/actions/commons.js';
+import {
+  composeReply,
+  extractURLFromSlackMessage,
+  formatBotProtectionSlackMessage,
+} from '../../../../src/support/slack/actions/commons.js';
 import {
   slackActionResponse,
   slackApprovedFriendsFamilyReply,
@@ -57,6 +61,76 @@ describe('Slack action commons', () => {
         username: 'some-user',
         approved: false,
       })).to.eql(slackIgnoredReply);
+    });
+  });
+
+  describe('formatBotProtectionSlackMessage', () => {
+    it('formats blocked bot protection message', () => {
+      const result = formatBotProtectionSlackMessage({
+        siteUrl: 'https://example.com',
+        botProtection: {
+          type: 'cloudflare',
+          confidence: 0.99,
+          reason: 'Challenge page detected',
+        },
+        botIps: '1.2.3.4,5.6.7.8',
+      });
+
+      expect(result).to.include('Bot Protection Detected');
+      expect(result).to.include('https://example.com');
+      expect(result).to.include('cloudflare');
+      expect(result).to.include('99%');
+      expect(result).to.include('Challenge page detected');
+      expect(result).to.include('Detection Details');
+      expect(result).to.include('1.2.3.4');
+    });
+
+    it('formats allowed infrastructure message', () => {
+      const result = formatBotProtectionSlackMessage({
+        siteUrl: 'https://allowed.com',
+        botProtection: {
+          type: 'cloudflare-allowed',
+          confidence: 1.0,
+        },
+        botIps: '1.2.3.4',
+      });
+
+      expect(result).to.include('Bot Protection Infrastructure Detected');
+      expect(result).to.include('https://allowed.com');
+      expect(result).to.include('cloudflare-allowed');
+      expect(result).to.include('100%');
+      expect(result).to.include('Current Status');
+      expect(result).to.include('SpaceCat can currently access the site');
+    });
+
+    it('formats message without reason', () => {
+      const result = formatBotProtectionSlackMessage({
+        siteUrl: 'https://no-reason.com',
+        botProtection: {
+          type: 'http2-block',
+          confidence: 0.9,
+        },
+      });
+
+      expect(result).to.include('Bot Protection Detected');
+      expect(result).to.include('https://no-reason.com');
+      expect(result).to.include('http2-block');
+      expect(result).to.include('90%');
+      expect(result).to.not.include('Reason:');
+    });
+
+    it('handles missing bot IPs gracefully', () => {
+      const result = formatBotProtectionSlackMessage({
+        siteUrl: 'https://test.com',
+        botProtection: {
+          type: 'akamai',
+          confidence: 0.95,
+        },
+        botIps: '',
+      });
+
+      expect(result).to.include('Bot Protection Detected');
+      expect(result).to.include('IP addresses not configured');
     });
   });
 });

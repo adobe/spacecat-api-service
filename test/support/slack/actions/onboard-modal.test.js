@@ -64,6 +64,13 @@ describe('onboard-modal', () => {
       '../../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
       },
+      '../../../../src/support/utils/bot-protection-check.js': {
+        checkBotProtectionDuringOnboarding: sinon.stub().resolves({
+          blocked: false,
+          type: 'unknown',
+          confidence: 0,
+        }),
+      },
     });
 
     ({ startOnboarding, onboardSiteModal, extractDeliveryConfigFromPreviewUrl } = mockedModule);
@@ -454,6 +461,7 @@ describe('onboard-modal', () => {
           SiteEnrollment: siteEnrollmentMock,
         },
         env: {
+          AWS_REGION: 'us-east-1',
           DEMO_IMS_ORG: '1234567894ABCDEF12345678@AdobeOrg',
           WORKFLOW_WAIT_TIME_IN_SECONDS: 300,
           ONBOARD_WORKFLOW_STATE_MACHINE_ARN: 'arn:aws:states:us-east-1:123456789012:stateMachine:onboard-workflow',
@@ -1105,6 +1113,139 @@ describe('onboard-modal', () => {
       });
 
       expect(ackMock).to.have.been.called;
+    });
+
+    describe('Bot Protection Detection', () => {
+      it('should warn about advanced bot protection (http2-block) but continue onboarding', async () => {
+        // Create a custom mock module for this test
+        const testModule = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+          '../../../../src/utils/slack/base.js': {
+            loadProfileConfig: sinon.stub().resolves({
+              audits: ['scrape-top-pages'],
+              imports: ['organic-traffic'],
+              profile: 'demo',
+            }),
+          },
+          '../../../../src/support/utils.js': {
+            onboardSingleSite: sinon.stub().resolves({
+              siteId: 'site123',
+              errors: [],
+            }),
+          },
+          '../../../../src/support/brand-profile-trigger.js': {
+            triggerBrandProfileAgent: sinon.stub().resolves('exec-123'),
+          },
+          '../../../../src/support/utils/bot-protection-check.js': {
+            checkBotProtectionDuringOnboarding: sinon.stub().resolves({
+              blocked: true,
+              type: 'http2-block',
+              confidence: 0.95,
+              reason: 'HTTP/2 connection error',
+            }),
+          },
+        });
+
+        const modalAction = testModule.onboardSiteModal(context);
+
+        await modalAction({
+          ack: ackMock,
+          body,
+          client: clientMock,
+        });
+
+        const calls = clientMock.chat.postMessage.getCalls();
+        const advancedWarning = calls.find((call) => call.args[0].text?.includes('Advanced Bot Protection Detected'));
+        expect(advancedWarning).to.exist;
+
+        const successMessage = calls.find((call) => call.args[0].text?.includes('Onboarding triggered successfully'));
+        expect(successMessage).to.exist;
+      });
+
+      it('should warn about advanced bot protection (imperva) but continue onboarding', async () => {
+        const testModule = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+          '../../../../src/utils/slack/base.js': {
+            loadProfileConfig: sinon.stub().resolves({
+              audits: ['scrape-top-pages'],
+              imports: ['organic-traffic'],
+              profile: 'demo',
+            }),
+          },
+          '../../../../src/support/utils.js': {
+            onboardSingleSite: sinon.stub().resolves({
+              siteId: 'site123',
+              errors: [],
+            }),
+          },
+          '../../../../src/support/brand-profile-trigger.js': {
+            triggerBrandProfileAgent: sinon.stub().resolves('exec-123'),
+          },
+          '../../../../src/support/utils/bot-protection-check.js': {
+            checkBotProtectionDuringOnboarding: sinon.stub().resolves({
+              blocked: true,
+              type: 'imperva',
+              confidence: 0.92,
+              reason: 'Imperva blocking detected',
+            }),
+          },
+        });
+
+        const modalAction = testModule.onboardSiteModal(context);
+
+        await modalAction({
+          ack: ackMock,
+          body,
+          client: clientMock,
+        });
+
+        const calls = clientMock.chat.postMessage.getCalls();
+        const advancedWarning = calls.find((call) => call.args[0].text?.includes('Advanced Bot Protection Detected'));
+        expect(advancedWarning).to.exist;
+      });
+
+      it('should warn about basic bot protection but continue onboarding', async () => {
+        const testModule = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+          '../../../../src/utils/slack/base.js': {
+            loadProfileConfig: sinon.stub().resolves({
+              audits: ['scrape-top-pages'],
+              imports: ['organic-traffic'],
+              profile: 'demo',
+            }),
+          },
+          '../../../../src/support/utils.js': {
+            onboardSingleSite: sinon.stub().resolves({
+              siteId: 'site123',
+              errors: [],
+            }),
+          },
+          '../../../../src/support/brand-profile-trigger.js': {
+            triggerBrandProfileAgent: sinon.stub().resolves('exec-123'),
+          },
+          '../../../../src/support/utils/bot-protection-check.js': {
+            checkBotProtectionDuringOnboarding: sinon.stub().resolves({
+              blocked: true,
+              type: 'cloudflare',
+              confidence: 0.85,
+              reason: 'Challenge page detected',
+            }),
+          },
+        });
+
+        const modalAction = testModule.onboardSiteModal(context);
+
+        await modalAction({
+          ack: ackMock,
+          body,
+          client: clientMock,
+        });
+
+        const calls = clientMock.chat.postMessage.getCalls();
+        const basicWarning = calls.find((call) => call.args[0].text?.includes('Bot Protection Detected')
+          && call.args[0].text?.includes('browser-based scraper can typically bypass'));
+        expect(basicWarning).to.exist;
+
+        const successMessage = calls.find((call) => call.args[0].text?.includes('Onboarding triggered successfully'));
+        expect(successMessage).to.exist;
+      });
     });
   });
 });
