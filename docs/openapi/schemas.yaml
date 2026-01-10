@@ -5016,8 +5016,10 @@ PreflightJobResponse:
           properties:
             checks:
               type: array
+              description: Array of checks that were enabled for this site and executed. Determined automatically based on site configuration.
               items:
                 type: string
+                enum: [canonical, links, metatags, body-size, lorem-ipsum, h1-count, accessibility, readability, headings]
             siteId:
               type: string
               format: uuid
@@ -5031,6 +5033,7 @@ PreflightJobResponse:
                 format: uri
             enableAuthentication:
               type: boolean
+              description: Whether authentication was enabled for scraping the pages
         tags:
           type: array
           items:
