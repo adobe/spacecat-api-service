@@ -1,3 +1,10 @@
+# [1.282.0](https://github.com/adobe/spacecat-api-service/compare/v1.281.2...v1.282.0) (2026-01-09)
+
+
+### Features
+
+* remove product-metatags audits for paid customer ([#1683](https://github.com/adobe/spacecat-api-service/issues/1683)) ([d15747a](https://github.com/adobe/spacecat-api-service/commit/d15747a096127a808f64ea21b50efb1b74ce5f7b))
+
 ## [1.281.2](https://github.com/adobe/spacecat-api-service/compare/v1.281.1...v1.281.2) (2026-01-09)
 
 
