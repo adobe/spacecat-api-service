@@ -35,6 +35,7 @@ import {
 import { hasText, resolveSecretsName, logWrapper } from '@adobe/spacecat-shared-utils';
 
 import sqs from './support/sqs.js';
+import { auroraClientWrapper } from './support/aurora-client.js';
 import getRouteHandlers from './routes/index.js';
 import matchPath, { sanitizePath } from './utils/route-utils.js';
 
@@ -101,7 +102,7 @@ async function run(request, context) {
   if (method === 'OPTIONS') {
     return noContent({
       'access-control-allow-methods': 'GET, HEAD, PATCH, POST, OPTIONS, DELETE',
-      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type, x-trigger-audits',
+      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type, x-trigger-audits, x-edge-authorization, x-product',
       'access-control-max-age': '86400',
       'access-control-allow-origin': '*',
     });
@@ -225,5 +226,6 @@ export const main = wrap(run)
   .with(s3ClientWrapper)
   .with(imsClientWrapper)
   .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
+  .with(auroraClientWrapper)
   .with(secrets, { name: resolveSecretsName })
   .with(helixStatus);

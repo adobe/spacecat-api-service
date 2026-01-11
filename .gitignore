@@ -15,3 +15,4 @@ admin-idp-p*.json
 .vscode/settings.json
 .cursor/*
 !.cursor/rules/
+data/*

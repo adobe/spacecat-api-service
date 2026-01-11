@@ -30,6 +30,8 @@ See the [API documentation](docs/API.md).
 
 ## Development
 
+### Local Development with PostgreSQL
+
 To set up local development for `spacecat-api-service`, follow these steps:
 
 1. Create an `.env` file in your project root and define the following environment variables with your AWS credentials:
@@ -43,11 +45,29 @@ USER_API_KEY=api_key_for_user_requests
 ADMIN_API_KEY=api_key_for_admin_requests
 ```
 
-2. Start the development server
+2. Start the local PostgreSQL database
 
+```bash
+npm run db:up
 ```
+
+3. Start the development server
+
+```bash
 npm start
 ```
+
+See [docs/AURORA_QUICKSTART.md](docs/AURORA_QUICKSTART.md) for more details on local database setup.
+
+### Deploying to AWS with Aurora
+
+To deploy your branch with Aurora PostgreSQL:
+
+1. Configure Aurora connection in `secrets/dev-secrets.json`
+2. Run the setup script: `./scripts/setup-aurora-complete.sh`
+3. Deploy: `npm run deploy-dev`
+
+See [docs/AURORA_DEV_SETUP.md](docs/AURORA_DEV_SETUP.md) for detailed Aurora setup instructions.
 
 ### Build
 

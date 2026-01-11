@@ -44,6 +44,17 @@ import {
 } from './llmo-onboarding.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
+import {
+  getBrandPresenceFilters as getBrandPresenceFiltersImpl,
+  exampleEndpoint as exampleEndpointImpl,
+  getSentimentOverview as getSentimentOverviewImpl,
+  getBrandPresenceStats as getBrandPresenceStatsImpl,
+  getBrandPresenceTopics as getBrandPresenceTopicsImpl,
+  getBrandPresencePrompts as getBrandPresencePromptsImpl,
+  searchBrandPresence as searchBrandPresenceImpl,
+  getCompetitorComparison as getCompetitorComparisonImpl,
+  handleBrandPresenceOptions,
+} from './brand-presence/index.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
 
 const { readConfig, writeConfig } = llmo;
@@ -917,6 +928,54 @@ function LlmoController(ctx) {
     }
   };
 
+  // Wrapper for brand presence filters endpoint
+  const getBrandPresenceFilters = async (context) => getBrandPresenceFiltersImpl(
+    context,
+    getSiteAndValidateLlmo,
+  );
+
+  // Wrapper for brand presence example endpoint
+  const exampleEndpoint = async (context) => exampleEndpointImpl(
+    context,
+    getSiteAndValidateLlmo,
+  );
+
+  // Wrapper for sentiment overview endpoint
+  const getSentimentOverview = async (context) => getSentimentOverviewImpl(
+    context,
+    getSiteAndValidateLlmo,
+  );
+
+  // Wrapper for brand presence stats endpoint
+  const getBrandPresenceStats = async (context) => getBrandPresenceStatsImpl(
+    context,
+    getSiteAndValidateLlmo,
+  );
+
+  // Wrapper for brand presence topics endpoint
+  const getBrandPresenceTopics = async (context) => getBrandPresenceTopicsImpl(
+    context,
+    getSiteAndValidateLlmo,
+  );
+
+  // Wrapper for brand presence prompts endpoint
+  const getBrandPresencePrompts = async (context) => getBrandPresencePromptsImpl(
+    context,
+    getSiteAndValidateLlmo,
+  );
+
+  // Wrapper for brand presence search endpoint
+  const searchBrandPresence = async (context) => searchBrandPresenceImpl(
+    context,
+    getSiteAndValidateLlmo,
+  );
+
+  // Wrapper for competitor comparison endpoint
+  const getCompetitorComparison = async (context) => getCompetitorComparisonImpl(
+    context,
+    getSiteAndValidateLlmo,
+  );
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -936,7 +995,16 @@ function LlmoController(ctx) {
     onboardCustomer,
     offboardCustomer,
     queryFiles,
+    getBrandPresenceFilters,
+    getSentimentOverview,
+    exampleEndpoint,
     getLlmoRationale,
+    getBrandPresenceStats,
+    getBrandPresenceTopics,
+    getBrandPresencePrompts,
+    searchBrandPresence,
+    getCompetitorComparison,
+    handleBrandPresenceOptions,
   };
 }
 
