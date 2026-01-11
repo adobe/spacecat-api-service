@@ -10,12 +10,11 @@
  * governing permissions and limitations under the License.
  */
 
-import { isValidUrl } from '@adobe/spacecat-shared-utils';
+import { isValidUrl, detectBotBlocker } from '@adobe/spacecat-shared-utils';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import { onboardSingleSite as sharedOnboardSingleSite } from '../../utils.js';
 import { triggerBrandProfileAgent } from '../../brand-profile-trigger.js';
 import { loadProfileConfig } from '../../../utils/slack/base.js';
-import { checkBotProtectionDuringOnboarding } from '../../utils/bot-protection-check.js';
 import { formatBotProtectionSlackMessage } from './commons.js';
 
 export const AEM_CS_HOST = /^author-p(\d+)-e(\d+)/i;
@@ -31,6 +30,8 @@ export function extractDeliveryConfigFromPreviewUrl(previewUrl, imsOrgId) {
   if (!isValidUrl(previewUrl)) {
     return null;
   }
+
+  // Safe to construct URL here since isValidUrl() already validated it
   const url = new URL(previewUrl);
   const { hostname } = url;
 
@@ -694,22 +695,11 @@ export function onboardSiteModal(lambdaContext) {
         thread_ts: responseThreadTs,
       });
 
-      // Check for bot protection (informational only - does not block onboarding)
-      const botProtectionResult = await checkBotProtectionDuringOnboarding(siteUrl, log);
+      const botProtectionResult = await detectBotBlocker({ baseUrl: siteUrl });
 
-      // Determine protection severity
-      const isAdvancedProtection = botProtectionResult.blocked
-        && (botProtectionResult.type === 'http2-block'
-          || botProtectionResult.type === 'imperva'
-          || botProtectionResult.type === 'perimeterx'
-          || botProtectionResult.type === 'datadome'
-          || botProtectionResult.confidence >= 0.95);
-
-      const isBasicProtection = botProtectionResult.blocked && !isAdvancedProtection;
-
-      if (isAdvancedProtection) {
-        // Advanced protection detected - likely to block scraper too
-        log.warn(`Advanced bot protection detected for ${siteUrl} - audits may fail`, botProtectionResult);
+      // Send warning if bot protection is detected
+      if (!botProtectionResult.crawlable) {
+        log.warn(`Bot protection detected for ${siteUrl} - audits may fail`, botProtectionResult);
 
         const botProtectionMessage = formatBotProtectionSlackMessage({
           siteUrl,
@@ -719,43 +709,10 @@ export function onboardSiteModal(lambdaContext) {
 
         await client.chat.postMessage({
           channel: responseChannel,
-          text: `:warning: *Advanced Bot Protection Detected for ${siteUrl}*`,
-          blocks: [
-            {
-              type: 'section',
-              text: {
-                type: 'mrkdwn',
-                text: botProtectionMessage,
-              },
-            },
-          ],
-          thread_ts: responseThreadTs,
-        });
-
-        await client.chat.postMessage({
-          channel: responseChannel,
-          text: ':information_source: *Onboarding will continue*, but audits will likely fail without allowlisting.\n'
-                + 'Our browser-based scraper may not be able to bypass this advanced protection.\n'
-                + 'Please allowlist SpaceCat IPs and User-Agent as shown above for best results.',
-          thread_ts: responseThreadTs,
-        });
-      } else if (isBasicProtection) {
-        // Basic protection detected - scraper can likely bypass
-        log.info(`Basic bot protection detected for ${siteUrl} - scraper should bypass`, botProtectionResult);
-
-        await client.chat.postMessage({
-          channel: responseChannel,
-          text: `:information_source: *Bot Protection Detected for ${siteUrl}*\n`
-                + `• Type: ${botProtectionResult.type}\n`
-                + `• Confidence: ${Math.round(botProtectionResult.confidence * 100)}%\n`
-                + '\n'
-                + ':white_check_mark: *Onboarding will continue.*\n'
-                + 'Our browser-based scraper can typically bypass basic protection.\n'
-                + 'If audits fail, allowlist instructions will be provided.',
+          text: `:warning: *Bot Protection Detected for ${siteUrl}*\n\n${botProtectionMessage}`,
           thread_ts: responseThreadTs,
         });
       }
-      // If no protection detected, proceed silently
 
       const reportLine = await onboardSingleSiteFromModal(
         siteUrl,

@@ -63,21 +63,11 @@ export function formatBotProtectionSlackMessage({
   botProtection,
   botIps,
 }) {
-  let allowlistInfo;
-  try {
-    allowlistInfo = formatAllowlistMessage(botIps);
-  } catch (error) {
-    // If IPs not configured, use generic message
-    allowlistInfo = {
-      ips: ['IP addresses not configured'],
-      userAgent: SPACECAT_BOT_USER_AGENT,
-    };
-  }
+  const isBlocked = botProtection.crawlable === false;
+  const emoji = isBlocked ? ':warning:' : ':information_source:';
+  const title = isBlocked ? 'Bot Protection Detected' : 'Bot Protection Infrastructure Detected';
 
-  const ipList = allowlistInfo.ips.map((ip) => `• \`${ip}\``).join('\n');
-  const isAllowed = botProtection.type && botProtection.type.includes('-allowed');
-
-  let message = `:${isAllowed ? 'information_source' : 'warning'}: *Bot Protection${isAllowed ? ' Infrastructure' : ''} Detected*\n\n`
+  let message = `${emoji} *${title}*\n\n`
     + `*Site:* ${siteUrl}\n`
     + `*Protection Type:* ${botProtection.type}\n`
     + `*Confidence:* ${(botProtection.confidence * 100).toFixed(0)}%\n`;
@@ -86,28 +76,21 @@ export function formatBotProtectionSlackMessage({
     message += `*Reason:* ${botProtection.reason}\n`;
   }
 
-  if (isAllowed) {
-    // Site is currently accessible - provide informational message
-    message += '\n'
-      + '*Current Status:*\n'
-      + '• SpaceCat can currently access the site\n'
-      + '• Bot protection infrastructure is present but allowing requests\n'
-      + '• This suggests AWS Lambda IPs may be allowlisted\n'
-      + '\n'
-      + '*Important Notes:*\n'
-      + '• If audits fail or return incorrect results, verify allowlist configuration\n'
-      + '• Ensure allowlist is permanent and covers all required IPs\n'
-      + '• Some protection types may still affect specific audit types\n'
-      + '\n'
-      + '*If you need to update allowlist:*\n'
-      + '\n'
-      + '*User-Agent to allowlist:*\n'
-      + `\`${allowlistInfo.userAgent}\`\n`
-      + '\n'
-      + '*IPs to allowlist:*\n'
-      + `${ipList}\n`;
-  } else {
-    // Site is blocked - provide allowlist information
+  // Only show allowlist instructions if site is actually blocked
+  if (isBlocked) {
+    let allowlistInfo;
+    try {
+      allowlistInfo = formatAllowlistMessage(botIps);
+    } catch (error) {
+      // If IPs not configured, use generic message
+      allowlistInfo = {
+        ips: ['IP addresses not configured'],
+        userAgent: SPACECAT_BOT_USER_AGENT,
+      };
+    }
+
+    const ipList = allowlistInfo.ips.map((ip) => `• \`${ip}\``).join('\n');
+
     message += '\n'
       + '*Detection Details:*\n'
       + '• Simple HTTP requests are being blocked\n'
@@ -115,15 +98,24 @@ export function formatBotProtectionSlackMessage({
       + '• Advanced protection may still block automated access\n'
       + '\n'
       + '*Recommended Action:*\n'
-      + `Allowlist SpaceCat in your ${botProtection.type} configuration for best results:\n`
+      + `Allowlist SpaceCat in your ${botProtection.type} configuration. *Both User-Agent and IPs must be allowlisted together:*\n`
       + '\n'
-      + '*User-Agent to allowlist:*\n'
-      + `\`${allowlistInfo.userAgent}\`\n`
+      + '*User-Agent Pattern to Allowlist:*\n'
+      + `Use a pattern match: \`*${allowlistInfo.userAgent}*\` or \`*Spacecat*\`\n`
+      + '_(Our scraper uses different User-Agent formats, so pattern matching is required)_\n'
       + '\n'
-      + '*IPs to allowlist:*\n'
+      + '*All IPs to Allowlist:*\n'
       + `${ipList}\n`
+      + '_(All IPs must be allowlisted as requests may come from any of them)_\n'
       + '\n'
-      + '_If audits fail, allowlisting will be required for the site to be monitored._';
+      + ':warning: _If audits continue to fail after allowlisting, verify that both User-Agent pattern and ALL IPs are configured correctly in your CDN/WAF._';
+  } else {
+    // Site is accessible - just informational
+    message += '\n'
+      + '*Status:*\n'
+      + '• Bot protection infrastructure is present\n'
+      + '• SpaceCat can currently access the site\n'
+      + '• No action needed at this time';
   }
 
   return message;

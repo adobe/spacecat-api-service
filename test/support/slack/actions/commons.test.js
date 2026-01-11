@@ -71,18 +71,23 @@ describe('Slack action commons', () => {
         botProtection: {
           type: 'cloudflare',
           confidence: 0.99,
+          crawlable: false,
           reason: 'Challenge page detected',
         },
         botIps: '1.2.3.4,5.6.7.8',
       });
 
       expect(result).to.include('Bot Protection Detected');
+      expect(result).to.include(':warning:');
       expect(result).to.include('https://example.com');
       expect(result).to.include('cloudflare');
       expect(result).to.include('99%');
       expect(result).to.include('Challenge page detected');
       expect(result).to.include('Detection Details');
       expect(result).to.include('1.2.3.4');
+      expect(result).to.include('User-Agent Pattern');
+      expect(result).to.include('*Spacecat*');
+      expect(result).to.include('Both User-Agent and IPs must be allowlisted together');
     });
 
     it('formats allowed infrastructure message', () => {
@@ -91,16 +96,20 @@ describe('Slack action commons', () => {
         botProtection: {
           type: 'cloudflare-allowed',
           confidence: 1.0,
+          crawlable: true,
         },
         botIps: '1.2.3.4',
       });
 
+      // Site is accessible - shows informational message only
       expect(result).to.include('Bot Protection Infrastructure Detected');
+      expect(result).to.include(':information_source:');
       expect(result).to.include('https://allowed.com');
       expect(result).to.include('cloudflare-allowed');
       expect(result).to.include('100%');
-      expect(result).to.include('Current Status');
       expect(result).to.include('SpaceCat can currently access the site');
+      expect(result).to.not.include('Detection Details');
+      expect(result).to.not.include('1.2.3.4');
     });
 
     it('formats message without reason', () => {
@@ -109,6 +118,7 @@ describe('Slack action commons', () => {
         botProtection: {
           type: 'http2-block',
           confidence: 0.9,
+          crawlable: false,
         },
       });
 
@@ -125,6 +135,7 @@ describe('Slack action commons', () => {
         botProtection: {
           type: 'akamai',
           confidence: 0.95,
+          crawlable: false,
         },
         botIps: '',
       });

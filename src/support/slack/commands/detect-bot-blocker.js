@@ -10,11 +10,10 @@
  * governing permissions and limitations under the License.
  */
 
-import { isValidUrl } from '@adobe/spacecat-shared-utils';
+import { isValidUrl, detectBotBlocker } from '@adobe/spacecat-shared-utils';
 
 import BaseCommand from './base.js';
 import { extractURLFromSlackInput, postErrorMessage } from '../../../utils/slack/base.js';
-import { checkBotProtectionDuringOnboarding } from '../../utils/bot-protection-check.js';
 
 const COMMAND_ID = 'detect-bot-blocker';
 const PHRASES = ['detect bot-blocker', 'detect bot blocker', 'check bot blocker'];
@@ -32,9 +31,8 @@ function DetectBotBlockerCommand(context) {
 
   const formatResult = (result) => {
     const {
-      blocked, type, confidence, reason,
+      crawlable, type, confidence, reason,
     } = result;
-    const crawlable = !blocked;
     const confidencePercent = (typeof confidence === 'number')
       ? `${(confidence * 100).toFixed(0)}%`
       : 'N/A%';
@@ -53,13 +51,12 @@ function DetectBotBlockerCommand(context) {
     else if (type === 'akamai') typeLabel = 'Akamai';
     else if (type === 'fastly') typeLabel = 'Fastly';
     else if (type === 'cloudfront') typeLabel = 'AWS CloudFront';
+    else if (type === 'http2-block') typeLabel = 'HTTP/2 Stream Error';
     else if (type === 'cloudflare-allowed') typeLabel = 'Cloudflare (Allowed)';
     else if (type === 'imperva-allowed') typeLabel = 'Imperva (Allowed)';
     else if (type === 'akamai-allowed') typeLabel = 'Akamai (Allowed)';
     else if (type === 'fastly-allowed') typeLabel = 'Fastly (Allowed)';
     else if (type === 'cloudfront-allowed') typeLabel = 'AWS CloudFront (Allowed)';
-    else if (type === 'http2-block') typeLabel = 'HTTP/2 Stream Error';
-    else if (type === 'http-error') typeLabel = 'HTTP Error (Possible Bot Protection)';
     else if (type === 'none') typeLabel = 'No Blocker Detected';
     else if (type === 'unknown') typeLabel = 'Unknown';
 
@@ -69,16 +66,6 @@ function DetectBotBlockerCommand(context) {
 
     if (reason) {
       message += `\n:information_source: *Reason:* ${reason}`;
-    }
-
-    if (result.details) {
-      message += '\n\n*Details:*';
-      if (result.details.httpStatus) {
-        message += `\n• HTTP Status: ${result.details.httpStatus}`;
-      }
-      if (result.details.htmlSize) {
-        message += `\n• HTML Size: ${result.details.htmlSize} bytes`;
-      }
     }
 
     return message;
@@ -102,7 +89,7 @@ function DetectBotBlockerCommand(context) {
     await say(`:mag: Checking bot blocker for \`${baseURL}\`...`);
 
     try {
-      const result = await checkBotProtectionDuringOnboarding(baseURL, log);
+      const result = await detectBotBlocker({ baseUrl: baseURL });
       const formattedResult = formatResult(result);
 
       await say(`:robot_face: *Bot Blocker Detection Results for* \`${baseURL}\`\n\n${formattedResult}`);
