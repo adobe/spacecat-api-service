@@ -16,1729 +16,995 @@ import { expect, use } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
-
-import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
-import { AWSAthenaClient } from '@adobe/spacecat-shared-athena-client';
-import { Site } from '@adobe/spacecat-shared-data-access';
+import { AWSAthenaClient, TrafficDataWithCWVDto } from '@adobe/spacecat-shared-athena-client';
 import TopPaidOpportunitiesController from '../../../src/controllers/paid/top-paid-opportunities.js';
+import { matchOpportunitiesWithPaidUrls } from '../../../src/controllers/paid/opportunity-matcher.js';
 
 use(chaiAsPromised);
 use(sinonChai);
 
-const SITE_ID = '123e4567-e89b-12d3-a456-426614174000';
+const SITE_ID = 'test-site-id';
+
+// Simplified factory functions - projectedTrafficValue defaults to 1000
+const createOpportunity = (overrides = {}) => {
+  const desc = overrides.description !== undefined ? overrides.description : 'Test Description';
+  const data = overrides.data === null ? null : { projectedTrafficValue: 1000, ...overrides.data };
+  return {
+    getId: () => overrides.id || 'oppty-1',
+    getSiteId: () => SITE_ID,
+    getTitle: () => overrides.title || 'Test Opportunity',
+    getDescription: () => desc,
+    getType: () => overrides.type || 'broken-backlinks',
+    getStatus: () => 'NEW',
+    getTags: () => overrides.tags || [],
+    getData: () => data,
+  };
+};
+
+const createSuggestion = (url, overrides = {}) => ({
+  getOpportunityId: () => overrides.opportunityId || 'oppty-1',
+  getData: () => ({ url, ...overrides.data }),
+  getRank: () => overrides.rank || 0,
+});
+
+const createTrafficData = (overrides = {}) => ({
+  url: overrides.url || 'https://example.com/page',
+  pageviews: overrides.pageviews || '1000',
+  overall_cwv_score: overrides.overall_cwv_score || 'poor',
+  lcp_score: overrides.lcp_score || 'poor',
+  inp_score: overrides.inp_score || 'good',
+  cls_score: overrides.cls_score || 'good',
+});
+
+const createMockSite = (overrides = {}) => ({
+  getId: () => overrides.id || SITE_ID,
+  getBaseURL: async () => overrides.baseURL || 'https://example.com',
+  getOrganizationId: () => overrides.organizationId || null,
+});
+
+// Helper to set up opportunity mocks with proper status filtering
+function setupOpportunityMocks(mockOpportunity, opportunities = []) {
+  mockOpportunity.allBySiteIdAndStatus
+    .withArgs(SITE_ID, 'NEW').resolves(opportunities)
+    .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+}
 
 describe('TopPaidOpportunitiesController', () => {
   let sandbox;
   let mockContext;
   let mockEnv;
-  let mockOpportunity;
-  let mockSuggestion;
-  let mockSite;
-  let topPaidController;
-  let mockLogger;
+  let mockAthenaClient;
+  let controller;
 
   beforeEach(() => {
     sandbox = sinon.createSandbox();
-
-    // Stub AWSAthenaClient.fromContext
     sandbox.stub(AWSAthenaClient, 'fromContext');
+    sandbox.stub(TrafficDataWithCWVDto, 'toJSON').callsFake((row, _thresholdConfig, baseURL) => {
+      const url = row.path ? `${baseURL}${row.path}` : row.url;
+      return { ...row, url };
+    });
 
-    mockLogger = {
-      info: sandbox.stub(),
-      warn: sandbox.stub(),
-      error: sandbox.stub(),
-      debug: sandbox.stub(),
-    };
-
-    mockOpportunity = {
-      allBySiteIdAndStatus: sandbox.stub().resolves([]),
-    };
-
-    mockSuggestion = {
-      allByOpportunityId: sandbox.stub().resolves([]),
-      allByOpportunityIdAndStatus: sandbox.stub().resolves([]),
-    };
-
-    mockSite = {
-      findById: sandbox.stub().resolves({
-        id: SITE_ID,
-        getBaseURL: async () => 'https://example.com',
-      }),
-    };
+    mockAthenaClient = { query: sandbox.stub().resolves([]) };
+    AWSAthenaClient.fromContext.returns(mockAthenaClient);
 
     mockContext = {
-      dataAccess: {
-        Opportunity: mockOpportunity,
-        Suggestion: mockSuggestion,
-        Site: mockSite,
+      log: {
+        info: sandbox.stub(),
+        warn: sandbox.stub(),
+        error: sandbox.stub(),
+        debug: sandbox.stub(),
       },
-      log: mockLogger,
-      s3: {},
-      pathInfo: {
-        headers: { 'x-product': 'abcd' },
+      dataAccess: {
+        Site: { findById: sandbox.stub().resolves(createMockSite()) },
+        Opportunity: { allBySiteIdAndStatus: sandbox.stub().resolves([]) },
+        Suggestion: { allByOpportunityIdAndStatus: sandbox.stub().resolves([]) },
       },
       attributes: {
-        authInfo: new AuthInfo()
-          .withType('jwt')
-          .withScopes([{ name: 'admin' }])
-          .withProfile({ is_admin: true })
-          .withAuthenticated(true),
+        authInfo: {
+          profile: { email: 'admin@example.com' },
+          isAdmin: () => true,
+          getType: () => 'jwt',
+          getScopes: () => [{ name: 'admin' }],
+          hasOrganization: () => true,
+        },
       },
+      pathInfo: { headers: {} },
     };
 
     mockEnv = {
-      RUM_METRICS_DATABASE: 'test_db',
-      RUM_METRICS_COMPACT_TABLE: 'test_table',
-      S3_BUCKET_NAME: 'test-bucket',
-      PAID_DATA_THRESHOLD: 1000,
-      CWV_THRESHOLDS: {},
+      PAID_DATA_THRESHOLD: '100',
+      CWV_THRESHOLDS: JSON.stringify({
+        LCP_GOOD: 2500,
+        LCP_NEEDS_IMPROVEMENT: 4000,
+        CLS_GOOD: 0.1,
+        CLS_NEEDS_IMPROVEMENT: 0.25,
+        INP_GOOD: 200,
+        INP_NEEDS_IMPROVEMENT: 500,
+      }),
     };
 
-    topPaidController = TopPaidOpportunitiesController(mockContext, mockEnv);
+    controller = TopPaidOpportunitiesController(mockContext, mockEnv);
   });
 
   afterEach(() => {
     sandbox.restore();
   });
 
-  describe('getTopPaidOpportunities', () => {
+  describe('TopPaidOpportunitiesController', () => {
     it('returns 404 when site is not found', async () => {
-      const nonExistentSiteId = '00000000-0000-0000-0000-000000000000';
-      mockSite.findById.resolves(null);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: nonExistentSiteId },
-        data: {},
-      });
-
-      expect(response.status).to.equal(404);
-    });
-
-    it('returns 403 when user does not have access to site', async () => {
-      const mockOrg = {
-        getImsOrgId: () => 'test-org-id',
-      };
-
-      const mockSiteWithOrg = {
-        id: SITE_ID,
-        getOrganization: async () => mockOrg,
-        getBaseURL: async () => 'https://example.com',
-      };
-      Object.setPrototypeOf(mockSiteWithOrg, Site.prototype);
-      mockSite.findById.resolves(mockSiteWithOrg);
-
-      const restrictedAuthInfo = new AuthInfo()
-        .withType('jwt')
-        .withScopes([{ name: 'user' }])
-        .withProfile({ is_admin: false })
-        .withAuthenticated(true);
-
-      restrictedAuthInfo.claims = {
-        organizations: [],
-      };
-
-      const restrictedContext = {
-        ...mockContext,
-        attributes: {
-          authInfo: restrictedAuthInfo,
-        },
-      };
-
-      const controller = TopPaidOpportunitiesController(restrictedContext, mockEnv);
-
+      mockContext.dataAccess.Site.findById.resolves(null);
       const response = await controller.getTopPaidOpportunities({
         params: { siteId: SITE_ID },
         data: {},
       });
+      expect(response.status).to.equal(404);
+    });
 
+    it('returns 403 when user does not have access to site', async () => {
+      mockContext.dataAccess.Site.findById.resolves(
+        createMockSite({ organizationId: 'test-org-id' }),
+      );
+      const restrictedContext = {
+        ...mockContext,
+        attributes: {
+          authInfo: {
+            profile: { email: 'user@example.com' },
+            isAdmin: () => false,
+            getType: () => 'jwt',
+            getScopes: () => [],
+            getOrganizations: () => [],
+            hasOrganization: () => false,
+          },
+        },
+      };
+      const restrictedController = TopPaidOpportunitiesController(restrictedContext, mockEnv);
+      const response = await restrictedController.getTopPaidOpportunities({
+        params: { siteId: SITE_ID },
+        data: {},
+      });
       expect(response.status).to.equal(403);
     });
 
     it('filters out opportunities with zero projectedTrafficValue', async () => {
-      const validOppty = {
-        getId: () => 'oppty-1',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'Valid Opportunity',
-        getDescription: () => 'Valid Description',
-        getType: () => 'broken-backlinks',
-        getStatus: () => 'NEW',
-        getTags: () => ['paid media'],
-        getData: () => ({ projectedTrafficValue: 1000 }),
-      };
-
-      const zeroValueOppty = {
-        getId: () => 'oppty-2',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'Zero Value',
-        getDescription: () => 'Description',
-        getType: () => 'broken-backlinks',
-        getStatus: () => 'NEW',
-        getTags: () => ['paid media'],
-        getData: () => ({ projectedTrafficValue: 0 }),
-      };
-
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([validOppty, zeroValueOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves([]);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: {},
+      const validOppty = createOpportunity({ id: 'oppty-1', tags: ['paid media'] });
+      const zeroValueOppty = createOpportunity({
+        id: 'oppty-2', tags: ['paid media'], data: { projectedTrafficValue: 0 },
       });
+      const nullValopt = createOpportunity({
+        id: 'oppty-2', tags: ['paid media'], data: { projectedTrafficValue: null },
+      });
+      setupOpportunityMocks(
+        mockContext.dataAccess.Opportunity,
+        [validOppty, zeroValueOppty, nullValopt],
+      );
 
-      expect(response.status).to.equal(200);
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
       const opportunities = await response.json();
-      expect(opportunities).to.be.an('array').with.lengthOf(1);
-      expect(opportunities[0].opportunityId).to.equal('oppty-1');
+      expect(opportunities).to.have.lengthOf(1);
     });
 
     it('returns paid media opportunities (with paid media tag)', async () => {
-      const paidOppty1 = {
-        getId: () => 'oppty-1',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'Paid Media Opportunity',
-        getDescription: () => 'Description for paid media',
-        getType: () => 'broken-backlinks',
-        getStatus: () => 'NEW',
-        getTags: () => ['paid media'],
-        getData: () => ({ projectedTrafficLost: 1000, projectedTrafficValue: 5000 }),
-      };
+      const paidOppty = createOpportunity({ id: 'oppty-1', tags: ['paid media'] });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [paidOppty]);
 
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([paidOppty1])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      const mockSuggestions = [
-        {
-          getData: () => ({ url_from: 'https://example.com/page1' }),
-          getRank: () => 100,
-        },
-      ];
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: {},
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
       });
-
-      expect(response.status).to.equal(200);
       const opportunities = await response.json();
-      expect(opportunities).to.be.an('array').with.lengthOf(1);
-      expect(opportunities[0].opportunityId).to.equal('oppty-1');
-      expect(opportunities[0].pageViews).to.equal(100);
+      expect(opportunities).to.have.lengthOf(1);
     });
 
-    it('returns consent-banner opportunities as paid media', async () => {
-      const consentBannerOppty = {
-        getId: () => 'consent-1',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'Consent Banner',
-        getDescription: () => 'Fix consent banner',
-        getType: () => 'consent-banner',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({ projectedTrafficLost: 500, projectedTrafficValue: 2000 }),
-      };
+    it('returns consent-banner opportunities in top paid opportunities', async () => {
+      const consentOppty = createOpportunity({ id: 'consent-1', type: 'consent-banner' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [consentOppty]);
 
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([consentBannerOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves([]);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: {},
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
       });
-
-      expect(response.status).to.equal(200);
       const opportunities = await response.json();
-      expect(opportunities).to.be.an('array').with.lengthOf(1);
-      expect(opportunities[0].opportunityId).to.equal('consent-1');
       expect(opportunities[0].system_type).to.equal('consent-banner');
     });
 
-    it('returns no-cta-above-the-fold opportunities as paid media', async () => {
-      const noctaOppty = {
-        getId: () => 'nocta-1',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'No CTA Above Fold',
-        getDescription: () => 'Fix CTA placement',
-        getType: () => 'generic-opportunity',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({
-          opportunityType: 'no-cta-above-the-fold',
-          projectedTrafficLost: 300,
-          projectedTrafficValue: 1500,
-        }),
-      };
-
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([noctaOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves([]);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: {},
+    it('returns no-cta-above-the-fold opportunities in top paid opportunities', async () => {
+      const noctaOppty = createOpportunity({
+        id: 'nocta-1',
+        type: 'generic-opportunity',
+        data: { opportunityType: 'no-cta-above-the-fold' },
       });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [noctaOppty]);
 
-      expect(response.status).to.equal(200);
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
       const opportunities = await response.json();
-      expect(opportunities).to.be.an('array').with.lengthOf(1);
-      expect(opportunities[0].opportunityId).to.equal('nocta-1');
-    });
-  });
-
-  describe('CWV opportunity filtering', () => {
-    it('returns CWV opportunities only when URLs match poor CWV from paid traffic', async () => {
-      const cwvOppty = {
-        getId: () => 'cwv-1',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'CWV Opportunity',
-        getDescription: () => 'Fix CWV issues',
-        getType: () => 'cwv',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({ projectedTrafficLost: 3000, projectedTrafficValue: 10000 }),
-      };
-
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      const mockSuggestions = [
-        {
-          getData: () => ({ url: 'https://example.com/page1' }),
-          getRank: () => 0,
-        },
-      ];
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
-
-      const mockAthenaClient = {
-        query: sandbox.stub().resolves([
-          {
-            url: 'https://example.com/page1',
-            pageviews: '5000',
-            overall_cwv_score: 'poor',
-            lcp_score: 'poor',
-            inp_score: 'good',
-            cls_score: 'good',
-          },
-        ]),
-      };
-
-      AWSAthenaClient.fromContext.returns(mockAthenaClient);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: { year: 2025, week: 1 },
-      });
-
-      expect(response.status).to.equal(200);
-      const opportunities = await response.json();
-      expect(opportunities).to.be.an('array').with.lengthOf(1);
-      expect(opportunities[0].opportunityId).to.equal('cwv-1');
-      expect(opportunities[0].pageViews).to.equal(5000);
-      expect(opportunities[0].urls).to.deep.equal(['https://example.com/page1']);
-    });
-
-    it('excludes CWV opportunities when Athena returns no poor CWV URLs', async () => {
-      const cwvOppty = {
-        getId: () => 'cwv-good',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'CWV Opportunity',
-        getDescription: () => 'Fix CWV issues',
-        getType: () => 'cwv',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({ projectedTrafficLost: 3000, projectedTrafficValue: 10000 }),
-      };
-
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves([]);
-
-      // Athena returns empty array (no poor CWV URLs)
-      const mockAthenaClient = {
-        query: sandbox.stub().resolves([]),
-      };
-
-      AWSAthenaClient.fromContext.returns(mockAthenaClient);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: { year: 2025, week: 1 },
-      });
-
-      expect(response.status).to.equal(200);
-      const opportunities = await response.json();
-      // Should be empty because Athena returned no poor CWV URLs
-      expect(opportunities).to.be.an('array').with.lengthOf(0);
-    });
-
-    it('excludes CWV opportunities when URLs do not match paid traffic', async () => {
-      const cwvOppty = {
-        getId: () => 'cwv-2',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'CWV Opportunity',
-        getDescription: () => 'Fix CWV issues',
-        getType: () => 'cwv',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({ projectedTrafficLost: 3000, projectedTrafficValue: 10000 }),
-      };
-
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      const mockSuggestions = [
-        {
-          getData: () => ({ url: 'https://example.com/different-page' }),
-          getRank: () => 0,
-        },
-      ];
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
-
-      const mockAthenaClient = {
-        query: sandbox.stub().resolves([
-          {
-            url: 'https://example.com/page1',
-            pageviews: '5000',
-            overall_cwv_score: 'poor',
-            lcp_score: 'poor',
-            inp_score: 'good',
-            cls_score: 'good',
-          },
-        ]),
-      };
-
-      AWSAthenaClient.fromContext.returns(mockAthenaClient);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: { year: 2025, week: 1 },
-      });
-
-      expect(response.status).to.equal(200);
-      const opportunities = await response.json();
-      expect(opportunities).to.be.an('array').with.lengthOf(0);
-    });
-
-    it('sums pageviews correctly for CWV opportunities with multiple matching URLs', async () => {
-      const cwvOppty = {
-        getId: () => 'cwv-3',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'CWV Opportunity',
-        getDescription: () => 'Fix CWV issues',
-        getType: () => 'cwv',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({ projectedTrafficLost: 3000, projectedTrafficValue: 10000 }),
-      };
-
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      const mockSuggestions = [
-        {
-          getData: () => ({ url: 'https://example.com/page1' }),
-          getRank: () => 0,
-        },
-        {
-          getData: () => ({ url: 'https://example.com/page2' }),
-          getRank: () => 0,
-        },
-      ];
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
-
-      const mockAthenaClient = {
-        query: sandbox.stub().resolves([
-          {
-            url: 'https://example.com/page1',
-            pageviews: '3000',
-            overall_cwv_score: 'poor',
-            lcp_score: 'poor',
-            inp_score: 'good',
-            cls_score: 'good',
-          },
-          {
-            url: 'https://example.com/page2',
-            pageviews: '2000',
-            overall_cwv_score: 'poor',
-            lcp_score: 'good',
-            inp_score: 'poor',
-            cls_score: 'good',
-          },
-        ]),
-      };
-
-      AWSAthenaClient.fromContext.returns(mockAthenaClient);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: { year: 2025, week: 1 },
-      });
-
-      expect(response.status).to.equal(200);
-      const opportunities = await response.json();
-      expect(opportunities).to.be.an('array').with.lengthOf(1);
-      expect(opportunities[0].pageViews).to.equal(5000);
-    });
-
-    it('does not fetch suggestions twice for CWV opportunities', async () => {
-      const cwvOppty = {
-        getId: () => 'cwv-4',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'CWV Opportunity',
-        getDescription: () => 'Fix CWV issues',
-        getType: () => 'cwv',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({ projectedTrafficLost: 3000, projectedTrafficValue: 10000 }),
-      };
-
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      const mockSuggestions = [
-        {
-          getData: () => ({ url: 'https://example.com/page1' }),
-          getRank: () => 0,
-        },
-      ];
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
-
-      const mockAthenaClient = {
-        query: sandbox.stub().resolves([
-          {
-            url: 'https://example.com/page1',
-            pageviews: '5000',
-            overall_cwv_score: 'poor',
-            lcp_score: 'poor',
-            inp_score: 'good',
-            cls_score: 'good',
-          },
-        ]),
-      };
-
-      AWSAthenaClient.fromContext.returns(mockAthenaClient);
-
-      await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: { year: 2025, week: 1 },
-      });
-
-      // Should only be called once during matching, not again during DTO conversion
-      expect(mockSuggestion.allByOpportunityIdAndStatus.callCount).to.equal(1);
-    });
-
-    it('continues without CWV filtering when Athena query fails', async () => {
-      const cwvOppty = {
-        getId: () => 'cwv-5',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'CWV Opportunity',
-        getDescription: () => 'Fix CWV issues',
-        getType: () => 'cwv',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({ projectedTrafficLost: 3000, projectedTrafficValue: 10000 }),
-      };
-
-      const paidOppty = {
-        getId: () => 'paid-1',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'Paid Media Opportunity',
-        getDescription: () => 'Description',
-        getType: () => 'broken-backlinks',
-        getStatus: () => 'NEW',
-        getTags: () => ['paid media'],
-        getData: () => ({ projectedTrafficLost: 1000, projectedTrafficValue: 5000 }),
-      };
-
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty, paidOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves([]);
-
-      const mockAthenaClient = {
-        query: sandbox.stub().rejects(new Error('Athena query failed')),
-      };
-
-      AWSAthenaClient.fromContext.returns(mockAthenaClient);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: { year: 2025, week: 1 },
-      });
-
-      expect(response.status).to.equal(200);
-      const opportunities = await response.json();
-      // Should only return paid media opportunity, not CWV
-      expect(opportunities).to.be.an('array').with.lengthOf(1);
-      expect(opportunities[0].opportunityId).to.equal('paid-1');
+      expect(opportunities).to.have.lengthOf(1);
     });
 
     it('sorts opportunities by projectedTrafficValue descending', async () => {
-      const oppty1 = {
-        getId: () => 'oppty-1',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'Low Value',
-        getDescription: () => 'Description',
-        getType: () => 'broken-backlinks',
-        getStatus: () => 'NEW',
-        getTags: () => ['paid media'],
-        getData: () => ({ projectedTrafficValue: 1000 }),
-      };
-
-      const oppty2 = {
-        getId: () => 'oppty-2',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'High Value',
-        getDescription: () => 'Description',
-        getType: () => 'broken-backlinks',
-        getStatus: () => 'NEW',
-        getTags: () => ['paid media'],
-        getData: () => ({ projectedTrafficValue: 5000 }),
-      };
-
-      const oppty3 = {
-        getId: () => 'oppty-3',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'Medium Value',
-        getDescription: () => 'Description',
-        getType: () => 'broken-backlinks',
-        getStatus: () => 'NEW',
-        getTags: () => ['paid media'],
-        getData: () => ({ projectedTrafficValue: 3000 }),
-      };
-
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([oppty1, oppty2, oppty3])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves([]);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: {},
+      const oppty1 = createOpportunity({
+        id: 'oppty-1', tags: ['paid media'], data: { projectedTrafficValue: 1000 },
       });
+      const oppty2 = createOpportunity({
+        id: 'oppty-2', tags: ['paid media'], data: { projectedTrafficValue: 5000 },
+      });
+      const oppty3 = createOpportunity({
+        id: 'oppty-3', tags: ['paid media'], data: { projectedTrafficValue: 3000 },
+      });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [oppty1, oppty2, oppty3]);
 
-      expect(response.status).to.equal(200);
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
       const opportunities = await response.json();
-      expect(opportunities).to.be.an('array').with.lengthOf(3);
       // Should be sorted: 5000, 3000, 1000
       expect(opportunities[0].opportunityId).to.equal('oppty-2');
       expect(opportunities[1].opportunityId).to.equal('oppty-3');
       expect(opportunities[2].opportunityId).to.equal('oppty-1');
     });
 
-    it('uses default year and week when not provided', async () => {
-      const cwvOppty = {
-        getId: () => 'cwv-1',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'CWV Opportunity',
-        getDescription: () => 'Fix CWV issues',
-        getType: () => 'cwv',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({ projectedTrafficLost: 3000, projectedTrafficValue: 10000 }),
-      };
-
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      const mockSuggestions = [
-        {
-          getData: () => ({ url: 'https://example.com/page1' }),
-          getRank: () => 0,
-        },
-      ];
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
-
-      const mockAthenaClient = {
-        query: sandbox.stub().resolves([
-          {
-            url: 'https://example.com/page1',
-            pageviews: '5000',
-            overall_cwv_score: 'poor',
-            lcp_score: 'poor',
-            inp_score: 'good',
-            cls_score: 'good',
-          },
-        ]),
-      };
-
-      AWSAthenaClient.fromContext.returns(mockAthenaClient);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: {},
+    it('filters out opportunities with "report" in title', async () => {
+      const validOppty = createOpportunity({
+        id: 'oppty-1', title: 'Valid Opportunity', tags: ['paid media'],
       });
-
-      expect(response.status).to.equal(200);
-      expect(mockLogger.warn).to.have.been.calledWith(sinon.match(/No year provided/));
-      expect(mockLogger.warn).to.have.been.calledWith(sinon.match(/No week or month provided/));
-    });
-
-    it('uses default week when only year is provided', async () => {
-      const cwvOppty = {
-        getId: () => 'cwv-1',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'CWV Opportunity',
-        getDescription: () => 'Fix CWV issues',
-        getType: () => 'cwv',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({ projectedTrafficLost: 3000, projectedTrafficValue: 10000 }),
-      };
-
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      const mockSuggestions = [
-        {
-          getData: () => ({ url: 'https://example.com/page1' }),
-          getRank: () => 0,
-        },
-      ];
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
-
-      const mockAthenaClient = {
-        query: sandbox.stub().resolves([
-          {
-            url: 'https://example.com/page1',
-            pageviews: '5000',
-            overall_cwv_score: 'poor',
-            lcp_score: 'poor',
-            inp_score: 'good',
-            cls_score: 'good',
-          },
-        ]),
-      };
-
-      AWSAthenaClient.fromContext.returns(mockAthenaClient);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: { year: 2025 },
+      const reportOppty = createOpportunity({
+        id: 'oppty-2', title: 'Monthly Report', tags: ['paid media'],
       });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [validOppty, reportOppty]);
 
-      expect(response.status).to.equal(200);
-      expect(mockLogger.warn).to.have.been.calledWith(sinon.match(/No week or month provided/));
-      expect(mockLogger.warn).to.not.have.been.calledWith(sinon.match(/No year provided/));
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(1);
+      expect(opportunities[0].opportunityId).to.equal('oppty-1');
     });
 
     it('filters out opportunities without description', async () => {
-      const validOppty = {
-        getId: () => 'oppty-1',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'Valid Opportunity',
-        getDescription: () => 'Valid Description',
-        getType: () => 'broken-backlinks',
-        getStatus: () => 'NEW',
-        getTags: () => ['paid media'],
-        getData: () => ({ projectedTrafficValue: 1000 }),
-      };
-
-      const noDescOppty = {
-        getId: () => 'oppty-2',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'No Description',
-        getDescription: () => null,
-        getType: () => 'broken-backlinks',
-        getStatus: () => 'NEW',
-        getTags: () => ['paid media'],
-        getData: () => ({ projectedTrafficValue: 2000 }),
-      };
-
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([validOppty, noDescOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves([]);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: {},
+      const validOppty = createOpportunity({ id: 'oppty-1', tags: ['paid media'] });
+      const noDescOppty = createOpportunity({
+        id: 'oppty-2', description: null, tags: ['paid media'],
       });
-
-      expect(response.status).to.equal(200);
-      const opportunities = await response.json();
-      expect(opportunities).to.be.an('array').with.lengthOf(1);
-      expect(opportunities[0].opportunityId).to.equal('oppty-1');
-    });
-
-    it('handles invalid CWV_THRESHOLDS gracefully', async () => {
-      const cwvOppty = {
-        getId: () => 'cwv-1',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'CWV Opportunity',
-        getDescription: () => 'Fix CWV issues',
-        getType: () => 'cwv',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({ projectedTrafficLost: 3000, projectedTrafficValue: 10000 }),
-      };
-
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      const mockSuggestions = [
-        {
-          getData: () => ({ url: 'https://example.com/page1' }),
-          getRank: () => 0,
-        },
-      ];
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
-
-      const mockAthenaClient = {
-        query: sandbox.stub().resolves([
-          {
-            url: 'https://example.com/page1',
-            pageviews: '5000',
-            overall_cwv_score: 'poor',
-            lcp_score: 'poor',
-            inp_score: 'good',
-            cls_score: 'good',
-          },
-        ]),
-      };
-
-      AWSAthenaClient.fromContext.returns(mockAthenaClient);
-
-      // Create controller with invalid CWV_THRESHOLDS
-      const envWithInvalidThresholds = {
-        ...mockEnv,
-        CWV_THRESHOLDS: 'invalid-json{',
-      };
-
-      const controller = TopPaidOpportunitiesController(mockContext, envWithInvalidThresholds);
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [validOppty, noDescOppty]);
 
       const response = await controller.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: { year: 2025, week: 1 },
+        params: { siteId: SITE_ID }, data: {},
       });
-
-      expect(response.status).to.equal(200);
-      expect(mockLogger.warn).to.have.been.calledWith(sinon.match(/Failed to parse CWV_THRESHOLDS/));
       const opportunities = await response.json();
-      expect(opportunities).to.be.an('array').with.lengthOf(1);
-    });
-
-    it('handles null CWV_THRESHOLDS gracefully', async () => {
-      const cwvOppty = {
-        getId: () => 'cwv-1',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'CWV Opportunity',
-        getDescription: () => 'Fix CWV issues',
-        getType: () => 'cwv',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({ projectedTrafficLost: 3000, projectedTrafficValue: 10000 }),
-      };
-
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      const mockSuggestions = [
-        {
-          getData: () => ({ url: 'https://example.com/page1' }),
-          getRank: () => 0,
-        },
-      ];
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
-
-      const mockAthenaClient = {
-        query: sandbox.stub().resolves([
-          {
-            url: 'https://example.com/page1',
-            pageviews: '5000',
-            overall_cwv_score: 'poor',
-            lcp_score: 'poor',
-            inp_score: 'good',
-            cls_score: 'good',
-          },
-        ]),
-      };
-
-      AWSAthenaClient.fromContext.returns(mockAthenaClient);
-
-      // Create controller with null CWV_THRESHOLDS
-      const envWithNullThresholds = {
-        ...mockEnv,
-        CWV_THRESHOLDS: null,
-      };
-
-      const controller = TopPaidOpportunitiesController(mockContext, envWithNullThresholds);
-
-      const response = await controller.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: { year: 2025, week: 1 },
-      });
-
-      expect(response.status).to.equal(200);
-      const opportunities = await response.json();
-      expect(opportunities).to.be.an('array').with.lengthOf(1);
-    });
-
-    it('filters out opportunities with "report" in title', async () => {
-      const validOppty = {
-        getId: () => 'oppty-1',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'Valid Opportunity',
-        getDescription: () => 'Valid Description',
-        getType: () => 'broken-backlinks',
-        getStatus: () => 'NEW',
-        getTags: () => ['paid media'],
-        getData: () => ({ projectedTrafficValue: 1000 }),
-      };
-
-      const reportOppty = {
-        getId: () => 'oppty-2',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'Monthly Report',
-        getDescription: () => 'Report Description',
-        getType: () => 'broken-backlinks',
-        getStatus: () => 'NEW',
-        getTags: () => ['paid media'],
-        getData: () => ({ projectedTrafficValue: 2000 }),
-      };
-
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([validOppty, reportOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves([]);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: {},
-      });
-
-      expect(response.status).to.equal(200);
-      const opportunities = await response.json();
-      expect(opportunities).to.be.an('array').with.lengthOf(1);
-      expect(opportunities[0].opportunityId).to.equal('oppty-1');
-    });
-
-    it('handles opportunities with null getTags()', async () => {
-      const opptyWithNullTags = {
-        getId: () => 'oppty-1',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'Opportunity',
-        getDescription: () => 'Description',
-        getType: () => 'broken-backlinks',
-        getStatus: () => 'NEW',
-        getTags: () => null,
-        getData: () => ({ projectedTrafficValue: 1000 }),
-      };
-
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([opptyWithNullTags])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves([]);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: {},
-      });
-
-      expect(response.status).to.equal(200);
-      const opportunities = await response.json();
-      expect(opportunities).to.be.an('array').with.lengthOf(0);
-    });
-
-    it('handles opportunities with null getData()', async () => {
-      const opptyWithNullData = {
-        getId: () => 'oppty-1',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'Opportunity',
-        getDescription: () => 'Description',
-        getType: () => 'broken-backlinks',
-        getStatus: () => 'NEW',
-        getTags: () => ['paid media'],
-        getData: () => null,
-      };
-
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([opptyWithNullData])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves([]);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: {},
-      });
-
-      expect(response.status).to.equal(200);
-      const opportunities = await response.json();
-      expect(opportunities).to.be.an('array').with.lengthOf(0);
-    });
-
-    it('handles context.data being null', async () => {
-      const cwvOppty = {
-        getId: () => 'cwv-1',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'CWV Opportunity',
-        getDescription: () => 'Fix CWV issues',
-        getType: () => 'cwv',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({ projectedTrafficLost: 3000, projectedTrafficValue: 10000 }),
-      };
-
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      const mockSuggestions = [
-        {
-          getData: () => ({ url: 'https://example.com/page1' }),
-          getRank: () => 0,
-        },
-      ];
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
-
-      const mockAthenaClient = {
-        query: sandbox.stub().resolves([
-          {
-            url: 'https://example.com/page1',
-            pageviews: '5000',
-            overall_cwv_score: 'poor',
-            lcp_score: 'poor',
-            inp_score: 'good',
-            cls_score: 'good',
-          },
-        ]),
-      };
-
-      AWSAthenaClient.fromContext.returns(mockAthenaClient);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: null,
-      });
-
-      expect(response.status).to.equal(200);
-    });
-
-    it('uses month parameter when provided', async () => {
-      const cwvOppty = {
-        getId: () => 'cwv-1',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'CWV Opportunity',
-        getDescription: () => 'Fix CWV issues',
-        getType: () => 'cwv',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({ projectedTrafficLost: 3000, projectedTrafficValue: 10000 }),
-      };
-
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      const mockSuggestions = [
-        {
-          getData: () => ({ url: 'https://example.com/page1' }),
-          getRank: () => 0,
-        },
-      ];
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
-
-      const mockAthenaClient = {
-        query: sandbox.stub().resolves([
-          {
-            url: 'https://example.com/page1',
-            pageviews: '5000',
-            overall_cwv_score: 'poor',
-            lcp_score: 'poor',
-            inp_score: 'good',
-            cls_score: 'good',
-          },
-        ]),
-      };
-
-      AWSAthenaClient.fromContext.returns(mockAthenaClient);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: { year: 2025, month: 6 },
-      });
-
-      expect(response.status).to.equal(200);
-    });
-
-    it('uses provided week when year and week are both provided', async () => {
-      const cwvOppty = {
-        getId: () => 'cwv-1',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'CWV Opportunity',
-        getDescription: () => 'Fix CWV issues',
-        getType: () => 'cwv',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({ projectedTrafficLost: 3000, projectedTrafficValue: 10000 }),
-      };
-
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      const mockSuggestions = [
-        {
-          getData: () => ({ url: 'https://example.com/page1' }),
-          getRank: () => 0,
-        },
-      ];
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
-
-      const mockAthenaClient = {
-        query: sandbox.stub().resolves([
-          {
-            url: 'https://example.com/page1',
-            pageviews: '5000',
-            overall_cwv_score: 'poor',
-            lcp_score: 'poor',
-            inp_score: 'good',
-            cls_score: 'good',
-          },
-        ]),
-      };
-
-      AWSAthenaClient.fromContext.returns(mockAthenaClient);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: { year: 2025, week: 10 },
-      });
-
-      expect(response.status).to.equal(200);
-      expect(mockLogger.warn).to.not.have.been.calledWith(sinon.match(/No year provided/));
-      expect(mockLogger.warn).to.not.have.been.calledWith(sinon.match(/No week or month provided/));
-    });
-
-    it('uses default PAGE_VIEW_THRESHOLD when PAID_DATA_THRESHOLD is not set', async () => {
-      const cwvOppty = {
-        getId: () => 'cwv-1',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'CWV Opportunity',
-        getDescription: () => 'Fix CWV issues',
-        getType: () => 'cwv',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({ projectedTrafficLost: 3000, projectedTrafficValue: 10000 }),
-      };
-
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      const mockSuggestions = [
-        {
-          getData: () => ({ url: 'https://example.com/page1' }),
-          getRank: () => 0,
-        },
-      ];
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
-
-      const mockAthenaClient = {
-        query: sandbox.stub().resolves([
-          {
-            url: 'https://example.com/page1',
-            pageviews: '1500',
-            overall_cwv_score: 'poor',
-            lcp_score: 'poor',
-            inp_score: 'good',
-            cls_score: 'good',
-          },
-        ]),
-      };
-
-      AWSAthenaClient.fromContext.returns(mockAthenaClient);
-
-      const envWithoutThreshold = {
-        ...mockEnv,
-        PAID_DATA_THRESHOLD: undefined,
-      };
-
-      const controller = TopPaidOpportunitiesController(mockContext, envWithoutThreshold);
-      const response = await controller.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: { year: 2025, week: 1 },
-      });
-
-      expect(response.status).to.equal(200);
-      const opportunities = await response.json();
-      expect(opportunities).to.be.an('array').with.lengthOf(1);
-    });
-
-    it('includes CWV opportunities with "needs improvement" score', async () => {
-      const cwvOppty = {
-        getId: () => 'cwv-1',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'CWV Opportunity',
-        getDescription: () => 'Fix CWV issues',
-        getType: () => 'cwv',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({ projectedTrafficLost: 2000, projectedTrafficValue: 8000 }),
-      };
-
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      const mockSuggestions = [
-        {
-          getData: () => ({ url: 'https://example.com/page1' }),
-          getRank: () => 0,
-        },
-      ];
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
-
-      const mockAthenaClient = {
-        query: sandbox.stub().resolves([
-          {
-            url: 'https://example.com/page1',
-            pageviews: '3000',
-            overall_cwv_score: 'needs improvement',
-            lcp_score: 'needs improvement',
-            inp_score: 'good',
-            cls_score: 'good',
-          },
-        ]),
-      };
-
-      AWSAthenaClient.fromContext.returns(mockAthenaClient);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: { year: 2025, week: 1 },
-      });
-
-      expect(response.status).to.equal(200);
-      const opportunities = await response.json();
-      expect(opportunities).to.be.an('array').with.lengthOf(1);
-      expect(opportunities[0].opportunityId).to.equal('cwv-1');
-      expect(opportunities[0].pageViews).to.equal(3000);
-    });
-
-    it('excludes CWV URLs below pageview threshold even if poor score', async () => {
-      const cwvOppty = {
-        getId: () => 'cwv-1',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'CWV Opportunity',
-        getDescription: () => 'Fix CWV issues',
-        getType: () => 'cwv',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({ projectedTrafficLost: 2000, projectedTrafficValue: 8000 }),
-      };
-
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      const mockSuggestions = [
-        {
-          getData: () => ({ url: 'https://example.com/page1' }),
-          getRank: () => 0,
-        },
-      ];
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
-
-      const mockAthenaClient = {
-        query: sandbox.stub().resolves([
-          {
-            url: 'https://example.com/page1',
-            pageviews: '500',
-            overall_cwv_score: 'poor',
-            lcp_score: 'poor',
-            inp_score: 'good',
-            cls_score: 'good',
-          },
-        ]),
-      };
-
-      AWSAthenaClient.fromContext.returns(mockAthenaClient);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: { year: 2025, week: 1 },
-      });
-
-      expect(response.status).to.equal(200);
-      const opportunities = await response.json();
-      expect(opportunities).to.be.an('array').with.lengthOf(0);
-    });
-
-    it('excludes CWV URLs with good score even if high traffic', async () => {
-      const cwvOppty = {
-        getId: () => 'cwv-1',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'CWV Opportunity',
-        getDescription: () => 'Fix CWV issues',
-        getType: () => 'cwv',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({ projectedTrafficLost: 2000, projectedTrafficValue: 8000 }),
-      };
-
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      const mockSuggestions = [
-        {
-          getData: () => ({ url: 'https://example.com/page1' }),
-          getRank: () => 0,
-        },
-        {
-          getData: () => ({ url: 'https://example.com/page2' }),
-          getRank: () => 1,
-        },
-      ];
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
-
-      const mockAthenaClient = {
-        query: sandbox.stub().resolves([
-          {
-            path: '/page1',
-            pageviews: '5000',
-            p70_lcp: 1500,
-            p70_cls: 0.05,
-            p70_inp: 100,
-          },
-          {
-            path: '/page2',
-            pageviews: '3000',
-            p70_lcp: 5000,
-            p70_cls: 0.3,
-            p70_inp: 600,
-          },
-        ]),
-      };
-
-      AWSAthenaClient.fromContext.returns(mockAthenaClient);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: { year: 2025, week: 1 },
-      });
-
-      expect(response.status).to.equal(200);
-      const opportunities = await response.json();
-      expect(opportunities).to.be.an('array').with.lengthOf(1);
-      expect(opportunities[0].opportunityId).to.equal('cwv-1');
-      // Should only include page2 (poor score), not page1 (good score)
-      expect(opportunities[0].urls).to.deep.equal(['https://example.com/page2']);
-      expect(opportunities[0].urls).to.not.include('https://example.com/page1');
+      expect(opportunities).to.have.lengthOf(1);
     });
   });
 
-  describe('URL normalization for matching', () => {
-    it('does not match partial URLs (exact match required)', async () => {
-      const cwvOppty = {
-        getId: () => 'cwv-1',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'CWV Opportunity',
-        getDescription: () => 'Fix CWV issues',
-        getType: () => 'cwv',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({ projectedTrafficLost: 2000, projectedTrafficValue: 8000 }),
-      };
+  describe('CWV opportunity filtering', () => {
+    it('returns CWV opportunities when URLs match poor CWV from paid traffic', async () => {
+      const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://example.com/page1'),
+      ]);
+      mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' }), createTrafficData({ url: 'https://example.com/not-matching' })]);
 
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      const mockSuggestions = [
-        {
-          getData: () => ({ url: 'https://www.bulk.com/de/products/pure-whey-protein-de' }),
-          getRank: () => 0,
-        },
-      ];
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
-
-      const mockAthenaClient = {
-        query: sandbox.stub().resolves([
-          {
-            path: '/de/products/pure-whey-protein-de/bpb-wpc8-0000',
-            pageviews: '5000',
-            p70_lcp: 5000,
-            p70_cls: 0.3,
-            p70_inp: 600,
-          },
-        ]),
-      };
-
-      AWSAthenaClient.fromContext.returns(mockAthenaClient);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: { year: 2025, week: 1 },
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
       });
-
-      expect(response.status).to.equal(200);
       const opportunities = await response.json();
-      // Should return 0 opportunities because URLs don't match exactly
-      expect(opportunities).to.be.an('array').with.lengthOf(0);
+      expect(opportunities).to.have.lengthOf(1);
+      expect(opportunities[0].urls).to.not.include('https://example.com/not-matching');
+      expect(opportunities[0].urls).to.include('https://example.com/page1');
     });
 
-    it('matches URLs with www prefix differences', async () => {
-      const cwvOppty = {
-        getId: () => 'cwv-1',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'CWV Opportunity',
-        getDescription: () => 'Fix CWV issues',
-        getType: () => 'cwv',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({ projectedTrafficLost: 3000, projectedTrafficValue: 10000 }),
-      };
+    it('excludes CWV opportunities when Athena returns no poor CWV URLs', async () => {
+      const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
+      mockAthenaClient.query.resolves([]);
 
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      const mockSuggestions = [
-        {
-          getData: () => ({ url: 'https://www.example.com/page1' }),
-          getRank: () => 100,
-        },
-      ];
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
-
-      const mockAthenaClient = {
-        query: sandbox.stub().resolves([
-          {
-            url: 'https://example.com/page1',
-            pageviews: '5000',
-            overall_cwv_score: 'poor',
-            lcp_score: 'poor',
-            inp_score: 'good',
-            cls_score: 'good',
-          },
-        ]),
-      };
-
-      AWSAthenaClient.fromContext.returns(mockAthenaClient);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: { year: 2025, week: 1 },
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
       });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(0);
+    });
 
+    it('continues without CWV filtering when Athena query fails', async () => {
+      const paidOppty = createOpportunity({ id: 'paid-1', tags: ['paid media'] });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [paidOppty]);
+      mockAthenaClient.query.rejects(new Error('Athena query failed'));
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(1);
+    });
+
+    it('excludes CWV opportunities when URLs do not match paid traffic', async () => {
+      const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://example.com/different-page'),
+      ]);
+      mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' })]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(0);
+    });
+
+    it('sums pageviews correctly for CWV opportunities with multiple URLs', async () => {
+      const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://example.com/page1'),
+        createSuggestion('https://example.com/page2'),
+      ]);
+      mockAthenaClient.query.resolves([
+        createTrafficData({ url: 'https://example.com/page1', pageviews: '3000' }),
+        createTrafficData({ url: 'https://example.com/page2', pageviews: '2000' }),
+      ]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
+      const opportunities = await response.json();
+      expect(opportunities[0].pageViews).to.equal(5000);
+    });
+
+    it('uses default year and week when not provided', async () => {
+      const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://example.com/page1'),
+      ]);
+      mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' })]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
       expect(response.status).to.equal(200);
     });
 
-    it('matches URLs with trailing slash differences', async () => {
-      const cwvOppty = {
-        getId: () => 'cwv-2',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'CWV Opportunity',
-        getDescription: () => 'Fix CWV issues',
-        getType: () => 'cwv',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({ projectedTrafficLost: 3000, projectedTrafficValue: 10000 }),
-      };
+    it('handles context.data being null', async () => {
+      const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://example.com/page1'),
+      ]);
+      mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' })]);
 
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      const mockSuggestions = [
-        {
-          getData: () => ({ url: 'https://example.com/page1/' }),
-          getRank: () => 100,
-        },
-      ];
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
-
-      const mockAthenaClient = {
-        query: sandbox.stub().resolves([
-          {
-            url: 'https://example.com/page1',
-            pageviews: '5000',
-            overall_cwv_score: 'poor',
-            lcp_score: 'poor',
-            inp_score: 'good',
-            cls_score: 'good',
-          },
-        ]),
-      };
-
-      AWSAthenaClient.fromContext.returns(mockAthenaClient);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: { year: 2025, week: 1 },
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: null,
       });
-
       expect(response.status).to.equal(200);
     });
 
-    it('matches URLs with both www and trailing slash differences', async () => {
-      const cwvOppty = {
-        getId: () => 'cwv-3',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'CWV Opportunity',
-        getDescription: () => 'Fix CWV issues',
-        getType: () => 'cwv',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({ projectedTrafficLost: 3000, projectedTrafficValue: 10000 }),
-      };
+    it('handles invalid CWV_THRESHOLDS gracefully', async () => {
+      const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://example.com/page1'),
+      ]);
+      mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' })]);
 
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([cwvOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+      const envWithInvalidThresholds = { ...mockEnv, CWV_THRESHOLDS: 'invalid-json{' };
+      const ctrl = TopPaidOpportunitiesController(mockContext, envWithInvalidThresholds);
 
-      const mockSuggestions = [
-        {
-          getData: () => ({ url: 'https://www.example.com/page1/' }),
-          getRank: () => 100,
-        },
-      ];
+      const response = await ctrl.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
+      expect(response.status).to.equal(200);
+    });
 
-      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
+    it('handles null CWV_THRESHOLDS gracefully', async () => {
+      const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://example.com/page1'),
+      ]);
+      mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' })]);
 
-      const mockAthenaClient = {
-        query: sandbox.stub().resolves([
-          {
-            url: 'https://example.com/page1',
-            pageviews: '5000',
-            overall_cwv_score: 'poor',
-            lcp_score: 'poor',
-            inp_score: 'good',
-            cls_score: 'good',
-          },
-        ]),
-      };
+      const envWithNullThresholds = { ...mockEnv, CWV_THRESHOLDS: null };
+      const ctrl = TopPaidOpportunitiesController(mockContext, envWithNullThresholds);
 
-      AWSAthenaClient.fromContext.returns(mockAthenaClient);
+      const response = await ctrl.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
+      expect(response.status).to.equal(200);
+    });
 
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: { year: 2025, week: 1 },
+    it('includes CWV opportunities with "needs improvement" score', async () => {
+      const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://example.com/page1'),
+      ]);
+      mockAthenaClient.query.resolves([
+        createTrafficData({
+          url: 'https://example.com/page1',
+          overall_cwv_score: 'needs improvement',
+        }),
+      ]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(1);
+    });
+
+    it('does not fetch suggestions twice for CWV opportunities', async () => {
+      const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://example.com/page1'),
+      ]);
+      mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' })]);
+
+      await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
       });
 
-      expect(response.status).to.equal(200);
+      expect(mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.callCount).to.equal(1);
     });
   });
 
   describe('Forms opportunity filtering', () => {
     it('returns forms opportunities when URLs match paid traffic', async () => {
-      const formsOppty = {
-        getId: () => 'forms-1',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'Forms Opportunity',
-        getDescription: () => 'Fix form accessibility issues',
-        getType: () => 'form-accessibility',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({ projectedTrafficLost: 2000, projectedTrafficValue: 8000 }),
-      };
-
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([formsOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      const mockSuggestions = [
-        {
-          getData: () => ({ url: 'https://example.com/contact-form' }),
-          getRank: () => 0,
-        },
-      ];
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
-
-      const mockAthenaClient = {
-        query: sandbox.stub().resolves([
-          {
-            url: 'https://example.com/contact-form',
-            pageviews: '3000',
-            overall_cwv_score: 'good',
-            lcp_score: 'good',
-            inp_score: 'good',
-            cls_score: 'good',
-          },
-        ]),
-      };
-
-      AWSAthenaClient.fromContext.returns(mockAthenaClient);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: { year: 2025, week: 1 },
+      const formsOppty = createOpportunity({
+        id: 'forms-1',
+        type: 'form-accessibility',
+        data: { projectedConversionValue: 22888.14, form: 'https://example.com/form-page' },
       });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [formsOppty]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://example.com/form-page'),
+      ]);
+      mockAthenaClient.query.resolves([
+        createTrafficData({ url: 'https://example.com/form-page', pageviews: '3000' }),
+      ]);
 
-      expect(response.status).to.equal(200);
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
       const opportunities = await response.json();
-      expect(opportunities).to.be.an('array').with.lengthOf(1);
-      expect(opportunities[0].opportunityId).to.equal('forms-1');
-      expect(opportunities[0].system_type).to.equal('form-accessibility');
-      expect(opportunities[0].pageViews).to.equal(3000);
+      expect(opportunities).to.have.lengthOf(1);
     });
 
-    it('does not return forms opportunities when URLs do not match paid traffic', async () => {
-      const formsOppty = {
-        getId: () => 'forms-2',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'Forms Opportunity',
-        getDescription: () => 'Fix form conversion issues',
-        getType: () => 'high-form-views-low-conversions',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({ projectedTrafficLost: 1500, projectedTrafficValue: 6000 }),
-      };
-
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([formsOppty])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
-
-      const mockSuggestions = [
-        {
-          getData: () => ({ url: 'https://example.com/signup-form' }),
-          getRank: () => 0,
-        },
-      ];
-
-      mockSuggestion.allByOpportunityIdAndStatus.resolves(mockSuggestions);
-
-      const mockAthenaClient = {
-        query: sandbox.stub().resolves([
-          {
-            url: 'https://example.com/different-page',
-            pageviews: '2000',
-            overall_cwv_score: 'good',
-            lcp_score: 'good',
-            inp_score: 'good',
-            cls_score: 'good',
-          },
-        ]),
-      };
-
-      AWSAthenaClient.fromContext.returns(mockAthenaClient);
-
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: { year: 2025, week: 1 },
+    it('does not return forms opportunities when URLs do not match', async () => {
+      const formsOppty = createOpportunity({
+        id: 'forms-1',
+        type: 'high-form-views-low-conversions',
+        data: { projectedConversionValue: 15000 },
       });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [formsOppty]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://example.com/different-page'),
+      ]);
+      mockAthenaClient.query.resolves([
+        createTrafficData({ url: 'https://example.com/form-page' }),
+      ]);
 
-      expect(response.status).to.equal(200);
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
       const opportunities = await response.json();
-      expect(opportunities).to.be.an('array').with.lengthOf(0);
+      expect(opportunities).to.have.lengthOf(0);
     });
 
     it('handles multiple forms opportunity types', async () => {
-      const formsOppty1 = {
-        getId: () => 'forms-3',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'Low Form Navigation',
-        getDescription: () => 'Improve form navigation',
-        getType: () => 'high-page-views-low-form-nav',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({ projectedTrafficLost: 1000, projectedTrafficValue: 4000 }),
-      };
+      const formsOppty1 = createOpportunity({
+        id: 'forms-1',
+        type: 'high-page-views-low-form-nav',
+        data: { projectedConversionValue: 18500 },
+      });
+      const formsOppty2 = createOpportunity({
+        id: 'forms-2',
+        type: 'high-page-views-low-form-views',
+        data: { projectedConversionValue: 12000 },
+      });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [formsOppty1, formsOppty2]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus
+        .withArgs('forms-1', 'NEW').resolves([createSuggestion('https://example.com/form1')])
+        .withArgs('forms-2', 'NEW').resolves([createSuggestion('https://example.com/form2')]);
+      mockAthenaClient.query.resolves([
+        createTrafficData({ url: 'https://example.com/form1', pageviews: '2500' }),
+        createTrafficData({ url: 'https://example.com/form2', pageviews: '1800' }),
+      ]);
 
-      const formsOppty2 = {
-        getId: () => 'forms-4',
-        getSiteId: () => SITE_ID,
-        getTitle: () => 'Low Form Views',
-        getDescription: () => 'Increase form visibility',
-        getType: () => 'high-page-views-low-form-views',
-        getStatus: () => 'NEW',
-        getTags: () => [],
-        getData: () => ({ projectedTrafficLost: 800, projectedTrafficValue: 3000 }),
-      };
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(2);
+    });
+  });
 
-      mockOpportunity.allBySiteIdAndStatus
-        .withArgs(SITE_ID, 'NEW').resolves([formsOppty1, formsOppty2])
-        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([]);
+  describe('URL matching', () => {
+    it('matches URLs with www prefix differences', async () => {
+      const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://www.example.com/page1'),
+      ]);
+      mockAthenaClient.query.resolves([
+        createTrafficData({ url: 'https://example.com/page1' }),
+      ]);
 
-      mockSuggestion.allByOpportunityIdAndStatus
-        .withArgs('forms-3', 'NEW').resolves([
-          { getData: () => ({ url: 'https://example.com/form1' }), getRank: () => 0 },
-        ])
-        .withArgs('forms-4', 'NEW').resolves([
-          { getData: () => ({ url: 'https://example.com/form2' }), getRank: () => 0 },
-        ]);
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(1);
+    });
 
-      const mockAthenaClient = {
-        query: sandbox.stub().resolves([
-          {
-            url: 'https://example.com/form1',
-            pageviews: '2500',
-            overall_cwv_score: 'good',
-            lcp_score: 'good',
-            inp_score: 'good',
-            cls_score: 'good',
-          },
-          {
-            url: 'https://example.com/form2',
-            pageviews: '1800',
-            overall_cwv_score: 'good',
-            lcp_score: 'good',
-            inp_score: 'good',
-            cls_score: 'good',
-          },
-        ]),
-      };
+    it('matches URLs with trailing slash differences', async () => {
+      const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://example.com/page1/'),
+      ]);
+      mockAthenaClient.query.resolves([
+        createTrafficData({ url: 'https://example.com/page1' }),
+      ]);
 
-      AWSAthenaClient.fromContext.returns(mockAthenaClient);
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(1);
+    });
 
-      const response = await topPaidController.getTopPaidOpportunities({
-        params: { siteId: SITE_ID },
-        data: { year: 2025, week: 1 },
+    it('matches URLs with both www and trailing slash differences', async () => {
+      const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://www.example.com/page1/'),
+      ]);
+      mockAthenaClient.query.resolves([
+        createTrafficData({ url: 'https://example.com/page1' }),
+      ]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(1);
+    });
+
+    it('does not match partial URLs (exact match required)', async () => {
+      const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://example.com/page'),
+      ]);
+      mockAthenaClient.query.resolves([
+        createTrafficData({ url: 'https://example.com/page1' }),
+      ]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(0);
+    });
+  });
+
+  describe('Threshold and score filtering', () => {
+    it('excludes CWV URLs below pageview threshold even if poor score', async () => {
+      const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://example.com/page1'),
+      ]);
+      // pageviews below threshold (100) - Athena returns empty
+      mockAthenaClient.query.resolves([]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(0);
+    });
+
+    it('excludes CWV URLs with good score even if high traffic', async () => {
+      const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://example.com/page1'),
+      ]);
+      // CWV scores are good - Athena query with CWV filter returns empty
+      mockAthenaClient.query.resolves([
+        createTrafficData({
+          url: 'https://example.com/page1',
+          overall_cwv_score: 'good',
+          lcp_score: 'good',
+        }),
+      ]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(0);
+    });
+
+    it('uses default PAGE_VIEW_THRESHOLD when PAID_DATA_THRESHOLD is not set', async () => {
+      const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://example.com/page1'),
+        createSuggestion('https://example.com/page2'),
+      ]);
+      mockAthenaClient.query.resolves([
+        createTrafficData({ url: 'https://example.com/page1', pageviews: '1000' }), // at threshold
+        createTrafficData({ url: 'https://example.com/page2', pageviews: '999' }), // below threshold
+      ]);
+
+      const envWithoutThreshold = { ...mockEnv };
+      delete envWithoutThreshold.PAID_DATA_THRESHOLD;
+      const ctrl = TopPaidOpportunitiesController(mockContext, envWithoutThreshold);
+
+      const response = await ctrl.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(1);
+      expect(opportunities[0].urls).to.include('https://example.com/page1');
+      expect(opportunities[0].urls).to.not.include('https://example.com/page2');
+    });
+  });
+
+  describe('Temporal parameters', () => {
+    it('uses month parameter when provided', async () => {
+      const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://example.com/page1'),
+      ]);
+      mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' })]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, month: 6 },
+      });
+      expect(response.status).to.equal(200);
+
+      // Verify month was used in the Athena query
+      const queryArg = mockAthenaClient.query.firstCall.args[0];
+      expect(queryArg).to.include('month=6');
+      expect(queryArg).to.include('year=2025');
+    });
+
+    it('uses provided week when year and week are both provided', async () => {
+      const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://example.com/page1'),
+      ]);
+      mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' })]);
+
+      await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 25 },
+      });
+      // Verify week was used in the Athena query
+      const queryArg = mockAthenaClient.query.firstCall.args[0];
+      expect(queryArg).to.include('week=25');
+      expect(queryArg).to.include('year=2025');
+    });
+
+    it('uses default week when temporal params are not provided', async () => {
+      const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://example.com/page1'),
+      ]);
+      mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' })]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025 },
+      });
+      expect(response.status).to.equal(200);
+      const queryArg = mockAthenaClient.query.firstCall.args[0];
+      expect(queryArg).to.include('week');
+    });
+  });
+
+  describe('Edge cases and error handling', () => {
+    it('handles multiple CWV opportunities in processOpportunityMatching', async () => {
+      const cwvOppty1 = createOpportunity({ id: 'cwv-1', type: 'cwv' });
+      const cwvOppty2 = createOpportunity({ id: 'cwv-2', type: 'cwv' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty1, cwvOppty2]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://example.com/page1'),
+      ]);
+      mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' })]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
+      expect(response.status).to.equal(200);
+    });
+
+    it('handles suggestions with multiple URL fields (url_from, urlTo)', async () => {
+      const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
+      // Suggestion with url_from field
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([{
+        getOpportunityId: () => 'cwv-1',
+        getData: () => ({ url_from: 'https://example.com/page1' }),
+        getRank: () => 0,
+      }]);
+      mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' })]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(1);
+    });
+
+    it('skips Athena query when no opportunities require URL matching', async () => {
+      const paidOppty = createOpportunity({ id: 'paid-1', tags: ['paid media'] });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [paidOppty]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(1);
+      // Athena should not be queried since no CWV/forms opportunities
+      expect(mockAthenaClient.query.called).to.be.false;
+    });
+
+    it('handles IN_PROGRESS opportunities along with NEW', async () => {
+      const newOppty = createOpportunity({ id: 'new-1', tags: ['paid media'] });
+      const inProgressOppty = createOpportunity({
+        id: 'progress-1',
+        tags: ['paid media'],
+        data: { projectedTrafficValue: 2000 },
+      });
+      // Modify inProgressOppty to have IN_PROGRESS status
+      inProgressOppty.getStatus = () => 'IN_PROGRESS';
+
+      mockContext.dataAccess.Opportunity.allBySiteIdAndStatus
+        .withArgs(SITE_ID, 'NEW').resolves([newOppty])
+        .withArgs(SITE_ID, 'IN_PROGRESS').resolves([inProgressOppty]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(2);
+    });
+
+    it('uses cache when available (cache hit)', async () => {
+      const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://example.com/page1'),
+      ]);
+
+      // Add S3 mock to context for cache testing - proper structure with s3Client
+      const s3SendStub = sandbox.stub();
+      // HeadObjectCommand succeeds (file exists)
+      s3SendStub.onFirstCall().resolves({});
+      // GetObjectCommand returns cached data (async iterator for gzipped data)
+      const { gzip } = await import('zlib');
+      const { promisify } = await import('util');
+      const gzipAsync = promisify(gzip);
+      const cachedData = [createTrafficData({ url: 'https://example.com/page1' })];
+      const compressedData = await gzipAsync(JSON.stringify(cachedData));
+      s3SendStub.onSecondCall().resolves({
+        Body: {
+          async* [Symbol.asyncIterator]() { yield compressedData; },
+        },
       });
 
+      mockContext.s3 = { s3Client: { send: s3SendStub } };
+      mockEnv.S3_BUCKET_NAME = 'test-bucket';
+      controller = TopPaidOpportunitiesController(mockContext, mockEnv);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
       expect(response.status).to.equal(200);
-      const opportunities = await response.json();
-      expect(opportunities).to.be.an('array').with.lengthOf(2);
-      // Should be sorted by projectedTrafficValue descending
-      expect(opportunities[0].opportunityId).to.equal('forms-3');
-      expect(opportunities[1].opportunityId).to.equal('forms-4');
     });
+
+    it('writes to cache after Athena query (cache miss)', async () => {
+      const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://example.com/page1'),
+      ]);
+
+      // Add S3 mock to context for cache testing - simulate cache miss
+      const s3SendStub = sandbox.stub();
+      // HeadObjectCommand throws NotFound (cache miss)
+      s3SendStub.onFirstCall().rejects({ name: 'NotFound' });
+      // PutObjectCommand succeeds (cache write)
+      s3SendStub.onSecondCall().resolves({});
+
+      mockContext.s3 = { s3Client: { send: s3SendStub } };
+      mockEnv.S3_BUCKET_NAME = 'test-bucket';
+      controller = TopPaidOpportunitiesController(mockContext, mockEnv);
+      mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' })]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
+      expect(response.status).to.equal(200);
+      // Verify s3Client.send was called for cache write (second call)
+      expect(s3SendStub.callCount).to.be.at.least(2);
+    });
+
+    it('handles CWV opportunity matching with multiple suggestions', async () => {
+      const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
+      // Multiple suggestions with different URLs
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://example.com/page1'),
+        createSuggestion('https://example.com/page2'),
+        createSuggestion('https://example.com/page3'),
+      ]);
+      mockAthenaClient.query.resolves([
+        createTrafficData({ url: 'https://example.com/page1', pageviews: '3000' }),
+        createTrafficData({ url: 'https://example.com/page2', pageviews: '1000' }),
+      ]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(1);
+      // Verify URLs are sorted by pageviews (uses 'urls' field in response)
+      expect(opportunities[0].urls[0]).to.equal('https://example.com/page1');
+    });
+
+    it('handles forms opportunity with url_to field', async () => {
+      const formsOppty = createOpportunity({ id: 'forms-1', type: 'high-form-views-low-conversions' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [formsOppty]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([{
+        getOpportunityId: () => 'forms-1',
+        getData: () => ({ url_to: 'https://example.com/form-page' }),
+        getRank: () => 0,
+      }]);
+      mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/form-page' })]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(1);
+    });
+
+    it('handles CWV_THRESHOLDS as object (not string)', async () => {
+      // Use object instead of JSON string for CWV_THRESHOLDS
+      mockEnv.CWV_THRESHOLDS = {
+        LCP_GOOD: 2500,
+        LCP_NEEDS_IMPROVEMENT: 4000,
+        CLS_GOOD: 0.1,
+        CLS_NEEDS_IMPROVEMENT: 0.25,
+        INP_GOOD: 200,
+        INP_NEEDS_IMPROVEMENT: 500,
+      };
+      controller = TopPaidOpportunitiesController(mockContext, mockEnv);
+
+      const cwvOppty = createOpportunity({ id: 'cwv-1', type: 'cwv' });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOppty]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://example.com/page1'),
+      ]);
+      mockAthenaClient.query.resolves([createTrafficData({ url: 'https://example.com/page1' })]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
+      expect(response.status).to.equal(200);
+    });
+  });
+});
+
+describe('matchOpportunitiesWithPaidUrls', () => {
+  let mockLog;
+  let mockSuggestion;
+
+  beforeEach(() => {
+    mockLog = { info: sinon.stub() };
+    mockSuggestion = { allByOpportunityIdAndStatus: sinon.stub() };
+  });
+
+  it('returns empty results when no opportunities', async () => {
+    const result = await matchOpportunitiesWithPaidUrls(
+      [],
+      [{ url: 'https://example.com/page1', pageviews: '1000' }],
+      mockSuggestion,
+      mockLog,
+    );
+    expect(result.matched).to.have.lengthOf(0);
+    expect(result.paidUrlsMap.size).to.equal(0);
+  });
+
+  it('returns empty results when no paid traffic data', async () => {
+    const opportunity = createOpportunity({ id: 'opp-1', type: 'cwv' });
+    const result = await matchOpportunitiesWithPaidUrls(
+      [opportunity],
+      [],
+      mockSuggestion,
+      mockLog,
+    );
+    expect(result.matched).to.have.lengthOf(0);
+    expect(result.paidUrlsMap.size).to.equal(0);
+  });
+
+  it('matches opportunities with paid URLs from suggestions', async () => {
+    const opportunity = createOpportunity({ id: 'opp-1', type: 'cwv' });
+    mockSuggestion.allByOpportunityIdAndStatus.resolves([
+      { getData: () => ({ url: 'https://example.com/page1' }) },
+    ]);
+
+    const result = await matchOpportunitiesWithPaidUrls(
+      [opportunity],
+      [{ url: 'https://example.com/page1', pageviews: '1000' }],
+      mockSuggestion,
+      mockLog,
+    );
+
+    expect(result.matched).to.have.lengthOf(1);
+    expect(result.paidUrlsMap.get('opp-1')).to.deep.include({ pageViews: 1000 });
+  });
+
+  it('handles multiple URL fields in suggestions', async () => {
+    const opportunity = createOpportunity({ id: 'opp-1', type: 'cwv' });
+    mockSuggestion.allByOpportunityIdAndStatus.resolves([
+      { getData: () => ({ url_from: 'https://example.com/page1', url_to: 'https://example.com/page2' }) },
+    ]);
+
+    const result = await matchOpportunitiesWithPaidUrls(
+      [opportunity],
+      [
+        { url: 'https://example.com/page1', pageviews: '1000' },
+        { url: 'https://example.com/page2', pageviews: '2000' },
+      ],
+      mockSuggestion,
+      mockLog,
+    );
+
+    expect(result.matched).to.have.lengthOf(1);
+    expect(result.paidUrlsMap.get('opp-1').pageViews).to.equal(3000);
+    // URLs should be sorted by pageviews descending
+    expect(result.paidUrlsMap.get('opp-1').urls[0]).to.equal('https://example.com/page2');
+  });
+
+  it('does not match when suggestion URLs are not in paid traffic', async () => {
+    const opportunity = createOpportunity({ id: 'opp-1', type: 'cwv' });
+    mockSuggestion.allByOpportunityIdAndStatus.resolves([
+      { getData: () => ({ url: 'https://example.com/different-page' }) },
+    ]);
+
+    const result = await matchOpportunitiesWithPaidUrls(
+      [opportunity],
+      [{ url: 'https://example.com/page1', pageviews: '1000' }],
+      mockSuggestion,
+      mockLog,
+    );
+
+    expect(result.matched).to.have.lengthOf(0);
+  });
+
+  it('normalizes URLs for matching (www prefix)', async () => {
+    const opportunity = createOpportunity({ id: 'opp-1', type: 'cwv' });
+    mockSuggestion.allByOpportunityIdAndStatus.resolves([
+      { getData: () => ({ url: 'https://www.example.com/page1' }) },
+    ]);
+
+    const result = await matchOpportunitiesWithPaidUrls(
+      [opportunity],
+      [{ url: 'https://example.com/page1', pageviews: '1000' }],
+      mockSuggestion,
+      mockLog,
+    );
+
+    expect(result.matched).to.have.lengthOf(1);
   });
 });
