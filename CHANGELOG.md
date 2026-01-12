@@ -1,3 +1,38 @@
+# [1.282.0](https://github.com/adobe/spacecat-api-service/compare/v1.281.2...v1.282.0) (2026-01-09)
+
+
+### Features
+
+* remove product-metatags audits for paid customer ([#1683](https://github.com/adobe/spacecat-api-service/issues/1683)) ([d15747a](https://github.com/adobe/spacecat-api-service/commit/d15747a096127a808f64ea21b50efb1b74ce5f7b))
+
+## [1.281.2](https://github.com/adobe/spacecat-api-service/compare/v1.281.1...v1.281.2) (2026-01-09)
+
+
+### Bug Fixes
+
+* **org-detection:** make openai api version variable ([#1686](https://github.com/adobe/spacecat-api-service/issues/1686)) ([d59eb27](https://github.com/adobe/spacecat-api-service/commit/d59eb2762d7d8ae7b3909bdb70689047befd19f7))
+
+## [1.281.1](https://github.com/adobe/spacecat-api-service/compare/v1.281.0...v1.281.1) (2026-01-09)
+
+
+### Bug Fixes
+
+* make brand profile exec names unique ([#1685](https://github.com/adobe/spacecat-api-service/issues/1685)) ([0f1fb65](https://github.com/adobe/spacecat-api-service/commit/0f1fb6554176facb2478cfeda9cf394bf4223d94))
+
+# [1.281.0](https://github.com/adobe/spacecat-api-service/compare/v1.280.0...v1.281.0) (2026-01-07)
+
+
+### Features
+
+* update llmo slack command to include human, ai and total prompt… ([#1676](https://github.com/adobe/spacecat-api-service/issues/1676)) ([25c5e45](https://github.com/adobe/spacecat-api-service/commit/25c5e451c687901cc1d9b1dd36a7d2d2dc7cce02))
+
+# [1.280.0](https://github.com/adobe/spacecat-api-service/compare/v1.279.3...v1.280.0) (2026-01-07)
+
+
+### Features
+
+* top paid opportunites v2 ([#1664](https://github.com/adobe/spacecat-api-service/issues/1664)) ([d516a2a](https://github.com/adobe/spacecat-api-service/commit/d516a2a33823718400a1dc674605fe21570e1419))
+
 ## [1.279.3](https://github.com/adobe/spacecat-api-service/compare/v1.279.2...v1.279.3) (2026-01-07)
 
 

@@ -125,6 +125,11 @@ describe('GetLlmoConfigSummaryCommand', () => {
     const mockConfig = {
       categories: { cat1: {} },
       topics: { topic1: { prompts: ['prompt1'] } },
+      aiTopics: {
+        aiTopic1: { prompts: ['aiPrompt1', 'aiPrompt2'] },
+        // Topic without prompts property to cover || 0 fallback branch
+        aiTopic2: { name: 'ai-topic-no-prompts' },
+      },
       brands: { aliases: ['alias1'] },
       competitors: { competitors: ['comp1'] },
       deleted: { prompts: { deleted1: {} } },
@@ -139,6 +144,18 @@ describe('GetLlmoConfigSummaryCommand', () => {
     await command.handleExecution([], slackContext);
 
     expect(sendFileStub.called).to.be.true;
+
+    // Verify CSV contains human prompts, AI prompts, and total prompts columns
+    const csvBuffer = sendFileStub.firstCall.args[1];
+    const csvString = Buffer.isBuffer(csvBuffer) ? csvBuffer.toString('utf8') : String(csvBuffer);
+    const lines = csvString.trim().split(/\r?\n/);
+
+    expect(lines[0]).to.include('Human Prompts');
+    expect(lines[0]).to.include('AI Prompts');
+    expect(lines[0]).to.include('Total Prompts');
+    // Data row should have 1 human prompt, 2 AI prompts, 3 total
+    expect(lines[1]).to.include(',1,2,3,');
+
     expect(context.log.info.calledWith(sinon.match('LLMO config summary completed: 1 sites processed in 1 file(s)'))).to.be.true;
   });
 
@@ -287,7 +304,11 @@ describe('GetLlmoConfigSummaryCommand', () => {
       getName: () => 'Valid Org',
     });
     readConfigStub.resolves({
-      config: { categories: { cat1: {} }, topics: { topic1: { prompts: ['p1'] } } },
+      config: {
+        categories: { cat1: {} },
+        topics: { topic1: { prompts: ['p1'] } },
+        aiTopics: { aiTopic1: { prompts: ['ai1', 'ai2'] } },
+      },
       exists: true,
     });
 
