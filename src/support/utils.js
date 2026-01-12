@@ -1041,19 +1041,13 @@ export const onboardSingleSite = async (
     }
     for (const auditType of auditTypes) {
       /* eslint-disable no-await-in-loop */
-      // For demo profiles (scheduledRun=false), trigger audits without enabled check
-      // For paid profiles (scheduledRun=true), check if enabled before triggering
-      if (scheduledRun && !latestConfiguration.isHandlerEnabledForSite(auditType, site)) {
-        await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
-      } else {
-        await triggerAuditForSite(
-          site,
-          auditType,
-          undefined,
-          slackContext,
-          context,
-        );
-      }
+      await triggerAuditForSite(
+        site,
+        auditType,
+        undefined,
+        slackContext,
+        context,
+      );
     }
 
     // Opportunity status job
