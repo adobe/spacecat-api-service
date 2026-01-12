@@ -213,6 +213,8 @@ export const sendAuditMessages = async (
  * @param {undefined|string} auditData - Optional audit data.
  * @param {Object} slackContext - The Slack context object.
  * @param {Object} lambdaContext - The Lambda context object.
+ * @param {number} onboardStartTime - Optional timestamp when onboarding started
+ *   (for bot protection checks).
  * @return {Promise} - A promise representing the audit trigger operation.
  */
 export const triggerAuditForSite = async (
@@ -221,6 +223,7 @@ export const triggerAuditForSite = async (
   auditData,
   slackContext,
   lambdaContext,
+  onboardStartTime,
 ) => sendAuditMessage(
   lambdaContext.sqs,
   lambdaContext.env.AUDIT_JOBS_QUEUE_URL,
@@ -230,6 +233,7 @@ export const triggerAuditForSite = async (
       channelId: slackContext.channelId,
       threadTs: slackContext.threadTs,
     },
+    ...(onboardStartTime && { onboardStartTime }),
   },
   site.getId(),
   auditData,
@@ -1020,6 +1024,9 @@ export const onboardSingleSite = async (
     const importsMessage = reportLine.imports || 'None';
     await say(`:white_check_mark: *For site ${baseURL}*: Enabled imports: ${importsMessage} and audits: ${auditsMessage}`);
 
+    // Capture timestamp before triggering audits for consistent bot protection time window
+    const onboardStartTime = Date.now();
+
     // trigger audit runs
     if (auditTypes.length > 0) {
       await say(`:gear: Starting audits: ${auditTypes.join(', ')}`);
@@ -1035,6 +1042,7 @@ export const onboardSingleSite = async (
           undefined,
           slackContext,
           context,
+          onboardStartTime,
         );
       }
     }
@@ -1048,7 +1056,7 @@ export const onboardSingleSite = async (
       organizationId,
       taskContext: {
         auditTypes,
-        onboardStartTime: Date.now(), // Track exact onboarding start time for log search
+        onboardStartTime, // Use the same timestamp for consistent time window
         slackContext: {
           channelId: slackContext.channelId,
           threadTs: slackContext.threadTs,
