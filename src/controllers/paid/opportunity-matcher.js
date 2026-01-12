@@ -282,8 +282,6 @@ async function processOpportunityMatching(
       (c) => c.requiresUrlMatching && c.matcher(oppData),
     );
 
-    if (!config) return;
-
     // Get the pre-filtered URL set for this category
     const allowedUrls = filteredDataByCategory.get(config.category);
 
@@ -367,8 +365,8 @@ function combineAndSortOpportunities(categorizedOpportunities, matchResults) {
   // CWV opportunities use projectedTrafficValue
   // Forms opportunities use projectedConversionValue
   filteredOpportunitiesData.sort((a, b) => {
-    const aValue = a.data.projectedTrafficValue || a.data.projectedConversionValue || 0;
-    const bValue = b.data.projectedTrafficValue || b.data.projectedConversionValue || 0;
+    const aValue = a.data.projectedTrafficValue || a.data.projectedConversionValue;
+    const bValue = b.data.projectedTrafficValue || b.data.projectedConversionValue;
     return bValue - aValue;
   });
 

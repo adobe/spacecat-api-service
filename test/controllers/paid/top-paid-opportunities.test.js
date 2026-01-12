@@ -222,26 +222,59 @@ describe('TopPaidOpportunitiesController', () => {
       expect(opportunities).to.have.lengthOf(1);
     });
 
-    it('sorts opportunities by projectedTrafficValue descending', async () => {
-      const oppty1 = createOpportunity({
-        id: 'oppty-1', tags: ['paid media'], data: { projectedTrafficValue: 1000 },
+    it('sorts opportunities by projectedTrafficValue and projectedConversionValue descending', async () => {
+      // CWV opportunities use projectedTrafficValue
+      const cwvOppty1 = createOpportunity({
+        id: 'cwv-1', type: 'cwv', data: { projectedTrafficValue: 2000 },
       });
-      const oppty2 = createOpportunity({
-        id: 'oppty-2', tags: ['paid media'], data: { projectedTrafficValue: 5000 },
+      const cwvOppty2 = createOpportunity({
+        id: 'cwv-2', type: 'cwv', data: { projectedTrafficValue: 4000 },
       });
-      const oppty3 = createOpportunity({
-        id: 'oppty-3', tags: ['paid media'], data: { projectedTrafficValue: 3000 },
+      // Forms opportunities use projectedConversionValue (not projectedTrafficValue)
+      const formsOppty1 = createOpportunity({
+        id: 'forms-1',
+        type: 'form-accessibility',
+        data: { projectedTrafficValue: 0, projectedConversionValue: 3000, form: 'https://example.com/form1' },
       });
-      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [oppty1, oppty2, oppty3]);
+      const formsOppty2 = createOpportunity({
+        id: 'forms-2',
+        type: 'high-form-views-low-conversions',
+        data: { projectedTrafficValue: 0, projectedConversionValue: 1000, form: 'https://example.com/form2' },
+      });
+      setupOpportunityMocks(
+        mockContext.dataAccess.Opportunity,
+        [cwvOppty1, cwvOppty2, formsOppty1, formsOppty2],
+      );
+      // CWV opportunities match by suggestion URL
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus
+        .withArgs('cwv-1', 'NEW')
+        .resolves([createSuggestion('https://example.com/page1')])
+        .withArgs('cwv-2', 'NEW')
+        .resolves([createSuggestion('https://example.com/page2')])
+        // Forms opportunities match by form URL in suggestion
+        .withArgs('forms-1', 'NEW')
+        .resolves([createSuggestion('https://example.com/form1')])
+        .withArgs('forms-2', 'NEW')
+        .resolves([createSuggestion('https://example.com/form2')]);
+      // Mock Athena to return paid traffic data for all URLs
+      mockAthenaClient.query.resolves([
+        createTrafficData({ url: 'https://example.com/page1', pageviews: '1000' }),
+        createTrafficData({ url: 'https://example.com/page2', pageviews: '1000' }),
+        createTrafficData({ url: 'https://example.com/form1', pageviews: '1000' }),
+        createTrafficData({ url: 'https://example.com/form2', pageviews: '1000' }),
+      ]);
 
       const response = await controller.getTopPaidOpportunities({
-        params: { siteId: SITE_ID }, data: {},
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
       });
       const opportunities = await response.json();
-      // Should be sorted: 5000, 3000, 1000
-      expect(opportunities[0].opportunityId).to.equal('oppty-2');
-      expect(opportunities[1].opportunityId).to.equal('oppty-3');
-      expect(opportunities[2].opportunityId).to.equal('oppty-1');
+      // Should be sorted by value descending:
+      // 4000 (cwv-2), 3000 (forms-1), 2000 (cwv-1), 1000 (forms-2)
+      expect(opportunities).to.have.lengthOf(4);
+      expect(opportunities[0].opportunityId).to.equal('cwv-2');
+      expect(opportunities[1].opportunityId).to.equal('forms-1');
+      expect(opportunities[2].opportunityId).to.equal('cwv-1');
+      expect(opportunities[3].opportunityId).to.equal('forms-2');
     });
 
     it('filters out opportunities with "report" in title', async () => {
