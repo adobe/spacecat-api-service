@@ -175,6 +175,7 @@ export default class OrgDetectorAgent {
       AZURE_OPEN_AI_API_KEY: azureOpenAIApiKey,
       AZURE_OPEN_AI_API_INSTANCE_NAME: azureOpenAIApiInstanceName,
       AZURE_OPEN_AI_API_DEPLOYMENT_NAME: azureOpenAIApiDeploymentName,
+      AZURE_OPEN_AI_API_VERSION: azureOpenAIApiVersion,
       IGNORED_GITHUB_ORGS: ignoredGithubOrgsRaw,
     } = env;
 
@@ -204,7 +205,7 @@ export default class OrgDetectorAgent {
       azureOpenAIApiKey,
       azureOpenAIApiInstanceName,
       azureOpenAIApiDeploymentName,
-      azureOpenAIApiVersion: '2024-08-01-preview',
+      azureOpenAIApiVersion,
       temperature: 0,
       callbacks: [new ConsoleCallbackHandler()],
     }).bindTools(tools);
