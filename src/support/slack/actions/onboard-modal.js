@@ -709,7 +709,7 @@ export function onboardSiteModal(lambdaContext) {
 
         await client.chat.postMessage({
           channel: responseChannel,
-          text: `:warning: *Bot Protection Detected for ${siteUrl}*\n\n${botProtectionMessage}`,
+          text: botProtectionMessage, // Already includes title, emoji, and site URL
           thread_ts: responseThreadTs,
         });
       }
