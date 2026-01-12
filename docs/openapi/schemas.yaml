@@ -2801,9 +2801,12 @@ OpportunityCreate:
       type: array
       items:
         type: string
-      description: Optional list of tags
+      description: |
+        Tags are automatically applied based on the opportunity type.
+        The `isElmo` and `isASO` tags are preserved if present. Generic opportunities skip automatic tag application.
       example:
-        - 'Traffic acquisition'
+        - 'Backlinks'
+        - 'SEO'
   required:
     - auditId
     - runbook
@@ -2847,9 +2850,12 @@ OpportunityUpdate:
       type: array
       items:
         type: string
-      description: Optional list of tags
+      description: |
+        Optional list of tags. When updated, tags are automatically merged/applied based on the opportunity type.
+        The `isElmo` and `isASO` tags are preserved if present. Generic opportunities skip automatic tag application.
       example:
-        - 'Traffic acquisition'
+        - 'Backlinks'
+        - 'SEO'
 SuggestionStatus:
   description: Status of this suggestion; status reflects overall fix execution, flagged here for optimization
   type: string

@@ -18,7 +18,8 @@ broken-backlinks-opportunity:
         - 'Paste new entries in your website redirects file.'
         - 'Publish the changes.'
     tags:
-      - 'Traffic acquisition'
+      - 'Backlinks'
+      - 'SEO'
     createdAt: '2024-01-20T12:00:00Z'
     updatedAt: '2024-07-23T12:00:00Z'
 broken-backlinks-opportunity-create:
@@ -38,12 +39,16 @@ broken-backlinks-opportunity-create:
         - 'Paste new entries in your website redirects file.'
         - 'Publish the changes.'
     tags:
-      - 'Traffic acquisition'
+      - 'Backlinks'
+      - 'SEO'
 broken-backlinks-opportunity-update:
   description: Example for a broken backlinks opportunity update
   value:
     runbook: 'https://example.com/runbook/broken-backlinks-v2'
     title: '10 authoritative domains are linking to invalid SecurBank URLs. This could impact your SEO.'
+    tags:
+      - 'Backlinks'
+      - 'SEO'
 broken-backlinks-suggestion:
   description: Example for a broken backlinks suggestion
   value:
