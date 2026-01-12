@@ -28,6 +28,7 @@ import {
 import { ValidationError } from '@adobe/spacecat-shared-data-access';
 import { OpportunityDto } from '../dto/opportunity.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { mergeTagsWithHardcodedTags } from '../common/tagMappings.js';
 
 /**
  * Opportunities controller.
@@ -181,6 +182,13 @@ function OpportunitiesController(ctx) {
     }
 
     context.data.siteId = siteId;
+
+    // Apply hardcoded tags based on opportunity type (except for Generic Opportunity)
+    // This ensures all opportunities have standardized tags while preserving isElmo/isASO
+    if (context.data.type && context.data.type !== 'generic-opportunity') {
+      context.data.tags = mergeTagsWithHardcodedTags(context.data.type, context.data.tags);
+    }
+
     try {
       const oppty = await Opportunity.create(context.data);
       return createResponse(OpportunityDto.toJSON(oppty), 201);
@@ -260,7 +268,15 @@ function OpportunitiesController(ctx) {
       }
       if (tags && !arrayEquals(tags, opportunity.getTags())) {
         hasUpdates = true;
-        opportunity.setTags(tags);
+        // Apply hardcoded tags if opportunity type is provided and not generic
+        // Preserve isElmo/isASO tags from the provided tags
+        const opportunityType = context.data.type || opportunity.getType();
+        if (opportunityType && opportunityType !== 'generic-opportunity') {
+          const mergedTags = mergeTagsWithHardcodedTags(opportunityType, tags);
+          opportunity.setTags(mergedTags);
+        } else {
+          opportunity.setTags(tags);
+        }
       }
       if (hasUpdates) {
         opportunity.setUpdatedBy(profile.email || 'system');
