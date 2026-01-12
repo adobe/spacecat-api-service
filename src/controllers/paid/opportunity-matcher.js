@@ -73,7 +73,7 @@ const OPPORTUNITY_TYPE_CONFIGS = [
     requiresUrlMatching: false,
     matcher: (oppData) => {
       const { tags, type, data } = oppData;
-      return tags.some((tag) => tag?.toLowerCase() === 'paid media')
+      return tags?.some((tag) => tag?.toLowerCase() === 'paid media')
         || type === 'consent-banner'
         || data?.opportunityType === 'no-cta-above-the-fold';
     },
@@ -83,7 +83,7 @@ const OPPORTUNITY_TYPE_CONFIGS = [
     category: 'cwv',
     displayName: 'CWV',
     requiresUrlMatching: true,
-    matcher: (oppData) => oppData.type === 'cwv',
+    matcher: (oppData) => oppData?.type === 'cwv',
     // Custom data filter - only match URLs with poor CWV scores
     dataFilter: (trafficData, pageViewThreshold, log) => filterHighTrafficPoorCwv(
       trafficData,
