@@ -3001,6 +3001,10 @@ SuggestionOperationSuccess:
       description: Index of this suggestion in the list from the request body, starting from 0
       type: integer
       minimum: 0
+    uuid:
+      description: UUID of the suggestion
+      type: string
+      format: uuid
     statusCode:
       description: HTTP status code indicating the type of success
       type: integer
@@ -3008,6 +3012,7 @@ SuggestionOperationSuccess:
       $ref: '#/Suggestion'
   required:
     - index
+    - uuid
     - statusCode
     - suggestion
 SuggestionCreateFailure:
@@ -3097,9 +3102,10 @@ SuggestionUpdateFailure:
   type: object
   description: Suggestion update failure
   properties:
-    id:
+    uuid:
       description: UUID of this suggestion
-      $ref: '#/Id'
+      type: string
+      format: uuid
     index:
       description: Index of this suggestion in the list from the request body, starting from 0
       type: integer
@@ -3111,9 +3117,10 @@ SuggestionUpdateFailure:
       description: Error message describing the failure
       type: string
   required:
-    - id
+    - uuid
     - index
     - statusCode
+    - message
     - message
 SuggestionStatusUpdateListResponse:
   type: object
@@ -3134,13 +3141,13 @@ SuggestionStatusUpdateListResponse:
         success:
           description: Number of suggestions successfully updated
           type: integer
-        failure:
+        failed:
           description: Number of suggestions that failed to update
           type: integer
       required:
         - total
         - success
-        - failure
+        - failed
   required:
     - suggestions
     - metadata
