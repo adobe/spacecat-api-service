@@ -386,15 +386,14 @@ describe('Opportunities Controller', () => {
         type: 'meta-tags',
         tags: ['Custom Tag'],
       };
-      const createStub = sandbox.stub(mockOpportunityDataAccess.Opportunity, 'create').resolves(mockOpptyEntity);
 
       await opportunitiesController.createOpportunity({
         params: { siteId: SITE_ID },
         data: opportunityData,
       });
 
-      expect(createStub.calledOnce).to.be.true;
-      const callArgs = createStub.getCall(0).args[0];
+      expect(mockOpportunity.create.calledOnce).to.be.true;
+      const callArgs = mockOpportunity.create.getCall(0).args[0];
       expect(callArgs.tags).to.deep.equal(['Meta Tags', 'SEO']);
     });
 
@@ -404,15 +403,14 @@ describe('Opportunities Controller', () => {
         type: 'cwv',
         tags: ['isElmo', 'isASO', 'Custom Tag'],
       };
-      const createStub = sandbox.stub(mockOpportunityDataAccess.Opportunity, 'create').resolves(mockOpptyEntity);
 
       await opportunitiesController.createOpportunity({
         params: { siteId: SITE_ID },
         data: opportunityData,
       });
 
-      expect(createStub.calledOnce).to.be.true;
-      const callArgs = createStub.getCall(0).args[0];
+      expect(mockOpportunity.create.calledOnce).to.be.true;
+      const callArgs = mockOpportunity.create.getCall(0).args[0];
       expect(callArgs.tags).to.include('isElmo');
       expect(callArgs.tags).to.include('isASO');
       expect(callArgs.tags).to.not.include('Custom Tag');
@@ -425,15 +423,14 @@ describe('Opportunities Controller', () => {
         type: 'generic-opportunity',
         tags: ['Custom Tag', 'Another Tag'],
       };
-      const createStub = sandbox.stub(mockOpportunityDataAccess.Opportunity, 'create').resolves(mockOpptyEntity);
 
       await opportunitiesController.createOpportunity({
         params: { siteId: SITE_ID },
         data: opportunityData,
       });
 
-      expect(createStub.calledOnce).to.be.true;
-      const callArgs = createStub.getCall(0).args[0];
+      expect(mockOpportunity.create.calledOnce).to.be.true;
+      const callArgs = mockOpportunity.create.getCall(0).args[0];
       expect(callArgs.tags).to.deep.equal(['Custom Tag', 'Another Tag']);
     });
 
@@ -443,15 +440,14 @@ describe('Opportunities Controller', () => {
         type: 'alt-text',
         tags: undefined,
       };
-      const createStub = sandbox.stub(mockOpportunityDataAccess.Opportunity, 'create').resolves(mockOpptyEntity);
 
       await opportunitiesController.createOpportunity({
         params: { siteId: SITE_ID },
         data: opportunityData,
       });
 
-      expect(createStub.calledOnce).to.be.true;
-      const callArgs = createStub.getCall(0).args[0];
+      expect(mockOpportunity.create.calledOnce).to.be.true;
+      const callArgs = mockOpportunity.create.getCall(0).args[0];
       expect(callArgs.tags).to.deep.equal(['Alt-Text', 'Accessibility', 'SEO']);
     });
 
@@ -461,15 +457,14 @@ describe('Opportunities Controller', () => {
         type: 'a11y-assistive',
         tags: null,
       };
-      const createStub = sandbox.stub(mockOpportunityDataAccess.Opportunity, 'create').resolves(mockOpptyEntity);
 
       await opportunitiesController.createOpportunity({
         params: { siteId: SITE_ID },
         data: opportunityData,
       });
 
-      expect(createStub.calledOnce).to.be.true;
-      const callArgs = createStub.getCall(0).args[0];
+      expect(mockOpportunity.create.calledOnce).to.be.true;
+      const callArgs = mockOpportunity.create.getCall(0).args[0];
       expect(callArgs.tags).to.deep.equal(['ARIA Labels', 'Accessibility']);
     });
 
@@ -479,15 +474,14 @@ describe('Opportunities Controller', () => {
         type: undefined,
         tags: ['Custom Tag'],
       };
-      const createStub = sandbox.stub(mockOpportunityDataAccess.Opportunity, 'create').resolves(mockOpptyEntity);
 
       await opportunitiesController.createOpportunity({
         params: { siteId: SITE_ID },
         data: opportunityData,
       });
 
-      expect(createStub.calledOnce).to.be.true;
-      const callArgs = createStub.getCall(0).args[0];
+      expect(mockOpportunity.create.calledOnce).to.be.true;
+      const callArgs = mockOpportunity.create.getCall(0).args[0];
       expect(callArgs.tags).to.deep.equal(['Custom Tag']);
     });
   });
@@ -568,11 +562,20 @@ describe('Opportunities Controller', () => {
     beforeEach(() => {
       sandbox.resetHistory();
       opptys[0].type = 'meta-tags';
-      opptys[0].tags = ['tag1', 'tag2'];
+      // Set initial tags to be different from what we'll pass in tests
+      // This ensures arrayEquals check passes and hasUpdates becomes true
+      opptys[0].tags = ['initial-tag1', 'initial-tag2'];
+      // Ensure findById returns the mock entity
+      mockOpportunity.findById.resolves(mockOpptyEntity);
+      // Spy on setTags to track calls (original implementation still runs)
+      sandbox.spy(mockOpptyEntity, 'setTags');
+      // Ensure save returns a promise that resolves to the entity
+      sandbox.stub(mockOpptyEntity, 'save').resolves(mockOpptyEntity);
     });
 
     it('should apply hardcoded tags when updating tags for non-generic opportunity', async () => {
       opptys[0].type = 'cwv';
+      opptys[0].tags = ['different-initial-tags'];
       const response = await opportunitiesController.patchOpportunity({
         ...defaultAuthAttributes,
         params: {
@@ -592,6 +595,7 @@ describe('Opportunities Controller', () => {
 
     it('should preserve isElmo and isASO tags when updating tags', async () => {
       opptys[0].type = 'alt-text';
+      opptys[0].tags = ['different-initial-tags'];
       const response = await opportunitiesController.patchOpportunity({
         ...defaultAuthAttributes,
         params: {
@@ -614,6 +618,7 @@ describe('Opportunities Controller', () => {
 
     it('should not apply hardcoded tags for generic-opportunity type', async () => {
       opptys[0].type = 'generic-opportunity';
+      opptys[0].tags = ['different-initial-tags'];
       const response = await opportunitiesController.patchOpportunity({
         ...defaultAuthAttributes,
         params: {
@@ -633,6 +638,7 @@ describe('Opportunities Controller', () => {
 
     it('should use opportunity type from request data if provided', async () => {
       opptys[0].type = 'old-type';
+      opptys[0].tags = ['different-initial-tags'];
       const response = await opportunitiesController.patchOpportunity({
         ...defaultAuthAttributes,
         params: {
@@ -653,6 +659,7 @@ describe('Opportunities Controller', () => {
 
     it('should use existing opportunity type if not provided in request data', async () => {
       opptys[0].type = 'high-form-views-low-conversions';
+      opptys[0].tags = ['different-initial-tags'];
       const response = await opportunitiesController.patchOpportunity({
         ...defaultAuthAttributes,
         params: {
@@ -672,6 +679,7 @@ describe('Opportunities Controller', () => {
 
     it('should not apply tags if opportunity type is not available', async () => {
       opptys[0].type = undefined;
+      opptys[0].tags = ['different-initial-tags'];
       const response = await opportunitiesController.patchOpportunity({
         ...defaultAuthAttributes,
         params: {
