@@ -1,0 +1,79 @@
+---
+title: OpenAPI Specification and Implementation
+description: Guidelines for maintaining OpenAPI specifications in sync with API implementation
+globs:
+  - "docs/openapi/**"
+  - "src/**"
+alwaysApply: false
+version: "1.0.0"
+---
+
+# OpenAPI Specification and Implementation
+
+## Context
+When changes touch API specification files under `docs/openapi` **or** implementation files under `src`, this rule applies.
+
+## Core Principles
+
+### Specification-Implementation Sync
+- Any new endpoint, modification of existing endpoint, or removal must include **both** the OpenAPI spec change **and** the matching implementation in `src`
+- If the implementation is deferred, the spec's endpoint description **must start with** `Not implemented yet`
+and the actual handler must return HTTP **501** with a clear JSON message:
+```json
+{ "error": "Not implemented yet: <feature-name>" }
+```
+- Keep examples in sync with actual API behavior
+
+### Schema Management
+- All request/response bodies and parameters **must reference** schemas in `schemas.yaml`
+- Reuse existing schemas wherever possible to avoid duplication
+- Avoid redefining data structures inline unless absolutely necessary
+- Use **composition, inheritance, polymorphism** (as supported by OpenAPI 3.1.1) to reuse common parts
+- When introducing new audit types, update:
+  - Audit type enum
+  - Audit result schema
+  - At least one complete example
+
+### Examples
+- Add examples to `examples.yaml` and reference them (don't inline)
+- Include at least one request and response example per endpoint
+- Examples must validate against the schema and represent realistic, production-like data
+
+### Precision & Consistency
+- Keep definitions as precise as possible (correct types, constraints, formats, etc.)
+- Endpoints under the same tag must follow consistent naming, path structure, response format, etc.
+
+### Validation & Documentation Build
+- After modifying OpenAPI specs, **always run** `npm run docs:lint` to validate the specification
+- Before completing implementation, **must run** `npm run docs:build` to generate documentation
+- Fix any linting errors or build failures before considering the task complete
+
+## API Design Patterns
+
+### Pagination
+- Set strict limits on collection resource items returned
+- Support optional `limit` query parameter with documented defaults, min/max values
+- Use cursor-based pagination with `cursor` query parameter
+- Response format: `{ "cursor": "next-token", "items": [...] }`
+- Omit `cursor` property when no more items exist
+- Use consistent naming: `limit` and `cursor` across all paginated endpoints
+
+### Bulk Operations
+- **Prefer bulk endpoints over separate single/multi-item endpoints**
+- Accept arrays containing one or more items
+- Document explicitly in description that single items can be passed in arrays
+- Set strict limits on bulk POST/PUT/PATCH/DELETE request sizes
+- Response format: `{ "metadata": { "total": N, "success": N, "failure": N }, "failures": [...], "items": [...] }`
+- Specify atomicity behavior and per-item error reporting
+
+### Parameters
+- For URLs passed as path parameters, use {base64Url} and encode as URL-safe base64 without padding (RFC 4648 §5) to avoid +/= issues in paths
+- Maintain consistent naming across all endpoints
+
+### POST Requests
+- Document idempotency behavior explicitly
+- Specify duplicate detection mechanism if applicable
+- Indicate whether upserts are supported
+
+### PATCH Requests
+- Implementation must update only fields provided in request. If other fields are modified or reset, document this behavior clearly in the endpoint description

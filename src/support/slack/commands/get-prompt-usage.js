@@ -109,22 +109,36 @@ function GetPromptUsageCommand(context) {
       sitesInOrg.map((site) => getLlmoConfig(site.getId())),
     );
 
-    let totalPrompts = 0;
+    let humanPromptsCount = 0;
+    let aiPromptsCount = 0;
 
     for (const cfg of configs) {
       if (cfg) {
-        const topicPromptCount = Object.values(cfg.topics).reduce(
-          (sum, topic) => sum + (topic.prompts?.length || 0),
-          0,
-        );
-        totalPrompts += topicPromptCount;
+        // Count prompts within topics (human prompts)
+        if (cfg.topics) {
+          humanPromptsCount += Object.values(cfg.topics).reduce(
+            (sum, topic) => sum + (topic.prompts?.length || 0),
+            0,
+          );
+        }
+        // Count prompts within aiTopics (AI prompts)
+        if (cfg.aiTopics) {
+          aiPromptsCount += Object.values(cfg.aiTopics).reduce(
+            (sum, topic) => sum + (topic.prompts?.length || 0),
+            0,
+          );
+        }
       }
     }
+
+    const totalPrompts = humanPromptsCount + aiPromptsCount;
 
     return {
       organizationName,
       imsOrgID,
       tier,
+      humanPromptsCount,
+      aiPromptsCount,
       totalPrompts,
     };
   };
@@ -154,7 +168,7 @@ function GetPromptUsageCommand(context) {
       if (imsOrgIds.length === 1 && imsOrgIds[0] !== '--all') {
         const data = await getPromptUsageForSingleIMSOrg(imsOrgIds[0]);
         await say(
-          `*Prompt usage for IMS Org ID* \`${data.imsOrgID}\`:\n   :ims: *IMS Org Name:* ${data.organizationName}\n   :paid: *Tier:* ${data.tier}\n   :elmo: *Total number of prompts in use:* ${data.totalPrompts}`,
+          `*Prompt usage for IMS Org ID* \`${data.imsOrgID}\`:\n   :ims: *IMS Org Name:* ${data.organizationName}\n   :paid: *Tier:* ${data.tier}\n   :bust_in_silhouette: *Human prompts:* ${data.humanPromptsCount}\n   :robot_face: *AI prompts:* ${data.aiPromptsCount}\n   :elmo: *Total number of prompts in use:* ${data.totalPrompts}`,
         );
         return;
       }
@@ -176,6 +190,8 @@ function GetPromptUsageCommand(context) {
             organizationName,
             imsOrgID,
             tier,
+            humanPromptsCount,
+            aiPromptsCount,
             totalPrompts,
           } = res.value;
           if (args[0] === '--all' && (totalPrompts === 0 || LLMO_INTERNAL_IMS_ORGS.includes(imsOrgID))) return undefined;
@@ -183,6 +199,8 @@ function GetPromptUsageCommand(context) {
             organizationName,
             imsOrgID,
             tier,
+            humanPromptsCount,
+            aiPromptsCount,
             totalPrompts,
           };
         })
@@ -207,7 +225,9 @@ function GetPromptUsageCommand(context) {
           { id: 'organizationName', title: 'IMS Org Name' },
           { id: 'imsOrgID', title: 'IMS Org ID' },
           { id: 'tier', title: 'Tier' },
-          { id: 'totalPrompts', title: 'Total number of prompts in use' },
+          { id: 'humanPromptsCount', title: 'Human Prompts' },
+          { id: 'aiPromptsCount', title: 'AI Prompts' },
+          { id: 'totalPrompts', title: 'Total Prompts' },
         ],
       });
 

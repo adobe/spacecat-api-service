@@ -168,6 +168,10 @@ function TrafficController(context, log, env) {
       pageViewThreshold = 0;
     }
 
+    if (isWeekOverWeek) {
+      log.info(`Week over week parameters: context.data: ${JSON.stringify(context.data)} / temporal: ${JSON.stringify(temporal)} / trafficType: ${JSON.stringify(trafficType)} / pageViewThreshold: ${pageViewThreshold}`);
+    }
+
     const quereyParams = getTrafficAnalysisQueryPlaceholdersFilled({
       week: weekInt,
       month: monthInt,
@@ -181,6 +185,10 @@ function TrafficController(context, log, env) {
       pageViewThreshold,
       numTemporalSeries: isWeekOverWeek ? 4 : 1,
     });
+
+    if (isWeekOverWeek) {
+      log.info(`Week over week: queryParams: ${JSON.stringify(quereyParams)}`);
+    }
 
     const description = `fetch paid channel data db: ${rumMetricsDatabase}| siteKey: ${siteId} | year: ${year} | month: ${month} | week: ${week} } | temporalCondition: ${quereyParams.temporalCondition} | groupBy: [${dimensions.join(', ')}] `;
 

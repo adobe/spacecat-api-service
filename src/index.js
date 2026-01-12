@@ -59,6 +59,7 @@ import { multipartFormData } from './support/multipart-form-data.js';
 import ApiKeyController from './controllers/api-key.js';
 import OpportunitiesController from './controllers/opportunities.js';
 import PaidController from './controllers/paid.js';
+import TopPaidOpportunitiesController from './controllers/paid/top-paid-opportunities.js';
 import TrafficController from './controllers/paid/traffic.js';
 import SuggestionsController from './controllers/suggestions.js';
 import BrandsController from './controllers/brands.js';
@@ -75,6 +76,7 @@ import TrialUsersController from './controllers/trial-users.js';
 import UserDetailsController from './controllers/user-details.js';
 import EntitlementsController from './controllers/entitlements.js';
 import SandboxAuditController from './controllers/sandbox-audit.js';
+import UrlStoreController from './controllers/url-store.js';
 import PTA2Controller from './controllers/paid/pta2.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -125,6 +127,7 @@ async function run(request, context) {
     const suggestionsController = SuggestionsController(context, context.sqs, context.env);
     const brandsController = BrandsController(context, log, context.env);
     const paidController = PaidController(context);
+    const topPaidOpportunitiesController = TopPaidOpportunitiesController(context, context.env);
     const trafficController = TrafficController(context, log, context.env);
     const preflightController = PreflightController(context, log, context.env);
     const demoController = DemoController(context);
@@ -140,6 +143,7 @@ async function run(request, context) {
     const userDetailsController = UserDetailsController(context);
     const entitlementsController = EntitlementsController(context);
     const sandboxAuditController = SandboxAuditController(context);
+    const urlStoreController = UrlStoreController(context, log);
     const pta2Controller = PTA2Controller(context, log, context.env);
 
     const routeHandlers = getRouteHandlers(
@@ -165,6 +169,7 @@ async function run(request, context) {
       scrapeController,
       scrapeJobController,
       paidController,
+      topPaidOpportunitiesController,
       trafficController,
       fixesController,
       llmoController,
@@ -175,6 +180,7 @@ async function run(request, context) {
       entitlementsController,
       sandboxAuditController,
       reportsController,
+      urlStoreController,
       pta2Controller,
     );
 

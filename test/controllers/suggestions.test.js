@@ -3252,8 +3252,23 @@ describe('Suggestions Controller', () => {
       mockSuggestion.allByOpportunityId.resolves(tokowakaSuggestions);
 
       s3ClientSendStub = sandbox.stub().callsFake((command) => {
-        // Handle GetObjectCommand (fetchConfig) - return NoSuchKey to simulate no existing config
+        // Handle GetObjectCommand
         if (command.constructor.name === 'GetObjectCommand') {
+          const { Key } = command.input;
+          // If fetching metaconfig (path ends with /config without base64 path)
+          if (Key && Key.match(/^opportunities\/[^/]+\/config$/)) {
+            // Return existing metaconfig
+            return Promise.resolve({
+              Body: {
+                transformToString: async () => JSON.stringify({
+                  siteId: SITE_ID,
+                  prerender: false,
+                  apiKeys: ['test-api-key-123'],
+                }),
+              },
+            });
+          }
+          // For URL configs (with base64 path), return NoSuchKey to simulate no existing config
           const error = new Error('NoSuchKey');
           error.name = 'NoSuchKey';
           return Promise.reject(error);
@@ -3315,11 +3330,12 @@ describe('Suggestions Controller', () => {
       expect(body.suggestions[1].uuid).to.equal(SUGGESTION_IDS[1]);
       expect(body.suggestions[1].statusCode).to.equal(200);
 
-      // Verify S3 was called (GET to fetch existing config, PUT to upload)
+      // Verify S3 was called (GET to fetch metaconfig and config, PUT to upload config)
       expect(s3ClientSendStub.callCount).to.be.at.least(1);
       // Verify PutObjectCommand was called for upload
+      // Both suggestions are for same URL, so only 1 config file is created
       const putObjectCalls = s3ClientSendStub.getCalls().filter((call) => call.args[0].constructor.name === 'PutObjectCommand');
-      expect(putObjectCalls).to.have.length(2);
+      expect(putObjectCalls).to.have.length(1);
 
       // Verify suggestion data was updated with deployment timestamp
       const firstSugg = tokowakaSuggestions[0];
@@ -3644,10 +3660,10 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(207);
 
-      // Find the second PutObjectCommand call
+      // Find the PutObjectCommand call (both suggestions for same URL, so 1 config file)
       const putObjectCalls = s3ClientSendStub.getCalls().filter((call) => call.args[0].constructor.name === 'PutObjectCommand');
-      expect(putObjectCalls).to.have.length.at.least(2);
-      const uploadedConfig = JSON.parse(putObjectCalls[1].args[0].input.Body);
+      expect(putObjectCalls).to.have.length(1);
+      const uploadedConfig = JSON.parse(putObjectCalls[0].args[0].input.Body);
       console.log(JSON.stringify(uploadedConfig, null, 2));
       // Validate config structure
       expect(uploadedConfig).to.have.property('url');
@@ -3664,6 +3680,747 @@ describe('Suggestions Controller', () => {
       expect(patches[0]).to.have.property('suggestionId');
       expect(patches[0]).to.have.property('prerenderRequired', true);
       expect(patches[0]).to.have.property('lastUpdated');
+    });
+
+    describe('domain-wide suggestions', () => {
+      let s3ClientSendStub;
+      let prerenderOpportunity;
+      let domainWideSuggestion;
+      let regularSuggestions;
+      let allSuggestions;
+
+      beforeEach(() => {
+        // Create a domain-wide suggestion
+        domainWideSuggestion = {
+          getId: () => SUGGESTION_IDS[0],
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 1,
+          getData: () => ({
+            url: 'https://example.com/* (All Domain URLs)',
+            isDomainWide: true,
+            allowedRegexPatterns: ['/*'],
+            pathPattern: '/*',
+            scope: 'domain-wide',
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().returnsThis(),
+        };
+
+        // Create regular suggestions that should be covered by domain-wide
+        regularSuggestions = [
+          {
+            getId: () => SUGGESTION_IDS[1],
+            getType: () => 'prerender',
+            getOpportunityId: () => OPPORTUNITY_ID,
+            getStatus: () => 'NEW',
+            getRank: () => 2,
+            getData: () => ({
+              url: 'https://example.com/page1',
+            }),
+            getKpiDeltas: () => ({}),
+            getCreatedAt: () => '2025-01-15T10:00:00Z',
+            getUpdatedAt: () => '2025-01-15T10:00:00Z',
+            getUpdatedBy: () => 'system',
+            setData: sandbox.stub().returnsThis(),
+            setUpdatedBy: sandbox.stub().returnsThis(),
+            save: sandbox.stub().returnsThis(),
+          },
+          {
+            getId: () => SUGGESTION_IDS[2],
+            getType: () => 'prerender',
+            getOpportunityId: () => OPPORTUNITY_ID,
+            getStatus: () => 'NEW',
+            getRank: () => 3,
+            getData: () => ({
+              url: 'https://example.com/page2',
+            }),
+            getKpiDeltas: () => ({}),
+            getCreatedAt: () => '2025-01-15T10:00:00Z',
+            getUpdatedAt: () => '2025-01-15T10:00:00Z',
+            getUpdatedBy: () => 'system',
+            setData: sandbox.stub().returnsThis(),
+            setUpdatedBy: sandbox.stub().returnsThis(),
+            save: sandbox.stub().returnsThis(),
+          },
+        ];
+
+        allSuggestions = [domainWideSuggestion, ...regularSuggestions];
+
+        prerenderOpportunity = {
+          getId: sandbox.stub().returns(OPPORTUNITY_ID),
+          getSiteId: sandbox.stub().returns(SITE_ID),
+          getType: sandbox.stub().returns('prerender'),
+        };
+
+        site.getConfig = sandbox.stub().returns({
+          getTokowakaConfig: () => ({ apiKey: 'test-api-key-123' }),
+        });
+        site.getBaseURL = sandbox.stub().returns('https://example.com');
+        site.getId = sandbox.stub().returns(SITE_ID);
+        mockOpportunity.findById.resetBehavior();
+        mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(prerenderOpportunity);
+        mockSuggestion.allByOpportunityId.resetBehavior();
+        mockSuggestion.allByOpportunityId.resolves(allSuggestions);
+
+        s3ClientSendStub = sandbox.stub().callsFake((command) => {
+          // Handle GetObjectCommand (fetchMetaconfig)
+          if (command.constructor.name === 'GetObjectCommand') {
+            // Return existing metaconfig
+            return Promise.resolve({
+              Body: {
+                transformToString: () => Promise.resolve(JSON.stringify({
+                  siteId: SITE_ID,
+                  existingProperty: 'should-be-preserved',
+                })),
+              },
+            });
+          }
+          // Handle PutObjectCommand (uploadMetaconfig)
+          return Promise.resolve();
+        });
+
+        context.s3 = {
+          s3Client: {
+            send: s3ClientSendStub,
+          },
+        };
+        context.env = {
+          TOKOWAKA_SITE_CONFIG_BUCKET: 'test-tokowaka-bucket',
+          TOKOWAKA_PREVIEW_BUCKET: 'test-tokowaka-preview-bucket',
+          TOKOWAKA_CDN_PROVIDER: 'test-cdn-provider',
+          TOKOWAKA_EDGE_URL: 'https://edge-dev.tokowaka.now',
+          TOKOWAKA_CDN_CONFIG: JSON.stringify({
+            cloudfront: {
+              distributionId: 'E123456',
+              region: 'us-east-1',
+            },
+          }),
+        };
+        context.log = {
+          info: sandbox.stub(),
+          warn: sandbox.stub(),
+          error: sandbox.stub(),
+          debug: sandbox.stub(),
+        };
+      });
+
+      it('should deploy domain-wide suggestion and update metaconfig', async () => {
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: {
+            siteId: SITE_ID,
+            opportunityId: OPPORTUNITY_ID,
+          },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0]],
+          },
+        });
+
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+
+        // Should successfully deploy domain-wide suggestion
+        expect(body.metadata.success).to.equal(1);
+        expect(body.suggestions[0].uuid).to.equal(SUGGESTION_IDS[0]);
+        expect(body.suggestions[0].statusCode).to.equal(200);
+
+        // Verify metaconfig was updated
+        const putObjectCalls = s3ClientSendStub.getCalls()
+          .filter((call) => call.args[0].constructor.name === 'PutObjectCommand');
+        expect(putObjectCalls.length).to.be.at.least(1);
+
+        // Verify domain-wide suggestion was marked as deployed
+        expect(domainWideSuggestion.setData.calledOnce).to.be.true;
+        const setDataArgs = domainWideSuggestion.setData.firstCall.args[0];
+        expect(setDataArgs).to.have.property('tokowakaDeployed');
+        expect(setDataArgs.tokowakaDeployed).to.be.a('number');
+        expect(domainWideSuggestion.setUpdatedBy.calledWith('tokowaka-deployment')).to.be.true;
+        expect(domainWideSuggestion.save.calledOnce).to.be.true;
+      });
+
+      it('should filter out regular suggestions covered by domain-wide pattern', async () => {
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: {
+            siteId: SITE_ID,
+            opportunityId: OPPORTUNITY_ID,
+          },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1], SUGGESTION_IDS[2]],
+          },
+        });
+
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+
+        // Domain-wide should be deployed
+        expect(body.metadata.total).to.equal(3);
+        expect(body.metadata.success).to.equal(3); // All marked as success
+
+        // Verify regular suggestions were marked as covered
+        expect(regularSuggestions[0].setData.calledOnce).to.be.true;
+        expect(regularSuggestions[1].setData.calledOnce).to.be.true;
+
+        const firstRegularData = regularSuggestions[0].setData.firstCall.args[0];
+        expect(firstRegularData).to.have.property('tokowakaDeployed');
+        expect(firstRegularData).to.have.property('coveredByDomainWide');
+        expect(firstRegularData).to.have.property('skippedInDeployment', true);
+      });
+
+      it('should include autoCovered count in metadata when suggestions are auto-marked', async () => {
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: {
+            siteId: SITE_ID,
+            opportunityId: OPPORTUNITY_ID,
+          },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1], SUGGESTION_IDS[2]],
+          },
+        });
+
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+
+        // Should include autoCovered metadata
+        expect(body.metadata).to.have.property('autoCovered');
+        expect(body.metadata.autoCovered).to.equal(2); // 2 regular suggestions auto-covered
+        expect(body.metadata).to.have.property('message');
+        expect(body.metadata.message).to.include('automatically marked as deployed');
+      });
+
+      it('should mark other NEW suggestions matching domain-wide pattern as covered', async () => {
+        // Add another NEW suggestion that matches the pattern but wasn't in deployment
+        const anotherSuggestion = {
+          getId: () => 'suggestion-id-4',
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 4,
+          getData: () => ({
+            url: 'https://example.com/page3',
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().returnsThis(),
+        };
+
+        mockSuggestion.allByOpportunityId.resolves([
+          domainWideSuggestion,
+          ...regularSuggestions,
+          anotherSuggestion,
+        ]);
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: {
+            siteId: SITE_ID,
+            opportunityId: OPPORTUNITY_ID,
+          },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0]], // Only deploying domain-wide
+            suggestionsMetadata: [
+              {
+                id: SUGGESTION_IDS[0],
+                allowedRegexPatterns: ['/*'],
+              },
+            ],
+          },
+        });
+
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+
+        // The other suggestion should have been auto-marked
+        expect(body.metadata.autoCovered).to.be.at.least(3);
+        expect(anotherSuggestion.setData.called).to.be.true;
+        const anotherData = anotherSuggestion.setData.firstCall.args[0];
+        expect(anotherData).to.have.property('coveredByDomainWide', SUGGESTION_IDS[0]);
+        expect(anotherSuggestion.setUpdatedBy.calledWith('domain-wide-deployment')).to.be.true;
+      });
+
+      it('should not mark non-NEW suggestions as covered by domain-wide', async () => {
+        const deployedSuggestion = {
+          getId: () => 'suggestion-id-5',
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'DEPLOYED', // Not NEW
+          getRank: () => 5,
+          getData: () => ({
+            url: 'https://example.com/page4',
+            tokowakaDeployed: Date.now() - 10000,
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().returnsThis(),
+        };
+
+        mockSuggestion.allByOpportunityId.resolves([
+          domainWideSuggestion,
+          ...regularSuggestions,
+          deployedSuggestion,
+        ]);
+
+        await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: {
+            siteId: SITE_ID,
+            opportunityId: OPPORTUNITY_ID,
+          },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0]],
+          },
+        });
+
+        // Deployed suggestion should NOT be modified
+        expect(deployedSuggestion.setData.called).to.be.false;
+        expect(deployedSuggestion.save.called).to.be.false;
+      });
+
+      it('should not mark suggestions without URLs as covered', async () => {
+        const noUrlSuggestion = {
+          getId: () => 'suggestion-id-6',
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 6,
+          getData: () => ({}), // No URL
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().returnsThis(),
+        };
+
+        mockSuggestion.allByOpportunityId.resolves([
+          domainWideSuggestion,
+          noUrlSuggestion,
+        ]);
+
+        await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: {
+            siteId: SITE_ID,
+            opportunityId: OPPORTUNITY_ID,
+          },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0]],
+          },
+        });
+
+        // Suggestion without URL should NOT be auto-marked
+        expect(noUrlSuggestion.setData.called).to.be.false;
+      });
+
+      it('should handle domain-wide deployment errors gracefully', async () => {
+        // Make S3 fail
+        s3ClientSendStub.rejects(new Error('S3 upload failed'));
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: {
+            siteId: SITE_ID,
+            opportunityId: OPPORTUNITY_ID,
+          },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0]],
+          },
+        });
+
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+
+        // Domain-wide suggestion should be marked as failed
+        expect(body.metadata.failed).to.equal(1);
+        expect(body.suggestions[0].uuid).to.equal(SUGGESTION_IDS[0]);
+        expect(body.suggestions[0].statusCode).to.equal(500);
+        expect(body.suggestions[0].message).to.include('Deployment failed');
+      });
+
+      it('should handle errors when marking skipped suggestions', async () => {
+        // Override save to reject for ALL suggestions to trigger the catch block
+        const saveError = new Error('Database error');
+        allSuggestions.forEach((sugg) => {
+          if (sugg.save && sugg.save.restore) {
+            sugg.save.restore();
+          }
+          sugg.save = sandbox.stub().rejects(saveError);
+        });
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: {
+            siteId: SITE_ID,
+            opportunityId: OPPORTUNITY_ID,
+          },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1], SUGGESTION_IDS[2]],
+          },
+        });
+
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+
+        // Should have failed suggestions due to save errors
+        expect(body.metadata.failed).to.be.at.least(2);
+        const failedSuggestions = body.suggestions.filter((s) => s.statusCode === 500);
+        expect(failedSuggestions.length).to.be.at.least(2);
+        expect(failedSuggestions.some((s) => s.message.includes('Failed to mark as covered'))).to.be.true;
+      });
+
+      it('should handle errors when auto-marking covered suggestions', async () => {
+        // Add a suggestion that will fail when auto-marking
+        const failingSuggestion = {
+          getId: () => 'failing-suggestion',
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 10,
+          getData: () => ({
+            url: 'https://example.com/failing',
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().rejects(new Error('Failed to save covered suggestion')),
+        };
+
+        mockSuggestion.allByOpportunityId.resolves([
+          domainWideSuggestion,
+          failingSuggestion,
+        ]);
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: {
+            siteId: SITE_ID,
+            opportunityId: OPPORTUNITY_ID,
+          },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0]],
+          },
+        });
+
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+
+        // Domain-wide should still deploy successfully despite auto-mark error
+        expect(body.metadata.success).to.equal(1);
+        expect(context.log.error.called).to.be.true;
+        const errorCalls = context.log.error.getCalls();
+        const coverErrorLog = errorCalls.find((call) => call.args[0].includes('Error marking covered suggestions'));
+        expect(coverErrorLog).to.exist;
+      });
+
+      it('should handle errors at the start of domain-wide deployment', async () => {
+        // Make site.getBaseURL throw an error
+        site.getBaseURL.throws(new Error('Cannot get base URL'));
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: {
+            siteId: SITE_ID,
+            opportunityId: OPPORTUNITY_ID,
+          },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0]],
+          },
+        });
+
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+
+        // Domain-wide deployment should fail
+        expect(body.metadata.failed).to.equal(1);
+        expect(body.suggestions[0].statusCode).to.equal(500);
+        expect(body.suggestions[0].message).to.equal('Deployment failed: Internal server error');
+      });
+
+      it('should create new metaconfig when none exists', async () => {
+        // Make S3 return NoSuchKey error (no existing metaconfig)
+        s3ClientSendStub.callsFake((command) => {
+          if (command.constructor.name === 'GetObjectCommand') {
+            const error = new Error('NoSuchKey');
+            error.name = 'NoSuchKey';
+            return Promise.reject(error);
+          }
+          return Promise.resolve();
+        });
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: {
+            siteId: SITE_ID,
+            opportunityId: OPPORTUNITY_ID,
+          },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0]],
+          },
+        });
+
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+        expect(body.metadata.success).to.equal(1);
+
+        // Verify PutObjectCommand was called with new metaconfig
+        const putCalls = s3ClientSendStub.getCalls()
+          .filter((call) => call.args[0].constructor.name === 'PutObjectCommand');
+        expect(putCalls.length).to.be.at.least(1);
+      });
+
+      it('should skip other domain-wide suggestions when auto-marking', async () => {
+        // Create a second domain-wide suggestion
+        const secondDomainWide = {
+          getId: () => 'domain-wide-2',
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 11,
+          getData: () => ({
+            url: 'https://example.com/subdomain/* (Subdomain)',
+            isDomainWide: true,
+            allowedRegexPatterns: ['/subdomain/*'],
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().returnsThis(),
+        };
+
+        mockSuggestion.allByOpportunityId.resolves([
+          domainWideSuggestion,
+          secondDomainWide,
+          ...regularSuggestions,
+        ]);
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: {
+            siteId: SITE_ID,
+            opportunityId: OPPORTUNITY_ID,
+          },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0]],
+          },
+        });
+
+        expect(response.status).to.equal(207);
+
+        // Second domain-wide should NOT be auto-marked
+        expect(secondDomainWide.setData.called).to.be.false;
+        expect(secondDomainWide.save.called).to.be.false;
+      });
+
+      it('should handle suggestions without URLs in filtering logic', async () => {
+        const suggestionWithoutUrl = {
+          getId: () => SUGGESTION_IDS[3],
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 12,
+          getData: () => ({}), // No URL
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().returnsThis(),
+        };
+
+        mockSuggestion.allByOpportunityId.resolves([
+          domainWideSuggestion,
+          suggestionWithoutUrl,
+        ]);
+
+        // Deploy both domain-wide and the suggestion without URL
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: {
+            siteId: SITE_ID,
+            opportunityId: OPPORTUNITY_ID,
+          },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[3]],
+          },
+        });
+
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+
+        // Suggestion without URL should not be filtered out
+        expect(body.metadata.success).to.be.at.least(1);
+      });
+
+      it('should include suggestions not covered by domain-wide pattern', async () => {
+        const notCoveredSuggestion = {
+          getId: () => SUGGESTION_IDS[4],
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 13,
+          getData: () => ({
+            url: 'https://different-domain.com/page1', // Different domain
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().returnsThis(),
+        };
+
+        mockSuggestion.allByOpportunityId.resolves([
+          domainWideSuggestion,
+          notCoveredSuggestion,
+        ]);
+
+        // Deploy both domain-wide and the non-covered suggestion
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: {
+            siteId: SITE_ID,
+            opportunityId: OPPORTUNITY_ID,
+          },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[4]],
+          },
+        });
+
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+
+        // Non-covered suggestion should be deployed normally
+        expect(body.metadata.success).to.be.at.least(2);
+        expect(notCoveredSuggestion.setData.called).to.be.true;
+        expect(notCoveredSuggestion.save.called).to.be.true;
+      });
+
+      it('should fail domain-wide suggestion without allowedRegexPatterns', async () => {
+        const missingPatternsId = 'missing-patterns-uuid';
+
+        // Mock domain-wide suggestion WITHOUT allowedRegexPatterns in its data
+        const domainWideWithoutPatterns = {
+          getId: () => missingPatternsId,
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 999999,
+          getData: () => ({
+            url: 'https://example.com/* (All Domain URLs)',
+            isDomainWide: true,
+            // Missing allowedRegexPatterns
+          }),
+          save: sandbox.stub().returnsThis(),
+        };
+
+        mockSuggestion.allByOpportunityId.resolves([domainWideWithoutPatterns]);
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: {
+            siteId: SITE_ID,
+            opportunityId: OPPORTUNITY_ID,
+          },
+          data: {
+            suggestionIds: [missingPatternsId],
+          },
+        });
+
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+
+        // Domain-wide suggestion should fail due to missing allowedRegexPatterns
+        expect(body.metadata.failed).to.equal(1);
+        expect(body.suggestions[0].uuid).to.equal(missingPatternsId);
+        expect(body.suggestions[0].statusCode).to.equal(400);
+        expect(body.suggestions[0].message).to.include('allowedRegexPatterns');
+      });
+
+      it('should handle invalid regex patterns gracefully', async () => {
+        const invalidRegexId = 'invalid-regex-uuid';
+        const regularId = 'regular-suggestion-uuid';
+
+        // Mock domain-wide suggestion WITH invalid regex patterns in its data
+        const domainWideWithInvalidRegex = {
+          getId: () => invalidRegexId,
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 999999,
+          getData: () => ({
+            url: 'https://example.com/* (All Domain URLs)',
+            isDomainWide: true,
+            allowedRegexPatterns: ['[invalid(regex'], // Invalid regex
+          }),
+          save: sandbox.stub().returnsThis(),
+        };
+
+        const regularSuggestion = {
+          getId: () => regularId,
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 2,
+          getData: () => ({
+            url: 'https://example.com/page1',
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().returnsThis(),
+        };
+
+        mockSuggestion.allByOpportunityId.resolves([domainWideWithInvalidRegex, regularSuggestion]);
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: {
+            siteId: SITE_ID,
+            opportunityId: OPPORTUNITY_ID,
+          },
+          data: {
+            suggestionIds: [invalidRegexId, regularId],
+          },
+        });
+
+        expect(response.status).to.equal(207);
+        const body = await response.json();
+
+        // Should still deploy domain-wide despite invalid regex (will log warning)
+        expect(body.metadata.success).to.be.at.least(1);
+        expect(context.log.warn.called).to.be.true;
+        const warnCalls = context.log.warn.getCalls();
+        const regexWarning = warnCalls.find((call) => call.args[0].includes('Invalid regex pattern'));
+        expect(regexWarning).to.exist;
+      });
     });
   });
 
@@ -4088,6 +4845,260 @@ describe('Suggestions Controller', () => {
     });
   });
 
+  describe('rollbackSuggestionFromEdge - domain-wide rollback', () => {
+    let domainWideSuggestion;
+    let coveredSuggestions;
+    let prerenderOpportunity;
+    let tokowakaClientStub;
+
+    beforeEach(() => {
+      // Create a domain-wide suggestion that has been deployed
+      domainWideSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'prerender',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          url: 'https://example.com/* (All Domain URLs)',
+          isDomainWide: true,
+          allowedRegexPatterns: ['/*'],
+          pathPattern: '/*',
+          scope: 'domain-wide',
+          tokowakaDeployed: Date.now(),
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+
+      // Create suggestions that were covered by the domain-wide deployment
+      coveredSuggestions = [
+        {
+          getId: () => SUGGESTION_IDS[1],
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 2,
+          getData: () => ({
+            url: 'https://example.com/page1',
+            tokowakaDeployed: Date.now(),
+            coveredByDomainWide: SUGGESTION_IDS[0],
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().resolves(),
+        },
+        {
+          getId: () => SUGGESTION_IDS[2],
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 3,
+          getData: () => ({
+            url: 'https://example.com/page2',
+            tokowakaDeployed: Date.now(),
+            coveredByDomainWide: SUGGESTION_IDS[0],
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().resolves(),
+        },
+      ];
+
+      prerenderOpportunity = {
+        getId: sandbox.stub().returns(OPPORTUNITY_ID),
+        getSiteId: sandbox.stub().returns(SITE_ID),
+        getType: sandbox.stub().returns('prerender'),
+      };
+
+      site.getConfig = sandbox.stub().returns({
+        getTokowakaConfig: () => ({ apiKey: 'test-api-key-123' }),
+      });
+      site.getBaseURL = sandbox.stub().returns('https://example.com');
+      site.getId = sandbox.stub().returns(SITE_ID);
+
+      mockOpportunity.findById.resetBehavior();
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(prerenderOpportunity);
+
+      const allSuggestions = [domainWideSuggestion, ...coveredSuggestions];
+      mockSuggestion.allByOpportunityId.resolves(allSuggestions);
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(domainWideSuggestion);
+      coveredSuggestions.forEach((suggestion, index) => {
+        mockSuggestion.findById
+          .withArgs(SUGGESTION_IDS[index + 1])
+          .resolves(suggestion);
+      });
+
+      // Mock TokowakaClient
+      tokowakaClientStub = {
+        fetchMetaconfig: sandbox.stub().resolves({
+          prerender: {
+            enabled: true,
+            patterns: ['/*'],
+          },
+        }),
+        uploadMetaconfig: sandbox.stub().resolves(),
+      };
+
+      sandbox.stub(TokowakaClient, 'createFrom').returns(tokowakaClientStub);
+
+      context.env = {
+        TOKOWAKA_SITE_CONFIG_BUCKET: 'test-tokowaka-bucket',
+        TOKOWAKA_PREVIEW_BUCKET: 'test-tokowaka-preview-bucket',
+        TOKOWAKA_CDN_PROVIDER: 'test-cdn-provider',
+        TOKOWAKA_EDGE_URL: 'https://edge-dev.tokowaka.now',
+      };
+
+      context.log = {
+        info: sandbox.stub(),
+        warn: sandbox.stub(),
+        error: sandbox.stub(),
+        debug: sandbox.stub(),
+      };
+    });
+
+    it('should rollback domain-wide suggestion and covered suggestions', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      // Should successfully rollback domain-wide suggestion
+      expect(body.metadata.success).to.equal(1);
+      expect(body.metadata.failed).to.equal(0);
+
+      // Verify metaconfig was updated (prerender removed)
+      expect(tokowakaClientStub.fetchMetaconfig.calledOnce).to.be.true;
+      expect(tokowakaClientStub.uploadMetaconfig.calledOnce).to.be.true;
+      const uploadedMetaconfig = tokowakaClientStub.uploadMetaconfig.firstCall.args[1];
+      expect(uploadedMetaconfig).to.not.have.property('prerender');
+
+      // Verify domain-wide suggestion data was updated
+      expect(domainWideSuggestion.setData.calledOnce).to.be.true;
+      const domainWideData = domainWideSuggestion.setData.firstCall.args[0];
+      expect(domainWideData).to.not.have.property('tokowakaDeployed');
+      expect(domainWideSuggestion.setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
+      expect(domainWideSuggestion.save.calledOnce).to.be.true;
+
+      // Verify covered suggestions were also rolled back
+      coveredSuggestions.forEach((suggestion) => {
+        expect(suggestion.setData.calledOnce).to.be.true;
+        const suggestionData = suggestion.setData.firstCall.args[0];
+        expect(suggestionData).to.not.have.property('tokowakaDeployed');
+        expect(suggestionData).to.not.have.property('coveredByDomainWide');
+        expect(suggestion.setUpdatedBy.calledWith('domain-wide-rollback')).to.be.true;
+        expect(suggestion.save.calledOnce).to.be.true;
+      });
+    });
+
+    it('should handle error when metaconfig fetch fails', async () => {
+      tokowakaClientStub.fetchMetaconfig.rejects(new Error('Failed to fetch metaconfig'));
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      expect(body.metadata.success).to.equal(0);
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0].statusCode).to.equal(500);
+      expect(body.suggestions[0].message).to.include('Rollback failed');
+    });
+
+    it('should continue with domain-wide rollback even if metaconfig has no prerender config', async () => {
+      // Return metaconfig without prerender property
+      tokowakaClientStub.fetchMetaconfig.resolves({
+        someOtherConfig: true,
+      });
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      // Should still succeed
+      expect(body.metadata.success).to.equal(1);
+      expect(body.metadata.failed).to.equal(0);
+
+      // Verify metaconfig fetch was attempted but upload was not called (no prerender to remove)
+      expect(tokowakaClientStub.fetchMetaconfig.calledOnce).to.be.true;
+      expect(tokowakaClientStub.uploadMetaconfig.called).to.be.false;
+
+      // Verify domain-wide suggestion was still rolled back
+      expect(domainWideSuggestion.save.calledOnce).to.be.true;
+    });
+
+    it('should handle error when TokowakaClient.createFrom fails', async () => {
+      // Make TokowakaClient.createFrom throw an error
+      TokowakaClient.createFrom.restore();
+      sandbox.stub(TokowakaClient, 'createFrom').throws(new Error('Failed to create Tokowaka client'));
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      // Should fail all domain-wide suggestions
+      expect(body.metadata.success).to.equal(0);
+      expect(body.metadata.failed).to.equal(1);
+      expect(body.suggestions[0].uuid).to.equal(SUGGESTION_IDS[0]);
+      expect(body.suggestions[0].statusCode).to.equal(500);
+      expect(body.suggestions[0].message).to.include('Rollback failed: Internal server error');
+
+      // Verify error was logged
+      expect(context.log.error.called).to.be.true;
+    });
+  });
+
   describe('previewSuggestions (Tokowaka Preview)', () => {
     let s3ClientSendStub;
     let tokowakaSuggestions;
@@ -4192,6 +5203,7 @@ describe('Suggestions Controller', () => {
 
       site.getConfig = sandbox.stub().returns({
         getTokowakaConfig: () => ({ apiKey: 'test-api-key-123', forwardedHost: 'example.com' }),
+        getEdgeOptimizeConfig: () => undefined,
       });
       site.getBaseURL = sandbox.stub().returns('https://example.com');
       site.getId = sandbox.stub().returns(SITE_ID);
@@ -4201,8 +5213,23 @@ describe('Suggestions Controller', () => {
       mockSuggestion.allByOpportunityId.resolves(tokowakaSuggestions);
 
       s3ClientSendStub = sandbox.stub().callsFake((command) => {
-        // Handle GetObjectCommand (fetchConfig) - return NoSuchKey to simulate no existing config
+        // Handle GetObjectCommand
         if (command.constructor.name === 'GetObjectCommand') {
+          const { Key } = command.input;
+          // If fetching metaconfig (path ends with /config without base64 path)
+          if (Key && Key.match(/^(preview\/)?opportunities\/[^/]+\/config$/)) {
+            // Return existing metaconfig
+            return Promise.resolve({
+              Body: {
+                transformToString: async () => JSON.stringify({
+                  siteId: SITE_ID,
+                  prerender: false,
+                  apiKeys: ['test-api-key-123'],
+                }),
+              },
+            });
+          }
+          // For URL configs (with base64 path), return NoSuchKey to simulate no existing config
           const error = new Error('NoSuchKey');
           error.name = 'NoSuchKey';
           return Promise.reject(error);
@@ -4952,6 +5979,199 @@ describe('Suggestions Controller', () => {
       expect(body.message).to.include('Network error');
       expect(body.html).to.exist;
       expect(body.html.content).to.be.null;
+    });
+  });
+
+  describe('autofixSuggestions with domain-wide suggestions', () => {
+    let suggestionsControllerWithMock;
+    
+    beforeEach(async () => {
+      const mockPromiseToken = {
+        promise_token: 'promiseTokenExample',
+        expires_in: 14399,
+        token_type: 'promise_token',
+      };
+
+      const suggestionControllerWithMock = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/utils.js': {
+          getIMSPromiseToken: async () => mockPromiseToken,
+        },
+      });
+      
+      suggestionsControllerWithMock = suggestionControllerWithMock({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'abcd' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    });
+
+    afterEach(() => {
+      sandbox.restore();
+    });
+
+    it('should reject autofix for domain-wide suggestions', async () => {
+      // Stub AccessControlUtil
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+
+      opportunity.getType = sandbox.stub().returns('prerender');
+      
+      const isHandlerEnabledForSite = sandbox.stub();
+      isHandlerEnabledForSite.withArgs('prerender-auto-fix', site).returns(true);
+      mockConfiguration.findLatest.resolves({
+        isHandlerEnabledForSite,
+      });
+      
+      const domainWideSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getType: () => 'prerender',
+        getRank: () => 1,
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        getData: () => ({
+          url: 'https://example.com/* (All Domain URLs)',
+          isDomainWide: true,
+          allowedRegexPatterns: ['/*'],
+        }),
+      };
+
+      const regularSuggestion = {
+        getId: () => SUGGESTION_IDS[1],
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getType: () => 'prerender',
+        getRank: () => 2,
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        getData: () => ({
+          url: 'https://example.com/page1',
+        }),
+      };
+
+      mockSuggestion.allByOpportunityId
+        .withArgs(OPPORTUNITY_ID)
+        .resolves([domainWideSuggestion, regularSuggestion]);
+
+      mockSuggestion.bulkUpdateStatus.resolves([regularSuggestion]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      expect(body.metadata.total).to.equal(2);
+      expect(body.metadata.success).to.equal(1); // Only regular suggestion
+      expect(body.metadata.failed).to.equal(1); // Domain-wide rejected
+
+      const failedSuggestion = body.suggestions.find((s) => s.uuid === SUGGESTION_IDS[0]);
+      expect(failedSuggestion).to.exist;
+      expect(failedSuggestion.statusCode).to.equal(400);
+      expect(failedSuggestion.message).to.equal('Domain-wide aggregate suggestions cannot be auto-fixed individually');
+    });
+  });
+
+  describe('previewSuggestions with domain-wide suggestions', () => {
+    it('should reject preview for domain-wide suggestions', async () => {
+      const domainWideSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getType: () => 'prerender',
+        getRank: () => 1,
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        getData: () => ({
+          url: 'https://example.com/* (All Domain URLs)',
+          isDomainWide: true,
+          allowedRegexPatterns: ['/*'],
+        }),
+      };
+
+      const regularSuggestion = {
+        getId: () => SUGGESTION_IDS[1],
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getType: () => 'prerender',
+        getRank: () => 2,
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        getData: () => ({
+          url: 'https://example.com/page1',
+        }),
+      };
+
+      mockSuggestion.allByOpportunityId
+        .withArgs(OPPORTUNITY_ID)
+        .resolves([domainWideSuggestion, regularSuggestion]);
+
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves({
+        getId: () => OPPORTUNITY_ID,
+        getSiteId: () => SITE_ID,
+        getType: () => 'prerender',
+        getData: () => ({}),
+      });
+
+      // Mock TokowakaClient.previewSuggestions for the regular suggestion
+      const mockTokowakaClient = {
+        previewSuggestions: sandbox.stub().resolves({
+          succeededSuggestions: [regularSuggestion],
+          failedSuggestions: [],
+          html: {
+            url: 'https://example.com/page1',
+            originalHtml: '<html>original</html>',
+            optimizedHtml: '<html>optimized</html>',
+          },
+        }),
+      };
+
+      sandbox.stub(TokowakaClient, 'createFrom').returns(mockTokowakaClient);
+
+      context.log = {
+        info: sandbox.stub(),
+        warn: sandbox.stub(),
+        error: sandbox.stub(),
+        debug: sandbox.stub(),
+      };
+
+      const response = await suggestionsController.previewSuggestions({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      expect(body.metadata.total).to.equal(2);
+      expect(body.metadata.success).to.equal(1); // Only regular suggestion
+      expect(body.metadata.failed).to.equal(1); // Domain-wide rejected
+
+      const failedSuggestion = body.suggestions.find((s) => s.uuid === SUGGESTION_IDS[0]);
+      expect(failedSuggestion).to.exist;
+      expect(failedSuggestion.statusCode).to.equal(400);
+      expect(failedSuggestion.message).to.equal('Domain-wide aggregate suggestions cannot be previewed individually');
     });
   });
 });
