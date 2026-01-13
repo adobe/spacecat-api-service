@@ -115,8 +115,9 @@ describe('brand-profile-trigger helper', () => {
     });
     expect(payload.context).to.deep.equal({ baseURL: 'https://example.com' });
     expect(payload.slackContext).to.deep.equal(slackContext);
-    expect(payload.idempotencyKey).to.match(/^brand-profile-site-123-test-reason-\d+/);
-    expect(options.executionName).to.match(/^brand-profile-site-123-test-reason/);
+    // Suffix is a short base36 timestamp to ensure uniqueness across repeated triggers.
+    expect(payload.idempotencyKey).to.match(/^brand-profile-site-123-test-reason-[0-9a-z]+$/);
+    expect(options.executionName).to.match(/^brand-profile-site-123-test-reason-[0-9a-z]+$/);
   });
 
   it('defaults slack context to empty object when not provided', async () => {

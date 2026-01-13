@@ -1,3 +1,31 @@
+## [1.282.1](https://github.com/adobe/spacecat-api-service/compare/v1.282.0...v1.282.1) (2026-01-13)
+
+
+### Bug Fixes
+
+* add GET/POST apis for edge config APIs ([#1688](https://github.com/adobe/spacecat-api-service/issues/1688)) ([fbdcdc1](https://github.com/adobe/spacecat-api-service/commit/fbdcdc1615cbd9e4c042d51f8fd9069988e0f2cb))
+
+# [1.282.0](https://github.com/adobe/spacecat-api-service/compare/v1.281.2...v1.282.0) (2026-01-09)
+
+
+### Features
+
+* remove product-metatags audits for paid customer ([#1683](https://github.com/adobe/spacecat-api-service/issues/1683)) ([d15747a](https://github.com/adobe/spacecat-api-service/commit/d15747a096127a808f64ea21b50efb1b74ce5f7b))
+
+## [1.281.2](https://github.com/adobe/spacecat-api-service/compare/v1.281.1...v1.281.2) (2026-01-09)
+
+
+### Bug Fixes
+
+* **org-detection:** make openai api version variable ([#1686](https://github.com/adobe/spacecat-api-service/issues/1686)) ([d59eb27](https://github.com/adobe/spacecat-api-service/commit/d59eb2762d7d8ae7b3909bdb70689047befd19f7))
+
+## [1.281.1](https://github.com/adobe/spacecat-api-service/compare/v1.281.0...v1.281.1) (2026-01-09)
+
+
+### Bug Fixes
+
+* make brand profile exec names unique ([#1685](https://github.com/adobe/spacecat-api-service/issues/1685)) ([0f1fb65](https://github.com/adobe/spacecat-api-service/commit/0f1fb6554176facb2478cfeda9cf394bf4223d94))
+
 # [1.281.0](https://github.com/adobe/spacecat-api-service/compare/v1.280.0...v1.281.0) (2026-01-07)
 
 

@@ -25,6 +25,7 @@ import {
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
+import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import {
@@ -917,6 +918,103 @@ function LlmoController(ctx) {
     }
   };
 
+  /**
+   * POST /sites/{siteId}/llmo/edge-optimize-config
+   * Creates or updates Tokowaka edge optimization configuration
+   * - Updates site's tokowaka meta-config in S3
+   * - Updates site's edgeOptimizeConfig in site config
+   * @param {object} context - Request context
+   * @returns {Promise<Response>} Created/updated edge config
+   */
+  const createOrUpdateEdgeConfig = async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+    const { edgeOptimizeEnabled } = context.data || {};
+
+    log.info(`createOrUpdateEdgeConfig request received for site ${siteId}, data=${JSON.stringify(context.data)}`);
+
+    if (typeof edgeOptimizeEnabled !== 'boolean') {
+      return badRequest('edgeOptimizeEnabled field is required and must be a boolean');
+    }
+
+    try {
+      // Validate site and LLMO access
+      const { site } = await getSiteAndValidateLlmo(context);
+
+      const baseURL = site.getBaseURL();
+      const tokowakaClient = TokowakaClient.createFrom(context);
+
+      // Handle S3 metaconfig
+      let metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
+
+      if (!metaconfig || !Array.isArray(metaconfig.apiKeys) || metaconfig.apiKeys.length === 0) {
+        // Create new metaconfig with generated API key
+        metaconfig = await tokowakaClient.createMetaconfig(
+          baseURL,
+          site.getId(),
+          { tokowakaEnabled: edgeOptimizeEnabled },
+        );
+      } else {
+        metaconfig = {
+          ...metaconfig,
+          siteId: site.getId(),
+          tokowakaEnabled: edgeOptimizeEnabled,
+        };
+        await tokowakaClient.uploadMetaconfig(baseURL, metaconfig);
+      }
+
+      const currentConfig = site.getConfig();
+      // Update site config
+      currentConfig.updateEdgeOptimizeConfig({
+        ...(currentConfig.getEdgeOptimizeConfig() || {}),
+        enabled: edgeOptimizeEnabled,
+      });
+      await saveSiteConfig(site, currentConfig, log, `updating edge optimize config to enabled=${edgeOptimizeEnabled}`);
+
+      log.info(`Updated edgeOptimizeConfig enabled=${edgeOptimizeEnabled} for site ${siteId}`);
+
+      return ok({
+        edgeOptimizeConfig: currentConfig.getEdgeOptimizeConfig(),
+        metaconfig,
+      });
+    } catch (error) {
+      log.error(`Failed to create/update edge config for site ${siteId}:`, error);
+      return badRequest(error.message);
+    }
+  };
+
+  /**
+   * GET /sites/{siteId}/llmo/edge-optimize-config
+   * Retrieves Tokowaka edge optimization configuration
+   * - Fetches S3 metaconfig (opportunities/{domain}/config)
+   * - Returns edgeOptimizeConfig from site config
+   * @param {object} context - Request context
+   * @returns {Promise<Response>} Edge config or not found
+   */
+  const getEdgeConfig = async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+
+    try {
+      // Validate site and LLMO access
+      const { site } = await getSiteAndValidateLlmo(context);
+
+      const baseURL = site.getBaseURL();
+
+      // Fetch metaconfig from S3
+      const tokowakaClient = TokowakaClient.createFrom(context);
+      const metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
+
+      return ok({
+        metaconfig,
+        edgeOptimizeConfig: site.getConfig().getEdgeOptimizeConfig(),
+      });
+    } catch (error) {
+      log.error(`Failed to fetch edge config for site ${siteId}:`, error);
+      return badRequest(error.message);
+    }
+  };
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -937,6 +1035,8 @@ function LlmoController(ctx) {
     offboardCustomer,
     queryFiles,
     getLlmoRationale,
+    createOrUpdateEdgeConfig,
+    getEdgeConfig,
   };
 }
 
