@@ -144,7 +144,7 @@ function GetSiteCommand(context) {
       const textSections = [{
         text: `
 *Site Status for ${site.getBaseURL()}*
-${printSiteDetails(site, isAuditEnabled, psiStrategy, latestAudit)}
+${await printSiteDetails(site, isAuditEnabled, psiStrategy, latestAudit)}
 
 _Audits of *${psiStrategy}* strategy, sorted by date descending:_
 ${formatAudits(audits)}
