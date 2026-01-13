@@ -1,3 +1,10 @@
+## [1.282.1](https://github.com/adobe/spacecat-api-service/compare/v1.282.0...v1.282.1) (2026-01-13)
+
+
+### Bug Fixes
+
+* add GET/POST apis for edge config APIs ([#1688](https://github.com/adobe/spacecat-api-service/issues/1688)) ([fbdcdc1](https://github.com/adobe/spacecat-api-service/commit/fbdcdc1615cbd9e4c042d51f8fd9069988e0f2cb))
+
 # [1.282.0](https://github.com/adobe/spacecat-api-service/compare/v1.281.2...v1.282.0) (2026-01-09)
 
 
