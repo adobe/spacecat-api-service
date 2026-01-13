@@ -76,6 +76,10 @@ describe('GetSiteCommand', () => {
       getDeliveryType: () => 'aem_edge',
       getBaseURL: () => 'example.com',
       getGitHubURL: () => '',
+      getOrganizationId: () => 'org-123',
+      getOrganization: sinon.stub().resolves({
+        getImsOrgId: () => 'ims-org-456',
+      }),
       getIsLive: () => true,
       getIsLiveToggledAt: () => '2011-10-05T14:48:00.000Z',
       getAuditsByAuditType: sinon.stub(),
@@ -171,6 +175,56 @@ describe('GetSiteCommand', () => {
       await command.handleExecution(args, slackContext);
 
       expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: Test error')).to.be.true;
+    });
+
+    it('includes organization ID and IMS org in response', async () => {
+      site.getAuditsByAuditType.resolves(generateMockAudits(1));
+
+      const args = ['example.com', 'mobile'];
+      const command = GetSiteCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      const callArgs = slackContext.say.firstCall.args;
+      const responseText = JSON.stringify(callArgs);
+
+      expect(responseText).to.include('org-123');
+      expect(responseText).to.include('ims-org-456');
+    });
+
+    it('handles missing organization ID and IMS org gracefully', async () => {
+      site.getOrganizationId = () => null;
+      site.getOrganization = sinon.stub().resolves(null);
+      site.getAuditsByAuditType.resolves(generateMockAudits(1));
+
+      const args = ['example.com', 'mobile'];
+      const command = GetSiteCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      const callArgs = slackContext.say.firstCall.args;
+      const responseText = JSON.stringify(callArgs);
+
+      expect(responseText).to.include('_not set_');
+    });
+
+    it('handles empty string organization ID and IMS org', async () => {
+      site.getOrganizationId = () => '';
+      site.getImsOrgId = () => '';
+      site.getAuditsByAuditType.resolves(generateMockAudits(1));
+
+      const args = ['example.com', 'mobile'];
+      const command = GetSiteCommand(context);
+
+      await command.handleExecution(args, slackContext);
+
+      expect(slackContext.say.called).to.be.true;
+      const callArgs = slackContext.say.firstCall.args;
+      const responseText = JSON.stringify(callArgs);
+
+      expect(responseText).to.include('_not set_');
     });
   });
 
