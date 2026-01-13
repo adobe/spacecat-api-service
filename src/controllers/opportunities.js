@@ -24,11 +24,11 @@ import {
   isNonEmptyObject,
   arrayEquals,
   isValidUUID,
+  mergeTagsWithHardcodedTags,
 } from '@adobe/spacecat-shared-utils';
 import { ValidationError } from '@adobe/spacecat-shared-data-access';
 import { OpportunityDto } from '../dto/opportunity.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { mergeTagsWithHardcodedTags } from '../common/tagMappings.js';
 
 /**
  * Opportunities controller.
