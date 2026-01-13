@@ -623,21 +623,29 @@ function SitesController(ctx, log, env) {
       return forbidden('Only users belonging to the organization can view its metrics');
     }
 
-    let metrics = await getStoredMetrics({ siteId, metric, source }, context);
+    const metrics = await getStoredMetrics({ siteId, metric, source }, context);
+
+    // Handle new metadata wrapper format { label, startTime, endTime, data }
+    const isMetadataWrapper = isObject(metrics) && !isArray(metrics) && isArray(metrics.data);
+    let metricsData = isMetadataWrapper ? metrics.data : metrics;
 
     // Filter to top 100 pages by pageViews when requested
     if (filterByTop100PageViews) {
       // Sort by pageViews in descending order and take top 100
-      const originalCount = metrics.length;
-      metrics = metrics
+      const originalCount = metricsData.length;
+      metricsData = metricsData
         .filter((metricEntry) => metricEntry.pageviews !== undefined)
         .sort((a, b) => (b.pageviews || 0) - (a.pageviews || 0))
         .slice(0, 100);
 
-      log.info(`Filtered metrics from ${originalCount} to ${metrics.length} entries based on top pageViews`);
+      log.info(`Filtered metrics from ${originalCount} to ${metricsData.length} entries based on top pageViews`);
     }
 
-    return ok(metrics);
+    // Return in original format (with or without metadata wrapper)
+    if (isMetadataWrapper) {
+      return ok({ ...metrics, data: metricsData });
+    }
+    return ok(metricsData);
   };
 
   const getLatestSiteMetrics = async (context) => {
