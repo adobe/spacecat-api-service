@@ -1845,6 +1845,149 @@ describe('Sites Controller', () => {
     });
   });
 
+  // Metadata wrapper format tests
+  describe('Metrics with metadata wrapper format', () => {
+    it('handles metadata wrapper format with filterByTop100PageViews=true', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-last-week';
+
+      // Create mock metadata wrapper with 150 items
+      const mockData = Array.from({ length: 150 }, (_, i) => ({
+        url: `https://example.com/page${i}`,
+        pageviews: 150 - i,
+        metrics: [],
+      }));
+
+      const mockMetricsWrapper = {
+        label: 'last-week',
+        startTime: '2026-01-05T12:00:00.000Z',
+        endTime: '2026-01-12T12:00:00.000Z',
+        data: mockData,
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetricsWrapper);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTop100PageViews: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Should preserve wrapper format
+      expect(response).to.have.property('label', 'last-week');
+      expect(response).to.have.property('startTime', '2026-01-05T12:00:00.000Z');
+      expect(response).to.have.property('endTime', '2026-01-12T12:00:00.000Z');
+      expect(response).to.have.property('data');
+
+      // Should filter data to top 100
+      expect(response.data).to.have.length(100);
+
+      // Should be sorted by pageviews descending
+      expect(response.data[0].pageviews).to.equal(150);
+      expect(response.data[99].pageviews).to.equal(51);
+    });
+
+    it('handles metadata wrapper format without filtering', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'user-engagement-7d-last-to-last-week';
+
+      const mockMetricsWrapper = {
+        label: 'last-to-last-week',
+        startTime: '2025-12-29T12:00:00.000Z',
+        endTime: '2026-01-05T12:00:00.000Z',
+        data: [
+          { url: 'https://example.com/page1', engagement: 0.8 },
+          { url: 'https://example.com/page2', engagement: 0.6 },
+        ],
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetricsWrapper);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+      });
+
+      const response = await result.json();
+
+      // Should preserve entire wrapper
+      expect(response).to.have.property('label', 'last-to-last-week');
+      expect(response).to.have.property('startTime', '2025-12-29T12:00:00.000Z');
+      expect(response).to.have.property('endTime', '2026-01-05T12:00:00.000Z');
+      expect(response).to.have.property('data');
+      expect(response.data).to.have.length(2);
+    });
+
+    it('handles metadata wrapper with empty data array', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-last-week';
+
+      const mockMetricsWrapper = {
+        label: 'last-week',
+        startTime: '2026-01-05T12:00:00.000Z',
+        endTime: '2026-01-12T12:00:00.000Z',
+        data: [],
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetricsWrapper);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTop100PageViews: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Should preserve wrapper with empty data
+      expect(response).to.have.property('label', 'last-week');
+      expect(response).to.have.property('data');
+      expect(response.data).to.have.length(0);
+    });
+
+    it('handles regular array format (backward compatibility)', async () => {
+      const siteId = sites[0].getId();
+      const source = 'ahrefs';
+      const metric = 'organic-traffic';
+
+      const mockMetricsArray = [
+        { url: 'https://example.com/page1', pageviews: 1000 },
+        { url: 'https://example.com/page2', pageviews: 800 },
+      ];
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetricsArray);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+      });
+
+      const response = await result.json();
+
+      // Should return array directly (no wrapper)
+      expect(response).to.be.an('array');
+      expect(response).to.have.length(2);
+      expect(response).to.not.have.property('label');
+    });
+  });
+
   it('get page metrics by source returns list of metrics', async () => {
     const siteId = sites[0].getId();
     const source = 'ahrefs';
