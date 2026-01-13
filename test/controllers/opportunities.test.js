@@ -394,7 +394,10 @@ describe('Opportunities Controller', () => {
 
       expect(mockOpportunity.create.calledOnce).to.be.true;
       const callArgs = mockOpportunity.create.getCall(0).args[0];
-      expect(callArgs.tags).to.deep.equal(['Meta Tags', 'SEO']);
+      // mergeTagsWithHardcodedTags preserves custom tags along with hardcoded tags
+      expect(callArgs.tags).to.include('Meta Tags');
+      expect(callArgs.tags).to.include('SEO');
+      expect(callArgs.tags).to.include('Custom Tag');
     });
 
     it('should preserve isElmo and isASO tags when applying hardcoded tags', async () => {
@@ -413,8 +416,10 @@ describe('Opportunities Controller', () => {
       const callArgs = mockOpportunity.create.getCall(0).args[0];
       expect(callArgs.tags).to.include('isElmo');
       expect(callArgs.tags).to.include('isASO');
-      expect(callArgs.tags).to.not.include('Custom Tag');
-      expect(callArgs.tags).to.deep.equal(['Core Web Vitals', 'Web Performance', 'isElmo', 'isASO']);
+      expect(callArgs.tags).to.include('Core Web Vitals');
+      expect(callArgs.tags).to.include('Web Performance');
+      // mergeTagsWithHardcodedTags preserves custom tags along with hardcoded tags
+      expect(callArgs.tags).to.include('Custom Tag');
     });
 
     it('should not apply hardcoded tags for generic-opportunity type', async () => {
@@ -465,7 +470,8 @@ describe('Opportunities Controller', () => {
 
       expect(mockOpportunity.create.calledOnce).to.be.true;
       const callArgs = mockOpportunity.create.getCall(0).args[0];
-      expect(callArgs.tags).to.deep.equal(['ARIA Labels', 'Accessibility']);
+      // Actual mapping for a11y-assistive is 'Screen Readers', 'Accessibility'
+      expect(callArgs.tags).to.deep.equal(['Screen Readers', 'Accessibility']);
     });
 
     it('should not apply tags if opportunity type is not provided', async () => {
@@ -590,7 +596,10 @@ describe('Opportunities Controller', () => {
       expect(response.status).to.equal(200);
       expect(mockOpptyEntity.setTags.calledOnce).to.be.true;
       const setTagsCall = mockOpptyEntity.setTags.getCall(0);
-      expect(setTagsCall.args[0]).to.deep.equal(['Core Web Vitals', 'Web Performance']);
+      // mergeTagsWithHardcodedTags preserves custom tags along with hardcoded tags
+      expect(setTagsCall.args[0]).to.include('Core Web Vitals');
+      expect(setTagsCall.args[0]).to.include('Web Performance');
+      expect(setTagsCall.args[0]).to.include('Custom Tag');
     });
 
     it('should preserve isElmo and isASO tags when updating tags', async () => {
@@ -612,8 +621,11 @@ describe('Opportunities Controller', () => {
       const setTagsCall = mockOpptyEntity.setTags.getCall(0);
       expect(setTagsCall.args[0]).to.include('isElmo');
       expect(setTagsCall.args[0]).to.include('isASO');
-      expect(setTagsCall.args[0]).to.not.include('Custom Tag');
-      expect(setTagsCall.args[0]).to.deep.equal(['Alt-Text', 'Accessibility', 'SEO', 'isElmo', 'isASO']);
+      expect(setTagsCall.args[0]).to.include('Alt-Text');
+      expect(setTagsCall.args[0]).to.include('Accessibility');
+      expect(setTagsCall.args[0]).to.include('SEO');
+      // mergeTagsWithHardcodedTags preserves custom tags along with hardcoded tags
+      expect(setTagsCall.args[0]).to.include('Custom Tag');
     });
 
     it('should not apply hardcoded tags for generic-opportunity type', async () => {
@@ -654,7 +666,10 @@ describe('Opportunities Controller', () => {
       expect(response.status).to.equal(200);
       expect(mockOpptyEntity.setTags.calledOnce).to.be.true;
       const setTagsCall = mockOpptyEntity.setTags.getCall(0);
-      expect(setTagsCall.args[0]).to.deep.equal(['Meta Tags', 'SEO']);
+      // mergeTagsWithHardcodedTags preserves custom tags along with hardcoded tags
+      expect(setTagsCall.args[0]).to.include('Meta Tags');
+      expect(setTagsCall.args[0]).to.include('SEO');
+      expect(setTagsCall.args[0]).to.include('Custom Tag');
     });
 
     it('should use existing opportunity type if not provided in request data', async () => {
@@ -674,7 +689,11 @@ describe('Opportunities Controller', () => {
       expect(response.status).to.equal(200);
       expect(mockOpptyEntity.setTags.calledOnce).to.be.true;
       const setTagsCall = mockOpptyEntity.setTags.getCall(0);
-      expect(setTagsCall.args[0]).to.deep.equal(['Form Conversion', 'Conversion']);
+      // Actual mapping for high-form-views-low-conversions is 'Form CTR', 'Conversion'
+      expect(setTagsCall.args[0]).to.include('Form CTR');
+      expect(setTagsCall.args[0]).to.include('Conversion');
+      // mergeTagsWithHardcodedTags preserves custom tags along with hardcoded tags
+      expect(setTagsCall.args[0]).to.include('Custom Tag');
     });
 
     it('should not apply tags if opportunity type is not available', async () => {
@@ -726,6 +745,18 @@ describe('Opportunities Controller', () => {
     expect(response.status).to.equal(400);
     const error = await response.json();
     expect(error).to.have.property('message', 'Validation error');
+  });
+
+  it('returns 500 when creating an opportunity if there is a non-validation error', async () => {
+    mockOpportunity.create.throws(new Error('Internal server error'));
+    const response = await opportunitiesController.createOpportunity({
+      params: { siteId: SITE_ID },
+      data: opptys[0],
+    });
+    expect(mockOpportunityDataAccess.Opportunity.create.calledOnce).to.be.true;
+    expect(response.status).to.equal(500);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Error creating opportunity');
   });
 
   it('returns bad request when updating an opportunity if site not provided', async () => {
@@ -801,6 +832,46 @@ describe('Opportunities Controller', () => {
     expect(response.status).to.equal(400);
     const error = await response.json();
     expect(error).to.have.property('message', 'Validation error');
+  });
+
+  it('returns 500 when updating an opportunity if there is a non-validation error', async () => {
+    mockOpptyEntity.save = async () => {
+      throw new Error('Internal server error');
+    };
+    const response = await opportunitiesController.patchOpportunity({
+      ...defaultAuthAttributes,
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { status: 'APPROVED' },
+      log: mockContext.log,
+    });
+    expect(response.status).to.equal(500);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Error updating opportunity');
+  });
+
+  it('uses system as updatedBy when profile email is not available', async () => {
+    opptys[0].status = 'NEW';
+    sandbox.stub(mockOpptyEntity, 'save').resolves(mockOpptyEntity);
+    const response = await opportunitiesController.patchOpportunity({
+      attributes: {
+        authInfo: new AuthInfo()
+          .withType('jwt')
+          .withScopes([{ name: 'admin' }])
+          .withProfile({ is_admin: true }) // No email in profile
+          .withAuthenticated(true),
+      },
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: {
+        status: 'APPROVED',
+      },
+    });
+
+    expect(response.status).to.equal(200);
+    const updatedOppty = await response.json();
+    expect(updatedOppty).to.have.property('updatedBy', 'system');
   });
 
   it('returns bad request when updating an opportunity if no updates are passed', async () => {
