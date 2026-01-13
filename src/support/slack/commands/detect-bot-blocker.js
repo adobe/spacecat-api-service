@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { detectBotBlocker, isValidUrl } from '@adobe/spacecat-shared-utils';
+import { isValidUrl, detectBotBlocker } from '@adobe/spacecat-shared-utils';
 
 import BaseCommand from './base.js';
 import { extractURLFromSlackInput, postErrorMessage } from '../../../utils/slack/base.js';
@@ -30,14 +30,18 @@ function DetectBotBlockerCommand(context) {
   const { log } = context;
 
   const formatResult = (result) => {
-    const { crawlable, type, confidence } = result;
-    const confidencePercent = (confidence * 100).toFixed(0);
+    const {
+      crawlable, type, confidence, reason,
+    } = result;
+    const confidencePercent = (typeof confidence === 'number')
+      ? `${(confidence * 100).toFixed(0)}%`
+      : 'N/A%';
     const crawlableEmoji = crawlable ? ':white_check_mark:' : ':no_entry:';
 
     let confidenceEmoji = ':question:';
     if (confidence >= 0.95) {
       confidenceEmoji = ':muscle:';
-    } else if (confidence >= 0.5) {
+    } else if (confidence >= 0.7) {
       confidenceEmoji = ':thinking_face:';
     }
 
@@ -47,18 +51,24 @@ function DetectBotBlockerCommand(context) {
     else if (type === 'akamai') typeLabel = 'Akamai';
     else if (type === 'fastly') typeLabel = 'Fastly';
     else if (type === 'cloudfront') typeLabel = 'AWS CloudFront';
+    else if (type === 'http2-block') typeLabel = 'HTTP/2 Stream Error';
     else if (type === 'cloudflare-allowed') typeLabel = 'Cloudflare (Allowed)';
     else if (type === 'imperva-allowed') typeLabel = 'Imperva (Allowed)';
     else if (type === 'akamai-allowed') typeLabel = 'Akamai (Allowed)';
     else if (type === 'fastly-allowed') typeLabel = 'Fastly (Allowed)';
     else if (type === 'cloudfront-allowed') typeLabel = 'AWS CloudFront (Allowed)';
-    else if (type === 'http2-block') typeLabel = 'HTTP/2 Stream Error';
     else if (type === 'none') typeLabel = 'No Blocker Detected';
     else if (type === 'unknown') typeLabel = 'Unknown';
 
-    return `${crawlableEmoji} *Crawlable:* ${crawlable ? 'Yes' : 'No'}\n`
+    let message = `${crawlableEmoji} *Crawlable:* ${crawlable ? 'Yes' : 'No'}\n`
       + `:shield: *Blocker Type:* ${typeLabel}\n`
-      + `${confidenceEmoji} *Confidence:* ${confidencePercent}%`;
+      + `${confidenceEmoji} *Confidence:* ${confidencePercent}`;
+
+    if (reason) {
+      message += `\n:information_source: *Reason:* ${reason}`;
+    }
+
+    return message;
   };
 
   const handleExecution = async (args, slackContext) => {
