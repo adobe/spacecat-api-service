@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Adobe. All rights reserved.
+ * Copyright 2026 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
  * of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -18,7 +18,6 @@ import { triggerGlobalImportRun } from '../../utils.js';
 /* eslint-disable no-useless-escape */
 const PHRASES = ['run global import'];
 
-// Global import types that don't require a siteId
 const GLOBAL_IMPORTS = [
   'stale-suggestions-cleanup',
 ];
@@ -70,7 +69,6 @@ function runGlobalImportCommand(context) {
         return;
       }
 
-      // Verify the import type is configured in the system
       const jobConfig = config.getJobs().filter(
         (job) => job.group === 'imports' && job.type === importType,
       );
