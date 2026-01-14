@@ -571,6 +571,38 @@ describe('Suggestions Controller', () => {
     expect(error).to.have.property('message', 'Site not found');
   });
 
+  it('gets all suggestions for an opportunity returns bad request for invalid view parameter', async () => {
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { view: 'invalid-view' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid view. Must be one of: minimal, summary, full');
+  });
+
+  it('gets all suggestions for an opportunity with minimal view', async () => {
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { view: 'minimal' },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    const suggestions = await response.json();
+    expect(suggestions).to.be.an('array').with.lengthOf(1);
+    expect(suggestions[0]).to.have.property('id');
+    expect(suggestions[0]).to.have.property('url');
+    expect(suggestions[0]).to.not.have.property('data');
+    expect(suggestions[0]).to.not.have.property('kpiDeltas');
+  });
+
   it('gets paged suggestions returns bad request if limit is less than 1', async () => {
     const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
@@ -647,6 +679,21 @@ describe('Suggestions Controller', () => {
     expect(response.status).to.equal(404);
     const error = await response.json();
     expect(error).to.have.property('message', 'Opportunity not found');
+  });
+
+  it('gets paged suggestions returns bad request for invalid view parameter', async () => {
+    const response = await suggestionsController.getAllForOpportunityPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        limit: 10,
+      },
+      data: { view: 'invalid-view' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid view. Must be one of: minimal, summary, full');
   });
 
   it('gets paged suggestions for an opportunity successfully', async () => {
@@ -872,6 +919,21 @@ describe('Suggestions Controller', () => {
     expect(error).to.have.property('message', 'Status is required');
   });
 
+  it('gets all suggestions for an opportunity by status returns bad request for invalid view parameter', async () => {
+    const response = await suggestionsController.getByStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+      },
+      data: { view: 'invalid-view' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid view. Must be one of: minimal, summary, full');
+  });
+
   it('gets all suggestions for a site does not exist', async () => {
     const response = await suggestionsController.getByStatus({
       params: {
@@ -1023,6 +1085,21 @@ describe('Suggestions Controller', () => {
     expect(response.status).to.equal(404);
     const error = await response.json();
     expect(error).to.have.property('message', 'Opportunity not found');
+  });
+
+  it('gets paged suggestions by status returns bad request for invalid view parameter', async () => {
+    const response = await suggestionsController.getByStatusPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+      },
+      data: { view: 'invalid-view' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid view. Must be one of: minimal, summary, full');
   });
 
   it('gets paged suggestions by status successfully', async () => {
@@ -1297,6 +1374,21 @@ describe('Suggestions Controller', () => {
     expect(response.status).to.equal(400);
     const error = await response.json();
     expect(error).to.have.property('message', 'Suggestion ID required');
+  });
+
+  it('gets suggestion by ID returns bad request for invalid view parameter', async () => {
+    const response = await suggestionsController.getByID({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: { view: 'invalid-view' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid view. Must be one of: minimal, summary, full');
   });
 
   it('gets suggestion by ID returns not found if suggestion is not found', async () => {

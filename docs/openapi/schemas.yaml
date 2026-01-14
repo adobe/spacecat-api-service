@@ -2928,6 +2928,58 @@ SuggestionList:
   type: array
   items:
     $ref: '#/Suggestion'
+SuggestionMinimal:
+  type: object
+  description: Minimal suggestion projection containing only id and url (lightest payload for selection lists)
+  properties:
+    id:
+      description: UUID of this suggestion
+      $ref: '#/Id'
+    url:
+      description: URL associated with the suggestion (extracted from data.url, data.pageUrl, data.url_from, or data.urlFrom). May be null if no URL found.
+      type: string
+      example: "https://example.com/page"
+  required:
+    - id
+SuggestionSummary:
+  type: object
+  description: Summary suggestion projection containing key fields without heavy data (for table displays)
+  properties:
+    id:
+      description: UUID of this suggestion
+      $ref: '#/Id'
+    opportunityId:
+      description: UUID of the opportunity this suggestion belongs to
+      $ref: '#/Id'
+    type:
+      $ref: '#/SuggestionType'
+    rank:
+      description: Type-specific numeric rank value (e.g., "domainTraffic" for a broken-backlink) helps sorting
+      type: number
+      example: 45600
+    status:
+      description: Status of this suggestion
+      $ref: '#/SuggestionStatus'
+    url:
+      description: URL associated with the suggestion (extracted from data). May be null if no URL found.
+      type: string
+      example: "https://example.com/page"
+    createdAt:
+      description: UTC timestamp of when the suggestion was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: UTC timestamp of when the suggestion was last updated
+      $ref: '#/DateTime'
+    updatedBy:
+      description: Who last updated this suggestion
+      type: string
+      example: "user@example.com"
+  required:
+    - id
+    - opportunityId
+    - type
+    - rank
+    - status
 PaginationMetadata:
   type: object
   description: Metadata for paginated responses

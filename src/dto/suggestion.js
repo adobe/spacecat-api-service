@@ -13,28 +13,55 @@
 import { buildAggregationKeyFromSuggestion } from '@adobe/spacecat-shared-utils';
 
 /**
+ * Valid projection views for suggestions.
+ * @type {string[]}
+ */
+export const SUGGESTION_VIEWS = ['minimal', 'summary', 'full'];
+
+/**
+ * Extracts URL from suggestion data.
+ * @param {object} data - Suggestion data object.
+ * @returns {string|null} URL or null if not found.
+ */
+const extractUrl = (data) => data?.url || data?.pageUrl || data?.url_from || data?.urlFrom || null;
+
+/**
  * Data transfer object for Suggestion.
  */
 export const SuggestionDto = {
-
   /**
-   * Converts a Suggestion object into a JSON object.
+   * Converts a Suggestion object into a JSON object with optional projection.
    * @param {Readonly<Suggestion>} suggestion - Suggestion object.
-   * @returns {{
-   *  id: string,
-   *  opportunityId: string,
-   *  type: string,
-   *  rank: number,
-   *  data: object,
-   *  kpiDeltas: object,
-   *  status: string,
-   *  createdAt: string,
-   *  updatedAt: string,
-   *  updatedBy: string,
-   * }} JSON object.
+   * @param {string} [view='full'] - Projection view: 'minimal', 'summary', or 'full'.
+   * @returns {object} JSON object with fields based on the selected view.
    */
-  toJSON: (suggestion) => {
+  toJSON: (suggestion, view = 'full') => {
     const data = suggestion.getData();
+
+    // Minimal view: id and url only
+    if (view === 'minimal') {
+      return {
+        id: suggestion.getId(),
+        url: extractUrl(data),
+      };
+    }
+
+    // Summary view: key fields without heavy data
+    if (view === 'summary') {
+      return {
+        id: suggestion.getId(),
+        opportunityId: suggestion.getOpportunityId(),
+        type: suggestion.getType(),
+        rank: suggestion.getRank(),
+        status: suggestion.getStatus(),
+        url: extractUrl(data),
+        createdAt: suggestion.getCreatedAt(),
+        updatedAt: suggestion.getUpdatedAt(),
+        updatedBy: suggestion.getUpdatedBy(),
+      };
+    }
+
+    // Full view: all fields (default, backward compatible)
     const aggregationKey = buildAggregationKeyFromSuggestion(data);
     return {
       id: suggestion.getId(),
