@@ -149,7 +149,7 @@ broken-backlinks-suggestions-status-update-response:
       - id: '945e4567-f543-12d3-a456-426614174010'
         index: 1
         statusCode: 400
-        message: 'Validation failed in suggestion: status must be one of NEW,APPROVED,SKIPPED,FIXED,ERROR'
+        message: 'Validation failed in suggestion: status must be one of NEW,APPROVED,SKIPPED,FIXED,ERROR,IN_PROGRESS,OUTDATED,PENDING_VALIDATION,REJECTED'
     metadata:
       total: 2
       success: 1
