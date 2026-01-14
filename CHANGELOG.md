@@ -1,3 +1,10 @@
+# [1.283.0](https://github.com/adobe/spacecat-api-service/compare/v1.282.1...v1.283.0) (2026-01-13)
+
+
+### Features
+
+* Add orgId and imsOrgId to site details ([#1682](https://github.com/adobe/spacecat-api-service/issues/1682)) ([246c135](https://github.com/adobe/spacecat-api-service/commit/246c135bc6ad9fd68e0d3857de2ae87b6ed5aba1))
+
 ## [1.282.1](https://github.com/adobe/spacecat-api-service/compare/v1.282.0...v1.282.1) (2026-01-13)
 
 
