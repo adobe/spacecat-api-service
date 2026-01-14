@@ -355,6 +355,8 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/rationale': llmoController.getLlmoRationale,
     'POST /llmo/onboard': llmoController.onboardCustomer,
     'POST /sites/:siteId/llmo/offboard': llmoController.offboardCustomer,
+    'POST /sites/:siteId/llmo/edge-optimize-config': llmoController.createOrUpdateEdgeConfig,
+    'GET /sites/:siteId/llmo/edge-optimize-config': llmoController.getEdgeConfig,
 
     // Tier Specific Routes
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,
