@@ -603,6 +603,66 @@ describe('Suggestions Controller', () => {
     expect(suggestions[0]).to.not.have.property('kpiDeltas');
   });
 
+  it('gets all suggestions for an opportunity filtered by single status', async () => {
+    const suggWithStatus = { ...suggs[0], status: 'NEW' };
+    mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggWithStatus)]);
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { status: 'NEW' },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(mockSuggestion.allByOpportunityId).to.have.been.calledWith(OPPORTUNITY_ID);
+    const suggestions = await response.json();
+    expect(suggestions).to.be.an('array').with.lengthOf(1);
+  });
+
+  it('gets all suggestions for an opportunity filtered by multiple statuses (comma-separated)', async () => {
+    const sugg1 = { ...suggs[0], status: 'NEW' };
+    const sugg2 = { ...suggs[0], id: 'different-id', status: 'APPROVED' };
+    const sugg3 = { ...suggs[0], id: 'another-id', status: 'COMPLETED' };
+    mockSuggestion.allByOpportunityId.resolves([
+      mockSuggestionEntity(sugg1),
+      mockSuggestionEntity(sugg2),
+      mockSuggestionEntity(sugg3),
+    ]);
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { status: 'NEW,APPROVED' },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    const suggestions = await response.json();
+    // Should only return NEW and APPROVED, not COMPLETED
+    expect(suggestions).to.be.an('array').with.lengthOf(2);
+  });
+
+  it('gets all suggestions for an opportunity with status and view filters', async () => {
+    const suggWithStatus = { ...suggs[0], status: 'NEW' };
+    mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggWithStatus)]);
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { status: 'NEW', view: 'minimal' },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    const suggestions = await response.json();
+    expect(suggestions).to.be.an('array').with.lengthOf(1);
+    expect(suggestions[0]).to.have.property('id');
+    expect(suggestions[0]).to.have.property('url');
+    expect(suggestions[0]).to.not.have.property('data');
+    expect(suggestions[0]).to.not.have.property('kpiDeltas');
+  });
+
   it('gets paged suggestions returns bad request if limit is less than 1', async () => {
     const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
@@ -714,6 +774,7 @@ describe('Suggestions Controller', () => {
     expect(result.pagination).to.have.property('cursor', null);
     expect(result.pagination).to.have.property('hasMore', false);
   });
+
 
   it('gets paged suggestions returns empty array when no suggestions exist', async () => {
     const emptyResults = {

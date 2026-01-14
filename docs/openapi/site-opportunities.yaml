@@ -196,14 +196,25 @@ site-opportunity-suggestions:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/opportunityId'
     - $ref: './parameters.yaml#/suggestionView'
+    - $ref: './parameters.yaml#/suggestionStatus'
   get:
     operationId: getSiteOpportunitySuggestions
     summary: |
       Retrieve a list of all suggestions for a specific opportunity
     description: |
-      Returns suggestions with optional field projection using the view parameter.
-      Use view=minimal for selection lists (returns only id and url).
-      Use view=summary for table displays to reduce bandwidth.
+      Returns all suggestions (non-paginated) with optional field projection and status filtering.
+      
+      **Field Projection:**
+      - `view=minimal` - Returns only id and url (lightest, for selection lists)
+      - `view=summary` - Returns key fields without heavy data payload
+      - `view=full` - Returns all fields (default)
+      
+      **Status Filtering:**
+      - Supports single status: `status=NEW`
+      - Supports multiple statuses: `status=NEW,APPROVED,IN_PROGRESS`
+      - Fetches all suggestions and filters in-memory (O(n) operation)
+      
+      **Note:** For paginated results, use the `/paged` endpoints. Status filtering is only available on this non-paginated endpoint or the dedicated `/by-status` endpoints.
     tags:
       - opportunity-suggestions
     responses:
@@ -309,6 +320,7 @@ site-opportunity-suggestions-paged:
     description: |
       Returns suggestions in pages with pagination metadata. Use the cursor from the response to fetch subsequent pages.
       Supports field projection using the view parameter to reduce response size.
+      Note: For status filtering, use the non-paginated endpoint or the by-status endpoints.
     tags:
       - opportunity-suggestions
     responses:
@@ -347,6 +359,7 @@ site-opportunity-suggestions-paged-with-cursor:
     description: |
       Returns suggestions in pages with pagination metadata. Provide the cursor from a previous response to fetch the next page.
       Supports field projection using the view parameter to reduce response size.
+      Note: For status filtering, use the non-paginated endpoint or the by-status endpoints.
     tags:
       - opportunity-suggestions
     responses:

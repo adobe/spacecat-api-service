@@ -116,6 +116,48 @@ describe('Suggestion DTO', () => {
         expect(json.url).to.equal('https://example.com/url-from-camel');
       });
 
+      it('extracts url from nested recommendations[0].pageUrl for alt-text suggestions', () => {
+        const suggestion = {
+          ...createMockSuggestion(),
+          getData: () => ({
+            recommendations: [
+              { pageUrl: 'https://example.com/nested-page', altText: 'description' },
+              { pageUrl: 'https://example.com/other-page', altText: 'other' },
+            ],
+          }),
+        };
+
+        const json = SuggestionDto.toJSON(suggestion, 'minimal');
+
+        expect(json.url).to.equal('https://example.com/nested-page');
+      });
+
+      it('extracts url from nested recommendations[0].url when pageUrl not present', () => {
+        const suggestion = {
+          ...createMockSuggestion(),
+          getData: () => ({
+            recommendations: [
+              { url: 'https://example.com/nested-url', altText: 'description' },
+            ],
+          }),
+        };
+
+        const json = SuggestionDto.toJSON(suggestion, 'minimal');
+
+        expect(json.url).to.equal('https://example.com/nested-url');
+      });
+
+      it('returns null url when recommendations array is empty', () => {
+        const suggestion = {
+          ...createMockSuggestion(),
+          getData: () => ({ recommendations: [] }),
+        };
+
+        const json = SuggestionDto.toJSON(suggestion, 'minimal');
+
+        expect(json.url).to.be.null;
+      });
+
       it('returns null url when no URL field is present', () => {
         const suggestion = {
           ...createMockSuggestion(),

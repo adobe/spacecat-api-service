@@ -110,6 +110,7 @@ function SuggestionsController(ctx, sqs, env) {
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId;
     const viewParam = context.data?.view;
+    const statusParam = context.data?.status;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -135,7 +136,9 @@ function SuggestionsController(ctx, sqs, env) {
       return forbidden('User does not belong to the organization');
     }
 
-    const suggestionEntities = await Suggestion.allByOpportunityId(opptyId);
+    // Fetch all suggestions (single DB call)
+    let suggestionEntities = await Suggestion.allByOpportunityId(opptyId);
+
     // Check if the opportunity belongs to the site
     if (suggestionEntities.length > 0) {
       const oppty = await suggestionEntities[0].getOpportunity();
@@ -143,6 +146,17 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
+
+    // Filter by status in memory if status param provided (supports comma-separated values)
+    if (statusParam) {
+      const statuses = statusParam.split(',').map((s) => s.trim()).filter(Boolean);
+      if (statuses.length > 0) {
+        suggestionEntities = suggestionEntities.filter(
+          (sugg) => statuses.includes(sugg.getStatus()),
+        );
+      }
+    }
+
     const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg, view));
     return ok(suggestions);
   };
@@ -190,13 +204,11 @@ function SuggestionsController(ctx, sqs, env) {
       return forbidden('User does not belong to the organization');
     }
 
-    const results = await Suggestion
-      .allByOpportunityId(opptyId, {
-        limit,
-        cursor,
-        returnCursor: true,
-      });
-    const { data: suggestionEntities = [], cursor: newCursor = null } = results;
+    // Fetch suggestions with pagination
+    const paginationOptions = { limit, cursor, returnCursor: true };
+    const results = await Suggestion.allByOpportunityId(opptyId, paginationOptions);
+    const suggestionEntities = results.data || [];
+    const newCursor = results.cursor || null;
 
     // Check if the opportunity belongs to the site
     if (suggestionEntities.length > 0) {

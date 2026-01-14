@@ -20,10 +20,32 @@ export const SUGGESTION_VIEWS = ['minimal', 'summary', 'full'];
 
 /**
  * Extracts URL from suggestion data.
+ * Handles both flat structures and nested recommendations.
  * @param {object} data - Suggestion data object.
  * @returns {string|null} URL or null if not found.
  */
-const extractUrl = (data) => data?.url || data?.pageUrl || data?.url_from || data?.urlFrom || null;
+const extractUrl = (data) => {
+  if (!data) return null;
+
+  // Check top-level URL fields (most common)
+  if (data.url) return data.url;
+  if (data.pageUrl) return data.pageUrl;
+  if (data.url_from) return data.url_from;
+  if (data.urlFrom) return data.urlFrom;
+
+  // Check nested recommendations (e.g., alt-text suggestions)
+  const hasRecommendations = data.recommendations
+    && Array.isArray(data.recommendations)
+    && data.recommendations.length > 0;
+
+  if (hasRecommendations) {
+    const firstRec = data.recommendations[0];
+    if (firstRec.pageUrl) return firstRec.pageUrl;
+    if (firstRec.url) return firstRec.url;
+  }
+
+  return null;
+};
 
 /**
  * Data transfer object for Suggestion.
