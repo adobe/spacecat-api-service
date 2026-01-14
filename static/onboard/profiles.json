@@ -38,9 +38,7 @@
 		"imports": {
 			"organic-traffic" : {},
 			"top-pages" : {},
-			"all-traffic": {},
-			"user-engagement": {},
-			"cwv-weekly": {}
+			"all-traffic": {}
 		},
 		"config": {
 			"scheduledRun": false
