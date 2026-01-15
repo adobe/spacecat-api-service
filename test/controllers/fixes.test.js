@@ -1687,6 +1687,21 @@ describe('Fixes Controller', () => {
       expect(await response.json()).deep.equals({ message: 'No suggestions found for this fix' });
     });
 
+    it('responds 400 if there are suggestions but none in ERROR status', async () => {
+      const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+      requestContext.params.fixId = fixId;
+
+      const fix = await createFixWithStatus(fixId, 'FAILED');
+      const fixedSuggestion = await createSuggestionWithStatus('FIXED');
+      const newSuggestion = await createSuggestionWithStatus('NEW');
+
+      sandbox.stub(fix, 'getSuggestions').resolves([fixedSuggestion, newSuggestion]);
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'No suggestions in ERROR status found for this fix' });
+    });
+
     it('successfully rolls back a failed fix with ERROR suggestions', async () => {
       const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
       requestContext.params.fixId = fixId;
@@ -1782,6 +1797,26 @@ describe('Fixes Controller', () => {
 
       const result = await response.json();
       expect(result.message).to.include('Error rolling back fix');
+    });
+
+    it('responds 400 if transaction is canceled due to condition check failure', async () => {
+      const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+      requestContext.params.fixId = fixId;
+
+      const fix = await createFixWithStatus(fixId, 'FAILED');
+      const suggestion = await createSuggestionWithStatus('ERROR');
+
+      sandbox.stub(fix, 'getSuggestions').resolves([suggestion]);
+      fixEntityCollection.rollbackFixWithSuggestionUpdates.rejects(
+        new Error('Transaction canceled: condition check failed for fix'),
+      );
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 400 });
+
+      const result = await response.json();
+      expect(result.message).to.include('Rollback failed');
+      expect(result.message).to.include('Transaction canceled');
     });
   });
 });
