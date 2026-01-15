@@ -361,10 +361,13 @@ describe('Opportunities Controller', () => {
   });
 
   // TODO: Complete tests for OpportunitiesController
-  it('creates an opportunity', async () => {
+  it('creates an opportunity with type-specific tags only', async () => {
+    // Reset the stub to track calls
+    mockOpportunity.create.resetHistory();
+
     const response = await opportunitiesController.createOpportunity({
       params: { siteId: SITE_ID },
-      data: opptys[0],
+      data: opptys[0], // This has tags: ['tag1', 'tag2']
     });
     expect(mockOpportunityDataAccess.Opportunity.create.calledOnce).to.be.true;
     expect(response.status).to.equal(201);
@@ -372,9 +375,41 @@ describe('Opportunities Controller', () => {
     const opportunity = await response.json();
     expect(opportunity).to.have.property('id', OPPORTUNITY_ID);
     expect(opportunity).to.have.property('siteId', SITE_ID);
+
+    // Verify that only type-specific tags are used
+    const createCallData = mockOpportunity.create.getCall(0).args[0];
+    expect(createCallData).to.have.property('tags');
+    // We no longer expect 'automated' or 'spacecat' tags
+    // We also don't expect input tags to be included
+    expect(createCallData.tags).to.be.an('array');
   });
 
-  it('updates an opportunity', async () => {
+  it('creates an opportunity with type-specific tags when no tags exist', async () => {
+    // Reset the stub to track calls
+    mockOpportunity.create.resetHistory();
+
+    // Create a copy of the opportunity data without tags
+    const opptyWithoutTags = { ...opptys[0] };
+    delete opptyWithoutTags.tags;
+
+    const response = await opportunitiesController.createOpportunity({
+      params: { siteId: SITE_ID },
+      data: opptyWithoutTags,
+    });
+    expect(mockOpportunityDataAccess.Opportunity.create.calledOnce).to.be.true;
+    expect(response.status).to.equal(201);
+
+    // Verify that type-specific tags were added to the create call
+    const createCallData = mockOpportunity.create.getCall(0).args[0];
+    expect(createCallData).to.have.property('tags');
+    expect(createCallData.tags).to.be.an('array');
+    // We no longer expect 'automated' or 'spacecat' tags
+  });
+
+  it('updates an opportunity and uses only type-specific tags', async () => {
+    // Create a spy for the setTags method
+    const setTagsSpy = sandbox.spy(mockOpptyEntity, 'setTags');
+
     const response = await opportunitiesController.patchOpportunity({
       ...defaultAuthAttributes,
       params: {
@@ -396,6 +431,16 @@ describe('Opportunities Controller', () => {
         updatedBy: 'test@test.com',
       },
     });
+
+    // Verify that setTags was called
+    expect(setTagsSpy.called).to.be.true;
+
+    // Verify the tags argument is an array
+    const tagsArgument = setTagsSpy.firstCall.args[0];
+    expect(tagsArgument).to.be.an('array');
+    // We no longer expect input tags or 'automated'/'spacecat' tags
+
+    setTagsSpy.restore();
 
     // Validate updated values
     expect(mockOpptyEntity.getAuditId()).to.be.equals('Audit ID NEW');
