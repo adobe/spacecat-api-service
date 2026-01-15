@@ -54,6 +54,10 @@ describe('getRouteHandlers', () => {
     getPTAWeeklySummary: sinon.stub(),
   };
 
+  const mockTrafficToolsController = {
+    getPredominantTraffic: sinon.stub(),
+  };
+
   const mockUrlStoreController = {
     listUrls: sinon.stub(),
     listUrlsByAuditType: sinon.stub(),
@@ -264,6 +268,8 @@ describe('getRouteHandlers', () => {
     offboardCustomer: () => null,
     queryFiles: () => null,
     getLlmoRationale: () => null,
+    createOrUpdateEdgeConfig: () => null,
+    getEdgeConfig: () => null,
   };
 
   const mockSandboxAuditController = {
@@ -338,6 +344,7 @@ describe('getRouteHandlers', () => {
       mockReportsController,
       mockUrlStoreController,
       mockPTA2Controller,
+      mockTrafficToolsController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -517,6 +524,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/traffic/paid/url-page-type-campaign-platform',
       'GET /sites/:siteId/traffic/paid/url-page-type-platform-device',
       'GET /sites/:siteId/traffic/paid/pta2/weekly-summary',
+      'POST /sites/:siteId/traffic/predominant-type',
       'GET /sites/:siteId/traffic/paid/type-device',
       'GET /sites/:siteId/traffic/paid/type-device-channel',
       'GET /sites/:siteId/traffic/paid/channel',
@@ -589,6 +597,8 @@ describe('getRouteHandlers', () => {
       'DELETE /sites/:siteId/llmo/customer-intent/:intentKey',
       'PATCH /sites/:siteId/llmo/customer-intent/:intentKey',
       'POST /sites/:siteId/llmo/offboard',
+      'POST /sites/:siteId/llmo/edge-optimize-config',
+      'GET /sites/:siteId/llmo/edge-optimize-config',
       'GET /consent-banner/:jobId',
       'PATCH /sites/:siteId/llmo/cdn-logs-filter',
       'POST /sites/:siteId/sandbox/audit',
@@ -694,6 +704,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/type-channel'].handler).to.equal(mockTrafficController.getPaidTrafficByTypeChannel);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/type-channel-campaign'].handler).to.equal(mockTrafficController.getPaidTrafficByTypeChannelCampaign);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/pta2/weekly-summary'].handler).to.equal(mockPTA2Controller.getPTAWeeklySummary);
+    expect(dynamicRoutes['POST /sites/:siteId/traffic/predominant-type'].handler).to.equal(mockTrafficToolsController.getPredominantTraffic);
+    expect(dynamicRoutes['POST /sites/:siteId/traffic/predominant-type'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/type-device'].handler).to.equal(mockTrafficController.getPaidTrafficByTypeDevice);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/type-device-channel'].handler).to.equal(mockTrafficController.getPaidTrafficByTypeDeviceChannel);
     expect(dynamicRoutes['GET /sites/:siteId/traffic/paid/channel'].handler).to.equal(mockTrafficController.getPaidTrafficByChannel);
@@ -784,6 +796,10 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/customer-intent/:intentKey'].paramNames).to.deep.equal(['siteId', 'intentKey']);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/offboard'].handler).to.equal(mockLlmoController.offboardCustomer);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/offboard'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-config'].handler).to.equal(mockLlmoController.createOrUpdateEdgeConfig);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-config'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-config'].handler).to.equal(mockLlmoController.getEdgeConfig);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-config'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /consent-banner/:jobId'].handler).to.equal(mockConsentBannerController.getScreenshots);
     expect(dynamicRoutes['GET /consent-banner/:jobId'].paramNames).to.deep.equal(['jobId']);
     expect(dynamicRoutes['PATCH /sites/:siteId/llmo/cdn-logs-filter'].handler).to.equal(mockLlmoController.patchLlmoCdnLogsFilter);
