@@ -990,35 +990,50 @@ export const onboardSingleSite = async (
 
     const auditTypes = Object.keys(profile.audits);
 
+    // Determine scheduledRun early to decide enable/disable behavior
+    const scheduledRun = additionalParams.scheduledRun !== undefined
+      ? additionalParams.scheduledRun
+      : (profile.config?.scheduledRun || false);
+
     const latestConfiguration = await Configuration.findLatest();
-
-    // Check which audits are not already enabled
     const auditsEnabled = [];
-    for (const auditType of auditTypes) {
-      /* eslint-disable no-await-in-loop */
-      const isEnabled = latestConfiguration.isHandlerEnabledForSite(auditType, site);
-      if (!isEnabled) {
-        latestConfiguration.enableHandlerForSite(auditType, site);
-        auditsEnabled.push(auditType);
-      }
-    }
 
-    if (auditsEnabled.length > 0) {
-      try {
-        await latestConfiguration.save();
-        log.debug(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`);
-      } catch (error) {
-        log.error(`Failed to save configuration for site ${siteID}:`, error);
-        throw error;
+    // Only enable audits in configuration if scheduledRun is true (paid profiles)
+    if (scheduledRun) {
+      // Check which audits are not already enabled
+      for (const auditType of auditTypes) {
+        /* eslint-disable no-await-in-loop */
+        const isEnabled = latestConfiguration.isHandlerEnabledForSite(auditType, site);
+        if (!isEnabled) {
+          latestConfiguration.enableHandlerForSite(auditType, site);
+          auditsEnabled.push(auditType);
+        }
+      }
+
+      if (auditsEnabled.length > 0) {
+        try {
+          await latestConfiguration.save();
+          log.debug(`Enabled the following audits for site ${siteID}: ${auditsEnabled.join(', ')}`);
+        } catch (error) {
+          log.error(`Failed to save configuration for site ${siteID}:`, error);
+          throw error;
+        }
+      } else {
+        log.debug(`All audits are already enabled for site ${siteID}`);
       }
     } else {
-      log.debug(`All audits are already enabled for site ${siteID}`);
+      log.debug(`Skipping audit enablement for site ${siteID} because scheduledRun is false (one-off execution)`);
     }
 
     reportLine.audits = auditTypes.join(', ');
     const auditsMessage = reportLine.audits || 'None';
     const importsMessage = reportLine.imports || 'None';
-    await say(`:white_check_mark: *For site ${baseURL}*: Enabled imports: ${importsMessage} and audits: ${auditsMessage}`);
+
+    if (scheduledRun) {
+      await say(`:white_check_mark: *For site ${baseURL}*: Enabled imports: ${importsMessage} and audits: ${auditsMessage}`);
+    } else {
+      await say(`:white_check_mark: *For site ${baseURL}*: Enabled imports: ${importsMessage}. Running audits: ${auditsMessage} (one-off execution, not scheduled)`);
+    }
 
     // trigger audit runs
     if (auditTypes.length > 0) {
@@ -1026,17 +1041,13 @@ export const onboardSingleSite = async (
     }
     for (const auditType of auditTypes) {
       /* eslint-disable no-await-in-loop */
-      if (!latestConfiguration.isHandlerEnabledForSite(auditType, site)) {
-        await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
-      } else {
-        await triggerAuditForSite(
-          site,
-          auditType,
-          undefined,
-          slackContext,
-          context,
-        );
-      }
+      await triggerAuditForSite(
+        site,
+        auditType,
+        undefined,
+        slackContext,
+        context,
+      );
     }
 
     // Opportunity status job
@@ -1056,29 +1067,7 @@ export const onboardSingleSite = async (
       },
     };
 
-    const scheduledRun = additionalParams.scheduledRun !== undefined
-      ? additionalParams.scheduledRun
-      : (profile.config?.scheduledRun || false);
-
     await say(`:information_source: Scheduled run: ${scheduledRun}`);
-
-    // Disable imports and audits job - only disable what was enabled during onboarding
-    const disableImportAndAuditJob = {
-      type: 'disable-import-audit-processor',
-      siteId: siteID,
-      siteUrl: baseURL,
-      imsOrgId: imsOrgID,
-      organizationId,
-      taskContext: {
-        importTypes: importsEnabled || [],
-        auditTypes: auditsEnabled || [],
-        scheduledRun,
-        slackContext: {
-          channelId: slackContext.channelId,
-          threadTs: slackContext.threadTs,
-        },
-      },
-    };
 
     // Demo URL job
     const demoURLJob = {
@@ -1115,11 +1104,31 @@ export const onboardSingleSite = async (
     // Prepare and start step function workflow with the necessary parameters
     const workflowInput = {
       opportunityStatusJob,
-      disableImportAndAuditJob,
       demoURLJob,
       cwvDemoSuggestionsJob,
       workflowWaitTime: workflowWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS,
     };
+
+    // Only add disable job for paid profiles (scheduledRun=true)
+    // For demo profiles, we don't enable audits, so there's nothing to disable
+    if (scheduledRun) {
+      workflowInput.disableImportAndAuditJob = {
+        type: 'disable-import-audit-processor',
+        siteId: siteID,
+        siteUrl: baseURL,
+        imsOrgId: imsOrgID,
+        organizationId,
+        taskContext: {
+          importTypes: importsEnabled || [],
+          auditTypes: auditsEnabled || [],
+          scheduledRun,
+          slackContext: {
+            channelId: slackContext.channelId,
+            threadTs: slackContext.threadTs,
+          },
+        },
+      };
+    }
 
     const workflowName = `onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`;
 
