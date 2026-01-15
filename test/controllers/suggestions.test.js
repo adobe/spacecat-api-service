@@ -799,6 +799,28 @@ describe('Suggestions Controller', () => {
     expect(result.pagination).to.have.property('hasMore', false);
   });
 
+  it('gets paged suggestions handles undefined data property gracefully', async () => {
+    const resultsWithoutData = {
+      cursor: undefined,
+    };
+    mockSuggestion.allByOpportunityId.resolves(resultsWithoutData);
+    const response = await suggestionsController.getAllForOpportunityPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        limit: 10,
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    const result = await response.json();
+    expect(result).to.have.property('suggestions');
+    expect(result.suggestions).to.be.an('array').with.lengthOf(0);
+    expect(result.pagination).to.have.property('limit', 10);
+    expect(result.pagination).to.have.property('cursor', null);
+    expect(result.pagination).to.have.property('hasMore', false);
+  });
+
   it('gets paged suggestions successfully when parameters come as strings from URL', async () => {
     const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
