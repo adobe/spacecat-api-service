@@ -33,7 +33,8 @@ export const OpportunitySummaryDto = {
    *  pageViews: number,
    *  projectedTrafficLost: number,
    *  projectedTrafficValue: number,
-   *  projectedConversionValue: number
+   *  projectedConversionValue: number,
+   *  impact: number
    * }} JSON object.
    */
   toJSON: (opportunity, suggestions = [], paidUrlsData = null, topUrlsLimit = 20) => {
@@ -82,6 +83,9 @@ export const OpportunitySummaryDto = {
     const projectedTrafficValue = opportunityData.projectedTrafficValue || 0;
     const projectedConversionValue = opportunityData.projectedConversionValue || 0;
 
+    // Determine impact value (prioritize conversion value over traffic value)
+    const impact = projectedConversionValue || projectedTrafficValue || 0;
+
     return {
       opportunityId: opportunity.getId(),
       urls: Array.from(urls).slice(0, topUrlsLimit),
@@ -95,6 +99,7 @@ export const OpportunitySummaryDto = {
       projectedTrafficLost,
       projectedTrafficValue,
       projectedConversionValue,
+      impact,
     };
   },
 };

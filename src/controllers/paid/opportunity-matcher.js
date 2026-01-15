@@ -346,6 +346,7 @@ async function processOpportunityMatching(
 
 /**
  * Combine and sort opportunities, converting back to original opportunity objects
+ * Limits to 10 total opportunities with max 2 per type
  */
 function combineAndSortOpportunities(categorizedOpportunities, matchResults) {
   const filteredOpportunitiesData = [];
@@ -362,16 +363,31 @@ function combineAndSortOpportunities(categorizedOpportunities, matchResults) {
   }
 
   // Sort by value descending
-  // CWV opportunities use projectedTrafficValue
+  // Prioritize projectedConversionValue or projectedTrafficValue (matches DTO impact calculation)
   // Forms opportunities use projectedConversionValue
+  // CWV opportunities use projectedTrafficValue
   filteredOpportunitiesData.sort((a, b) => {
-    const aValue = a.data.projectedTrafficValue || a.data.projectedConversionValue;
-    const bValue = b.data.projectedTrafficValue || b.data.projectedConversionValue;
+    const aValue = a.data.projectedConversionValue || a.data.projectedTrafficValue;
+    const bValue = b.data.projectedConversionValue || b.data.projectedTrafficValue;
     return bValue - aValue;
   });
 
+  // Limit to max 2 per type and 10 total
+  const typeCount = new Map();
+  const limitedOpportunities = [];
+
+  for (const oppData of filteredOpportunitiesData) {
+    const { type } = oppData;
+    const count = typeCount.get(type) || 0;
+
+    if (count < 2 && limitedOpportunities.length < 10) {
+      limitedOpportunities.push(oppData);
+      typeCount.set(type, count + 1);
+    }
+  }
+
   // Convert back to original opportunity objects
-  return filteredOpportunitiesData.map((oppData) => oppData.original);
+  return limitedOpportunities.map((oppData) => oppData.original);
 }
 
 export {

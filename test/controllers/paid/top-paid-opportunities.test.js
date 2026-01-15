@@ -270,11 +270,122 @@ describe('TopPaidOpportunitiesController', () => {
       const opportunities = await response.json();
       // Should be sorted by value descending:
       // 4000 (cwv-2), 3000 (forms-1), 2000 (cwv-1), 1000 (forms-2)
+      // But with max 2 per type limit, we get: cwv-2, forms-1, cwv-1, forms-2
       expect(opportunities).to.have.lengthOf(4);
       expect(opportunities[0].opportunityId).to.equal('cwv-2');
       expect(opportunities[1].opportunityId).to.equal('forms-1');
       expect(opportunities[2].opportunityId).to.equal('cwv-1');
       expect(opportunities[3].opportunityId).to.equal('forms-2');
+      // Verify impact field is present as a number
+      expect(opportunities[0].impact).to.equal(4000);
+      expect(opportunities[1].impact).to.equal(3000);
+    });
+
+    it('limits results to top 10 opportunities with max 2 per type', async () => {
+      // Create opportunities with 5 different types to test both limits
+      // The controller limits to 8 total after combineAndSortOpportunities limits to 10
+      const opportunities = [];
+
+      // 3 CWV opportunities
+      for (let i = 1; i <= 3; i += 1) {
+        opportunities.push(createOpportunity({
+          id: `cwv-${i}`,
+          type: 'cwv',
+          data: { projectedTrafficValue: (4 - i) * 10000 }, // 30000, 20000, 10000
+        }));
+      }
+
+      // 3 Forms opportunities (form-accessibility)
+      for (let i = 1; i <= 3; i += 1) {
+        opportunities.push(createOpportunity({
+          id: `forms-acc-${i}`,
+          type: 'form-accessibility',
+          data: { projectedConversionValue: (4 - i) * 9000, form: `https://example.com/form-acc${i}` }, // 27000, 18000, 9000
+        }));
+      }
+
+      // 3 Forms opportunities (high-form-views-low-conversions) - different type
+      for (let i = 1; i <= 3; i += 1) {
+        opportunities.push(createOpportunity({
+          id: `forms-conv-${i}`,
+          type: 'high-form-views-low-conversions',
+          data: { projectedConversionValue: (4 - i) * 8000, form: `https://example.com/form-conv${i}` }, // 24000, 16000, 8000
+        }));
+      }
+
+      // 3 Paid media opportunities (consent-banner)
+      for (let i = 1; i <= 3; i += 1) {
+        opportunities.push(createOpportunity({
+          id: `consent-${i}`,
+          type: 'consent-banner',
+          tags: ['paid media'],
+          data: { projectedTrafficValue: (4 - i) * 7000 }, // 21000, 14000, 7000
+        }));
+      }
+
+      // 3 Paid media opportunities (broken-backlinks) - different type
+      for (let i = 1; i <= 3; i += 1) {
+        opportunities.push(createOpportunity({
+          id: `backlinks-${i}`,
+          type: 'broken-backlinks',
+          tags: ['paid media'],
+          data: { projectedTrafficValue: (4 - i) * 6000 }, // 18000, 12000, 6000
+        }));
+      }
+
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, opportunities);
+
+      // Mock suggestions for CWV and forms opportunities
+      for (let i = 1; i <= 3; i += 1) {
+        mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus
+          .withArgs(`cwv-${i}`, 'NEW')
+          .resolves([createSuggestion(`https://example.com/cwv${i}`)]);
+        mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus
+          .withArgs(`forms-acc-${i}`, 'NEW')
+          .resolves([createSuggestion(`https://example.com/form-acc${i}`)]);
+        mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus
+          .withArgs(`forms-conv-${i}`, 'NEW')
+          .resolves([createSuggestion(`https://example.com/form-conv${i}`)]);
+      }
+
+      // Mock Athena to return paid traffic data for CWV and forms URLs
+      const trafficData = [];
+      for (let i = 1; i <= 3; i += 1) {
+        trafficData.push(createTrafficData({ url: `https://example.com/cwv${i}`, pageviews: '1000' }));
+        trafficData.push(createTrafficData({ url: `https://example.com/form-acc${i}`, pageviews: '1000' }));
+        trafficData.push(createTrafficData({ url: `https://example.com/form-conv${i}`, pageviews: '1000' }));
+      }
+      mockAthenaClient.query.resolves(trafficData);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
+      const result = await response.json();
+
+      // Should return top 8 total (controller slices to 8 after sorting)
+      expect(result).to.have.lengthOf(8);
+
+      // Count opportunities by system_type
+      const typeCounts = result.reduce((acc, opp) => {
+        acc[opp.system_type] = (acc[opp.system_type] || 0) + 1;
+        return acc;
+      }, {});
+
+      // Should have max 2 per system_type
+      Object.values(typeCounts).forEach((count) => {
+        expect(count).to.be.at.most(2);
+      });
+
+      // Should be sorted by impact descending
+      // Expected order: cwv-1 (30000), forms-acc-1 (27000), forms-conv-1 (24000),
+      // consent-1 (21000), cwv-2 (20000), backlinks-1 (18000), forms-acc-2 (18000),
+      // forms-conv-2 (16000)
+      expect(result[0].opportunityId).to.equal('cwv-1');
+      expect(result[0].impact).to.equal(30000);
+      expect(result[1].opportunityId).to.equal('forms-acc-1');
+      expect(result[1].impact).to.equal(27000);
+      expect(result[2].opportunityId).to.equal('forms-conv-1');
+      expect(result[2].impact).to.equal(24000);
     });
 
     it('filters out opportunities with "report" in title', async () => {

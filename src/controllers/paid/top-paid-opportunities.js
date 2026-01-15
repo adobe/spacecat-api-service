@@ -121,9 +121,12 @@ function TopPaidOpportunitiesController(ctx, env = {}) {
       matchResults,
     );
 
+    // Limit to top 8 opportunities
+    const topOpportunities = filteredOpportunities.slice(0, 8);
+
     // Convert to DTOs
     const opportunitySummaries = await Promise.all(
-      filteredOpportunities.map(async (opportunity) => {
+      topOpportunities.map(async (opportunity) => {
         const opportunityId = opportunity.getId();
         const paidUrlsData = paidUrlsMap.get(opportunityId);
         // Only fetch NEW suggestions if not a CWV opportunity (no paidUrlsData)
