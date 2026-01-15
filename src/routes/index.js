@@ -323,6 +323,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.getByID(c),
     'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/suggestions': (c) => fixesController.getAllSuggestionsForFix(c),
     'POST /sites/:siteId/opportunities/:opportunityId/fixes': (c) => fixesController.createFixes(c),
+    'POST /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/rollback': (c) => fixesController.rollbackFailedFix(c),
     'PATCH /sites/:siteId/opportunities/:opportunityId/status': (c) => fixesController.patchFixesStatus(c),
     'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.patchFix(c),
     'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.removeFix(c),

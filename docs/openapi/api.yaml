@@ -384,6 +384,8 @@ paths:
     $ref: './site-opportunities.yaml#/site-opportunity-fix'
   /sites/{siteId}/opportunities/{opportunityId}/fixes/{fixId}/suggestions:
     $ref: './site-opportunities.yaml#/site-opportunity-fix-suggestions'
+  /sites/{siteId}/opportunities/{opportunityId}/fixes/{fixId}/rollback:
+    $ref: './site-opportunities.yaml#/site-opportunity-fix-rollback'
   /sites/{siteId}/opportunities/{opportunityId}/status:
     $ref: './site-opportunities.yaml#/site-opportunity-status'
   /slack/channels/invite-by-user-id:

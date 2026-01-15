@@ -939,7 +939,48 @@ site-opportunity-fix-suggestions:
     security:
       - ims_key: [ ]
 
+site-opportunity-fix-rollback:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+    - $ref: './parameters.yaml#/fixId'
+  post:
+    operationId: rollbackSiteOpportunityFix
+    summary: |
+      Roll back a failed fix and mark associated suggestions as skipped
+    description: |
+      Atomically rolls back a failed fix:
+      - Marks the Fix as ROLLED_BACK (only if currently in FAILED status)
+      - Marks all associated suggestions with ERROR status as SKIPPED
 
+      This operation will fail if:
+      - The fix is not in FAILED status
+      - No suggestions are found for the fix
+
+      Either all updates succeed or none are applied.
+    tags:
+      - opportunity-fixes
+    responses:
+      '200':
+        description: Fix successfully rolled back
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/FixRollbackResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
 
 site-opportunity-status:
   parameters:

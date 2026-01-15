@@ -490,6 +490,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/suggestions',
       'POST /sites/:siteId/opportunities/:opportunityId/fixes',
+      'POST /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/rollback',
       'PATCH /sites/:siteId/opportunities/:opportunityId/status',
       'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',
       'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId',

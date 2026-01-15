@@ -3754,6 +3754,41 @@ FixStatusUpdateListResponse:
     - fixes
     - metadata
 
+FixRollbackResponse:
+  type: object
+  description: Response after successfully rolling back a failed fix
+  properties:
+    fix:
+      $ref: '#/Fix'
+      description: The updated fix entity with ROLLED_BACK status
+    suggestions:
+      type: object
+      description: Summary of suggestions that were updated
+      properties:
+        updated:
+          type: array
+          items:
+            $ref: '#/Suggestion'
+          description: List of suggestions that were marked as SKIPPED
+        totalUpdated:
+          type: integer
+          description: Number of suggestions that were updated to SKIPPED
+        totalSkipped:
+          type: integer
+          description: Number of suggestions that were not updated (not in ERROR status)
+      required:
+        - updated
+        - totalUpdated
+        - totalSkipped
+    message:
+      type: string
+      description: Human-readable message describing the result
+      example: "Fix rolled back successfully. 3 suggestion(s) marked as SKIPPED."
+  required:
+    - fix
+    - suggestions
+    - message
+
 PaidSiteTopPage:
   type: object
   required:
