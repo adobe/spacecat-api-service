@@ -865,7 +865,7 @@ AuditResult:
     - type: object
       description: |
         The result of a product-metatags audit targeting Product Detail Pages (PDP) of commerce sites.
-        This audit specifically analyzes product pages for e-commerce optimization, scraping SKU, 
+        This audit specifically analyzes product pages for e-commerce optimization, scraping SKU,
         thumbnail images, and catalog/store view codes for later autofixing capabilities.
       properties:
         auditResult:
@@ -873,7 +873,7 @@ AuditResult:
           properties:
             productDetailPages:
               description: |
-                A mapping of product page URLs to their analysis results, including product metadata 
+                A mapping of product page URLs to their analysis results, including product metadata
                 and meta tag recommendations for commerce optimization.
               type: object
               additionalProperties:
@@ -3177,7 +3177,7 @@ BrokenBacklinksRedirectData:
       type: number
     aggregationKey:
       description: |
-        Computed aggregation key for grouping related suggestions. 
+        Computed aggregation key for grouping related suggestions.
         Format varies by issue type granularity (e.g., url|type|selector|source for individual issues).
         Used for bulk operations and tracking remediation across audit runs.
       type: string
@@ -3216,7 +3216,7 @@ BrokenInternalLinksSuggestionData:
       $ref: '#/Priority'
     aggregationKey:
       description: |
-        Computed aggregation key for grouping related suggestions. 
+        Computed aggregation key for grouping related suggestions.
         Format varies by issue type granularity (e.g., url|type|selector|source for individual issues).
         Used for bulk operations and tracking remediation across audit runs.
       type: string
@@ -3847,6 +3847,91 @@ PTAWeeklySummary:
           type: number
           description: Percentage change in bounce rate
           example: 11.40608350861348
+
+PredominantTrafficRequest:
+  type: object
+  required:
+    - urls
+  properties:
+    urls:
+      type: array
+      description: Array of URLs to analyze for predominant traffic type
+      items:
+        type: string
+        format: uri
+      minItems: 1
+      example:
+        - 'https://example.com/page1'
+        - 'https://example.com/page2'
+        - 'https://example.com/products/item'
+    predominantTrafficPct:
+      type: number
+      description: |
+        Minimum percentage threshold for a traffic type to be considered predominant.
+        If any single traffic type (paid, earned, or owned) reaches or exceeds this percentage,
+        it is considered the predominant type. Otherwise, traffic is classified as "mixed".
+      minimum: 0
+      maximum: 100
+      default: 80
+      example: 80
+
+PredominantTrafficResponse:
+  type: array
+  description: Array of traffic analysis results, one per URL requested
+  items:
+    $ref: '#/PredominantTrafficResult'
+
+PredominantTrafficResult:
+  type: object
+  description: Traffic analysis result for a single URL
+  required:
+    - url
+    - predominantTraffic
+    - details
+  properties:
+    url:
+      type: string
+      format: uri
+      description: The URL that was analyzed
+      example: 'https://example.com/page1'
+    predominantTraffic:
+      type: string
+      description: |
+        The predominant traffic type for this URL. Can be 'paid', 'earned', 'owned',
+        'mixed' (no single type reaches threshold), or 'no traffic' (no data available).
+      enum:
+        - paid
+        - earned
+        - owned
+        - mixed
+        - no traffic
+      example: 'paid'
+    details:
+      type: object
+      description: Detailed traffic breakdown showing percentage of traffic from each type
+      required:
+        - paid
+        - earned
+        - owned
+      properties:
+        paid:
+          type: number
+          description: Percentage of traffic from paid sources
+          minimum: 0
+          maximum: 100
+          example: 85.5
+        earned:
+          type: number
+          description: Percentage of traffic from earned sources
+          minimum: 0
+          maximum: 100
+          example: 10.3
+        owned:
+          type: number
+          description: Percentage of traffic from owned sources
+          minimum: 0
+          maximum: 100
+          example: 4.2
 
 LlmoQuestion:
   type: object
@@ -4820,7 +4905,7 @@ SandboxAuditType:
   description: |
     Supported audit types for sandbox environments:
     - meta-tags: General meta tag analysis for all page types
-    - product-metatags: Specialized audit for Product Detail Pages (PDP) of commerce sites, 
+    - product-metatags: Specialized audit for Product Detail Pages (PDP) of commerce sites,
       analyzing product-specific meta tags and scraping SKU, thumbnail, and catalog/store view codes for autofixing
     - alt-text: Alternative text analysis for images
   enum:

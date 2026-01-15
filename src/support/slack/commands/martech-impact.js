@@ -161,7 +161,7 @@ function MartechImpactCommand(context) {
         text: `
 *Martech Impact for ${site.getBaseURL()}*
 
-${printSiteDetails(site)}
+${await printSiteDetails(site)}
 
 *Total Blocking Time (TBT):*\t${formatTotalBlockingTime(totalBlockingTime)}
 
