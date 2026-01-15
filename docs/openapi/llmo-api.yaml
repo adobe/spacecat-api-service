@@ -1336,3 +1336,197 @@ llmo-rationale:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+
+site-llmo-edge-optimize-config:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    operationId: createOrUpdateSiteLlmoEdgeConfig
+    summary: |
+      Create or update Tokowaka edge optimization configuration for an LLMO site
+    description: |
+      Creates or updates edge optimization configuration for the specified LLMO-enabled site.
+      
+      **Behavior:**
+      - If metaconfig doesn't exist or has no API keys: Generates a unique API key and creates metaconfig in S3
+      - If metaconfig exists with API keys: Updates the metaconfig's tokowakaEnabled flag in S3
+      - Updates the site's edgeOptimizeConfig.enabled flag in the database
+      
+      The API key is generated using: SHA256(UUID + domain) encoded as base64url.
+      
+      **Note:** This endpoint requires LLMO access for the site.
+    tags:
+      - llmo
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - edgeOptimizeEnabled
+            properties:
+              edgeOptimizeEnabled:
+                type: boolean
+                description: Whether to enable or disable edge optimization
+          examples:
+            enable:
+              summary: Enable edge optimization
+              value:
+                edgeOptimizeEnabled: true
+            disable:
+              summary: Disable edge optimization
+              value:
+                edgeOptimizeEnabled: false
+    responses:
+      '200':
+        description: Edge config created/updated successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                metaconfig:
+                  type: object
+                  description: The Tokowaka metaconfig object stored in S3
+                  properties:
+                    siteId:
+                      $ref: './schemas.yaml#/Id'
+                    apiKeys:
+                      type: array
+                      items:
+                        type: string
+                      description: Array of API keys for Tokowaka authentication
+                    tokowakaEnabled:
+                      type: boolean
+                      description: Whether Tokowaka/edge optimization is enabled in the metaconfig
+                    enhancements:
+                      type: boolean
+                      description: Whether enhancements are enabled
+                edgeOptimizeConfig:
+                  type: object
+                  properties:
+                    enabled:
+                      type: boolean
+                      description: Whether edge optimization is enabled for this site (fetched from site config)
+            examples:
+              enabled:
+                summary: Edge config enabled
+                value:
+                  metaconfig:
+                    siteId: "abc-123-def-456"
+                    apiKeys: ["xYz123AbC456DeF789"]
+                    tokowakaEnabled: true
+                    enhancements: true
+                  edgeOptimizeConfig:
+                    enabled: true
+              disabled:
+                summary: Edge config disabled
+                value:
+                  metaconfig:
+                    siteId: "abc-123-def-456"
+                    apiKeys: ["xYz123AbC456DeF789"]
+                    tokowakaEnabled: false
+                    enhancements: true
+                  edgeOptimizeConfig:
+                    enabled: false
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+  get:
+    operationId: getSiteLlmoEdgeConfig
+    summary: |
+      Retrieve Tokowaka edge optimization configuration for an LLMO site
+    description: |
+      Fetches the existing edge optimization configuration for the specified LLMO-enabled site. This includes:
+      - The metaconfig from S3 containing siteId, apiKeys, tokowakaEnabled, and enhancement flags
+      - The edgeOptimizeConfig from the site config
+      
+      Returns null for metaconfig if no edge config has been created for this site yet.
+      Returns null for edgeOptimizeConfig if not set in the site configuration.
+      
+      **Note:** This endpoint requires LLMO access for the site.
+    tags:
+      - llmo
+    responses:
+      '200':
+        description: Edge config retrieved successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                metaconfig:
+                  description: The Tokowaka metaconfig object from S3 (null if not exists)
+                  oneOf:
+                    - type: object
+                      properties:
+                        siteId:
+                          $ref: './schemas.yaml#/Id'
+                        apiKeys:
+                          type: array
+                          items:
+                            type: string
+                          description: Array of API keys for Tokowaka authentication
+                        tokowakaEnabled:
+                          type: boolean
+                          description: Whether Tokowaka/edge optimization is enabled in the metaconfig
+                        enhancements:
+                          type: boolean
+                          description: Whether enhancements are enabled (always true)
+                    - type: "null"
+                edgeOptimizeConfig:
+                  description: Edge optimization configuration from site config (null if not set)
+                  oneOf:
+                    - type: object
+                      properties:
+                        enabled:
+                          type: boolean
+                          description: Whether edge optimization is enabled for this site
+                    - type: "null"
+            examples:
+              withConfig:
+                summary: Site with edge config
+                value:
+                  metaconfig:
+                    siteId: "abc-123-def-456"
+                    apiKeys: ["xYz123AbC456DeF789"]
+                    tokowakaEnabled: true
+                    enhancements: true
+                  edgeOptimizeConfig:
+                    enabled: true
+              withoutConfig:
+                summary: Site without edge config
+                value:
+                  metaconfig: null
+                  edgeOptimizeConfig: null
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]

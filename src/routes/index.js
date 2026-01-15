@@ -82,6 +82,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} reportsController - The reports controller.
  * @param {Object} urlStoreController - The URL store controller.
  * @param {Object} pta2Controller - The PTA2 controller.
+ * @param {Object} trafficToolsController - The traffic tools controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -120,6 +121,7 @@ export default function getRouteHandlers(
   reportsController,
   urlStoreController,
   pta2Controller,
+  trafficToolsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -273,6 +275,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/traffic/paid/impact-by-page-traffic-type': trafficController.getImpactByPageTrafficType,
     'GET /sites/:siteId/traffic/paid/impact-by-page-traffic-type-device': trafficController.getImpactByPageTrafficTypeDevice,
     'GET /sites/:siteId/traffic/paid/traffic-loss-by-devices': trafficController.getTrafficLossByDevices,
+    'POST /sites/:siteId/traffic/predominant-type': trafficToolsController.getPredominantTraffic,
     'GET /sites/:siteId/brand-guidelines': brandsController.getBrandGuidelinesForSite,
     'GET /sites/:siteId/brand-profile': sitesController.getBrandProfile,
     'POST /sites/:siteId/brand-profile': sitesController.triggerBrandProfile,
@@ -355,6 +358,8 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/rationale': llmoController.getLlmoRationale,
     'POST /llmo/onboard': llmoController.onboardCustomer,
     'POST /sites/:siteId/llmo/offboard': llmoController.offboardCustomer,
+    'POST /sites/:siteId/llmo/edge-optimize-config': llmoController.createOrUpdateEdgeConfig,
+    'GET /sites/:siteId/llmo/edge-optimize-config': llmoController.getEdgeConfig,
 
     // Tier Specific Routes
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,

@@ -1,3 +1,38 @@
+# [1.284.0](https://github.com/adobe/spacecat-api-service/compare/v1.283.1...v1.284.0) (2026-01-14)
+
+
+### Features
+
+* endpoint for predominant traffic ([#1696](https://github.com/adobe/spacecat-api-service/issues/1696)) ([a4428f2](https://github.com/adobe/spacecat-api-service/commit/a4428f233a02e2e9dbfbe41badada1ed19983aa3))
+
+## [1.283.1](https://github.com/adobe/spacecat-api-service/compare/v1.283.0...v1.283.1) (2026-01-14)
+
+
+### Bug Fixes
+
+* update tokowaka s3 config with patches ([#1694](https://github.com/adobe/spacecat-api-service/issues/1694)) ([cab0761](https://github.com/adobe/spacecat-api-service/commit/cab0761e1252afc8e706f029168b75be3b789a08))
+
+# [1.283.0](https://github.com/adobe/spacecat-api-service/compare/v1.282.1...v1.283.0) (2026-01-13)
+
+
+### Features
+
+* Add orgId and imsOrgId to site details ([#1682](https://github.com/adobe/spacecat-api-service/issues/1682)) ([246c135](https://github.com/adobe/spacecat-api-service/commit/246c135bc6ad9fd68e0d3857de2ae87b6ed5aba1))
+
+## [1.282.1](https://github.com/adobe/spacecat-api-service/compare/v1.282.0...v1.282.1) (2026-01-13)
+
+
+### Bug Fixes
+
+* add GET/POST apis for edge config APIs ([#1688](https://github.com/adobe/spacecat-api-service/issues/1688)) ([fbdcdc1](https://github.com/adobe/spacecat-api-service/commit/fbdcdc1615cbd9e4c042d51f8fd9069988e0f2cb))
+
+# [1.282.0](https://github.com/adobe/spacecat-api-service/compare/v1.281.2...v1.282.0) (2026-01-09)
+
+
+### Features
+
+* remove product-metatags audits for paid customer ([#1683](https://github.com/adobe/spacecat-api-service/issues/1683)) ([d15747a](https://github.com/adobe/spacecat-api-service/commit/d15747a096127a808f64ea21b50efb1b74ce5f7b))
+
 ## [1.281.2](https://github.com/adobe/spacecat-api-service/compare/v1.281.1...v1.281.2) (2026-01-09)
 
 
