@@ -113,5 +113,101 @@ describe('agent-workflow support util', () => {
   it('sanitizes execution names when no value is provided', () => {
     const result = sanitizeExecutionName();
     expect(result).to.match(/^agent-\d+/);
+    expect(result.length).to.be.at.most(80);
+  });
+
+  it('sanitizes execution names when empty string is provided', () => {
+    const result = sanitizeExecutionName('');
+    expect(result).to.match(/^agent-\d+/);
+    expect(result.length).to.be.at.most(80);
+  });
+
+  it('sanitizes execution names when only invalid characters are provided', () => {
+    // String with only invalid characters should fallback to agent-{timestamp}
+    const result = sanitizeExecutionName('!!!@@@###$$$');
+    expect(result).to.match(/^agent-\d+/);
+    expect(result.length).to.be.at.most(80);
+  });
+
+  it('returns execution name as-is when exactly 80 characters', () => {
+    const exactName = 'a'.repeat(80);
+    const result = sanitizeExecutionName(exactName);
+    expect(result).to.equal(exactName);
+    expect(result.length).to.equal(80);
+  });
+
+  it('returns execution name as-is when less than 80 characters', () => {
+    const shortName = 'onboard-example-com-1234567890123';
+    const result = sanitizeExecutionName(shortName);
+    expect(result).to.equal(shortName);
+    expect(result.length).to.be.lessThan(80);
+  });
+
+  it('preserves full timestamp when truncating long names with timestamps', () => {
+    // Create a long name with a 13-digit timestamp at the end
+    const timestamp = 1768507714773;
+    const longUrl = 'https://main--aem-cloud-migration-reporter--aemdemos.aem.live';
+    const longName = `onboard-${longUrl.replace(/[^a-zA-Z0-9]/g, '-')}-${timestamp}`;
+
+    expect(longName.length).to.be.greaterThan(80); // Ensure it's too long
+
+    const result = sanitizeExecutionName(longName);
+
+    expect(result.length).to.equal(80);
+    expect(result).to.match(/-1768507714773$/); // Full timestamp preserved
+  });
+
+  it('truncates middle portion while preserving timestamp', () => {
+    const timestamp = 1234567890123;
+    const longPrefix = 'onboard-https---very--long--url--with--many--segments--that--exceeds--the--limit';
+    const longName = `${longPrefix}-${timestamp}`;
+
+    const result = sanitizeExecutionName(longName);
+
+    expect(result.length).to.equal(80);
+    expect(result.endsWith(`-${timestamp}`)).to.be.true;
+    expect(result.startsWith('onboard-')).to.be.true;
+  });
+
+  it('truncates from end when no timestamp pattern is found', () => {
+    // Name longer than 80 chars but no timestamp pattern
+    const longName = 'a'.repeat(100);
+
+    const result = sanitizeExecutionName(longName);
+
+    expect(result.length).to.equal(80);
+    expect(result).to.equal('a'.repeat(80));
+  });
+
+  it('removes invalid characters while preserving valid ones', () => {
+    const nameWithInvalid = 'onboard-test@site.com/path-1234567890123';
+    const result = sanitizeExecutionName(nameWithInvalid);
+
+    // Should remove @ . / but keep alphanumeric, hyphens, underscores
+    expect(result).to.not.include('@');
+    expect(result).to.not.include('.');
+    expect(result).to.not.include('/');
+    expect(result).to.match(/^[A-Za-z0-9-_]+$/);
+  });
+
+  it('handles names with underscores correctly', () => {
+    const nameWithUnderscores = 'agent_workflow_test_name_123';
+    const result = sanitizeExecutionName(nameWithUnderscores);
+
+    // Underscores should be preserved
+    expect(result).to.equal(nameWithUnderscores);
+    expect(result).to.include('_');
+  });
+
+  it('handles long names with timestamps that have short prefixes', () => {
+    // Edge case: very short prefix with long timestamp pattern
+    const timestamp = 1768507714773;
+    const shortPrefix = 'on';
+    const longName = `${shortPrefix + '-'.repeat(70)}-${timestamp}`;
+
+    const result = sanitizeExecutionName(longName);
+
+    expect(result.length).to.equal(80);
+    expect(result.endsWith(`-${timestamp}`)).to.be.true;
   });
 });
