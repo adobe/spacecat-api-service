@@ -37,6 +37,22 @@ import {
 } from '../utils/constants.js';
 
 /**
+ * Step Functions execution names must be 1–80 chars and may only contain
+ * letters, numbers, hyphens, or underscores
+ * (see https://docs.aws.amazon.com/step-functions/latest/apireference/API_StartExecution.html).
+ * This helper enforces those constraints and falls back to a timestamped name
+ * when input is missing or becomes empty after sanitization.
+ *
+ * @param {string} value - The execution name to sanitize.
+ * @returns {string} The sanitized execution name.
+ */
+export const sanitizeExecutionName = (value) => {
+  const sanitizedInput = (value || `agent-${Date.now()}`).replace(/[^A-Za-z0-9-_]/g, '');
+  const safe = sanitizedInput.length > 0 ? sanitizedInput : `agent-${Date.now()}`;
+  return safe.slice(0, 80);
+};
+
+/**
  * Checks if the url parameter "url" equals "ALL".
  * @param {string} url - URL parameter.
  * @returns {boolean} True if url equals "ALL", false otherwise.
@@ -1121,7 +1137,7 @@ export const onboardSingleSite = async (
       workflowWaitTime: workflowWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS,
     };
 
-    const workflowName = `onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`;
+    const workflowName = sanitizeExecutionName(`onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`);
 
     const startCommand = new StartExecutionCommand({
       stateMachineArn: env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN,

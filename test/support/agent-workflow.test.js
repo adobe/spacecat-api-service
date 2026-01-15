@@ -25,7 +25,8 @@ describe('agent-workflow support util', () => {
   let sendStub;
 
   before(async () => {
-    ({ startAgentWorkflow, sanitizeExecutionName } = await import('../../src/support/agent-workflow.js'));
+    ({ startAgentWorkflow } = await import('../../src/support/agent-workflow.js'));
+    ({ sanitizeExecutionName } = await import('../../src/support/utils.js'));
   });
 
   beforeEach(() => {
