@@ -4681,7 +4681,7 @@ Entitlement:
     productCode:
       description: The product code this entitlement provides access to
       type: string
-      enum: [LLMO, ASO]
+      enum: [LLMO, ASO, ACO]
     tier:
       description: The tier level of the entitlement
       type: string
@@ -4850,7 +4850,7 @@ TrialUserActivity:
     productCode:
       description: The product code associated with the activity
       type: string
-      enum: [LLMO, ASO]
+      enum: [LLMO, ASO, ACO]
       example: 'LLMO'
     createdAt:
       description: When the activity was recorded
