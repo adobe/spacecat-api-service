@@ -39,7 +39,7 @@ function extractOpportunityData(opportunity) {
 
 function isValidOpportunity(opportunityData) {
   const {
-    title, description, data,
+    title, description, data, original, type,
   } = opportunityData;
 
   // Must have description
@@ -56,6 +56,20 @@ function isValidOpportunity(opportunityData) {
 
   const hasValue = projectedTrafficValue > 0 || projectedConversionValue > 0;
   if (!hasValue) return false;
+
+  // Exclude forms opportunities with null brief fields in guidance recommendations
+  // This happens when scrapedStatus is false (form wasn't successfully scraped)
+  // These cause UI rendering issues
+  const formTypes = [
+    'high-form-views-low-conversions',
+    'high-page-views-low-form-nav',
+    'high-page-views-low-form-views',
+    'form-accessibility',
+  ];
+  if (formTypes.includes(type)) {
+    const recommendations = original.getGuidance?.()?.recommendations;
+    if (recommendations?.some((rec) => rec?.brief === null)) return false;
+  }
 
   return true;
 }

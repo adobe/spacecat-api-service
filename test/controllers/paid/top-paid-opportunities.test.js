@@ -29,6 +29,11 @@ const SITE_ID = 'test-site-id';
 const createOpportunity = (overrides = {}) => {
   const desc = overrides.description !== undefined ? overrides.description : 'Test Description';
   const data = overrides.data === null ? null : { projectedTrafficValue: 1000, ...overrides.data };
+  const guidance = overrides.guidance || {
+    recommendations: [
+      { brief: 'Test brief', insight: 'Test insight', recommendation: 'Test recommendation' },
+    ],
+  };
   return {
     getId: () => overrides.id || 'oppty-1',
     getSiteId: () => SITE_ID,
@@ -38,6 +43,7 @@ const createOpportunity = (overrides = {}) => {
     getStatus: () => 'NEW',
     getTags: () => overrides.tags || [],
     getData: () => data,
+    getGuidance: () => guidance,
   };
 };
 
@@ -662,6 +668,66 @@ describe('TopPaidOpportunitiesController', () => {
       });
       const opportunities = await response.json();
       expect(opportunities).to.have.lengthOf(2);
+    });
+
+    it('filters out forms opportunities with null brief in guidance recommendations', async () => {
+      const validFormsOppty = createOpportunity({
+        id: 'forms-1',
+        type: 'high-page-views-low-form-views',
+        data: { projectedConversionValue: 3000, form: 'https://example.com/form1' },
+      });
+      const nullBriefFormsOppty = createOpportunity({
+        id: 'forms-2',
+        type: 'high-page-views-low-form-views',
+        data: { projectedConversionValue: 5000, form: 'https://example.com/form2' },
+        guidance: {
+          recommendations: [
+            { brief: null, insight: 'Test insight', recommendation: 'Test recommendation' },
+          ],
+        },
+      });
+      setupOpportunityMocks(
+        mockContext.dataAccess.Opportunity,
+        [validFormsOppty, nullBriefFormsOppty],
+      );
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([]);
+      mockAthenaClient.query.resolves([
+        createTrafficData({ url: 'https://example.com/form1', pageviews: '3000' }),
+        createTrafficData({ url: 'https://example.com/form2', pageviews: '5000' }),
+      ]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(1);
+      expect(opportunities[0].opportunityId).to.equal('forms-1');
+    });
+
+    it('does not filter non-forms opportunities with null brief', async () => {
+      const cwvOpptyWithNullBrief = createOpportunity({
+        id: 'cwv-1',
+        type: 'cwv',
+        guidance: {
+          recommendations: [
+            { brief: null, insight: 'Test insight', recommendation: 'Test recommendation' },
+          ],
+        },
+      });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [cwvOpptyWithNullBrief]);
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([
+        createSuggestion('https://example.com/page1'),
+      ]);
+      mockAthenaClient.query.resolves([
+        createTrafficData({ url: 'https://example.com/page1', pageviews: '2000' }),
+      ]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(1);
+      expect(opportunities[0].opportunityId).to.equal('cwv-1');
     });
   });
 
