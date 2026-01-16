@@ -11,7 +11,6 @@
  */
 
 import {
-  getLastNumberOfWeeks,
   hasText,
   isNonEmptyObject,
   isValidUrl,
@@ -23,6 +22,7 @@ import {
   postErrorMessage,
   postSiteNotFoundMessage,
 } from '../../../utils/slack/base.js';
+import { triggerTrafficAnalysisBackfill } from '../../utils.js';
 
 const TRAFFIC_ANALYSIS_IMPORT_TYPE = 'traffic-analysis';
 const PHRASES = ['run traffic-analysis-backfill'];
@@ -45,36 +45,6 @@ function RunTrafficAnalysisBackfillCommand(context) {
 
   const { dataAccess, log } = context;
   const { Configuration, Site } = dataAccess;
-
-  /**
-   * Triggers a traffic-analysis import run for the given site.
-   * @param {Object} site - The site object.
-   * @param {string} week - The calendar week for the import run.
-   * @param {string} year - The calendar year for the import run.
-   * @param {Object} config - The configuration object.`
-   * @param {Object} slackContext - The Slack context object.
-   * @returns {Promise} A promise that resolves when the operation is complete.
-   */
-  const runTrafficAnalysisImportForSite = async (
-    site,
-    week,
-    year,
-    config,
-    slackContext,
-  ) => {
-    const { sqs } = context;
-    const importQueueUrl = config.getQueues().imports;
-
-    await sqs.sendMessage(importQueueUrl, {
-      type: TRAFFIC_ANALYSIS_IMPORT_TYPE,
-      trigger: 'backfill',
-      siteId: site.getId(),
-      week,
-      year,
-      allowCache: false,
-      slackContext,
-    });
-  };
 
   /**
    * Validates input and triggers a new import run for the given site.
@@ -135,22 +105,30 @@ function RunTrafficAnalysisBackfillCommand(context) {
         return;
       }
 
-      const weekYearPairs = getLastNumberOfWeeks(weeks || 52);
+      // const weekYearPairs = getLastNumberOfWeeks(weeks || 52);
 
       const message = `:adobe-run: Triggered backfill for traffic analysis import for site \`${baseURL}\` for the last ${weeks || 52} weeks\n`;
       await say(message);
 
-      await Promise.all(
-        weekYearPairs.map(async ({ week, year }) => {
-          await runTrafficAnalysisImportForSite(
-            site,
-            week,
-            year,
-            config,
-            slackContext,
-          );
-        }),
+      await triggerTrafficAnalysisBackfill(
+        site.getId(),
+        config,
+        slackContext,
+        context,
+        weeks || 52,
       );
+
+    //   await Promise.all(
+    //     weekYearPairs.map(async ({ week, year }) => {
+    //       await runTrafficAnalysisImportForSite(
+    //         site,
+    //         week,
+    //         year,
+    //         config,
+    //         slackContext,
+    //       );
+    //     }),
+    //   );
     } catch (error) {
       log.error(error);
       await postErrorMessage(say, error);
