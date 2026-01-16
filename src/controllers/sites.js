@@ -642,7 +642,7 @@ function SitesController(ctx, log, env) {
       metricsData = metrics;
     }
 
-    // Filter by site baseURL when requested (applied first)
+    // Filter by site baseURL when requested
     if (filterByBaseURL) {
       const siteBaseURL = site.getBaseURL();
       const originalCount = metricsData.length;
