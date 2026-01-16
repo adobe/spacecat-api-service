@@ -647,9 +647,9 @@ function SitesController(ctx, log, env) {
       const siteBaseURL = site.getBaseURL();
       const originalCount = metricsData.length;
 
-      // Normalize baseURL: remove protocol and www., keep path
+      // Normalize baseURL: remove protocol and www variants, keep path
       const normalizedBaseURL = siteBaseURL
-        .replace(/^https?:\/\/(www\.)?/, '') // Remove protocol and optional www.
+        .replace(/^https?:\/\/(www\d*\.)?/, '') // Remove protocol and optional www/www2/www3 etc.
         .replace(/\/$/, ''); // Remove trailing slash
 
       metricsData = metricsData.filter((metricEntry) => {
@@ -657,9 +657,9 @@ function SitesController(ctx, log, env) {
           return false;
         }
 
-        // Normalize metric URL: remove protocol and www.
+        // Normalize metric URL: remove protocol and www variants
         const normalizedMetricURL = metricEntry.url
-          .replace(/^https?:\/\/(www\.)?/, '') // Remove protocol and optional www.
+          .replace(/^https?:\/\/(www\d*\.)?/, '') // Remove protocol and optional www/www2/www3 etc.
           .replace(/\/$/, ''); // Remove trailing slash
 
         // Check if metric URL starts with the normalized base URL
