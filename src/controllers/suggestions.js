@@ -56,6 +56,9 @@ function SuggestionsController(ctx, sqs, env) {
     'form-accessibility',
     'product-metatags',
     'security-permissions-redundant',
+    'security-permissions',
+    'security-vulnerabilities',
+    'security-csp',
   ];
 
   const DEFAULT_PAGE_SIZE = 100;
