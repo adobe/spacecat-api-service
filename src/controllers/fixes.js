@@ -476,7 +476,6 @@ export class FixesController {
     // Build suggestion updates for the transaction
     const suggestionUpdates = errorSuggestions.map((s) => ({
       suggestionId: s.getId(),
-      opportunityId: s.getOpportunityId(),
     }));
 
     try {
@@ -511,8 +510,23 @@ export class FixesController {
       if (e.message?.includes('Transaction canceled') || e.message?.includes('condition check failed')) {
         return badRequest(`Rollback failed: ${e.message}`);
       }
+      context.log.error('Rollback error details', {
+        error: e,
+        errorMessage: e.message,
+        errorStack: e.stack,
+        errorCause: e.cause,
+        errorDetails: e.details,
+      });
+
       return createResponse({
         message: `Error rolling back fix: ${e.message}`,
+        ...(process.env.NODE_ENV !== 'production' && {
+          debug: {
+            name: e.name,
+            cause: e.cause?.message,
+            stack: e.stack,
+          },
+        }),
       }, 500);
     }
   }
