@@ -1,3 +1,17 @@
+# [1.284.0](https://github.com/adobe/spacecat-api-service/compare/v1.283.1...v1.284.0) (2026-01-14)
+
+
+### Features
+
+* endpoint for predominant traffic ([#1696](https://github.com/adobe/spacecat-api-service/issues/1696)) ([a4428f2](https://github.com/adobe/spacecat-api-service/commit/a4428f233a02e2e9dbfbe41badada1ed19983aa3))
+
+## [1.283.1](https://github.com/adobe/spacecat-api-service/compare/v1.283.0...v1.283.1) (2026-01-14)
+
+
+### Bug Fixes
+
+* update tokowaka s3 config with patches ([#1694](https://github.com/adobe/spacecat-api-service/issues/1694)) ([cab0761](https://github.com/adobe/spacecat-api-service/commit/cab0761e1252afc8e706f029168b75be3b789a08))
+
 # [1.283.0](https://github.com/adobe/spacecat-api-service/compare/v1.282.1...v1.283.0) (2026-01-13)
 
 
