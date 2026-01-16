@@ -164,6 +164,22 @@ describe('Modal Utils', () => {
       expect(products).to.deep.equal(['LLMO']);
     });
 
+    it('extracts only ACO when only ACO is selected', () => {
+      const state = {
+        values: {
+          products_block: {
+            aso_checkbox: { selected_options: [] },
+            llmo_checkbox: { selected_options: [] },
+            aco_checkbox: { selected_options: [{ value: 'ACO' }] },
+          },
+        },
+      };
+
+      const products = modalUtils.extractSelectedProducts(state);
+
+      expect(products).to.deep.equal(['ACO']);
+    });
+
     it('returns empty array when no products are selected', () => {
       const state = {
         values: {
