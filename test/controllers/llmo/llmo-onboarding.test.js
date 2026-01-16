@@ -826,6 +826,7 @@ describe('LLMO Onboarding Functions', () => {
         organizationId: 'org123',
         baseURL: 'https://example.com',
         dataFolder: 'dev/example-com',
+        brandPresenceCadence: undefined, // Not provided in params, so undefined
         message: 'LLMO onboarding completed successfully',
       });
 

@@ -15,7 +15,9 @@ import { createFrom } from '@adobe/spacecat-helix-content-sdk';
 import { Octokit } from '@octokit/rest';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import TierClient from '@adobe/spacecat-shared-tier-client';
-import { composeBaseURL, tracingFetch as fetch, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
+import {
+  composeBaseURL, tracingFetch as fetch, isNonEmptyArray, isNonEmptyObject,
+} from '@adobe/spacecat-shared-utils';
 import AhrefsAPIClient from '@adobe/spacecat-shared-ahrefs-client';
 import { parse as parseDomain } from 'tldts';
 
@@ -845,7 +847,7 @@ export async function enableImports(siteConfig, imports = []) {
   });
 }
 
-export async function triggerAudits(audits, context, site) {
+export async function triggerAudits(audits, context, site, auditContext = {}) {
   const { sqs, dataAccess, log } = context;
   const { Configuration } = dataAccess;
   const configuration = await Configuration.findLatest();
@@ -853,12 +855,55 @@ export async function triggerAudits(audits, context, site) {
   await Promise.allSettled(
     audits.map(async (audit) => {
       log.info(`Triggering ${audit} audit for site: ${site.getId()}`);
-      await sqs.sendMessage(configuration.getQueues().audits, {
+      const message = {
         type: audit,
         siteId: site.getId(),
-      });
+      };
+      // Include auditContext if provided and non-empty
+      if (isNonEmptyObject(auditContext)) {
+        message.auditContext = auditContext;
+      }
+      await sqs.sendMessage(configuration.getQueues().audits, message);
     }),
   );
+}
+
+// Brand presence handler constants
+const GEO_BRAND_PRESENCE_WEEKLY_FREE = 'geo-brand-presence-free';
+const GEO_BRAND_PRESENCE_WEEKLY_PAID = 'geo-brand-presence-paid';
+const GEO_BRAND_PRESENCE_DAILY = 'geo-brand-presence-daily';
+
+/**
+ * Configure brand presence handlers based on cadence.
+ * @param {object} site - The site object
+ * @param {string} cadence - The brand presence cadence ('weekly-free', 'weekly-paid', or 'daily')
+ * @param {object} context - The request context
+ */
+async function configureBrandPresenceHandlers(site, cadence, context) {
+  const { dataAccess, log } = context;
+  const { Configuration } = dataAccess;
+  const configuration = await Configuration.findLatest();
+  const siteId = site.getId();
+
+  if (cadence === 'daily') {
+    log.info(`Enabling daily brand presence audit and disabling weekly for site ${siteId}`);
+    configuration.enableHandlerForSite(GEO_BRAND_PRESENCE_DAILY, site);
+    configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_PAID, site);
+    configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_FREE, site);
+  } else if (cadence === 'weekly-paid') {
+    log.info(`Enabling weekly-paid brand presence audit and disabling daily for site ${siteId}`);
+    configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_DAILY, site);
+    configuration.enableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_PAID, site);
+    configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_FREE, site);
+  } else {
+    // Default to weekly-free
+    log.info(`Enabling weekly-free brand presence audit and disabling daily for site ${siteId}`);
+    configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_DAILY, site);
+    configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_PAID, site);
+    configuration.enableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_FREE, site);
+  }
+
+  await configuration.save();
 }
 
 /**
@@ -867,12 +912,14 @@ export async function triggerAudits(audits, context, site) {
  * @param {string} params.domain - The domain name
  * @param {string} params.brandName - The brand name
  * @param {string} params.imsOrgId - The IMS Organization ID
+ * @param {string} [params.brandPresenceCadence] - Brand presence cadence (Slack only)
  * @param {object} context - The request context
- * @param {object} slackContext - Slack context (optional, for Slack operations)
  * @returns {Promise<object>} Onboarding result
  */
 export async function performLlmoOnboarding(params, context) {
-  const { domain, brandName, imsOrgId } = params;
+  const {
+    domain, brandName, imsOrgId, brandPresenceCadence,
+  } = params;
   const { env, log } = context;
 
   // Construct base URL and data folder name
@@ -937,14 +984,26 @@ export async function performLlmoOnboarding(params, context) {
     site.setConfig(Config.toDynamoItem(siteConfig));
     await site.save();
 
+    // Configure brand presence handlers if cadence is specified (Slack flow)
+    if (brandPresenceCadence) {
+      await configureBrandPresenceHandlers(site, brandPresenceCadence, context);
+    }
+
+    // Build auditContext for llmo-customer-analysis
+    const auditContext = {};
+    if (brandPresenceCadence) {
+      auditContext.brandPresenceCadence = brandPresenceCadence;
+    }
+
     // Trigger audits
-    await triggerAudits([...BASIC_AUDITS, 'llmo-customer-analysis'], context, site);
+    await triggerAudits([...BASIC_AUDITS, 'llmo-customer-analysis'], context, site, auditContext);
 
     return {
       siteId: site.getId(),
       organizationId: organization.getId(),
       baseURL,
       dataFolder,
+      brandPresenceCadence,
       message: 'LLMO onboarding completed successfully',
     };
   } catch (error) {

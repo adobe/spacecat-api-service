@@ -10,23 +10,15 @@
  * governing permissions and limitations under the License.
  */
 
-import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import {
   postErrorMessage,
 } from '../../../utils/slack/base.js';
 import {
   createEntitlementAndEnrollment,
-  copyFilesToSharepoint,
-  updateIndexConfig,
-  enableAudits,
-  BASIC_AUDITS,
-  triggerAudits,
+  performLlmoOnboarding,
 } from '../../../controllers/llmo/llmo-onboarding.js';
 import { triggerBrandProfileAgent } from '../../brand-profile-trigger.js';
 
-const REFERRAL_TRAFFIC_AUDIT = 'llmo-referral-traffic';
-const REFERRAL_TRAFFIC_IMPORT = 'traffic-analysis';
-const AGENTIC_TRAFFIC_REPORT_AUDIT = 'cdn-logs-report';
 const GEO_BRAND_PRESENCE_WEEKLY_FREE = 'geo-brand-presence-free';
 const GEO_BRAND_PRESENCE_WEEKLY_PAID = 'geo-brand-presence-paid';
 const GEO_BRAND_PRESENCE_DAILY = 'geo-brand-presence-daily';
@@ -421,177 +413,61 @@ export function startLLMOOnboarding(lambdaContext) {
   };
 }
 
-async function createSiteAndOrganization(input, lambda, slackContext) {
-  const { dataAccess } = lambda;
-  const {
-    baseURL, imsOrgId, deliveryType,
-  } = input;
-  const { Organization, Site } = dataAccess;
-
-  const org = await Organization.findByImsOrgId(imsOrgId);
-  let orgId = org?.getId();
-  if (!orgId) {
-    const newOrg = await createOrg(imsOrgId, lambda, slackContext);
-    orgId = newOrg.getId();
-  }
-
-  const site = await Site.create({
-    baseURL, deliveryType, organizationId: orgId,
-  });
-  await site.save();
-  return site.getId();
-}
-
 /**
  * @param {Object} input
  * @param {string} input.baseURL
  * @param {string} input.brandName
  * @param {string} input.imsOrgId
- * @param {'weekly-free' | 'weekly-paid' | 'daily'} [input.brandPresenceCadence]
+ * @param {string} [input.brandPresenceCadence] - Cadence (weekly-free, weekly-paid, daily)
  * @param {Object} lambdaCtx
  * @param {Object} slackCtx
  */
 export async function onboardSite(input, lambdaCtx, slackCtx) {
-  const {
-    log, dataAccess, sqs, env,
-  } = lambdaCtx;
+  const { log, dataAccess } = lambdaCtx;
   const { say } = slackCtx;
   const {
     baseURL, brandName, imsOrgId, brandPresenceCadence = 'weekly-free',
   } = input;
-  const { hostname } = new URL(baseURL);
-  const dataFolderName = hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
-  /* c8 ignore next */
-  const dataFolder = env.ENV === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
 
-  const {
-    Site, Configuration,
-  } = dataAccess;
+  // Extract domain from baseURL for performLlmoOnboarding
+  const { hostname } = new URL(baseURL);
 
   await say(`:gear: ${brandName} onboarding started...`);
 
   try {
-    // Find the site
-    let site = await Site.findByBaseURL(baseURL);
-    if (!site) {
-      // create a new site
-      const configuration = await Configuration.findLatest();
-      // onboard the site
-      const siteId = await createSiteAndOrganization(input, lambdaCtx, slackCtx);
+    // Use the shared performLlmoOnboarding function with Slack-specific cadence
+    const result = await performLlmoOnboarding(
+      {
+        domain: hostname, brandName, imsOrgId, brandPresenceCadence,
+      },
+      lambdaCtx,
+    );
 
-      await configuration.save();
-      site = await Site.findById(siteId);
-    } else {
-      // check that the existing site matches the provided IMS org id
-      await checkOrg(imsOrgId, site, lambdaCtx, slackCtx);
-    }
+    const { Site } = dataAccess;
+    const site = await Site.findById(result.siteId);
 
-    // create entitlement
-    await createEntitlementAndEnrollment(site, lambdaCtx, slackCtx.say);
+    const message = `:white_check_mark: *LLMO onboarding completed successfully!*
 
-    // upload and publish the query index file
-    await copyFilesToSharepoint(dataFolder, lambdaCtx, slackCtx.say);
-
-    // update indexing config in helix
-    await updateIndexConfig(dataFolder, lambdaCtx, slackCtx.say);
-
-    const siteId = site.getId();
-
-    // Get current site config
-    const siteConfig = site.getConfig();
-
-    // Update brand and data directory
-    siteConfig.updateLlmoBrand(brandName.trim());
-    siteConfig.updateLlmoDataFolder(dataFolder.trim());
-
-    // enable the traffic-analysis import for referral-traffic
-    siteConfig.enableImport(REFERRAL_TRAFFIC_IMPORT);
-
-    // enable the llmo-prompts-ahrefs import
-    siteConfig.enableImport('llmo-prompts-ahrefs', { limit: 25 });
-
-    // enable top 200 pages import
-    siteConfig.enableImport('top-pages');
-
-    // update the site config object
-    site.setConfig(Config.toDynamoItem(siteConfig));
-
-    // enable all necessary handlers
-    const configuration = await Configuration.findLatest();
-    configuration.enableHandlerForSite(REFERRAL_TRAFFIC_AUDIT, site);
-
-    // Enable the selected cadence and disable the other
-    if (brandPresenceCadence === 'daily') {
-      log.info(`Enabling daily brand presence audit and disabling weekly for site ${siteId}`);
-      configuration.enableHandlerForSite(GEO_BRAND_PRESENCE_DAILY, site);
-      configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_PAID, site);
-      configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_FREE, site);
-    } else {
-      log.info(`Enabling ${brandPresenceCadence} brand presence audit and disabling daily for site ${siteId}`);
-      if (brandPresenceCadence === 'weekly-paid') {
-        configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_DAILY, site);
-        configuration.enableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_PAID, site);
-        configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_FREE, site);
-      } else {
-        configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_DAILY, site);
-        configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_PAID, site);
-        configuration.enableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_FREE, site);
-      }
-    }
-
-    try {
-      await configuration.save();
-
-      await enableAudits(site, lambdaCtx, [
-        ...BASIC_AUDITS,
-        AGENTIC_TRAFFIC_REPORT_AUDIT, // enable the cdn-logs-report audits for agentic traffic
-        'llmo-customer-analysis', // this generates LLMO excel sheets and triggers audits
-        REFERRAL_TRAFFIC_AUDIT,
-        'llm-error-pages',
-      ]);
-
-      await site.save();
-      log.debug(`Successfully updated LLMO config for site ${siteId}`);
-
-      // trigger the llmo-customer-analysis handler
-      const sqsTriggerMessage = {
-        type: 'llmo-customer-analysis',
-        siteId,
-        auditContext: {
-          auditType: 'llmo-customer-analysis',
-          brandPresenceCadence,
-        },
-      };
-      await sqs.sendMessage(configuration.getQueues().audits, sqsTriggerMessage);
-
-      await triggerAudits(BASIC_AUDITS, lambdaCtx, site);
-
-      const message = `:white_check_mark: *LLMO onboarding completed successfully!*
-        
-:link: *Site:* ${baseURL}
-:identification_card: *Site ID:* ${siteId}
-:file_folder: *Data Folder:* ${dataFolder}
+:link: *Site:* ${result.baseURL}
+:identification_card: *Site ID:* ${result.siteId}
+:file_folder: *Data Folder:* ${result.dataFolder}
 :label: *Brand:* ${brandName}
 :identification_card: *IMS Org ID:* ${imsOrgId}
 :calendar: *Brand Presence Cadence:* ${brandPresenceCadence}
 
 The LLMO Customer Analysis handler has been triggered. It will take a few minutes to complete.`;
 
-      await say(message);
+    await say(message);
 
-      await triggerBrandProfileAgent({
-        context: lambdaCtx,
-        site,
-        slackContext: {
-          channelId: slackCtx.channelId,
-          threadTs: slackCtx.threadTs,
-        },
-        reason: 'llmo-slack',
-      });
-    } catch (error) {
-      log.error(`Error saving LLMO config for site ${siteId}: ${error.message}`);
-      await say(`:x: Failed to save LLMO configuration: ${error.message}`);
-    }
+    await triggerBrandProfileAgent({
+      context: lambdaCtx,
+      site,
+      slackContext: {
+        channelId: slackCtx.channelId,
+        threadTs: slackCtx.threadTs,
+      },
+      reason: 'llmo-slack',
+    });
   } catch (error) {
     log.error('Error in LLMO onboarding:', error);
     await postErrorMessage(say, error);
@@ -627,9 +503,13 @@ export function onboardLLMOModal(lambdaContext) {
       const deliveryType = values.delivery_type_input?.delivery_type?.selected_option?.value;
       const brandPresenceCadenceRaw = values.brand_presence_cadence_input
         ?.brand_presence_cadence?.selected_option?.value;
-      const brandPresenceCadence = (brandPresenceCadenceRaw === 'daily' || brandPresenceCadenceRaw === 'weekly')
-        ? brandPresenceCadenceRaw
-        : 'weekly';
+      // Map UI values to handler values: 'weekly' -> 'weekly-free', 'daily' stays as 'daily'
+      let brandPresenceCadence = 'weekly-free'; // default
+      if (brandPresenceCadenceRaw === 'daily') {
+        brandPresenceCadence = 'daily';
+      } else if (brandPresenceCadenceRaw === 'weekly-paid') {
+        brandPresenceCadence = 'weekly-paid';
+      }
 
       if (!brandName || !imsOrgId) {
         await ack({
