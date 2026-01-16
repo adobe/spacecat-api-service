@@ -1845,6 +1845,221 @@ describe('Sites Controller', () => {
     });
   });
 
+  // Metadata wrapper format tests with objectResponseDataKey parameter
+  describe('Metrics with objectResponseDataKey parameter', () => {
+    it('extracts and filters array from object when objectResponseDataKey=data is provided', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-last-week';
+
+      // Create mock metadata wrapper with 150 items
+      const mockData = Array.from({ length: 150 }, (_, i) => ({
+        url: `https://example.com/page${i}`,
+        pageviews: 150 - i,
+        metrics: [],
+      }));
+
+      const mockMetricsWrapper = {
+        label: 'last-week',
+        startTime: '2026-01-05T12:00:00.000Z',
+        endTime: '2026-01-12T12:00:00.000Z',
+        data: mockData,
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetricsWrapper);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { objectResponseDataKey: 'data', filterByTop100PageViews: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Should preserve wrapper format
+      expect(response).to.have.property('label', 'last-week');
+      expect(response).to.have.property('startTime', '2026-01-05T12:00:00.000Z');
+      expect(response).to.have.property('endTime', '2026-01-12T12:00:00.000Z');
+      expect(response).to.have.property('data');
+
+      // Should filter data to top 100
+      expect(response.data).to.have.length(100);
+
+      // Should be sorted by pageviews descending
+      expect(response.data[0].pageviews).to.equal(150);
+      expect(response.data[99].pageviews).to.equal(51);
+    });
+
+    it('extracts array from object when objectResponseDataKey=data without filtering', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'user-engagement-7d-last-to-last-week';
+
+      const mockMetricsWrapper = {
+        label: 'last-to-last-week',
+        startTime: '2025-12-29T12:00:00.000Z',
+        endTime: '2026-01-05T12:00:00.000Z',
+        data: [
+          { url: 'https://example.com/page1', engagement: 0.8 },
+          { url: 'https://example.com/page2', engagement: 0.6 },
+        ],
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetricsWrapper);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { objectResponseDataKey: 'data' },
+      });
+
+      const response = await result.json();
+
+      // Should preserve entire wrapper
+      expect(response).to.have.property('label', 'last-to-last-week');
+      expect(response).to.have.property('startTime', '2025-12-29T12:00:00.000Z');
+      expect(response).to.have.property('endTime', '2026-01-05T12:00:00.000Z');
+      expect(response).to.have.property('data');
+      expect(response.data).to.have.length(2);
+    });
+
+    it('handles object with empty data array when objectResponseDataKey=data', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-last-week';
+
+      const mockMetricsWrapper = {
+        label: 'last-week',
+        startTime: '2026-01-05T12:00:00.000Z',
+        endTime: '2026-01-12T12:00:00.000Z',
+        data: [],
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetricsWrapper);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { objectResponseDataKey: 'data', filterByTop100PageViews: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Should preserve wrapper with empty data
+      expect(response).to.have.property('label', 'last-week');
+      expect(response).to.have.property('data');
+      expect(response.data).to.have.length(0);
+    });
+
+    it('returns plain array when objectResponseDataKey is not provided (backward compatibility)', async () => {
+      const siteId = sites[0].getId();
+      const source = 'ahrefs';
+      const metric = 'organic-traffic';
+
+      const mockMetricsArray = [
+        { url: 'https://example.com/page1', pageviews: 1000 },
+        { url: 'https://example.com/page2', pageviews: 800 },
+      ];
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetricsArray);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+      });
+
+      const response = await result.json();
+
+      // Should return array directly (no wrapper)
+      expect(response).to.be.an('array');
+      expect(response).to.have.length(2);
+      expect(response).to.not.have.property('label');
+    });
+
+    it('returns plain array when stored data is object but objectResponseDataKey is not provided', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-last-week';
+
+      const mockMetricsWrapper = {
+        label: 'last-week',
+        startTime: '2026-01-05T12:00:00.000Z',
+        endTime: '2026-01-12T12:00:00.000Z',
+        data: [
+          { url: 'https://example.com/page1', pageviews: 100 },
+          { url: 'https://example.com/page2', pageviews: 200 },
+        ],
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetricsWrapper);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        // No objectResponseDataKey provided
+      });
+
+      const response = await result.json();
+
+      // Should return the object as-is (backward compatible - treats object as data)
+      expect(response).to.be.an('object');
+      expect(response).to.have.property('label');
+      expect(response).to.have.property('data');
+    });
+
+    it('works with custom objectResponseDataKey other than "data"', async () => {
+      const siteId = sites[0].getId();
+      const source = 'custom';
+      const metric = 'custom-metric';
+
+      const mockMetricsWrapper = {
+        label: 'custom-label',
+        items: [
+          { url: 'https://example.com/page1', pageviews: 500 },
+          { url: 'https://example.com/page2', pageviews: 300 },
+          { url: 'https://example.com/page3', pageviews: 400 },
+        ],
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetricsWrapper);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { objectResponseDataKey: 'items', filterByTop100PageViews: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Should use 'items' key
+      expect(response).to.have.property('label', 'custom-label');
+      expect(response).to.have.property('items');
+      expect(response.items).to.have.length(3);
+      // Should be sorted by pageviews descending
+      expect(response.items[0].pageviews).to.equal(500);
+      expect(response.items[1].pageviews).to.equal(400);
+      expect(response.items[2].pageviews).to.equal(300);
+    });
+  });
+
   it('get page metrics by source returns list of metrics', async () => {
     const siteId = sites[0].getId();
     const source = 'ahrefs';
