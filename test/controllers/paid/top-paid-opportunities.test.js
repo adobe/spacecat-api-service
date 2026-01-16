@@ -704,6 +704,40 @@ describe('TopPaidOpportunitiesController', () => {
       expect(opportunities[0].opportunityId).to.equal('forms-1');
     });
 
+    it('filters out forms opportunities with missing brief field in guidance recommendations', async () => {
+      const validFormsOppty = createOpportunity({
+        id: 'forms-1',
+        type: 'high-page-views-low-form-views',
+        data: { projectedConversionValue: 3000, form: 'https://example.com/form1' },
+      });
+      const missingBriefFormsOppty = createOpportunity({
+        id: 'forms-2',
+        type: 'high-page-views-low-form-views',
+        data: { projectedConversionValue: 5000, form: 'https://example.com/form2' },
+        guidance: {
+          recommendations: [
+            { insight: 'Test insight', recommendation: 'Test recommendation', type: 'guidance' },
+          ],
+        },
+      });
+      setupOpportunityMocks(
+        mockContext.dataAccess.Opportunity,
+        [validFormsOppty, missingBriefFormsOppty],
+      );
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([]);
+      mockAthenaClient.query.resolves([
+        createTrafficData({ url: 'https://example.com/form1', pageviews: '3000' }),
+        createTrafficData({ url: 'https://example.com/form2', pageviews: '5000' }),
+      ]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(1);
+      expect(opportunities[0].opportunityId).to.equal('forms-1');
+    });
+
     it('does not filter non-forms opportunities with null brief', async () => {
       const cwvOpptyWithNullBrief = createOpportunity({
         id: 'cwv-1',

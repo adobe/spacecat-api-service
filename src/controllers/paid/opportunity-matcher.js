@@ -68,7 +68,10 @@ function isValidOpportunity(opportunityData) {
   ];
   if (formTypes.includes(type)) {
     const recommendations = original.getGuidance?.()?.recommendations;
-    if (recommendations?.some((rec) => rec?.brief === null)) return false;
+    const hasInvalidBrief = recommendations?.some(
+      (rec) => rec?.brief === null || rec?.brief === undefined,
+    );
+    if (hasInvalidBrief) return false;
   }
 
   return true;
