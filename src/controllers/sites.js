@@ -602,7 +602,7 @@ function SitesController(ctx, log, env) {
     const source = context.params?.source;
     const filterByTop100PageViews = context.data?.filterByTop100PageViews === 'true';
     // Key to extract from object response, e.g., 'data' in { label, data: [...] }
-    const arrayKey = context.data?.arrayKey;
+    const objectResponseDataKey = context.data?.objectResponseDataKey;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -627,14 +627,14 @@ function SitesController(ctx, log, env) {
 
     const metrics = await getStoredMetrics({ siteId, metric, source }, context);
 
-    // Handle object response: extract array from key if arrayKey is provided
+    // Handle object response: extract array from key if objectResponseDataKey is provided
     let metricsData;
     let objectWrapper = null;
 
-    if (arrayKey && isObject(metrics) && !isArray(metrics)
-        && isArray(metrics[arrayKey])) {
+    if (objectResponseDataKey && isObject(metrics) && !isArray(metrics)
+        && isArray(metrics[objectResponseDataKey])) {
       // Stored data is an object with array at specified key
-      metricsData = metrics[arrayKey];
+      metricsData = metrics[objectResponseDataKey];
       objectWrapper = metrics;
     } else {
       // Stored data is a plain array (backward compatible)
@@ -653,9 +653,9 @@ function SitesController(ctx, log, env) {
       log.info(`Filtered metrics from ${originalCount} to ${metricsData.length} entries based on top pageViews`);
     }
 
-    // Return object wrapper if arrayKey was used, otherwise return plain array
+    // Return object wrapper if objectResponseDataKey was used, otherwise return plain array
     if (objectWrapper) {
-      return ok({ ...objectWrapper, [arrayKey]: metricsData });
+      return ok({ ...objectWrapper, [objectResponseDataKey]: metricsData });
     }
     return ok(metricsData);
   };
