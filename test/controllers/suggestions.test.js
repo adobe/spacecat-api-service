@@ -2398,6 +2398,65 @@ describe('Suggestions Controller', () => {
       expect(mockSqs.sendMessage).to.have.been.calledOnce;
     });
 
+    it('defaults to ungrouped behavior for unknown opportunity types', async () => {
+      // New opportunity types should default to ungrouped behavior
+      opportunity.getType = sandbox.stub().returns('some-new-opportunity-type');
+      // Enable the auto-fix handler for this test
+      mockConfiguration.findLatest.resolves({
+        isHandlerEnabledForSite: sandbox.stub().withArgs('some-new-opportunity-type-auto-fix', site).returns(true),
+      });
+
+      const newTypeSuggs = [
+        {
+          id: SUGGESTION_IDS[0],
+          opportunityId: OPPORTUNITY_ID,
+          type: 'CONTENT_UPDATE',
+          rank: 1,
+          status: 'NEW',
+          data: {
+            url: 'https://www.example.com/page1',
+            content: 'Some content',
+          },
+          updatedAt: new Date(),
+        },
+        {
+          id: SUGGESTION_IDS[1],
+          opportunityId: OPPORTUNITY_ID,
+          type: 'CONTENT_UPDATE',
+          rank: 2,
+          status: 'NEW',
+          data: {
+            url: 'https://www.example.com/page2',
+            content: 'Other content',
+          },
+          updatedAt: new Date(),
+        },
+      ];
+
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(newTypeSuggs[0]), mockSuggestionEntity(newTypeSuggs[1])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...newTypeSuggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...newTypeSuggs[1], status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.metadata).to.have.property('success', 2);
+      // Unknown types should NOT be grouped by URL, so single SQS call with all suggestions
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+    });
+
     it('triggers autofixSuggestion with customData for non-grouped type', async () => {
       opportunity.getType = sandbox.stub().returns('product-metatags');
       mockSuggestion.allByOpportunityId.resolves(
@@ -2436,7 +2495,7 @@ describe('Suggestions Controller', () => {
       expect(sqsCallArgs[1].customData).to.deep.equal(customData);
     });
 
-    it('triggers autofixSuggestion without customData for grouped type', async () => {
+    it('triggers autofixSuggestion without customData for non-grouped type', async () => {
       opportunity.getType = sandbox.stub().returns('form-accessibility');
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(formAccessibilitySuggs[0])],
