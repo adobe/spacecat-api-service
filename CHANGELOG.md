@@ -1,3 +1,10 @@
+# [1.285.0](https://github.com/adobe/spacecat-api-service/compare/v1.284.0...v1.285.0) (2026-01-16)
+
+
+### Features
+
+* add ACO product code ([#1687](https://github.com/adobe/spacecat-api-service/issues/1687)) ([e8abc9d](https://github.com/adobe/spacecat-api-service/commit/e8abc9d1362b1225b6bba37991da8546b2d08226))
+
 # [1.284.0](https://github.com/adobe/spacecat-api-service/compare/v1.283.1...v1.284.0) (2026-01-14)
 
 
