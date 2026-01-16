@@ -117,7 +117,10 @@ export function extractSelectedProducts(state) {
   if (values[LLMO_ACTION_ID]?.selected_options?.length > 0) {
     selectedProducts.push(EntitlementModel.PRODUCT_CODES.LLMO);
   }
-
+  if (values[ACO_ACTION_ID]?.selected_options?.length > 0) {
+    selectedProducts.push(EntitlementModel.PRODUCT_CODES.ACO);
+  }
+  
   return selectedProducts;
 }
 
