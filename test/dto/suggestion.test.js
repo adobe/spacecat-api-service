@@ -236,12 +236,89 @@ describe('Suggestion DTO', () => {
         expect(json).to.not.have.property('kpiDeltas');
       });
 
-      it('extracts url from various data fields', () => {
+      it('extracts url from pageUrl when url is not present', () => {
         const suggestion = createMockSuggestion({ url: undefined, pageUrl: 'https://example.com/summary-url' });
 
         const json = SuggestionDto.toJSON(suggestion, 'summary');
 
         expect(json.url).to.equal('https://example.com/summary-url');
+      });
+
+      it('extracts url from url_from (snake_case) when url and pageUrl are not present', () => {
+        const suggestion = createMockSuggestion({
+          url: undefined,
+          pageUrl: undefined,
+          url_from: 'https://example.com/url-from-snake',
+        });
+
+        const json = SuggestionDto.toJSON(suggestion, 'summary');
+
+        expect(json.url).to.equal('https://example.com/url-from-snake');
+      });
+
+      it('extracts url from urlFrom (camelCase) when url, pageUrl, url_from are not present', () => {
+        const suggestion = createMockSuggestion({
+          url: undefined,
+          pageUrl: undefined,
+          url_from: undefined,
+          urlFrom: 'https://example.com/url-from-camel',
+        });
+
+        const json = SuggestionDto.toJSON(suggestion, 'summary');
+
+        expect(json.url).to.equal('https://example.com/url-from-camel');
+      });
+
+      it('extracts url from nested recommendations[0].pageUrl', () => {
+        const suggestion = {
+          ...createMockSuggestion(),
+          getData: () => ({
+            recommendations: [
+              { pageUrl: 'https://example.com/rec-page-url', altText: 'test' },
+            ],
+          }),
+        };
+
+        const json = SuggestionDto.toJSON(suggestion, 'summary');
+
+        expect(json.url).to.equal('https://example.com/rec-page-url');
+      });
+
+      it('extracts url from nested recommendations[0].url when pageUrl not present', () => {
+        const suggestion = {
+          ...createMockSuggestion(),
+          getData: () => ({
+            recommendations: [
+              { url: 'https://example.com/rec-url', altText: 'test' },
+            ],
+          }),
+        };
+
+        const json = SuggestionDto.toJSON(suggestion, 'summary');
+
+        expect(json.url).to.equal('https://example.com/rec-url');
+      });
+
+      it('returns null url when recommendations array is empty', () => {
+        const suggestion = {
+          ...createMockSuggestion(),
+          getData: () => ({ recommendations: [] }),
+        };
+
+        const json = SuggestionDto.toJSON(suggestion, 'summary');
+
+        expect(json.url).to.be.null;
+      });
+
+      it('returns null url when getData returns null', () => {
+        const suggestion = {
+          ...createMockSuggestion(),
+          getData: () => null,
+        };
+
+        const json = SuggestionDto.toJSON(suggestion, 'summary');
+
+        expect(json.url).to.be.null;
       });
     });
   });
