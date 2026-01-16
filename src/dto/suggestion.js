@@ -19,6 +19,51 @@ import { buildAggregationKeyFromSuggestion } from '@adobe/spacecat-shared-utils'
 export const SUGGESTION_VIEWS = ['minimal', 'summary', 'full'];
 
 /**
+ * Fields to include in minimal view from data object.
+ * @type {string[]}
+ */
+const MINIMAL_DATA_FIELDS = [
+  'url',
+  'urls',
+  'urlFrom',
+  'urlTo',
+  'sitemapUrl',
+  'pageUrl',
+  'pattern',
+  'link',
+  'path',
+  'sourceUrl',
+  'destinationUrl',
+  'recommendations',
+  'cves',
+  'findings',
+  'form',
+  'page',
+  'accessibility',
+];
+
+/**
+ * Extracts minimal data fields from suggestion data.
+ * @param {object} data - Suggestion data object.
+ * @returns {object|null} Object with only minimal fields, or null if no data.
+ */
+const extractMinimalData = (data) => {
+  if (!data) return null;
+
+  const minimalData = {};
+  let hasFields = false;
+
+  for (const field of MINIMAL_DATA_FIELDS) {
+    if (data[field] !== undefined) {
+      minimalData[field] = data[field];
+      hasFields = true;
+    }
+  }
+
+  return hasFields ? minimalData : null;
+};
+
+/**
  * Extracts URL from suggestion data.
  * Handles both flat structures and nested recommendations.
  * @param {object} data - Suggestion data object.
@@ -60,11 +105,13 @@ export const SuggestionDto = {
   toJSON: (suggestion, view = 'full') => {
     const data = suggestion.getData();
 
-    // Minimal view: id and url only
+    // Minimal view: id, status, and URL-related data fields
     if (view === 'minimal') {
+      const minimalData = extractMinimalData(data);
       return {
         id: suggestion.getId(),
-        url: extractUrl(data),
+        status: suggestion.getStatus(),
+        ...(minimalData && { data: minimalData }),
       };
     }
 

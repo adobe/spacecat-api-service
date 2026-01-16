@@ -598,9 +598,11 @@ describe('Suggestions Controller', () => {
     const suggestions = await response.json();
     expect(suggestions).to.be.an('array').with.lengthOf(1);
     expect(suggestions[0]).to.have.property('id');
-    expect(suggestions[0]).to.have.property('url');
-    expect(suggestions[0]).to.not.have.property('data');
+    expect(suggestions[0]).to.have.property('status');
+    // Minimal view now includes data with URL-related fields only
     expect(suggestions[0]).to.not.have.property('kpiDeltas');
+    expect(suggestions[0]).to.not.have.property('opportunityId');
+    expect(suggestions[0]).to.not.have.property('type');
   });
 
   it('gets all suggestions for an opportunity filtered by single status', async () => {
@@ -658,9 +660,11 @@ describe('Suggestions Controller', () => {
     const suggestions = await response.json();
     expect(suggestions).to.be.an('array').with.lengthOf(1);
     expect(suggestions[0]).to.have.property('id');
-    expect(suggestions[0]).to.have.property('url');
-    expect(suggestions[0]).to.not.have.property('data');
+    expect(suggestions[0]).to.have.property('status');
+    // Minimal view now includes data with URL-related fields only
     expect(suggestions[0]).to.not.have.property('kpiDeltas');
+    expect(suggestions[0]).to.not.have.property('opportunityId');
+    expect(suggestions[0]).to.not.have.property('type');
   });
 
   it('gets paged suggestions returns bad request if limit is less than 1', async () => {

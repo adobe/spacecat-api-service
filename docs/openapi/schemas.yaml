@@ -2930,17 +2930,68 @@ SuggestionList:
     $ref: '#/Suggestion'
 SuggestionMinimal:
   type: object
-  description: Minimal suggestion projection containing only id and url (lightest payload for selection lists)
+  description: Minimal suggestion projection containing id, status, and URL-related data fields for listing views
   properties:
     id:
       description: UUID of this suggestion
       $ref: '#/Id'
-    url:
-      description: URL associated with the suggestion (extracted from data.url, data.pageUrl, data.url_from, or data.urlFrom). May be null if no URL found.
-      type: string
-      example: "https://example.com/page"
+    status:
+      description: Status of this suggestion
+      $ref: '#/SuggestionStatus'
+    data:
+      type: object
+      description: URL-related fields extracted from the full data object. Only present if any URL fields exist.
+      properties:
+        url:
+          type: string
+          example: "https://example.com/page"
+        urls:
+          type: array
+          items:
+            type: string
+        urlFrom:
+          type: string
+          example: "https://example.com/source"
+        urlTo:
+          type: string
+          example: "https://example.com/destination"
+        sitemapUrl:
+          type: string
+          example: "https://example.com/sitemap.xml"
+        pageUrl:
+          type: string
+          example: "https://example.com/page"
+        pattern:
+          type: string
+        link:
+          type: string
+        path:
+          type: string
+        sourceUrl:
+          type: string
+        destinationUrl:
+          type: string
+        recommendations:
+          type: array
+          items:
+            type: object
+        cves:
+          type: array
+          items:
+            type: object
+        findings:
+          type: array
+          items:
+            type: object
+        form:
+          type: object
+        page:
+          type: object
+        accessibility:
+          type: object
   required:
     - id
+    - status
 SuggestionSummary:
   type: object
   description: Summary suggestion projection containing key fields without heavy data (for table displays)

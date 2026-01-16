@@ -76,47 +76,41 @@ describe('Suggestion DTO', () => {
     });
 
     describe('minimal view', () => {
-      it('returns only id and url', () => {
+      it('returns id, status, and URL-related data fields', () => {
         const suggestion = createMockSuggestion();
 
         const json = SuggestionDto.toJSON(suggestion, 'minimal');
 
-        expect(json).to.deep.equal({
-          id: 'suggestion-id-123',
-          url: 'https://example.com/page',
-        });
+        expect(json).to.have.property('id', 'suggestion-id-123');
+        expect(json).to.have.property('status', 'NEW');
+        expect(json).to.have.property('data');
+        expect(json.data).to.have.property('url', 'https://example.com/page');
+        // Should not include non-URL fields like 'content'
+        expect(json.data).to.not.have.property('content');
       });
 
-      it('extracts url from data.pageUrl when data.url is not present', () => {
+      it('includes pageUrl in data when present', () => {
         const suggestion = createMockSuggestion({ url: undefined, pageUrl: 'https://example.com/page-url' });
 
         const json = SuggestionDto.toJSON(suggestion, 'minimal');
 
-        expect(json.url).to.equal('https://example.com/page-url');
+        expect(json.data).to.have.property('pageUrl', 'https://example.com/page-url');
       });
 
-      it('extracts url from data.url_from when url and pageUrl are not present', () => {
-        const suggestion = createMockSuggestion({ url: undefined, pageUrl: undefined, url_from: 'https://example.com/url-from' });
-
-        const json = SuggestionDto.toJSON(suggestion, 'minimal');
-
-        expect(json.url).to.equal('https://example.com/url-from');
-      });
-
-      it('extracts url from data.urlFrom as fallback', () => {
+      it('includes urlFrom and urlTo in data when present', () => {
         const suggestion = createMockSuggestion({
           url: undefined,
-          pageUrl: undefined,
-          url_from: undefined,
-          urlFrom: 'https://example.com/url-from-camel',
+          urlFrom: 'https://example.com/from',
+          urlTo: 'https://example.com/to',
         });
 
         const json = SuggestionDto.toJSON(suggestion, 'minimal');
 
-        expect(json.url).to.equal('https://example.com/url-from-camel');
+        expect(json.data).to.have.property('urlFrom', 'https://example.com/from');
+        expect(json.data).to.have.property('urlTo', 'https://example.com/to');
       });
 
-      it('extracts url from nested recommendations[0].pageUrl for alt-text suggestions', () => {
+      it('includes recommendations array in data when present', () => {
         const suggestion = {
           ...createMockSuggestion(),
           getData: () => ({
@@ -129,47 +123,77 @@ describe('Suggestion DTO', () => {
 
         const json = SuggestionDto.toJSON(suggestion, 'minimal');
 
-        expect(json.url).to.equal('https://example.com/nested-page');
+        expect(json.data).to.have.property('recommendations');
+        expect(json.data.recommendations).to.have.length(2);
       });
 
-      it('extracts url from nested recommendations[0].url when pageUrl not present', () => {
+      it('includes multiple URL-related fields when present', () => {
+        const suggestion = createMockSuggestion({
+          url: 'https://example.com/url',
+          sitemapUrl: 'https://example.com/sitemap.xml',
+          path: '/some/path',
+          pattern: '*.html',
+        });
+
+        const json = SuggestionDto.toJSON(suggestion, 'minimal');
+
+        expect(json.data).to.have.property('url', 'https://example.com/url');
+        expect(json.data).to.have.property('sitemapUrl', 'https://example.com/sitemap.xml');
+        expect(json.data).to.have.property('path', '/some/path');
+        expect(json.data).to.have.property('pattern', '*.html');
+      });
+
+      it('includes cves, findings, form, page, accessibility when present', () => {
+        const suggestion = createMockSuggestion({
+          url: undefined,
+          cves: [{ id: 'CVE-2025-1234' }],
+          findings: [{ type: 'error' }],
+          form: { action: '/submit' },
+          page: { title: 'Test Page' },
+          accessibility: { score: 95 },
+        });
+
+        const json = SuggestionDto.toJSON(suggestion, 'minimal');
+
+        expect(json.data).to.have.property('cves');
+        expect(json.data).to.have.property('findings');
+        expect(json.data).to.have.property('form');
+        expect(json.data).to.have.property('page');
+        expect(json.data).to.have.property('accessibility');
+      });
+
+      it('includes urls array, link, sourceUrl, destinationUrl when present', () => {
+        const suggestion = createMockSuggestion({
+          url: undefined,
+          urls: ['https://example.com/1', 'https://example.com/2'],
+          link: 'https://example.com/link',
+          sourceUrl: 'https://example.com/source',
+          destinationUrl: 'https://example.com/dest',
+        });
+
+        const json = SuggestionDto.toJSON(suggestion, 'minimal');
+
+        expect(json.data).to.have.property('urls');
+        expect(json.data.urls).to.deep.equal(['https://example.com/1', 'https://example.com/2']);
+        expect(json.data).to.have.property('link', 'https://example.com/link');
+        expect(json.data).to.have.property('sourceUrl', 'https://example.com/source');
+        expect(json.data).to.have.property('destinationUrl', 'https://example.com/dest');
+      });
+
+      it('does not include data property when no URL-related fields exist', () => {
         const suggestion = {
           ...createMockSuggestion(),
-          getData: () => ({
-            recommendations: [
-              { url: 'https://example.com/nested-url', altText: 'description' },
-            ],
-          }),
+          getData: () => ({ content: 'no url here', title: 'test' }),
         };
 
         const json = SuggestionDto.toJSON(suggestion, 'minimal');
 
-        expect(json.url).to.equal('https://example.com/nested-url');
+        expect(json).to.have.property('id');
+        expect(json).to.have.property('status');
+        expect(json).to.not.have.property('data');
       });
 
-      it('returns null url when recommendations array is empty', () => {
-        const suggestion = {
-          ...createMockSuggestion(),
-          getData: () => ({ recommendations: [] }),
-        };
-
-        const json = SuggestionDto.toJSON(suggestion, 'minimal');
-
-        expect(json.url).to.be.null;
-      });
-
-      it('returns null url when no URL field is present', () => {
-        const suggestion = {
-          ...createMockSuggestion(),
-          getData: () => ({ content: 'no url here' }),
-        };
-
-        const json = SuggestionDto.toJSON(suggestion, 'minimal');
-
-        expect(json.url).to.be.null;
-      });
-
-      it('returns null url when getData returns null', () => {
+      it('does not include data property when getData returns null', () => {
         const suggestion = {
           ...createMockSuggestion(),
           getData: () => null,
@@ -177,7 +201,10 @@ describe('Suggestion DTO', () => {
 
         const json = SuggestionDto.toJSON(suggestion, 'minimal');
 
-        expect(json.url).to.be.null;
+        expect(json).to.deep.equal({
+          id: 'suggestion-id-123',
+          status: 'NEW',
+        });
       });
     });
 
