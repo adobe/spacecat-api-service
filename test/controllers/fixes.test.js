@@ -105,6 +105,12 @@ describe('Fixes Controller', () => {
     fixesController = new FixesController({ dataAccess }, accessControlUtil);
     requestContext = {
       params: { siteId, opportunityId },
+      log: {
+        error: sandbox.stub(),
+        info: sandbox.stub(),
+        warn: sandbox.stub(),
+        debug: sandbox.stub(),
+      },
     };
   });
 
@@ -1797,6 +1803,33 @@ describe('Fixes Controller', () => {
 
       const result = await response.json();
       expect(result.message).to.include('Error rolling back fix');
+    });
+
+    it('responds 500 with debug info when error has a cause', async () => {
+      const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+      requestContext.params.fixId = fixId;
+
+      const fix = await createFixWithStatus(fixId, 'FAILED');
+      const suggestion = await createSuggestionWithStatus('ERROR');
+
+      sandbox.stub(fix, 'getSuggestions').resolves([suggestion]);
+
+      // Create an error with a cause
+      const rootCause = new Error('Root cause failure');
+      const errorWithCause = new Error('Database connection failed');
+      errorWithCause.cause = rootCause;
+      fixEntityCollection.rollbackFixWithSuggestionUpdates.rejects(errorWithCause);
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 500 });
+
+      const result = await response.json();
+      expect(result.message).to.include('Error rolling back fix');
+      // In non-production, debug info should be included
+      if (process.env.NODE_ENV !== 'production') {
+        expect(result.debug).to.exist;
+        expect(result.debug.cause).to.equal('Root cause failure');
+      }
     });
 
     it('responds 400 if transaction is canceled due to condition check failure', async () => {
