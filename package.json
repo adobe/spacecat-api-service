@@ -149,7 +149,7 @@
   },
   "overrides": {
     "@adobe/fetch": "4.2.3",
-    "@adobe/spacecat-shared-data-access": "2.92.1"
+    "@adobe/spacecat-shared-data-access": "2.96.0"
   },
   "lint-staged": {
     "*.js": "eslint",
