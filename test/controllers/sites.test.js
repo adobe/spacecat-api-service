@@ -2058,6 +2058,110 @@ describe('Sites Controller', () => {
       expect(response.items[1].pageviews).to.equal(400);
       expect(response.items[2].pageviews).to.equal(300);
     });
+
+    it('filters metrics by site baseURL when filterByBaseURL=true', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockMetrics = [
+        { url: 'https://site1.com/page1', pageviews: 5000, lcp: 1500 },
+        { url: 'https://other.com/page2', pageviews: 3000, lcp: 2000 },
+        { url: 'https://site1.com/page3', pageviews: 4000, lcp: 1800 },
+        { url: 'https://different.com/page4', pageviews: 2000, lcp: 2200 },
+      ];
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByBaseURL: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Should only include metrics from site1.com (site baseURL)
+      expect(response).to.have.length(2);
+      expect(response[0].url).to.equal('https://site1.com/page1');
+      expect(response[1].url).to.equal('https://site1.com/page3');
+    });
+
+    it('applies filterByBaseURL before top100 filtering', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      // Create 150 metrics: 75 from site1.com, 75 from other.com
+      const mockMetrics = [
+        ...Array.from({ length: 75 }, (_, i) => ({
+          url: `https://site1.com/page${i}`,
+          pageviews: 1000 + i,
+          lcp: 1500,
+        })),
+        ...Array.from({ length: 75 }, (_, i) => ({
+          url: `https://other.com/page${i}`,
+          pageviews: 2000 + i,
+          lcp: 1500,
+        })),
+      ];
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: {
+          filterByBaseURL: 'true',
+          filterByTop100PageViews: 'true',
+        },
+      });
+
+      const response = await result.json();
+
+      // Should filter to site1.com first (75 items), then take top 75
+      // (since less than 100)
+      expect(response).to.have.length(75);
+      response.forEach((item) => {
+        expect(item.url).to.include('site1.com');
+      });
+    });
+
+    it('handles missing url field gracefully when filterByBaseURL=true', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockMetrics = [
+        { url: 'https://site1.com/page1', pageviews: 5000 },
+        { pageviews: 3000 }, // Missing url
+        { url: 'https://site1.com/page3', pageviews: 4000 },
+      ];
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByBaseURL: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Should only include valid entries with URLs matching baseURL
+      expect(response).to.have.length(2);
+      expect(response[0].url).to.equal('https://site1.com/page1');
+      expect(response[1].url).to.equal('https://site1.com/page3');
+    });
   });
 
   it('get page metrics by source returns list of metrics', async () => {

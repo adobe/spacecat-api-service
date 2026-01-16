@@ -601,6 +601,7 @@ function SitesController(ctx, log, env) {
     const metric = context.params?.metric;
     const source = context.params?.source;
     const filterByTop100PageViews = context.data?.filterByTop100PageViews === 'true';
+    const filterByBaseURL = context.data?.filterByBaseURL === 'true';
     // Key to extract from object response, e.g., 'data' in { label, data: [...] }
     const arrayKey = context.data?.arrayKey;
 
@@ -641,7 +642,21 @@ function SitesController(ctx, log, env) {
       metricsData = metrics;
     }
 
-    // Filter to top 100 pages by pageViews when requested
+    // Filter by site baseURL when requested (applied first)
+    if (filterByBaseURL) {
+      const siteBaseURL = site.getBaseURL();
+      const originalCount = metricsData.length;
+      metricsData = metricsData.filter((metricEntry) => {
+        if (!metricEntry.url || !siteBaseURL) {
+          return false;
+        }
+        return metricEntry.url.includes(siteBaseURL);
+      });
+
+      log.info(`Filtered metrics from ${originalCount} to ${metricsData.length} entries based on site baseURL`);
+    }
+
+    // Filter to top 100 pages by pageViews when requested (applied last)
     if (filterByTop100PageViews) {
       // Sort by pageViews in descending order and take top 100
       const originalCount = metricsData.length;
