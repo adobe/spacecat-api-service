@@ -2090,6 +2090,42 @@ describe('Sites Controller', () => {
       expect(response[1].url).to.equal('https://site1.com/page3');
     });
 
+    it('normalizes www prefix when filtering by baseURL', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      // Test: Site baseURL is "https://site1.com" (no www)
+      // Metrics include both with and without www - all should match
+      const mockMetrics = [
+        { url: 'https://www.site1.com/page1', pageviews: 5000, lcp: 1500 },
+        { url: 'http://site1.com/page2', pageviews: 4000, lcp: 1600 },
+        { url: 'https://site1.com/page3', pageviews: 3000, lcp: 1700 },
+        { url: 'https://www.other.com/page4', pageviews: 2000, lcp: 1800 },
+        { url: 'http://www.site1.com/page5', pageviews: 1000, lcp: 1900 },
+      ];
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByBaseURL: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Should match all site1.com URLs regardless of www prefix or protocol
+      expect(response).to.have.length(4);
+      expect(response[0].url).to.equal('https://www.site1.com/page1');
+      expect(response[1].url).to.equal('http://site1.com/page2');
+      expect(response[2].url).to.equal('https://site1.com/page3');
+      expect(response[3].url).to.equal('http://www.site1.com/page5');
+    });
+
     it('applies filterByBaseURL before top100 filtering', async () => {
       const siteId = sites[0].getId();
       const source = 'rum';
@@ -2161,6 +2197,41 @@ describe('Sites Controller', () => {
       expect(response).to.have.length(2);
       expect(response[0].url).to.equal('https://site1.com/page1');
       expect(response[1].url).to.equal('https://site1.com/page3');
+    });
+
+    it('filters by path when baseURL includes a path', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      // Override site baseURL to include a path
+      sites[0].getBaseURL = () => 'https://site1.com/book';
+
+      const mockMetrics = [
+        { url: 'https://site1.com/book/flights', pageviews: 5000 },
+        { url: 'https://site1.com/book/hotels', pageviews: 4000 },
+        { url: 'https://site1.com/other/page', pageviews: 3000 },
+        { url: 'https://www.site1.com/book/cars', pageviews: 2000 },
+      ];
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByBaseURL: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Should only include URLs that start with site1.com/book
+      expect(response).to.have.length(3);
+      expect(response[0].url).to.equal('https://site1.com/book/flights');
+      expect(response[1].url).to.equal('https://site1.com/book/hotels');
+      expect(response[2].url).to.equal('https://www.site1.com/book/cars');
     });
   });
 

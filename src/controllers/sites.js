@@ -646,14 +646,27 @@ function SitesController(ctx, log, env) {
     if (filterByBaseURL) {
       const siteBaseURL = site.getBaseURL();
       const originalCount = metricsData.length;
+
+      // Normalize baseURL: remove protocol and www., keep path
+      const normalizedBaseURL = siteBaseURL
+        .replace(/^https?:\/\/(www\.)?/, '') // Remove protocol and optional www.
+        .replace(/\/$/, ''); // Remove trailing slash
+
       metricsData = metricsData.filter((metricEntry) => {
-        if (!metricEntry.url || !siteBaseURL) {
+        if (!metricEntry.url || !normalizedBaseURL) {
           return false;
         }
-        return metricEntry.url.includes(siteBaseURL);
+
+        // Normalize metric URL: remove protocol and www.
+        const normalizedMetricURL = metricEntry.url
+          .replace(/^https?:\/\/(www\.)?/, '') // Remove protocol and optional www.
+          .replace(/\/$/, ''); // Remove trailing slash
+
+        // Check if metric URL starts with the normalized base URL
+        return normalizedMetricURL.startsWith(normalizedBaseURL);
       });
 
-      log.info(`Filtered metrics from ${originalCount} to ${metricsData.length} entries based on site baseURL`);
+      log.info(`Filtered metrics from ${originalCount} to ${metricsData.length} entries based on site baseURL (${normalizedBaseURL})`);
     }
 
     // Filter to top 100 pages by pageViews when requested (applied last)
