@@ -2955,6 +2955,19 @@ SuggestionMinimal:
         urlTo:
           type: string
           example: "https://example.com/destination"
+        url_from:
+          type: string
+          description: Source URL (snake_case variant for broken backlinks)
+          example: "https://example.com/source"
+        url_to:
+          type: string
+          description: Target URL (snake_case variant for broken backlinks)
+          example: "https://example.com/destination"
+        urlsSuggested:
+          type: array
+          description: Array of suggested URLs
+          items:
+            type: string
         sitemapUrl:
           type: string
           example: "https://example.com/sitemap.xml"
@@ -2989,6 +3002,20 @@ SuggestionMinimal:
           type: object
         accessibility:
           type: object
+        metrics:
+          type: object
+          description: CWV metrics (mobileMetric, desktopMetric) for calculating totalIssues
+        type:
+          type: string
+          description: Type indicator (e.g., 'url' vs 'group' for CWV)
+        pageviews:
+          type: number
+          description: Page views count for display
+        issues:
+          type: array
+          description: Issues array for Accessibility, ColorContrast, FormNonExperimental (includes occurrences field)
+          items:
+            type: object
   required:
     - id
     - status

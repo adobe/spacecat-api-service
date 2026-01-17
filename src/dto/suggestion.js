@@ -23,10 +23,14 @@ export const SUGGESTION_VIEWS = ['minimal', 'summary', 'full'];
  * @type {string[]}
  */
 const MINIMAL_DATA_FIELDS = [
+  // URL fields
   'url',
   'urls',
   'urlFrom',
   'urlTo',
+  'url_from', // snake_case variant (broken backlinks)
+  'url_to', // snake_case variant (broken backlinks)
+  'urlsSuggested',
   'sitemapUrl',
   'pageUrl',
   'pattern',
@@ -34,6 +38,12 @@ const MINIMAL_DATA_FIELDS = [
   'path',
   'sourceUrl',
   'destinationUrl',
+  // CWV fields
+  'metrics', // for totalIssues calculation (mobileMetric + desktopMetric)
+  'type', // to determine url vs group
+  'pageviews', // for display
+  // Issues and findings
+  'issues', // for CWV, Accessibility, ColorContrast, FormNonExperimental
   'recommendations',
   'cves',
   'findings',

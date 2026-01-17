@@ -180,6 +180,66 @@ describe('Suggestion DTO', () => {
         expect(json.data).to.have.property('destinationUrl', 'https://example.com/dest');
       });
 
+      it('includes url_from and url_to (snake_case) for broken backlinks', () => {
+        const suggestion = createMockSuggestion({
+          url: undefined,
+          url_from: 'https://example.com/source-page',
+          url_to: 'https://example.com/target-page',
+        });
+
+        const json = SuggestionDto.toJSON(suggestion, 'minimal');
+
+        expect(json.data).to.have.property('url_from', 'https://example.com/source-page');
+        expect(json.data).to.have.property('url_to', 'https://example.com/target-page');
+      });
+
+      it('includes urlsSuggested array when present', () => {
+        const suggestion = createMockSuggestion({
+          url: undefined,
+          urlsSuggested: ['https://example.com/suggested1', 'https://example.com/suggested2'],
+        });
+
+        const json = SuggestionDto.toJSON(suggestion, 'minimal');
+
+        expect(json.data).to.have.property('urlsSuggested');
+        expect(json.data.urlsSuggested).to.deep.equal([
+          'https://example.com/suggested1',
+          'https://example.com/suggested2',
+        ]);
+      });
+
+      it('includes CWV fields: metrics, type, pageviews when present', () => {
+        const suggestion = createMockSuggestion({
+          url: 'https://example.com/page',
+          metrics: { mobileMetric: 5, desktopMetric: 3 },
+          type: 'url',
+          pageviews: 1000,
+        });
+
+        const json = SuggestionDto.toJSON(suggestion, 'minimal');
+
+        expect(json.data).to.have.property('metrics');
+        expect(json.data.metrics).to.deep.equal({ mobileMetric: 5, desktopMetric: 3 });
+        expect(json.data).to.have.property('type', 'url');
+        expect(json.data).to.have.property('pageviews', 1000);
+      });
+
+      it('includes issues array for Accessibility/ColorContrast/Form suggestions', () => {
+        const suggestion = createMockSuggestion({
+          url: undefined,
+          issues: [
+            { type: 'color-contrast', occurrences: 5 },
+            { type: 'missing-alt', occurrences: 3 },
+          ],
+        });
+
+        const json = SuggestionDto.toJSON(suggestion, 'minimal');
+
+        expect(json.data).to.have.property('issues');
+        expect(json.data.issues).to.have.length(2);
+        expect(json.data.issues[0]).to.have.property('occurrences', 5);
+      });
+
       it('does not include data property when no URL-related fields exist', () => {
         const suggestion = {
           ...createMockSuggestion(),
