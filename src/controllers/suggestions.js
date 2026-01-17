@@ -28,7 +28,7 @@ import {
 
 import { ValidationError, Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
-import { SuggestionDto } from '../dto/suggestion.js';
+import { SuggestionDto, SUGGESTION_VIEWS } from '../dto/suggestion.js';
 import { FixDto } from '../dto/fix.js';
 import { sendAutofixMessage, getIMSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
@@ -59,6 +59,20 @@ function SuggestionsController(ctx, sqs, env) {
   ];
 
   const DEFAULT_PAGE_SIZE = 100;
+
+  /**
+   * Validates the view parameter for projection.
+   * @param {string} view - The view parameter from query string.
+   * @returns {string} Valid view name or 'full' as default.
+   * @throws {Error} If view is invalid.
+   */
+  const validateView = (view) => {
+    if (!view) return 'full';
+    if (!SUGGESTION_VIEWS.includes(view)) {
+      throw new Error(`Invalid view. Must be one of: ${SUGGESTION_VIEWS.join(', ')}`);
+    }
+    return view;
+  };
 
   const shouldGroupSuggestionsForAutofix = (type) => !AUTOFIX_UNGROUPED_OPPTY_TYPES.includes(type);
 
@@ -95,6 +109,8 @@ function SuggestionsController(ctx, sqs, env) {
   const getAllForOpportunity = async (context) => {
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId;
+    const viewParam = context.data?.view;
+    const statusParam = context.data?.status;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -102,6 +118,13 @@ function SuggestionsController(ctx, sqs, env) {
 
     if (!isValidUUID(opptyId)) {
       return badRequest('Opportunity ID required');
+    }
+
+    let view;
+    try {
+      view = validateView(viewParam);
+    } catch (e) {
+      return badRequest(e.message);
     }
 
     const site = await Site.findById(siteId);
@@ -113,7 +136,9 @@ function SuggestionsController(ctx, sqs, env) {
       return forbidden('User does not belong to the organization');
     }
 
-    const suggestionEntities = await Suggestion.allByOpportunityId(opptyId);
+    // Fetch all suggestions (single DB call)
+    let suggestionEntities = await Suggestion.allByOpportunityId(opptyId);
+
     // Check if the opportunity belongs to the site
     if (suggestionEntities.length > 0) {
       const oppty = await suggestionEntities[0].getOpportunity();
@@ -121,7 +146,18 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
-    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg));
+
+    // Filter by status in memory if status param provided (supports comma-separated values)
+    if (statusParam) {
+      const statuses = statusParam.split(',').map((s) => s.trim()).filter(Boolean);
+      if (statuses.length > 0) {
+        suggestionEntities = suggestionEntities.filter(
+          (sugg) => statuses.includes(sugg.getStatus()),
+        );
+      }
+    }
+
+    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg, view));
     return ok(suggestions);
   };
 
@@ -130,6 +166,7 @@ function SuggestionsController(ctx, sqs, env) {
    * @param {Object} context of the request
    * @param {number} context.params.limit - Number of suggestions per page. Default=100.
    * @param {number} context.params.cursor - The next cursor or null for first page.
+   * @param {string} context.params.view - Projection view: 'minimal', 'summary', or 'full'.
    * @returns {Promise<Response>} Array of suggestions response.
    */
   const getAllForOpportunityPaged = async (context) => {
@@ -137,6 +174,7 @@ function SuggestionsController(ctx, sqs, env) {
     const opptyId = context.params?.opportunityId;
     const limit = parseInt(context.params?.limit, 10) || DEFAULT_PAGE_SIZE;
     const cursor = context.params?.cursor || null;
+    const viewParam = context.data?.view;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -150,6 +188,13 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('Page size must be greater than 0');
     }
 
+    let view;
+    try {
+      view = validateView(viewParam);
+    } catch (e) {
+      return badRequest(e.message);
+    }
+
     const site = await Site.findById(siteId);
     if (!site) {
       return notFound('Site not found');
@@ -159,13 +204,11 @@ function SuggestionsController(ctx, sqs, env) {
       return forbidden('User does not belong to the organization');
     }
 
-    const results = await Suggestion
-      .allByOpportunityId(opptyId, {
-        limit,
-        cursor,
-        returnCursor: true,
-      });
-    const { data: suggestionEntities = [], cursor: newCursor = null } = results;
+    // Fetch suggestions with pagination
+    const paginationOptions = { limit, cursor, returnCursor: true };
+    const results = await Suggestion.allByOpportunityId(opptyId, paginationOptions);
+    const suggestionEntities = results.data || [];
+    const newCursor = results.cursor || null;
 
     // Check if the opportunity belongs to the site
     if (suggestionEntities.length > 0) {
@@ -175,7 +218,7 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
 
-    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg));
+    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg, view));
 
     return ok({
       suggestions,
@@ -196,6 +239,8 @@ function SuggestionsController(ctx, sqs, env) {
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId;
     const status = context.params?.status || undefined;
+    const viewParam = context.data?.view;
+
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
@@ -204,6 +249,13 @@ function SuggestionsController(ctx, sqs, env) {
     }
     if (!hasText(status)) {
       return badRequest('Status is required');
+    }
+
+    let view;
+    try {
+      view = validateView(viewParam);
+    } catch (e) {
+      return badRequest(e.message);
     }
 
     const site = await Site.findById(siteId);
@@ -223,7 +275,7 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
-    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg));
+    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg, view));
     return ok(suggestions);
   };
 
@@ -238,6 +290,7 @@ function SuggestionsController(ctx, sqs, env) {
     const status = context.params?.status || undefined;
     const limit = parseInt(context.params?.limit, 10) || DEFAULT_PAGE_SIZE;
     const cursor = context.params?.cursor || null;
+    const viewParam = context.data?.view;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -251,6 +304,13 @@ function SuggestionsController(ctx, sqs, env) {
 
     if (!isInteger(limit) || limit < 1) {
       return badRequest('Page size must be greater than 0');
+    }
+
+    let view;
+    try {
+      view = validateView(viewParam);
+    } catch (e) {
+      return badRequest(e.message);
     }
 
     const site = await Site.findById(siteId);
@@ -275,7 +335,7 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
-    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg));
+    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg, view));
     return ok({
       suggestions,
       pagination: {
@@ -295,6 +355,7 @@ function SuggestionsController(ctx, sqs, env) {
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId || undefined;
     const suggestionId = context.params?.suggestionId || undefined;
+    const viewParam = context.data?.view;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -306,6 +367,13 @@ function SuggestionsController(ctx, sqs, env) {
 
     if (!isValidUUID(suggestionId)) {
       return badRequest('Suggestion ID required');
+    }
+
+    let view;
+    try {
+      view = validateView(viewParam);
+    } catch (e) {
+      return badRequest(e.message);
     }
 
     const site = await Site.findById(siteId);
@@ -325,7 +393,7 @@ function SuggestionsController(ctx, sqs, env) {
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound();
     }
-    return ok(SuggestionDto.toJSON(suggestion));
+    return ok(SuggestionDto.toJSON(suggestion, view));
   };
 
   /**

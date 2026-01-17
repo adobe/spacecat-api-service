@@ -13,28 +13,134 @@
 import { buildAggregationKeyFromSuggestion } from '@adobe/spacecat-shared-utils';
 
 /**
+ * Valid projection views for suggestions.
+ * @type {string[]}
+ */
+export const SUGGESTION_VIEWS = ['minimal', 'summary', 'full'];
+
+/**
+ * Fields to include in minimal view from data object.
+ * @type {string[]}
+ */
+const MINIMAL_DATA_FIELDS = [
+  // URL fields
+  'url',
+  'urls',
+  'urlFrom',
+  'urlTo',
+  'url_from', // snake_case variant (broken backlinks)
+  'url_to', // snake_case variant (broken backlinks)
+  'urlsSuggested',
+  'sitemapUrl',
+  'pageUrl',
+  'pattern',
+  'link',
+  'path',
+  'sourceUrl',
+  'destinationUrl',
+  // CWV fields
+  'metrics', // for totalIssues calculation (mobileMetric + desktopMetric)
+  'type', // to determine url vs group
+  'pageviews', // for display
+  // Issues and findings
+  'issues', // for CWV, Accessibility, ColorContrast, FormNonExperimental
+  'recommendations',
+  'cves',
+  'findings',
+  'form',
+  'page',
+  'accessibility',
+];
+
+/**
+ * Extracts minimal data fields from suggestion data.
+ * @param {object} data - Suggestion data object.
+ * @returns {object|null} Object with only minimal fields, or null if no data.
+ */
+const extractMinimalData = (data) => {
+  if (!data) return null;
+
+  const minimalData = {};
+  let hasFields = false;
+
+  for (const field of MINIMAL_DATA_FIELDS) {
+    if (data[field] !== undefined) {
+      minimalData[field] = data[field];
+      hasFields = true;
+    }
+  }
+
+  return hasFields ? minimalData : null;
+};
+
+/**
+ * Extracts URL from suggestion data.
+ * Handles both flat structures and nested recommendations.
+ * @param {object} data - Suggestion data object.
+ * @returns {string|null} URL or null if not found.
+ */
+const extractUrl = (data) => {
+  if (!data) return null;
+
+  // Check top-level URL fields (most common)
+  if (data.url) return data.url;
+  if (data.pageUrl) return data.pageUrl;
+  if (data.url_from) return data.url_from;
+  if (data.urlFrom) return data.urlFrom;
+
+  // Check nested recommendations (e.g., alt-text suggestions)
+  const hasRecommendations = data.recommendations
+    && Array.isArray(data.recommendations)
+    && data.recommendations.length > 0;
+
+  if (hasRecommendations) {
+    const firstRec = data.recommendations[0];
+    if (firstRec.pageUrl) return firstRec.pageUrl;
+    if (firstRec.url) return firstRec.url;
+  }
+
+  return null;
+};
+
+/**
  * Data transfer object for Suggestion.
  */
 export const SuggestionDto = {
-
   /**
-   * Converts a Suggestion object into a JSON object.
+   * Converts a Suggestion object into a JSON object with optional projection.
    * @param {Readonly<Suggestion>} suggestion - Suggestion object.
-   * @returns {{
-   *  id: string,
-   *  opportunityId: string,
-   *  type: string,
-   *  rank: number,
-   *  data: object,
-   *  kpiDeltas: object,
-   *  status: string,
-   *  createdAt: string,
-   *  updatedAt: string,
-   *  updatedBy: string,
-   * }} JSON object.
+   * @param {string} [view='full'] - Projection view: 'minimal', 'summary', or 'full'.
+   * @returns {object} JSON object with fields based on the selected view.
    */
-  toJSON: (suggestion) => {
+  toJSON: (suggestion, view = 'full') => {
     const data = suggestion.getData();
+
+    // Minimal view: id, status, and URL-related data fields
+    if (view === 'minimal') {
+      const minimalData = extractMinimalData(data);
+      return {
+        id: suggestion.getId(),
+        status: suggestion.getStatus(),
+        ...(minimalData && { data: minimalData }),
+      };
+    }
+
+    // Summary view: key fields without heavy data
+    if (view === 'summary') {
+      return {
+        id: suggestion.getId(),
+        opportunityId: suggestion.getOpportunityId(),
+        type: suggestion.getType(),
+        rank: suggestion.getRank(),
+        status: suggestion.getStatus(),
+        url: extractUrl(data),
+        createdAt: suggestion.getCreatedAt(),
+        updatedAt: suggestion.getUpdatedAt(),
+        updatedBy: suggestion.getUpdatedBy(),
+      };
+    }
+
+    // Full view: all fields (default, backward compatible)
     const aggregationKey = buildAggregationKeyFromSuggestion(data);
     return {
       id: suggestion.getId(),

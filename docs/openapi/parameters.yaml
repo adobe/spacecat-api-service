@@ -380,3 +380,39 @@ cursor:
   schema:
     type: string
     example: "eyJzayI6IjIwMjQtMDEtMTVUMTI6MzA6MDBaIiwiaWQiOiIxMjNlNDU2Ny1lODliLTEyZDMtYTQ1Ni00MjY2MTQxNzQwMDAifQ=="
+
+suggestionView:
+  name: view
+  description: |
+    Projection view for suggestion response data. Controls which fields are returned.
+    - `minimal`: Returns only id and url (lightest payload for selection lists)
+    - `summary`: Returns key fields: id, opportunityId, type, rank, status, url, timestamps (excludes heavy data and kpiDeltas)
+    - `full`: Returns all fields including data and kpiDeltas (default, backward compatible)
+  in: query
+  required: false
+  schema:
+    type: string
+    enum:
+      - minimal
+      - summary
+      - full
+    default: full
+  example: summary
+
+suggestionStatus:
+  name: status
+  description: |
+    Filter suggestions by status. Supports single status or comma-separated multiple statuses.
+    When provided, only suggestions matching any of the specified statuses are returned.
+    Examples: 'NEW' or 'NEW,APPROVED,IN_PROGRESS'
+  in: query
+  required: false
+  schema:
+    type: string
+  examples:
+    single:
+      value: NEW
+      summary: Filter by single status
+    multiple:
+      value: NEW,APPROVED,IN_PROGRESS
+      summary: Filter by multiple statuses (comma-separated)
