@@ -1,3 +1,17 @@
+## [1.285.1](https://github.com/adobe/spacecat-api-service/compare/v1.285.0...v1.285.1) (2026-01-16)
+
+
+### Bug Fixes
+
+* shorten the step function workflow execution name ([#1699](https://github.com/adobe/spacecat-api-service/issues/1699)) ([551fe99](https://github.com/adobe/spacecat-api-service/commit/551fe99477a3c6a5dd5e3cde5eb6c1c1a0e4a531))
+
+# [1.285.0](https://github.com/adobe/spacecat-api-service/compare/v1.284.0...v1.285.0) (2026-01-16)
+
+
+### Features
+
+* add ACO product code ([#1687](https://github.com/adobe/spacecat-api-service/issues/1687)) ([e8abc9d](https://github.com/adobe/spacecat-api-service/commit/e8abc9d1362b1225b6bba37991da8546b2d08226))
+
 # [1.284.0](https://github.com/adobe/spacecat-api-service/compare/v1.283.1...v1.284.0) (2026-01-14)
 
 
