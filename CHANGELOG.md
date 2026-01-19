@@ -1,3 +1,10 @@
+# [1.286.0](https://github.com/adobe/spacecat-api-service/compare/v1.285.3...v1.286.0) (2026-01-19)
+
+
+### Features
+
+* add support for global run import ([#1681](https://github.com/adobe/spacecat-api-service/issues/1681)) ([745c127](https://github.com/adobe/spacecat-api-service/commit/745c1273be6c842a642499baa6b53503d624dd92))
+
 ## [1.285.3](https://github.com/adobe/spacecat-api-service/compare/v1.285.2...v1.285.3) (2026-01-19)
 
 
