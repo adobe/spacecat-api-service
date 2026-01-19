@@ -19,6 +19,7 @@ import getSiteAudits from './commands/get-site-audits.js';
 import martechImpact from './commands/martech-impact.js';
 import runAudit from './commands/run-audit.js';
 import runImport from './commands/run-import.js';
+import runGlobalImport from './commands/run-global-import.js';
 import runInternalReport from './commands/run-internal-report.js';
 import runReport from './commands/run-report.js';
 import runScrape from './commands/run-scrape.js';
@@ -61,6 +62,7 @@ export default (context) => [
   martechImpact(context),
   runAudit(context),
   runImport(context),
+  runGlobalImport(context),
   runInternalReport(context),
   runReport(context),
   runScrape(context),
