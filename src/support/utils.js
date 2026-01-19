@@ -233,6 +233,25 @@ export const sendInternalReportRunMessage = async (
   slackContext,
 });
 
+/**
+ * Sends a message to run a global import job to the provided SQS queue.
+ * Global imports don't require a siteId - they run across all data.
+ *
+ * @param {Object} sqs - The SQS service object.
+ * @param {string} queueUrl - The SQS queue URL.
+ * @param {string} importType - The type of global import to run.
+ * @param {Object} slackContext - The Slack context for notifications.
+ */
+export const sendGlobalImportRunMessage = async (
+  sqs,
+  queueUrl,
+  importType,
+  slackContext,
+) => sqs.sendMessage(queueUrl, {
+  type: importType,
+  slackContext,
+});
+
 export const sendReportTriggerMessage = async (
   sqs,
   queueUrl,
@@ -380,6 +399,29 @@ export const triggerInternalReportRun = async (
   lambdaContext.sqs,
   config.getQueues().reports,
   reportType,
+  {
+    channelId: slackContext.channelId,
+    threadTs: slackContext.threadTs,
+  },
+);
+
+/**
+ * Triggers a global import run (imports that don't require a siteId).
+ *
+ * @param {Object} config - The configuration object.
+ * @param {string} importType - The type of global import to run.
+ * @param {Object} slackContext - The Slack context for notifications.
+ * @param {Object} lambdaContext - The Lambda context with SQS service.
+ */
+export const triggerGlobalImportRun = async (
+  config,
+  importType,
+  slackContext,
+  lambdaContext,
+) => sendGlobalImportRunMessage(
+  lambdaContext.sqs,
+  config.getQueues().imports,
+  importType,
   {
     channelId: slackContext.channelId,
     threadTs: slackContext.threadTs,
