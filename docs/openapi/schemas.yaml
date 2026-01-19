@@ -2802,8 +2802,8 @@ OpportunityCreate:
       items:
         type: string
       description: |
-        Tags are automatically applied based on the opportunity type.
-        The `isElmo` and `isASO` tags are preserved if present. Generic opportunities skip automatic tag application.
+        Tags for opportunity. Hardcoded tags are applied based on the opportunity type during creation of opportunity. The `isElmo` and `isASO` provided tags are preserved.
+        Generic opportunities skip automatic(hardcoded) tag application and use only the tags provided in this field.
       example:
         - 'Backlinks'
         - 'SEO'
