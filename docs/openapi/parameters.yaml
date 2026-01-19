@@ -404,11 +404,15 @@ suggestionStatus:
   description: |
     Filter suggestions by status. Supports single status or comma-separated multiple statuses.
     When provided, only suggestions matching any of the specified statuses are returned.
-    Examples: 'NEW' or 'NEW,APPROVED,IN_PROGRESS'
+    
+    **Valid values:** NEW, APPROVED, SKIPPED, FIXED, ERROR, IN_PROGRESS, OUTDATED, PENDING_VALIDATION
+    
+    Returns 400 Bad Request if invalid status values are provided.
   in: query
   required: false
   schema:
     type: string
+    description: Single status or comma-separated statuses (e.g., "NEW" or "NEW,APPROVED")
   examples:
     single:
       value: NEW
