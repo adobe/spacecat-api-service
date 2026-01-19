@@ -282,10 +282,6 @@ function TrafficController(context, log, env) {
       || !decodedTemporalCondition.includes('year')) {
       return badRequest('Invalid temporal condition');
     }
-    if (decodedTemporalCondition.match(/week/g).length !== 4
-      || decodedTemporalCondition.match(/year/g).length !== 4) {
-      return badRequest('Invalid temporal condition');
-    }
 
     const tableName = `${rumMetricsDatabase}.${rumMetricsCompactTable}`;
 
