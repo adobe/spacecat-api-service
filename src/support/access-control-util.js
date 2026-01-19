@@ -12,7 +12,7 @@
 
 import { isNonEmptyObject, hasText } from '@adobe/spacecat-shared-utils';
 import {
-  Site, Organization, TrialUser as TrialUserModel,
+  Site, Organization, Project, TrialUser as TrialUserModel,
   Entitlement as EntitlementModel,
 } from '@adobe/spacecat-shared-data-access';
 import TierClient from '@adobe/spacecat-shared-tier-client';
@@ -148,7 +148,7 @@ export default class AccessControlUtil {
     }
 
     let imsOrgId;
-    if (entity instanceof Site) {
+    if (entity instanceof Site || entity instanceof Project) {
       const org = await entity.getOrganization();
       if (!isNonEmptyObject(org)) {
         throw new Error('Missing organization for site');
