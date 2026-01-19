@@ -1253,7 +1253,9 @@ describe('Access Control Util', () => {
     it('verifies access control for Project entity', async () => {
       const util = AccessControlUtil.fromContext(context);
       const project = {
-        getOrganizationId: () => 'project-org-id',
+        getOrganization: async () => ({
+          getImsOrgId: () => 'project-org-id',
+        }),
       };
       Object.setPrototypeOf(project, Project.prototype);
 
@@ -1268,7 +1270,9 @@ describe('Access Control Util', () => {
     it('returns false when user does not have access to Project organization', async () => {
       const util = AccessControlUtil.fromContext(context);
       const project = {
-        getOrganizationId: () => 'project-org-id',
+        getOrganization: async () => ({
+          getImsOrgId: () => 'project-org-id',
+        }),
       };
       Object.setPrototypeOf(project, Project.prototype);
 

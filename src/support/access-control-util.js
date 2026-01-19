@@ -148,7 +148,7 @@ export default class AccessControlUtil {
     }
 
     let imsOrgId;
-    if (entity instanceof Site) {
+    if (entity instanceof Site || entity instanceof Project) {
       const org = await entity.getOrganization();
       if (!isNonEmptyObject(org)) {
         throw new Error('Missing organization for site');
@@ -156,8 +156,6 @@ export default class AccessControlUtil {
       imsOrgId = org.getImsOrgId();
     } else if (entity instanceof Organization) {
       imsOrgId = entity.getImsOrgId();
-    } else if (entity instanceof Project) {
-      imsOrgId = entity.getOrganizationId();
     }
 
     const hasOrgAccess = authInfo.hasOrganization(imsOrgId);
