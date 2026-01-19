@@ -74,6 +74,26 @@ function SuggestionsController(ctx, sqs, env) {
     return view;
   };
 
+  /**
+   * Validates and parses the status parameter for filtering.
+   * @param {string} statusParam - Comma-separated status values.
+   * @returns {string[]} Array of valid status values, or empty array if no param.
+   * @throws {Error} If any status value is invalid.
+   */
+  const validateStatuses = (statusParam) => {
+    if (!statusParam) return [];
+    const statuses = statusParam.split(',').map((s) => s.trim()).filter(Boolean);
+    if (statuses.length === 0) return [];
+
+    const validStatuses = Object.values(SuggestionModel.STATUSES);
+    const invalidStatuses = statuses.filter((s) => !validStatuses.includes(s));
+
+    if (invalidStatuses.length > 0) {
+      throw new Error(`Invalid status value(s): ${invalidStatuses.join(', ')}. Valid: ${validStatuses.join(', ')}`);
+    }
+    return statuses;
+  };
+
   const shouldGroupSuggestionsForAutofix = (type) => !AUTOFIX_UNGROUPED_OPPTY_TYPES.includes(type);
 
   /**
@@ -127,6 +147,13 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest(e.message);
     }
 
+    let statuses;
+    try {
+      statuses = validateStatuses(statusParam);
+    } catch (e) {
+      return badRequest(e.message);
+    }
+
     const site = await Site.findById(siteId);
     if (!site) {
       return notFound('Site not found');
@@ -147,14 +174,11 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
 
-    // Filter by status in memory if status param provided (supports comma-separated values)
-    if (statusParam) {
-      const statuses = statusParam.split(',').map((s) => s.trim()).filter(Boolean);
-      if (statuses.length > 0) {
-        suggestionEntities = suggestionEntities.filter(
-          (sugg) => statuses.includes(sugg.getStatus()),
-        );
-      }
+    // Filter by status in memory if validated statuses provided
+    if (statuses.length > 0) {
+      suggestionEntities = suggestionEntities.filter(
+        (sugg) => statuses.includes(sugg.getStatus()),
+      );
     }
 
     const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg, view));

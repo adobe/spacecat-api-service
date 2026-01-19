@@ -667,6 +667,52 @@ describe('Suggestions Controller', () => {
     expect(suggestions[0]).to.not.have.property('type');
   });
 
+  it('returns bad request for invalid status values', async () => {
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { status: 'INVALID_STATUS' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error.message).to.include('Invalid status value(s): INVALID_STATUS');
+    expect(error.message).to.include('Valid:');
+  });
+
+  it('returns bad request for multiple invalid status values', async () => {
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { status: 'NEW,INVALID,APPROVED,BOGUS' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error.message).to.include('INVALID');
+    expect(error.message).to.include('BOGUS');
+  });
+
+  it('returns all suggestions when status param is empty commas', async () => {
+    mockSuggestion.allByOpportunityId.resolves(suggs.map(mockSuggestionEntity));
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { status: ',,,' },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    const suggestions = await response.json();
+    // Should return all suggestions since no valid statuses were provided
+    expect(suggestions).to.be.an('array').with.lengthOf(suggs.length);
+  });
+
   it('gets paged suggestions returns bad request if limit is less than 1', async () => {
     const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
