@@ -12,7 +12,7 @@
 
 import { isNonEmptyObject, hasText } from '@adobe/spacecat-shared-utils';
 import {
-  Site, Organization, TrialUser as TrialUserModel,
+  Site, Organization, Project, TrialUser as TrialUserModel,
   Entitlement as EntitlementModel,
 } from '@adobe/spacecat-shared-data-access';
 import TierClient from '@adobe/spacecat-shared-tier-client';
@@ -156,6 +156,8 @@ export default class AccessControlUtil {
       imsOrgId = org.getImsOrgId();
     } else if (entity instanceof Organization) {
       imsOrgId = entity.getImsOrgId();
+    } else if (entity instanceof Project) {
+      imsOrgId = entity.getOrganizationId();
     }
 
     const hasOrgAccess = authInfo.hasOrganization(imsOrgId);

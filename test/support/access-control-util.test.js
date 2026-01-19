@@ -16,6 +16,7 @@ import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import {
   Site,
   Organization,
+  Project,
   Entitlement as EntitlementModel,
   TrialUser as TrialUserModel,
 } from '@adobe/spacecat-shared-data-access';
@@ -1245,6 +1246,38 @@ describe('Access Control Util', () => {
       await expect(util.hasAccess(site, '', 'llmo')).to.be.rejectedWith('Missing enrollment for site');
 
       expect(mockTierClient.checkValidEntitlement).to.have.been.called;
+    });
+  });
+
+  describe('Project Access Control', () => {
+    it('verifies access control for Project entity', async () => {
+      const util = AccessControlUtil.fromContext(context);
+      const project = {
+        getOrganizationId: () => 'project-org-id',
+      };
+      Object.setPrototypeOf(project, Project.prototype);
+
+      util.authInfo.hasOrganization = sinon.stub().returns(true);
+
+      const result = await util.hasAccess(project);
+
+      expect(result).to.be.true;
+      expect(util.authInfo.hasOrganization).to.have.been.calledWith('project-org-id');
+    });
+
+    it('returns false when user does not have access to Project organization', async () => {
+      const util = AccessControlUtil.fromContext(context);
+      const project = {
+        getOrganizationId: () => 'project-org-id',
+      };
+      Object.setPrototypeOf(project, Project.prototype);
+
+      util.authInfo.hasOrganization = sinon.stub().returns(false);
+
+      const result = await util.hasAccess(project);
+
+      expect(result).to.be.false;
+      expect(util.authInfo.hasOrganization).to.have.been.calledWith('project-org-id');
     });
   });
 
