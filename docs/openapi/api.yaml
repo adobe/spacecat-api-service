@@ -270,6 +270,8 @@ paths:
     $ref: './site-paid.yaml#/site-traffic-paid-type'
   /sites/{siteId}/traffic/paid/pta2/weekly-summary:
     $ref: './site-paid.yaml#/site-traffic-paid-pta2-weekly-summary'
+  /sites/{siteId}/traffic/predominant-type:
+    $ref: './site-paid.yaml#/site-traffic-predominant-type'
   /sites/{siteId}/traffic/paid/page-type:
     $ref: './site-paid.yaml#/site-traffic-paid-page-type'
   /sites/{siteId}/traffic/paid/page-type-platform-campaign:
@@ -438,6 +440,8 @@ paths:
     $ref: './llmo-api.yaml#/llmo-onboard'
   /sites/{siteId}/llmo/offboard:
     $ref: './llmo-api.yaml#/llmo-offboard'
+  /sites/{siteId}/llmo/edge-optimize-config:
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-config'
   /sites/{siteId}/reports:
     $ref: './site-api.yaml#/site-reports'
   /sites/{siteId}/reports/{reportId}:

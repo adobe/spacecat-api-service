@@ -1,3 +1,45 @@
+## [1.285.1](https://github.com/adobe/spacecat-api-service/compare/v1.285.0...v1.285.1) (2026-01-16)
+
+
+### Bug Fixes
+
+* shorten the step function workflow execution name ([#1699](https://github.com/adobe/spacecat-api-service/issues/1699)) ([551fe99](https://github.com/adobe/spacecat-api-service/commit/551fe99477a3c6a5dd5e3cde5eb6c1c1a0e4a531))
+
+# [1.285.0](https://github.com/adobe/spacecat-api-service/compare/v1.284.0...v1.285.0) (2026-01-16)
+
+
+### Features
+
+* add ACO product code ([#1687](https://github.com/adobe/spacecat-api-service/issues/1687)) ([e8abc9d](https://github.com/adobe/spacecat-api-service/commit/e8abc9d1362b1225b6bba37991da8546b2d08226))
+
+# [1.284.0](https://github.com/adobe/spacecat-api-service/compare/v1.283.1...v1.284.0) (2026-01-14)
+
+
+### Features
+
+* endpoint for predominant traffic ([#1696](https://github.com/adobe/spacecat-api-service/issues/1696)) ([a4428f2](https://github.com/adobe/spacecat-api-service/commit/a4428f233a02e2e9dbfbe41badada1ed19983aa3))
+
+## [1.283.1](https://github.com/adobe/spacecat-api-service/compare/v1.283.0...v1.283.1) (2026-01-14)
+
+
+### Bug Fixes
+
+* update tokowaka s3 config with patches ([#1694](https://github.com/adobe/spacecat-api-service/issues/1694)) ([cab0761](https://github.com/adobe/spacecat-api-service/commit/cab0761e1252afc8e706f029168b75be3b789a08))
+
+# [1.283.0](https://github.com/adobe/spacecat-api-service/compare/v1.282.1...v1.283.0) (2026-01-13)
+
+
+### Features
+
+* Add orgId and imsOrgId to site details ([#1682](https://github.com/adobe/spacecat-api-service/issues/1682)) ([246c135](https://github.com/adobe/spacecat-api-service/commit/246c135bc6ad9fd68e0d3857de2ae87b6ed5aba1))
+
+## [1.282.1](https://github.com/adobe/spacecat-api-service/compare/v1.282.0...v1.282.1) (2026-01-13)
+
+
+### Bug Fixes
+
+* add GET/POST apis for edge config APIs ([#1688](https://github.com/adobe/spacecat-api-service/issues/1688)) ([fbdcdc1](https://github.com/adobe/spacecat-api-service/commit/fbdcdc1615cbd9e4c042d51f8fd9069988e0f2cb))
+
 # [1.282.0](https://github.com/adobe/spacecat-api-service/compare/v1.281.2...v1.282.0) (2026-01-09)
 
 

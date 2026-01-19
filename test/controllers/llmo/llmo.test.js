@@ -67,6 +67,7 @@ describe('LlmoController', () => {
   let llmoConfigSchemaStub;
   let triggerBrandProfileAgentStub;
   let updateModifiedByDetailsStub;
+  let mockTokowakaClient;
 
   const mockHttpUtils = {
     ok: (data, headers = {}) => ({
@@ -95,6 +96,13 @@ describe('LlmoController', () => {
   before(async () => {
     triggerBrandProfileAgentStub = sinon.stub().resolves('exec-123');
     updateModifiedByDetailsStub = sinon.stub();
+
+    // Initialize mock TokowakaClient
+    mockTokowakaClient = {
+      fetchMetaconfig: sinon.stub(),
+      createMetaconfig: sinon.stub(),
+      uploadMetaconfig: sinon.stub(),
+    };
 
     // Set up esmock once for all tests
     LlmoController = await esmock('../../../src/controllers/llmo/llmo.js', {
@@ -134,6 +142,11 @@ describe('LlmoController', () => {
       },
       '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
         Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+      },
+      '@adobe/spacecat-shared-tokowaka-client': {
+        default: {
+          createFrom: () => mockTokowakaClient,
+        },
       },
     });
 
@@ -241,6 +254,11 @@ describe('LlmoController', () => {
       save: sinon.stub().resolves(),
       getOrganization: sinon.stub().resolves(mockOrganization),
     };
+
+    // Reset mockTokowakaClient
+    mockTokowakaClient.fetchMetaconfig.reset();
+    mockTokowakaClient.createMetaconfig.reset();
+    mockTokowakaClient.uploadMetaconfig.reset();
 
     mockDataAccess = {
       Site: { findById: sinon.stub().resolves(mockSite) },
@@ -3226,6 +3244,226 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.have.length(1);
       expect(responseBody[0].topic).to.equal('Search & Discovery Tools');
+    });
+  });
+
+  describe('createOrUpdateEdgeConfig', () => {
+    let edgeConfigContext;
+
+    beforeEach(() => {
+      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({ enabled: false });
+      mockConfig.updateEdgeOptimizeConfig = sinon.stub();
+      mockSite.getBaseURL = sinon.stub().returns('https://www.example.com');
+
+      edgeConfigContext = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        data: { edgeOptimizeEnabled: true },
+      };
+    });
+
+    it('should create new metaconfig when none exists', async () => {
+      const newMetaconfig = {
+        siteId: TEST_SITE_ID,
+        apiKeys: ['test-api-key-123'],
+        tokowakaEnabled: true,
+      };
+
+      mockTokowakaClient.fetchMetaconfig.resolves(null);
+      mockTokowakaClient.createMetaconfig.resolves(newMetaconfig);
+
+      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.metaconfig).to.deep.equal(newMetaconfig);
+      expect(responseBody.edgeOptimizeConfig).to.exist;
+      expect(mockTokowakaClient.createMetaconfig).to.have.been.calledWith(
+        'https://www.example.com',
+        TEST_SITE_ID,
+        { tokowakaEnabled: true },
+      );
+      expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.called;
+      expect(mockSite.save).to.have.been.called;
+    });
+
+    it('should update existing metaconfig when it exists', async () => {
+      const existingMetaconfig = {
+        siteId: TEST_SITE_ID,
+        apiKeys: ['existing-api-key'],
+        tokowakaEnabled: false,
+      };
+
+      mockTokowakaClient.fetchMetaconfig.resolves(existingMetaconfig);
+      mockTokowakaClient.uploadMetaconfig.resolves();
+
+      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.metaconfig.tokowakaEnabled).to.equal(true);
+      expect(mockTokowakaClient.uploadMetaconfig).to.have.been.called;
+      const uploadedMetaconfig = mockTokowakaClient.uploadMetaconfig.firstCall.args[1];
+      expect(uploadedMetaconfig.tokowakaEnabled).to.equal(true);
+      expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.called;
+      expect(mockSite.save).to.have.been.called;
+    });
+
+    it('should handle disabling edge optimization', async () => {
+      const existingMetaconfig = {
+        siteId: TEST_SITE_ID,
+        apiKeys: ['existing-api-key'],
+        tokowakaEnabled: true,
+      };
+
+      edgeConfigContext.data = { edgeOptimizeEnabled: false };
+      mockTokowakaClient.fetchMetaconfig.resolves(existingMetaconfig);
+      mockTokowakaClient.uploadMetaconfig.resolves();
+
+      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.metaconfig.tokowakaEnabled).to.equal(false);
+      const uploadedMetaconfig = mockTokowakaClient.uploadMetaconfig.firstCall.args[1];
+      expect(uploadedMetaconfig.tokowakaEnabled).to.equal(false);
+      expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(
+        sinon.match({ enabled: false }),
+      );
+    });
+
+    it('should recreate metaconfig when apiKeys are missing', async () => {
+      const invalidMetaconfig = {
+        siteId: TEST_SITE_ID,
+        apiKeys: [],
+      };
+
+      const newMetaconfig = {
+        siteId: TEST_SITE_ID,
+        apiKeys: ['new-api-key'],
+        tokowakaEnabled: true,
+      };
+
+      mockTokowakaClient.fetchMetaconfig.resolves(invalidMetaconfig);
+      mockTokowakaClient.createMetaconfig.resolves(newMetaconfig);
+
+      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockTokowakaClient.createMetaconfig).to.have.been.called;
+    });
+
+    it('should return bad request when edgeOptimizeEnabled is missing', async () => {
+      edgeConfigContext.data = {};
+
+      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('edgeOptimizeEnabled');
+    });
+
+    it('should return bad request when context.data is undefined', async () => {
+      edgeConfigContext.data = undefined;
+
+      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('edgeOptimizeEnabled');
+    });
+
+    it('should return bad request when edgeOptimizeEnabled is not boolean', async () => {
+      edgeConfigContext.data = { edgeOptimizeEnabled: 'true' };
+
+      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('edgeOptimizeEnabled');
+    });
+
+    it('should handle errors gracefully', async () => {
+      mockTokowakaClient.fetchMetaconfig.rejects(new Error('S3 connection failed'));
+
+      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('S3 connection failed');
+    });
+
+    it('should create edge config when getEdgeOptimizeConfig returns null', async () => {
+      const newMetaconfig = {
+        siteId: TEST_SITE_ID,
+        apiKeys: ['test-api-key-123'],
+        tokowakaEnabled: true,
+      };
+
+      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns(null);
+      mockTokowakaClient.fetchMetaconfig.resolves(null);
+      mockTokowakaClient.createMetaconfig.resolves(newMetaconfig);
+
+      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.metaconfig).to.deep.equal(newMetaconfig);
+      expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(
+        sinon.match({ enabled: true }),
+      );
+    });
+  });
+
+  describe('getEdgeConfig', () => {
+    let edgeConfigContext;
+
+    beforeEach(() => {
+      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({ enabled: true });
+      mockSite.getBaseURL = sinon.stub().returns('https://www.example.com');
+
+      edgeConfigContext = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+      };
+    });
+
+    it('should return edge config successfully', async () => {
+      const metaconfig = {
+        siteId: TEST_SITE_ID,
+        apiKeys: ['test-api-key'],
+        tokowakaEnabled: true,
+      };
+
+      mockTokowakaClient.fetchMetaconfig.resolves(metaconfig);
+
+      const result = await controller.getEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.metaconfig).to.deep.equal(metaconfig);
+      expect(responseBody.edgeOptimizeConfig).to.deep.equal({ enabled: true });
+    });
+
+    it('should return null metaconfig when none exists', async () => {
+      mockTokowakaClient.fetchMetaconfig.resolves(null);
+
+      const result = await controller.getEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.metaconfig).to.be.null;
+      expect(responseBody.edgeOptimizeConfig).to.exist;
+    });
+
+    it('should handle errors gracefully', async () => {
+      mockTokowakaClient.fetchMetaconfig.rejects(new Error('S3 fetch failed'));
+
+      const result = await controller.getEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('S3 fetch failed');
     });
   });
 });
