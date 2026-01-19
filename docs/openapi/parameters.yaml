@@ -292,6 +292,7 @@ productCode:
     enum:
       - 'LLMO'
       - 'ASO'
+      - 'ACO'
 
 # New parameters for site enrollments API
 siteEnrollmentId:
