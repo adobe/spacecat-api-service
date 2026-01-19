@@ -1,3 +1,10 @@
+## [1.286.1](https://github.com/adobe/spacecat-api-service/compare/v1.286.0...v1.286.1) (2026-01-19)
+
+
+### Bug Fixes
+
+* removed wrong validation ([#1707](https://github.com/adobe/spacecat-api-service/issues/1707)) ([a44a35b](https://github.com/adobe/spacecat-api-service/commit/a44a35bd091824a0fbabd195cdd9bcff3e70473e))
+
 # [1.286.0](https://github.com/adobe/spacecat-api-service/compare/v1.285.3...v1.286.0) (2026-01-19)
 
 
