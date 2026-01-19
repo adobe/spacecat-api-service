@@ -269,30 +269,31 @@ describe('Suggestion DTO', () => {
     });
 
     describe('summary view', () => {
-      it('returns key fields without data and kpiDeltas', () => {
+      it('returns minimal fields plus metadata (superset of minimal)', () => {
         const suggestion = createMockSuggestion();
 
         const json = SuggestionDto.toJSON(suggestion, 'summary');
 
-        expect(json).to.deep.equal({
-          id: 'suggestion-id-123',
-          opportunityId: 'opportunity-id-456',
-          type: 'CONTENT_UPDATE',
-          rank: 42,
-          status: 'NEW',
-          url: 'https://example.com/page',
-          createdAt: '2025-01-01T00:00:00.000Z',
-          updatedAt: '2025-01-02T00:00:00.000Z',
-          updatedBy: 'system',
-        });
+        expect(json).to.have.property('id', 'suggestion-id-123');
+        expect(json).to.have.property('status', 'NEW');
+        expect(json).to.have.property('data');
+        expect(json.data).to.have.property('url', 'https://example.com/page');
+        expect(json).to.have.property('opportunityId', 'opportunity-id-456');
+        expect(json).to.have.property('type', 'CONTENT_UPDATE');
+        expect(json).to.have.property('rank', 42);
+        expect(json).to.have.property('url', 'https://example.com/page');
+        expect(json).to.have.property('createdAt', '2025-01-01T00:00:00.000Z');
+        expect(json).to.have.property('updatedAt', '2025-01-02T00:00:00.000Z');
+        expect(json).to.have.property('updatedBy', 'system');
       });
 
-      it('does not include data or kpiDeltas fields', () => {
+      it('includes data with minimal fields but excludes kpiDeltas', () => {
         const suggestion = createMockSuggestion();
 
         const json = SuggestionDto.toJSON(suggestion, 'summary');
 
-        expect(json).to.not.have.property('data');
+        expect(json).to.have.property('data');
+        expect(json.data).to.not.have.property('content'); // Non-URL field excluded
         expect(json).to.not.have.property('kpiDeltas');
       });
 

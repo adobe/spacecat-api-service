@@ -125,14 +125,16 @@ export const SuggestionDto = {
       };
     }
 
-    // Summary view: key fields without heavy data
+    // Summary view: minimal fields + metadata (superset of minimal, subset of full)
     if (view === 'summary') {
+      const minimalData = extractMinimalData(data);
       return {
         id: suggestion.getId(),
+        status: suggestion.getStatus(),
+        ...(minimalData && { data: minimalData }),
         opportunityId: suggestion.getOpportunityId(),
         type: suggestion.getType(),
         rank: suggestion.getRank(),
-        status: suggestion.getStatus(),
         url: extractUrl(data),
         createdAt: suggestion.getCreatedAt(),
         updatedAt: suggestion.getUpdatedAt(),

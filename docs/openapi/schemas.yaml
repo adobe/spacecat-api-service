@@ -3021,11 +3021,17 @@ SuggestionMinimal:
     - status
 SuggestionSummary:
   type: object
-  description: Summary suggestion projection containing key fields without heavy data (for table displays)
+  description: Summary suggestion projection (superset of minimal, subset of full). Contains minimal data fields plus metadata for table displays.
   properties:
     id:
       description: UUID of this suggestion
       $ref: '#/Id'
+    status:
+      description: Status of this suggestion
+      $ref: '#/SuggestionStatus'
+    data:
+      type: object
+      description: URL-related fields from minimal view (same as SuggestionMinimal.data). Only present if any URL fields exist.
     opportunityId:
       description: UUID of the opportunity this suggestion belongs to
       $ref: '#/Id'
@@ -3035,9 +3041,6 @@ SuggestionSummary:
       description: Type-specific numeric rank value (e.g., "domainTraffic" for a broken-backlink) helps sorting
       type: number
       example: 45600
-    status:
-      description: Status of this suggestion
-      $ref: '#/SuggestionStatus'
     url:
       description: URL associated with the suggestion (extracted from data). May be null if no URL found.
       type: string
@@ -3054,10 +3057,10 @@ SuggestionSummary:
       example: "user@example.com"
   required:
     - id
+    - status
     - opportunityId
     - type
     - rank
-    - status
 PaginationMetadata:
   type: object
   description: Metadata for paginated responses
