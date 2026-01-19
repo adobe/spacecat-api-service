@@ -12,24 +12,9 @@
 
 import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import { hasText } from '@adobe/spacecat-shared-utils';
+import { sanitizeExecutionName } from './utils.js';
 
 const sfnClient = new SFNClient();
-
-/**
- * Step Functions execution names must be 1–80 chars and may only contain
- * letters, numbers, hyphens, or underscores
- * (see https://docs.aws.amazon.com/step-functions/latest/apireference/API_StartExecution.html).
- * This helper enforces those constraints and falls back to a timestamped name
- * when input is missing or becomes empty after sanitization.
- *
- * @param {string} value - The execution name to sanitize.
- * @returns {string} The sanitized execution name.
- */
-export const sanitizeExecutionName = (value) => {
-  const sanitizedInput = (value || `agent-${Date.now()}`).replace(/[^A-Za-z0-9-_]/g, '');
-  const safe = sanitizedInput.length > 0 ? sanitizedInput : `agent-${Date.now()}`;
-  return safe.slice(0, 80);
-};
 
 /**
  * Starts the generic agent workflow Step Function.
