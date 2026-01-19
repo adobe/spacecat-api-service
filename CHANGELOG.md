@@ -1,3 +1,10 @@
+## [1.285.2](https://github.com/adobe/spacecat-api-service/compare/v1.285.1...v1.285.2) (2026-01-19)
+
+
+### Bug Fixes
+
+* Project access ctrl ([#1704](https://github.com/adobe/spacecat-api-service/issues/1704)) ([c6a0af4](https://github.com/adobe/spacecat-api-service/commit/c6a0af478810a33e68a0c24b88d783dab2c34a12))
+
 ## [1.285.1](https://github.com/adobe/spacecat-api-service/compare/v1.285.0...v1.285.1) (2026-01-16)
 
 
