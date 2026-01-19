@@ -1171,13 +1171,26 @@ describe('Paid TrafficController', async () => {
       expect(res.status).to.equal(403);
     });
 
-    it('returns 400 if temporalCondition is invalid (not enough week numbers)', async () => {
+    it('accepts temporalCondition with single temporal period', async () => {
       mockContext.data.temporalCondition = encodeURIComponent('(year = 2024 AND week = 23)');
+      const mockResponse = [
+        {
+          path: '/home',
+          pageviews: 1000,
+          pct_pageviews: 0.5,
+          click_rate: 0.1,
+          engagement_rate: 0.2,
+          bounce_rate: 0.3,
+          p70_lcp: 2.5,
+          p70_cls: 0.1,
+          p70_inp: 200,
+        },
+      ];
+      mockAthenaQuery.resolves(mockResponse);
       const controller = TrafficController(mockContext, mockLog, mockEnv);
       const res = await controller.getImpactByPage();
-      expect(res.status).to.equal(400);
-      const body = await res.json();
-      expect(body.message).to.equal('Invalid temporal condition');
+      expect(res.status).to.equal(200);
+      expect(mockAthenaQuery).to.have.been.calledOnce;
     });
 
     it('returns 400 if temporalCondition does not contain "week"', async () => {
