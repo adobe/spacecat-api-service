@@ -1,3 +1,17 @@
+## [1.285.3](https://github.com/adobe/spacecat-api-service/compare/v1.285.2...v1.285.3) (2026-01-19)
+
+
+### Bug Fixes
+
+* replaced predominant traffic query ([#1705](https://github.com/adobe/spacecat-api-service/issues/1705)) ([6d1e1e2](https://github.com/adobe/spacecat-api-service/commit/6d1e1e29760dec01561d899d3cafa16102f66461))
+
+## [1.285.2](https://github.com/adobe/spacecat-api-service/compare/v1.285.1...v1.285.2) (2026-01-19)
+
+
+### Bug Fixes
+
+* Project access ctrl ([#1704](https://github.com/adobe/spacecat-api-service/issues/1704)) ([c6a0af4](https://github.com/adobe/spacecat-api-service/commit/c6a0af478810a33e68a0c24b88d783dab2c34a12))
+
 ## [1.285.1](https://github.com/adobe/spacecat-api-service/compare/v1.285.0...v1.285.1) (2026-01-16)
 
 
