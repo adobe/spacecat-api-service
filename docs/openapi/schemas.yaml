@@ -3770,20 +3770,12 @@ FixRollbackResponse:
           items:
             $ref: '#/Suggestion'
           description: List of suggestions that were marked as SKIPPED
-        totalUpdated:
-          type: integer
-          description: Number of suggestions that were updated to SKIPPED
-        totalSkipped:
-          type: integer
-          description: Number of suggestions that were not updated (not in ERROR status)
       required:
         - updated
-        - totalUpdated
-        - totalSkipped
     message:
       type: string
       description: Human-readable message describing the result
-      example: "Fix rolled back successfully. 3 suggestion(s) marked as SKIPPED."
+      example: "Fix rolled back successfully. All 3 suggestion(s) marked as SKIPPED."
   required:
     - fix
     - suggestions

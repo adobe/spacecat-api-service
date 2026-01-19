@@ -469,8 +469,15 @@ export class FixesController {
     // Filter suggestions that are in ERROR status (eligible for rollback)
     const errorSuggestions = suggestions.filter((s) => s.getStatus() === 'ERROR');
 
-    if (errorSuggestions.length === 0) {
-      return badRequest('No suggestions in ERROR status found for this fix');
+    // Check if ALL suggestions are in ERROR status
+    if (errorSuggestions.length !== suggestions.length) {
+      const nonErrorStatuses = suggestions
+        .filter((s) => s.getStatus() !== 'ERROR')
+        .map((s) => s.getStatus())
+        .join(', ');
+      return badRequest(
+        `All suggestions must be in ERROR status to rollback. Found suggestions with status: ${nonErrorStatuses}`,
+      );
     }
 
     // Build suggestion updates for the transaction
@@ -480,7 +487,7 @@ export class FixesController {
 
     try {
       // Use atomic transact write to update fix and all suggestions together
-      const result = await this.#FixEntity.rollbackFixWithSuggestionUpdates(
+      await this.#FixEntity.rollbackFixWithSuggestionUpdates(
         fixId,
         opportunityId,
         suggestionUpdates,
@@ -496,10 +503,8 @@ export class FixesController {
         fix: FixDto.toJSON(updatedFix),
         suggestions: {
           updated: updatedSuggestions.map(SuggestionDto.toJSON),
-          totalUpdated: result.updatedCount,
-          totalSkipped: suggestions.length - errorSuggestions.length,
         },
-        message: `Fix rolled back successfully. ${result.updatedCount} suggestion(s) marked as SKIPPED.`,
+        message: `Fix rolled back successfully. All ${updatedSuggestions.length} suggestion(s) marked as SKIPPED.`,
       });
     } catch (e) {
       /* c8 ignore next 3 */
@@ -510,23 +515,8 @@ export class FixesController {
       if (e.message?.includes('Transaction canceled') || e.message?.includes('condition check failed')) {
         return badRequest(`Rollback failed: ${e.message}`);
       }
-      context.log.error('Rollback error details', {
-        error: e,
-        errorMessage: e.message,
-        errorStack: e.stack,
-        errorCause: e.cause,
-        errorDetails: e.details,
-      });
-
       return createResponse({
         message: `Error rolling back fix: ${e.message}`,
-        ...(process.env.NODE_ENV !== 'production' && {
-          debug: {
-            name: e.name,
-            cause: e.cause?.message,
-            stack: e.stack,
-          },
-        }),
       }, 500);
     }
   }

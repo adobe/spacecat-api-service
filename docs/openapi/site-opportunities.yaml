@@ -951,11 +951,12 @@ site-opportunity-fix-rollback:
     description: |
       Atomically rolls back a failed fix:
       - Marks the Fix as ROLLED_BACK (only if currently in FAILED status)
-      - Marks all associated suggestions with ERROR status as SKIPPED
+      - Marks all associated suggestions as SKIPPED
 
       This operation will fail if:
       - The fix is not in FAILED status
       - No suggestions are found for the fix
+      - Not all suggestions are in ERROR status
 
       Either all updates succeed or none are applied.
     tags:
