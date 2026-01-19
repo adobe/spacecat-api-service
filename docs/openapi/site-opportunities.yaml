@@ -205,14 +205,15 @@ site-opportunity-suggestions:
       Returns all suggestions (non-paginated) with optional field projection and status filtering.
       
       **Field Projection:**
-      - `view=minimal` - Returns only id and url (lightest, for selection lists)
-      - `view=summary` - Returns key fields without heavy data payload
-      - `view=full` - Returns all fields (default)
+      - `view=minimal` - Returns id, status, and URL-related data fields (lightest)
+      - `view=summary` - Returns minimal fields plus metadata (type, rank, timestamps)
+      - `view=full` - Returns all fields including complete data object (default)
       
       **Status Filtering:**
-      - Supports single status: `status=NEW`
-      - Supports multiple statuses: `status=NEW,APPROVED,IN_PROGRESS`
-      - Fetches all suggestions and filters in-memory (O(n) operation)
+      - Single status: `status=NEW`
+      - Multiple statuses: `status=NEW,APPROVED,IN_PROGRESS`
+      - Valid values: NEW, APPROVED, SKIPPED, FIXED, ERROR, IN_PROGRESS, OUTDATED, PENDING_VALIDATION
+      - Returns 400 Bad Request for invalid status values
       
       **Note:** For paginated results, use the `/paged` endpoints. Status filtering is only available on this non-paginated endpoint or the dedicated `/by-status` endpoints.
     tags:
