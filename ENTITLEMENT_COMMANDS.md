@@ -14,7 +14,7 @@ Six new commands have been added to manage entitlements for sites and organizati
 **Behavior:**
 - Validates the site URL
 - Checks if the site exists in the database
-- Shows a button to select products (ASO and/or LLMO)
+- Shows a button to select products (ASO, ACO and/or LLMO)
 - Opens a modal for product selection
 - Creates entitlements and enrollments for selected products
 
@@ -31,7 +31,7 @@ Six new commands have been added to manage entitlements for sites and organizati
 **Behavior:**
 - Validates the IMS Org ID
 - Checks if the organization exists in the database
-- Shows a button to select products (ASO and/or LLMO)
+- Shows a button to select products (ASO, ACO and/or LLMO)
 - Opens a modal for product selection
 - Creates entitlements for selected products (no site enrollments for org-level)
 
@@ -48,7 +48,7 @@ Six new commands have been added to manage entitlements for sites and organizati
 **Behavior:**
 - Validates the site URL
 - Checks if the site exists in the database
-- Queries entitlements for both ASO and LLMO products
+- Queries entitlements for ASO, ACO and LLMO products
 - Displays entitlement details including:
   - Product code
   - Entitlement ID
@@ -68,7 +68,7 @@ Six new commands have been added to manage entitlements for sites and organizati
 **Behavior:**
 - Validates the IMS Org ID
 - Checks if the organization exists in the database
-- Queries entitlements for both ASO and LLMO products
+- Queries entitlements for ASO, ACO and LLMO products
 - Displays entitlement details including:
   - Product code
   - Entitlement ID
@@ -142,7 +142,7 @@ Six new commands have been added to manage entitlements for sites and organizati
 - **Error Handling:** Proper error messages for site/org not found
 - **Modal-based Product Selection:** Reuses existing `entitlement-modal-utils.js` for consistent UI
 - **TierClient Integration:** Uses `@adobe/spacecat-shared-tier-client` for all entitlement operations
-- **Product Support:** Supports both ASO and LLMO product codes
+- **Product Support:** Supports ASO, ACO and LLMO product codes
 - **Interactive UI:** Uses Slack buttons and modals for better user experience
 
 ### Architecture

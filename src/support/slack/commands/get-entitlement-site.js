@@ -68,6 +68,7 @@ function GetEntitlementSiteCommand(context) {
       const productCodes = [
         EntitlementModel.PRODUCT_CODES.ASO,
         EntitlementModel.PRODUCT_CODES.LLMO,
+        EntitlementModel.PRODUCT_CODES.ACO,
       ];
 
       await say(`:mag: Checking entitlements for site: *${siteURL}* (${siteId})`);
