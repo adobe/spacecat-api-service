@@ -88,7 +88,7 @@ describe('Modal Utils', () => {
       expect(dividerBlock).to.exist;
     });
 
-    it('includes ASO and LLMO checkboxes', () => {
+    it('includes ASO, ACO and LLMO checkboxes', () => {
       const modal = modalUtils.createProductSelectionModal(
         'test_modal',
         {},
@@ -99,7 +99,7 @@ describe('Modal Utils', () => {
       const actionsBlock = modal.blocks.find((b) => b.type === 'actions');
       expect(actionsBlock).to.exist;
       expect(actionsBlock.block_id).to.equal('products_block');
-      expect(actionsBlock.elements).to.have.lengthOf(2);
+      expect(actionsBlock.elements).to.have.lengthOf(3);
 
       const asoCheckbox = actionsBlock.elements[0];
       expect(asoCheckbox.type).to.equal('checkboxes');
@@ -110,6 +110,11 @@ describe('Modal Utils', () => {
       expect(llmoCheckbox.type).to.equal('checkboxes');
       expect(llmoCheckbox.action_id).to.equal('llmo_checkbox');
       expect(llmoCheckbox.options[0].value).to.equal(EntitlementModel.PRODUCT_CODES.LLMO);
+
+      const acoCheckbox = actionsBlock.elements[2];
+      expect(acoCheckbox.type).to.equal('checkboxes');
+      expect(acoCheckbox.action_id).to.equal('aco_checkbox');
+      expect(acoCheckbox.options[0].value).to.equal(EntitlementModel.PRODUCT_CODES.ACO);
     });
   });
 
@@ -157,6 +162,22 @@ describe('Modal Utils', () => {
       const products = modalUtils.extractSelectedProducts(state);
 
       expect(products).to.deep.equal(['LLMO']);
+    });
+
+    it('extracts only ACO when only ACO is selected', () => {
+      const state = {
+        values: {
+          products_block: {
+            aso_checkbox: { selected_options: [] },
+            llmo_checkbox: { selected_options: [] },
+            aco_checkbox: { selected_options: [{ value: 'ACO' }] },
+          },
+        },
+      };
+
+      const products = modalUtils.extractSelectedProducts(state);
+
+      expect(products).to.deep.equal(['ACO']);
     });
 
     it('returns empty array when no products are selected', () => {
