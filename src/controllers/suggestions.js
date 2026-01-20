@@ -589,6 +589,30 @@ function SuggestionsController(ctx, sqs, env) {
 
       try {
         if (suggestion.getStatus() !== status) {
+          // Validate REJECTED status transition
+          if (status === 'REJECTED') {
+            // Check admin access for REJECTED status
+            if (!accessControlUtil.hasAdminAccess()) {
+              return {
+                index,
+                uuid: id,
+                message: 'Only admins can reject suggestions',
+                statusCode: 403,
+              };
+            }
+
+            // Only allow REJECTED from PENDING_VALIDATION
+            const currentStatus = suggestion.getStatus();
+            if (currentStatus !== 'PENDING_VALIDATION') {
+              return {
+                index,
+                uuid: id,
+                message: 'Can only reject suggestions with status PENDING_VALIDATION',
+                statusCode: 400,
+              };
+            }
+          }
+
           suggestion.setStatus(status);
           suggestion.setUpdatedBy(profile.email);
         } else {
