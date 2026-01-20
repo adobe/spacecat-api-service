@@ -195,5 +195,72 @@ describe('OpportunitySummaryDto', () => {
 
       expect(result.pageViews).to.equal(0);
     });
+
+    it('sets impact for conversion value', () => {
+      const opportunity = {
+        getId: () => 'oppty-1',
+        getTitle: () => 'Test Opportunity',
+        getDescription: () => 'Test Description',
+        getType: () => 'form-accessibility',
+        getStatus: () => 'NEW',
+        getData: () => ({
+          projectedConversionValue: 69314.31,
+        }),
+      };
+
+      const result = OpportunitySummaryDto.toJSON(opportunity, []);
+
+      expect(result.impact).to.equal(69314.31);
+    });
+
+    it('sets impact for traffic value', () => {
+      const opportunity = {
+        getId: () => 'oppty-1',
+        getTitle: () => 'Test Opportunity',
+        getDescription: () => 'Test Description',
+        getType: () => 'cwv',
+        getStatus: () => 'NEW',
+        getData: () => ({
+          projectedTrafficValue: 13200,
+        }),
+      };
+
+      const result = OpportunitySummaryDto.toJSON(opportunity, []);
+
+      expect(result.impact).to.equal(13200);
+    });
+
+    it('prioritizes higher impact irrigadless of source, traffic or conversion', () => {
+      const opportunity = {
+        getId: () => 'oppty-1',
+        getTitle: () => 'Test Opportunity',
+        getDescription: () => 'Test Description',
+        getType: () => 'form-accessibility',
+        getStatus: () => 'NEW',
+        getData: () => ({
+          projectedConversionValue: 5000,
+          projectedTrafficValue: 3000,
+        }),
+      };
+
+      const result = OpportunitySummaryDto.toJSON(opportunity, []);
+
+      expect(result.impact).to.equal(5000);
+    });
+
+    it('sets impact to 0 when no values are present', () => {
+      const opportunity = {
+        getId: () => 'oppty-1',
+        getTitle: () => 'Test Opportunity',
+        getDescription: () => 'Test Description',
+        getType: () => 'cwv',
+        getStatus: () => 'NEW',
+        getData: () => ({}),
+      };
+
+      const result = OpportunitySummaryDto.toJSON(opportunity, []);
+
+      expect(result.impact).to.equal(0);
+    });
   });
 });
