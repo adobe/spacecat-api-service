@@ -18,7 +18,7 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import {
   AWSAthenaClient,
-  getTop3PagesWithTrafficLostTemplate,
+  getTrafficTypeAnalysisTemplate,
 } from '@adobe/spacecat-shared-athena-client';
 import {
   startOfWeek, subWeeks, getYear, getISOWeek,
@@ -178,7 +178,7 @@ function TrafficToolsController(context, log, env) {
       const dimensionColumns = dimensions.join(', ');
       const dimensionColumnsPrefixed = dimensions.map((col) => `a.${col}`).join(', ');
 
-      const query = getTop3PagesWithTrafficLostTemplate({
+      const query = getTrafficTypeAnalysisTemplate({
         siteId,
         tableName,
         temporalCondition,
