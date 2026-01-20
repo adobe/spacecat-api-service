@@ -1372,33 +1372,7 @@ site-llmo-edge-optimize-config:
             schema:
               type: object
               additionalProperties: true
-              description: The metaconfig object stored in S3 with free-form properties
-            examples:
-              enabled:
-                summary: Edge config with both enabled
-                value:
-                  siteId: "abc-123-def-456"
-                  apiKeys: ["xYz123AbC456DeF789"]
-                  tokowakaEnabled: true
-                  enhancements: true
-              onlyTokowaka:
-                summary: Only Tokowaka enabled
-                value:
-                  siteId: "abc-123-def-456"
-                  apiKeys: ["xYz123AbC456DeF789"]
-                  tokowakaEnabled: true
-              onlyEnhancements:
-                summary: Only enhancements enabled
-                value:
-                  siteId: "abc-123-def-456"
-                  apiKeys: ["xYz123AbC456DeF789"]
-                  enhancements: true
-              disabled:
-                summary: Tokowaka disabled
-                value:
-                  siteId: "abc-123-def-456"
-                  apiKeys: ["xYz123AbC456DeF789"]
-                  tokowakaEnabled: false
+              description: The metaconfig object stored in S3
       '400':
         $ref: './responses.yaml#/400'
       '401':
