@@ -34,6 +34,7 @@ import runTrafficAnalysisBackfill from './commands/run-traffic-analysis-backfill
 import backfillLlmo from './commands/backfill-llmo.js';
 import getPromptUsage from './commands/get-prompt-usage.js';
 import getLlmoConfigSummary from './commands/get-llmo-config-summary.js';
+import generateA11yCodefix from './commands/generate-a11y-codefix.js';
 
 /**
  * Returns all commands.
@@ -66,4 +67,5 @@ export default (context) => [
   backfillLlmo(context),
   getPromptUsage(context),
   getLlmoConfigSummary(context),
+  generateA11yCodefix(context),
 ];
