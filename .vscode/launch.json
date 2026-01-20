@@ -4,6 +4,36 @@
         {
             "type": "node",
             "request": "launch",
+            "name": "Debug Generic Autofix Script",
+            "program": "${workspaceFolder}/scripts/create-generic-autofix-suggestions.js",
+            "args": [
+                // "9ae8877a-bbf3-407d-9adb-d6a72ce3c5e3"
+                "c2473d89-e997-458d-a86d-b4096649c12b"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "skipFiles": [
+                "<node_internals>/**"
+            ]
+        },
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Debug Touch Suggestions Script",
+            "program": "${workspaceFolder}/scripts/touch-suggestions-updatedAt.js",
+            "args": [
+                // "9ae8877a-bbf3-407d-9adb-d6a72ce3c5e3"
+                "c2473d89-e997-458d-a86d-b4096649c12b"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "skipFiles": [
+                "<node_internals>/**"
+            ]
+        },
+        {
+            "type": "node",
+            "request": "launch",
             "name": "Debug Current Mocha Test File",
             "program": "${workspaceFolder}/node_modules/mocha/bin/_mocha",
             "args": [
