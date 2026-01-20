@@ -93,9 +93,11 @@ describe('RunTrafficAnalysisBackfillCommand', () => {
       const [queueUrl, message] = sqsStub.sendMessage.firstCall.args;
       expect(queueUrl).to.equal('test-import-queue-url');
       expect(message).to.have.property('type', 'traffic-analysis');
+      expect(message).to.have.property('trigger', 'backfill');
       expect(message).to.have.property('siteId', 'test-site-id');
       expect(message).to.have.property('week');
       expect(message).to.have.property('year');
+      expect(message).to.have.property('allowCache', false);
       expect(message).to.have.property('slackContext');
     });
 

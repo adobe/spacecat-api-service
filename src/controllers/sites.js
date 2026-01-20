@@ -11,13 +11,15 @@
  */
 
 import {
+  accepted,
+  badRequest,
   createResponse,
   created,
-  badRequest,
+  forbidden,
+  internalServerError,
   noContent,
   notFound,
   ok,
-  forbidden,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   hasText,
@@ -33,12 +35,15 @@ import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
+import TierClient from '@adobe/spacecat-shared-tier-client';
 import { SiteDto } from '../dto/site.js';
+import { OrganizationDto } from '../dto/organization.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
 import { KeyEventDto } from '../dto/key-event.js';
-import { wwwUrlResolver } from '../support/utils.js';
+import { wwwUrlResolver, resolveWwwUrl } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 
 /**
  * Sites controller. Provides methods to create, read, update and delete sites.
@@ -51,6 +56,7 @@ const AHREFS = 'ahrefs';
 const ORGANIC_TRAFFIC = 'organic-traffic';
 const MONTH_DAYS = 30;
 const TOTAL_METRICS = 'totalMetrics';
+const BRAND_PROFILE_AGENT_ID = 'brand-profile';
 
 /**
  * Validates that pageTypes array contains valid regex patterns
@@ -97,7 +103,9 @@ function SitesController(ctx, log, env) {
     throw new Error('Data access required');
   }
 
-  const { Audit, KeyEvent, Site } = dataAccess;
+  const {
+    Audit, KeyEvent, Organization, Site,
+  } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
@@ -264,6 +272,69 @@ function SitesController(ctx, log, env) {
     return ok(SiteDto.toJSON(site));
   };
 
+  const getBrandProfile = async (context) => {
+    const siteId = context.params?.siteId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view its sites');
+    }
+
+    const config = site.getConfig();
+    const profile = config?.getBrandProfile?.();
+    if (!isNonEmptyObject(profile)) {
+      return noContent();
+    }
+
+    return ok({ brandProfile: profile });
+  };
+
+  const triggerBrandProfile = async (context) => {
+    const siteId = context.params?.siteId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view its sites');
+    }
+
+    try {
+      const executionName = await triggerBrandProfileAgent({
+        context: ctx,
+        site,
+        slackContext: context.data?.slackContext,
+        reason: 'sites-http',
+      });
+
+      if (!executionName) {
+        throw new Error('brand profile trigger returned empty execution name');
+      }
+
+      return accepted({
+        executionName,
+        siteId,
+      });
+    } catch (error) {
+      log.error(`Failed to trigger ${BRAND_PROFILE_AGENT_ID} agent for site ${siteId}`, error);
+      return internalServerError('Failed to trigger brand profile agent');
+    }
+  };
+
   /**
    * Gets a site by base URL. The base URL is base64 encoded. This is to allow
    * for URLs with special characters to be used as path parameters.
@@ -297,26 +368,7 @@ function SitesController(ctx, log, env) {
    * @param {object} context - Context of the request.
    * @return {Promise<Response>} Delete response.
    */
-  const removeSite = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can remove sites');
-    }
-    const siteId = context.params?.siteId;
-
-    if (!isValidUUID(siteId)) {
-      return badRequest('Site ID required');
-    }
-
-    const site = await Site.findById(siteId);
-
-    if (!site) {
-      return notFound('Site not found');
-    }
-
-    await site.remove();
-
-    return noContent();
-  };
+  const removeSite = async () => forbidden('Restricted Operation');
 
   /**
    * Updates a site
@@ -549,6 +601,8 @@ function SitesController(ctx, log, env) {
     const metric = context.params?.metric;
     const source = context.params?.source;
     const filterByTop100PageViews = context.data?.filterByTop100PageViews === 'true';
+    // Key to extract from object response, e.g., 'data' in { label, data: [...] }
+    const objectResponseDataKey = context.data?.objectResponseDataKey;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -571,21 +625,39 @@ function SitesController(ctx, log, env) {
       return forbidden('Only users belonging to the organization can view its metrics');
     }
 
-    let metrics = await getStoredMetrics({ siteId, metric, source }, context);
+    const metrics = await getStoredMetrics({ siteId, metric, source }, context);
+
+    // Handle object response: extract array from key if objectResponseDataKey is provided
+    let metricsData;
+    let objectWrapper = null;
+
+    if (objectResponseDataKey && isObject(metrics) && !isArray(metrics)
+        && isArray(metrics[objectResponseDataKey])) {
+      // Stored data is an object with array at specified key
+      metricsData = metrics[objectResponseDataKey];
+      objectWrapper = metrics;
+    } else {
+      // Stored data is a plain array (backward compatible)
+      metricsData = metrics;
+    }
 
     // Filter to top 100 pages by pageViews when requested
     if (filterByTop100PageViews) {
       // Sort by pageViews in descending order and take top 100
-      const originalCount = metrics.length;
-      metrics = metrics
+      const originalCount = metricsData.length;
+      metricsData = metricsData
         .filter((metricEntry) => metricEntry.pageviews !== undefined)
         .sort((a, b) => (b.pageviews || 0) - (a.pageviews || 0))
         .slice(0, 100);
 
-      log.info(`Filtered metrics from ${originalCount} to ${metrics.length} entries based on top pageViews`);
+      log.info(`Filtered metrics from ${originalCount} to ${metricsData.length} entries based on top pageViews`);
     }
 
-    return ok(metrics);
+    // Return object wrapper if objectResponseDataKey was used, otherwise return plain array
+    if (objectWrapper) {
+      return ok({ ...objectWrapper, [objectResponseDataKey]: metricsData });
+    }
+    return ok(metricsData);
   };
 
   const getLatestSiteMetrics = async (context) => {
@@ -605,27 +677,52 @@ function SitesController(ctx, log, env) {
     }
 
     const rumAPIClient = RUMAPIClient.createFrom(context);
-    const domain = wwwUrlResolver(site);
+    const domain = await resolveWwwUrl(site, context);
 
     try {
+      const now = new Date();
+      const todayUTC = new Date(Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        0,
+        0,
+        0,
+        0,
+      ));
+      const thirtyDaysAgo = new Date(todayUTC.getTime() - MONTH_DAYS * 24 * 60 * 60 * 1000);
+      const sixtyDaysAgo = new Date(todayUTC.getTime() - 2 * MONTH_DAYS * 24 * 60 * 60 * 1000);
+
       const current = await rumAPIClient.query(TOTAL_METRICS, {
         domain,
-        interval: MONTH_DAYS,
+        startTime: thirtyDaysAgo.toISOString(),
+        endTime: todayUTC.toISOString(),
       });
-      const total = await rumAPIClient.query(TOTAL_METRICS, {
+      const previous = await rumAPIClient.query(TOTAL_METRICS, {
         domain,
-        interval: 2 * MONTH_DAYS,
+        startTime: sixtyDaysAgo.toISOString(),
+        endTime: thirtyDaysAgo.toISOString(),
       });
       const organicTraffic = await getStoredMetrics(
         { siteId, metric: ORGANIC_TRAFFIC, source: AHREFS },
         context,
       );
 
-      const previousPageViews = total.totalPageViews - current.totalPageViews;
-      const previousCTR = (total.totalClicks - current.totalClicks) / previousPageViews;
-      const pageViewsChange = ((current.totalPageViews - previousPageViews)
-        / previousPageViews) * 100;
-      const ctrChange = ((current.totalCTR - previousCTR) / previousCTR) * 100;
+      const pageViewsChange = previous.totalPageViews !== 0
+        ? ((current.totalPageViews - previous.totalPageViews) / previous.totalPageViews) * 100
+        : 0;
+      const ctrChange = previous.totalCTR !== 0
+        ? ((current.totalCTR - previous.totalCTR) / previous.totalCTR) * 100
+        : 0;
+
+      const currentLCP = current.totalLCP;
+      const previousLCP = previous.totalLCP;
+
+      const currentEngagement = current.totalEngagement || 0;
+      const previousEngagement = previous.totalEngagement || 0;
+
+      const currentConversion = current.totalClicks || 0;
+      const previousConversion = previous.totalClicks || 0;
 
       let cpc = 0;
 
@@ -640,6 +737,14 @@ function SitesController(ctx, log, env) {
         pageViewsChange,
         ctrChange,
         projectedTrafficValue,
+        currentPageViews: current.totalPageViews,
+        previousPageViews: previous.totalPageViews,
+        currentLCP,
+        previousLCP,
+        currentEngagement,
+        previousEngagement,
+        currentConversion,
+        previousConversion,
       });
     } catch (error) {
       log.error(`Error getting RUM metrics for site ${siteId}: ${error.message}`);
@@ -649,6 +754,14 @@ function SitesController(ctx, log, env) {
       pageViewsChange: 0,
       ctrChange: 0,
       projectedTrafficValue: 0,
+      currentLCP: null,
+      previousPageViews: 0,
+      currentPageViews: 0,
+      currentConversion: 0,
+      previousConversion: 0,
+      previousLCP: null,
+      previousEngagement: 0,
+      currentEngagement: 0,
     });
   };
 
@@ -757,6 +870,156 @@ function SitesController(ctx, log, env) {
     return ok(topPages);
   };
 
+  /**
+   * Resolves site and organization data based on query parameters.
+   * Tries siteId first, then checks either organizationId or imsOrg (mutually exclusive).
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Resolved site and organization data response.
+   */
+  const resolveSite = async (context) => {
+    const { organizationId, imsOrg, siteId } = context.data;
+    const { pathInfo } = context;
+    const X_PRODUCT_HEADER = 'x-product';
+    const productCode = pathInfo.headers[X_PRODUCT_HEADER];
+
+    if (!hasText(productCode)) {
+      return badRequest('Product code required in x-product header');
+    }
+
+    if (!hasText(organizationId) && !hasText(imsOrg)) {
+      return badRequest('Either organizationId or imsOrg must be provided');
+    }
+
+    let organization;
+    let site;
+
+    try {
+      if (hasText(siteId) && isValidUUID(siteId)) {
+        site = await Site.findById(siteId);
+        if (site) {
+          const orgId = site.getOrganizationId();
+          if (orgId) {
+            organization = await Organization.findById(orgId);
+            if (organization) {
+              if (hasText(organizationId) && organization.getId() !== organizationId) {
+                organization = null;
+              } else if (hasText(imsOrg) && organization.getImsOrgId() !== imsOrg) {
+                organization = null;
+              }
+            }
+            if (organization && await accessControlUtil.hasAccess(organization)) {
+              const tierClient = await TierClient.createForSite(context, site, productCode);
+              const { entitlement, enrollments } = await tierClient.getAllEnrollment();
+
+              if (entitlement && enrollments?.length) {
+                const data = {
+                  organization: OrganizationDto.toJSON(organization),
+                  site: SiteDto.toJSON(site),
+                };
+
+                return ok({ data });
+              }
+            }
+          }
+        }
+      }
+
+      if (hasText(organizationId) && isValidUUID(organizationId)) {
+        organization = await Organization.findById(organizationId);
+        if (organization && await accessControlUtil.hasAccess(organization)) {
+          const tierClient = TierClient.createForOrg(context, organization, productCode);
+          const { site: enrolledSite } = await tierClient.getFirstEnrollment();
+
+          if (enrolledSite) {
+            const data = {
+              organization: OrganizationDto.toJSON(organization),
+              site: SiteDto.toJSON(enrolledSite),
+            };
+
+            return ok({ data });
+          }
+        }
+      } else if (hasText(imsOrg)) {
+        organization = await Organization.findByImsOrgId(imsOrg);
+        if (organization && await accessControlUtil.hasAccess(organization)) {
+          const tierClient = TierClient.createForOrg(context, organization, productCode);
+          const { site: enrolledSite } = await tierClient.getFirstEnrollment();
+
+          if (enrolledSite) {
+            const data = {
+              organization: OrganizationDto.toJSON(organization),
+              site: SiteDto.toJSON(enrolledSite),
+            };
+
+            return ok({ data });
+          }
+        }
+      }
+
+      return notFound('No site found for the provided parameters');
+    } catch (error) {
+      log.error(`Error resolving site: ${error.message}`);
+      return badRequest('Failed to resolve site');
+    }
+  };
+
+  const getGraph = async (context) => {
+    const siteId = context.params?.siteId;
+    const {
+      urls, startDate, endDate, granularity,
+    } = context.data || {};
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view graph data');
+    }
+
+    // Validate required parameters
+    if (!isArray(urls) || urls.length === 0) {
+      return badRequest('urls array is required and must not be empty');
+    }
+
+    if (!hasText(startDate)) {
+      return badRequest('startDate is required');
+    }
+
+    if (!hasText(endDate)) {
+      return badRequest('endDate is required');
+    }
+
+    if (!hasText(granularity)) {
+      return badRequest('granularity is required');
+    }
+
+    const rumAPIClient = RUMAPIClient.createFrom(context);
+    const domain = wwwUrlResolver(site);
+
+    try {
+      const params = {
+        domain,
+        urls,
+        startTime: startDate,
+        endTime: endDate,
+        granularity,
+      };
+
+      const graphData = await rumAPIClient.query('optimization-report-graph', params);
+
+      return ok(graphData);
+    } catch (error) {
+      log.error(`Error getting optimization report graph for site ${siteId}: ${error.message}`);
+      return internalServerError('Failed to retrieve graph data');
+    }
+  };
+
   return {
     createSite,
     getAll,
@@ -771,6 +1034,9 @@ function SitesController(ctx, log, env) {
     updateSite,
     updateCdnLogsConfig,
     getTopPages,
+    resolveSite,
+    getBrandProfile,
+    triggerBrandProfile,
 
     // key events
     createKeyEvent,
@@ -781,6 +1047,7 @@ function SitesController(ctx, log, env) {
     getSiteMetricsBySource,
     getPageMetricsBySource,
     getLatestSiteMetrics,
+    getGraph,
   };
 }
 

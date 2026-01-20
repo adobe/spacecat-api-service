@@ -77,7 +77,7 @@ describe('Fixes Controller', () => {
       .withArgs({ opportunityId })
       .callsFake((data) => ({ go: async () => ({ data: { ...data, siteId } }) }));
 
-    const entityRegistry = new EntityRegistry(electroService, log);
+    const entityRegistry = new EntityRegistry({ dynamo: electroService, s3: null }, log);
     const dataAccess = entityRegistry.getCollections();
     fixEntityCollection = dataAccess.FixEntity;
     suggestionCollection = dataAccess.Suggestion;

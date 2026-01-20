@@ -1,0 +1,104 @@
+---
+title: API Design and Data Modeling Principles
+description: Guidelines for designing APIs and data models according to use cases
+alwaysApply: true
+version: "1.0.0"
+---
+
+# API Design and Data Modeling Principles
+
+## Core Principles
+- API design and implementation starts with understanding both the business use cases and the non-functional
+requirements, and not directly with implementation.
+- Data access patterns should be derived from the business use cases.
+- The data models, storage implementation and API endpoints should be informed by and implemented starting from the
+required data access patterns and the non-functional requirements relevant to the use case.
+- Implementation should be done incrementally.
+
+## When Planning or Implementing New API Endpoints
+
+### 1. Clarification Phase - Ask These Questions First
+
+Before planning implementation, systematically gather requirements:
+
+**Data Access Patterns:**
+- Where will this data surface? (internal UI, customer-facing UI, internal services, external services, etc.)
+- What query patterns are required? (filtering, sorting, pagination)
+- Read vs write frequency and volume?
+- Will users need to filter or sort by already known, common root-level fields and simple conditions?
+- Will users need to filter or sort by deeply nested, complex field values and conditions?
+
+**Data Model:**
+- What kind of data needs to be surfaced for the use case?
+- What type of data: simple fields or complex nested structures?
+- How large will the data be? (impacts bandwidth)
+- Who can read/write different parts of the data? (access control needs)
+- How often will different parts be updated? (concurrent update patterns)
+- Will all records have this data or only a subset of the data?
+- Are some subsets of the data used and retrieved only for some specific use cases?
+
+**Scale and Performance:**
+- Expected record count and growth rate?
+- List operation payload size concerns? (especially mobile)
+- Can we use projection to exclude heavy fields?
+- Is progressive/lazy loading needed?
+- Are counts of all/filtered records required to be surfaced together with the paged query results?
+
+Always ask for clarification if:
+- Business use cases are not provided, e.g. "Implement a CRUD API for URLs", "Implement a CRUD API for configurations"
+- Requirements include "filter/sort by any field", "sort by a single field required by only one of the use cases" (may need different approach)
+- Data has vague or only implied requirements, e.g.
+  - is mostly free-form with no details regarding which fields are used when and where
+  - all data fields are always needed with every query (consider single entity)
+  - all data fields are rarely needed (definitely separate)
+- Multiple services update same fields concurrently (coordination strategy needed)
+- Different access control for different parts of data (separate entities)
+
+### 2. Evaluation Criteria For Different Implementation Approaches
+
+Include these if relevant to the business use cases or non-functional requirements:
+
+- List performance
+- Query performance
+- Concurrent updates
+- Storage aspects
+- Access control granularity
+- Complex data structures support
+- Filtering and sorting support
+- Projection/bandwidth
+
+### 3. Implementation Principles
+
+**Follow Existing Patterns:**
+- Examine similar features in the codebase first
+- Reuse established patterns (e.g., Site/Audit, Opportunity/Suggestion)
+- Use existing utilities and helpers
+
+**Don't Over-Engineer:**
+- Match solution complexity to actual requirements
+- Don't add features "just in case" - implement what's needed
+- Keep the implementation open for extensibility
+
+**OpenAPI First:**
+- Define API contract before implementation
+
+**Concurrent Updates:**
+- Avoid read-modify-write patterns when possible
+- Use atomic operations whenever possible
+- Separate entities for independent update paths
+- Document merge strategies if needed
+
+**Access Control:**
+- Consider who can read/write each entity
+- Plan entity-level permissions from the start
+- Separate sensitive data to separate entities if needed
+
+### 4. Documentation Requirements
+
+In the plan, explicitly state:
+- Which query patterns are supported (index-based) vs not supported (client-side)
+- Pagination behavior and options
+- Bandwidth considerations and optimization strategies
+- Concurrent update safety or coordination needs
+- Access control boundaries
+

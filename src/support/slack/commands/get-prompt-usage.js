@@ -18,7 +18,24 @@ import { createObjectCsvStringifier } from '../../../utils/slack/csvHelper.cjs';
 
 const { readConfig } = llmo;
 const PHRASES = ['get-prompt-usage'];
-const EXCLUDED_IMS_ORGS = ['9E1005A551ED61CA0A490D45@AdobeOrg'];
+/**
+ * IMS orgs that are excluded from the prompt usage report
+ */
+export const LLMO_INTERNAL_IMS_ORGS = [
+  '908936ED5D35CC220A495CD4@AdobeOrg', // Sites Internal
+  '9E1005A551ED61CA0A490D45@AdobeOrg', // Adobe Corp
+  '42A126776407096B0A495E50@AdobeOrg', // AEM Reference Demo Shared
+  '907136ED5D35CBF50A495CD4@AdobeOrg', // Foundation Internal
+  '05791F3F677F1AE80A495CB0@AdobeOrg', // AEM Sites Trial
+  '021654A663AF3D5A0A495FD4@AdobeOrg', // adobe-tucker-elliott
+  '632645F86160D2940A495E6D@AdobeOrg', // Assets Essentials Beta Org 1
+  'EE9332B3547CC74E0A4C98A1@AdobeOrg', // Adobe Inc.
+  '812B47145DC5A2450A495C14@AdobeOrg', // Adobe Experience Cloud Skyline
+  '3B962FB55F5F922E0A495C88@AdobeOrg', // Odin
+  '38931D6666E3ECDA0A495E80@AdobeOrg', // AEM Showcase
+  '7B4A0E7A5D6E2CA10A495EE1@AdobeOrg', // Cloud Manager Development Team
+  '7ABB3E6A5A7491460A495D61@AdobeOrg', // Adobe Tech Marketing
+];
 
 /**
  * Factory function to create the GetPromptUsage object.
@@ -92,22 +109,36 @@ function GetPromptUsageCommand(context) {
       sitesInOrg.map((site) => getLlmoConfig(site.getId())),
     );
 
-    let totalPrompts = 0;
+    let humanPromptsCount = 0;
+    let aiPromptsCount = 0;
 
     for (const cfg of configs) {
       if (cfg) {
-        const topicPromptCount = Object.values(cfg.topics).reduce(
-          (sum, topic) => sum + (topic.prompts?.length || 0),
-          0,
-        );
-        totalPrompts += topicPromptCount;
+        // Count prompts within topics (human prompts)
+        if (cfg.topics) {
+          humanPromptsCount += Object.values(cfg.topics).reduce(
+            (sum, topic) => sum + (topic.prompts?.length || 0),
+            0,
+          );
+        }
+        // Count prompts within aiTopics (AI prompts)
+        if (cfg.aiTopics) {
+          aiPromptsCount += Object.values(cfg.aiTopics).reduce(
+            (sum, topic) => sum + (topic.prompts?.length || 0),
+            0,
+          );
+        }
       }
     }
+
+    const totalPrompts = humanPromptsCount + aiPromptsCount;
 
     return {
       organizationName,
       imsOrgID,
       tier,
+      humanPromptsCount,
+      aiPromptsCount,
       totalPrompts,
     };
   };
@@ -137,7 +168,7 @@ function GetPromptUsageCommand(context) {
       if (imsOrgIds.length === 1 && imsOrgIds[0] !== '--all') {
         const data = await getPromptUsageForSingleIMSOrg(imsOrgIds[0]);
         await say(
-          `*Prompt usage for IMS Org ID* \`${data.imsOrgID}\`:\n   :ims: *IMS Org Name:* ${data.organizationName}\n   :paid: *Tier:* ${data.tier}\n   :elmo: *Total number of prompts in use:* ${data.totalPrompts}`,
+          `*Prompt usage for IMS Org ID* \`${data.imsOrgID}\`:\n   :ims: *IMS Org Name:* ${data.organizationName}\n   :paid: *Tier:* ${data.tier}\n   :bust_in_silhouette: *Human prompts:* ${data.humanPromptsCount}\n   :robot_face: *AI prompts:* ${data.aiPromptsCount}\n   :elmo: *Total number of prompts in use:* ${data.totalPrompts}`,
         );
         return;
       }
@@ -145,7 +176,7 @@ function GetPromptUsageCommand(context) {
       if (imsOrgIds.length === 1 && imsOrgIds[0] === '--all') {
         const allOrgs = await Organization.all();
         imsOrgIds = allOrgs.map((org) => org.getImsOrgId());
-        await say(':progress-loader: Retrieving total number of prompts in use for *all* organizations (excluding Adobe Corp)...');
+        await say(':progress-loader: Retrieving total number of prompts in use for *all* organizations (excluding Internal IMS orgs)...');
       }
 
       const results = await Promise.allSettled(
@@ -159,13 +190,17 @@ function GetPromptUsageCommand(context) {
             organizationName,
             imsOrgID,
             tier,
+            humanPromptsCount,
+            aiPromptsCount,
             totalPrompts,
           } = res.value;
-          if (args[0] === '--all' && (totalPrompts === 0 || EXCLUDED_IMS_ORGS.includes(imsOrgID))) return undefined;
+          if (args[0] === '--all' && (totalPrompts === 0 || LLMO_INTERNAL_IMS_ORGS.includes(imsOrgID))) return undefined;
           return {
             organizationName,
             imsOrgID,
             tier,
+            humanPromptsCount,
+            aiPromptsCount,
             totalPrompts,
           };
         })
@@ -190,7 +225,9 @@ function GetPromptUsageCommand(context) {
           { id: 'organizationName', title: 'IMS Org Name' },
           { id: 'imsOrgID', title: 'IMS Org ID' },
           { id: 'tier', title: 'Tier' },
-          { id: 'totalPrompts', title: 'Total number of prompts in use' },
+          { id: 'humanPromptsCount', title: 'Human Prompts' },
+          { id: 'aiPromptsCount', title: 'AI Prompts' },
+          { id: 'totalPrompts', title: 'Total Prompts' },
         ],
       });
 

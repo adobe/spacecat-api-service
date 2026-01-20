@@ -78,13 +78,6 @@ export function setImsOrgModal(lambdaContext) {
       // Create a say function to post back to the channel
       const say = createSayFunction(client, channelId, threadTs);
 
-      // Validate that at least one product is selected
-      if (selectedProducts.length === 0) {
-        await ack();
-        await say(':warning: Please select at least one product.');
-        return;
-      }
-
       await ack();
 
       // Find the site
@@ -133,8 +126,9 @@ export function setImsOrgModal(lambdaContext) {
         );
 
         // inform user that we created the org and set it
-        // Note: selectedProducts.length is always > 0 due to validation
-        const productsMessage = `\nSelected products for entitlement: *${selectedProducts.join(', ')}*`;
+        const productsMessage = selectedProducts.length > 0
+          ? `\nSelected products for entitlement: *${selectedProducts.join(', ')}*`
+          : '\n:warning: *No products selected* - No entitlements were created.';
         await say(
           `:white_check_mark: Successfully *created* a new Spacecat org (Name: *${imsOrgDetails.orgName}*) `
           + `and set it for site <${baseURL}|${baseURL}>!${productsMessage}`,
@@ -153,21 +147,23 @@ export function setImsOrgModal(lambdaContext) {
           'Set IMS Organization',
         );
 
-        // Note: selectedProducts.length is always > 0 due to validation
-        const productsMessage = `\nSelected products for entitlement: *${selectedProducts.join(', ')}*`;
+        const productsMessage = selectedProducts.length > 0
+          ? `\nSelected products for entitlement: *${selectedProducts.join(', ')}*`
+          : '\n:warning: *No products selected* - No entitlements were created.';
         await say(
           `:white_check_mark: Successfully updated site <${baseURL}|${baseURL}> to use Spacecat org `
           + `with imsOrgId: *${userImsOrgId}*.${productsMessage}`,
         );
       }
-      // ensure entitlements and enrollments for selected products
-      const entitlementResults = await createEntitlementsForProducts(
-        lambdaContext,
-        site,
-        selectedProducts,
-      );
-
-      await postEntitlementMessages(say, entitlementResults, site.getId());
+      if (selectedProducts.length > 0) {
+        // ensure entitlements and enrollments for selected products
+        const entitlementResults = await createEntitlementsForProducts(
+          lambdaContext,
+          site,
+          selectedProducts,
+        );
+        await postEntitlementMessages(say, entitlementResults, site.getId());
+      }
     } catch (error) {
       log.error('Error handling modal submission:', error);
     }

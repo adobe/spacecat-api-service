@@ -15,6 +15,9 @@ import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import esmock from 'esmock';
+import {
+  preflightConfigModal,
+} from '../../../../src/support/slack/actions/preflight-config-modal.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -170,6 +173,31 @@ describe('preflight-config-modal', () => {
       });
     });
 
+    it('should handle helix preview URL for ams type', async () => {
+      body.view.state.values.authoring_type_input.authoring_type.selected_option.value = 'ams';
+      body.view.state.values.preview_url_input.preview_url.value = 'https://some-preview.url';
+
+      siteMock.findById.resolves(siteMock);
+
+      const modalAction = preflightConfigModal(context);
+      await modalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.calledOnce;
+      expect(siteMock.setAuthoringType).to.have.been.calledWith('ams');
+      expect(siteMock.setDeliveryConfig).to.have.been.calledWith({
+        authorURL: 'https://some-preview.url',
+      });
+      expect(clientMock.chat.postMessage).to.have.been.calledWith({
+        channel: 'C12345',
+        text: ':white_check_mark: Successfully configured and enabled preflight audit for `https://example.com`\n:writing_hand: *Authoring Type:* ams\n:gear: *Authoring URL:* https://some-preview.url',
+        thread_ts: undefined,
+      });
+    });
+
     it('should validate required authoring type field', async () => {
       body.view.state.values.authoring_type_input.authoring_type.selected_option = null;
 
@@ -248,6 +276,26 @@ describe('preflight-config-modal', () => {
         response_action: 'errors',
         errors: {
           preview_url_input: 'Could not extract RSO information from this URL. Please provide a valid Helix preview URL (e.g., https://main--site--owner.hlx.live).',
+        },
+      });
+    });
+
+    it('should validate ams author URL for ams type', async () => {
+      body.view.state.values.authoring_type_input.authoring_type.selected_option.value = 'ams';
+      body.view.state.values.preview_url_input.preview_url.value = 'invalid';
+
+      const mockedModule = await esmock('../../../../src/support/slack/actions/preflight-config-modal.js');
+      const modalAction = mockedModule.preflightConfigModal(context);
+      await modalAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+      });
+
+      expect(ackMock).to.have.been.calledWith({
+        response_action: 'errors',
+        errors: {
+          preview_url_input: 'Please provide a valid AMS author URL.',
         },
       });
     });

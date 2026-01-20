@@ -10,6 +10,9 @@
  * governing permissions and limitations under the License.
  */
 
+// LLMO constants
+export const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
+
 // Apply filters to data arrays with case-insensitive exact matching
 export const applyFilters = (rawData, filterFields) => {
   const data = { ...rawData };
@@ -166,6 +169,51 @@ export const applyMappings = (rawData, mappingConfig) => {
       data[key].data = mapArray(data[key].data, mappings);
     }
   });
+
+  return data;
+};
+
+// Apply sorting to data arrays based on field and order
+export const applySort = (rawData, sortConfig) => {
+  const data = { ...rawData };
+
+  const sortArray = (array, field, order = 'asc') => {
+    const sorted = [...array].sort((a, b) => {
+      const aValue = a[field];
+      const bValue = b[field];
+
+      // Handle null/undefined values - push to end
+      if (aValue == null && bValue == null) return 0;
+      if (aValue == null) return 1;
+      if (bValue == null) return -1;
+
+      // Try numeric comparison first
+      const aNum = Number(aValue);
+      const bNum = Number(bValue);
+      if (!Number.isNaN(aNum) && !Number.isNaN(bNum)) {
+        return order === 'asc' ? aNum - bNum : bNum - aNum;
+      }
+
+      // Fall back to string comparison
+      const aStr = String(aValue).toLowerCase();
+      const bStr = String(bValue).toLowerCase();
+      if (order === 'asc') {
+        return aStr.localeCompare(bStr);
+      }
+      return bStr.localeCompare(aStr);
+    });
+    return sorted;
+  };
+
+  if (data[':type'] === 'sheet' && data.data) {
+    data.data = sortArray(data.data, sortConfig.field, sortConfig.order);
+  } else if (data[':type'] === 'multi-sheet') {
+    Object.keys(data).forEach((key) => {
+      if (key !== ':type' && data[key]?.data) {
+        data[key].data = sortArray(data[key].data, sortConfig.field, sortConfig.order);
+      }
+    });
+  }
 
   return data;
 };

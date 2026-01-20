@@ -53,6 +53,14 @@ describe('Organizations Controller', () => {
       deliveryType: 'aem_edge',
       config: Config({}),
     },
+    {
+      siteId: '550e8400-e29b-41d4-a716-446655440001',
+      organizationId: '7033554c-de8a-44ac-a356-09b51af8cc28',
+      projectId: '850e8400-e29b-41d4-a716-446655440000',
+      baseURL: 'https://site3.com',
+      deliveryType: 'aem_edge',
+      config: Config({}),
+    },
   ].map((site) => new Site(
     { entities: { site: { model: {} } } },
     {
@@ -93,6 +101,12 @@ describe('Organizations Controller', () => {
       organizationId: 'org3',
       name: 'Org 3',
       imsOrgId: '9876567890ABCDEF12345678@AdobeOrg',
+    },
+    {
+      organizationId: '7033554c-de8a-44ac-a356-09b51af8cc28',
+      name: 'Org 4',
+      imsOrgId: '1176567890ABCDEF12345678@AdobeOrg',
+      config: Config({}),
     },
   ].map((org) => new Organization(
     {
@@ -203,6 +217,7 @@ describe('Organizations Controller', () => {
         allByOrganizationId: sinon.stub(),
         allByOrganizationIdAndProjectId: sinon.stub(),
         allByOrganizationIdAndProjectName: sinon.stub(),
+        findById: sinon.stub(),
       },
       Project: {
         allByOrganizationId: sinon.stub(),
@@ -212,6 +227,7 @@ describe('Organizations Controller', () => {
       },
       SiteEnrollment: {
         allBySiteId: sinon.stub(),
+        allByEntitlementId: sinon.stub(),
       },
     };
 
@@ -401,52 +417,6 @@ describe('Organizations Controller', () => {
     expect(error).to.have.property('message', 'No updates provided');
   });
 
-  it('removes an organization', async () => {
-    organizations[0].remove = sinon.stub().resolves(organizations[0]);
-    mockDataAccess.Organization.findById.resolves(organizations[0]);
-    const response = await organizationsController.removeOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...context });
-
-    expect(organizations[0].remove).to.have.been.calledOnce;
-    expect(response.status).to.equal(204);
-  });
-
-  it('returns bad request when removing a site if id not provided', async () => {
-    organizations[0].remove = sinon.stub().resolves(organizations[0]);
-    mockDataAccess.Organization.findById.resolves(organizations[0]);
-    const response = await organizationsController.removeOrganization(
-      { params: {}, ...context },
-    );
-    const error = await response.json();
-
-    expect(organizations[0].remove).to.not.have.been.called;
-    expect(response.status).to.equal(400);
-    expect(error).to.have.property('message', 'Organization ID required');
-  });
-
-  it('returns unauthorized when removing a site for non admin users', async () => {
-    context.attributes.authInfo.withProfile({ is_admin: false });
-    organizations[0].remove = sinon.stub().resolves(organizations[0]);
-    mockDataAccess.Organization.findById.resolves(organizations[0]);
-    const response = await organizationsController.removeOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...context });
-    const error = await response.json();
-
-    expect(organizations[0].remove).to.not.have.been.called;
-    expect(response.status).to.equal(403);
-    expect(error).to.have.property('message', 'Only admins can delete Organizations');
-  });
-
-  it('returns not found when removing a non-existing organization', async () => {
-    organizations[0].remove = sinon.stub().resolves(organizations[0]);
-    mockDataAccess.Organization.findById.resolves(null);
-
-    const response = await organizationsController.removeOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...context });
-    const error = await response.json();
-
-    expect(organizations[0].remove).to.not.have.been.called;
-    expect(response.status).to.equal(404);
-    expect(error).to.have.property('message', 'Organization not found');
-  });
-
   it('gets all organizations', async () => {
     mockDataAccess.Organization.all.resolves(organizations);
 
@@ -454,7 +424,7 @@ describe('Organizations Controller', () => {
     const resultOrganizations = await result.json();
 
     expect(mockDataAccess.Organization.all).to.have.been.calledOnce;
-    expect(resultOrganizations).to.be.an('array').with.lengthOf(3);
+    expect(resultOrganizations).to.be.an('array').with.lengthOf(4);
     expect(resultOrganizations[0]).to.have.property('id', '9033554c-de8a-44ac-a356-09b51af8cc28');
     expect(resultOrganizations[1]).to.have.property('id', '5f3b3626-029c-476e-924b-0c1bba2e871f');
   });
@@ -480,13 +450,21 @@ describe('Organizations Controller', () => {
       getProductCode: () => 'abcd',
       getTier: () => 'premium',
     };
-    const mockSiteEnrollment = {
-      getId: () => 'enrollment-123',
-      getEntitlementId: () => 'entitlement-123',
-    };
+    const mockSiteEnrollments = [
+      {
+        getId: () => 'enrollment-1',
+        getEntitlementId: () => 'entitlement-123',
+        getSiteId: () => 'site1',
+      },
+      {
+        getId: () => 'enrollment-2',
+        getEntitlementId: () => 'entitlement-123',
+        getSiteId: () => 'site2',
+      },
+    ];
 
     mockDataAccess.Entitlement.findByOrganizationIdAndProductCode.resolves(mockEntitlement);
-    mockDataAccess.SiteEnrollment.allBySiteId.resolves([mockSiteEnrollment]);
+    mockDataAccess.SiteEnrollment.allByEntitlementId.resolves(mockSiteEnrollments);
 
     const result = await organizationsController.getSitesForOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' }, ...context });
     const resultSites = await result.json();
@@ -758,7 +736,7 @@ describe('Organizations Controller', () => {
   describe('getSitesByProjectIdAndOrganizationId', () => {
     it('gets all sites for an organization by project ID', async () => {
       mockDataAccess.Organization.findById.resolves(organizations[0]);
-      mockDataAccess.Site.allByOrganizationIdAndProjectId.resolves(sites);
+      mockDataAccess.Site.allByOrganizationIdAndProjectId.resolves(sites.slice(0, 2));
 
       const result = await organizationsController.getSitesByProjectIdAndOrganizationId({
         params: { organizationId: organizations[0].getId(), projectId: '550e8400-e29b-41d4-a716-446655440000' },
@@ -825,7 +803,7 @@ describe('Organizations Controller', () => {
   describe('getSitesByProjectNameAndOrganizationId', () => {
     it('gets all sites for an organization by project name', async () => {
       mockDataAccess.Organization.findById.resolves(organizations[0]);
-      mockDataAccess.Site.allByOrganizationIdAndProjectName.resolves(sites);
+      mockDataAccess.Site.allByOrganizationIdAndProjectName.resolves(sites.slice(0, 2));
 
       const result = await organizationsController.getSitesByProjectNameAndOrganizationId({
         params: { organizationId: organizations[0].getId(), projectName: 'test-project' },
@@ -886,6 +864,14 @@ describe('Organizations Controller', () => {
 
       expect(result.status).to.equal(403);
       expect(error).to.have.property('message', 'Only users belonging to the organization can view its sites');
+    });
+
+    it('throw restricted operation when user try to delete organization', async () => {
+      const response = await organizationsController.removeOrganization({ params: { organizationId: '9033554c-de8a-44ac-a356-09b51af8cc28' } });
+      const error = await response.json();
+
+      expect(response.status).to.equal(403);
+      expect(error.message).to.equal('Restricted Operation');
     });
   });
 });

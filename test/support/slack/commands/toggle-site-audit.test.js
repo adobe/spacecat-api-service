@@ -301,7 +301,7 @@ describe('UpdateSitesAuditsCommand', () => {
       await command.handleExecution(args, slackContextMock);
 
       expect(configurationMock.enableHandlerForSite.callCount)
-        .to.equal(44); // 22 audits in demo profile × 2 sites
+        .to.equal(46); // 23 audits in demo profile × 2 sites
       expect(configurationMock.save.calledOnce).to.be.true;
       expect(slackContextMock.say.calledWith(sinon.match('Successfully'))).to.be.true;
     });
@@ -320,7 +320,7 @@ describe('UpdateSitesAuditsCommand', () => {
       await command.handleExecution(args, slackContextMock);
 
       expect(configurationMock.disableHandlerForSite.callCount)
-        .to.equal(44); // 22 audits in demo profile × 2 sites
+        .to.equal(46); // 23 audits in demo profile × 2 sites
       expect(configurationMock.save.calledOnce).to.be.true;
       expect(slackContextMock.say.calledWith(sinon.match('Successfully'))).to.be.true;
     });
@@ -603,6 +603,20 @@ describe('UpdateSitesAuditsCommand', () => {
       expect(configurationMock.enableHandlerForSite.called).to.be.false;
     });
 
+    it('should prompt for configuration when ams type missing delivery config', async () => {
+      preflightSiteMock.getAuthoringType.returns('ams');
+      preflightSiteMock.getDeliveryConfig.returns({ }); // missing author url
+      preflightSiteMock.getHlxConfig.returns({});
+
+      const command = ToggleSiteAuditCommand(contextMock);
+      await command.handleExecution(['enable', 'https://example.com', 'preflight'], slackContextMock);
+
+      expect(slackContextMock.say.calledWith({
+        text: ':warning: Preflight audit requires additional configuration for `https://example.com`',
+        blocks: sinon.match.array,
+      }));
+    });
+
     it('should show correct missing items for documentauthoring with missing helix config', async () => {
       preflightSiteMock.getAuthoringType.returns('documentauthoring');
       preflightSiteMock.getDeliveryConfig.returns(null);
@@ -687,6 +701,132 @@ describe('UpdateSitesAuditsCommand', () => {
       expect(buttonValue.siteId).to.equal('site123');
       expect(buttonValue.auditType).to.equal('preflight');
       expect(configurationMock.enableHandlerForSite.called).to.be.false;
+    });
+  });
+
+  describe('Disable All Audits', () => {
+    let loadProfileConfigStub;
+    let ToggleSiteAuditCommandWithProfile;
+
+    beforeEach(async () => {
+      loadProfileConfigStub = sinon.stub().returns({
+        audits: {
+          cwv: {},
+          'meta-tags': {},
+          'broken-backlinks': {},
+        },
+      });
+
+      ToggleSiteAuditCommandWithProfile = await esmock('../../../../src/support/slack/commands/toggle-site-audit.js', {
+        '@adobe/spacecat-shared-utils': {
+          tracingFetch: fetchStub,
+        },
+        '../../../../src/utils/slack/base.js': {
+          extractURLFromSlackInput: (input) => (input.startsWith('http') ? input : `https://${input}`),
+          loadProfileConfig: loadProfileConfigStub,
+        },
+      });
+    });
+
+    it('should disable all audits from demo profile by default', async () => {
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
+
+      const command = ToggleSiteAuditCommandWithProfile(contextMock);
+      const args = ['disable', 'https://site0.com', 'all'];
+      await command.handleExecution(args, slackContextMock);
+
+      expect(loadProfileConfigStub.calledWith('demo')).to.be.true;
+      expect(configurationMock.disableHandlerForSite.calledWith('cwv', site)).to.be.true;
+      expect(configurationMock.disableHandlerForSite.calledWith('meta-tags', site)).to.be.true;
+      expect(configurationMock.disableHandlerForSite.calledWith('broken-backlinks', site)).to.be.true;
+      expect(configurationMock.save.called).to.be.true;
+      expect(slackContextMock.say.calledWith(sinon.match(/Successfully disabled all audits/))).to.be.true;
+    });
+
+    it('should disable all audits from specified profile', async () => {
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
+
+      const command = ToggleSiteAuditCommandWithProfile(contextMock);
+      const args = ['disable', 'https://site0.com', 'all', 'paid'];
+      await command.handleExecution(args, slackContextMock);
+
+      expect(loadProfileConfigStub.calledWith('paid')).to.be.true;
+      expect(configurationMock.disableHandlerForSite.calledThrice).to.be.true;
+      expect(configurationMock.save.called).to.be.true;
+      expect(slackContextMock.say.calledWith(sinon.match(/from profile "paid"/))).to.be.true;
+    });
+
+    it('should reject enable all', async () => {
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
+
+      const command = ToggleSiteAuditCommandWithProfile(contextMock);
+      const args = ['enable', 'https://site0.com', 'all'];
+      await command.handleExecution(args, slackContextMock);
+
+      expect(configurationMock.enableHandlerForSite.called).to.be.false;
+      expect(configurationMock.save.called).to.be.false;
+      expect(slackContextMock.say.calledWith(sinon.match(/Enable all is not supported/))).to.be.true;
+    });
+
+    it('should show error if profile not found', async () => {
+      loadProfileConfigStub.throws(new Error('Profile not found'));
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
+
+      const command = ToggleSiteAuditCommandWithProfile(contextMock);
+      const args = ['disable', 'https://site0.com', 'all', 'invalid'];
+      await command.handleExecution(args, slackContextMock);
+
+      expect(configurationMock.disableHandlerForSite.called).to.be.false;
+      expect(configurationMock.save.called).to.be.false;
+      expect(slackContextMock.say.calledWith(sinon.match(/Profile "invalid" not found/))).to.be.true;
+    });
+
+    it('should show error if site not found for disable all', async () => {
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(null);
+
+      const command = ToggleSiteAuditCommandWithProfile(contextMock);
+      const args = ['disable', 'https://site0.com', 'all'];
+      await command.handleExecution(args, slackContextMock);
+
+      expect(configurationMock.disableHandlerForSite.called).to.be.false;
+      expect(configurationMock.save.called).to.be.false;
+      expect(slackContextMock.say.calledWith(sinon.match(/site not found/))).to.be.true;
+    });
+
+    it('should handle profile with no audits gracefully', async () => {
+      loadProfileConfigStub.returns({ audits: {} }); // Empty audits object
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
+
+      const command = ToggleSiteAuditCommandWithProfile(contextMock);
+      const args = ['disable', 'https://site0.com', 'all'];
+      await command.handleExecution(args, slackContextMock);
+
+      expect(configurationMock.disableHandlerForSite.called).to.be.false;
+      expect(configurationMock.save.called).to.be.false;
+    });
+
+    it('should handle profile with null audits gracefully', async () => {
+      loadProfileConfigStub.returns({ audits: null }); // Null audits (tests || {} fallback)
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
+
+      const command = ToggleSiteAuditCommandWithProfile(contextMock);
+      const args = ['disable', 'https://site0.com', 'all'];
+      await command.handleExecution(args, slackContextMock);
+
+      expect(configurationMock.disableHandlerForSite.called).to.be.false;
+      expect(configurationMock.save.called).to.be.false;
+    });
+
+    it('should handle profile with undefined audits gracefully', async () => {
+      loadProfileConfigStub.returns({}); // No audits property (tests || {} fallback)
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site0.com').resolves(site);
+
+      const command = ToggleSiteAuditCommandWithProfile(contextMock);
+      const args = ['disable', 'https://site0.com', 'all'];
+      await command.handleExecution(args, slackContextMock);
+
+      expect(configurationMock.disableHandlerForSite.called).to.be.false;
+      expect(configurationMock.save.called).to.be.false;
     });
   });
 });

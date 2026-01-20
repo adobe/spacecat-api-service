@@ -12,7 +12,7 @@
 
 import { isNonEmptyObject, hasText } from '@adobe/spacecat-shared-utils';
 import {
-  Site, Organization, TrialUser as TrialUserModel,
+  Site, Organization, Project, TrialUser as TrialUserModel,
   Entitlement as EntitlementModel,
 } from '@adobe/spacecat-shared-data-access';
 import TierClient from '@adobe/spacecat-shared-tier-client';
@@ -131,22 +131,24 @@ export default class AccessControlUtil {
   }
 
   async hasAccess(entity, subService = '', productCode = '') {
-    if (hasText(productCode) && this.xProductHeader !== productCode) {
-      this.log.error(`Unauthorized request for product ${productCode}, x-product header: ${this.xProductHeader}`);
-      throw new Error('[Error] Unauthorized request');
-    }
-
     if (!isNonEmptyObject(entity)) {
       throw new Error('Missing entity');
     }
 
     const { authInfo } = this;
+    // Check admin access first - admins bypass product code validation
     if (this.hasAdminAccess()) {
       return true;
     }
 
+    // For non-admin users, validate x-product header
+    if (hasText(productCode) && this.xProductHeader !== productCode) {
+      this.log.error(`Unauthorized request for product ${productCode}, x-product header: ${this.xProductHeader}`);
+      throw new Error('[Error] Unauthorized request');
+    }
+
     let imsOrgId;
-    if (entity instanceof Site) {
+    if (entity instanceof Site || entity instanceof Project) {
       const org = await entity.getOrganization();
       if (!isNonEmptyObject(org)) {
         throw new Error('Missing organization for site');

@@ -83,6 +83,10 @@ export function initSlackBot(lambdaContext, App) {
   app.view('update_ims_org_modal', actions.updateIMSOrgModal(lambdaContext));
   app.view('set_ims_org_modal', actions.setImsOrgModal(lambdaContext));
   app.view('add_site_modal', actions.addSiteModal(lambdaContext));
+  app.view('ensure_entitlement_site_modal', actions.ensure_entitlement_site_modal(lambdaContext));
+  app.view('ensure_entitlement_imsorg_modal', actions.ensure_entitlement_imsorg_modal(lambdaContext));
+  app.view('revoke_entitlement_site_modal', actions.revoke_entitlement_site_modal(lambdaContext));
+  app.view('revoke_entitlement_imsorg_modal', actions.revoke_entitlement_imsorg_modal(lambdaContext));
 
   return app;
 }

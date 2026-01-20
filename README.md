@@ -100,6 +100,7 @@ IMS_CLIENT_SECRET=client secret for the IMS API
 
 SLACK_TOKEN_WORKSPACE_EXTERNAL_ELEVATED=Slack token for the external workspace, elevated permissions
 SLACK_OPS_CHANNEL_WORKSPACE_EXTERNAL=channel ID to use for operations messages in the external workspace
+AGENT_WORKFLOW_STATE_MACHINE_ARN=ARN of the generic agent Step Functions workflow (used by the brand-profile Slack command)
 ```
 
 Sandbox audit rate-limit (optional):

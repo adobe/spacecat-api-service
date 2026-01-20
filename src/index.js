@@ -32,7 +32,7 @@ import {
   elevatedSlackClientWrapper,
   SLACK_TARGETS,
 } from '@adobe/spacecat-shared-slack-client';
-import { hasText, resolveSecretsName } from '@adobe/spacecat-shared-utils';
+import { hasText, resolveSecretsName, logWrapper } from '@adobe/spacecat-shared-utils';
 
 import sqs from './support/sqs.js';
 import getRouteHandlers from './routes/index.js';
@@ -59,6 +59,7 @@ import { multipartFormData } from './support/multipart-form-data.js';
 import ApiKeyController from './controllers/api-key.js';
 import OpportunitiesController from './controllers/opportunities.js';
 import PaidController from './controllers/paid.js';
+import TopPaidOpportunitiesController from './controllers/paid/top-paid-opportunities.js';
 import TrafficController from './controllers/paid/traffic.js';
 import SuggestionsController from './controllers/suggestions.js';
 import BrandsController from './controllers/brands.js';
@@ -72,8 +73,12 @@ import LlmoController from './controllers/llmo/llmo.js';
 import UserActivitiesController from './controllers/user-activities.js';
 import SiteEnrollmentsController from './controllers/site-enrollments.js';
 import TrialUsersController from './controllers/trial-users.js';
+import UserDetailsController from './controllers/user-details.js';
 import EntitlementsController from './controllers/entitlements.js';
 import SandboxAuditController from './controllers/sandbox-audit.js';
+import UrlStoreController from './controllers/url-store.js';
+import PTA2Controller from './controllers/paid/pta2.js';
+import TrafficToolsController from './controllers/paid/traffic-tools.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -97,7 +102,7 @@ async function run(request, context) {
   if (method === 'OPTIONS') {
     return noContent({
       'access-control-allow-methods': 'GET, HEAD, PATCH, POST, OPTIONS, DELETE',
-      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type',
+      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type, x-trigger-audits',
       'access-control-max-age': '86400',
       'access-control-allow-origin': '*',
     });
@@ -123,6 +128,7 @@ async function run(request, context) {
     const suggestionsController = SuggestionsController(context, context.sqs, context.env);
     const brandsController = BrandsController(context, log, context.env);
     const paidController = PaidController(context);
+    const topPaidOpportunitiesController = TopPaidOpportunitiesController(context, context.env);
     const trafficController = TrafficController(context, log, context.env);
     const preflightController = PreflightController(context, log, context.env);
     const demoController = DemoController(context);
@@ -135,8 +141,12 @@ async function run(request, context) {
     const userActivitiesController = UserActivitiesController(context);
     const siteEnrollmentsController = SiteEnrollmentsController(context);
     const trialUsersController = TrialUsersController(context);
+    const userDetailsController = UserDetailsController(context);
     const entitlementsController = EntitlementsController(context);
     const sandboxAuditController = SandboxAuditController(context);
+    const urlStoreController = UrlStoreController(context, log);
+    const pta2Controller = PTA2Controller(context, log, context.env);
+    const trafficToolsController = TrafficToolsController(context, log, context.env);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -161,15 +171,20 @@ async function run(request, context) {
       scrapeController,
       scrapeJobController,
       paidController,
+      topPaidOpportunitiesController,
       trafficController,
       fixesController,
       llmoController,
       userActivitiesController,
       siteEnrollmentsController,
       trialUsersController,
+      userDetailsController,
       entitlementsController,
       sandboxAuditController,
       reportsController,
+      urlStoreController,
+      pta2Controller,
+      trafficToolsController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -204,6 +219,7 @@ export const main = wrap(run)
   .with(authWrapper, {
     authHandlers: [JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler],
   })
+  .with(logWrapper)
   .with(dataAccess)
   .with(bodyData)
   .with(multipartFormData)

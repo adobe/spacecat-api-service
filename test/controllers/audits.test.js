@@ -635,6 +635,8 @@ describe('Audits Controller', () => {
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
+        getEdgeOptimizeConfig: () => undefined,
+        getBrandProfile: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -673,6 +675,8 @@ describe('Audits Controller', () => {
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
+        getEdgeOptimizeConfig: () => undefined,
+        getBrandProfile: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -712,6 +716,8 @@ describe('Audits Controller', () => {
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
+        getEdgeOptimizeConfig: () => undefined,
+        getBrandProfile: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -754,6 +760,8 @@ describe('Audits Controller', () => {
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
+        getEdgeOptimizeConfig: () => undefined,
+        getBrandProfile: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -836,6 +844,8 @@ describe('Audits Controller', () => {
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
+        getEdgeOptimizeConfig: () => undefined,
+        getBrandProfile: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -879,6 +889,8 @@ describe('Audits Controller', () => {
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
+        getEdgeOptimizeConfig: () => undefined,
+        getBrandProfile: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -920,6 +932,8 @@ describe('Audits Controller', () => {
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
+        getEdgeOptimizeConfig: () => undefined,
+        getBrandProfile: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -960,6 +974,8 @@ describe('Audits Controller', () => {
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
+        getEdgeOptimizeConfig: () => undefined,
+        getBrandProfile: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -999,6 +1015,8 @@ describe('Audits Controller', () => {
         getCdnLogsConfig: () => ({}),
         getLlmoConfig: () => ({}),
         getTokowakaConfig: () => ({}),
+        getEdgeOptimizeConfig: () => undefined,
+        getBrandProfile: () => ({}),
       });
 
       const result = await auditsController.patchAuditForSite(context);
@@ -1064,6 +1082,8 @@ describe('Audits Controller', () => {
           getCdnLogsConfig: () => ({}),
           getLlmoConfig: () => ({}),
           getTokowakaConfig: () => ({}),
+          getEdgeOptimizeConfig: () => undefined,
+          getBrandProfile: () => ({}),
         };
 
         site.getConfig = () => siteConfig;

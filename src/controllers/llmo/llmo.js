@@ -25,13 +25,16 @@ import {
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
+import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import {
   applyFilters,
   applyInclusions,
   applyExclusions,
   applyGroups,
   applyMappings,
+  LLMO_SHEETDATA_SOURCE_URL,
 } from './llmo-utils.js';
 import { LLMO_SHEET_MAPPINGS } from './llmo-mappings.js';
 import {
@@ -40,11 +43,12 @@ import {
   performLlmoOnboarding,
   performLlmoOffboarding,
 } from './llmo-onboarding.js';
+import { queryLlmoFiles } from './llmo-query-handler.js';
+import { updateModifiedByDetails } from './llmo-config-metadata.js';
+import { handleLlmoRationale } from './llmo-rationale.js';
 
 const { readConfig, writeConfig } = llmo;
 const { llmoConfig: llmoConfigSchema } = schemas;
-
-const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
 
 function LlmoController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
@@ -391,6 +395,9 @@ function LlmoController(ctx) {
     const { siteId } = context.params;
     const version = context.data?.version;
     try {
+      // Validate site and LLMO access
+      await getSiteAndValidateLlmo(context);
+
       if (!s3 || !s3.s3Client) {
         return badRequest('LLMO config storage is not configured for this environment');
       }
@@ -406,7 +413,9 @@ function LlmoController(ctx) {
         return notFound(`LLMO config version '${version}' not found for site '${siteId}'`);
       }
 
-      return ok({ config, version: configVersion || null });
+      return ok({ config, version: configVersion || null }, {
+        'Content-Encoding': 'br',
+      });
     } catch (error) {
       log.error(`Error getting llmo config for siteId: ${siteId}, error: ${error.message}`);
       return badRequest(error.message);
@@ -414,12 +423,20 @@ function LlmoController(ctx) {
   };
 
   async function updateLlmoConfig(context) {
-    const { log, s3, data } = context;
+    const {
+      log,
+      s3,
+      data,
+      pathInfo,
+    } = context;
     const { siteId } = context.params;
 
-    const userId = context.attributes?.authInfo?.getProfile()?.sub || 'unknown';
+    const userId = context.attributes?.authInfo?.getProfile()?.sub || 'system';
 
     try {
+      // Validate site and LLMO access
+      await getSiteAndValidateLlmo(context);
+
       if (!isObject(data)) {
         return badRequest('LLMO config update must be provided as an object');
       }
@@ -430,10 +447,11 @@ function LlmoController(ctx) {
 
       const prevConfig = await readConfig(siteId, s3.s3Client, { s3Bucket: s3.s3Bucket });
 
-      const newConfig = {
-        ...(prevConfig?.exists && { ...prevConfig.config }),
-        ...data,
-      };
+      const { newConfig, stats } = updateModifiedByDetails(
+        data,
+        prevConfig?.exists ? prevConfig.config : null,
+        userId,
+      );
 
       // Validate the config, return 400 if validation fails
       const result = llmoConfigSchema.safeParse(newConfig);
@@ -453,40 +471,29 @@ function LlmoController(ctx) {
         { s3Bucket: s3.s3Bucket },
       );
 
-      // Trigger llmo-customer-analysis after config is updated
-      await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
-        type: 'llmo-customer-analysis',
-        siteId,
-        auditContext: {
-          configVersion: version,
-          previousConfigVersion: prevConfig.exists ? prevConfig.version : /* c8 ignore next */ null,
-        },
-      });
-
-      // Calculate config summary
-      const numCategories = Object.keys(parsedConfig.categories || {}).length;
-      const numTopics = Object.keys(parsedConfig.topics || {}).length;
-      const numPrompts = Object.values(parsedConfig.topics || {}).reduce(
-        (total, topic) => total + (topic.prompts?.length || 0),
-        0,
-      );
-      const numBrandAliases = parsedConfig.brands?.aliases?.length || 0;
-      const numCompetitors = parsedConfig.competitors?.competitors?.length || 0;
-      const numDeletedPrompts = Object.keys(parsedConfig.deleted?.prompts || {}).length;
-      const numCategoryUrls = Object.values(parsedConfig.categories || {}).reduce(
-        (total, category) => total + (category.urls?.length || 0),
-        0,
-      );
+      // Only send audit job message if X-Trigger-Audits header is present
+      if (pathInfo?.headers?.['x-trigger-audits']) {
+        await context.sqs.sendMessage(context.env.AUDIT_JOBS_QUEUE_URL, {
+          type: 'llmo-customer-analysis',
+          siteId,
+          auditContext: {
+            configVersion: version,
+            previousConfigVersion: prevConfig.exists
+              ? prevConfig.version
+              : /* c8 ignore next */ null,
+          },
+        });
+      }
 
       // Build config summary
       const summaryParts = [
-        `${numPrompts} prompts`,
-        `${numCategories} categories`,
-        `${numTopics} topics`,
-        `${numBrandAliases} brand aliases`,
-        `${numCompetitors} competitors`,
-        `${numDeletedPrompts} deleted prompts`,
-        `${numCategoryUrls} category URLs`,
+        `${stats.prompts.total} prompts${stats.prompts.modified ? ` (${stats.prompts.modified} modified)` : ''}`,
+        `${stats.categories.total} categories${stats.categories.modified ? ` (${stats.categories.modified} modified)` : ''}`,
+        `${stats.topics.total} topics${stats.topics.modified ? ` (${stats.topics.modified} modified)` : ''}`,
+        `${stats.brandAliases.total} brand aliases${stats.brandAliases.modified ? ` (${stats.brandAliases.modified} modified)` : ''}`,
+        `${stats.competitors.total} competitors${stats.competitors.modified ? ` (${stats.competitors.modified} modified)` : ''}`,
+        `${stats.deletedPrompts.total} deleted prompts${stats.deletedPrompts.modified ? ` (${stats.deletedPrompts.modified} modified)` : ''}`,
+        `${stats.categoryUrls.total} category URLs`,
       ];
       const configSummary = summaryParts.join(', ');
 
@@ -811,6 +818,20 @@ function LlmoController(ctx) {
         context,
       );
 
+      let brandProfileExecutionName = null;
+      try {
+        const site = await context.dataAccess?.Site?.findById(result.siteId);
+        if (site) {
+          brandProfileExecutionName = await triggerBrandProfileAgent({
+            context,
+            site,
+            reason: 'llmo-http',
+          });
+        }
+      } catch (hookError) {
+        log.warn(`LLMO onboarding: failed to trigger brand-profile workflow for site ${result.siteId}`, hookError);
+      }
+
       log.info(`LLMO onboarding completed successfully for domain ${domain}`);
 
       return ok({
@@ -824,6 +845,7 @@ function LlmoController(ctx) {
         siteId: result.siteId,
         status: 'completed',
         createdAt: new Date().toISOString(),
+        brandProfileExecutionName,
       });
     } catch (error) {
       log.error(`Error during LLMO onboarding: ${error.message}`);
@@ -867,6 +889,143 @@ function LlmoController(ctx) {
     }
   };
 
+  const queryFiles = async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+    try {
+      const { llmoConfig } = await getSiteAndValidateLlmo(context);
+      const { data, headers } = await queryLlmoFiles(context, llmoConfig);
+      return ok(data, headers);
+    } catch (error) {
+      log.error(`Error during LLMO cached query for site ${siteId}: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
+  // Handles requests to the LLMO rationale endpoint
+  const getLlmoRationale = async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+    try {
+      // Validate site and LLMO access
+      await getSiteAndValidateLlmo(context);
+
+      // Delegate to the rationale handler for the actual processing
+      return await handleLlmoRationale(context);
+    } catch (error) {
+      log.error(`Error getting LLMO rationale for site ${siteId}: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
+  /**
+   * POST /sites/{siteId}/llmo/edge-optimize-config
+   * Creates or updates Tokowaka edge optimization configuration
+   * - Updates site's tokowaka meta-config in S3
+   * - Updates site's tokowakaEnabled in site config
+   * @param {object} context - Request context
+   * @returns {Promise<Response>} Created/updated edge config
+   */
+  const createOrUpdateEdgeConfig = async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+    const { enhancements, tokowakaEnabled } = context.data || {};
+
+    log.info(`createOrUpdateEdgeConfig request received for site ${siteId}, data=${JSON.stringify(context.data)}`);
+
+    if (tokowakaEnabled !== undefined && typeof tokowakaEnabled !== 'boolean') {
+      return badRequest('tokowakaEnabled field must be a boolean');
+    }
+
+    if (enhancements !== undefined && typeof enhancements !== 'boolean') {
+      return badRequest('enhancements field must be a boolean');
+    }
+
+    if (tokowakaEnabled === undefined && enhancements === undefined) {
+      return badRequest('No edge optimize configuration parameters provided');
+    }
+
+    try {
+      // Validate site and LLMO access
+      const { site } = await getSiteAndValidateLlmo(context);
+
+      const baseURL = site.getBaseURL();
+      const tokowakaClient = TokowakaClient.createFrom(context);
+
+      // Handle S3 metaconfig
+      let metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
+
+      if (!metaconfig || !Array.isArray(metaconfig.apiKeys) || metaconfig.apiKeys.length === 0) {
+        // Create new metaconfig with generated API key
+        metaconfig = await tokowakaClient.createMetaconfig(
+          baseURL,
+          site.getId(),
+          {
+            ...(tokowakaEnabled !== undefined && { tokowakaEnabled }),
+            ...(enhancements !== undefined && { enhancements }),
+          },
+        );
+      } else {
+        metaconfig = {
+          ...metaconfig,
+          siteId: site.getId(),
+          ...(tokowakaEnabled !== undefined && { tokowakaEnabled }),
+          ...(enhancements !== undefined && { enhancements }),
+        };
+        await tokowakaClient.uploadMetaconfig(baseURL, metaconfig);
+      }
+
+      const currentConfig = site.getConfig();
+      // Update site config only if tokowakaEnabled is provided
+      if (tokowakaEnabled !== undefined) {
+        currentConfig.updateEdgeOptimizeConfig({
+          ...(currentConfig.getEdgeOptimizeConfig() || {}),
+          enabled: tokowakaEnabled,
+        });
+        await saveSiteConfig(site, currentConfig, log, `updating edge optimize config to enabled=${tokowakaEnabled}`);
+        log.info(`Updated edgeOptimizeConfig enabled=${tokowakaEnabled} for site ${siteId}`);
+      }
+
+      return ok({
+        ...metaconfig,
+      });
+    } catch (error) {
+      log.error(`Failed to create/update edge config for site ${siteId}:`, error);
+      return badRequest(error.message);
+    }
+  };
+
+  /**
+   * GET /sites/{siteId}/llmo/edge-optimize-config
+   * Retrieves Tokowaka edge optimization configuration
+   * - Fetches S3 metaconfig (opportunities/{domain}/config)
+   * - Returns edgeOptimizeConfig from site config
+   * @param {object} context - Request context
+   * @returns {Promise<Response>} Edge config or not found
+   */
+  const getEdgeConfig = async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+
+    try {
+      // Validate site and LLMO access
+      const { site } = await getSiteAndValidateLlmo(context);
+
+      const baseURL = site.getBaseURL();
+
+      // Fetch metaconfig from S3
+      const tokowakaClient = TokowakaClient.createFrom(context);
+      const metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
+
+      return ok({
+        ...metaconfig,
+      });
+    } catch (error) {
+      log.error(`Failed to fetch edge config for site ${siteId}:`, error);
+      return badRequest(error.message);
+    }
+  };
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -885,6 +1044,10 @@ function LlmoController(ctx) {
     updateLlmoConfig,
     onboardCustomer,
     offboardCustomer,
+    queryFiles,
+    getLlmoRationale,
+    createOrUpdateEdgeConfig,
+    getEdgeConfig,
   };
 }
 

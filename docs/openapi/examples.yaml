@@ -60,6 +60,7 @@ broken-backlinks-suggestion:
         - 'https://www.example.com/customer-service'
       ai_rationale: 'The URL is about customer service, so it should be redirected to the customer service page.'
       traffic_domain: 571000
+      aggregationKey: 'https://www.dailynews.com/2024/08/13/black-friday-sale-at-example-inc/|broken-backlinks|ahrefs'
     status: 'APPROVED'
     createdAt: '2024-01-22T12:00:00Z'
     updatedAt: '2024-07-26T12:00:00Z'
@@ -110,6 +111,7 @@ broken-backlinks-suggestion-create-list-response:
               - 'https://www.example.com/customer-service/contact'
               - 'https://www.example.com/customer-service'
             traffic_domain: 571000
+            aggregationKey: 'https://www.dailynews.com/2024/08/13/black-friday-sale-at-example-inc/|broken-backlinks|ahrefs'
           createdAt: '2024-01-22T12:00:00Z'
           updatedAt: '2024-07-26T12:00:00Z'
       - id: 'invalid-suggestion'
@@ -417,3 +419,55 @@ analytics-site-integration-cja-websdk:
         'Page URL': 'web.webPageDetails.URL'
         'Data Source': '_example.dataSource'
         'Site Domain': 'web.webPageDetails.server'
+fix-create-list:
+  summary: Example for creating multiple fixes with and without suggestion associations
+  value:
+    - type: 'broken-backlinks'
+      changeDetails:
+        description: 'Fixed broken backlink on homepage'
+        sourceUrl: 'https://example.com/'
+        targetUrl: 'https://example.com/new-page'
+      status: 'EXECUTED'
+      suggestionIds:
+        - '123e4567-e89b-12d3-a456-426614174001'
+        - '123e4567-e89b-12d3-a456-426614174002'
+    - type: 'broken-backlinks'
+      changeDetails:
+        description: 'Fixed broken backlink on about page'
+        sourceUrl: 'https://example.com/about'
+        targetUrl: 'https://example.com/new-about'
+      status: 'EXECUTED'
+fix-create-list-response:
+  summary: Example response for creating multiple fixes
+  value:
+    fixes:
+      - index: 0
+        fix:
+          id: '456e7890-e89b-12d3-a456-426614174000'
+          type: 'broken-backlinks'
+          opportunityId: '789e1234-e89b-12d3-a456-426614174000'
+          changeDetails:
+            description: 'Fixed broken backlink on homepage'
+            sourceUrl: 'https://example.com/'
+            targetUrl: 'https://example.com/new-page'
+          status: 'EXECUTED'
+          createdAt: '2024-01-19T14:20:30Z'
+          updatedAt: '2024-01-19T14:20:30Z'
+        statusCode: 201
+      - index: 1
+        fix:
+          id: '567e8901-e89b-12d3-a456-426614174000'
+          type: 'broken-backlinks'
+          opportunityId: '789e1234-e89b-12d3-a456-426614174000'
+          changeDetails:
+            description: 'Fixed broken backlink on about page'
+            sourceUrl: 'https://example.com/about'
+            targetUrl: 'https://example.com/new-about'
+          status: 'EXECUTED'
+          createdAt: '2024-01-19T14:20:31Z'
+          updatedAt: '2024-01-19T14:20:31Z'
+        statusCode: 201
+    metadata:
+      total: 2
+      success: 2
+      failed: 0

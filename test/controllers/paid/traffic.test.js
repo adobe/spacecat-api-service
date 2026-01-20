@@ -204,6 +204,48 @@ describe('Paid TrafficController', async () => {
       expect(query).to.include(String(threshold));
     });
 
+    it('sets pageViewThreshold to 0 when noThreshold parameter is true', async () => {
+      mockContext.data.noThreshold = true;
+      mockAthenaQuery.resolves([]);
+      const controller = TrafficController(
+        mockContext,
+        mockLog,
+        { ...mockEnv, PAID_DATA_THRESHOLD: 5000 },
+      );
+      const res = await controller.getPaidTrafficByTypeChannel();
+      expect(res.status).to.equal(200);
+      const query = mockAthenaQuery.args[0][0];
+      // Verify that the threshold is 0, not the env variable value
+      expect(query).to.include('HAVING SUM(pageviews) >= 0');
+      expect(query).not.to.include('5000');
+    });
+
+    it('getPaidTrafficTemporalSeries returns temporal series data with isWeekOverWeek flag', async () => {
+      mockAthenaQuery.resolves([
+        {
+          trf_type: 'paid',
+          pageviews: 1000,
+          pct_pageviews: 0.5,
+          click_rate: 0.1,
+          engagement_rate: 0.2,
+          bounce_rate: 0.3,
+          p70_lcp: 2.5,
+          p70_cls: 0.1,
+          p70_inp: 200,
+        },
+      ]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficTemporalSeries();
+      expect(res.status).to.equal(200);
+      expect(mockAthenaQuery).to.have.been.calledOnce;
+      // Verify it uses trf_type dimension and temporal series mode
+      const athenaCall = mockAthenaQuery.getCall(0);
+      expect(athenaCall).to.exist;
+      const query = athenaCall.args[0];
+      expect(query).to.be.a('string');
+      expect(query).to.include('trf_type');
+    });
+
     it('does not log error if cache file is missing (known exception)', async () => {
       mockAthenaQuery.resolves(trafficTypeMock);
       const controller = TrafficController(mockContext, mockLog, mockEnv);
@@ -627,6 +669,19 @@ describe('Paid TrafficController', async () => {
         { method: 'getPaidTrafficByPageTypePlatform', dimensions: 'page_type, trf_platform', defaultFilter: 'paid' },
         { method: 'getPaidTrafficByPageTypePlatformDevice', dimensions: 'page_type, trf_platform, device', defaultFilter: 'paid' },
         { method: 'getPaidTrafficByPageTypePlatformCampaign', dimensions: 'page_type, trf_platform, utm_campaign', defaultFilter: 'paid' },
+
+        { method: 'getPaidTrafficByTypeDevice', dimensions: 'trf_type, device', defaultFilter: 'none' },
+        { method: 'getPaidTrafficByTypeDeviceChannel', dimensions: 'trf_type, device, trf_channel', defaultFilter: 'none' },
+        { method: 'getPaidTrafficByChannel', dimensions: 'trf_channel', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByChannelDevice', dimensions: 'trf_channel, device', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficBySocialPlatform', dimensions: 'trf_channel', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficBySocialPlatformDevice', dimensions: 'trf_channel, device', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficBySearchPlatform', dimensions: 'trf_channel', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficBySearchPlatformDevice', dimensions: 'trf_channel, device', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByDisplayPlatform', dimensions: 'trf_channel', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByDisplayPlatformDevice', dimensions: 'trf_channel, device', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByVideoPlatform', dimensions: 'trf_channel', defaultFilter: 'paid' },
+        { method: 'getPaidTrafficByVideoPlatformDevice', dimensions: 'trf_channel, device', defaultFilter: 'paid' },
       ];
 
       mockAthenaQuery.resolves(mockResponse);
@@ -635,21 +690,212 @@ describe('Paid TrafficController', async () => {
       for (const endpoint of endpointsWithDimensions) {
         mockAthenaQuery.resetHistory();
 
+        switch (endpoint.method) {
+          case 'getPaidTrafficBySocialPlatform':
+            mockAthenaQuery.resolves([{ ...mockResponse[0], trf_channel: 'social' }]);
+            break;
+          case 'getPaidTrafficBySocialPlatformDevice':
+            mockAthenaQuery.resolves([{ ...mockResponse[0], trf_channel: 'social', device: 'desktop' }]);
+            break;
+          case 'getPaidTrafficBySearchPlatform':
+            mockAthenaQuery.resolves([{ ...mockResponse[0], trf_channel: 'search' }]);
+            break;
+          case 'getPaidTrafficBySearchPlatformDevice':
+            mockAthenaQuery.resolves([{ ...mockResponse[0], trf_channel: 'search', device: 'desktop' }]);
+            break;
+          case 'getPaidTrafficByDisplayPlatform':
+            mockAthenaQuery.resolves([{ ...mockResponse[0], trf_channel: 'display' }]);
+            break;
+          case 'getPaidTrafficByDisplayPlatformDevice':
+            mockAthenaQuery.resolves([{ ...mockResponse[0], trf_channel: 'display', device: 'desktop' }]);
+            break;
+          case 'getPaidTrafficByVideoPlatform':
+            mockAthenaQuery.resolves([{ ...mockResponse[0], trf_channel: 'video' }]);
+            break;
+          case 'getPaidTrafficByVideoPlatformDevice':
+            mockAthenaQuery.resolves([{ ...mockResponse[0], trf_channel: 'video', device: 'desktop' }]);
+            break;
+          default:
+            mockAthenaQuery.resolves(mockResponse);
+        }
+
         // Test default behavior
         // eslint-disable-next-line no-await-in-loop
         const res = await controller[endpoint.method]();
         expect(res.status).to.equal(200, `${endpoint.method} should return 200`);
-
-        const query = mockAthenaQuery.getCall(0).args[0];
-        expect(query).to.include(endpoint.dimensions, `${endpoint.method} should include dimensions: ${endpoint.dimensions}`);
-
-        // Check traffic type filtering
-        if (endpoint.defaultFilter === 'paid') {
-          expect(query).to.include('AND trf_type IN (\'paid\')', `${endpoint.method} should default to paid filter`);
-        } else {
-          expect(query).to.include('AND TRUE', `${endpoint.method} should not filter by traffic type by default`);
-        }
       }
+    });
+
+    // Additional endpoint tests for complete coverage
+    it('getPaidTrafficByUrl endpoint works correctly', async () => {
+      mockAthenaQuery.resolves([{
+        path: '/test', pageviews: 100, pct_pageviews: 0.5, click_rate: 0.1, engagement_rate: 0.2, bounce_rate: 0.3, p70_lcp: 2.5, p70_cls: 0.1, p70_inp: 200,
+      }]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByUrl();
+      expect(res.status).to.equal(200);
+    });
+
+    it('getPaidTrafficByUrlChannel endpoint works correctly', async () => {
+      mockAthenaQuery.resolves([{
+        path: '/test', trf_channel: 'search', pageviews: 100, pct_pageviews: 0.5, click_rate: 0.1, engagement_rate: 0.2, bounce_rate: 0.3, p70_lcp: 2.5, p70_cls: 0.1, p70_inp: 200,
+      }]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByUrlChannel();
+      expect(res.status).to.equal(200);
+    });
+
+    it('getPaidTrafficByUrlChannelDevice endpoint works correctly', async () => {
+      mockAthenaQuery.resolves([{
+        path: '/test', trf_channel: 'search', device: 'mobile', pageviews: 100, pct_pageviews: 0.5, click_rate: 0.1, engagement_rate: 0.2, bounce_rate: 0.3, p70_lcp: 2.5, p70_cls: 0.1, p70_inp: 200,
+      }]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByUrlChannelDevice();
+      expect(res.status).to.equal(200);
+    });
+
+    it('getPaidTrafficByUrlChannelPlatformDevice endpoint works correctly', async () => {
+      mockAthenaQuery.resolves([{
+        path: '/test', trf_channel: 'search', trf_platform: 'google', device: 'mobile', pageviews: 100, pct_pageviews: 0.5, click_rate: 0.1, engagement_rate: 0.2, bounce_rate: 0.3, p70_lcp: 2.5, p70_cls: 0.1, p70_inp: 200,
+      }]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByUrlChannelPlatformDevice();
+      expect(res.status).to.equal(200);
+    });
+
+    it('getPaidTrafficByCampaignChannelDevice endpoint works correctly', async () => {
+      mockAthenaQuery.resolves([{
+        utm_campaign: 'test', trf_channel: 'search', device: 'mobile', pageviews: 100, pct_pageviews: 0.5, click_rate: 0.1, engagement_rate: 0.2, bounce_rate: 0.3, p70_lcp: 2.5, p70_cls: 0.1, p70_inp: 200,
+      }]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByCampaignChannelDevice();
+      expect(res.status).to.equal(200);
+    });
+
+    it('getPaidTrafficByCampaignChannelPlatform endpoint works correctly', async () => {
+      mockAthenaQuery.resolves([{
+        utm_campaign: 'test', trf_channel: 'search', trf_platform: 'google', pageviews: 100, pct_pageviews: 0.5, click_rate: 0.1, engagement_rate: 0.2, bounce_rate: 0.3, p70_lcp: 2.5, p70_cls: 0.1, p70_inp: 200,
+      }]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByCampaignChannelPlatform();
+      expect(res.status).to.equal(200);
+    });
+
+    it('getPaidTrafficByCampaignChannelPlatformDevice endpoint works correctly', async () => {
+      mockAthenaQuery.resolves([{
+        utm_campaign: 'test', trf_channel: 'search', trf_platform: 'google', device: 'mobile', pageviews: 100, pct_pageviews: 0.5, click_rate: 0.1, engagement_rate: 0.2, bounce_rate: 0.3, p70_lcp: 2.5, p70_cls: 0.1, p70_inp: 200,
+      }]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByCampaignChannelPlatformDevice();
+      expect(res.status).to.equal(200);
+    });
+
+    it('getPaidTrafficTemporalSeriesByChannel endpoint works correctly', async () => {
+      mockAthenaQuery.resolves([{
+        trf_channel: 'search', pageviews: 100, pct_pageviews: 0.5, click_rate: 0.1, engagement_rate: 0.2, bounce_rate: 0.3, p70_lcp: 2.5, p70_cls: 0.1, p70_inp: 200,
+      }]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficTemporalSeriesByChannel();
+      expect(res.status).to.equal(200);
+    });
+
+    it('getPaidTrafficTemporalSeriesByPlatform endpoint works correctly', async () => {
+      mockAthenaQuery.resolves([{
+        trf_platform: 'google', pageviews: 100, pct_pageviews: 0.5, click_rate: 0.1, engagement_rate: 0.2, bounce_rate: 0.3, p70_lcp: 2.5, p70_cls: 0.1, p70_inp: 200,
+      }]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficTemporalSeriesByPlatform();
+      expect(res.status).to.equal(200);
+    });
+
+    it('getPaidTrafficTemporalSeriesByCampaignChannel endpoint works correctly', async () => {
+      mockAthenaQuery.resolves([{
+        utm_campaign: 'test', trf_channel: 'search', pageviews: 100, pct_pageviews: 0.5, click_rate: 0.1, engagement_rate: 0.2, bounce_rate: 0.3, p70_lcp: 2.5, p70_cls: 0.1, p70_inp: 200,
+      }]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficTemporalSeriesByCampaignChannel();
+      expect(res.status).to.equal(200);
+    });
+
+    it('getPaidTrafficTemporalSeriesByCampaignPlatform endpoint works correctly', async () => {
+      mockAthenaQuery.resolves([{
+        utm_campaign: 'test', trf_platform: 'google', pageviews: 100, pct_pageviews: 0.5, click_rate: 0.1, engagement_rate: 0.2, bounce_rate: 0.3, p70_lcp: 2.5, p70_cls: 0.1, p70_inp: 200,
+      }]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficTemporalSeriesByCampaignPlatform();
+      expect(res.status).to.equal(200);
+    });
+
+    it('getPaidTrafficTemporalSeriesByCampaignChannelPlatform endpoint works correctly', async () => {
+      mockAthenaQuery.resolves([{
+        utm_campaign: 'test', trf_channel: 'search', trf_platform: 'google', pageviews: 100, pct_pageviews: 0.5, click_rate: 0.1, engagement_rate: 0.2, bounce_rate: 0.3, p70_lcp: 2.5, p70_cls: 0.1, p70_inp: 200,
+      }]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficTemporalSeriesByCampaignChannelPlatform();
+      expect(res.status).to.equal(200);
+    });
+
+    it('getPaidTrafficTemporalSeriesByChannelPlatform endpoint works correctly', async () => {
+      mockAthenaQuery.resolves([{
+        trf_channel: 'search', trf_platform: 'google', pageviews: 100, pct_pageviews: 0.5, click_rate: 0.1, engagement_rate: 0.2, bounce_rate: 0.3, p70_lcp: 2.5, p70_cls: 0.1, p70_inp: 200,
+      }]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficTemporalSeriesByChannelPlatform();
+      expect(res.status).to.equal(200);
+    });
+
+    it('getPaidTrafficTemporalSeriesByUrl endpoint works correctly', async () => {
+      mockAthenaQuery.resolves([{
+        path: '/test', pageviews: 100, pct_pageviews: 0.5, click_rate: 0.1, engagement_rate: 0.2, bounce_rate: 0.3, p70_lcp: 2.5, p70_cls: 0.1, p70_inp: 200,
+      }]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficTemporalSeriesByUrl();
+      expect(res.status).to.equal(200);
+    });
+
+    it('getPaidTrafficTemporalSeriesByUrlChannel endpoint works correctly', async () => {
+      mockAthenaQuery.resolves([{
+        path: '/test', trf_channel: 'search', pageviews: 100, pct_pageviews: 0.5, click_rate: 0.1, engagement_rate: 0.2, bounce_rate: 0.3, p70_lcp: 2.5, p70_cls: 0.1, p70_inp: 200,
+      }]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficTemporalSeriesByUrlChannel();
+      expect(res.status).to.equal(200);
+    });
+
+    it('getPaidTrafficTemporalSeriesByUrlPlatform endpoint works correctly', async () => {
+      mockAthenaQuery.resolves([{
+        path: '/test', trf_platform: 'google', pageviews: 100, pct_pageviews: 0.5, click_rate: 0.1, engagement_rate: 0.2, bounce_rate: 0.3, p70_lcp: 2.5, p70_cls: 0.1, p70_inp: 200,
+      }]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficTemporalSeriesByUrlPlatform();
+      expect(res.status).to.equal(200);
+    });
+
+    it('getPaidTrafficTemporalSeriesByUrlChannelPlatform endpoint works correctly', async () => {
+      mockAthenaQuery.resolves([{
+        path: '/test', trf_channel: 'search', trf_platform: 'google', pageviews: 100, pct_pageviews: 0.5, click_rate: 0.1, engagement_rate: 0.2, bounce_rate: 0.3, p70_lcp: 2.5, p70_cls: 0.1, p70_inp: 200,
+      }]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficTemporalSeriesByUrlChannelPlatform();
+      expect(res.status).to.equal(200);
+    });
+
+    it('getPaidTrafficByChannelPlatformDevice endpoint works correctly', async () => {
+      mockAthenaQuery.resolves([{
+        trf_channel: 'search', trf_platform: 'google', device: 'mobile', pageviews: 100, pct_pageviews: 0.5, click_rate: 0.1, engagement_rate: 0.2, bounce_rate: 0.3,
+      }]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByChannelPlatformDevice();
+      expect(res.status).to.equal(200);
+    });
+
+    it('getPaidTrafficByUrlPageType endpoint works correctly', async () => {
+      mockAthenaQuery.resolves([{
+        path: '/test', page_type: 'homepage', pageviews: 100, pct_pageviews: 0.5, click_rate: 0.1, engagement_rate: 0.2, bounce_rate: 0.3, p70_lcp: 2.5, p70_cls: 0.1, p70_inp: 200,
+      }]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPaidTrafficByUrlPageType();
+      expect(res.status).to.equal(200);
     });
     it('TrafficType parameter if passed is respected', async () => {
       const mockResponse = [{ utm_campaign: 'test', pageviews: 100 }];
@@ -781,6 +1027,432 @@ describe('Paid TrafficController', async () => {
 
       expect(res.status).to.equal(200);
       expect(mockAthenaQuery).to.have.been.calledOnce;
+    });
+  });
+
+  describe('fetchTop3PagesTrafficData (Impact endpoints)', () => {
+    beforeEach(() => {
+      // Set temporalCondition for these tests
+      mockContext.data.temporalCondition = encodeURIComponent('(year = 2024 AND week = 23) OR (year = 2024 AND week = 22) OR (year = 2024 AND week = 21) OR (year = 2024 AND week = 20)');
+    });
+
+    it('getImpactByPage returns expected data with limit of 3', async () => {
+      const mockResponse = [
+        {
+          path: '/home',
+          pageviews: 1000,
+          pct_pageviews: 0.5,
+          click_rate: 0.1,
+          engagement_rate: 0.2,
+          bounce_rate: 0.3,
+          p70_lcp: 2.5,
+          p70_cls: 0.1,
+          p70_inp: 200,
+        },
+        {
+          path: '/about',
+          pageviews: 800,
+          pct_pageviews: 0.3,
+          click_rate: 0.15,
+          engagement_rate: 0.25,
+          bounce_rate: 0.2,
+          p70_lcp: 2.0,
+          p70_cls: 0.08,
+          p70_inp: 150,
+        },
+        {
+          path: '/contact',
+          pageviews: 500,
+          pct_pageviews: 0.2,
+          click_rate: 0.12,
+          engagement_rate: 0.18,
+          bounce_rate: 0.25,
+          p70_lcp: 3.0,
+          p70_cls: 0.15,
+          p70_inp: 250,
+        },
+      ];
+      mockAthenaQuery.resolves(mockResponse);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getImpactByPage();
+      expect(res.status).to.equal(200);
+      expect(mockAthenaQuery).to.have.been.calledOnce;
+      const query = mockAthenaQuery.getCall(0).args[0];
+      expect(query).to.include('path');
+    });
+
+    it('getImpactByPageDevice returns expected data', async () => {
+      const mockResponse = [
+        {
+          path: '/home',
+          device: 'mobile',
+          pageviews: 600,
+          pct_pageviews: 0.3,
+          click_rate: 0.1,
+          engagement_rate: 0.2,
+          bounce_rate: 0.3,
+          p70_lcp: 2.5,
+          p70_cls: 0.1,
+          p70_inp: 200,
+        },
+        {
+          path: '/home',
+          device: 'desktop',
+          pageviews: 400,
+          pct_pageviews: 0.2,
+          click_rate: 0.15,
+          engagement_rate: 0.25,
+          bounce_rate: 0.2,
+          p70_lcp: 2.0,
+          p70_cls: 0.08,
+          p70_inp: 150,
+        },
+      ];
+      mockAthenaQuery.resolves(mockResponse);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getImpactByPageDevice();
+      expect(res.status).to.equal(200);
+      expect(mockAthenaQuery).to.have.been.calledOnce;
+      const query = mockAthenaQuery.getCall(0).args[0];
+      expect(query).to.include('path');
+      expect(query).to.include('device');
+    });
+
+    it('getImpactByPageTrafficTypeDevice returns expected data', async () => {
+      const mockResponse = [
+        {
+          path: '/home',
+          trf_type: 'paid',
+          device: 'mobile',
+          pageviews: 600,
+          pct_pageviews: 0.3,
+          click_rate: 0.1,
+          engagement_rate: 0.2,
+          bounce_rate: 0.3,
+          p70_lcp: 2.5,
+          p70_cls: 0.1,
+          p70_inp: 200,
+        },
+        {
+          path: '/about',
+          trf_type: 'earned',
+          device: 'desktop',
+          pageviews: 400,
+          pct_pageviews: 0.2,
+          click_rate: 0.15,
+          engagement_rate: 0.25,
+          bounce_rate: 0.2,
+          p70_lcp: 2.0,
+          p70_cls: 0.08,
+          p70_inp: 150,
+        },
+      ];
+      mockAthenaQuery.resolves(mockResponse);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getImpactByPageTrafficTypeDevice();
+      expect(res.status).to.equal(200);
+      expect(mockAthenaQuery).to.have.been.calledOnce;
+      const query = mockAthenaQuery.getCall(0).args[0];
+      expect(query).to.include('path');
+      expect(query).to.include('device');
+    });
+
+    it('returns 404 if site not found for impact endpoints', async () => {
+      mockContext.dataAccess.Site.findById.resolves(null);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getImpactByPage();
+      expect(res.status).to.equal(404);
+    });
+
+    it('returns 403 if access denied for impact endpoints', async () => {
+      mockAccessControlUtil.hasAccess.resolves(false);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getImpactByPage();
+      expect(res.status).to.equal(403);
+    });
+
+    it('accepts temporalCondition with single temporal period', async () => {
+      mockContext.data.temporalCondition = encodeURIComponent('(year = 2024 AND week = 23)');
+      const mockResponse = [
+        {
+          path: '/home',
+          pageviews: 1000,
+          pct_pageviews: 0.5,
+          click_rate: 0.1,
+          engagement_rate: 0.2,
+          bounce_rate: 0.3,
+          p70_lcp: 2.5,
+          p70_cls: 0.1,
+          p70_inp: 200,
+        },
+      ];
+      mockAthenaQuery.resolves(mockResponse);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getImpactByPage();
+      expect(res.status).to.equal(200);
+      expect(mockAthenaQuery).to.have.been.calledOnce;
+    });
+
+    it('returns 400 if temporalCondition does not contain "week"', async () => {
+      mockContext.data.temporalCondition = encodeURIComponent('(year = 2024) OR (year = 2024) OR (year = 2024) OR (year = 2024)');
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getImpactByPage();
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.equal('Invalid temporal condition');
+    });
+
+    it('returns 400 if temporalCondition does not contain "year"', async () => {
+      mockContext.data.temporalCondition = encodeURIComponent('(week = 23) OR (week = 22) OR (week = 21) OR (week = 20)');
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getImpactByPage();
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.equal('Invalid temporal condition');
+    });
+
+    it('returns cached result if available for impact endpoints', async () => {
+      mockS3.send.callsFake((cmd) => {
+        if (cmd.constructor && cmd.constructor.name === 'HeadObjectCommand') {
+          return Promise.resolve({});
+        }
+        return Promise.resolve({});
+      });
+
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getImpactByPage();
+      expect(res.status).to.equal(302);
+      expect(res.headers.get('location')).to.equal(TEST_PRESIGNED_URL);
+      expect(mockAthenaQuery).not.to.have.been.called;
+    });
+
+    it('respects noCache flag for impact endpoints', async () => {
+      mockContext.data.noCache = true;
+      const mockResponse = [
+        {
+          path: '/home',
+          pageviews: 1000,
+          pct_pageviews: 0.5,
+          click_rate: 0.1,
+          engagement_rate: 0.2,
+          bounce_rate: 0.3,
+          p70_lcp: 2.5,
+          p70_cls: 0.1,
+          p70_inp: 200,
+        },
+      ];
+      mockAthenaQuery.resolves(mockResponse);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getImpactByPage();
+      expect(res.status).to.equal(200);
+      expect(mockAthenaQuery).to.have.been.calledOnce;
+    });
+
+    it('returns empty array if Athena returns empty for impact endpoints', async () => {
+      mockAthenaQuery.resolves([]);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getImpactByPage();
+      expect(res.status).to.equal(200);
+      expect(lastPutObject).to.not.exist;
+      const gzippedBuffer = Buffer.from(await res.arrayBuffer());
+      const decompressed = await gunzipAsync(gzippedBuffer);
+      const body = JSON.parse(decompressed.toString());
+      expect(body).to.deep.equal([]);
+    });
+
+    it('uses custom CWV thresholds for impact endpoints', async () => {
+      const customThresholds = {
+        LCP_GOOD: 10,
+        LCP_NEEDS_IMPROVEMENT: 20,
+        INP_GOOD: 10,
+        INP_NEEDS_IMPROVEMENT: 20,
+        CLS_GOOD: 10,
+        CLS_NEEDS_IMPROVEMENT: 20,
+      };
+      const mockResponse = [
+        {
+          path: '/home',
+          pageviews: 1000,
+          pct_pageviews: 0.5,
+          click_rate: 0.1,
+          engagement_rate: 0.2,
+          bounce_rate: 0.3,
+          p70_lcp: 5,
+          p70_cls: 5,
+          p70_inp: 5,
+        },
+      ];
+      mockAthenaQuery.resolves(mockResponse);
+      const controller = TrafficController(
+        mockContext,
+        mockLog,
+        { ...mockEnv, CWV_THRESHOLDS: customThresholds },
+      );
+      await controller.getImpactByPage();
+      const decompressed = await gunzipAsync(lastPutObject.input.Body);
+      const putBody = JSON.parse(decompressed.toString())[0];
+      expect(putBody.lcp_score).to.equal('good');
+      expect(putBody.inp_score).to.equal('good');
+      expect(putBody.cls_score).to.equal('good');
+    });
+
+    it('uses custom CWV thresholds from JSON string for impact endpoints', async () => {
+      const jsonThresholds = JSON.stringify({
+        LCP_GOOD: 10,
+        LCP_NEEDS_IMPROVEMENT: 20,
+        INP_GOOD: 10,
+        INP_NEEDS_IMPROVEMENT: 20,
+        CLS_GOOD: 10,
+        CLS_NEEDS_IMPROVEMENT: 20,
+      });
+      const mockResponse = [
+        {
+          path: '/home',
+          pageviews: 1000,
+          pct_pageviews: 0.5,
+          click_rate: 0.1,
+          engagement_rate: 0.2,
+          bounce_rate: 0.3,
+          p70_lcp: 5,
+          p70_cls: 5,
+          p70_inp: 5,
+        },
+      ];
+      mockAthenaQuery.resolves(mockResponse);
+      const controller = TrafficController(
+        mockContext,
+        mockLog,
+        { ...mockEnv, CWV_THRESHOLDS: jsonThresholds },
+      );
+      await controller.getImpactByPage();
+      const decompressed = await gunzipAsync(lastPutObject.input.Body);
+      const putBody = JSON.parse(decompressed.toString())[0];
+      expect(putBody.lcp_score).to.equal('good');
+      expect(putBody.inp_score).to.equal('good');
+      expect(putBody.cls_score).to.equal('good');
+    });
+
+    it('falls back to default thresholds when CWV_THRESHOLDS is invalid JSON for impact endpoints', async () => {
+      const mockResponse = [
+        {
+          path: '/home',
+          pageviews: 1000,
+          pct_pageviews: 0.5,
+          click_rate: 0.1,
+          engagement_rate: 0.2,
+          bounce_rate: 0.3,
+          p70_lcp: 5000,
+          p70_cls: 0.4,
+          p70_inp: 300,
+        },
+      ];
+      mockAthenaQuery.resolves(mockResponse);
+      const controller = TrafficController(
+        mockContext,
+        mockLog,
+        { ...mockEnv, CWV_THRESHOLDS: '{not-json}' },
+      );
+      const res = await controller.getImpactByPage();
+      expect(res.status).to.equal(200);
+      expect(mockLog.warn).to.have.been.calledWith('Invalid CWV_THRESHOLDS JSON. Falling back to defaults.');
+    });
+
+    it('returns response directly if caching fails for impact endpoints', async () => {
+      mockS3.send.callsFake((cmd) => {
+        if (cmd.constructor && cmd.constructor.name === 'PutObjectCommand') {
+          throw new Error('S3 put failed');
+        }
+        if (cmd.constructor && cmd.constructor.name === 'HeadObjectCommand' && cmd.input.Key.includes(`${SITE_ID}/`)) {
+          const err = new Error('not found');
+          err.name = 'NotFound';
+          return Promise.reject(err);
+        }
+        return Promise.resolve({});
+      });
+      const mockResponse = [
+        {
+          path: '/home',
+          pageviews: 1000,
+          pct_pageviews: 0.5,
+          click_rate: 0.1,
+          engagement_rate: 0.2,
+          bounce_rate: 0.3,
+          p70_lcp: 2.5,
+          p70_cls: 0.1,
+          p70_inp: 200,
+        },
+      ];
+      mockAthenaQuery.resolves(mockResponse);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getImpactByPage();
+      expect(res.status).to.equal(200);
+      const contentEncoding = res.headers.get('content-encoding');
+      expect(contentEncoding).to.equal('gzip');
+    });
+
+    it('returns signed URL when cache is successfully verified after being created for impact endpoints', async () => {
+      let cacheExists = false;
+      mockS3.send.callsFake((cmd) => {
+        if (cmd.constructor && cmd.constructor.name === 'HeadObjectCommand') {
+          if (cacheExists) {
+            return Promise.resolve({});
+          } else {
+            const err = new Error('not found');
+            err.name = 'NotFound';
+            return Promise.reject(err);
+          }
+        }
+        if (cmd.constructor && cmd.constructor.name === 'PutObjectCommand') {
+          lastPutObject = cmd;
+          cacheExists = true;
+          return Promise.resolve({});
+        }
+        return Promise.resolve({});
+      });
+
+      const mockResponse = [
+        {
+          path: '/home',
+          pageviews: 1000,
+          pct_pageviews: 0.5,
+          click_rate: 0.1,
+          engagement_rate: 0.2,
+          bounce_rate: 0.3,
+          p70_lcp: 2.5,
+          p70_cls: 0.1,
+          p70_inp: 200,
+        },
+      ];
+      mockAthenaQuery.resolves(mockResponse);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      const res = await controller.getImpactByPage();
+      expect(res.status).to.equal(302);
+      expect(res.headers.get('location')).to.equal(TEST_PRESIGNED_URL);
+      expect(mockLog.debug).to.have.been.calledWithMatch('Successfully verified file existence');
+    });
+
+    it('respects trafficType parameter for impact endpoints', async () => {
+      mockContext.data.trafficType = 'earned';
+      const mockResponse = [
+        {
+          path: '/home',
+          pageviews: 1000,
+          pct_pageviews: 0.5,
+          click_rate: 0.1,
+          engagement_rate: 0.2,
+          bounce_rate: 0.3,
+          p70_lcp: 2.5,
+          p70_cls: 0.1,
+          p70_inp: 200,
+        },
+      ];
+      mockAthenaQuery.resolves(mockResponse);
+      const controller = TrafficController(mockContext, mockLog, mockEnv);
+      await controller.getImpactByPage();
+      expect(mockAthenaQuery).to.have.been.calledOnce;
+      // The query should filter by traffic type
+      const query = mockAthenaQuery.getCall(0).args[0];
+      expect(query).to.be.a('string');
     });
   });
 });

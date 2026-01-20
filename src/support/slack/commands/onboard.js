@@ -26,6 +26,7 @@ import {
 } from '../../../utils/slack/base.js';
 
 import { onboardSingleSite as sharedOnboardSingleSite } from '../../utils.js';
+import { triggerBrandProfileAgent } from '../../brand-profile-trigger.js';
 import BaseCommand from './base.js';
 
 import { createObjectCsvStringifier } from '../../../utils/slack/csvHelper.cjs';
@@ -89,6 +90,26 @@ function OnboardCommand(context) {
       { id: 'status', title: 'Status' },
     ],
   });
+
+  const maybeTriggerBrandProfile = async (reportLine, ctx, slackCtx, reason) => {
+    try {
+      if (!reportLine || reportLine.status === 'Failed' || !reportLine.siteId) {
+        return;
+      }
+      await triggerBrandProfileAgent({
+        context: ctx,
+        siteId: reportLine.siteId,
+        baseURL: reportLine.site,
+        slackContext: {
+          channelId: slackCtx.channelId,
+          threadTs: slackCtx.threadTs,
+        },
+        reason,
+      });
+    } catch (error) {
+      log.warn?.(`Failed to trigger brand-profile workflow for site ${reportLine?.siteId}`, error);
+    }
+  };
 
   /**
    * Onboards a single site.
@@ -205,6 +226,8 @@ function OnboardCommand(context) {
               region,
             },
           );
+
+          await maybeTriggerBrandProfile(reportLine, context, slackContext, 'aso-slack');
 
           // Add individual site status reporting for CSV processing
           if (reportLine.errors) {

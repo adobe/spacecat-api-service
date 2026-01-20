@@ -22,12 +22,13 @@ import {
   BASIC_AUDITS,
   triggerAudits,
 } from '../../../controllers/llmo/llmo-onboarding.js';
+import { triggerBrandProfileAgent } from '../../brand-profile-trigger.js';
 
 const REFERRAL_TRAFFIC_AUDIT = 'llmo-referral-traffic';
 const REFERRAL_TRAFFIC_IMPORT = 'traffic-analysis';
-const AGENTIC_TRAFFIC_ANALYSIS_AUDIT = 'cdn-analysis';
 const AGENTIC_TRAFFIC_REPORT_AUDIT = 'cdn-logs-report';
-const GEO_BRAND_PRESENCE_WEEKLY = 'geo-brand-presence';
+const GEO_BRAND_PRESENCE_WEEKLY_FREE = 'geo-brand-presence-free';
+const GEO_BRAND_PRESENCE_WEEKLY_PAID = 'geo-brand-presence-paid';
 const GEO_BRAND_PRESENCE_DAILY = 'geo-brand-presence-daily';
 
 // site isn't on spacecat yet
@@ -391,8 +392,12 @@ export function startLLMOOnboarding(lambdaContext) {
       // Detect current cadence for existing site
       const { Configuration } = dataAccess;
       const configuration = await Configuration.findLatest();
-      const isWeeklyEnabled = configuration.isHandlerEnabledForSite(
-        GEO_BRAND_PRESENCE_WEEKLY,
+      const isWeeklyFreeEnabled = configuration.isHandlerEnabledForSite(
+        GEO_BRAND_PRESENCE_WEEKLY_FREE,
+        site,
+      );
+      const isWeeklyPaidEnabled = configuration.isHandlerEnabledForSite(
+        GEO_BRAND_PRESENCE_WEEKLY_PAID,
         site,
       );
       const isDailyEnabled = configuration.isHandlerEnabledForSite(
@@ -402,7 +407,7 @@ export function startLLMOOnboarding(lambdaContext) {
 
       // Prefer daily if both are enabled (edge case), otherwise use what's enabled
       const currentCadence = isDailyEnabled ? 'daily' : 'weekly';
-      log.debug(`Site ${site.getId()} current brand presence config: weekly=${isWeeklyEnabled}, daily=${isDailyEnabled}, detected cadence=${currentCadence}`);
+      log.debug(`Site ${site.getId()} current brand presence config: weekly-free=${isWeeklyFreeEnabled}, weekly-paid=${isWeeklyPaidEnabled}, daily=${isDailyEnabled}, detected cadence=${currentCadence}`);
 
       await elmoOnboardingModal(body, client, respond, brandURL, currentCadence);
       log.debug(`User ${user.id} started LLMO onboarding process for ${brandURL} with existing site ${site.getId()}.`);
@@ -437,13 +442,22 @@ async function createSiteAndOrganization(input, lambda, slackContext) {
   return site.getId();
 }
 
+/**
+ * @param {Object} input
+ * @param {string} input.baseURL
+ * @param {string} input.brandName
+ * @param {string} input.imsOrgId
+ * @param {'weekly-free' | 'weekly-paid' | 'daily'} [input.brandPresenceCadence]
+ * @param {Object} lambdaCtx
+ * @param {Object} slackCtx
+ */
 export async function onboardSite(input, lambdaCtx, slackCtx) {
   const {
     log, dataAccess, sqs, env,
   } = lambdaCtx;
   const { say } = slackCtx;
   const {
-    baseURL, brandName, imsOrgId, brandPresenceCadence = 'weekly',
+    baseURL, brandName, imsOrgId, brandPresenceCadence = 'weekly-free',
   } = input;
   const { hostname } = new URL(baseURL);
   const dataFolderName = hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
@@ -510,26 +524,19 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
     if (brandPresenceCadence === 'daily') {
       log.info(`Enabling daily brand presence audit and disabling weekly for site ${siteId}`);
       configuration.enableHandlerForSite(GEO_BRAND_PRESENCE_DAILY, site);
-      configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY, site);
+      configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_PAID, site);
+      configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_FREE, site);
     } else {
-      log.info(`Enabling weekly brand presence audit and disabling daily for site ${siteId}`);
-      configuration.enableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY, site);
-      configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_DAILY, site);
-    }
-
-    // enable the cdn-analysis only if no other site in this organization already has it enabled
-    const orgId = site.getOrganizationId();
-    const sitesInOrg = await Site.allByOrganizationId(orgId);
-
-    const hasAgenticTrafficEnabled = sitesInOrg.some(
-      (orgSite) => configuration.isHandlerEnabledForSite(AGENTIC_TRAFFIC_ANALYSIS_AUDIT, orgSite),
-    );
-
-    if (!hasAgenticTrafficEnabled) {
-      log.info(`Enabling agentic traffic audits for organization ${orgId} (first site in org)`);
-      configuration.enableHandlerForSite(AGENTIC_TRAFFIC_ANALYSIS_AUDIT, site);
-    } else {
-      log.debug(`Agentic traffic audits already enabled for organization ${orgId}, skipping`);
+      log.info(`Enabling ${brandPresenceCadence} brand presence audit and disabling daily for site ${siteId}`);
+      if (brandPresenceCadence === 'weekly-paid') {
+        configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_DAILY, site);
+        configuration.enableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_PAID, site);
+        configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_FREE, site);
+      } else {
+        configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_DAILY, site);
+        configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_PAID, site);
+        configuration.enableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_FREE, site);
+      }
     }
 
     try {
@@ -540,7 +547,6 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
         AGENTIC_TRAFFIC_REPORT_AUDIT, // enable the cdn-logs-report audits for agentic traffic
         'llmo-customer-analysis', // this generates LLMO excel sheets and triggers audits
         REFERRAL_TRAFFIC_AUDIT,
-        'geo-brand-presence',
         'llm-error-pages',
       ]);
 
@@ -572,6 +578,16 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
 The LLMO Customer Analysis handler has been triggered. It will take a few minutes to complete.`;
 
       await say(message);
+
+      await triggerBrandProfileAgent({
+        context: lambdaCtx,
+        site,
+        slackContext: {
+          channelId: slackCtx.channelId,
+          threadTs: slackCtx.threadTs,
+        },
+        reason: 'llmo-slack',
+      });
     } catch (error) {
       log.error(`Error saving LLMO config for site ${siteId}: ${error.message}`);
       await say(`:x: Failed to save LLMO configuration: ${error.message}`);

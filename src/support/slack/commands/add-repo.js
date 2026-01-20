@@ -174,7 +174,7 @@ function AddRepoCommand(context) {
       await say(`
       :white_check_mark: *GitHub repo added for <${site.getBaseURL()}|${site.getBaseURL()}>*
 
-${printSiteDetails(site, isAuditEnabled)}
+${await printSiteDetails(site, isAuditEnabled)}
 
       First PSI check with new repo is triggered! :adobe-run:
       `);

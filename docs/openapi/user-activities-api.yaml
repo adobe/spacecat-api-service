@@ -58,7 +58,7 @@ paths:
                 productCode:
                   type: string
                   description: The product code associated with the activity
-                  enum: [LLMO, ASO]
+                  enum: [LLMO, ASO, ACO]
                   example: 'LLMO'
       responses:
         '201':

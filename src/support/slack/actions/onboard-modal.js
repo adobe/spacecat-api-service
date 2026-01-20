@@ -13,6 +13,7 @@
 import { isValidUrl } from '@adobe/spacecat-shared-utils';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import { onboardSingleSite as sharedOnboardSingleSite } from '../../utils.js';
+import { triggerBrandProfileAgent } from '../../brand-profile-trigger.js';
 import { loadProfileConfig } from '../../../utils/slack/base.js';
 
 export const AEM_CS_HOST = /^author-p(\d+)-e(\d+)/i;
@@ -25,25 +26,26 @@ export const AEM_CS_HOST = /^author-p(\d+)-e(\d+)/i;
  *                        and imsOrgId, or null if not extractable
  */
 export function extractDeliveryConfigFromPreviewUrl(previewUrl, imsOrgId) {
-  try {
-    if (!isValidUrl(previewUrl)) {
-      return null;
-    }
-    const url = new URL(previewUrl);
-    const { hostname } = url;
-
-    const [, programId, envId] = AEM_CS_HOST.exec(hostname);
-
-    return {
-      programId: `${programId}`,
-      environmentId: `${envId}`,
-      authorURL: previewUrl,
-      preferContentApi: true,
-      imsOrgId: imsOrgId || null,
-    };
-  } catch (error) {
+  if (!isValidUrl(previewUrl)) {
     return null;
   }
+  const url = new URL(previewUrl);
+  const { hostname } = url;
+
+  let programId = null;
+  let environmentId = null;
+
+  if (AEM_CS_HOST.test(hostname)) {
+    [, programId, environmentId] = hostname.match(AEM_CS_HOST);
+  }
+
+  return {
+    ...(programId && { programId }),
+    ...(environmentId && { environmentId }),
+    authorURL: previewUrl,
+    preferContentApi: true,
+    imsOrgId: imsOrgId || null,
+  };
 }
 
 /**
@@ -477,7 +479,7 @@ export function startOnboarding(lambdaContext) {
               type: 'section',
               text: {
                 type: 'mrkdwn',
-                text: '*Preview Environment Configuration (Optional)*\nConfigure preview environment for preflight and auto-optimize. Only needed for AEM Cloud Service URLs.',
+                text: '*Preview Environment Configuration (Optional)*\nConfigure preview environment for preflight and auto-optimize.',
               },
             },
             {
@@ -493,7 +495,7 @@ export function startOnboarding(lambdaContext) {
               },
               label: {
                 type: 'plain_text',
-                text: 'Preview URL (AEM Cloud Service)',
+                text: 'Preview URL (AEM Cloud Service or AMS)',
               },
               optional: true,
             },
@@ -528,6 +530,13 @@ export function startOnboarding(lambdaContext) {
                       text: 'Crosswalk (Universal Editor & EDS)',
                     },
                     value: 'cs/crosswalk',
+                  },
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'Adobe Managed Services',
+                    },
+                    value: 'ams',
                   },
                 ],
               },
@@ -626,7 +635,7 @@ export function onboardSiteModal(lambdaContext) {
           await ack({
             response_action: 'errors',
             errors: {
-              preview_url_input: 'Could not extract program/environment ID from this URL. Please provide a valid AEM CS preview URL.',
+              preview_url_input: 'Please provide a valid preview URL.',
             },
           });
           return;
@@ -644,9 +653,9 @@ export function onboardSiteModal(lambdaContext) {
         }
       }
 
+      const configuration = await Configuration.findLatest();
       await ack();
 
-      const configuration = await Configuration.findLatest();
       const additionalParams = {};
       if (deliveryType && deliveryType !== 'auto') {
         additionalParams.deliveryType = deliveryType;
@@ -715,7 +724,7 @@ export function onboardSiteModal(lambdaContext) {
           ? `\n:globe_with_meridians: *Preview Environment:* Configured with Program ${deliveryConfigFromPreview.programId}, Environment ${deliveryConfigFromPreview.environmentId}`
           : '';
 
-        const message = `:white_check_mark: *Onboarding completed successfully by ${user.name}!*
+        const message = `:white_check_mark: *Onboarding triggered successfully by ${user.name}!*
 
 :ims: *IMS Org ID:* ${reportLine.imsOrgId || 'n/a'}
 :groups: *Project ID:* ${reportLine.projectId || 'n/a'}
@@ -739,6 +748,15 @@ ${deliveryConfigInfo}${previewConfigInfo}
           text: message,
           thread_ts: responseThreadTs,
         });
+
+        if (site) {
+          await triggerBrandProfileAgent({
+            context: lambdaContext,
+            site,
+            slackContext,
+            reason: 'aso-slack',
+          });
+        }
       }
 
       log.debug(`Onboard site modal processed for user ${user.id}, site ${siteUrl}`);

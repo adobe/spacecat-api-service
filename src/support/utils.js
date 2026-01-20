@@ -19,11 +19,15 @@ import {
   tracingFetch as fetch,
   isValidUrl,
   isObject,
-  resolveCanonicalUrl, isValidIMSOrgId,
+  isNonEmptyObject,
+  resolveCanonicalUrl,
+  isValidIMSOrgId,
   detectAEMVersion,
   detectLocale,
+  wwwUrlResolver as sharedWwwUrlResolver,
 } from '@adobe/spacecat-shared-utils';
 import TierClient from '@adobe/spacecat-shared-tier-client';
+import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
 import { iso6393 } from 'iso-639-3';
 import worldCountries from 'world-countries';
 
@@ -31,6 +35,42 @@ import { SFNClient, StartExecutionCommand } from '@aws-sdk/client-sfn';
 import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
+
+/**
+ * Step Functions execution names must be 1–80 chars and may only contain
+ * letters, numbers, hyphens, or underscores
+ * (see https://docs.aws.amazon.com/step-functions/latest/apireference/API_StartExecution.html).
+ * This helper enforces those constraints and falls back to a timestamped name
+ * when input is missing or becomes empty after sanitization.
+ *
+ * When the name follows the pattern "prefix-{content}-{timestamp}", it preserves
+ * the full timestamp by truncating the middle content portion instead of the end.
+ *
+ * @param {string} value - The execution name to sanitize.
+ * @returns {string} The sanitized execution name.
+ */
+export const sanitizeExecutionName = (value) => {
+  const sanitizedInput = (value || `agent-${Date.now()}`).replace(/[^A-Za-z0-9-_]/g, '');
+  const executionName = sanitizedInput.length > 0 ? sanitizedInput : `agent-${Date.now()}`;
+
+  if (executionName.length <= 80) {
+    return executionName;
+  }
+
+  // Check if the name ends with a timestamp (13-digit number preceded by dash)
+  const timestampMatch = executionName.match(/-(\d{13})$/);
+
+  if (timestampMatch) {
+    // Preserve the full timestamp, truncate the middle portion
+    const timestamp = timestampMatch[0]; // Includes the dash: -1768507714773
+    const maxPrefixLength = 80 - timestamp.length; // 80 - 14 = 66
+    const prefix = executionName.substring(0, maxPrefixLength);
+    return prefix + timestamp;
+  }
+
+  // No timestamp pattern found, just truncate to 80
+  return executionName.slice(0, 80);
+};
 
 /**
  * Checks if the url parameter "url" equals "ALL".
@@ -144,6 +184,7 @@ export const sendAutofixMessage = async (
   promiseToken,
   variations,
   action,
+  customData,
   { url } = {},
 ) => sqs.sendMessage(queueUrl, {
   opportunityId,
@@ -153,6 +194,7 @@ export const sendAutofixMessage = async (
   variations,
   action,
   url,
+  ...(customData && { customData }),
 });
 /* c8 ignore end */
 
@@ -163,6 +205,25 @@ export const sendInternalReportRunMessage = async (
   slackContext,
 ) => sqs.sendMessage(queueUrl, {
   type: ReportType,
+  slackContext,
+});
+
+/**
+ * Sends a message to run a global import job to the provided SQS queue.
+ * Global imports don't require a siteId - they run across all data.
+ *
+ * @param {Object} sqs - The SQS service object.
+ * @param {string} queueUrl - The SQS queue URL.
+ * @param {string} importType - The type of global import to run.
+ * @param {Object} slackContext - The Slack context for notifications.
+ */
+export const sendGlobalImportRunMessage = async (
+  sqs,
+  queueUrl,
+  importType,
+  slackContext,
+) => sqs.sendMessage(queueUrl, {
+  type: importType,
   slackContext,
 });
 
@@ -320,6 +381,29 @@ export const triggerInternalReportRun = async (
 );
 
 /**
+ * Triggers a global import run (imports that don't require a siteId).
+ *
+ * @param {Object} config - The configuration object.
+ * @param {string} importType - The type of global import to run.
+ * @param {Object} slackContext - The Slack context for notifications.
+ * @param {Object} lambdaContext - The Lambda context with SQS service.
+ */
+export const triggerGlobalImportRun = async (
+  config,
+  importType,
+  slackContext,
+  lambdaContext,
+) => sendGlobalImportRunMessage(
+  lambdaContext.sqs,
+  config.getQueues().imports,
+  importType,
+  {
+    channelId: slackContext.channelId,
+    threadTs: slackContext.threadTs,
+  },
+);
+
+/**
  * Checks if a given URL corresponds to a Helix site.
  * @param {string} url - The URL to check.
  * @param {Object} [edgeConfig] - The optional edge configuration object.
@@ -424,6 +508,19 @@ export const wwwUrlResolver = (site) => {
   const uri = new URI(baseURL);
   return hasText(uri.subdomain()) ? baseURL.replace(/https?:\/\//, '') : baseURL.replace(/https?:\/\//, 'www.');
 };
+
+/**
+ * Resolves the correct hostname for a site by checking RUM data availability.
+ * Adapts wwwUrlResolver from shared-utils to work with api-service context.
+ * @param {object} site - The site object.
+ * @param {object} context - The context object.
+ * @returns {Promise<string>} - The resolved hostname without protocol.
+ */
+export async function resolveWwwUrl(site, context) {
+  const { log } = context;
+  const rumApiClient = RUMAPIClient.createFrom(context);
+  return sharedWwwUrlResolver(site, rumApiClient, log);
+}
 
 /**
  * Get the IMS user token from the context.
@@ -1029,6 +1126,7 @@ export const onboardSingleSite = async (
       organizationId,
       taskContext: {
         auditTypes,
+        onboardStartTime: Date.now(), // Track exact onboarding start time for log search
         slackContext: {
           channelId: slackContext.channelId,
           threadTs: slackContext.threadTs,
@@ -1101,7 +1199,7 @@ export const onboardSingleSite = async (
       workflowWaitTime: workflowWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS,
     };
 
-    const workflowName = `onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`;
+    const workflowName = sanitizeExecutionName(`onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`);
 
     const startCommand = new StartExecutionCommand({
       stateMachineArn: env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN,
@@ -1130,18 +1228,20 @@ export const onboardSingleSite = async (
  */
 export const filterSitesForProductCode = async (context, organization, sites, productCode) => {
   // for every site we will create tier client and will check valid entitlement and enrollment
-  const filteredSites = [];
   const { SiteEnrollment } = context.dataAccess;
   const tierClient = TierClient.createForOrg(context, organization, productCode);
   const { entitlement } = await tierClient.checkValidEntitlement();
-  for (const site of sites) {
-    /* eslint-disable no-await-in-loop */
-    const siteEnrollments = await SiteEnrollment.allBySiteId(site.getId());
-    /* eslint-disable no-await-in-loop, max-len */
-    const validSiteEnrollment = siteEnrollments.find((se) => se.getEntitlementId() === entitlement?.getId());
-    if (validSiteEnrollment) {
-      filteredSites.push(site);
-    }
+
+  if (!isNonEmptyObject(entitlement)) {
+    return [];
   }
-  return filteredSites;
+
+  // Get all enrollments for this entitlement in one query
+  const siteEnrollments = await SiteEnrollment.allByEntitlementId(entitlement.getId());
+
+  // Create a Set of enrolled site IDs for efficient lookup
+  const enrolledSiteIds = new Set(siteEnrollments.map((se) => se.getSiteId()));
+
+  // Filter sites based on enrollment
+  return sites.filter((site) => enrolledSiteIds.has(site.getId()));
 };
