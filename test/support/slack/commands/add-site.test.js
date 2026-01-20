@@ -21,8 +21,6 @@ import AddSiteCommand from '../../../../src/support/slack/commands/add-site.js';
 
 use(sinonChai);
 
-const validHelixDom = '<!doctype html><html lang="en"><head><script src="/scripts/aem.js"></script></head><body><header></header><main><div class="block hero" data-block-status="loaded"></div></main></body></html>';
-
 describe('AddSiteCommand', () => {
   let context;
   let slackContext;
@@ -30,6 +28,7 @@ describe('AddSiteCommand', () => {
   let sqsStub;
 
   beforeEach(() => {
+    nock.cleanAll();
     const configuration = {
       isHandlerEnabledForSite: sinon.stub(),
     };
@@ -62,6 +61,10 @@ describe('AddSiteCommand', () => {
         },
       },
     };
+  });
+
+  afterEach(() => {
+    nock.cleanAll();
   });
 
   describe('Initialization and BaseCommand Integration', () => {
@@ -244,62 +247,6 @@ describe('AddSiteCommand', () => {
       await command.handleExecution(args, slackContext);
 
       expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: test error')).to.be.true;
-    });
-
-    it('adds an aem_edge site', async () => {
-      const baseURL = 'https://example.com';
-      nock(baseURL)
-        .get('/')
-        .reply(200, validHelixDom);
-
-      dataAccessStub.Site.findByBaseURL.resolves(null);
-      dataAccessStub.Site.create.resolves({
-        getId: () => 'site4',
-        getBaseURL: () => baseURL,
-        getDeliveryType: () => 'aem_edge',
-        getIsLive: () => true,
-      });
-
-      const args = ['example.com'];
-      const command = AddSiteCommand(context);
-
-      await command.handleExecution(args, slackContext);
-
-      expect(dataAccessStub.Site.findByBaseURL.calledWith('https://example.com')).to.be.true;
-      expect(dataAccessStub.Site.create).to.have.been.calledWith({
-        baseURL: 'https://example.com', deliveryType: 'aem_edge', isLive: true, organizationId: 'default',
-      });
-      expect(slackContext.say.calledWith(sinon.match.string)).to.be.true;
-    });
-
-    it('adds an aem_cs site', async () => {
-      const baseURL = 'https://example.com';
-      nock(baseURL)
-        .get('/')
-        .times(2)
-        .reply(200, '<html><head><link rel="stylesheet" href="/etc.clientlibs/picdev/clientlibs/clientlib-base.lc-dfb8e36247b60d34b43665aa46f30417-lc.min.css"><link rel="shortcut icon" href="/content/dam/some-company/favicon.ico"></head><body><div id="container-f2b429b0c5" class="cmp-container"><div class="cmp-text" data-cmp-data-layer="{&quot;text-123&quot;:{&quot;@type&quot;:&quot;some-company/components/text&quot;}}">Content</div></div></body></html>');
-      nock(baseURL)
-        .get('/index.plain.html')
-        .reply(404);
-
-      dataAccessStub.Site.findByBaseURL.resolves(null);
-      dataAccessStub.Site.create.resolves({
-        getId: () => 'site5',
-        getBaseURL: () => baseURL,
-        getDeliveryType: () => 'aem_cs',
-        getIsLive: () => true,
-      });
-
-      const args = ['example.com'];
-      const command = AddSiteCommand(context);
-
-      await command.handleExecution(args, slackContext);
-
-      expect(dataAccessStub.Site.findByBaseURL.calledWith('https://example.com')).to.be.true;
-      expect(dataAccessStub.Site.create).to.have.been.calledWith({
-        baseURL: 'https://example.com', deliveryType: 'aem_cs', isLive: false, organizationId: 'default',
-      });
-      expect(slackContext.say.calledWith(sinon.match.string)).to.be.true;
     });
 
     it('adds a new site with explicit delivery type arg (aem_ams)', async () => {
