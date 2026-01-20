@@ -96,7 +96,149 @@ export function formatThirdPartySummary(summary = []) {
   const formattedTable = `${BACKTICKS}\n${table.map((row) => formatRows(row, columnWidths)).join('\n')}\n${BACKTICKS}`;
 
   // Ensure the formattedTable string does not exceed the Slack message character limit.
-  return formattedTable.length > CHARACTER_LIMIT ? `${formattedTable.slice(0, CHARACTER_LIMIT - 3)}...` : formattedTable;
+  return formattedTable.length > CHARACTER_LIMIT
+    ? `${formattedTable.slice(0, CHARACTER_LIMIT - 3)}...`
+    : formattedTable;
+}
+
+/**
+ * Analyzes network requests to identify Adobe Experience Cloud tools.
+ *
+ * @param {Array<Object>} networkRequests - An array of network request objects.
+ * @param {Object} log - The logging object.
+ * @returns {Array<Object>} An array of identified Adobe tools with their details.
+ */
+export function analyzeAdobeTools(networkRequests = [], log = null) {
+  const adobeTools = [];
+  const toolCounts = new Map();
+
+  // Add null check before forEach
+  if (!networkRequests) {
+    if (log) log.debug('No network requests provided');
+    return adobeTools;
+  }
+
+  networkRequests.forEach((request) => {
+    const {
+      url,
+      statusCode,
+      priority,
+      entity,
+    } = request;
+    let toolName = null;
+
+    // Debug logging
+    if (log) {
+      log.debug('Checking request:', {
+        url,
+        entity,
+      });
+    }
+
+    // Adobe Target detection
+    if ((url.includes('/delivery') || url.includes('/interact'))
+        && (url.startsWith('https://edge.adobedc.net/ee') || url.includes('tt.omtrdc.net'))) {
+      toolName = 'Adobe Target';
+      if (log) log.debug('Found Adobe Target:', { url, entity });
+    } else if (url.includes('.sc.omtrdc.net') || url.includes('2o7.net')
+             || (url.includes('/collect') && (url.includes('adobe') || url.includes('analytics')))) {
+      // Adobe Analytics detection
+      toolName = 'Adobe Analytics';
+      if (log) log.debug('Found Adobe Analytics:', { url, entity });
+    } else if (
+      entity === 'adobedc.net'
+      || url.includes('edge.adobedc.net')
+      || url.includes('.demdex.net')
+      || url.includes('alloy.js')
+      || url.includes('alloy.min.js')
+      || (url.includes('/collect') && url.includes('adobedc.net'))
+    ) {
+      // AEP WebSDK detection - check entity first
+      toolName = 'AEP WebSDK';
+      if (log) {
+        log.debug('Found AEP WebSDK:', {
+          url,
+          entity,
+        });
+      }
+    } else if (
+      entity === 'adobedtm.com'
+      || url.toLowerCase().includes('assets.adobedtm.com')
+      || url.toLowerCase().includes('launch-')
+      || url.toLowerCase().includes('launch.')
+      || url.toLowerCase().includes('.min.js')
+    ) {
+      // Adobe Launch detection - expanded patterns
+      toolName = 'Adobe Launch/Tags';
+      if (log) {
+        log.debug('Found Adobe Launch:', {
+          url,
+          entity,
+        });
+      }
+    }
+
+    if (toolName) {
+      const key = `${toolName}-${statusCode}`;
+      if (!toolCounts.has(key)) {
+        toolCounts.set(key, {
+          tool: toolName,
+          statusCode,
+          priority,
+          requestCount: 0,
+        });
+      }
+      toolCounts.get(key).requestCount += 1;
+    }
+  });
+
+  // Convert map to array
+  toolCounts.forEach((value) => {
+    adobeTools.push(value);
+  });
+
+  return adobeTools;
+}
+
+/**
+ * Formats an array of Adobe tools into a stringified table format.
+ * If tools array is empty, it returns a fallback message. If the formatted
+ * table exceeds the character limit, it is sliced and appended
+ * with an ellipsis.
+ *
+ * @param {Array<Object>} tools - An array of Adobe tool objects.
+ * @returns {string} Adobe tools formatted into a stringified table or a fallback message.
+ */
+export function formatAdobeTools(tools = []) {
+  if (tools.length === 0) {
+    return '    _No Adobe Experience Cloud tools detected_';
+  }
+
+  const headers = ['Tool', 'Status', 'Priority', 'Requests'];
+  const rows = tools.map((tool) => {
+    const {
+      toolName, statusCode, priority, requestCount,
+    } = tool;
+
+    return [
+      toolName,
+      `${statusCode}`,
+      priority || 'N/A',
+      `${requestCount}`,
+    ];
+  });
+
+  const table = [headers, ...rows];
+  const columnWidths = calculateColumnWidths(table);
+
+  const formattedTable = `${BACKTICKS}\n`
+    + `${table.map((row) => formatRows(row, columnWidths)).join('\n')}`
+    + `\n${BACKTICKS}`;
+
+  // Ensure the formattedTable string does not exceed the Slack message character limit.
+  return formattedTable.length > CHARACTER_LIMIT
+    ? `${formattedTable.slice(0, CHARACTER_LIMIT - 3)}...`
+    : formattedTable;
 }
 
 /**
@@ -155,7 +297,10 @@ function MartechImpactCommand(context) {
         return;
       }
 
-      const { totalBlockingTime, thirdPartySummary } = latestAudit.getAuditResult();
+      const auditResult = latestAudit.getAuditResult();
+      const { totalBlockingTime, thirdPartySummary, networkRequests } = auditResult;
+
+      const adobeTools = analyzeAdobeTools(networkRequests, log);
 
       const textSections = [{
         text: `
@@ -166,6 +311,8 @@ ${await printSiteDetails(site)}
 *Total Blocking Time (TBT):*\t${formatTotalBlockingTime(totalBlockingTime)}
 
 *Third Party Summary:*\n${formatThirdPartySummary(thirdPartySummary)}
+
+*Adobe Experience Cloud Tools:*\n${formatAdobeTools(adobeTools)}
   `,
       }];
 
