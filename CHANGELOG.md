@@ -1,3 +1,10 @@
+# [1.288.0](https://github.com/adobe/spacecat-api-service/compare/v1.287.0...v1.288.0) (2026-01-20)
+
+
+### Features
+
+* added shm imports in onboard command ([#1689](https://github.com/adobe/spacecat-api-service/issues/1689)) ([4fb92dc](https://github.com/adobe/spacecat-api-service/commit/4fb92dcc87fbde0f953ccfe0eadff3888d60fb2e))
+
 # [1.287.0](https://github.com/adobe/spacecat-api-service/compare/v1.286.1...v1.287.0) (2026-01-20)
 
 
