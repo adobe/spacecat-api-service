@@ -1,3 +1,10 @@
+# [1.290.0](https://github.com/adobe/spacecat-api-service/compare/v1.289.0...v1.290.0) (2026-01-20)
+
+
+### Features
+
+* rename tokowaka, and fix edge config self serve apis ([#1709](https://github.com/adobe/spacecat-api-service/issues/1709)) ([8359ba6](https://github.com/adobe/spacecat-api-service/commit/8359ba61d0f3e94b4c4f7e7ed3ff95d1a3997d62))
+
 # [1.289.0](https://github.com/adobe/spacecat-api-service/compare/v1.288.0...v1.289.0) (2026-01-20)
 
 
