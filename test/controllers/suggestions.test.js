@@ -2189,7 +2189,8 @@ describe('Suggestions Controller', () => {
       mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(opportunity);
       mockSite.findById.withArgs(SITE_ID).resolves(site);
 
-      // Mock AccessControlUtil to deny admin access
+      // Mock AccessControlUtil - allow hasAccess (for initial check), deny hasAdminAccess (for REJECTED check)
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
       sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
 
       const response = await suggestionsController.patchSuggestionsStatus({
@@ -2204,6 +2205,7 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(207);
       const bulkPatchResponse = await response.json();
       expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 403);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('uuid', SUGGESTION_IDS[0]);
       expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'Only admins can reject suggestions');
       expect(bulkPatchResponse.suggestions[0].suggestion).to.not.exist;
     });
@@ -2223,7 +2225,8 @@ describe('Suggestions Controller', () => {
       mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(opportunity);
       mockSite.findById.withArgs(SITE_ID).resolves(site);
 
-      // Mock AccessControlUtil to allow admin access
+      // Mock AccessControlUtil - allow both hasAccess and hasAdminAccess
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
       sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
 
       const response = await suggestionsController.patchSuggestionsStatus({
@@ -2238,6 +2241,7 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(207);
       const bulkPatchResponse = await response.json();
       expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 400);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('uuid', SUGGESTION_IDS[0]);
       expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'Can only reject suggestions with status PENDING_VALIDATION');
       expect(bulkPatchResponse.suggestions[0].suggestion).to.not.exist;
     });
@@ -2258,7 +2262,8 @@ describe('Suggestions Controller', () => {
       mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(opportunity);
       mockSite.findById.withArgs(SITE_ID).resolves(site);
 
-      // Mock AccessControlUtil to allow admin access
+      // Mock AccessControlUtil - allow both hasAccess and hasAdminAccess
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
       sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
 
       const response = await suggestionsController.patchSuggestionsStatus({
@@ -2294,7 +2299,8 @@ describe('Suggestions Controller', () => {
       mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(opportunity);
       mockSite.findById.withArgs(SITE_ID).resolves(site);
 
-      // Mock AccessControlUtil to allow admin access
+      // Mock AccessControlUtil - allow both hasAccess and hasAdminAccess
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
       sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
 
       const response = await suggestionsController.patchSuggestionsStatus({
@@ -2309,6 +2315,7 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(207);
       const bulkPatchResponse = await response.json();
       expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 400);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('uuid', SUGGESTION_IDS[0]);
       expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'Can only reject suggestions with status PENDING_VALIDATION');
       expect(bulkPatchResponse.suggestions[0].suggestion).to.not.exist;
     });
