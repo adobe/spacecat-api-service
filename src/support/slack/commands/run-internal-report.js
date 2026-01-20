@@ -29,19 +29,19 @@ const REPORTS = [
  * @constructor
  */
 function runInternalReportCommand(context) {
-  const { log, dataAccess } = context;
-  const { Configuration } = dataAccess;
+  const { log, dataAccess, sqs, env } = context;
+  const { Configuration, Organization, Site } = dataAccess;
 
   const baseCommand = BaseCommand({
     id: 'run-internal-report',
     name: 'Run Internal Report',
-    description: 'Run internal report for all sites. Runs usage-metrics-internal by default if no report type parameter is provided.',
+    description: 'Run internal report for all sites, or for a specific org/site/audit type. Usage: run internal report [reportType] [orgId] [siteBaseURL] [auditType]',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} [reportType (optional)]`,
+    usageText: `${PHRASES[0]} [reportType (optional)] [orgId (optional)] [siteBaseURL (optional)] [auditType (optional)]`,
   });
 
   /**
-   * Runs an internal report for the given type.
+   * Runs an internal report for the given type, org, site, and auditType.
    *
    * @param {string[]} args - The arguments provided to the command.
    * @param {Object} slackContext - The Slack context object.
@@ -51,9 +51,10 @@ function runInternalReportCommand(context) {
     const config = await Configuration.findLatest();
 
     try {
-      let [reportType] = args;
+      let [reportType, orgId, siteBaseURL, auditType] = args;
 
-      if (reportType === '') {
+      // Default reportType if not provided
+      if (!reportType || reportType === '') {
         reportType = 'usage-metrics-internal';
       }
 
@@ -67,14 +68,41 @@ function runInternalReportCommand(context) {
         return;
       }
 
-      await triggerInternalReportRun(
-        config,
-        reportType,
-        slackContext,
-        context,
-      );
+      // If no org/site/auditType provided, run for all sites (default)
+      if (!orgId && !siteBaseURL && !auditType) {
+        await triggerInternalReportRun(
+          config,
+          reportType,
+          slackContext,
+          context,
+        );
+        await say(`:adobe-run: Triggered report generation for: *${reportType}* for all sites`);
+        return;
+      }
 
-      await say(`:adobe-run: Triggered report generation for: *${reportType}* for all sites`);
+      // If orgId or siteBaseURL or auditType is provided, trigger for specific org/site/auditType
+      // This will send a message to the reports queue with the filter parameters
+      // (downstream jobs-dispatcher must support these fields)
+      const queueUrl = config.getQueues().reports;
+      const filter = {};
+      if (orgId) filter.orgId = orgId;
+      if (siteBaseURL) filter.siteBaseURL = siteBaseURL;
+      if (auditType) filter.auditType = auditType;
+
+      await sqs.sendMessage(queueUrl, {
+        type: reportType,
+        slackContext: {
+          channelId: slackContext.channelId,
+          threadTs: slackContext.threadTs,
+        },
+        ...filter,
+      });
+
+      let msg = `:adobe-run: Triggered report generation for: *${reportType}*`;
+      if (orgId) msg += `, org: \`${orgId}\``;
+      if (siteBaseURL) msg += `, site: \`${siteBaseURL}\``;
+      if (auditType) msg += `, auditType: \`${auditType}\``;
+      await say(msg);
     } catch (error) {
       log.error(`Error running internal report: ${error.message}`);
       await postErrorMessage(say, error);

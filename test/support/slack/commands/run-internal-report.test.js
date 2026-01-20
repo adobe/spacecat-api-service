@@ -99,5 +99,76 @@ describe('runInternalReportCommand', () => {
       await command.handleExecution(args, slackContext);
       expect(context.log.error).to.have.been.calledWith('Error running internal report: Cannot read properties of undefined (reading \'getQueues\')');
     });
+
+    it('should execute with orgId, siteBaseURL, and auditType', async () => {
+      dataAccessStub.Configuration.findLatest.resolves({
+        getQueues: () => ({ reports: 'reports-queue' }),
+      });
+
+      const command = runInternalReportCommand(context);
+      const args = ['usage-metrics-internal', 'org123', 'https://site.com', 'lhs-mobile'];
+      await command.handleExecution(args, slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      const msg = sqsStub.sendMessage.firstCall.args[1];
+      expect(msg.type).to.equal('usage-metrics-internal');
+      expect(msg.orgId).to.equal('org123');
+      expect(msg.siteBaseURL).to.equal('https://site.com');
+      expect(msg.auditType).to.equal('lhs-mobile');
+      expect(slackContext.say).to.have.been.calledWithMatch('org: `org123`');
+      expect(slackContext.say).to.have.been.calledWithMatch('site: `https://site.com`');
+      expect(slackContext.say).to.have.been.calledWithMatch('auditType: `lhs-mobile`');
+    });
+
+    it('should execute with only orgId', async () => {
+      dataAccessStub.Configuration.findLatest.resolves({
+        getQueues: () => ({ reports: 'reports-queue' }),
+      });
+
+      const command = runInternalReportCommand(context);
+      const args = ['usage-metrics-internal', 'org123'];
+      await command.handleExecution(args, slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      const msg = sqsStub.sendMessage.firstCall.args[1];
+      expect(msg.orgId).to.equal('org123');
+      expect(msg.siteBaseURL).to.be.undefined;
+      expect(msg.auditType).to.be.undefined;
+      expect(slackContext.say).to.have.been.calledWithMatch('org: `org123`');
+    });
+
+    it('should execute with only siteBaseURL', async () => {
+      dataAccessStub.Configuration.findLatest.resolves({
+        getQueues: () => ({ reports: 'reports-queue' }),
+      });
+
+      const command = runInternalReportCommand(context);
+      const args = ['usage-metrics-internal', '', 'https://site.com'];
+      await command.handleExecution(args, slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      const msg = sqsStub.sendMessage.firstCall.args[1];
+      expect(msg.orgId).to.be.undefined;
+      expect(msg.siteBaseURL).to.equal('https://site.com');
+      expect(msg.auditType).to.be.undefined;
+      expect(slackContext.say).to.have.been.calledWithMatch('site: `https://site.com`');
+    });
+
+    it('should execute with only auditType', async () => {
+      dataAccessStub.Configuration.findLatest.resolves({
+        getQueues: () => ({ reports: 'reports-queue' }),
+      });
+
+      const command = runInternalReportCommand(context);
+      const args = ['usage-metrics-internal', '', '', 'lhs-mobile'];
+      await command.handleExecution(args, slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      const msg = sqsStub.sendMessage.firstCall.args[1];
+      expect(msg.orgId).to.be.undefined;
+      expect(msg.siteBaseURL).to.be.undefined;
+      expect(msg.auditType).to.equal('lhs-mobile');
+      expect(slackContext.say).to.have.been.calledWithMatch('auditType: `lhs-mobile`');
+    });
   });
 });
