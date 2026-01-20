@@ -1,0 +1,130 @@
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://www.adobe.com/#organization",
+      "name": "Adobe",
+      "url": "https://www.adobe.com",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "https://www.adobe.com/content/dam/acom/one-console/icons_redesign/adobe-icon-192x192.png"
+      },
+      "sameAs": [
+        "https://www.facebook.com/Adobe",
+        "https://x.com/Adobe",
+        "https://www.linkedin.com/company/adobe",
+        "https://www.youtube.com/@Adobe",
+        "https://en.wikipedia.org/wiki/Adobe_Inc."
+      ]
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://www.adobe.com/#website",
+      "name": "Adobe",
+      "url": "https://www.adobe.com",
+      "publisher": {
+        "@id": "https://www.adobe.com/#organization"
+      }
+    },
+    {
+      "@type": "WebPage",
+      "@id": "https://www.adobe.com/products/photoshop/glitch-effect.html#webpage",
+      "url": "https://www.adobe.com/products/photoshop/glitch-effect.html",
+      "name": "Glitch effect | Adobe Photoshop",
+      "description": "Glitches, static, and tracking errors were the result of old technology's failures. See how you can use Adobe Photoshop to recreate these effects in your work.",
+      "inLanguage": "en-US",
+      "isPartOf": {
+        "@id": "https://www.adobe.com/#website"
+      },
+      "about": {
+        "@id": "https://www.adobe.com/products/photoshop.html#software"
+      }
+    },
+    {
+      "@type": "HowTo",
+      "@id": "https://www.adobe.com/products/photoshop/glitch-effect.html#howto",
+      "name": "Adding glitch effects to your images",
+      "description": "Glitches, static, and tracking errors were the result of old technology's failures. See how you can use Adobe Photoshop to recreate these effects in your work.",
+      "url": "https://www.adobe.com/products/photoshop/glitch-effect.html",
+      "inLanguage": "en-US",
+      "author": {
+        "@id": "https://www.adobe.com/#organization"
+      },
+      "publisher": {
+        "@id": "https://www.adobe.com/#organization"
+      },
+      "about": {
+        "@id": "https://www.adobe.com/products/photoshop.html#software"
+      },
+      "tool": "Adobe Photoshop",
+      "isPartOf": {
+        "@id": "https://www.adobe.com/products/photoshop/glitch-effect.html#webpage"
+      },
+      "mainEntityOfPage": {
+        "@id": "https://www.adobe.com/products/photoshop/glitch-effect.html#webpage"
+      },
+      "step": [
+        {
+          "@type": "HowToStep",
+          "position": 1,
+          "name": "Simulating glitch effect scan lines",
+          "text": "Use Photoshop's halftone pattern found under Filter › Pixelate › Color Halftone set to the Line option. This gives your image files the subtle look of another era with scan lines similar to old CRT tube displays."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 2,
+          "name": "Distorting and separating colors",
+          "text": "Use RGB channels to break apart the colors of an image and create color separation. Select the RGB channel you want to use in the Channels panel, and select All on the document. Apply a Wave effect to create color-based distortion. Copy and paste the image three times into different layers, disable different color channels on each layer, and use Screen blending mode to create separated, fractured appearance."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 3,
+          "name": "Simulate horizontal tracking errors",
+          "text": "Use the rectangular Marquee tool to grab long, thin sections of the image. Move those sections with the Move tool so they're out of sync with the rest of the picture, optionally adding distortion effects. Repeat several times to get the characteristic look of a fractured broadcast or interrupted satellite feed."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 4,
+          "name": "Simulate static",
+          "text": "To recreate the visual noise of a retro VHS tape or glitching CRT monitor, select a portion of the image with the rectangular Marquee tool and use the Wave option under the Distort and Filter menus to add visual noise. Use the Randomize button to make each distortion effect unique."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 5,
+          "name": "Distort a small part of the screen",
+          "text": "Select individual sections of the photo with the rectangular Marquee tool, right click, and select Layer Via Copy to apply wave distortion to that specific area. This creates targeted glitch effects within your image."
+        }
+      ],
+      "mentions": [
+        {
+          "@type": "Thing",
+          "name": "Color Halftone Filter",
+          "description": "Photoshop filter that can simulate scan lines when set to the Line option"
+        },
+        {
+          "@type": "Thing",
+          "name": "RGB Channels",
+          "description": "Red, green, and blue color channels that can be separated to create color distortion effects"
+        },
+        {
+          "@type": "Thing",
+          "name": "Rectangular Marquee Tool",
+          "description": "Selection tool used to select specific areas of an image for applying glitch effects"
+        },
+        {
+          "@type": "Thing",
+          "name": "Wave Effect",
+          "description": "Distortion filter that applies color-based distortion with adjustable generators, wavelength, and amplitude"
+        },
+        {
+          "@type": "Thing",
+          "name": "Blending Options",
+          "description": "Panel used to control color channel visibility and blending modes for creating separated color effects"
+        }
+      ]
+    }
+  ]
+}
+</script>

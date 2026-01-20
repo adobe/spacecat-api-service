@@ -1,0 +1,128 @@
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://www.adobe.com/#organization",
+      "name": "Adobe",
+      "url": "https://www.adobe.com",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "https://www.adobe.com/content/dam/acom/one-console/icons_redesign/adobe-icon-192x192.png"
+      },
+      "sameAs": [
+        "https://www.facebook.com/Adobe",
+        "https://x.com/Adobe",
+        "https://www.linkedin.com/company/adobe",
+        "https://www.youtube.com/@Adobe",
+        "https://en.wikipedia.org/wiki/Adobe_Inc."
+      ]
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://www.adobe.com/#website",
+      "name": "Adobe",
+      "url": "https://www.adobe.com",
+      "publisher": {
+        "@id": "https://www.adobe.com/#organization"
+      }
+    },
+    {
+      "@type": "WebPage",
+      "@id": "https://www.adobe.com/products/photoshop/feather-edges.html#webpage",
+      "url": "https://www.adobe.com/products/photoshop/feather-edges.html",
+      "name": "How to feather edges in Adobe Photoshop.",
+      "description": "Learn the tools and techniques you need to soften up your image when it's rough around the edges.",
+      "inLanguage": "en-US",
+      "isPartOf": {
+        "@id": "https://www.adobe.com/#website"
+      },
+      "about": {
+        "@id": "https://www.adobe.com/products/photoshop.html#software"
+      }
+    },
+    {
+      "@type": "HowTo",
+      "@id": "https://www.adobe.com/products/photoshop/feather-edges.html#howto",
+      "name": "How to feather edges in Adobe Photoshop",
+      "description": "Learn the tools and techniques you need to soften up your image when it's rough around the edges.",
+      "url": "https://www.adobe.com/products/photoshop/feather-edges.html",
+      "inLanguage": "en-US",
+      "author": {
+        "@id": "https://www.adobe.com/#organization"
+      },
+      "publisher": {
+        "@id": "https://www.adobe.com/#organization"
+      },
+      "about": {
+        "@id": "https://www.adobe.com/products/photoshop.html#software"
+      },
+      "tool": "Adobe Photoshop",
+      "isPartOf": {
+        "@id": "https://www.adobe.com/products/photoshop/feather-edges.html#webpage"
+      },
+      "mainEntityOfPage": {
+        "@id": "https://www.adobe.com/products/photoshop/feather-edges.html#webpage"
+      },
+      "step": [
+        {
+          "@type": "HowToStep",
+          "position": 1,
+          "name": "Feather the pixels around a shape",
+          "text": "Use a shape-based selection tool, such as the Elliptical tool or Lasso tool, to choose the area that you want to feather. When you've made your selection, it'll be surrounded by animated black dashes. From the settings bar at the top of the window, select Feather. In the text box, enter a value of between 0 and 100 pixels to determine how heavily the Feather effect will be applied to the selected area."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 2,
+          "name": "Feather the pixels around a selection",
+          "text": "Select the area you want to feather with a selection tool, such as the Quick Selection tool. Choose Select and Mask from the options bar. In the Properties panel on the right side of the screen, use the Feather slider to adjust how much of a blur effect will be applied to the layer mask that overlays the selected area. Click OK. Copy the mask with Ctrl+C (Command+C on Mac) and paste it onto another layer with Ctrl+V (Command+V on Mac)."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 3,
+          "name": "Feather radius",
+          "text": "Make a selection. Go to Select › Modify › Feather or press Shift+F6. Click OK in the dialog box to apply changes."
+        }
+      ],
+      "mentions": [
+        {
+          "@type": "Thing",
+          "name": "Elliptical tool",
+          "description": "Shape-based selection tool for choosing areas to feather"
+        },
+        {
+          "@type": "Thing",
+          "name": "Lasso tool",
+          "description": "Shape-based selection tool for choosing areas to feather"
+        },
+        {
+          "@type": "Thing",
+          "name": "Quick Selection tool",
+          "description": "Selection tool for choosing areas to feather"
+        },
+        {
+          "@type": "Thing",
+          "name": "Select and Mask",
+          "description": "Feature for applying feather effects to layer masks"
+        },
+        {
+          "@type": "Thing",
+          "name": "Blur tool",
+          "description": "Tool for painting smoothing effects directly onto the canvas"
+        },
+        {
+          "@type": "Thing",
+          "name": "Anti-aliasing",
+          "description": "Feature that softens opacity between edge and background pixels while maintaining image clarity"
+        },
+        {
+          "@type": "Thing",
+          "name": "Gaussian blur",
+          "description": "Blur filter for creating feathered edges on targeted edits"
+        }
+      ]
+    }
+  ]
+}
+</script>
