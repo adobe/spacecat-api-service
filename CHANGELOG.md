@@ -1,3 +1,10 @@
+# [1.289.0](https://github.com/adobe/spacecat-api-service/compare/v1.288.0...v1.289.0) (2026-01-20)
+
+
+### Features
+
+* disable autofix grouping for security opportunities ([#1701](https://github.com/adobe/spacecat-api-service/issues/1701)) ([11089de](https://github.com/adobe/spacecat-api-service/commit/11089de9c2bd2bbee5169d3ebef4a9be552305da))
+
 # [1.288.0](https://github.com/adobe/spacecat-api-service/compare/v1.287.0...v1.288.0) (2026-01-20)
 
 
