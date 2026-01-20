@@ -441,7 +441,7 @@ describe('User Activity Controller', () => {
 
       expect(result.status).to.equal(400);
       const body = await result.json();
-      expect(body.message).to.equal('Valid product code is required (LLMO, ASO)');
+      expect(body.message).to.equal('Valid product code is required (LLMO, ASO, ACO)');
     });
 
     it('should return bad request for invalid product code', async () => {
@@ -454,7 +454,7 @@ describe('User Activity Controller', () => {
 
       expect(result.status).to.equal(400);
       const body = await result.json();
-      expect(body.message).to.equal('Valid product code is required (LLMO, ASO)');
+      expect(body.message).to.equal('Valid product code is required (LLMO, ASO, ACO)');
     });
 
     it('should return not found for non-existent site', async () => {

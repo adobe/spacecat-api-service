@@ -78,6 +78,8 @@
 			"top-pages" : {},
 			"organic-keywords" :{},
 			"all-traffic": {},
+			"user-engagement": {},
+			"cwv-weekly": {},
             "traffic-analysis": {}
 		},
 		"config": {
@@ -113,7 +115,9 @@
 			"top-pages" : {},
 			"organic-keywords" :{},
 			"all-traffic": {},
-            "traffic-analysis": {}
+            "traffic-analysis": {},
+			"user-engagement": {},
+			"cwv-weekly": {}
 		},
 		"config": {
 			"scheduledRun": true
