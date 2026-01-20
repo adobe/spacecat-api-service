@@ -161,6 +161,47 @@ site-traffic-paid-pta2-weekly-summary:
     security:
       - api_key: []
 
+site-traffic-predominant-type:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    tags:
+      - site
+      - traffic
+      - paid
+    summary: Determine predominant traffic type for URLs
+    description: |
+      Analyzes traffic patterns for a list of URLs over the last 4 weeks and determines
+      the predominant traffic type (paid, earned, owned, or mixed) for each URL based on
+      a configurable percentage threshold. If any single traffic type meets or exceeds
+      the threshold, it is considered predominant; otherwise the traffic is classified as "mixed".
+
+      **_Prerequisite:_** This functionality queries traffic data. It is required to activate the "traffic-analysis" import first and run the "traffic-analysis-backfill" for 5 weeks to have enough data for the first time. After this, the import will keep the OpTel data up-to-date.
+    operationId: getPredominantTrafficType
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/PredominantTrafficRequest'
+    responses:
+      '200':
+        description: Predominant traffic analysis results
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/PredominantTrafficResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
 site-traffic-paid-top-pages:
   parameters:
     - $ref: './parameters.yaml#/siteId'

@@ -78,6 +78,7 @@ import EntitlementsController from './controllers/entitlements.js';
 import SandboxAuditController from './controllers/sandbox-audit.js';
 import UrlStoreController from './controllers/url-store.js';
 import PTA2Controller from './controllers/paid/pta2.js';
+import TrafficToolsController from './controllers/paid/traffic-tools.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -145,6 +146,7 @@ async function run(request, context) {
     const sandboxAuditController = SandboxAuditController(context);
     const urlStoreController = UrlStoreController(context, log);
     const pta2Controller = PTA2Controller(context, log, context.env);
+    const trafficToolsController = TrafficToolsController(context, log, context.env);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -182,6 +184,7 @@ async function run(request, context) {
       reportsController,
       urlStoreController,
       pta2Controller,
+      trafficToolsController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);

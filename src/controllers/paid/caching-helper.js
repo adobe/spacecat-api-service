@@ -13,10 +13,11 @@
 import {
   GetObjectCommand, PutObjectCommand, HeadObjectCommand,
 } from '@aws-sdk/client-s3';
-import { gzip } from 'zlib';
+import { gzip, gunzip } from 'zlib';
 import { promisify } from 'util';
 
 const gzipAsync = promisify(gzip);
+const gunzipAsync = promisify(gunzip);
 
 const PRE_SIGNED_MAX_AGE_SECONDS = 6 * 60 * 60; // 6 hours
 
@@ -113,10 +114,39 @@ async function addResultJsonToCache(s3, cacheKey, result, log) {
   }
 }
 
+async function getCachedJsonData(s3, key, log) {
+  try {
+    const { bucket, prefix } = parseS3Uri(key);
+
+    const getCmd = new GetObjectCommand({ Bucket: bucket, Key: prefix });
+    const response = await s3.s3Client.send(getCmd);
+
+    // Read the stream and decompress
+    const chunks = [];
+    // eslint-disable-next-line no-restricted-syntax
+    for await (const chunk of response.Body) {
+      chunks.push(chunk);
+    }
+    const compressedData = Buffer.concat(chunks);
+    const decompressed = await gunzipAsync(compressedData);
+    const jsonData = JSON.parse(decompressed.toString());
+
+    return jsonData;
+  } catch (err) {
+    if (err.name === 'NoSuchKey' || err.name === 'NotFound') {
+      log.info(`Cached data not found for key: ${key}`);
+      return null;
+    }
+    log.error(`Failed to fetch cached JSON data from ${key}: ${err.message}`);
+    return null;
+  }
+}
+
 export {
   fileExists,
   parseS3Uri,
   getS3CachedResult,
   addResultJsonToCache,
   getSignedUrlWithRetries,
+  getCachedJsonData,
 };
