@@ -287,6 +287,51 @@ describe('TopPaidOpportunitiesController', () => {
       expect(opportunities[1].impact).to.equal(3000);
     });
 
+    it('sorts opportunities with missing data fields using fallback to 0', async () => {
+      // Test branch where both projectedConversionValue and projectedTrafficValue are falsy
+      // Use CWV type to test the sort function with undefined data values
+      const opptyWithUndefinedData = createOpportunity({
+        id: 'oppty-undefined',
+        type: 'cwv',
+        data: undefined, // This will be filtered out by isValidOpportunity
+      });
+      const opptyWithNullValues = createOpportunity({
+        id: 'oppty-null-values',
+        type: 'cwv',
+        data: { someOtherField: 'value' }, // No projectedTrafficValue
+      });
+      const opptyWithValue = createOpportunity({
+        id: 'oppty-with-value',
+        type: 'cwv',
+        data: { projectedTrafficValue: 5000 },
+      });
+      setupOpportunityMocks(
+        mockContext.dataAccess.Opportunity,
+        [opptyWithUndefinedData, opptyWithNullValues, opptyWithValue],
+      );
+      // Set up specific mocks for each opportunity ID
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus
+        .withArgs('oppty-undefined', 'NEW')
+        .resolves([createSuggestion('https://example.com/page1', { opportunityId: 'oppty-undefined' })])
+        .withArgs('oppty-null-values', 'NEW')
+        .resolves([createSuggestion('https://example.com/page2', { opportunityId: 'oppty-null-values' })])
+        .withArgs('oppty-with-value', 'NEW')
+        .resolves([createSuggestion('https://example.com/page3', { opportunityId: 'oppty-with-value' })]);
+      mockAthenaClient.query.resolves([
+        createTrafficData({ url: 'https://example.com/page1', pageviews: '1000' }),
+        createTrafficData({ url: 'https://example.com/page2', pageviews: '1000' }),
+        createTrafficData({ url: 'https://example.com/page3', pageviews: '1000' }),
+      ]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
+      const opportunities = await response.json();
+      // Only the one with value should be returned (others filtered out by isValidOpportunity)
+      expect(opportunities).to.have.lengthOf(1);
+      expect(opportunities[0].opportunityId).to.equal('oppty-with-value');
+    });
+
     it('limits results to top 10 opportunities with max 2 per type', async () => {
       // Create opportunities with 5 different types to test both limits
       // The controller limits to 8 total after combineAndSortOpportunities limits to 10
@@ -955,6 +1000,49 @@ describe('TopPaidOpportunitiesController', () => {
   });
 
   describe('Edge cases and error handling', () => {
+    it('handles opportunities with undefined data gracefully', async () => {
+      // Tests fix for: Cannot read properties of undefined (reading 'projectedTrafficValue')
+      const opptyWithUndefinedData = {
+        getId: () => 'oppty-undefined-data',
+        getType: () => 'cwv',
+        getTitle: () => 'Opportunity with undefined data',
+        getDescription: () => 'Test description',
+        getTags: () => [],
+        getData: () => undefined, // This was causing the crash
+        getGuidance: () => ({ recommendations: [] }),
+      };
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [opptyWithUndefinedData]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      // Should be filtered out because data is undefined (no projectedTrafficValue)
+      expect(opportunities).to.have.lengthOf(0);
+    });
+
+    it('handles opportunities with null data gracefully', async () => {
+      const opptyWithNullData = {
+        getId: () => 'oppty-null-data',
+        getType: () => 'cwv',
+        getTitle: () => 'Opportunity with null data',
+        getDescription: () => 'Test description',
+        getTags: () => [],
+        getData: () => null, // Also should not crash
+        getGuidance: () => ({ recommendations: [] }),
+      };
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [opptyWithNullData]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      // Should be filtered out because data is null (no projectedTrafficValue)
+      expect(opportunities).to.have.lengthOf(0);
+    });
+
     it('handles multiple CWV opportunities in processOpportunityMatching', async () => {
       const cwvOppty1 = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       const cwvOppty2 = createOpportunity({ id: 'cwv-2', type: 'cwv' });
