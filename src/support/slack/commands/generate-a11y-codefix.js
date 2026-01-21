@@ -213,14 +213,18 @@ function GenerateA11yCodefixCommand(context) {
         AWS_SECRET_ACCESS_KEY,
         AWS_SESSION_TOKEN,
         SQS_SPACECAT_TO_MYSTIQUE_QUEUE_URL,
+        S3_MYSTIQUE_BUCKET_NAME,
       } = env;
 
       if (!SQS_SPACECAT_TO_MYSTIQUE_QUEUE_URL) {
         throw new Error('SQS_SPACECAT_TO_MYSTIQUE_QUEUE_URL not configured');
       }
 
-      // S3 bucket for code archives (used in message payload only)
-      const mystiqueBucket = 'spacecat-prod-mystique-assets';
+      // S3 bucket for code archives
+      const mystiqueBucket = S3_MYSTIQUE_BUCKET_NAME;
+      if (!mystiqueBucket) {
+        throw new Error('S3_MYSTIQUE_BUCKET_NAME not configured');
+      }
 
       // Initialize AWS clients
       const awsConfig = {

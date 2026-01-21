@@ -31,8 +31,8 @@ const mockSQSClient = sinon.stub().returns({
   send: mockSQSSend,
 });
 
-const mockHeadObjectCommand = sinon.stub();
-const mockSendMessageCommand = sinon.stub();
+const mockHeadObjectCommand = sinon.stub().returns({});
+const mockSendMessageCommand = sinon.stub().returns({});
 
 let GenerateA11yCodefixCommand;
 
@@ -125,8 +125,8 @@ describe('GenerateA11yCodefixCommand', () => {
         AWS_REGION: 'us-east-1',
         AWS_ACCESS_KEY_ID: 'test-key',
         AWS_SECRET_ACCESS_KEY: 'test-secret',
-        SQS_MYSTIQUE_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/123456789/mystique-queue',
-        S3_MYSTIQUE_BUCKET_NAME: 'test-bucket',
+        SQS_SPACECAT_TO_MYSTIQUE_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/123456789/mystique-queue',
+        S3_MYSTIQUE_BUCKET_NAME: 'spacecat-prod-mystique-assets',
       },
     };
 
@@ -465,7 +465,7 @@ describe('GenerateA11yCodefixCommand', () => {
       await command.handleExecution(['site-123', 'opp-456', 'sugg-789', '--archive', 'my-archive.tar.gz'], slackContext);
 
       expect(mockHeadObjectCommand).to.have.been.calledWith({
-        Bucket: 'test-bucket',
+        Bucket: 'spacecat-prod-mystique-assets',
         Key: 'tmp/codefix/source/my-archive.tar.gz',
       });
     });
@@ -504,7 +504,7 @@ describe('GenerateA11yCodefixCommand', () => {
       const messageBody = JSON.parse(messageCall.MessageBody);
       expect(messageBody.type).to.equal('guidance:accessibility-remediation');
       expect(messageBody.siteId).to.equal('site-123');
-      expect(messageBody).to.have.property('auditId');
+      expect(messageBody.auditId).to.equal('opp-456');
       expect(messageBody).to.have.property('time');
       expect(messageBody).to.not.have.property('deliveryType'); // Not in Python format
       expect(messageBody).to.not.have.property('aggregationKey'); // Should be in data
@@ -520,7 +520,7 @@ describe('GenerateA11yCodefixCommand', () => {
         target_selector: 'img.logo',
         suggestion_id: 'sugg-789',
       });
-      expect(messageBody.data.codeBucket).to.equal('test-bucket');
+      expect(messageBody.data.codeBucket).to.equal('spacecat-prod-mystique-assets');
       expect(messageBody.data.codePath).to.equal('tmp/codefix/source/test-archive.tar.gz');
     });
 
@@ -895,9 +895,7 @@ describe('GenerateA11yCodefixCommand', () => {
       expect(successCall.blocks[0].text.text).to.include('sqs-msg-456');
     });
 
-    it('uses default S3 bucket when not configured', async () => {
-      context.env.S3_MYSTIQUE_BUCKET_NAME = undefined;
-
+    it('uses S3 bucket from environment', async () => {
       dataAccessStub.Site.findById.resolves(createMockSite());
       dataAccessStub.Opportunity.findById.resolves(createMockOpportunity());
       dataAccessStub.Suggestion.findById.resolves(createMockSuggestion());
@@ -916,8 +914,22 @@ describe('GenerateA11yCodefixCommand', () => {
   });
 
   describe('Handle Execution Method - Error Handling', () => {
-    it('handles error when SQS_MYSTIQUE_QUEUE_URL is not configured', async () => {
-      context.env.SQS_MYSTIQUE_QUEUE_URL = undefined;
+    it('handles error when SQS_SPACECAT_TO_MYSTIQUE_QUEUE_URL is not configured', async () => {
+      context.env.SQS_SPACECAT_TO_MYSTIQUE_QUEUE_URL = undefined;
+
+      dataAccessStub.Site.findById.resolves(createMockSite());
+      dataAccessStub.Opportunity.findById.resolves(createMockOpportunity());
+      dataAccessStub.Suggestion.findById.resolves(createMockSuggestion());
+
+      const command = GenerateA11yCodefixCommand(context);
+      await command.handleExecution(['site-123', 'opp-456', 'sugg-789', '--archive', 'test.tar.gz'], slackContext);
+
+      expect(logStub.error).to.have.been.called;
+      expect(slackContext.say).to.have.been.calledWith(sinon.match(/Oops! Something went wrong/));
+    });
+
+    it('handles error when S3_MYSTIQUE_BUCKET_NAME is not configured', async () => {
+      context.env.S3_MYSTIQUE_BUCKET_NAME = undefined;
 
       dataAccessStub.Site.findById.resolves(createMockSite());
       dataAccessStub.Opportunity.findById.resolves(createMockOpportunity());
