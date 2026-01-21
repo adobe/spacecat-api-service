@@ -1,3 +1,10 @@
+# [1.291.0](https://github.com/adobe/spacecat-api-service/compare/v1.290.0...v1.291.0) (2026-01-21)
+
+
+### Features
+
+* Add filterByBaseURL parameter for locale-specific metrics filtering ([#1700](https://github.com/adobe/spacecat-api-service/issues/1700)) ([55b2236](https://github.com/adobe/spacecat-api-service/commit/55b2236db3d09344adbdf39f1aeed94f1e1d593d))
+
 # [1.290.0](https://github.com/adobe/spacecat-api-service/compare/v1.289.0...v1.290.0) (2026-01-20)
 
 
