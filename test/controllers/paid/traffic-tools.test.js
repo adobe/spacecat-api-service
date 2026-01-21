@@ -454,5 +454,178 @@ describe('TrafficToolsController', () => {
       expect(body[0].predominantTraffic).to.equal('paid');
       expect(body[0].details.paid).to.equal(100);
     });
+
+    it('returns correct results when channel parameter is provided', async () => {
+      mockContext.params.channel = 'search';
+      const mockAthenaResults = [
+        {
+          path: '/page1',
+          trf_type: 'paid',
+          trf_channel: 'search',
+          pageviews: '850',
+        },
+        {
+          path: '/page1',
+          trf_type: 'earned',
+          trf_channel: 'search',
+          pageviews: '100',
+        },
+        {
+          path: '/page1',
+          trf_type: 'owned',
+          trf_channel: 'search',
+          pageviews: '50',
+        },
+        {
+          path: '/page2',
+          trf_type: 'paid',
+          trf_channel: 'search',
+          pageviews: '400',
+        },
+        {
+          path: '/page2',
+          trf_type: 'earned',
+          trf_channel: 'search',
+          pageviews: '400',
+        },
+        {
+          path: '/page2',
+          trf_type: 'owned',
+          trf_channel: 'search',
+          pageviews: '200',
+        },
+      ];
+      mockAthenaQuery.resolves(mockAthenaResults);
+
+      const controller = TrafficToolsController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPredominantTraffic();
+      expect(res.status).to.equal(200);
+
+      const gzippedBuffer = Buffer.from(await res.arrayBuffer());
+      const decompressed = await gunzipAsync(gzippedBuffer);
+      const body = JSON.parse(decompressed.toString());
+
+      expect(body).to.be.an('array').with.lengthOf(2);
+      expect(body[0].url).to.equal('https://example.com/page1');
+      expect(body[0].predominantTraffic).to.equal('paid');
+      expect(body[0].details.paid).to.equal(85);
+
+      // Verify query includes trf_channel dimension
+      const query = mockAthenaQuery.args[0][0];
+      expect(query).to.include('trf_channel');
+    });
+
+    it('filters out rows that do not match the channel', async () => {
+      mockContext.params.channel = 'social';
+      const mockAthenaResults = [
+        {
+          path: '/page1',
+          trf_type: 'paid',
+          trf_channel: 'social',
+          pageviews: '800',
+        },
+        {
+          path: '/page1',
+          trf_type: 'earned',
+          trf_channel: 'social',
+          pageviews: '150',
+        },
+        {
+          path: '/page1',
+          trf_type: 'owned',
+          trf_channel: 'social',
+          pageviews: '50',
+        },
+        {
+          path: '/page1',
+          trf_type: 'paid',
+          trf_channel: 'search',
+          pageviews: '500',
+        },
+        {
+          path: '/page1',
+          trf_type: 'earned',
+          trf_channel: 'search',
+          pageviews: '300',
+        },
+        {
+          path: '/page1',
+          trf_type: 'owned',
+          trf_channel: 'search',
+          pageviews: '200',
+        },
+      ];
+      mockAthenaQuery.resolves(mockAthenaResults);
+
+      const controller = TrafficToolsController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPredominantTraffic();
+      expect(res.status).to.equal(200);
+
+      const gzippedBuffer = Buffer.from(await res.arrayBuffer());
+      const decompressed = await gunzipAsync(gzippedBuffer);
+      const body = JSON.parse(decompressed.toString());
+
+      // Should only use social channel data (800+150+50=1000)
+      expect(body[0].predominantTraffic).to.equal('paid');
+      expect(body[0].details.paid).to.equal(80); // 800/1000
+      expect(body[0].details.earned).to.equal(15); // 150/1000
+      expect(body[0].details.owned).to.equal(5); // 50/1000
+    });
+
+    it('logs channel parameter when provided', async () => {
+      mockContext.params.channel = 'display';
+      const mockAthenaResults = [
+        {
+          path: '/page1',
+          trf_type: 'paid',
+          trf_channel: 'display',
+          pageviews: '850',
+        },
+        {
+          path: '/page1',
+          trf_type: 'earned',
+          trf_channel: 'display',
+          pageviews: '100',
+        },
+        {
+          path: '/page1',
+          trf_type: 'owned',
+          trf_channel: 'display',
+          pageviews: '50',
+        },
+      ];
+      mockAthenaQuery.resolves(mockAthenaResults);
+
+      const controller = TrafficToolsController(mockContext, mockLog, mockEnv);
+      await controller.getPredominantTraffic();
+
+      expect(mockLog.info).to.have.been.calledWith(sinon.match(/and channel display/));
+    });
+
+    it('works correctly without channel parameter (regression)', async () => {
+      // Ensure channel is not set
+      delete mockContext.params.channel;
+
+      const mockAthenaResults = [
+        { path: '/page1', trf_type: 'paid', pageviews: '850' },
+        { path: '/page1', trf_type: 'earned', pageviews: '100' },
+        { path: '/page1', trf_type: 'owned', pageviews: '50' },
+      ];
+      mockAthenaQuery.resolves(mockAthenaResults);
+
+      const controller = TrafficToolsController(mockContext, mockLog, mockEnv);
+      const res = await controller.getPredominantTraffic();
+      expect(res.status).to.equal(200);
+
+      const gzippedBuffer = Buffer.from(await res.arrayBuffer());
+      const decompressed = await gunzipAsync(gzippedBuffer);
+      const body = JSON.parse(decompressed.toString());
+
+      expect(body[0].predominantTraffic).to.equal('paid');
+
+      // Verify query was called and log does not mention channel
+      expect(mockLog.info).to.have.been.calledWith(sinon.match(/Determining predominant traffic for 2 URLs/));
+      expect(mockLog.info).to.not.have.been.calledWith(sinon.match(/and channel/));
+    });
   });
 });
