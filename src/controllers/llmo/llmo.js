@@ -929,7 +929,9 @@ function LlmoController(ctx) {
   const createOrUpdateEdgeConfig = async (context) => {
     const { log } = context;
     const { siteId } = context.params;
-    const { enhancements, tokowakaEnabled } = context.data || {};
+    const {
+      enhancements, tokowakaEnabled, forceFail, patches = {},
+    } = context.data || {};
 
     log.info(`createOrUpdateEdgeConfig request received for site ${siteId}, data=${JSON.stringify(context.data)}`);
 
@@ -941,8 +943,12 @@ function LlmoController(ctx) {
       return badRequest('enhancements field must be a boolean');
     }
 
-    if (tokowakaEnabled === undefined && enhancements === undefined) {
-      return badRequest('No edge optimize configuration parameters provided');
+    if (forceFail !== undefined && typeof forceFail !== 'boolean') {
+      return badRequest('forceFail field must be a boolean');
+    }
+
+    if (patches !== undefined && typeof patches !== 'object') {
+      return badRequest('patches field must be an object');
     }
 
     try {
@@ -966,13 +972,16 @@ function LlmoController(ctx) {
           },
         );
       } else {
-        metaconfig = {
-          ...metaconfig,
-          siteId: site.getId(),
-          ...(tokowakaEnabled !== undefined && { tokowakaEnabled }),
-          ...(enhancements !== undefined && { enhancements }),
-        };
-        await tokowakaClient.uploadMetaconfig(baseURL, metaconfig);
+        metaconfig = await tokowakaClient.updateMetaconfig(
+          baseURL,
+          site.getId(),
+          {
+            tokowakaEnabled,
+            enhancements,
+            patches,
+            forceFail,
+          },
+        );
       }
 
       const currentConfig = site.getConfig();
