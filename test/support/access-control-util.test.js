@@ -66,6 +66,58 @@ describe('Access Control Util', () => {
     expect(accessControlUtil.hasAdminAccess()).to.be.true;
   });
 
+  it('should check if user has edge deploy access', () => {
+    const authInfo = new AuthInfo()
+      .withType('jwt')
+      .withProfile({
+        is_admin: false,
+      });
+    authInfo.isEdgeDeployer = () => true;
+
+    const context = {
+      pathInfo: {
+        headers: { 'x-product': 'llmo' },
+      },
+      attributes: { authInfo },
+      dataAccess: {
+        Entitlement: {
+          findByOrganizationIdAndProductCode: sinon.stub(),
+        },
+        TrialUser: {},
+        OrganizationIdentityProvider: {},
+      },
+    };
+
+    const accessControlUtil = AccessControlUtil.fromContext(context);
+    expect(accessControlUtil.hasEdgeDeployAccess()).to.be.true;
+  });
+
+  it('should return false when user lacks edge deploy access', () => {
+    const authInfo = new AuthInfo()
+      .withType('jwt')
+      .withProfile({
+        is_admin: false,
+      });
+    authInfo.isEdgeDeployer = () => false;
+
+    const context = {
+      pathInfo: {
+        headers: { 'x-product': 'llmo' },
+      },
+      attributes: { authInfo },
+      dataAccess: {
+        Entitlement: {
+          findByOrganizationIdAndProductCode: sinon.stub(),
+        },
+        TrialUser: {},
+        OrganizationIdentityProvider: {},
+      },
+    };
+
+    const accessControlUtil = AccessControlUtil.fromContext(context);
+    expect(accessControlUtil.hasEdgeDeployAccess()).to.be.false;
+  });
+
   it('should throw an error if entity is not provided', async () => {
     const context = {
       pathInfo: {
