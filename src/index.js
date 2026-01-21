@@ -80,6 +80,7 @@ import UrlStoreController from './controllers/url-store.js';
 import PTA2Controller from './controllers/paid/pta2.js';
 import TrafficToolsController from './controllers/paid/traffic-tools.js';
 import BotBlockerController from './controllers/bot-blocker.js';
+import SentimentController from './controllers/sentiment.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -148,7 +149,8 @@ async function run(request, context) {
     const urlStoreController = UrlStoreController(context, log);
     const pta2Controller = PTA2Controller(context, log, context.env);
     const trafficToolsController = TrafficToolsController(context, log, context.env);
-    const botBlockerController = BotBlockerController(context, log);
+const botBlockerController = BotBlockerController(context, log);
+    const sentimentController = SentimentController(context, log);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -187,7 +189,8 @@ async function run(request, context) {
       urlStoreController,
       pta2Controller,
       trafficToolsController,
-      botBlockerController,
+botBlockerController,
+      sentimentController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
