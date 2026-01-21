@@ -1,3 +1,31 @@
+# [1.293.0](https://github.com/adobe/spacecat-api-service/compare/v1.292.1...v1.293.0) (2026-01-21)
+
+
+### Features
+
+* get predominant-traffic by channel ([#1712](https://github.com/adobe/spacecat-api-service/issues/1712)) ([686d501](https://github.com/adobe/spacecat-api-service/commit/686d5017b8ac16339059751e4cb6846f2c151b71))
+
+## [1.292.1](https://github.com/adobe/spacecat-api-service/compare/v1.292.0...v1.292.1) (2026-01-21)
+
+
+### Bug Fixes
+
+* create and update tokowaka config api ([#1711](https://github.com/adobe/spacecat-api-service/issues/1711)) ([32a84f3](https://github.com/adobe/spacecat-api-service/commit/32a84f36c53809c3051c362dd4475b76d88dd28a))
+
+# [1.292.0](https://github.com/adobe/spacecat-api-service/compare/v1.291.0...v1.292.0) (2026-01-21)
+
+
+### Features
+
+* **llmo:** enable wikipedia-analysis audit during onboarding ([#1708](https://github.com/adobe/spacecat-api-service/issues/1708)) ([8c23d92](https://github.com/adobe/spacecat-api-service/commit/8c23d92dae12c2a713e686eb81bb8f691541d3ff))
+
+# [1.291.0](https://github.com/adobe/spacecat-api-service/compare/v1.290.0...v1.291.0) (2026-01-21)
+
+
+### Features
+
+* Add filterByBaseURL parameter for locale-specific metrics filtering ([#1700](https://github.com/adobe/spacecat-api-service/issues/1700)) ([55b2236](https://github.com/adobe/spacecat-api-service/commit/55b2236db3d09344adbdf39f1aeed94f1e1d593d))
+
 # [1.290.0](https://github.com/adobe/spacecat-api-service/compare/v1.289.0...v1.290.0) (2026-01-20)
 
 

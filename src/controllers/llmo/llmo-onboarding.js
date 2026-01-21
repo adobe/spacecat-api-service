@@ -773,6 +773,7 @@ export async function removeLlmoConfig(site, config, context) {
     'geo-brand-presence-free',
     'geo-brand-presence-paid',
     'geo-brand-presence-daily',
+    'wikipedia-analysis',
   ];
 
   // Update configuration to disable audits
@@ -901,7 +902,7 @@ export async function performLlmoOnboarding(params, context) {
     await updateIndexConfig(dataFolder, context);
 
     // Enable audits
-    await enableAudits(site, context, [...BASIC_AUDITS, 'llm-error-pages', 'llmo-customer-analysis']);
+    await enableAudits(site, context, [...BASIC_AUDITS, 'llm-error-pages', 'llmo-customer-analysis', 'wikipedia-analysis']);
 
     // Get current site config
     const siteConfig = site.getConfig();
@@ -938,7 +939,7 @@ export async function performLlmoOnboarding(params, context) {
     await site.save();
 
     // Trigger audits
-    await triggerAudits([...BASIC_AUDITS, 'llmo-customer-analysis'], context, site);
+    await triggerAudits([...BASIC_AUDITS, 'llmo-customer-analysis', 'wikipedia-analysis'], context, site);
 
     return {
       siteId: site.getId(),
