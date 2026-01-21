@@ -1219,7 +1219,7 @@ function SuggestionsController(ctx, sqs, env) {
             const currentData = suggestion.getData();
             suggestion.setData({
               ...currentData,
-              tokowakaDeployed: deploymentTimestamp,
+              edgeDeployed: deploymentTimestamp,
             });
             suggestion.setUpdatedBy('tokowaka-deployment');
             return suggestion.save();
@@ -1291,7 +1291,7 @@ function SuggestionsController(ctx, sqs, env) {
             const currentData = suggestion.getData();
             suggestion.setData({
               ...currentData,
-              tokowakaDeployed: deploymentTimestamp,
+              edgeDeployed: deploymentTimestamp,
             });
             suggestion.setUpdatedBy('tokowaka-deployment');
             // eslint-disable-next-line no-await-in-loop
@@ -1352,7 +1352,7 @@ function SuggestionsController(ctx, sqs, env) {
                     const coveredData = coveredSuggestion.getData();
                     coveredSuggestion.setData({
                       ...coveredData,
-                      tokowakaDeployed: deploymentTimestamp,
+                      edgeDeployed: deploymentTimestamp,
                       coveredByDomainWide: suggestion.getId(),
                     });
                     coveredSuggestion.setUpdatedBy('domain-wide-deployment');
@@ -1410,7 +1410,7 @@ function SuggestionsController(ctx, sqs, env) {
             const currentData = skippedSuggestion.getData();
             skippedSuggestion.setData({
               ...currentData,
-              tokowakaDeployed: deploymentTimestamp,
+              edgeDeployed: deploymentTimestamp,
               coveredByDomainWide: 'same-batch-deployment',
               skippedInDeployment: true,
             });
@@ -1509,7 +1509,7 @@ function SuggestionsController(ctx, sqs, env) {
         });
       } else {
         // For rollback, check if suggestion has been deployed
-        const hasBeenDeployed = suggestion.getData()?.tokowakaDeployed;
+        const hasBeenDeployed = suggestion.getData()?.edgeDeployed;
         if (!hasBeenDeployed) {
           failedSuggestions.push({
             uuid: suggestionId,
@@ -1552,9 +1552,9 @@ function SuggestionsController(ctx, sqs, env) {
               context.log.info(`Removed prerender config from metaconfig for domain-wide suggestion ${suggestion.getId()}`);
             }
 
-            // Remove tokowakaDeployed from the domain-wide suggestion
+            // Remove edgeDeployed from the domain-wide suggestion
             const currentData = suggestion.getData();
-            delete currentData.tokowakaDeployed;
+            delete currentData.edgeDeployed;
             suggestion.setData(currentData);
             suggestion.setUpdatedBy('tokowaka-rollback');
             // eslint-disable-next-line no-await-in-loop
@@ -1574,7 +1574,7 @@ function SuggestionsController(ctx, sqs, env) {
               await Promise.all(
                 coveredSuggestions.map(async (coveredSuggestion) => {
                   const coveredData = coveredSuggestion.getData();
-                  delete coveredData.tokowakaDeployed;
+                  delete coveredData.edgeDeployed;
                   delete coveredData.coveredByDomainWide;
                   coveredSuggestion.setData(coveredData);
                   coveredSuggestion.setUpdatedBy('domain-wide-rollback');
@@ -1623,11 +1623,11 @@ function SuggestionsController(ctx, sqs, env) {
           failedSuggestions: ineligibleSuggestions,
         } = result;
 
-        // Update successfully rolled back suggestions - remove tokowakaDeployed timestamp
+        // Update successfully rolled back suggestions - remove edgeDeployed timestamp
         succeededSuggestions = await Promise.all(
           processedSuggestions.map(async (suggestion) => {
             const currentData = suggestion.getData();
-            delete currentData.tokowakaDeployed;
+            delete currentData.edgeDeployed;
             suggestion.setData(currentData);
             suggestion.setUpdatedBy('tokowaka-rollback');
             return suggestion.save();

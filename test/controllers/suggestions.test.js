@@ -3344,10 +3344,10 @@ describe('Suggestions Controller', () => {
       expect(firstSugg.setData.calledOnce).to.be.true;
       expect(secondSugg.setData.calledOnce).to.be.true;
 
-      // Verify tokowakaDeployed field was added
+      // Verify edgeDeployed field was added
       const firstCallArgs = firstSugg.setData.firstCall.args[0];
-      expect(firstCallArgs).to.have.property('tokowakaDeployed');
-      expect(firstCallArgs.tokowakaDeployed).to.be.a('number');
+      expect(firstCallArgs).to.have.property('edgeDeployed');
+      expect(firstCallArgs.edgeDeployed).to.be.a('number');
 
       // Verify updatedBy was set
       expect(firstSugg.setUpdatedBy.calledWith('tokowaka-deployment')).to.be.true;
@@ -3840,8 +3840,8 @@ describe('Suggestions Controller', () => {
         // Verify domain-wide suggestion was marked as deployed
         expect(domainWideSuggestion.setData.calledOnce).to.be.true;
         const setDataArgs = domainWideSuggestion.setData.firstCall.args[0];
-        expect(setDataArgs).to.have.property('tokowakaDeployed');
-        expect(setDataArgs.tokowakaDeployed).to.be.a('number');
+        expect(setDataArgs).to.have.property('edgeDeployed');
+        expect(setDataArgs.edgeDeployed).to.be.a('number');
         expect(domainWideSuggestion.setUpdatedBy.calledWith('tokowaka-deployment')).to.be.true;
         expect(domainWideSuggestion.save.calledOnce).to.be.true;
       });
@@ -3870,7 +3870,7 @@ describe('Suggestions Controller', () => {
         expect(regularSuggestions[1].setData.calledOnce).to.be.true;
 
         const firstRegularData = regularSuggestions[0].setData.firstCall.args[0];
-        expect(firstRegularData).to.have.property('tokowakaDeployed');
+        expect(firstRegularData).to.have.property('edgeDeployed');
         expect(firstRegularData).to.have.property('coveredByDomainWide');
         expect(firstRegularData).to.have.property('skippedInDeployment', true);
       });
@@ -3960,7 +3960,7 @@ describe('Suggestions Controller', () => {
           getRank: () => 5,
           getData: () => ({
             url: 'https://example.com/page4',
-            tokowakaDeployed: Date.now() - 10000,
+            edgeDeployed: Date.now() - 10000,
           }),
           getKpiDeltas: () => ({}),
           getCreatedAt: () => '2025-01-15T10:00:00Z',
@@ -4431,7 +4431,7 @@ describe('Suggestions Controller', () => {
     let headingsOpportunity;
 
     beforeEach(() => {
-      // Mock suggestions with tokowakaDeployed timestamp
+      // Mock suggestions with edgeDeployed timestamp
       tokowakaSuggestions = [
         {
           getId: () => SUGGESTION_IDS[0],
@@ -4447,7 +4447,7 @@ describe('Suggestions Controller', () => {
               action: 'replace',
               selector: 'h1.test-selector',
             },
-            tokowakaDeployed: '2025-01-01T00:00:00.000Z',
+            edgeDeployed: '2025-01-01T00:00:00.000Z',
           }),
           getKpiDeltas: () => ({}),
           getCreatedAt: () => '2025-01-15T10:00:00Z',
@@ -4471,7 +4471,7 @@ describe('Suggestions Controller', () => {
               action: 'replace',
               selector: 'h2.test-selector',
             },
-            tokowakaDeployed: '2025-01-01T00:00:00.000Z',
+            edgeDeployed: '2025-01-01T00:00:00.000Z',
           }),
           getKpiDeltas: () => ({}),
           getCreatedAt: () => '2025-01-15T10:00:00Z',
@@ -4687,11 +4687,11 @@ describe('Suggestions Controller', () => {
       expect(body.metadata.success).to.equal(1);
       expect(body.metadata.failed).to.equal(0);
 
-      // Verify tokowakaDeployed was removed
+      // Verify edgeDeployed was removed
       const suggestion = tokowakaSuggestions[0];
       expect(suggestion.setData.calledOnce).to.be.true;
       const dataArg = suggestion.setData.firstCall.args[0];
-      expect(dataArg).to.not.have.property('tokowakaDeployed');
+      expect(dataArg).to.not.have.property('edgeDeployed');
 
       // Verify setUpdatedBy was called
       expect(suggestion.setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
@@ -4700,8 +4700,8 @@ describe('Suggestions Controller', () => {
       expect(suggestion.save.calledOnce).to.be.true;
     });
 
-    it('should return 400 for suggestions without tokowakaDeployed during rollback', async () => {
-      // Remove tokowakaDeployed from suggestion
+    it('should return 400 for suggestions without edgeDeployed during rollback', async () => {
+      // Remove edgeDeployed from suggestion
       tokowakaSuggestions[0].getData = () => ({
         type: 'headings',
         checkType: 'heading-empty',
@@ -4866,7 +4866,7 @@ describe('Suggestions Controller', () => {
           allowedRegexPatterns: ['/*'],
           pathPattern: '/*',
           scope: 'domain-wide',
-          tokowakaDeployed: Date.now(),
+          edgeDeployed: Date.now(),
         }),
         getKpiDeltas: () => ({}),
         getCreatedAt: () => '2025-01-15T10:00:00Z',
@@ -4887,7 +4887,7 @@ describe('Suggestions Controller', () => {
           getRank: () => 2,
           getData: () => ({
             url: 'https://example.com/page1',
-            tokowakaDeployed: Date.now(),
+            edgeDeployed: Date.now(),
             coveredByDomainWide: SUGGESTION_IDS[0],
           }),
           getKpiDeltas: () => ({}),
@@ -4906,7 +4906,7 @@ describe('Suggestions Controller', () => {
           getRank: () => 3,
           getData: () => ({
             url: 'https://example.com/page2',
-            tokowakaDeployed: Date.now(),
+            edgeDeployed: Date.now(),
             coveredByDomainWide: SUGGESTION_IDS[0],
           }),
           getKpiDeltas: () => ({}),
@@ -4999,7 +4999,7 @@ describe('Suggestions Controller', () => {
       // Verify domain-wide suggestion data was updated
       expect(domainWideSuggestion.setData.calledOnce).to.be.true;
       const domainWideData = domainWideSuggestion.setData.firstCall.args[0];
-      expect(domainWideData).to.not.have.property('tokowakaDeployed');
+      expect(domainWideData).to.not.have.property('edgeDeployed');
       expect(domainWideSuggestion.setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
       expect(domainWideSuggestion.save.calledOnce).to.be.true;
 
@@ -5007,7 +5007,7 @@ describe('Suggestions Controller', () => {
       coveredSuggestions.forEach((suggestion) => {
         expect(suggestion.setData.calledOnce).to.be.true;
         const suggestionData = suggestion.setData.firstCall.args[0];
-        expect(suggestionData).to.not.have.property('tokowakaDeployed');
+        expect(suggestionData).to.not.have.property('edgeDeployed');
         expect(suggestionData).to.not.have.property('coveredByDomainWide');
         expect(suggestion.setUpdatedBy.calledWith('domain-wide-rollback')).to.be.true;
         expect(suggestion.save.calledOnce).to.be.true;
