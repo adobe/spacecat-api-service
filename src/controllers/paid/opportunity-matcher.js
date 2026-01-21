@@ -384,8 +384,8 @@ function combineAndSortOpportunities(categorizedOpportunities, matchResults) {
   // Forms opportunities use projectedConversionValue
   // CWV opportunities use projectedTrafficValue
   filteredOpportunitiesData.sort((a, b) => {
-    const aValue = a.data?.projectedConversionValue || a.data?.projectedTrafficValue || 0;
-    const bValue = b.data?.projectedConversionValue || b.data?.projectedTrafficValue || 0;
+    const aValue = a.data.projectedConversionValue || a.data.projectedTrafficValue;
+    const bValue = b.data.projectedConversionValue || b.data.projectedTrafficValue;
     return bValue - aValue;
   });
 
