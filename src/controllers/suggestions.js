@@ -590,10 +590,11 @@ function SuggestionsController(ctx, sqs, env) {
         };
       }
 
+      const currentStatus = suggestion.getStatus();
       try {
-        if (suggestion.getStatus() !== status) {
+        if (currentStatus !== status) {
           // Validate REJECTED status transition
-          if (status === 'REJECTED') {
+          if (status === SuggestionModel.STATUSES.REJECTED) {
             // Check admin access for REJECTED status
             if (!accessControlUtil.hasAdminAccess()) {
               return {
@@ -605,8 +606,7 @@ function SuggestionsController(ctx, sqs, env) {
             }
 
             // Only allow REJECTED from PENDING_VALIDATION
-            const currentStatus = suggestion.getStatus();
-            if (currentStatus !== 'PENDING_VALIDATION') {
+            if (currentStatus !== SuggestionModel.STATUSES.PENDING_VALIDATION) {
               return {
                 index,
                 uuid: id,
