@@ -143,6 +143,7 @@ function TrafficToolsController(context, log, env) {
   async function getPredominantTraffic() {
     /* c8 ignore next 1 */
     const siteId = context.params?.siteId;
+    const channel = context.params?.channel;
     const { data } = context;
 
     // Validate request data
@@ -169,12 +170,15 @@ function TrafficToolsController(context, log, env) {
       // Generate temporal condition for last 4 weeks
       const temporalCondition = generateTemporalCondition();
 
-      log.info(`Determining predominant traffic for ${urls.length} URLs with threshold ${predominantTrafficPct}%`);
+      log.info(`Determining predominant traffic for ${urls.length} URLs with threshold ${predominantTrafficPct}%${channel ? ` and channel ${channel}` : ''}`);
       log.debug(`Temporal condition: ${temporalCondition}`);
 
       // Build Athena query
       const tableName = `${rumMetricsDatabase}.${rumMetricsCompactTable}`;
       const dimensions = ['trf_type', 'path'];
+      if (channel) {
+        dimensions.push('trf_channel');
+      }
       const dimensionColumns = dimensions.join(', ');
       const dimensionColumnsPrefixed = dimensions.map((col) => `a.${col}`).join(', ');
 
@@ -198,7 +202,10 @@ function TrafficToolsController(context, log, env) {
       const resultLocation = `${ATHENA_TEMP_FOLDER}/${outPrefix}`;
       const athenaClient = AWSAthenaClient.fromContext(context, resultLocation);
 
-      const rawResults = await athenaClient.query(query, rumMetricsDatabase, description);
+      let rawResults = await athenaClient.query(query, rumMetricsDatabase, description);
+      if (channel) {
+        rawResults = rawResults.filter((row) => row.trf_channel === channel);
+      }
 
       log.info(`Athena query returned ${rawResults.length} rows`);
 
