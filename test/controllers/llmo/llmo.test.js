@@ -101,7 +101,7 @@ describe('LlmoController', () => {
     mockTokowakaClient = {
       fetchMetaconfig: sinon.stub(),
       createMetaconfig: sinon.stub(),
-      uploadMetaconfig: sinon.stub(),
+      updateMetaconfig: sinon.stub(),
     };
 
     // Set up esmock once for all tests
@@ -258,7 +258,7 @@ describe('LlmoController', () => {
     // Reset mockTokowakaClient
     mockTokowakaClient.fetchMetaconfig.reset();
     mockTokowakaClient.createMetaconfig.reset();
-    mockTokowakaClient.uploadMetaconfig.reset();
+    mockTokowakaClient.updateMetaconfig.reset();
 
     mockDataAccess = {
       Site: { findById: sinon.stub().resolves(mockSite) },
@@ -3294,15 +3294,18 @@ describe('LlmoController', () => {
       };
 
       mockTokowakaClient.fetchMetaconfig.resolves(existingMetaconfig);
-      mockTokowakaClient.uploadMetaconfig.resolves();
+      mockTokowakaClient.updateMetaconfig.resolves({
+        ...existingMetaconfig,
+        tokowakaEnabled: edgeConfigContext.data.tokowakaEnabled,
+      });
 
       const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
       expect(responseBody.tokowakaEnabled).to.equal(true);
-      expect(mockTokowakaClient.uploadMetaconfig).to.have.been.called;
-      const uploadedMetaconfig = mockTokowakaClient.uploadMetaconfig.firstCall.args[1];
+      expect(mockTokowakaClient.updateMetaconfig).to.have.been.called;
+      const uploadedMetaconfig = mockTokowakaClient.updateMetaconfig.firstCall.args[2];
       expect(uploadedMetaconfig.tokowakaEnabled).to.equal(true);
       expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.called;
       expect(mockSite.save).to.have.been.called;
@@ -3317,14 +3320,17 @@ describe('LlmoController', () => {
 
       edgeConfigContext.data = { tokowakaEnabled: false };
       mockTokowakaClient.fetchMetaconfig.resolves(existingMetaconfig);
-      mockTokowakaClient.uploadMetaconfig.resolves();
+      mockTokowakaClient.updateMetaconfig.resolves({
+        ...existingMetaconfig,
+        tokowakaEnabled: edgeConfigContext.data.tokowakaEnabled,
+      });
 
       const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
       expect(responseBody.tokowakaEnabled).to.equal(false);
-      const uploadedMetaconfig = mockTokowakaClient.uploadMetaconfig.firstCall.args[1];
+      const uploadedMetaconfig = mockTokowakaClient.updateMetaconfig.firstCall.args[2];
       expect(uploadedMetaconfig.tokowakaEnabled).to.equal(false);
       expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(
         sinon.match({ enabled: false }),
@@ -3352,24 +3358,22 @@ describe('LlmoController', () => {
       expect(mockTokowakaClient.createMetaconfig).to.have.been.called;
     });
 
-    it('should return bad request when no parameters are provided', async () => {
+    it('should create config when no parameters are provided', async () => {
       edgeConfigContext.data = {};
 
       const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
 
-      expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.include('No edge optimize configuration parameters provided');
+      expect(result.status).to.equal(200);
+      expect(mockTokowakaClient.createMetaconfig).to.have.been.called;
     });
 
-    it('should return bad request when context.data is undefined', async () => {
+    it('should create config when context.data is undefined', async () => {
       edgeConfigContext.data = undefined;
 
       const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
 
-      expect(result.status).to.equal(400);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.include('No edge optimize configuration parameters provided');
+      expect(result.status).to.equal(200);
+      expect(mockTokowakaClient.createMetaconfig).to.have.been.called;
     });
 
     it('should return bad request when tokowakaEnabled is not boolean', async () => {
@@ -3380,6 +3384,26 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.include('tokowakaEnabled');
+    });
+
+    it('should return bad request when forceFail is not boolean', async () => {
+      edgeConfigContext.data = { forceFail: 'true' };
+
+      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('forceFail');
+    });
+
+    it('should return bad request when patches is not object', async () => {
+      edgeConfigContext.data = { patches: 'true' };
+
+      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('patches');
     });
 
     it('should handle errors gracefully', async () => {
@@ -3422,14 +3446,13 @@ describe('LlmoController', () => {
 
       edgeConfigContext.data = { enhancements: true };
       mockTokowakaClient.fetchMetaconfig.resolves(existingMetaconfig);
-      mockTokowakaClient.uploadMetaconfig.resolves();
+      mockTokowakaClient.updateMetaconfig.resolves();
 
       const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
 
       expect(result.status).to.equal(200);
-      const uploadedMetaconfig = mockTokowakaClient.uploadMetaconfig.firstCall.args[1];
+      const uploadedMetaconfig = mockTokowakaClient.updateMetaconfig.firstCall.args[2];
       expect(uploadedMetaconfig.enhancements).to.equal(true);
-      expect(uploadedMetaconfig.tokowakaEnabled).to.equal(true); // Should remain unchanged
     });
 
     it('should update both tokowakaEnabled and enhancements when both provided', async () => {
@@ -3442,12 +3465,12 @@ describe('LlmoController', () => {
 
       edgeConfigContext.data = { tokowakaEnabled: true, enhancements: true };
       mockTokowakaClient.fetchMetaconfig.resolves(existingMetaconfig);
-      mockTokowakaClient.uploadMetaconfig.resolves();
+      mockTokowakaClient.updateMetaconfig.resolves();
 
       const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
 
       expect(result.status).to.equal(200);
-      const uploadedMetaconfig = mockTokowakaClient.uploadMetaconfig.firstCall.args[1];
+      const uploadedMetaconfig = mockTokowakaClient.updateMetaconfig.firstCall.args[2];
       expect(uploadedMetaconfig.tokowakaEnabled).to.equal(true);
       expect(uploadedMetaconfig.enhancements).to.equal(true);
     });
