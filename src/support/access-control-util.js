@@ -89,6 +89,10 @@ export default class AccessControlUtil {
     return this.authInfo.isAdmin();
   }
 
+  hasEdgeDeployAccess() {
+    return this.authInfo.isEdgeDeployer();
+  }
+
   async validateEntitlement(org, site, productCode) {
     // Use TierClient to fetch entitlement
     let tierClient;

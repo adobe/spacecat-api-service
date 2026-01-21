@@ -3182,6 +3182,7 @@ describe('Suggestions Controller', () => {
     let s3ClientSendStub;
     let tokowakaSuggestions;
     let headingsOpportunity;
+    let edgeAccessStub;
 
     beforeEach(() => {
       tokowakaSuggestions = [
@@ -3299,6 +3300,7 @@ describe('Suggestions Controller', () => {
         error: sandbox.stub(),
         debug: sandbox.stub(),
       };
+      edgeAccessStub = sandbox.stub(AccessControlUtil.prototype, 'hasEdgeDeployAccess').returns(true);
     });
 
     it('should deploy headings suggestions successfully', async () => {
@@ -3460,6 +3462,44 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(403);
       const body = await response.json();
       expect(body.message).to.equal('User does not belong to the organization');
+    });
+
+    it('should return 403 if user does not have edge deploy access', async () => {
+      edgeAccessStub.returns(false);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.equal('User does not have edge deploy access');
+    });
+
+    it('should return 403 if user does not have edge deploy access', async () => {
+      edgeAccessStub.returns(false);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.equal('User does not have edge deploy access');
     });
 
     it('should return 404 if opportunity not found', async () => {
@@ -4429,6 +4469,7 @@ describe('Suggestions Controller', () => {
     let s3ClientSendStub;
     let tokowakaSuggestions;
     let headingsOpportunity;
+    let edgeAccessStub;
 
     beforeEach(() => {
       // Mock suggestions with tokowakaDeployed timestamp
@@ -4575,6 +4616,7 @@ describe('Suggestions Controller', () => {
         error: sandbox.stub(),
         debug: sandbox.stub(),
       };
+      edgeAccessStub = sandbox.stub(AccessControlUtil.prototype, 'hasEdgeDeployAccess').returns(true);
     });
 
     it('should return 400 when no data provided', async () => {
@@ -4650,6 +4692,44 @@ describe('Suggestions Controller', () => {
       });
 
       expect(response.status).to.equal(403);
+    });
+
+    it('should return 403 if user does not have edge deploy access', async () => {
+      edgeAccessStub.returns(false);
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.equal('User does not have edge deploy access');
+    });
+
+    it('should return 403 if user does not have edge deploy access', async () => {
+      edgeAccessStub.returns(false);
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.equal('User does not have edge deploy access');
     });
 
     it('should return 404 when opportunity not found', async () => {
@@ -4969,6 +5049,7 @@ describe('Suggestions Controller', () => {
         error: sandbox.stub(),
         debug: sandbox.stub(),
       };
+      sandbox.stub(AccessControlUtil.prototype, 'hasEdgeDeployAccess').returns(true);
     });
 
     it('should rollback domain-wide suggestion and covered suggestions', async () => {
