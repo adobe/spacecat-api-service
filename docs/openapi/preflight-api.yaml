@@ -33,7 +33,7 @@ preflight-jobs:
                 type: array
                 items:
                   type: string
-                  enum: [accessibility, body-size, canonical, h1-count, headings, links, lorem-ipsum, metatags, readability]
+                  enum: [accessibility, body-size, canonical, h1-count, headings, links, lorem-ipsum, metatags, readability, image-alt]
                 description: Optional array of specific checks to run. If not provided, all checks will be run.
             required:
               - urls
