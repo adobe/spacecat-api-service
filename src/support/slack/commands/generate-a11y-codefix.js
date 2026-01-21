@@ -212,16 +212,15 @@ function GenerateA11yCodefixCommand(context) {
         AWS_ACCESS_KEY_ID,
         AWS_SECRET_ACCESS_KEY,
         AWS_SESSION_TOKEN,
-        SQS_MYSTIQUE_QUEUE_URL,
-        S3_MYSTIQUE_BUCKET_NAME,
+        SQS_SPACECAT_TO_MYSTIQUE_QUEUE_URL,
       } = env;
 
-      if (!SQS_MYSTIQUE_QUEUE_URL) {
-        throw new Error('SQS_MYSTIQUE_QUEUE_URL not configured');
+      if (!SQS_SPACECAT_TO_MYSTIQUE_QUEUE_URL) {
+        throw new Error('SQS_SPACECAT_TO_MYSTIQUE_QUEUE_URL not configured');
       }
 
       // S3 bucket for code archives (used in message payload only)
-      const mystiqueBucket = S3_MYSTIQUE_BUCKET_NAME || 'spacecat-prod-mystique-assets';
+      const mystiqueBucket = 'spacecat-prod-mystique-assets';
 
       // Initialize AWS clients
       const awsConfig = {
@@ -324,8 +323,8 @@ function GenerateA11yCodefixCommand(context) {
         });
       });
 
-      // Generate unique audit ID for tracking (using UUID format like Python)
-      const auditId = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+      // Use opportunity ID as audit ID for tracking
+      const auditId = opportunity.getId();
 
       // Get aggregation key from first suggestion (used by Mystique to group fixes)
       const aggregationKey = suggestionData.aggregationKey || `slack-${Date.now()}`;
@@ -347,7 +346,11 @@ function GenerateA11yCodefixCommand(context) {
       };
 
       // Send to SQS
-      const sqsMessageId = await sendToSQS(sqsClient, SQS_MYSTIQUE_QUEUE_URL, messagePayload);
+      const sqsMessageId = await sendToSQS(
+        sqsClient,
+        SQS_SPACECAT_TO_MYSTIQUE_QUEUE_URL,
+        messagePayload,
+      );
 
       const siteUrl = site.getBaseURL();
       await say({
