@@ -1552,9 +1552,11 @@ function SuggestionsController(ctx, sqs, env) {
               context.log.info(`Removed prerender config from metaconfig for domain-wide suggestion ${suggestion.getId()}`);
             }
 
-            // Remove edgeDeployed from the domain-wide suggestion
+            // Remove edgeDeployed (and legacy tokowakaDeployed) from the domain-wide suggestion
             const currentData = suggestion.getData();
             delete currentData.edgeDeployed;
+            // TODO: To be removed, kept for backward compatibility
+            delete currentData.tokowakaDeployed;
             suggestion.setData(currentData);
             suggestion.setUpdatedBy('tokowaka-rollback');
             // eslint-disable-next-line no-await-in-loop
@@ -1575,6 +1577,8 @@ function SuggestionsController(ctx, sqs, env) {
                 coveredSuggestions.map(async (coveredSuggestion) => {
                   const coveredData = coveredSuggestion.getData();
                   delete coveredData.edgeDeployed;
+                  // TODO: To be removed, kept for backward compatibility
+                  delete coveredData.tokowakaDeployed;
                   delete coveredData.coveredByDomainWide;
                   coveredSuggestion.setData(coveredData);
                   coveredSuggestion.setUpdatedBy('domain-wide-rollback');
@@ -1623,11 +1627,14 @@ function SuggestionsController(ctx, sqs, env) {
           failedSuggestions: ineligibleSuggestions,
         } = result;
 
-        // Update successfully rolled back suggestions - remove edgeDeployed timestamp
+        // Update successfully rolled back suggestions
+        // - remove edgeDeployed (and legacy tokowakaDeployed) timestamp
         succeededSuggestions = await Promise.all(
           processedSuggestions.map(async (suggestion) => {
             const currentData = suggestion.getData();
             delete currentData.edgeDeployed;
+            // TODO: To be removed, kept for backward compatibility
+            delete currentData.tokowakaDeployed;
             suggestion.setData(currentData);
             suggestion.setUpdatedBy('tokowaka-rollback');
             return suggestion.save();
