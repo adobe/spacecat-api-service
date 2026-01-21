@@ -498,8 +498,10 @@ describe('LLMO Onboarding Functions', () => {
       // Verify all checks were performed
       expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith(baseURL);
       expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledWith(imsOrgId);
-      expect(existingSite.getOrganizationId).to.have.been.calledThrice;
-      expect(organization.getId).to.have.been.calledOnce;
+      // Called 4 times now (3 for logic + 1 for Slack message)
+      expect(existingSite.getOrganizationId).to.have.callCount(4);
+      // Called 2 times now (1 for logic + 1 for Slack message)
+      expect(organization.getId).to.have.callCount(2);
     });
 
     it('should return isValid true when site exists but is assigned to default organization', async () => {
@@ -594,7 +596,8 @@ describe('LLMO Onboarding Functions', () => {
       // Verify all checks were performed
       expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith(baseURL);
       expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledWith(imsOrgId);
-      expect(existingSite.getOrganizationId).to.have.been.calledTwice;
+      // Called 3 times now (2 for logic + 1 for Slack message)
+      expect(existingSite.getOrganizationId).to.have.callCount(3);
     });
 
     it('should return isValid false when error occurs during validation', async () => {
@@ -633,6 +636,270 @@ describe('LLMO Onboarding Functions', () => {
       // Verify error was logged
       expect(mockLog.error).to.have.been.calledWith(
         'Error validating site onboarding status: Database connection failed',
+      );
+    });
+
+    it('should send Slack alert when SharePoint folder already exists', async () => {
+      // Mock postSlackMessage
+      const mockPostSlackMessage = sinon.stub().resolves({ channel: 'test-channel', ts: '123456' });
+
+      // Setup mocks for existing folder
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Organization.findByImsOrgId.resolves(null);
+      mockSharePointFolder.exists.resolves(true);
+
+      // Create context with Slack credentials
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: {
+          ...mockEnv,
+          SLACK_LLMO_ALERTS_CHANNEL_ID: 'test-alert-channel',
+          SLACK_BOT_TOKEN: 'test-bot-token',
+        },
+      };
+
+      // Import the function with mocked dependencies
+      const { validateSiteNotOnboarded } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-helix-content-sdk': {
+          createFrom: sinon.stub().resolves(mockSharePointClient),
+        },
+        '../../../src/utils/slack/base.js': {
+          postSlackMessage: mockPostSlackMessage,
+        },
+      });
+
+      // Test parameters
+      const baseURL = 'https://example.com';
+      const imsOrgId = 'test-tenant-id@AdobeOrg';
+      const dataFolder = 'dev/example-com';
+
+      // Call the function
+      const result = await validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, context);
+
+      // Verify result
+      expect(result).to.deep.equal({
+        isValid: false,
+        error: 'Data folder for site https://example.com already exists. The site is already onboarded.',
+      });
+
+      // Verify Slack message was sent
+      expect(mockPostSlackMessage).to.have.been.calledOnce;
+      expect(mockPostSlackMessage).to.have.been.calledWith(
+        'test-alert-channel',
+        sinon.match(/Site is already onboarded.*Data folder already exists/),
+        'test-bot-token',
+      );
+    });
+
+    it('should send Slack alert when site is assigned to different organization', async () => {
+      // Mock postSlackMessage
+      const mockPostSlackMessage = sinon.stub().resolves({ channel: 'test-channel', ts: '123456' });
+
+      // Create mock existing site assigned to different organization
+      const existingSite = {
+        getId: sinon.stub().returns('site-123'),
+        getOrganizationId: sinon.stub().returns('different-org-id'),
+      };
+
+      // Create mock organization
+      const organization = {
+        getId: sinon.stub().returns('test-org-id'),
+      };
+
+      // Setup mocks
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+      mockDataAccess.Organization.findByImsOrgId.resolves(organization);
+      mockSharePointFolder.exists.resolves(false);
+
+      // Create context with Slack credentials
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: {
+          ...mockEnv,
+          SLACK_LLMO_ALERTS_CHANNEL_ID: 'test-alert-channel',
+          SLACK_BOT_TOKEN: 'test-bot-token',
+        },
+      };
+
+      // Import the function with mocked dependencies
+      const { validateSiteNotOnboarded } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-helix-content-sdk': {
+          createFrom: sinon.stub().resolves(mockSharePointClient),
+        },
+        '../../../src/utils/slack/base.js': {
+          postSlackMessage: mockPostSlackMessage,
+        },
+      });
+
+      // Test parameters
+      const baseURL = 'https://example.com';
+      const imsOrgId = 'test-tenant-id@AdobeOrg';
+      const dataFolder = 'dev/example-com';
+
+      // Call the function
+      const result = await validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, context);
+
+      // Verify result
+      expect(result).to.deep.equal({
+        isValid: false,
+        error: 'Site https://example.com has already been assigned to a different organization.',
+      });
+
+      // Verify Slack message was sent
+      expect(mockPostSlackMessage).to.have.been.calledOnce;
+      expect(mockPostSlackMessage).to.have.been.calledWith(
+        'test-alert-channel',
+        sinon.match(/Site is already onboarded.*Assigned to a different organization/),
+        'test-bot-token',
+      );
+    });
+
+    it('should not send Slack alert when SLACK_LLMO_ALERTS_CHANNEL_ID is missing', async () => {
+      // Mock postSlackMessage
+      const mockPostSlackMessage = sinon.stub().resolves({ channel: 'test-channel', ts: '123456' });
+
+      // Setup mocks for existing folder
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Organization.findByImsOrgId.resolves(null);
+      mockSharePointFolder.exists.resolves(true);
+
+      // Create context WITHOUT Slack channel ID
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: {
+          ...mockEnv,
+          SLACK_BOT_TOKEN: 'test-bot-token',
+        },
+      };
+
+      // Import the function with mocked dependencies
+      const { validateSiteNotOnboarded } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-helix-content-sdk': {
+          createFrom: sinon.stub().resolves(mockSharePointClient),
+        },
+        '../../../src/utils/slack/base.js': {
+          postSlackMessage: mockPostSlackMessage,
+        },
+      });
+
+      // Test parameters
+      const baseURL = 'https://example.com';
+      const imsOrgId = 'test-tenant-id@AdobeOrg';
+      const dataFolder = 'dev/example-com';
+
+      // Call the function
+      const result = await validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, context);
+
+      // Verify result
+      expect(result).to.deep.equal({
+        isValid: false,
+        error: 'Data folder for site https://example.com already exists. The site is already onboarded.',
+      });
+
+      // Verify Slack message was NOT sent
+      expect(mockPostSlackMessage).to.not.have.been.called;
+    });
+
+    it('should not send Slack alert when SLACK_BOT_TOKEN is missing', async () => {
+      // Mock postSlackMessage
+      const mockPostSlackMessage = sinon.stub().resolves({ channel: 'test-channel', ts: '123456' });
+
+      // Setup mocks for existing folder
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Organization.findByImsOrgId.resolves(null);
+      mockSharePointFolder.exists.resolves(true);
+
+      // Create context WITHOUT Slack bot token
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: {
+          ...mockEnv,
+          SLACK_LLMO_ALERTS_CHANNEL_ID: 'test-alert-channel',
+        },
+      };
+
+      // Import the function with mocked dependencies
+      const { validateSiteNotOnboarded } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-helix-content-sdk': {
+          createFrom: sinon.stub().resolves(mockSharePointClient),
+        },
+        '../../../src/utils/slack/base.js': {
+          postSlackMessage: mockPostSlackMessage,
+        },
+      });
+
+      // Test parameters
+      const baseURL = 'https://example.com';
+      const imsOrgId = 'test-tenant-id@AdobeOrg';
+      const dataFolder = 'dev/example-com';
+
+      // Call the function
+      const result = await validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, context);
+
+      // Verify result
+      expect(result).to.deep.equal({
+        isValid: false,
+        error: 'Data folder for site https://example.com already exists. The site is already onboarded.',
+      });
+
+      // Verify Slack message was NOT sent
+      expect(mockPostSlackMessage).to.not.have.been.called;
+    });
+
+    it('should continue execution even when Slack posting fails', async () => {
+      // Mock postSlackMessage to throw an error
+      const mockPostSlackMessage = sinon.stub().rejects(new Error('Slack API error'));
+
+      // Setup mocks for existing folder
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Organization.findByImsOrgId.resolves(null);
+      mockSharePointFolder.exists.resolves(true);
+
+      // Create context with Slack credentials
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: {
+          ...mockEnv,
+          SLACK_LLMO_ALERTS_CHANNEL_ID: 'test-alert-channel',
+          SLACK_BOT_TOKEN: 'test-bot-token',
+        },
+      };
+
+      // Import the function with mocked dependencies
+      const { validateSiteNotOnboarded } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
+        '@adobe/spacecat-helix-content-sdk': {
+          createFrom: sinon.stub().resolves(mockSharePointClient),
+        },
+        '../../../src/utils/slack/base.js': {
+          postSlackMessage: mockPostSlackMessage,
+        },
+      });
+
+      // Test parameters
+      const baseURL = 'https://example.com';
+      const imsOrgId = 'test-tenant-id@AdobeOrg';
+      const dataFolder = 'dev/example-com';
+
+      // Call the function
+      const result = await validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, context);
+
+      // Verify result - validation error should still be returned
+      expect(result).to.deep.equal({
+        isValid: false,
+        error: 'Data folder for site https://example.com already exists. The site is already onboarded.',
+      });
+
+      // Verify Slack posting was attempted
+      expect(mockPostSlackMessage).to.have.been.calledOnce;
+
+      // Verify error was logged
+      expect(mockLog.error).to.have.been.calledWith(
+        'Failed to post LLMO alert to Slack: Slack API error',
       );
     });
   });
