@@ -1,3 +1,17 @@
+# [1.293.0](https://github.com/adobe/spacecat-api-service/compare/v1.292.1...v1.293.0) (2026-01-21)
+
+
+### Features
+
+* get predominant-traffic by channel ([#1712](https://github.com/adobe/spacecat-api-service/issues/1712)) ([686d501](https://github.com/adobe/spacecat-api-service/commit/686d5017b8ac16339059751e4cb6846f2c151b71))
+
+## [1.292.1](https://github.com/adobe/spacecat-api-service/compare/v1.292.0...v1.292.1) (2026-01-21)
+
+
+### Bug Fixes
+
+* create and update tokowaka config api ([#1711](https://github.com/adobe/spacecat-api-service/issues/1711)) ([32a84f3](https://github.com/adobe/spacecat-api-service/commit/32a84f36c53809c3051c362dd4475b76d88dd28a))
+
 # [1.292.0](https://github.com/adobe/spacecat-api-service/compare/v1.291.0...v1.292.0) (2026-01-21)
 
 
