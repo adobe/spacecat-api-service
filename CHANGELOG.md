@@ -1,3 +1,10 @@
+## [1.293.1](https://github.com/adobe/spacecat-api-service/compare/v1.293.0...v1.293.1) (2026-01-21)
+
+
+### Bug Fixes
+
+* 500 error on some top-opportunities  api calls ([#1713](https://github.com/adobe/spacecat-api-service/issues/1713)) ([a905541](https://github.com/adobe/spacecat-api-service/commit/a905541d312c3e543497167cac3a94f4387d1081))
+
 # [1.293.0](https://github.com/adobe/spacecat-api-service/compare/v1.292.1...v1.293.0) (2026-01-21)
 
 
