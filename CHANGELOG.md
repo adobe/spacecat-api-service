@@ -1,3 +1,31 @@
+# [1.290.0](https://github.com/adobe/spacecat-api-service/compare/v1.289.0...v1.290.0) (2026-01-20)
+
+
+### Features
+
+* rename tokowaka, and fix edge config self serve apis ([#1709](https://github.com/adobe/spacecat-api-service/issues/1709)) ([8359ba6](https://github.com/adobe/spacecat-api-service/commit/8359ba61d0f3e94b4c4f7e7ed3ff95d1a3997d62))
+
+# [1.289.0](https://github.com/adobe/spacecat-api-service/compare/v1.288.0...v1.289.0) (2026-01-20)
+
+
+### Features
+
+* disable autofix grouping for security opportunities ([#1701](https://github.com/adobe/spacecat-api-service/issues/1701)) ([11089de](https://github.com/adobe/spacecat-api-service/commit/11089de9c2bd2bbee5169d3ebef4a9be552305da))
+
+# [1.288.0](https://github.com/adobe/spacecat-api-service/compare/v1.287.0...v1.288.0) (2026-01-20)
+
+
+### Features
+
+* added shm imports in onboard command ([#1689](https://github.com/adobe/spacecat-api-service/issues/1689)) ([4fb92dc](https://github.com/adobe/spacecat-api-service/commit/4fb92dcc87fbde0f953ccfe0eadff3888d60fb2e))
+
+# [1.287.0](https://github.com/adobe/spacecat-api-service/compare/v1.286.1...v1.287.0) (2026-01-20)
+
+
+### Features
+
+* Support object format in metrics API for cwv and engagement weekly RUM data ([#1692](https://github.com/adobe/spacecat-api-service/issues/1692)) ([c6917d5](https://github.com/adobe/spacecat-api-service/commit/c6917d5234d459005dc7a57ea6541f04f849d197))
+
 ## [1.286.1](https://github.com/adobe/spacecat-api-service/compare/v1.286.0...v1.286.1) (2026-01-19)
 
 
