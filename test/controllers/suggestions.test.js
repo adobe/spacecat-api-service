@@ -5124,7 +5124,7 @@ describe('Suggestions Controller', () => {
         statusText: 'OK',
         headers: {
           get: (headerName) => {
-            if (headerName === 'x-tokowaka-cache') {
+            if (headerName === 'x-edge-optimize-cache') {
               return 'hit';
             }
             return null;
