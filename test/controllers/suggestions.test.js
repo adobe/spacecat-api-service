@@ -4733,6 +4733,44 @@ describe('Suggestions Controller', () => {
       expect(body.suggestions[0].message).to.include('has not been deployed');
     });
 
+    it('should support backward compatibility with legacy tokowakaDeployed property during rollback', async () => {
+      // Set up suggestion with legacy tokowakaDeployed property (no edgeDeployed)
+      const legacyTimestamp = Date.now() - 10000;
+      tokowakaSuggestions[0].getData = () => ({
+        type: 'headings',
+        checkType: 'heading-empty',
+        url: 'https://example.com/page1', // URL is required for rollback
+        tokowakaDeployed: legacyTimestamp, // Legacy property
+        recommendedAction: 'New Heading Title',
+        transformRules: {
+          action: 'replace',
+          selector: 'h1:nth-of-type(1)',
+        },
+      });
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      expect(body.metadata.success).to.equal(1);
+      expect(body.metadata.failed).to.equal(0);
+
+      // Verify both properties are removed
+      const dataArg = tokowakaSuggestions[0].setData.getCall(0).args[0];
+      expect(dataArg).to.not.have.property('edgeDeployed');
+      expect(dataArg).to.not.have.property('tokowakaDeployed');
+    });
+
     it('should handle multiple suggestions rollback', async () => {
       const response = await suggestionsController.rollbackSuggestionFromEdge({
         ...context,
