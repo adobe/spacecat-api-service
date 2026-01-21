@@ -1,3 +1,10 @@
+## [1.293.2](https://github.com/adobe/spacecat-api-service/compare/v1.293.1...v1.293.2) (2026-01-21)
+
+
+### Bug Fixes
+
+* edge preview api headers handling ([#1717](https://github.com/adobe/spacecat-api-service/issues/1717)) ([bf81d46](https://github.com/adobe/spacecat-api-service/commit/bf81d46c9df6c24aad3f35f5a1b0e3647c1532e8))
+
 ## [1.293.1](https://github.com/adobe/spacecat-api-service/compare/v1.293.0...v1.293.1) (2026-01-21)
 
 
