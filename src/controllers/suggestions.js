@@ -1217,11 +1217,16 @@ function SuggestionsController(ctx, sqs, env) {
         succeededSuggestions = await Promise.all(
           deployedSuggestions.map(async (suggestion) => {
             const currentData = suggestion.getData();
-            suggestion.setData({
+            const updatedData = {
               ...currentData,
               tokowakaDeployed: deploymentTimestamp,
               edgeDeployed: deploymentTimestamp,
-            });
+            };
+            // Remove edgeOptimizeStatus if it's STALE
+            if (currentData.edgeOptimizeStatus === 'STALE') {
+              delete updatedData.edgeOptimizeStatus;
+            }
+            suggestion.setData(updatedData);
             suggestion.setUpdatedBy('tokowaka-deployment');
             return suggestion.save();
           }),
@@ -1290,11 +1295,16 @@ function SuggestionsController(ctx, sqs, env) {
             // Update suggestion with deployment timestamp
             const deploymentTimestamp = Date.now();
             const currentData = suggestion.getData();
-            suggestion.setData({
+            const updatedData = {
               ...currentData,
               tokowakaDeployed: deploymentTimestamp,
               edgeDeployed: deploymentTimestamp,
-            });
+            };
+            // Remove edgeOptimizeStatus if it's STALE
+            if (currentData.edgeOptimizeStatus === 'STALE') {
+              delete updatedData.edgeOptimizeStatus;
+            }
+            suggestion.setData(updatedData);
             suggestion.setUpdatedBy('tokowaka-deployment');
             // eslint-disable-next-line no-await-in-loop
             await suggestion.save();
@@ -1352,12 +1362,17 @@ function SuggestionsController(ctx, sqs, env) {
                 await Promise.all(
                   coveredSuggestions.map(async (coveredSuggestion) => {
                     const coveredData = coveredSuggestion.getData();
-                    coveredSuggestion.setData({
+                    const updatedCoveredData = {
                       ...coveredData,
                       tokowakaDeployed: deploymentTimestamp,
                       edgeDeployed: deploymentTimestamp,
                       coveredByDomainWide: suggestion.getId(),
-                    });
+                    };
+                    // Remove edgeOptimizeStatus if it's STALE
+                    if (coveredData.edgeOptimizeStatus === 'STALE') {
+                      delete updatedCoveredData.edgeOptimizeStatus;
+                    }
+                    coveredSuggestion.setData(updatedCoveredData);
                     coveredSuggestion.setUpdatedBy('domain-wide-deployment');
                     return coveredSuggestion.save();
                   }),
@@ -1411,13 +1426,18 @@ function SuggestionsController(ctx, sqs, env) {
         await Promise.all(
           skippedSuggestionEntities.map(async (skippedSuggestion) => {
             const currentData = skippedSuggestion.getData();
-            skippedSuggestion.setData({
+            const updatedData = {
               ...currentData,
               tokowakaDeployed: deploymentTimestamp,
               edgeDeployed: deploymentTimestamp,
               coveredByDomainWide: 'same-batch-deployment',
               skippedInDeployment: true,
-            });
+            };
+            // Remove edgeOptimizeStatus if it's STALE
+            if (updatedData.edgeOptimizeStatus === 'STALE') {
+              delete updatedData.edgeOptimizeStatus;
+            }
+            skippedSuggestion.setData(updatedData);
             skippedSuggestion.setUpdatedBy('domain-wide-deployment');
             return skippedSuggestion.save();
           }),
