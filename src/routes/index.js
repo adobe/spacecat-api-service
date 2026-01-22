@@ -401,8 +401,6 @@ botBlockerController,
     'DELETE /sites/:siteId/sentiment/topics/:topicId': sentimentController.deleteTopic,
     'POST /sites/:siteId/sentiment/topics/:topicId/prompts': sentimentController.addSubPrompts,
     'DELETE /sites/:siteId/sentiment/topics/:topicId/prompts': sentimentController.removeSubPrompts,
-    'POST /sites/:siteId/sentiment/topics/:topicId/guidelines': sentimentController.linkGuidelines,
-    'DELETE /sites/:siteId/sentiment/topics/:topicId/guidelines': sentimentController.unlinkGuidelines,
     'POST /sites/:siteId/sentiment/topics/:topicId/audits': sentimentController.linkAudits,
     'DELETE /sites/:siteId/sentiment/topics/:topicId/audits': sentimentController.unlinkAudits,
     // Guidelines

@@ -25,7 +25,6 @@ describe('SentimentTopicDto', () => {
         getDescription: () => 'Latest corvette model reviews',
         getTopicName: () => '2026 Corvette Stingray Analysis',
         getSubPrompts: () => ['Focus on performance', 'Analyze design feedback'],
-        getGuidelineIds: () => ['guideline-1', 'guideline-2'],
         getAudits: () => ['wikipedia-analysis', 'reddit-analysis'],
         getEnabled: () => true,
         getCreatedAt: () => '2026-01-01T00:00:00Z',
@@ -43,7 +42,6 @@ describe('SentimentTopicDto', () => {
         description: 'Latest corvette model reviews',
         topicName: '2026 Corvette Stingray Analysis',
         subPrompts: ['Focus on performance', 'Analyze design feedback'],
-        guidelineIds: ['guideline-1', 'guideline-2'],
         audits: ['wikipedia-analysis', 'reddit-analysis'],
         enabled: true,
         createdAt: '2026-01-01T00:00:00Z',
@@ -61,7 +59,6 @@ describe('SentimentTopicDto', () => {
         getDescription: () => undefined,
         getTopicName: () => '',
         getSubPrompts: () => [],
-        getGuidelineIds: () => [],
         getAudits: () => [],
         getEnabled: () => false,
         getCreatedAt: () => '2026-01-01T00:00:00Z',
@@ -74,7 +71,6 @@ describe('SentimentTopicDto', () => {
 
       expect(result.topicName).to.equal('');
       expect(result.subPrompts).to.deep.equal([]);
-      expect(result.guidelineIds).to.deep.equal([]);
       expect(result.audits).to.deep.equal([]);
       expect(result.enabled).to.equal(false);
       expect(result.description).to.equal(undefined);
@@ -88,7 +84,6 @@ describe('SentimentTopicDto', () => {
         getDescription: () => null,
         getTopicName: () => null,
         getSubPrompts: () => undefined,
-        getGuidelineIds: () => null,
         getAudits: () => undefined,
         getEnabled: () => true,
         getCreatedAt: () => null,
@@ -106,7 +101,6 @@ describe('SentimentTopicDto', () => {
       expect(result.topicName).to.equal(null);
       // Arrays should default to empty arrays when null/undefined
       expect(result.subPrompts).to.deep.equal([]);
-      expect(result.guidelineIds).to.deep.equal([]);
       expect(result.audits).to.deep.equal([]);
     });
   });

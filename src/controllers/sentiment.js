@@ -259,7 +259,6 @@ function SentimentController(ctx, log) {
           description: topicData.description,
           topicName: topicData.topicName || '',
           subPrompts: isArray(topicData.subPrompts) ? topicData.subPrompts : [],
-          guidelineIds: isArray(topicData.guidelineIds) ? topicData.guidelineIds : [],
           audits: isArray(topicData.audits) ? topicData.audits : [],
           enabled: topicData.enabled !== false,
           createdBy: userId,
@@ -353,7 +352,6 @@ function SentimentController(ctx, log) {
       if (updates.description !== undefined) topic.setDescription(updates.description);
       if (hasText(updates.topicName)) topic.setTopicName(updates.topicName);
       if (isArray(updates.subPrompts)) topic.setSubPrompts(updates.subPrompts);
-      if (isArray(updates.guidelineIds)) topic.setGuidelineIds(updates.guidelineIds);
       if (isArray(updates.audits)) topic.setAudits(updates.audits);
       if (typeof updates.enabled === 'boolean') topic.setEnabled(updates.enabled);
 
@@ -512,114 +510,6 @@ function SentimentController(ctx, log) {
     } catch (error) {
       log.error(`Error removing prompts from topic ${topicId}: ${error.message}`);
       return internalServerError('Failed to remove prompts');
-    }
-  };
-
-  /**
-   * Link guidelines to a topic.
-   * POST /sites/{siteId}/sentiment/topics/{topicId}/guidelines
-   */
-  const linkGuidelines = async (context) => {
-    const { siteId, topicId } = context.params;
-    const { guidelineIds } = context.data || {};
-
-    if (!isValidUUID(siteId)) {
-      return badRequest('Site ID required');
-    }
-
-    if (!hasText(topicId)) {
-      return badRequest('Topic ID required');
-    }
-
-    if (!isArray(guidelineIds) || guidelineIds.length === 0) {
-      return badRequest('GuidelineIds array required');
-    }
-
-    const site = await Site.findById(siteId);
-    if (!site) {
-      return notFound('Site not found');
-    }
-
-    if (!await accessControlUtil.hasAccess(site)) {
-      return forbidden('Only users belonging to the organization can modify topics');
-    }
-
-    const userId = getUserIdentifier(context);
-
-    try {
-      let topic = await SentimentTopic.findById(siteId, topicId);
-
-      if (!topic) {
-        return notFound('Topic not found');
-      }
-
-      // Link guidelines
-      guidelineIds.forEach((guidelineId) => {
-        if (hasText(guidelineId)) {
-          topic.addGuideline(guidelineId);
-        }
-      });
-
-      topic.setUpdatedBy(userId);
-      topic = await topic.save();
-
-      return ok(SentimentTopicDto.toJSON(topic));
-    } catch (error) {
-      log.error(`Error linking guidelines to topic ${topicId}: ${error.message}`);
-      return internalServerError('Failed to link guidelines');
-    }
-  };
-
-  /**
-   * Unlink guidelines from a topic.
-   * DELETE /sites/{siteId}/sentiment/topics/{topicId}/guidelines
-   */
-  const unlinkGuidelines = async (context) => {
-    const { siteId, topicId } = context.params;
-    const { guidelineIds } = context.data || {};
-
-    if (!isValidUUID(siteId)) {
-      return badRequest('Site ID required');
-    }
-
-    if (!hasText(topicId)) {
-      return badRequest('Topic ID required');
-    }
-
-    if (!isArray(guidelineIds) || guidelineIds.length === 0) {
-      return badRequest('GuidelineIds array required');
-    }
-
-    const site = await Site.findById(siteId);
-    if (!site) {
-      return notFound('Site not found');
-    }
-
-    if (!await accessControlUtil.hasAccess(site)) {
-      return forbidden('Only users belonging to the organization can modify topics');
-    }
-
-    const userId = getUserIdentifier(context);
-
-    try {
-      let topic = await SentimentTopic.findById(siteId, topicId);
-
-      if (!topic) {
-        return notFound('Topic not found');
-      }
-
-      // Unlink guidelines
-      guidelineIds.forEach((guidelineId) => {
-        topic.removeGuideline(guidelineId);
-      });
-
-      topic.setUpdatedBy(userId);
-      topic = await topic.save();
-
-      return ok(SentimentTopicDto.toJSON(topic));
-    } catch (error) {
-      log.error(`Error unlinking guidelines from topic ${topicId}: ${error.message}`);
-      return internalServerError('Failed to unlink guidelines');
     }
   };
 
@@ -1031,7 +921,7 @@ function SentimentController(ctx, log) {
   // ==================== COMBINED CONFIG ENDPOINT ====================
 
   /**
-   * Get full sentiment config (topics with resolved guidelines).
+   * Get full sentiment config (topics and guidelines independently).
    * GET /sites/{siteId}/sentiment/config
    */
   const getConfig = async (context) => {
@@ -1060,38 +950,12 @@ function SentimentController(ctx, log) {
         topicsResult = await SentimentTopic.allBySiteIdEnabled(siteId, {});
       }
 
-      const topics = topicsResult.data || [];
-
-      // Collect all unique guideline IDs
-      const allGuidelineIds = new Set();
-      topics.forEach((topic) => {
-        const guidelineIds = topic.getGuidelineIds?.() ?? topic.guidelineIds ?? [];
-        guidelineIds.forEach((id) => allGuidelineIds.add(id));
-      });
-
-      // Fetch all referenced guidelines
-      const guidelines = await SentimentGuideline.findByIds(siteId, [...allGuidelineIds]);
-      const guidelineMap = new Map();
-      guidelines.forEach((g) => {
-        const id = g.getGuidelineId?.() ?? g.guidelineId;
-        guidelineMap.set(id, SentimentGuidelineDto.toJSON(g));
-      });
-
-      // Build response with resolved guidelines
-      const enrichedTopics = topics.map((topic) => {
-        const topicJson = SentimentTopicDto.toJSON(topic);
-        const resolvedGuidelines = topicJson.guidelineIds
-          .map((id) => guidelineMap.get(id))
-          .filter(Boolean);
-
-        return {
-          ...topicJson,
-          guidelines: resolvedGuidelines,
-        };
-      });
+      // Get all enabled guidelines (independent of topics)
+      const guidelinesResult = await SentimentGuideline.allBySiteIdEnabled(siteId, {});
 
       return ok({
-        topics: enrichedTopics,
+        topics: (topicsResult.data || []).map(SentimentTopicDto.toJSON),
+        guidelines: (guidelinesResult.data || []).map(SentimentGuidelineDto.toJSON),
       });
     } catch (error) {
       log.error(`Error getting config for site ${siteId}: ${error.message}`);
@@ -1108,8 +972,6 @@ function SentimentController(ctx, log) {
     deleteTopic,
     addSubPrompts,
     removeSubPrompts,
-    linkGuidelines,
-    unlinkGuidelines,
     linkAudits,
     unlinkAudits,
     // Guidelines
