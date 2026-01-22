@@ -1217,11 +1217,16 @@ function SuggestionsController(ctx, sqs, env) {
         succeededSuggestions = await Promise.all(
           deployedSuggestions.map(async (suggestion) => {
             const currentData = suggestion.getData();
-            suggestion.setData({
+            const updatedData = {
               ...currentData,
               tokowakaDeployed: deploymentTimestamp,
               edgeDeployed: deploymentTimestamp,
-            });
+            };
+            // Remove edgeOptimizeStatus if it's STALE
+            if (updatedData.edgeOptimizeStatus === 'STALE') {
+              delete updatedData.edgeOptimizeStatus;
+            }
+            suggestion.setData(updatedData);
             suggestion.setUpdatedBy('tokowaka-deployment');
             return suggestion.save();
           }),
