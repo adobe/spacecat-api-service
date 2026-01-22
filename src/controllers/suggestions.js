@@ -1295,16 +1295,11 @@ function SuggestionsController(ctx, sqs, env) {
             // Update suggestion with deployment timestamp
             const deploymentTimestamp = Date.now();
             const currentData = suggestion.getData();
-            const updatedData = {
+            suggestion.setData({
               ...currentData,
               tokowakaDeployed: deploymentTimestamp,
               edgeDeployed: deploymentTimestamp,
-            };
-            // Remove edgeOptimizeStatus if it's STALE
-            if (currentData.edgeOptimizeStatus === 'STALE') {
-              delete updatedData.edgeOptimizeStatus;
-            }
-            suggestion.setData(updatedData);
+            });
             suggestion.setUpdatedBy('tokowaka-deployment');
             // eslint-disable-next-line no-await-in-loop
             await suggestion.save();
