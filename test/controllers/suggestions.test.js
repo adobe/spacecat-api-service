@@ -3358,6 +3358,100 @@ describe('Suggestions Controller', () => {
       expect(secondSugg.save.calledOnce).to.be.true;
     });
 
+    it('should remove edgeOptimizeStatus when STALE during deployment', async () => {
+      // Update suggestions to have edgeOptimizeStatus: STALE
+      tokowakaSuggestions[0].getData = () => ({
+        url: 'https://example.com/page1',
+        recommendedAction: 'New Heading Title',
+        checkType: 'heading-empty',
+        transformRules: {
+          action: 'replace',
+          selector: 'h1.test-selector',
+        },
+        edgeOptimizeStatus: 'STALE',
+      });
+
+      tokowakaSuggestions[1].getData = () => ({
+        url: 'https://example.com/page1',
+        recommendedAction: 'New Subtitle',
+        checkType: 'heading-empty',
+        transformRules: {
+          action: 'replace',
+          selector: 'h2.test-selector',
+        },
+        edgeOptimizeStatus: 'STALE',
+      });
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+
+      // Verify edgeOptimizeStatus was removed from both suggestions
+      const firstCallArgs = tokowakaSuggestions[0].setData.firstCall.args[0];
+      const secondCallArgs = tokowakaSuggestions[1].setData.firstCall.args[0];
+
+      expect(firstCallArgs).to.not.have.property('edgeOptimizeStatus');
+      expect(secondCallArgs).to.not.have.property('edgeOptimizeStatus');
+      expect(firstCallArgs).to.have.property('tokowakaDeployed');
+      expect(secondCallArgs).to.have.property('tokowakaDeployed');
+    });
+
+    it('should preserve edgeOptimizeStatus when not STALE during deployment', async () => {
+      // Update suggestions to have edgeOptimizeStatus with other values
+      tokowakaSuggestions[0].getData = () => ({
+        url: 'https://example.com/page1',
+        recommendedAction: 'New Heading Title',
+        checkType: 'heading-empty',
+        transformRules: {
+          action: 'replace',
+          selector: 'h1.test-selector',
+        },
+        edgeOptimizeStatus: 'ACTIVE',
+      });
+
+      tokowakaSuggestions[1].getData = () => ({
+        url: 'https://example.com/page1',
+        recommendedAction: 'New Subtitle',
+        checkType: 'heading-empty',
+        transformRules: {
+          action: 'replace',
+          selector: 'h2.test-selector',
+        },
+        edgeOptimizeStatus: 'PENDING',
+      });
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+
+      // Verify edgeOptimizeStatus was preserved
+      const firstCallArgs = tokowakaSuggestions[0].setData.firstCall.args[0];
+      const secondCallArgs = tokowakaSuggestions[1].setData.firstCall.args[0];
+
+      expect(firstCallArgs).to.have.property('edgeOptimizeStatus', 'ACTIVE');
+      expect(secondCallArgs).to.have.property('edgeOptimizeStatus', 'PENDING');
+      expect(firstCallArgs).to.have.property('tokowakaDeployed');
+      expect(secondCallArgs).to.have.property('tokowakaDeployed');
+    });
+
     it('should return 400 if siteId is invalid', async () => {
       const response = await suggestionsController.deploySuggestionToEdge({
         ...context,
