@@ -1,3 +1,10 @@
+# [1.294.0](https://github.com/adobe/spacecat-api-service/compare/v1.293.4...v1.294.0) (2026-01-22)
+
+
+### Features
+
+* endpoint to connect new strategy s3 obj ([#1719](https://github.com/adobe/spacecat-api-service/issues/1719)) ([5f05d95](https://github.com/adobe/spacecat-api-service/commit/5f05d95ace8a0bf81cd044f2f22da034bef74d56))
+
 ## [1.293.4](https://github.com/adobe/spacecat-api-service/compare/v1.293.3...v1.293.4) (2026-01-22)
 
 
