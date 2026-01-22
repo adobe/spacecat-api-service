@@ -40,7 +40,14 @@ function normalizeOpportunityType(input) {
     return 'a11y-assistive';
   }
 
-  return input.toLowerCase().trim();
+  const normalized = input.toLowerCase().trim();
+
+  // Add a11y- prefix if not present
+  if (!normalized.startsWith('a11y-')) {
+    return `a11y-${normalized}`;
+  }
+
+  return normalized;
 }
 
 /**

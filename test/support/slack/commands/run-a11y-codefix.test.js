@@ -156,6 +156,68 @@ describe('RunA11yCodefixCommand', () => {
 
       expect(slackContext.say).to.have.been.calledWith(sinon.match(/Found site.*example.com/));
     });
+
+    it('handles site with null name', async () => {
+      const siteWithNullName = {
+        getId: () => 'site-null-name',
+        getName: () => null,
+        getBaseURL: () => 'https://nullname.example.com',
+      };
+      dataAccessStub.Site.all.resolves([siteWithNullName]);
+      dataAccessStub.Opportunity.allBySiteId.resolves([mockOpportunity]);
+      const command = RunA11yCodefixCommand(context);
+
+      await command.handleExecution(['nullname'], slackContext);
+
+      expect(slackContext.say).to.have.been.calledWith(sinon.match(/Found site.*nullname.example.com/));
+    });
+
+    it('handles site with null baseURL in search', async () => {
+      const siteWithNullUrl = {
+        getId: () => 'site-null-url',
+        getName: () => 'Null URL Site',
+        getBaseURL: () => null,
+      };
+      dataAccessStub.Site.all.resolves([siteWithNullUrl]);
+      const command = RunA11yCodefixCommand(context);
+
+      await command.handleExecution(['Null URL'], slackContext);
+
+      expect(slackContext.say).to.have.been.calledWith(sinon.match(/Found site/));
+    });
+
+    it('shows "No name" for sites without name in multiple matches list', async () => {
+      const siteWithNoName = {
+        getId: () => 'site-no-name',
+        getName: () => null,
+        getBaseURL: () => 'https://test1.example.com',
+      };
+      const secondSite = {
+        getId: () => 'site-456',
+        getName: () => 'Another Site',
+        getBaseURL: () => 'https://test2.example.com',
+      };
+      dataAccessStub.Site.all.resolves([siteWithNoName, secondSite]);
+      const command = RunA11yCodefixCommand(context);
+
+      await command.handleExecution(['test'], slackContext);
+
+      expect(slackContext.say).to.have.been.calledWith(sinon.match(/No name/));
+    });
+
+    it('truncates list when more than 10 sites match', async () => {
+      const manySites = Array.from({ length: 15 }, (_, i) => ({
+        getId: () => `site-${i}`,
+        getName: () => `Test Site ${i}`,
+        getBaseURL: () => `https://test${i}.example.com`,
+      }));
+      dataAccessStub.Site.all.resolves(manySites);
+      const command = RunA11yCodefixCommand(context);
+
+      await command.handleExecution(['test'], slackContext);
+
+      expect(slackContext.say).to.have.been.calledWith(sinon.match(/and 5 more/));
+    });
   });
 
   describe('Opportunity Lookup', () => {
@@ -246,6 +308,70 @@ describe('RunA11yCodefixCommand', () => {
       expect(triggerA11yCodefixStub).to.have.been.calledWith(
         mockSite,
         'opp-newer',
+        'a11y-assistive',
+        slackContext,
+        context,
+      );
+    });
+
+    it('falls back to createdAt when updatedAt is null for sorting', async () => {
+      const oppWithNullUpdatedAt = {
+        getId: () => 'opp-null-updated',
+        getType: () => 'a11y-assistive',
+        getStatus: () => 'NEW',
+        getUpdatedAt: () => null,
+        getCreatedAt: () => '2025-01-25T10:00:00Z', // Newer createdAt
+        getSuggestions: sinon.stub().resolves([]),
+      };
+      const oppWithUpdatedAt = {
+        getId: () => 'opp-with-updated',
+        getType: () => 'a11y-assistive',
+        getStatus: () => 'NEW',
+        getUpdatedAt: () => '2025-01-20T10:00:00Z',
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getSuggestions: sinon.stub().resolves([]),
+      };
+      dataAccessStub.Opportunity.allBySiteId.resolves([oppWithUpdatedAt, oppWithNullUpdatedAt]);
+      const command = RunA11yCodefixCommand(context);
+
+      await command.handleExecution(['example.com'], slackContext);
+
+      // oppWithNullUpdatedAt should be selected because createdAt (Jan 25) > updatedAt (Jan 20)
+      expect(triggerA11yCodefixStub).to.have.been.calledWith(
+        mockSite,
+        'opp-null-updated',
+        'a11y-assistive',
+        slackContext,
+        context,
+      );
+    });
+
+    it('falls back to createdAt for both opportunities when updatedAt is null', async () => {
+      const olderOppNullUpdated = {
+        getId: () => 'opp-older-null',
+        getType: () => 'a11y-assistive',
+        getStatus: () => 'NEW',
+        getUpdatedAt: () => null,
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getSuggestions: sinon.stub().resolves([]),
+      };
+      const newerOppNullUpdated = {
+        getId: () => 'opp-newer-null',
+        getType: () => 'a11y-assistive',
+        getStatus: () => 'NEW',
+        getUpdatedAt: () => null,
+        getCreatedAt: () => '2025-01-25T10:00:00Z',
+        getSuggestions: sinon.stub().resolves([]),
+      };
+      dataAccessStub.Opportunity.allBySiteId.resolves([olderOppNullUpdated, newerOppNullUpdated]);
+      const command = RunA11yCodefixCommand(context);
+
+      await command.handleExecution(['example.com'], slackContext);
+
+      // newerOppNullUpdated should be selected because createdAt (Jan 25) > createdAt (Jan 15)
+      expect(triggerA11yCodefixStub).to.have.been.calledWith(
+        mockSite,
+        'opp-newer-null',
         'a11y-assistive',
         slackContext,
         context,
