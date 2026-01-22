@@ -104,7 +104,7 @@ AuditType:
     - 'costs'
     - 'meta-tags'
     - 'product-metatags'
-    - 'commerce-page-enrichment'
+    - 'commerce-product-enrichments'
     - 'broken-internal-links'
     - 'experimentation-opportunities'
     - 'llm-error-pages'
@@ -4902,12 +4902,12 @@ SandboxAuditType:
     - meta-tags: General meta tag analysis for all page types
     - product-metatags: Specialized audit for Product Detail Pages (PDP) of commerce sites,
       analyzing product-specific meta tags and scraping SKU, thumbnail, and catalog/store view codes for autofixing
-    - commerce-page-enrichment: Commerce page enrichment audit for analyzing and enriching commerce pages
+    - commerce-product-enrichments: Commerce page enrichment audit for analyzing and enriching commerce pages
     - alt-text: Alternative text analysis for images
   enum:
     - 'meta-tags'
     - 'product-metatags'
-    - 'commerce-page-enrichment'
+    - 'commerce-product-enrichments'
     - 'alt-text'
   example: 'meta-tags'
 

@@ -27,7 +27,7 @@ import {
 export const ALL_AUDITS = [
   'meta-tags',
   'product-metatags',
-  'commerce-page-enrichment',
+  'commerce-product-enrichments',
   'alt-text',
 ];
 
