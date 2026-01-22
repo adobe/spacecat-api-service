@@ -2,6 +2,7 @@
 
 > Provides an HTTP API to interact with SpaceCat data
 
+
 ## HTTP API Doc
 
 https://opensource.adobe.com/spacecat-api-service/
