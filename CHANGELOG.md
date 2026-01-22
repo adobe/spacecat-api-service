@@ -1,3 +1,10 @@
+## [1.294.1](https://github.com/adobe/spacecat-api-service/compare/v1.294.0...v1.294.1) (2026-01-22)
+
+
+### Bug Fixes
+
+* remove stale status when edge deploying ([#1725](https://github.com/adobe/spacecat-api-service/issues/1725)) ([062b829](https://github.com/adobe/spacecat-api-service/commit/062b829f38e10ee6a588fd869ac357cc4d5bf295))
+
 # [1.294.0](https://github.com/adobe/spacecat-api-service/compare/v1.293.4...v1.294.0) (2026-01-22)
 
 
