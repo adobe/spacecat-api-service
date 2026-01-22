@@ -601,6 +601,7 @@ function SitesController(ctx, log, env) {
     const metric = context.params?.metric;
     const source = context.params?.source;
     const filterByTop100PageViews = context.data?.filterByTop100PageViews === 'true';
+    const filterByBaseURL = context.data?.filterByBaseURL === 'true';
     // Key to extract from object response, e.g., 'data' in { label, data: [...] }
     const objectResponseDataKey = context.data?.objectResponseDataKey;
 
@@ -641,7 +642,34 @@ function SitesController(ctx, log, env) {
       metricsData = metrics;
     }
 
-    // Filter to top 100 pages by pageViews when requested
+    // Filter by site baseURL when requested
+    if (filterByBaseURL) {
+      const siteBaseURL = site.getBaseURL();
+      const originalCount = metricsData.length;
+
+      // Normalize baseURL: remove protocol and www variants, keep path
+      const normalizedBaseURL = siteBaseURL
+        .replace(/^https?:\/\/(www\d*\.)?/, '') // Remove protocol and optional www/www2/www3 etc.
+        .replace(/\/$/, ''); // Remove trailing slash
+
+      metricsData = metricsData.filter((metricEntry) => {
+        if (!metricEntry.url || !normalizedBaseURL) {
+          return false;
+        }
+
+        // Normalize metric URL: remove protocol and www variants
+        const normalizedMetricURL = metricEntry.url
+          .replace(/^https?:\/\/(www\d*\.)?/, '') // Remove protocol and optional www/www2/www3 etc.
+          .replace(/\/$/, ''); // Remove trailing slash
+
+        // Check if metric URL starts with the normalized base URL
+        return normalizedMetricURL.startsWith(normalizedBaseURL);
+      });
+
+      log.info(`Filtered metrics from ${originalCount} to ${metricsData.length} entries based on site baseURL (${normalizedBaseURL})`);
+    }
+
+    // Filter to top 100 pages by pageViews when requested (applied last)
     if (filterByTop100PageViews) {
       // Sort by pageViews in descending order and take top 100
       const originalCount = metricsData.length;

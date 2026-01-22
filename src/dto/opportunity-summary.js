@@ -51,6 +51,7 @@ export const OpportunitySummaryDto = {
       // Otherwise, extract all URLs from suggestion data (for paid media opportunities)
       suggestions.forEach((suggestion) => {
         const data = suggestion.getData();
+        if (!data) return; // Skip if data is null/undefined
         // Handle different URL field names in suggestion data
         if (data.url_from) urls.add(data.url_from);
         if (data.url_to) urls.add(data.url_to);
@@ -62,6 +63,7 @@ export const OpportunitySummaryDto = {
       // Aggregate page views from rank (which often represents traffic)
       suggestions.forEach((suggestion) => {
         const data = suggestion.getData();
+        if (!data) return; // Skip if data is null/undefined
         const rank = suggestion.getRank();
         if (rank && typeof rank === 'number') {
           totalPageViews += rank;
