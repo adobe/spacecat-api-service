@@ -296,6 +296,19 @@ product-metatags-audit:
         mediumIssues: 2
         autofixableItems: 5
       finalUrl: "www.example.com/products/"
+commerce-page-enrichment-audit:
+  summary: Example for a commerce-page-enrichment audit (initial implementation - scaffolding only)
+  value:
+    id: '123e4567-e89b-12d3-a456-426614174002'
+    siteId: "cccdac43-1a22-4659-9086-b762f59b9928"
+    auditedAt: "2025-01-22T10:14:41.798Z"
+    expiresAt: "2025-07-22T10:14:41.798Z"
+    deliveryType: 'aem_edge'
+    fullAuditRef: "scrapes/cccdac43-1a22-4659-9086-b762f59b9928/"
+    auditResult:
+      status: "initial-implementation"
+      message: "Commerce page enrichment audit - initial implementation stop point"
+      pagesScraped: 150
 prerender-audit:
   summary: Example for a prerender audit
   value:

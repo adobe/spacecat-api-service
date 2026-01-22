@@ -30,6 +30,8 @@ audit-for-site:
                 $ref: './examples.yaml#/meta-tags-audit'
               product-metatags-audit:
                 $ref: './examples.yaml#/product-metatags-audit'
+              commerce-page-enrichment-audit:
+                $ref: './examples.yaml#/commerce-page-enrichment-audit'
               prerender-audit:
                 $ref: './examples.yaml#/prerender-audit'
               broken-internal-links-audit:
@@ -75,6 +77,8 @@ latest-audit-for-site:
                 $ref: './examples.yaml#/meta-tags-audit'
               product-metatags-audit:
                 $ref: './examples.yaml#/product-metatags-audit'
+              commerce-page-enrichment-audit:
+                $ref: './examples.yaml#/commerce-page-enrichment-audit'
               prerender-audit:
                 $ref: './examples.yaml#/prerender-audit'
               broken-internal-links-audit:
