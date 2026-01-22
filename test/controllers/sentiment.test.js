@@ -34,8 +34,6 @@ describe('Sentiment Controller', () => {
     'deleteTopic',
     'addSubPrompts',
     'removeSubPrompts',
-    'linkGuidelines',
-    'unlinkGuidelines',
     'linkAudits',
     'unlinkAudits',
     'listGuidelines',
@@ -53,7 +51,6 @@ describe('Sentiment Controller', () => {
     getDescription: () => data.description,
     getTopicName: () => data.topicName || '',
     getSubPrompts: () => data.subPrompts || [],
-    getGuidelineIds: () => data.guidelineIds || [],
     getAudits: () => data.audits || [],
     getEnabled: () => data.enabled !== false,
     getCreatedAt: () => data.createdAt || '2026-01-01T00:00:00Z',
@@ -70,8 +67,6 @@ describe('Sentiment Controller', () => {
     setUpdatedBy: sandbox.stub(),
     addSubPrompt: sandbox.stub(),
     removeSubPrompt: sandbox.stub(),
-    addGuideline: sandbox.stub(),
-    removeGuideline: sandbox.stub(),
     enableAudit: sandbox.stub(),
     disableAudit: sandbox.stub(),
     save: sandbox.stub().resolvesThis(),
@@ -532,108 +527,6 @@ describe('Sentiment Controller', () => {
     });
   });
 
-  describe('linkGuidelines', () => {
-    beforeEach(() => {
-      context.params.topicId = 'topic-1';
-    });
-
-    it('returns bad request for invalid siteId', async () => {
-      context.params.siteId = 'invalid';
-      const result = await sentimentController.linkGuidelines(context);
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns bad request for missing topicId', async () => {
-      context.params.topicId = '';
-      const result = await sentimentController.linkGuidelines(context);
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns bad request for missing guidelineIds', async () => {
-      context.data = {};
-      const result = await sentimentController.linkGuidelines(context);
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns not found if site does not exist', async () => {
-      mockDataAccess.Site.findById.resolves(null);
-      context.data = { guidelineIds: ['guideline-1'] };
-      const result = await sentimentController.linkGuidelines(context);
-      expect(result.status).to.equal(404);
-    });
-
-    it('returns not found if topic does not exist', async () => {
-      mockDataAccess.SentimentTopic.findById.resolves(null);
-      context.data = { guidelineIds: ['guideline-1'] };
-      const result = await sentimentController.linkGuidelines(context);
-      expect(result.status).to.equal(404);
-    });
-
-    it('handles error gracefully', async () => {
-      context.data = { guidelineIds: ['guideline-1'] };
-      mockDataAccess.SentimentTopic.findById.rejects(new Error('DB error'));
-      const result = await sentimentController.linkGuidelines(context);
-      expect(result.status).to.equal(500);
-    });
-
-    it('links guidelines successfully', async () => {
-      context.data = { guidelineIds: ['guideline-1'] };
-      const result = await sentimentController.linkGuidelines(context);
-      expect(result.status).to.equal(200);
-    });
-  });
-
-  describe('unlinkGuidelines', () => {
-    beforeEach(() => {
-      context.params.topicId = 'topic-1';
-    });
-
-    it('returns bad request for invalid siteId', async () => {
-      context.params.siteId = 'invalid';
-      const result = await sentimentController.unlinkGuidelines(context);
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns bad request for missing topicId', async () => {
-      context.params.topicId = '';
-      const result = await sentimentController.unlinkGuidelines(context);
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns bad request for missing guidelineIds', async () => {
-      context.data = {};
-      const result = await sentimentController.unlinkGuidelines(context);
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns not found if site does not exist', async () => {
-      mockDataAccess.Site.findById.resolves(null);
-      context.data = { guidelineIds: ['guideline-1'] };
-      const result = await sentimentController.unlinkGuidelines(context);
-      expect(result.status).to.equal(404);
-    });
-
-    it('returns not found if topic does not exist', async () => {
-      mockDataAccess.SentimentTopic.findById.resolves(null);
-      context.data = { guidelineIds: ['guideline-1'] };
-      const result = await sentimentController.unlinkGuidelines(context);
-      expect(result.status).to.equal(404);
-    });
-
-    it('handles error gracefully', async () => {
-      context.data = { guidelineIds: ['guideline-1'] };
-      mockDataAccess.SentimentTopic.findById.rejects(new Error('DB error'));
-      const result = await sentimentController.unlinkGuidelines(context);
-      expect(result.status).to.equal(500);
-    });
-
-    it('unlinks guidelines successfully', async () => {
-      context.data = { guidelineIds: ['guideline-1'] };
-      const result = await sentimentController.unlinkGuidelines(context);
-      expect(result.status).to.equal(200);
-    });
-  });
-
   describe('linkAudits', () => {
     beforeEach(() => {
       context.params.topicId = 'topic-1';
@@ -987,19 +880,12 @@ describe('Sentiment Controller', () => {
       expect(result.status).to.equal(404);
     });
 
-    it('returns config with topics and resolved guidelines', async () => {
-      const topicWithGuidelines = createMockTopic({
-        topicId: 'topic-1',
-        guidelineIds: ['guideline-1'],
-      });
-      mockDataAccess.SentimentTopic.allBySiteIdEnabled.resolves({
-        data: [topicWithGuidelines],
-        cursor: null,
-      });
+    it('returns config with topics and guidelines independently', async () => {
       const result = await sentimentController.getConfig(context);
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.topics).to.be.an('array');
+      expect(body.guidelines).to.be.an('array');
     });
 
     it('filters by audit when provided', async () => {
