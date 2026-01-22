@@ -68,6 +68,8 @@ describe('LlmoController', () => {
   let triggerBrandProfileAgentStub;
   let updateModifiedByDetailsStub;
   let mockTokowakaClient;
+  let readStrategyStub;
+  let writeStrategyStub;
 
   const mockHttpUtils = {
     ok: (data, headers = {}) => ({
@@ -117,6 +119,10 @@ describe('LlmoController', () => {
           defaultConfig: llmoConfig.defaultConfig,
           readConfig: (...args) => readConfigStub(...args),
           writeConfig: (...args) => writeConfigStub(...args),
+        },
+        llmoStrategy: {
+          readStrategy: (...args) => readStrategyStub(...args),
+          writeStrategy: (...args) => writeStrategyStub(...args),
         },
         schemas: {
           llmoConfig: { safeParse: (...args) => llmoConfigSchemaStub.safeParse(...args) },
@@ -339,6 +345,8 @@ describe('LlmoController', () => {
     tracingFetchStub = sinon.stub();
     readConfigStub = sinon.stub();
     writeConfigStub = sinon.stub();
+    readStrategyStub = sinon.stub();
+    writeStrategyStub = sinon.stub();
     llmoConfigSchemaStub = {
       safeParse: sinon.stub().returns({ success: true, data: {} }),
     };
@@ -3554,6 +3562,219 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.include('S3 fetch failed');
+    });
+  });
+
+  describe('getStrategy', () => {
+    const mockStrategyData = {
+      opportunities: [
+        { id: 'opp-1', name: 'Add meta description', category: 'SEO' },
+        { id: 'opp-2', name: 'Optimize title tag', category: 'SEO' },
+      ],
+      strategies: [
+        {
+          id: 'strategy-1',
+          name: 'Homepage SEO Optimization',
+          status: 'in_progress',
+          url: 'https://example.com/',
+          opportunities: [
+            { opportunityId: 'opp-1', status: 'completed' },
+            { opportunityId: 'opp-2', status: 'in_progress' },
+          ],
+        },
+      ],
+    };
+
+    it('should return strategy successfully', async () => {
+      readStrategyStub.resolves({
+        data: mockStrategyData,
+        exists: true,
+        version: 'v123',
+      });
+
+      const result = await controller.getStrategy(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(result.headers.get('Content-Encoding')).to.equal('br');
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ data: mockStrategyData, version: 'v123' });
+    });
+
+    it('should return 404 when strategy does not exist', async () => {
+      readStrategyStub.resolves({
+        data: null,
+        exists: false,
+        version: null,
+      });
+
+      const result = await controller.getStrategy(mockContext);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('not found');
+    });
+
+    it('should return strategy with specific version successfully', async () => {
+      readStrategyStub.resolves({
+        data: mockStrategyData,
+        exists: true,
+        version: 'v456',
+      });
+      mockContext.data = { version: 'v456' };
+
+      const result = await controller.getStrategy(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(result.headers.get('Content-Encoding')).to.equal('br');
+      const responseBody = await result.json();
+      expect(responseBody.version).to.equal('v456');
+    });
+
+    it('should return 404 when specific version does not exist', async () => {
+      readStrategyStub.resolves({
+        data: null,
+        exists: false,
+        version: null,
+      });
+      mockContext.data = { version: 'nonexistent-version' };
+
+      const result = await controller.getStrategy(mockContext);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('not found');
+      expect(responseBody.message).to.include('nonexistent-version');
+    });
+
+    it('should return bad request when s3 client is missing', async () => {
+      delete mockContext.s3;
+
+      const result = await controller.getStrategy(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('LLMO strategy storage is not configured for this environment');
+    });
+
+    it('should handle S3 errors when getting strategy', async () => {
+      readStrategyStub.rejects(new Error('S3 connection failed'));
+
+      const result = await controller.getStrategy(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('S3 connection failed');
+    });
+  });
+
+  describe('saveStrategy', () => {
+    const testStrategyData = {
+      opportunities: [
+        { id: 'opp-1', name: 'Improve page speed', category: 'Performance' },
+      ],
+      strategies: [
+        {
+          id: 'strategy-1',
+          name: 'Performance Optimization',
+          status: 'pending',
+          url: 'https://example.com/products',
+          opportunities: [{ opportunityId: 'opp-1', status: 'pending' }],
+        },
+      ],
+    };
+
+    beforeEach(() => {
+      writeStrategyStub.resolves({ version: 'v1' });
+      mockContext.data = testStrategyData;
+    });
+
+    it('should write strategy to S3 successfully', async () => {
+      const result = await controller.saveStrategy(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ version: 'v1' });
+      expect(writeStrategyStub).to.have.been.calledWith(
+        TEST_SITE_ID,
+        testStrategyData,
+        s3Client,
+        { s3Bucket: TEST_BUCKET },
+      );
+    });
+
+    it('should return bad request when payload is not an object', async () => {
+      mockContext.data = null;
+
+      const result = await controller.saveStrategy(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('LLMO strategy must be provided as an object');
+      expect(writeStrategyStub).to.not.have.been.called;
+    });
+
+    it('should return bad request when payload is an array', async () => {
+      mockContext.data = ['item1', 'item2'];
+
+      const result = await controller.saveStrategy(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('LLMO strategy must be provided as an object');
+      expect(writeStrategyStub).to.not.have.been.called;
+    });
+
+    it('should return bad request when s3 client is missing', async () => {
+      delete mockContext.s3;
+
+      const result = await controller.saveStrategy(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('LLMO strategy storage is not configured for this environment');
+    });
+
+    it('should handle S3 error when writing strategy', async () => {
+      writeStrategyStub.rejects(new Error('S3 write failed'));
+
+      const result = await controller.saveStrategy(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('S3 write failed');
+    });
+
+    it('should accept any valid JSON object as strategy', async () => {
+      const complexStrategy = {
+        opportunities: [
+          { id: 'opp-1', name: 'Fix broken links', category: 'SEO' },
+          { id: 'opp-2', name: 'Add alt text', category: 'Accessibility' },
+        ],
+        strategies: [
+          {
+            id: 'strategy-1',
+            name: 'Content Audit',
+            status: 'completed',
+            url: 'https://example.com/blog',
+            opportunities: [
+              { opportunityId: 'opp-1', status: 'completed' },
+              { opportunityId: 'opp-2', status: 'completed' },
+            ],
+          },
+        ],
+        metadata: { generatedAt: '2025-01-21T10:00:00Z', version: 1 },
+      };
+      mockContext.data = complexStrategy;
+
+      const result = await controller.saveStrategy(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(writeStrategyStub).to.have.been.calledWith(
+        TEST_SITE_ID,
+        complexStrategy,
+        s3Client,
+        { s3Bucket: TEST_BUCKET },
+      );
     });
   });
 });
