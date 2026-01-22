@@ -290,6 +290,38 @@ export const triggerAuditForSite = async (
   auditData,
 );
 
+/**
+ * Triggers the A11y codefix flow for an existing opportunity.
+ * This sends a message to the audit worker to process the opportunity's suggestions
+ * and send them to Mystique for code fix processing.
+ *
+ * @param {Site} site - The site object.
+ * @param {string} opportunityId - The opportunity ID to process.
+ * @param {string} opportunityType - The opportunity type (e.g., 'a11y-assistive').
+ * @param {Object} slackContext - The Slack context object.
+ * @param {Object} lambdaContext - The Lambda context object.
+ * @return {Promise} - A promise representing the trigger operation.
+ */
+export const triggerA11yCodefixForOpportunity = async (
+  site,
+  opportunityId,
+  opportunityType,
+  slackContext,
+  lambdaContext,
+) => sendAuditMessage(
+  lambdaContext.sqs,
+  lambdaContext.env.AUDIT_JOBS_QUEUE_URL,
+  'trigger:a11y-codefix',
+  {
+    slackContext: {
+      channelId: slackContext.channelId,
+      threadTs: slackContext.threadTs,
+    },
+  },
+  site.getId(),
+  { opportunityId, opportunityType },
+);
+
 // todo: prototype - untested
 /* c8 ignore start */
 export const triggerExperimentationCandidates = async (
