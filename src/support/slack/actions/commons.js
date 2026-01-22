@@ -11,7 +11,6 @@
  */
 
 import { Blocks, Message } from 'slack-block-builder';
-import { formatAllowlistMessage, SPACECAT_BOT_USER_AGENT } from '@adobe/spacecat-shared-utils';
 import { BUTTON_LABELS } from '../../../controllers/hooks.js';
 
 export function extractURLFromSlackMessage(inputString) {
@@ -55,13 +54,11 @@ export function composeReply(opts) {
  * @param {Object} options - Options
  * @param {string} options.siteUrl - Site URL
  * @param {Object} options.botProtection - Bot protection details
- * @param {string} [options.botIps] - Comma-separated bot IPs from environment (SPACECAT_BOT_IPS)
  * @returns {string} Formatted Slack message
  */
 export function formatBotProtectionSlackMessage({
   siteUrl,
   botProtection,
-  botIps,
 }) {
   const isBlocked = botProtection.crawlable === false;
   const emoji = isBlocked ? ':warning:' : ':information_source:';
@@ -72,50 +69,19 @@ export function formatBotProtectionSlackMessage({
     + `*Protection Type:* ${botProtection.type}\n`
     + `*Confidence:* ${(botProtection.confidence * 100).toFixed(0)}%\n`;
 
-  if (botProtection.reason) {
-    message += `*Reason:* ${botProtection.reason}\n`;
-  }
-
-  // Only show allowlist instructions if site is actually blocked
   if (isBlocked) {
-    let allowlistInfo;
-    try {
-      allowlistInfo = formatAllowlistMessage(botIps);
-    } catch (error) {
-      // If IPs not configured, use generic message
-      allowlistInfo = {
-        ips: ['IP addresses not configured'],
-        userAgent: SPACECAT_BOT_USER_AGENT,
-      };
-    }
-
-    const ipList = allowlistInfo.ips.map((ip) => `• \`${ip}\``).join('\n');
-
     message += '\n'
-      + '*Detection Details:*\n'
-      + '• Simple HTTP requests are being blocked\n'
-      + '• Our browser-based scraper may be able to bypass basic protection\n'
-      + '• Advanced protection may still block automated access\n'
-      + '\n'
-      + '*Recommended Action:*\n'
-      + `Allowlist SpaceCat in your ${botProtection.type} configuration. *Both User-Agent and IPs must be allowlisted together:*\n`
-      + '\n'
-      + '*User-Agent Pattern to Allowlist:*\n'
-      + `Use a pattern match: \`*${allowlistInfo.userAgent}*\` or \`*Spacecat*\`\n`
-      + '_(Our scraper uses different User-Agent formats, so pattern matching is required)_\n'
-      + '\n'
-      + '*All IPs to Allowlist:*\n'
-      + `${ipList}\n`
-      + '_(All IPs must be allowlisted as requests may come from any of them)_\n'
-      + '\n'
-      + ':warning: _If audits continue to fail after allowlisting, verify that both User-Agent pattern and ALL IPs are configured correctly in your CDN/WAF._';
+      + '*Status:*\n'
+      + '• Initial detection suggests bot protection is active\n'
+      + '• Onboarding will proceed with browser-based scraping\n'
+      + '• Additional details may be provided if bot protection is encountered during scraping\n';
   } else {
     // Site is accessible - just informational
     message += '\n'
       + '*Status:*\n'
       + '• Bot protection infrastructure is present\n'
       + '• SpaceCat can currently access the site\n'
-      + '• No action needed at this time';
+      + '• No action needed at this time\n';
   }
 
   return message;

@@ -704,7 +704,6 @@ export function onboardSiteModal(lambdaContext) {
         const botProtectionMessage = formatBotProtectionSlackMessage({
           siteUrl,
           botProtection: botProtectionResult,
-          botIps: env.SPACECAT_BOT_IPS,
         });
 
         await client.chat.postMessage({

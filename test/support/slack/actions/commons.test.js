@@ -72,9 +72,7 @@ describe('Slack action commons', () => {
           type: 'cloudflare',
           confidence: 0.99,
           crawlable: false,
-          reason: 'Challenge page detected',
         },
-        botIps: '1.2.3.4,5.6.7.8',
       });
 
       expect(result).to.include('Bot Protection Detected');
@@ -82,12 +80,12 @@ describe('Slack action commons', () => {
       expect(result).to.include('https://example.com');
       expect(result).to.include('cloudflare');
       expect(result).to.include('99%');
-      expect(result).to.include('Challenge page detected');
-      expect(result).to.include('Detection Details');
-      expect(result).to.include('1.2.3.4');
-      expect(result).to.include('User-Agent Pattern');
-      expect(result).to.include('*Spacecat*');
-      expect(result).to.include('Both User-Agent and IPs must be allowlisted together');
+      expect(result).to.include('Initial detection suggests bot protection is active');
+      expect(result).to.include('Onboarding will proceed with browser-based scraping');
+      expect(result).to.include('Additional details may be provided if bot protection is encountered during scraping');
+      // Should not include detailed allowlist instructions
+      expect(result).to.not.include('User-Agent Pattern');
+      expect(result).to.not.include('All IPs to Allowlist');
     });
 
     it('formats allowed infrastructure message', () => {
@@ -98,7 +96,6 @@ describe('Slack action commons', () => {
           confidence: 1.0,
           crawlable: true,
         },
-        botIps: '1.2.3.4',
       });
 
       // Site is accessible - shows informational message only
@@ -108,11 +105,10 @@ describe('Slack action commons', () => {
       expect(result).to.include('cloudflare-allowed');
       expect(result).to.include('100%');
       expect(result).to.include('SpaceCat can currently access the site');
-      expect(result).to.not.include('Detection Details');
-      expect(result).to.not.include('1.2.3.4');
+      expect(result).to.include('No action needed at this time');
     });
 
-    it('formats message without reason', () => {
+    it('formats blocked message without reason field', () => {
       const result = formatBotProtectionSlackMessage({
         siteUrl: 'https://no-reason.com',
         botProtection: {
@@ -126,22 +122,8 @@ describe('Slack action commons', () => {
       expect(result).to.include('https://no-reason.com');
       expect(result).to.include('http2-block');
       expect(result).to.include('90%');
-      expect(result).to.not.include('Reason:');
-    });
-
-    it('handles missing bot IPs gracefully', () => {
-      const result = formatBotProtectionSlackMessage({
-        siteUrl: 'https://test.com',
-        botProtection: {
-          type: 'akamai',
-          confidence: 0.95,
-          crawlable: false,
-        },
-        botIps: '',
-      });
-
-      expect(result).to.include('Bot Protection Detected');
-      expect(result).to.include('IP addresses not configured');
+      expect(result).to.include('Initial detection suggests bot protection is active');
+      expect(result).to.include('Additional details may be provided if bot protection is encountered during scraping');
     });
   });
 });
