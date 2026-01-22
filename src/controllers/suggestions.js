@@ -1055,6 +1055,7 @@ function SuggestionsController(ctx, sqs, env) {
   const deploySuggestionToEdge = async (context) => {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
+    const { authInfo: { profile } } = context.attributes;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -1222,7 +1223,7 @@ function SuggestionsController(ctx, sqs, env) {
               tokowakaDeployed: deploymentTimestamp,
               edgeDeployed: deploymentTimestamp,
             });
-            suggestion.setUpdatedBy('tokowaka-deployment');
+            suggestion.setUpdatedBy(profile?.email || 'tokowaka-deployment');
             return suggestion.save();
           }),
         );
@@ -1237,7 +1238,7 @@ function SuggestionsController(ctx, sqs, env) {
           });
         });
 
-        context.log.info(`Successfully deployed ${succeededSuggestions.length} suggestions to Edge`);
+        context.log.info(`[edge-deployment] Successfully deployed ${succeededSuggestions.length} suggestions by ${profile?.email || 'tokowaka-deployment'}`);
       } catch (error) {
         context.log.error(`Error deploying to Tokowaka: ${error.message}`, error);
         // If deployment fails, mark all valid suggestions as failed
@@ -1295,12 +1296,12 @@ function SuggestionsController(ctx, sqs, env) {
               tokowakaDeployed: deploymentTimestamp,
               edgeDeployed: deploymentTimestamp,
             });
-            suggestion.setUpdatedBy('tokowaka-deployment');
+            suggestion.setUpdatedBy(profile?.email || 'tokowaka-deployment');
             // eslint-disable-next-line no-await-in-loop
             await suggestion.save();
 
             succeededSuggestions.push(suggestion);
-            context.log.info(`Successfully deployed domain-wide suggestion ${suggestionId}`);
+            context.log.info(`[edge-deployment] Successfully deployed domain-wide suggestion ${suggestionId} by ${profile?.email || 'tokowaka-deployment'}`);
 
             // Mark all other NEW suggestions that match allowedRegexPatterns
             try {
@@ -1358,7 +1359,7 @@ function SuggestionsController(ctx, sqs, env) {
                       edgeDeployed: deploymentTimestamp,
                       coveredByDomainWide: suggestion.getId(),
                     });
-                    coveredSuggestion.setUpdatedBy('domain-wide-deployment');
+                    coveredSuggestion.setUpdatedBy(profile?.email || 'domain-wide-deployment');
                     return coveredSuggestion.save();
                   }),
                 );
@@ -1418,7 +1419,7 @@ function SuggestionsController(ctx, sqs, env) {
               coveredByDomainWide: 'same-batch-deployment',
               skippedInDeployment: true,
             });
-            skippedSuggestion.setUpdatedBy('domain-wide-deployment');
+            skippedSuggestion.setUpdatedBy(profile?.email || 'domain-wide-deployment');
             return skippedSuggestion.save();
           }),
         );
@@ -1471,6 +1472,7 @@ function SuggestionsController(ctx, sqs, env) {
 
   const rollbackSuggestionFromEdge = async (context) => {
     const { siteId, opportunityId } = context.params;
+    const { authInfo: { profile } } = context.attributes;
     if (!isNonEmptyObject(context.data)) {
       return badRequest('No data provided');
     }
@@ -1562,7 +1564,7 @@ function SuggestionsController(ctx, sqs, env) {
             delete currentData.tokowakaDeployed;
             delete currentData.edgeDeployed;
             suggestion.setData(currentData);
-            suggestion.setUpdatedBy('tokowaka-rollback');
+            suggestion.setUpdatedBy(profile?.email || 'tokowaka-rollback');
             // eslint-disable-next-line no-await-in-loop
             await suggestion.save();
 
@@ -1584,7 +1586,7 @@ function SuggestionsController(ctx, sqs, env) {
                   delete coveredData.edgeDeployed;
                   delete coveredData.coveredByDomainWide;
                   coveredSuggestion.setData(coveredData);
-                  coveredSuggestion.setUpdatedBy('domain-wide-rollback');
+                  coveredSuggestion.setUpdatedBy(profile?.email || 'domain-wide-rollback');
                   return coveredSuggestion.save();
                 }),
               );
@@ -1637,7 +1639,7 @@ function SuggestionsController(ctx, sqs, env) {
             delete currentData.tokowakaDeployed;
             delete currentData.edgeDeployed;
             suggestion.setData(currentData);
-            suggestion.setUpdatedBy('tokowaka-rollback');
+            suggestion.setUpdatedBy(profile?.email || 'tokowaka-rollback');
             return suggestion.save();
           }),
         );

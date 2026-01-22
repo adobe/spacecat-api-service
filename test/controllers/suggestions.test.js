@@ -3350,8 +3350,8 @@ describe('Suggestions Controller', () => {
       expect(firstCallArgs.tokowakaDeployed).to.be.a('number');
 
       // Verify updatedBy was set
-      expect(firstSugg.setUpdatedBy.calledWith('tokowaka-deployment')).to.be.true;
-      expect(secondSugg.setUpdatedBy.calledWith('tokowaka-deployment')).to.be.true;
+      expect(firstSugg.setUpdatedBy.calledWith('test@test.com')).to.be.true;
+      expect(secondSugg.setUpdatedBy.calledWith('test@test.com')).to.be.true;
 
       // Verify save was called
       expect(firstSugg.save.calledOnce).to.be.true;
@@ -3842,7 +3842,7 @@ describe('Suggestions Controller', () => {
         const setDataArgs = domainWideSuggestion.setData.firstCall.args[0];
         expect(setDataArgs).to.have.property('tokowakaDeployed');
         expect(setDataArgs.tokowakaDeployed).to.be.a('number');
-        expect(domainWideSuggestion.setUpdatedBy.calledWith('tokowaka-deployment')).to.be.true;
+        expect(domainWideSuggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
         expect(domainWideSuggestion.save.calledOnce).to.be.true;
       });
 
@@ -3948,7 +3948,7 @@ describe('Suggestions Controller', () => {
         expect(anotherSuggestion.setData.called).to.be.true;
         const anotherData = anotherSuggestion.setData.firstCall.args[0];
         expect(anotherData).to.have.property('coveredByDomainWide', SUGGESTION_IDS[0]);
-        expect(anotherSuggestion.setUpdatedBy.calledWith('domain-wide-deployment')).to.be.true;
+        expect(anotherSuggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
       });
 
       it('should not mark non-NEW suggestions as covered by domain-wide', async () => {
@@ -4694,7 +4694,7 @@ describe('Suggestions Controller', () => {
       expect(dataArg).to.not.have.property('tokowakaDeployed');
 
       // Verify setUpdatedBy was called
-      expect(suggestion.setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
+      expect(suggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
 
       // Verify save was called
       expect(suggestion.save.calledOnce).to.be.true;
@@ -4754,7 +4754,7 @@ describe('Suggestions Controller', () => {
       // Verify both suggestions were updated
       tokowakaSuggestions.forEach((suggestion) => {
         expect(suggestion.setData.calledOnce).to.be.true;
-        expect(suggestion.setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
+        expect(suggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
         expect(suggestion.save.calledOnce).to.be.true;
       });
     });
@@ -5000,7 +5000,7 @@ describe('Suggestions Controller', () => {
       expect(domainWideSuggestion.setData.calledOnce).to.be.true;
       const domainWideData = domainWideSuggestion.setData.firstCall.args[0];
       expect(domainWideData).to.not.have.property('tokowakaDeployed');
-      expect(domainWideSuggestion.setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
+      expect(domainWideSuggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
       expect(domainWideSuggestion.save.calledOnce).to.be.true;
 
       // Verify covered suggestions were also rolled back
@@ -5009,7 +5009,7 @@ describe('Suggestions Controller', () => {
         const suggestionData = suggestion.setData.firstCall.args[0];
         expect(suggestionData).to.not.have.property('tokowakaDeployed');
         expect(suggestionData).to.not.have.property('coveredByDomainWide');
-        expect(suggestion.setUpdatedBy.calledWith('domain-wide-rollback')).to.be.true;
+        expect(suggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
         expect(suggestion.save.calledOnce).to.be.true;
       });
     });
