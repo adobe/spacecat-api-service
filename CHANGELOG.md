@@ -1,3 +1,10 @@
+## [1.293.4](https://github.com/adobe/spacecat-api-service/compare/v1.293.3...v1.293.4) (2026-01-22)
+
+
+### Bug Fixes
+
+* self serve api fix, and lastModified updates ([#1723](https://github.com/adobe/spacecat-api-service/issues/1723)) ([ea70794](https://github.com/adobe/spacecat-api-service/commit/ea70794bdeef6e7982336fb7d69299eb33350c18))
+
 ## [1.293.3](https://github.com/adobe/spacecat-api-service/compare/v1.293.2...v1.293.3) (2026-01-22)
 
 
