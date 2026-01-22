@@ -120,6 +120,9 @@ describe('Suggestions Controller', () => {
         getSiteId() {
           return SITE_ID;
         },
+        getType() {
+          return 'test-opportunity-type';
+        },
       };
     },
     save() {

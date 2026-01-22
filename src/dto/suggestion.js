@@ -19,31 +19,65 @@ import { buildAggregationKeyFromSuggestion } from '@adobe/spacecat-shared-utils'
 export const SUGGESTION_VIEWS = ['minimal', 'summary', 'full'];
 
 /**
- * Fields to include in minimal view from data object.
+ * Accessibility-related opportunity types that need special issue handling.
+ * @type {Set<string>}
+ */
+const ACCESSIBILITY_OPPORTUNITY_TYPES = new Set([
+  'form-accessibility',
+  'a11y-color-contrast',
+  'a11y-assistive',
+]);
+
+/**
+ * Common URL-related fields that should always be included in minimal view.
  * @type {string[]}
  */
-const MINIMAL_DATA_FIELDS = [
-  // URL fields
+const COMMON_URL_FIELDS = [
   'url',
   'urls',
   'urlFrom',
   'urlTo',
-  'url_from', // snake_case variant (broken backlinks)
-  'url_to', // snake_case variant (broken backlinks)
+  'url_from',
+  'url_to',
   'urlsSuggested',
   'sitemapUrl',
   'pageUrl',
   'pattern',
   'link',
+  'type',
+];
+
+/**
+ * Mapping of opportunity types to their specific data fields for minimal view.
+ * Only fields relevant to each opportunity type are included.
+ * @type {Object<string, string[]>}
+ */
+const OPPORTUNITY_TYPE_FIELDS = {
+  'alt-text': ['recommendations'],
+  'security-vulnerabilities': ['cves'],
+  'security-csp': ['findings'],
+  'security-permissions': ['path'],
+  'redirect-chains': ['sourceUrl', 'destinationUrl'],
+  'form-opportunities': ['form', 'page'],
+  'form-accessibility': ['issues', 'form', 'page', 'accessibility'],
+  'a11y-color-contrast': ['issues'],
+  'a11y-assistive': ['issues'],
+  'cwv-lcp': ['metrics', 'pageviews', 'issues'],
+  'cwv-cls': ['metrics', 'pageviews', 'issues'],
+  'cwv-inp': ['metrics', 'pageviews', 'issues'],
+};
+
+/**
+ * Fallback fields for unknown opportunity types.
+ * @type {string[]}
+ */
+const FALLBACK_DATA_FIELDS = [
   'path',
   'sourceUrl',
   'destinationUrl',
-  // CWV fields
-  'metrics', // for totalIssues calculation (mobileMetric + desktopMetric)
-  'type', // to determine url vs group
-  'pageviews', // for display
-  // Issues and findings
-  'issues', // for CWV, Accessibility, ColorContrast, FormNonExperimental
+  'metrics',
+  'pageviews',
+  'issues',
   'recommendations',
   'cves',
   'findings',
@@ -53,19 +87,45 @@ const MINIMAL_DATA_FIELDS = [
 ];
 
 /**
- * Extracts minimal data fields from suggestion data.
- * @param {object} data - Suggestion data object.
- * @returns {object|null} Object with only minimal fields, or null if no data.
+ * Filters issues array to only include occurrences count for accessibility types.
+ * @param {Array} issues - Issues array from suggestion data.
+ * @returns {Array} Filtered issues array with only occurrences.
  */
-const extractMinimalData = (data) => {
+const filterAccessibilityIssues = (issues) => {
+  if (!Array.isArray(issues)) return issues;
+  return issues.map((issue) => ({
+    occurrences: issue.occurrences,
+  }));
+};
+
+/**
+ * Extracts minimal data fields from suggestion data with type-specific filtering.
+ * @param {object} data - Suggestion data object.
+ * @param {string} opportunityType - Type of opportunity (e.g., 'form-accessibility').
+ * @returns {object|null} Object with only relevant fields, or null if no data.
+ */
+const extractMinimalData = (data, opportunityType) => {
   if (!data) return null;
 
   const minimalData = {};
   let hasFields = false;
 
-  for (const field of MINIMAL_DATA_FIELDS) {
+  // Determine which fields to include based on opportunity type
+  const typeSpecificFields = opportunityType && OPPORTUNITY_TYPE_FIELDS[opportunityType]
+    ? OPPORTUNITY_TYPE_FIELDS[opportunityType]
+    : FALLBACK_DATA_FIELDS;
+
+  // Combine common URL fields with type-specific fields
+  const fieldsToInclude = [...COMMON_URL_FIELDS, ...typeSpecificFields];
+
+  for (const field of fieldsToInclude) {
     if (data[field] !== undefined) {
-      minimalData[field] = data[field];
+      // Special handling for issues array in accessibility types
+      if (field === 'issues' && ACCESSIBILITY_OPPORTUNITY_TYPES.has(opportunityType)) {
+        minimalData[field] = filterAccessibilityIssues(data[field]);
+      } else {
+        minimalData[field] = data[field];
+      }
       hasFields = true;
     }
   }
@@ -110,14 +170,16 @@ export const SuggestionDto = {
    * Converts a Suggestion object into a JSON object with optional projection.
    * @param {Readonly<Suggestion>} suggestion - Suggestion object.
    * @param {string} [view='full'] - Projection view: 'minimal', 'summary', or 'full'.
+   * @param {object} [opportunity] - Optional opportunity entity for type-specific filtering.
    * @returns {object} JSON object with fields based on the selected view.
    */
-  toJSON: (suggestion, view = 'full') => {
+  toJSON: (suggestion, view = 'full', opportunity = null) => {
     const data = suggestion.getData();
+    const opportunityType = opportunity?.getType() || null;
 
     // Minimal view: id, status, and URL-related data fields
     if (view === 'minimal') {
-      const minimalData = extractMinimalData(data);
+      const minimalData = extractMinimalData(data, opportunityType);
       return {
         id: suggestion.getId(),
         status: suggestion.getStatus(),
@@ -127,7 +189,7 @@ export const SuggestionDto = {
 
     // Summary view: minimal fields + metadata (superset of minimal, subset of full)
     if (view === 'summary') {
-      const minimalData = extractMinimalData(data);
+      const minimalData = extractMinimalData(data, opportunityType);
       return {
         id: suggestion.getId(),
         status: suggestion.getStatus(),

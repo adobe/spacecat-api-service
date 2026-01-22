@@ -167,9 +167,10 @@ function SuggestionsController(ctx, sqs, env) {
     let suggestionEntities = await Suggestion.allByOpportunityId(opptyId);
 
     // Check if the opportunity belongs to the site
+    let opportunity = null;
     if (suggestionEntities.length > 0) {
-      const oppty = await suggestionEntities[0].getOpportunity();
-      if (!oppty || oppty.getSiteId() !== siteId) {
+      opportunity = await suggestionEntities[0].getOpportunity();
+      if (!opportunity || opportunity.getSiteId() !== siteId) {
         return notFound('Opportunity not found');
       }
     }
@@ -181,7 +182,9 @@ function SuggestionsController(ctx, sqs, env) {
       );
     }
 
-    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg, view));
+    const suggestions = suggestionEntities.map(
+      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
+    );
     return ok(suggestions);
   };
 
@@ -235,14 +238,17 @@ function SuggestionsController(ctx, sqs, env) {
     const newCursor = results.cursor || null;
 
     // Check if the opportunity belongs to the site
+    let opportunity = null;
     if (suggestionEntities.length > 0) {
-      const oppty = await suggestionEntities[0].getOpportunity();
-      if (!oppty || oppty.getSiteId() !== siteId) {
+      opportunity = await suggestionEntities[0].getOpportunity();
+      if (!opportunity || opportunity.getSiteId() !== siteId) {
         return notFound('Opportunity not found');
       }
     }
 
-    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg, view));
+    const suggestions = suggestionEntities.map(
+      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
+    );
 
     return ok({
       suggestions,
@@ -293,13 +299,16 @@ function SuggestionsController(ctx, sqs, env) {
 
     const suggestionEntities = await Suggestion.allByOpportunityIdAndStatus(opptyId, status);
     // Check if the opportunity belongs to the site
+    let opportunity = null;
     if (suggestionEntities.length > 0) {
-      const oppty = await suggestionEntities[0].getOpportunity();
-      if (!oppty || oppty.getSiteId() !== siteId) {
+      opportunity = await suggestionEntities[0].getOpportunity();
+      if (!opportunity || opportunity.getSiteId() !== siteId) {
         return notFound('Opportunity not found');
       }
     }
-    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg, view));
+    const suggestions = suggestionEntities.map(
+      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
+    );
     return ok(suggestions);
   };
 
@@ -353,13 +362,16 @@ function SuggestionsController(ctx, sqs, env) {
     });
     const { data: suggestionEntities = [], cursor: newCursor = null } = results;
     // Check if the opportunity belongs to the site
+    let opportunity = null;
     if (suggestionEntities.length > 0) {
-      const oppty = await suggestionEntities[0].getOpportunity();
-      if (!oppty || oppty.getSiteId() !== siteId) {
+      opportunity = await suggestionEntities[0].getOpportunity();
+      if (!opportunity || opportunity.getSiteId() !== siteId) {
         return notFound('Opportunity not found');
       }
     }
-    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg, view));
+    const suggestions = suggestionEntities.map(
+      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
+    );
     return ok({
       suggestions,
       pagination: {
@@ -417,7 +429,7 @@ function SuggestionsController(ctx, sqs, env) {
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound();
     }
-    return ok(SuggestionDto.toJSON(suggestion, view));
+    return ok(SuggestionDto.toJSON(suggestion, view, opportunity));
   };
 
   /**

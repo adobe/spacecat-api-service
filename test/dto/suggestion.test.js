@@ -266,6 +266,129 @@ describe('Suggestion DTO', () => {
           status: 'NEW',
         });
       });
+
+      describe('accessibility-specific filtering', () => {
+        const createMockOpportunity = (type) => ({
+          getType: () => type,
+        });
+
+        it('filters issues to only occurrences for form-accessibility opportunities', () => {
+          const suggestion = createMockSuggestion({
+            issues: [
+              {
+                type: 'missing-label',
+                occurrences: 5,
+                severity: 'high',
+                description: 'Form input missing label',
+                element: '<input type="text">',
+              },
+              {
+                type: 'invalid-button',
+                occurrences: 3,
+                severity: 'medium',
+                description: 'Button missing type attribute',
+                element: '<button>Submit</button>',
+              },
+            ],
+          });
+          const opportunity = createMockOpportunity('form-accessibility');
+
+          const json = SuggestionDto.toJSON(suggestion, 'minimal', opportunity);
+
+          expect(json.data).to.have.property('issues');
+          expect(json.data.issues).to.have.length(2);
+          expect(json.data.issues[0]).to.deep.equal({ occurrences: 5 });
+          expect(json.data.issues[1]).to.deep.equal({ occurrences: 3 });
+          expect(json.data.issues[0]).to.not.have.property('severity');
+          expect(json.data.issues[0]).to.not.have.property('description');
+          expect(json.data.issues[0]).to.not.have.property('element');
+        });
+
+        it('filters issues to only occurrences for a11y-color-contrast opportunities', () => {
+          const suggestion = createMockSuggestion({
+            issues: [
+              {
+                type: 'low-contrast',
+                occurrences: 8,
+                severity: 'high',
+                ratio: '2.5:1',
+              },
+            ],
+          });
+          const opportunity = createMockOpportunity('a11y-color-contrast');
+
+          const json = SuggestionDto.toJSON(suggestion, 'minimal', opportunity);
+
+          expect(json.data.issues).to.have.length(1);
+          expect(json.data.issues[0]).to.deep.equal({ occurrences: 8 });
+          expect(json.data.issues[0]).to.not.have.property('ratio');
+        });
+
+        it('filters issues to only occurrences for a11y-assistive opportunities', () => {
+          const suggestion = createMockSuggestion({
+            issues: [
+              {
+                type: 'missing-alt',
+                occurrences: 12,
+                severity: 'critical',
+              },
+            ],
+          });
+          const opportunity = createMockOpportunity('a11y-assistive');
+
+          const json = SuggestionDto.toJSON(suggestion, 'minimal', opportunity);
+
+          expect(json.data.issues[0]).to.deep.equal({ occurrences: 12 });
+        });
+
+        it('does not filter issues for non-accessibility opportunities', () => {
+          const suggestion = createMockSuggestion({
+            issues: [
+              {
+                type: 'cwv-issue',
+                occurrences: 5,
+                severity: 'high',
+                metric: 'LCP',
+              },
+            ],
+          });
+          const opportunity = createMockOpportunity('cwv');
+
+          const json = SuggestionDto.toJSON(suggestion, 'minimal', opportunity);
+
+          expect(json.data.issues[0]).to.have.property('occurrences', 5);
+          expect(json.data.issues[0]).to.have.property('severity', 'high');
+          expect(json.data.issues[0]).to.have.property('metric', 'LCP');
+        });
+
+        it('does not filter issues when opportunity is not provided', () => {
+          const suggestion = createMockSuggestion({
+            issues: [
+              {
+                type: 'some-issue',
+                occurrences: 5,
+                severity: 'high',
+              },
+            ],
+          });
+
+          const json = SuggestionDto.toJSON(suggestion, 'minimal');
+
+          expect(json.data.issues[0]).to.have.property('occurrences', 5);
+          expect(json.data.issues[0]).to.have.property('severity', 'high');
+        });
+
+        it('handles non-array issues field gracefully', () => {
+          const suggestion = createMockSuggestion({
+            issues: null,
+          });
+          const opportunity = createMockOpportunity('form-accessibility');
+
+          const json = SuggestionDto.toJSON(suggestion, 'minimal', opportunity);
+
+          expect(json.data.issues).to.be.null;
+        });
+      });
     });
 
     describe('summary view', () => {
@@ -380,6 +503,52 @@ describe('Suggestion DTO', () => {
         const json = SuggestionDto.toJSON(suggestion, 'summary');
 
         expect(json.url).to.be.null;
+      });
+
+      describe('accessibility-specific filtering', () => {
+        const createMockOpportunity = (type) => ({
+          getType: () => type,
+        });
+
+        it('filters issues to only occurrences for accessibility opportunities in summary view', () => {
+          const suggestion = createMockSuggestion({
+            issues: [
+              {
+                type: 'missing-alt',
+                occurrences: 10,
+                severity: 'critical',
+                element: '<img src="test.jpg">',
+              },
+            ],
+          });
+          const opportunity = createMockOpportunity('form-accessibility');
+
+          const json = SuggestionDto.toJSON(suggestion, 'summary', opportunity);
+
+          expect(json.data.issues).to.have.length(1);
+          expect(json.data.issues[0]).to.deep.equal({ occurrences: 10 });
+          expect(json).to.have.property('opportunityId');
+          expect(json).to.have.property('type');
+          expect(json).to.have.property('rank');
+        });
+
+        it('does not filter issues for non-accessibility opportunities in summary view', () => {
+          const suggestion = createMockSuggestion({
+            issues: [
+              {
+                type: 'cwv-issue',
+                occurrences: 5,
+                severity: 'high',
+              },
+            ],
+          });
+          const opportunity = createMockOpportunity('broken-backlinks');
+
+          const json = SuggestionDto.toJSON(suggestion, 'summary', opportunity);
+
+          expect(json.data.issues[0]).to.have.property('occurrences', 5);
+          expect(json.data.issues[0]).to.have.property('severity', 'high');
+        });
       });
     });
   });
