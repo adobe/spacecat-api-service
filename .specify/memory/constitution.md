@@ -111,7 +111,7 @@ All significant operations MUST be observable. Logging, metrics, and tracing MUS
 
 **Key Requirements**:
 - Log all security events (authentication, authorization, access control violations)
-- Log errors with sufficient context for debugging (trace ID, user context, operation details)
+- Log errors with sufficient context for debugging (request context, operation details)
 - Use structured logging for machine-parseable output
 - Include timing information for performance-critical operations
 - Avoid logging sensitive data (credentials, tokens, PII)
