@@ -1654,7 +1654,7 @@ function SuggestionsController(ctx, sqs, env) {
           });
         });
 
-        context.log.info(`Successfully rolled back ${succeededSuggestions.length} suggestions from Edge`);
+        context.log.info(`[edge-rollback] Successfully rolled back ${succeededSuggestions.length} suggestions from Edge`);
       } catch (error) {
         context.log.error(`Error during Tokowaka rollback: ${error.message}`, error);
         // If rollback fails, mark all valid suggestions as failed
