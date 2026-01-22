@@ -1357,17 +1357,12 @@ function SuggestionsController(ctx, sqs, env) {
                 await Promise.all(
                   coveredSuggestions.map(async (coveredSuggestion) => {
                     const coveredData = coveredSuggestion.getData();
-                    const updatedCoveredData = {
+                    coveredSuggestion.setData({
                       ...coveredData,
                       tokowakaDeployed: deploymentTimestamp,
                       edgeDeployed: deploymentTimestamp,
                       coveredByDomainWide: suggestion.getId(),
-                    };
-                    // Remove edgeOptimizeStatus if it's STALE
-                    if (updatedCoveredData.edgeOptimizeStatus === 'STALE') {
-                      delete updatedCoveredData.edgeOptimizeStatus;
-                    }
-                    coveredSuggestion.setData(updatedCoveredData);
+                    });
                     coveredSuggestion.setUpdatedBy('domain-wide-deployment');
                     return coveredSuggestion.save();
                   }),
@@ -1421,18 +1416,13 @@ function SuggestionsController(ctx, sqs, env) {
         await Promise.all(
           skippedSuggestionEntities.map(async (skippedSuggestion) => {
             const currentData = skippedSuggestion.getData();
-            const updatedData = {
+            skippedSuggestion.setData({
               ...currentData,
               tokowakaDeployed: deploymentTimestamp,
               edgeDeployed: deploymentTimestamp,
               coveredByDomainWide: 'same-batch-deployment',
               skippedInDeployment: true,
-            };
-            // Remove edgeOptimizeStatus if it's STALE
-            if (updatedData.edgeOptimizeStatus === 'STALE') {
-              delete updatedData.edgeOptimizeStatus;
-            }
-            skippedSuggestion.setData(updatedData);
+            });
             skippedSuggestion.setUpdatedBy('domain-wide-deployment');
             return skippedSuggestion.save();
           }),
