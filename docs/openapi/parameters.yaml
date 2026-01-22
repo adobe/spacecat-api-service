@@ -273,6 +273,15 @@ trafficType:
       - 'paid'
     example: 'paid'
 
+channel:
+  name: channel
+  description: Filter by traffic channel (e.g., search, social, display, video)
+  in: path
+  required: true
+  schema:
+    type: string
+    example: 'search'
+
 # New parameters for entitlements API
 entitlementId:
   name: entitlementId
@@ -292,6 +301,7 @@ productCode:
     enum:
       - 'LLMO'
       - 'ASO'
+      - 'ACO'
 
 # New parameters for site enrollments API
 siteEnrollmentId:

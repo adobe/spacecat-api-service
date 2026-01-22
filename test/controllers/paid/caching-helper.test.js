@@ -16,13 +16,18 @@ import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import chaiAsPromised from 'chai-as-promised';
 import { describe } from 'mocha';
+import { gzip } from 'zlib';
+import { promisify } from 'util';
 import {
   fileExists,
   parseS3Uri,
   getS3CachedResult,
   addResultJsonToCache,
   getSignedUrlWithRetries,
+  getCachedJsonData,
 } from '../../../src/controllers/paid/caching-helper.js';
+
+const gzipAsync = promisify(gzip);
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -170,6 +175,75 @@ describe('Paid TrafficController caching-helper', () => {
 
       const result = await getSignedUrlWithRetries(mockS3, 's3://bucket/key.json', mockLog, 1);
       expect(result).to.be.null;
+    });
+  });
+
+  describe('getCachedJsonData', () => {
+    it('returns parsed JSON data when file exists and is valid', async () => {
+      const testData = { foo: 'bar', baz: 123 };
+      const compressedData = await gzipAsync(JSON.stringify(testData));
+
+      // Mock the S3 response with an async iterator
+      const mockBody = {
+        // eslint-disable-next-line require-yield
+        async* [Symbol.asyncIterator]() {
+          yield compressedData;
+        },
+      };
+
+      mockS3.s3Client.send.resolves({ Body: mockBody });
+
+      const result = await getCachedJsonData(mockS3, 's3://bucket/key.json', mockLog);
+      expect(result).to.deep.equal(testData);
+    });
+
+    it('returns null when file does not exist (NoSuchKey)', async () => {
+      const err = new Error('no such key');
+      err.name = 'NoSuchKey';
+      mockS3.s3Client.send.rejects(err);
+
+      const result = await getCachedJsonData(mockS3, 's3://bucket/key.json', mockLog);
+      expect(result).to.be.null;
+    });
+
+    it('returns null when file does not exist (NotFound)', async () => {
+      const err = new Error('not found');
+      err.name = 'NotFound';
+      mockS3.s3Client.send.rejects(err);
+
+      const result = await getCachedJsonData(mockS3, 's3://bucket/key.json', mockLog);
+      expect(result).to.be.null;
+    });
+
+    it('returns null on other errors', async () => {
+      const err = new Error('some other error');
+      err.name = 'OtherError';
+      mockS3.s3Client.send.rejects(err);
+
+      const result = await getCachedJsonData(mockS3, 's3://bucket/key.json', mockLog);
+      expect(result).to.be.null;
+    });
+
+    it('handles multiple chunks from S3 stream', async () => {
+      const testData = { large: 'data', with: 'multiple', chunks: true };
+      const compressedData = await gzipAsync(JSON.stringify(testData));
+
+      // Split the compressed data into multiple chunks
+      const chunk1 = Buffer.from(compressedData.subarray(0, Math.floor(compressedData.length / 2)));
+      const chunk2 = Buffer.from(compressedData.subarray(Math.floor(compressedData.length / 2)));
+
+      const mockBody = {
+        // eslint-disable-next-line require-yield
+        async* [Symbol.asyncIterator]() {
+          yield chunk1;
+          yield chunk2;
+        },
+      };
+
+      mockS3.s3Client.send.resolves({ Body: mockBody });
+
+      const result = await getCachedJsonData(mockS3, 's3://bucket/key.json', mockLog);
+      expect(result).to.deep.equal(testData);
     });
   });
 });

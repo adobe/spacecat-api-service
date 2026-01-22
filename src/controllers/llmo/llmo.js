@@ -922,19 +922,33 @@ function LlmoController(ctx) {
    * POST /sites/{siteId}/llmo/edge-optimize-config
    * Creates or updates Tokowaka edge optimization configuration
    * - Updates site's tokowaka meta-config in S3
-   * - Updates site's edgeOptimizeConfig in site config
+   * - Updates site's tokowakaEnabled in site config
    * @param {object} context - Request context
    * @returns {Promise<Response>} Created/updated edge config
    */
   const createOrUpdateEdgeConfig = async (context) => {
     const { log } = context;
     const { siteId } = context.params;
-    const { edgeOptimizeEnabled } = context.data || {};
+    const {
+      enhancements, tokowakaEnabled, forceFail, patches = {},
+    } = context.data || {};
 
     log.info(`createOrUpdateEdgeConfig request received for site ${siteId}, data=${JSON.stringify(context.data)}`);
 
-    if (typeof edgeOptimizeEnabled !== 'boolean') {
-      return badRequest('edgeOptimizeEnabled field is required and must be a boolean');
+    if (tokowakaEnabled !== undefined && typeof tokowakaEnabled !== 'boolean') {
+      return badRequest('tokowakaEnabled field must be a boolean');
+    }
+
+    if (enhancements !== undefined && typeof enhancements !== 'boolean') {
+      return badRequest('enhancements field must be a boolean');
+    }
+
+    if (forceFail !== undefined && typeof forceFail !== 'boolean') {
+      return badRequest('forceFail field must be a boolean');
+    }
+
+    if (patches !== undefined && typeof patches !== 'object') {
+      return badRequest('patches field must be an object');
     }
 
     try {
@@ -952,30 +966,37 @@ function LlmoController(ctx) {
         metaconfig = await tokowakaClient.createMetaconfig(
           baseURL,
           site.getId(),
-          { tokowakaEnabled: edgeOptimizeEnabled },
+          {
+            ...(tokowakaEnabled !== undefined && { tokowakaEnabled }),
+            ...(enhancements !== undefined && { enhancements }),
+          },
         );
       } else {
-        metaconfig = {
-          ...metaconfig,
-          siteId: site.getId(),
-          tokowakaEnabled: edgeOptimizeEnabled,
-        };
-        await tokowakaClient.uploadMetaconfig(baseURL, metaconfig);
+        metaconfig = await tokowakaClient.updateMetaconfig(
+          baseURL,
+          site.getId(),
+          {
+            tokowakaEnabled,
+            enhancements,
+            patches,
+            forceFail,
+          },
+        );
       }
 
       const currentConfig = site.getConfig();
-      // Update site config
-      currentConfig.updateEdgeOptimizeConfig({
-        ...(currentConfig.getEdgeOptimizeConfig() || {}),
-        enabled: edgeOptimizeEnabled,
-      });
-      await saveSiteConfig(site, currentConfig, log, `updating edge optimize config to enabled=${edgeOptimizeEnabled}`);
-
-      log.info(`Updated edgeOptimizeConfig enabled=${edgeOptimizeEnabled} for site ${siteId}`);
+      // Update site config only if tokowakaEnabled is provided
+      if (tokowakaEnabled !== undefined) {
+        currentConfig.updateEdgeOptimizeConfig({
+          ...(currentConfig.getEdgeOptimizeConfig() || {}),
+          enabled: tokowakaEnabled,
+        });
+        await saveSiteConfig(site, currentConfig, log, `updating edge optimize config to enabled=${tokowakaEnabled}`);
+        log.info(`Updated edgeOptimizeConfig enabled=${tokowakaEnabled} for site ${siteId}`);
+      }
 
       return ok({
-        edgeOptimizeConfig: currentConfig.getEdgeOptimizeConfig(),
-        metaconfig,
+        ...metaconfig,
       });
     } catch (error) {
       log.error(`Failed to create/update edge config for site ${siteId}:`, error);
@@ -1006,8 +1027,7 @@ function LlmoController(ctx) {
       const metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
 
       return ok({
-        metaconfig,
-        edgeOptimizeConfig: site.getConfig().getEdgeOptimizeConfig(),
+        ...metaconfig,
       });
     } catch (error) {
       log.error(`Failed to fetch edge config for site ${siteId}:`, error);

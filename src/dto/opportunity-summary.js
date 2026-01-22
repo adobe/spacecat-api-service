@@ -32,7 +32,9 @@ export const OpportunitySummaryDto = {
    *  system_description: string,
    *  pageViews: number,
    *  projectedTrafficLost: number,
-   *  projectedTrafficValue: number
+   *  projectedTrafficValue: number,
+   *  projectedConversionValue: number,
+   *  impact: number
    * }} JSON object.
    */
   toJSON: (opportunity, suggestions = [], paidUrlsData = null, topUrlsLimit = 20) => {
@@ -49,6 +51,7 @@ export const OpportunitySummaryDto = {
       // Otherwise, extract all URLs from suggestion data (for paid media opportunities)
       suggestions.forEach((suggestion) => {
         const data = suggestion.getData();
+        if (!data) return; // Skip if data is null/undefined
         // Handle different URL field names in suggestion data
         if (data.url_from) urls.add(data.url_from);
         if (data.url_to) urls.add(data.url_to);
@@ -60,6 +63,7 @@ export const OpportunitySummaryDto = {
       // Aggregate page views from rank (which often represents traffic)
       suggestions.forEach((suggestion) => {
         const data = suggestion.getData();
+        if (!data) return; // Skip if data is null/undefined
         const rank = suggestion.getRank();
         if (rank && typeof rank === 'number') {
           totalPageViews += rank;
@@ -79,6 +83,10 @@ export const OpportunitySummaryDto = {
     const opportunityData = opportunity.getData() || {};
     const projectedTrafficLost = opportunityData.projectedTrafficLost || 0;
     const projectedTrafficValue = opportunityData.projectedTrafficValue || 0;
+    const projectedConversionValue = opportunityData.projectedConversionValue || 0;
+
+    // Determine impact value (prioritize conversion value over traffic value)
+    const impact = projectedConversionValue || projectedTrafficValue || 0;
 
     return {
       opportunityId: opportunity.getId(),
@@ -92,6 +100,8 @@ export const OpportunitySummaryDto = {
       pageViews: totalPageViews,
       projectedTrafficLost,
       projectedTrafficValue,
+      projectedConversionValue,
+      impact,
     };
   },
 };
