@@ -3969,6 +3969,46 @@ describe('Suggestions Controller', () => {
         expect(firstRegularData).to.have.property('skippedInDeployment', true);
       });
 
+      it('should remove edgeOptimizeStatus when STALE for skipped suggestions', async () => {
+        // Reset mocks
+        regularSuggestions[0].setData.resetHistory();
+        regularSuggestions[1].setData.resetHistory();
+        domainWideSuggestion.setData.resetHistory();
+        
+        // Update regular suggestions to have edgeOptimizeStatus: STALE
+        regularSuggestions[0].getData = () => ({
+          url: 'https://example.com/page1',
+          edgeOptimizeStatus: 'STALE',
+        });
+
+        regularSuggestions[1].getData = () => ({
+          url: 'https://example.com/page2',
+          edgeOptimizeStatus: 'STALE',
+        });
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: {
+            siteId: SITE_ID,
+            opportunityId: OPPORTUNITY_ID,
+          },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1], SUGGESTION_IDS[2]],
+          },
+        });
+
+        expect(response.status).to.equal(207);
+
+        // Verify edgeOptimizeStatus was removed from skipped suggestions
+        const firstRegularData = regularSuggestions[0].setData.firstCall.args[0];
+        const secondRegularData = regularSuggestions[1].setData.firstCall.args[0];
+        
+        expect(firstRegularData).to.not.have.property('edgeOptimizeStatus');
+        expect(secondRegularData).to.not.have.property('edgeOptimizeStatus');
+        expect(firstRegularData).to.have.property('tokowakaDeployed');
+        expect(firstRegularData).to.have.property('skippedInDeployment', true);
+      });
+
       it('should include autoCovered count in metadata when suggestions are auto-marked', async () => {
         const response = await suggestionsController.deploySuggestionToEdge({
           ...context,
@@ -4043,6 +4083,59 @@ describe('Suggestions Controller', () => {
         const anotherData = anotherSuggestion.setData.firstCall.args[0];
         expect(anotherData).to.have.property('coveredByDomainWide', SUGGESTION_IDS[0]);
         expect(anotherSuggestion.setUpdatedBy.calledWith('domain-wide-deployment')).to.be.true;
+      });
+
+      it('should remove edgeOptimizeStatus when STALE for auto-covered suggestions', async () => {
+        // Add suggestion with STALE edgeOptimizeStatus
+        const staleSuggestion = {
+          getId: () => 'suggestion-id-stale',
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 4,
+          getData: () => ({
+            url: 'https://example.com/page-stale',
+            edgeOptimizeStatus: 'STALE',
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().returnsThis(),
+        };
+
+        mockSuggestion.allByOpportunityId.resolves([
+          domainWideSuggestion,
+          ...regularSuggestions,
+          staleSuggestion,
+        ]);
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: {
+            siteId: SITE_ID,
+            opportunityId: OPPORTUNITY_ID,
+          },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0]], // Only deploying domain-wide
+            suggestionsMetadata: [
+              {
+                id: SUGGESTION_IDS[0],
+                allowedRegexPatterns: ['/*'],
+              },
+            ],
+          },
+        });
+
+        expect(response.status).to.equal(207);
+
+        // Verify edgeOptimizeStatus was removed from auto-covered suggestion
+        expect(staleSuggestion.setData.called).to.be.true;
+        const staleData = staleSuggestion.setData.firstCall.args[0];
+        expect(staleData).to.not.have.property('edgeOptimizeStatus');
+        expect(staleData).to.have.property('coveredByDomainWide', SUGGESTION_IDS[0]);
       });
 
       it('should not mark non-NEW suggestions as covered by domain-wide', async () => {

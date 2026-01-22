@@ -1223,7 +1223,7 @@ function SuggestionsController(ctx, sqs, env) {
               edgeDeployed: deploymentTimestamp,
             };
             // Remove edgeOptimizeStatus if it's STALE
-            if (currentData.edgeOptimizeStatus === 'STALE') {
+            if (updatedData.edgeOptimizeStatus === 'STALE') {
               delete updatedData.edgeOptimizeStatus;
             }
             suggestion.setData(updatedData);
@@ -1364,7 +1364,7 @@ function SuggestionsController(ctx, sqs, env) {
                       coveredByDomainWide: suggestion.getId(),
                     };
                     // Remove edgeOptimizeStatus if it's STALE
-                    if (coveredData.edgeOptimizeStatus === 'STALE') {
+                    if (updatedCoveredData.edgeOptimizeStatus === 'STALE') {
                       delete updatedCoveredData.edgeOptimizeStatus;
                     }
                     coveredSuggestion.setData(updatedCoveredData);
