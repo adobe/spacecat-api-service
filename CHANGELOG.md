@@ -1,3 +1,10 @@
+## [1.294.2](https://github.com/adobe/spacecat-api-service/compare/v1.294.1...v1.294.2) (2026-01-22)
+
+
+### Bug Fixes
+
+* **slack/llmo:** unify onboarding ([#1715](https://github.com/adobe/spacecat-api-service/issues/1715)) ([590621b](https://github.com/adobe/spacecat-api-service/commit/590621bcdd9bceddc089e7c2d9eae52bfed02132))
+
 ## [1.294.1](https://github.com/adobe/spacecat-api-service/compare/v1.294.0...v1.294.1) (2026-01-22)
 
 
