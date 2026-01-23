@@ -2173,6 +2173,154 @@ describe('Suggestions Controller', () => {
     expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'Validation error');
   });
 
+  describe('REJECTED status validation', () => {
+    it('should return 403 when non-admin user tries to reject a suggestion', async () => {
+      // Create a suggestion with PENDING_VALIDATION status
+      const pendingSuggestion = {
+        id: SUGGESTION_IDS[0],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CODE_CHANGE',
+        status: 'PENDING_VALIDATION',
+        rank: 1,
+        data: { info: 'sample data' },
+      };
+
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(mockSuggestionEntity(pendingSuggestion, removeStub));
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(opportunity);
+      mockSite.findById.withArgs(SITE_ID).resolves(site);
+
+      // Mock AccessControlUtil - allow hasAccess (for initial check), deny hasAdminAccess (for REJECTED check)
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+
+      const response = await suggestionsController.patchSuggestionsStatus({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: [{ id: SUGGESTION_IDS[0], status: 'REJECTED' }],
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 403);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('uuid', SUGGESTION_IDS[0]);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'Only admins can reject suggestions');
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.not.exist;
+    });
+
+    it('should return 400 when trying to reject a suggestion that is not PENDING_VALIDATION', async () => {
+      // Create a suggestion with NEW status (not PENDING_VALIDATION)
+      const newSuggestion = {
+        id: SUGGESTION_IDS[0],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CODE_CHANGE',
+        status: 'NEW',
+        rank: 1,
+        data: { info: 'sample data' },
+      };
+
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(mockSuggestionEntity(newSuggestion, removeStub));
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(opportunity);
+      mockSite.findById.withArgs(SITE_ID).resolves(site);
+
+      // Mock AccessControlUtil - allow both hasAccess and hasAdminAccess
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+
+      const response = await suggestionsController.patchSuggestionsStatus({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: [{ id: SUGGESTION_IDS[0], status: 'REJECTED' }],
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 400);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('uuid', SUGGESTION_IDS[0]);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'Can only reject suggestions with status PENDING_VALIDATION');
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.not.exist;
+    });
+
+    it('should successfully reject a suggestion with PENDING_VALIDATION status when user has admin access', async () => {
+      // Create a suggestion with PENDING_VALIDATION status
+      const pendingSuggestion = {
+        id: SUGGESTION_IDS[0],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CODE_CHANGE',
+        status: 'PENDING_VALIDATION',
+        rank: 1,
+        data: { info: 'sample data' },
+      };
+
+      const suggestionEntity = mockSuggestionEntity(pendingSuggestion, removeStub);
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(suggestionEntity);
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(opportunity);
+      mockSite.findById.withArgs(SITE_ID).resolves(site);
+
+      // Mock AccessControlUtil - allow both hasAccess and hasAdminAccess
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+
+      const response = await suggestionsController.patchSuggestionsStatus({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: [{ id: SUGGESTION_IDS[0], status: 'REJECTED' }],
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('suggestion');
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'REJECTED');
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('id', SUGGESTION_IDS[0]);
+      expect(bulkPatchResponse.metadata).to.have.property('success', 1);
+      expect(bulkPatchResponse.metadata).to.have.property('failed', 0);
+    });
+
+    it('should return 400 when trying to reject a suggestion with APPROVED status', async () => {
+      // Create a suggestion with APPROVED status (not PENDING_VALIDATION)
+      const approvedSuggestion = {
+        id: SUGGESTION_IDS[0],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CODE_CHANGE',
+        status: 'APPROVED',
+        rank: 1,
+        data: { info: 'sample data' },
+      };
+
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(mockSuggestionEntity(approvedSuggestion, removeStub));
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(opportunity);
+      mockSite.findById.withArgs(SITE_ID).resolves(site);
+
+      // Mock AccessControlUtil - allow both hasAccess and hasAdminAccess
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+
+      const response = await suggestionsController.patchSuggestionsStatus({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: [{ id: SUGGESTION_IDS[0], status: 'REJECTED' }],
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 400);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('uuid', SUGGESTION_IDS[0]);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'Can only reject suggestions with status PENDING_VALIDATION');
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.not.exist;
+    });
+  });
+
   describe('auto-fix suggestions', () => {
     let suggestionsControllerWithMock;
     beforeEach(async () => {
