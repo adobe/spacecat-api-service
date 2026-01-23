@@ -28,6 +28,7 @@ import {
   isArray,
   getStoredMetrics,
   isValidUUID,
+  isValidUrl,
   deepEqual,
   isNonEmptyObject,
 } from '@adobe/spacecat-shared-utils';
@@ -644,7 +645,10 @@ function SitesController(ctx, log, env) {
 
     // Filter by site baseURL when requested
     if (filterByBaseURL) {
-      const siteBaseURL = site.getBaseURL();
+      const overrideBaseURL = site.getConfig()?.getFetchConfig()?.overrideBaseURL;
+      const siteBaseURL = (overrideBaseURL && isValidUrl(overrideBaseURL))
+        ? overrideBaseURL
+        : site.getBaseURL();
       const originalCount = metricsData.length;
 
       // Normalize baseURL: remove protocol and www variants, keep path
