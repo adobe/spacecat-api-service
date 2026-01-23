@@ -1,3 +1,10 @@
+## [1.294.3](https://github.com/adobe/spacecat-api-service/compare/v1.294.2...v1.294.3) (2026-01-23)
+
+
+### Bug Fixes
+
+* edge deploy updated by ([#1726](https://github.com/adobe/spacecat-api-service/issues/1726)) ([6730e68](https://github.com/adobe/spacecat-api-service/commit/6730e689363b7cc33f7c8ce09d988987a73d87c4))
+
 ## [1.294.2](https://github.com/adobe/spacecat-api-service/compare/v1.294.1...v1.294.2) (2026-01-22)
 
 
