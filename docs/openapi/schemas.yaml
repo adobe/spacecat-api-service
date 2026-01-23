@@ -2862,6 +2862,7 @@ SuggestionStatus:
     - 'IN_PROGRESS'
     - 'OUTDATED'
     - 'PENDING_VALIDATION'
+    - 'REJECTED'
   example: 'NEW'
 SuggestionType:
   description: |
