@@ -1087,14 +1087,13 @@ describe('LLMO Onboarding Functions', () => {
 
       const result = await performLlmoOnboardingWithMocks(params, context);
 
-      // Verify the result
-      expect(result).to.deep.equal({
-        siteId: 'site123',
-        organizationId: 'org123',
-        baseURL: 'https://example.com',
-        dataFolder: 'dev/example-com',
-        message: 'LLMO onboarding completed successfully',
-      });
+      // Verify the result contains expected fields
+      expect(result.siteId).to.equal('site123');
+      expect(result.organizationId).to.equal('org123');
+      expect(result.baseURL).to.equal('https://example.com');
+      expect(result.dataFolder).to.equal('dev/example-com');
+      expect(result.message).to.equal('LLMO onboarding completed successfully');
+      expect(result.site).to.exist;
 
       // Verify organization was found/created
       expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledWith('ABC123@AdobeOrg');
@@ -1124,7 +1123,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockTracingFetch).to.have.been.called;
 
       // Verify logging
-      expect(mockLog.info).to.have.been.calledWith('Starting LLMO onboarding for IMS org ABC123@AdobeOrg, domain example.com, brand Test Brand');
+      expect(mockLog.info).to.have.been.calledWith('Starting LLMO onboarding for IMS org ABC123@AdobeOrg, baseURL https://example.com, brand Test Brand');
       expect(mockLog.info).to.have.been.calledWith('Created site site123 for https://example.com');
 
       // Restore setTimeout

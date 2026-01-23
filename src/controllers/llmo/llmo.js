@@ -19,6 +19,7 @@ import {
   hasText,
   isObject,
   llmoConfig as llmo,
+  llmoStrategy,
   schemas,
   composeBaseURL,
 } from '@adobe/spacecat-shared-utils';
@@ -48,6 +49,7 @@ import { updateModifiedByDetails } from './llmo-config-metadata.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
 
 const { readConfig, writeConfig } = llmo;
+const { readStrategy, writeStrategy } = llmoStrategy;
 const { llmoConfig: llmoConfigSchema } = schemas;
 
 function LlmoController(ctx) {
@@ -929,7 +931,9 @@ function LlmoController(ctx) {
   const createOrUpdateEdgeConfig = async (context) => {
     const { log } = context;
     const { siteId } = context.params;
-    const { enhancements, tokowakaEnabled } = context.data || {};
+    const {
+      enhancements, tokowakaEnabled, forceFail, patches = {},
+    } = context.data || {};
 
     log.info(`createOrUpdateEdgeConfig request received for site ${siteId}, data=${JSON.stringify(context.data)}`);
 
@@ -941,8 +945,12 @@ function LlmoController(ctx) {
       return badRequest('enhancements field must be a boolean');
     }
 
-    if (tokowakaEnabled === undefined && enhancements === undefined) {
-      return badRequest('No edge optimize configuration parameters provided');
+    if (forceFail !== undefined && typeof forceFail !== 'boolean') {
+      return badRequest('forceFail field must be a boolean');
+    }
+
+    if (patches !== undefined && typeof patches !== 'object') {
+      return badRequest('patches field must be an object');
     }
 
     try {
@@ -966,13 +974,16 @@ function LlmoController(ctx) {
           },
         );
       } else {
-        metaconfig = {
-          ...metaconfig,
-          siteId: site.getId(),
-          ...(tokowakaEnabled !== undefined && { tokowakaEnabled }),
-          ...(enhancements !== undefined && { enhancements }),
-        };
-        await tokowakaClient.uploadMetaconfig(baseURL, metaconfig);
+        metaconfig = await tokowakaClient.updateMetaconfig(
+          baseURL,
+          site.getId(),
+          {
+            tokowakaEnabled,
+            enhancements,
+            patches,
+            forceFail,
+          },
+        );
       }
 
       const currentConfig = site.getConfig();
@@ -1026,6 +1037,73 @@ function LlmoController(ctx) {
     }
   };
 
+  /**
+   * GET /sites/{siteId}/llmo/strategy
+   * Retrieves LLMO strategy data from S3
+   * @param {object} context - Request context
+   * @returns {Promise<Response>} Strategy data and version, or 404 if not found
+   */
+  const getStrategy = async (context) => {
+    const { log, s3 } = context;
+    const { siteId } = context.params;
+    const version = context.data?.version;
+
+    try {
+      if (!s3 || !s3.s3Client) {
+        return badRequest('LLMO strategy storage is not configured for this environment');
+      }
+
+      log.info(`Fetching LLMO strategy from S3 for siteId: ${siteId}${version != null ? ` with version: ${version}` : ''}`);
+      const { data, exists, version: strategyVersion } = await readStrategy(siteId, s3.s3Client, {
+        s3Bucket: s3.s3Bucket,
+        version,
+      });
+
+      if (!exists) {
+        return notFound(`LLMO strategy not found for site '${siteId}'${version != null ? ` with version '${version}'` : ''}`);
+      }
+
+      return ok({ data, version: strategyVersion }, {
+        'Content-Encoding': 'br',
+      });
+    } catch (error) {
+      log.error(`Error getting llmo strategy for siteId: ${siteId}, error: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
+  /**
+   * PUT /sites/{siteId}/llmo/strategy
+   * Saves LLMO strategy data to S3
+   * @param {object} context - Request context
+   * @returns {Promise<Response>} Version of the saved strategy
+   */
+  const saveStrategy = async (context) => {
+    const { log, s3, data } = context;
+    const { siteId } = context.params;
+
+    try {
+      if (!isObject(data)) {
+        return badRequest('LLMO strategy must be provided as an object');
+      }
+
+      if (!s3 || !s3.s3Client) {
+        return badRequest('LLMO strategy storage is not configured for this environment');
+      }
+
+      log.info(`Writing LLMO strategy to S3 for siteId: ${siteId}`);
+      const { version } = await writeStrategy(siteId, data, s3.s3Client, {
+        s3Bucket: s3.s3Bucket,
+      });
+
+      log.info(`Successfully saved LLMO strategy for siteId: ${siteId}, version: ${version}`);
+      return ok({ version });
+    } catch (error) {
+      log.error(`Error saving llmo strategy for siteId: ${siteId}, error: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -1048,6 +1126,8 @@ function LlmoController(ctx) {
     getLlmoRationale,
     createOrUpdateEdgeConfig,
     getEdgeConfig,
+    getStrategy,
+    saveStrategy,
   };
 }
 

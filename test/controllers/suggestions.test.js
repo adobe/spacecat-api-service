@@ -3350,12 +3350,130 @@ describe('Suggestions Controller', () => {
       expect(firstCallArgs.tokowakaDeployed).to.be.a('number');
 
       // Verify updatedBy was set
-      expect(firstSugg.setUpdatedBy.calledWith('tokowaka-deployment')).to.be.true;
-      expect(secondSugg.setUpdatedBy.calledWith('tokowaka-deployment')).to.be.true;
+      expect(firstSugg.setUpdatedBy.calledWith('test@test.com')).to.be.true;
+      expect(secondSugg.setUpdatedBy.calledWith('test@test.com')).to.be.true;
 
       // Verify save was called
       expect(firstSugg.save.calledOnce).to.be.true;
       expect(secondSugg.save.calledOnce).to.be.true;
+    });
+
+    it('should remove edgeOptimizeStatus when STALE during deployment', async () => {
+      // Update suggestions to have edgeOptimizeStatus: STALE
+      tokowakaSuggestions[0].getData = () => ({
+        url: 'https://example.com/page1',
+        recommendedAction: 'New Heading Title',
+        checkType: 'heading-empty',
+        transformRules: {
+          action: 'replace',
+          selector: 'h1.test-selector',
+        },
+        edgeOptimizeStatus: 'STALE',
+      });
+
+      tokowakaSuggestions[1].getData = () => ({
+        url: 'https://example.com/page1',
+        recommendedAction: 'New Subtitle',
+        checkType: 'heading-empty',
+        transformRules: {
+          action: 'replace',
+          selector: 'h2.test-selector',
+        },
+        edgeOptimizeStatus: 'STALE',
+      });
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+
+      // Verify edgeOptimizeStatus was removed from both suggestions
+      const firstCallArgs = tokowakaSuggestions[0].setData.firstCall.args[0];
+      const secondCallArgs = tokowakaSuggestions[1].setData.firstCall.args[0];
+
+      expect(firstCallArgs).to.not.have.property('edgeOptimizeStatus');
+      expect(secondCallArgs).to.not.have.property('edgeOptimizeStatus');
+      expect(firstCallArgs).to.have.property('tokowakaDeployed');
+      expect(secondCallArgs).to.have.property('tokowakaDeployed');
+    });
+
+    it('should preserve edgeOptimizeStatus when not STALE during deployment', async () => {
+      // Update suggestions to have edgeOptimizeStatus with other values
+      tokowakaSuggestions[0].getData = () => ({
+        url: 'https://example.com/page1',
+        recommendedAction: 'New Heading Title',
+        checkType: 'heading-empty',
+        transformRules: {
+          action: 'replace',
+          selector: 'h1.test-selector',
+        },
+        edgeOptimizeStatus: 'ACTIVE',
+      });
+
+      tokowakaSuggestions[1].getData = () => ({
+        url: 'https://example.com/page1',
+        recommendedAction: 'New Subtitle',
+        checkType: 'heading-empty',
+        transformRules: {
+          action: 'replace',
+          selector: 'h2.test-selector',
+        },
+        edgeOptimizeStatus: 'PENDING',
+      });
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+
+      // Verify edgeOptimizeStatus was preserved
+      const firstCallArgs = tokowakaSuggestions[0].setData.firstCall.args[0];
+      const secondCallArgs = tokowakaSuggestions[1].setData.firstCall.args[0];
+
+      expect(firstCallArgs).to.have.property('edgeOptimizeStatus', 'ACTIVE');
+      expect(secondCallArgs).to.have.property('edgeOptimizeStatus', 'PENDING');
+      expect(firstCallArgs).to.have.property('tokowakaDeployed');
+      expect(secondCallArgs).to.have.property('tokowakaDeployed');
+    });
+
+    it('uses tokowaka-deployment when profile email is missing', async () => {
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'admin' }])
+            .withAuthenticated(true),
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(tokowakaSuggestions[0].setUpdatedBy.calledWith('tokowaka-deployment')).to.be.true;
+      expect(tokowakaSuggestions[1].setUpdatedBy.calledWith('tokowaka-deployment')).to.be.true;
+      expect(context.log.info.calledWithMatch('tokowaka-deployment')).to.be.true;
     });
 
     it('should return 400 if siteId is invalid', async () => {
@@ -3842,7 +3960,7 @@ describe('Suggestions Controller', () => {
         const setDataArgs = domainWideSuggestion.setData.firstCall.args[0];
         expect(setDataArgs).to.have.property('tokowakaDeployed');
         expect(setDataArgs.tokowakaDeployed).to.be.a('number');
-        expect(domainWideSuggestion.setUpdatedBy.calledWith('tokowaka-deployment')).to.be.true;
+        expect(domainWideSuggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
         expect(domainWideSuggestion.save.calledOnce).to.be.true;
       });
 
@@ -3948,7 +4066,61 @@ describe('Suggestions Controller', () => {
         expect(anotherSuggestion.setData.called).to.be.true;
         const anotherData = anotherSuggestion.setData.firstCall.args[0];
         expect(anotherData).to.have.property('coveredByDomainWide', SUGGESTION_IDS[0]);
-        expect(anotherSuggestion.setUpdatedBy.calledWith('domain-wide-deployment')).to.be.true;
+        expect(anotherSuggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
+      });
+
+      it('uses fallback updatedBy for domain-wide deployment and coverage', async () => {
+        const extraSuggestion = {
+          getId: () => 'suggestion-id-5',
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 4,
+          getData: () => ({
+            url: 'https://example.com/page3',
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().returnsThis(),
+        };
+
+        mockSuggestion.allByOpportunityId.resolves([
+          domainWideSuggestion,
+          ...regularSuggestions,
+          extraSuggestion,
+        ]);
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          attributes: {
+            authInfo: new AuthInfo()
+              .withType('jwt')
+              .withScopes([{ name: 'admin' }])
+              .withAuthenticated(true),
+          },
+          params: {
+            siteId: SITE_ID,
+            opportunityId: OPPORTUNITY_ID,
+          },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1], SUGGESTION_IDS[2]],
+          },
+        });
+
+        expect(response.status).to.equal(207);
+        expect(domainWideSuggestion.setUpdatedBy.calledWith('tokowaka-deployment')).to.be.true;
+        expect(regularSuggestions[0].setUpdatedBy.calledWith('domain-wide-deployment')).to.be.true;
+        expect(regularSuggestions[1].setUpdatedBy.calledWith('domain-wide-deployment')).to.be.true;
+        expect(extraSuggestion.setUpdatedBy.calledWith('domain-wide-deployment')).to.be.true;
+
+        const infoCalls = context.log.info.getCalls();
+        const domainWideLog = infoCalls.find((call) => call.args[0].includes('domain-wide suggestion'));
+        expect(domainWideLog).to.exist;
+        expect(domainWideLog.args[0]).to.include('tokowaka-deployment');
       });
 
       it('should not mark non-NEW suggestions as covered by domain-wide', async () => {
@@ -4694,10 +4866,32 @@ describe('Suggestions Controller', () => {
       expect(dataArg).to.not.have.property('tokowakaDeployed');
 
       // Verify setUpdatedBy was called
-      expect(suggestion.setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
+      expect(suggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
 
       // Verify save was called
       expect(suggestion.save.calledOnce).to.be.true;
+    });
+
+    it('uses fallback updatedBy when profile email is missing', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'admin' }])
+            .withAuthenticated(true),
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(tokowakaSuggestions[0].setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
     });
 
     it('should return 400 for suggestions without tokowakaDeployed during rollback', async () => {
@@ -4754,7 +4948,7 @@ describe('Suggestions Controller', () => {
       // Verify both suggestions were updated
       tokowakaSuggestions.forEach((suggestion) => {
         expect(suggestion.setData.calledOnce).to.be.true;
-        expect(suggestion.setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
+        expect(suggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
         expect(suggestion.save.calledOnce).to.be.true;
       });
     });
@@ -5000,7 +5194,7 @@ describe('Suggestions Controller', () => {
       expect(domainWideSuggestion.setData.calledOnce).to.be.true;
       const domainWideData = domainWideSuggestion.setData.firstCall.args[0];
       expect(domainWideData).to.not.have.property('tokowakaDeployed');
-      expect(domainWideSuggestion.setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
+      expect(domainWideSuggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
       expect(domainWideSuggestion.save.calledOnce).to.be.true;
 
       // Verify covered suggestions were also rolled back
@@ -5009,8 +5203,33 @@ describe('Suggestions Controller', () => {
         const suggestionData = suggestion.setData.firstCall.args[0];
         expect(suggestionData).to.not.have.property('tokowakaDeployed');
         expect(suggestionData).to.not.have.property('coveredByDomainWide');
-        expect(suggestion.setUpdatedBy.calledWith('domain-wide-rollback')).to.be.true;
+        expect(suggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
         expect(suggestion.save.calledOnce).to.be.true;
+      });
+    });
+
+    it('uses fallback updatedBy when profile email is missing', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'admin' }])
+            .withAuthenticated(true),
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(domainWideSuggestion.setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
+      coveredSuggestions.forEach((suggestion) => {
+        expect(suggestion.setUpdatedBy.calledWith('domain-wide-rollback')).to.be.true;
       });
     });
 

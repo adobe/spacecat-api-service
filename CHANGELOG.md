@@ -1,3 +1,87 @@
+## [1.294.3](https://github.com/adobe/spacecat-api-service/compare/v1.294.2...v1.294.3) (2026-01-23)
+
+
+### Bug Fixes
+
+* edge deploy updated by ([#1726](https://github.com/adobe/spacecat-api-service/issues/1726)) ([6730e68](https://github.com/adobe/spacecat-api-service/commit/6730e689363b7cc33f7c8ce09d988987a73d87c4))
+
+## [1.294.2](https://github.com/adobe/spacecat-api-service/compare/v1.294.1...v1.294.2) (2026-01-22)
+
+
+### Bug Fixes
+
+* **slack/llmo:** unify onboarding ([#1715](https://github.com/adobe/spacecat-api-service/issues/1715)) ([590621b](https://github.com/adobe/spacecat-api-service/commit/590621bcdd9bceddc089e7c2d9eae52bfed02132))
+
+## [1.294.1](https://github.com/adobe/spacecat-api-service/compare/v1.294.0...v1.294.1) (2026-01-22)
+
+
+### Bug Fixes
+
+* remove stale status when edge deploying ([#1725](https://github.com/adobe/spacecat-api-service/issues/1725)) ([062b829](https://github.com/adobe/spacecat-api-service/commit/062b829f38e10ee6a588fd869ac357cc4d5bf295))
+
+# [1.294.0](https://github.com/adobe/spacecat-api-service/compare/v1.293.4...v1.294.0) (2026-01-22)
+
+
+### Features
+
+* endpoint to connect new strategy s3 obj ([#1719](https://github.com/adobe/spacecat-api-service/issues/1719)) ([5f05d95](https://github.com/adobe/spacecat-api-service/commit/5f05d95ace8a0bf81cd044f2f22da034bef74d56))
+
+## [1.293.4](https://github.com/adobe/spacecat-api-service/compare/v1.293.3...v1.293.4) (2026-01-22)
+
+
+### Bug Fixes
+
+* self serve api fix, and lastModified updates ([#1723](https://github.com/adobe/spacecat-api-service/issues/1723)) ([ea70794](https://github.com/adobe/spacecat-api-service/commit/ea70794bdeef6e7982336fb7d69299eb33350c18))
+
+## [1.293.3](https://github.com/adobe/spacecat-api-service/compare/v1.293.2...v1.293.3) (2026-01-22)
+
+
+### Bug Fixes
+
+* save edgeDeployed along with tokowakaDeployed ([#1721](https://github.com/adobe/spacecat-api-service/issues/1721)) ([e98baa3](https://github.com/adobe/spacecat-api-service/commit/e98baa3d58ac9396efd91f79830655dcb9c9ab2d))
+
+## [1.293.2](https://github.com/adobe/spacecat-api-service/compare/v1.293.1...v1.293.2) (2026-01-21)
+
+
+### Bug Fixes
+
+* edge preview api headers handling ([#1717](https://github.com/adobe/spacecat-api-service/issues/1717)) ([bf81d46](https://github.com/adobe/spacecat-api-service/commit/bf81d46c9df6c24aad3f35f5a1b0e3647c1532e8))
+
+## [1.293.1](https://github.com/adobe/spacecat-api-service/compare/v1.293.0...v1.293.1) (2026-01-21)
+
+
+### Bug Fixes
+
+* 500 error on some top-opportunities  api calls ([#1713](https://github.com/adobe/spacecat-api-service/issues/1713)) ([a905541](https://github.com/adobe/spacecat-api-service/commit/a905541d312c3e543497167cac3a94f4387d1081))
+
+# [1.293.0](https://github.com/adobe/spacecat-api-service/compare/v1.292.1...v1.293.0) (2026-01-21)
+
+
+### Features
+
+* get predominant-traffic by channel ([#1712](https://github.com/adobe/spacecat-api-service/issues/1712)) ([686d501](https://github.com/adobe/spacecat-api-service/commit/686d5017b8ac16339059751e4cb6846f2c151b71))
+
+## [1.292.1](https://github.com/adobe/spacecat-api-service/compare/v1.292.0...v1.292.1) (2026-01-21)
+
+
+### Bug Fixes
+
+* create and update tokowaka config api ([#1711](https://github.com/adobe/spacecat-api-service/issues/1711)) ([32a84f3](https://github.com/adobe/spacecat-api-service/commit/32a84f36c53809c3051c362dd4475b76d88dd28a))
+
+# [1.292.0](https://github.com/adobe/spacecat-api-service/compare/v1.291.0...v1.292.0) (2026-01-21)
+
+
+### Features
+
+* **llmo:** enable wikipedia-analysis audit during onboarding ([#1708](https://github.com/adobe/spacecat-api-service/issues/1708)) ([8c23d92](https://github.com/adobe/spacecat-api-service/commit/8c23d92dae12c2a713e686eb81bb8f691541d3ff))
+
+# [1.291.0](https://github.com/adobe/spacecat-api-service/compare/v1.290.0...v1.291.0) (2026-01-21)
+
+
+### Features
+
+* Add filterByBaseURL parameter for locale-specific metrics filtering ([#1700](https://github.com/adobe/spacecat-api-service/issues/1700)) ([55b2236](https://github.com/adobe/spacecat-api-service/commit/55b2236db3d09344adbdf39f1aeed94f1e1d593d))
+
 # [1.290.0](https://github.com/adobe/spacecat-api-service/compare/v1.289.0...v1.290.0) (2026-01-20)
 
 
