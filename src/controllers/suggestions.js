@@ -590,8 +590,32 @@ function SuggestionsController(ctx, sqs, env) {
         };
       }
 
+      const currentStatus = suggestion.getStatus();
       try {
-        if (suggestion.getStatus() !== status) {
+        if (currentStatus !== status) {
+          // Validate REJECTED status transition
+          if (status === SuggestionModel.STATUSES.REJECTED) {
+            // Check admin access for REJECTED status
+            if (!accessControlUtil.hasAdminAccess()) {
+              return {
+                index,
+                uuid: id,
+                message: 'Only admins can reject suggestions',
+                statusCode: 403,
+              };
+            }
+
+            // Only allow REJECTED from PENDING_VALIDATION
+            if (currentStatus !== SuggestionModel.STATUSES.PENDING_VALIDATION) {
+              return {
+                index,
+                uuid: id,
+                message: 'Can only reject suggestions with status PENDING_VALIDATION',
+                statusCode: 400,
+              };
+            }
+          }
+
           suggestion.setStatus(status);
           suggestion.setUpdatedBy(profile.email);
         } else {
