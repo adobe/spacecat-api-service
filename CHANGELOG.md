@@ -1,3 +1,10 @@
+# [1.295.0](https://github.com/adobe/spacecat-api-service/compare/v1.294.3...v1.295.0) (2026-01-23)
+
+
+### Features
+
+* add LLMO onboarding alerts to Slack channel ([#1714](https://github.com/adobe/spacecat-api-service/issues/1714)) ([c74f162](https://github.com/adobe/spacecat-api-service/commit/c74f162e9dde66985dc4d104f0e840802d012576))
+
 ## [1.294.3](https://github.com/adobe/spacecat-api-service/compare/v1.294.2...v1.294.3) (2026-01-23)
 
 
