@@ -92,6 +92,52 @@ async function postLlmoAlert(message, context) {
 }
 
 /**
+ * Gets the IMS Org ID for a given organization ID.
+ * Used for enriching notification messages. Never throws - returns 'Unknown' on error.
+ * @param {string} organizationId - The SpaceCat organization ID
+ * @param {object} context - The request context containing dataAccess and log
+ * @returns {Promise<string>} The IMS Org ID or 'Unknown'
+ */
+async function getCurrentImsOrgIdForNotification(organizationId, context) {
+  const { dataAccess, log } = context;
+  const { Organization } = dataAccess;
+
+  try {
+    const organization = await Organization.findById(organizationId);
+    return organization ? organization.getImsOrgId() : 'Unknown';
+  } catch (error) {
+    log.warn(`Could not fetch IMS Org ID for notification: ${error.message}`);
+    return 'Unknown';
+  }
+}
+
+/**
+ * Gets the current IMS Org ID for a site by baseURL.
+ * Never throws - returns 'Unknown' on error.
+ * @param {string} baseURL - The site's base URL
+ * @param {object} context - The request context containing dataAccess and log
+ * @returns {Promise<string>} The IMS Org ID or 'Unknown'
+ */
+async function getCurrentImsOrgIdForSite(baseURL, context) {
+  const { dataAccess, log } = context;
+  const { Site } = dataAccess;
+
+  try {
+    const site = await Site.findByBaseURL(baseURL);
+    if (site) {
+      return await getCurrentImsOrgIdForNotification(
+        site.getOrganizationId(),
+        context,
+      );
+    }
+    return 'Unknown';
+  } catch (error) {
+    log.warn(`Could not fetch IMS Org ID for site: ${error.message}`);
+    return 'Unknown';
+  }
+}
+
+/**
  * Creates a SharePoint client for LLMO operations.
  * @param {object} env - Environment variables
  * @returns {Promise<object>} SharePoint client
@@ -125,12 +171,16 @@ export async function validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, co
     const folderExists = await folder.exists();
 
     if (folderExists) {
+      // Try to get current IMS Org if site exists (best effort - don't fail validation)
+      const currentImsOrgId = await getCurrentImsOrgIdForSite(baseURL, context);
+
       await postLlmoAlert(
         ':warning: *Site is already onboarded* - Data folder already exists\n\n'
         + `• Site: \`${baseURL}\`\n`
-        + `• IMS Org: \`${imsOrgId}\`\n`
+        + `• Requesting IMS Org: \`${imsOrgId}\`\n`
+        + `• Current IMS Org: \`${currentImsOrgId}\`\n`
         + `• Data Folder: \`${dataFolder}\`\n\n`
-        + 'The data folder already exists, indicating the site has been previously onboarded.',
+        + 'The site has already been assigned to a different organization.',
         context,
       );
 
@@ -166,12 +216,19 @@ export async function validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, co
       if (existingSite.getOrganizationId() !== organization.getId()
         && existingSite.getOrganizationId() !== env.DEFAULT_ORGANIZATION_ID
         && existingSite.getOrganizationId() !== ASO_DEMO_ORG) {
+        // Get current organization's IMS Org ID (best effort - don't fail validation)
+        const currentImsOrgId = await getCurrentImsOrgIdForNotification(
+          existingSite.getOrganizationId(),
+          context,
+        );
+
         await postLlmoAlert(
           ':warning: *Site is already onboarded* - Assigned to a different organization\n\n'
           + `• Site: \`${baseURL}\`\n`
+          + `• Requesting IMS Org: \`${imsOrgId}\`\n`
+          + `• Current IMS Org: \`${currentImsOrgId}\`\n`
           + `• Current Org ID: \`${existingSite.getOrganizationId()}\`\n`
-          + `• Requested Org ID: \`${organization.getId()}\`\n`
-          + `• IMS Org: \`${imsOrgId}\`\n\n`
+          + `• Requested Org ID: \`${organization.getId()}\`\n\n`
           + 'The site has already been assigned to a different organization.',
           context,
         );
@@ -185,11 +242,18 @@ export async function validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, co
         && existingSite.getOrganizationId() !== ASO_DEMO_ORG) {
       // if the organization doesn't exist, but the site does, check that the site isn't claimed yet
       // by another organization
+      // Get current organization's IMS Org ID (best effort - don't fail validation)
+      const currentImsOrgId = await getCurrentImsOrgIdForNotification(
+        existingSite.getOrganizationId(),
+        context,
+      );
+
       await postLlmoAlert(
         ':warning: *Site is already onboarded* - Assigned to a different organization\n\n'
         + `• Site: \`${baseURL}\`\n`
-        + `• Current Org ID: \`${existingSite.getOrganizationId()}\`\n`
-        + `• IMS Org: \`${imsOrgId}\`\n\n`
+        + `• Requesting IMS Org: \`${imsOrgId}\`\n`
+        + `• Current IMS Org: \`${currentImsOrgId}\`\n`
+        + `• Current Org ID: \`${existingSite.getOrganizationId()}\`\n\n`
         + 'The site has already been assigned to a different organization.',
         context,
       );
