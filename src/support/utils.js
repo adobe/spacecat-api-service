@@ -37,6 +37,42 @@ import {
 } from '../utils/constants.js';
 
 /**
+ * Step Functions execution names must be 1–80 chars and may only contain
+ * letters, numbers, hyphens, or underscores
+ * (see https://docs.aws.amazon.com/step-functions/latest/apireference/API_StartExecution.html).
+ * This helper enforces those constraints and falls back to a timestamped name
+ * when input is missing or becomes empty after sanitization.
+ *
+ * When the name follows the pattern "prefix-{content}-{timestamp}", it preserves
+ * the full timestamp by truncating the middle content portion instead of the end.
+ *
+ * @param {string} value - The execution name to sanitize.
+ * @returns {string} The sanitized execution name.
+ */
+export const sanitizeExecutionName = (value) => {
+  const sanitizedInput = (value || `agent-${Date.now()}`).replace(/[^A-Za-z0-9-_]/g, '');
+  const executionName = sanitizedInput.length > 0 ? sanitizedInput : `agent-${Date.now()}`;
+
+  if (executionName.length <= 80) {
+    return executionName;
+  }
+
+  // Check if the name ends with a timestamp (13-digit number preceded by dash)
+  const timestampMatch = executionName.match(/-(\d{13})$/);
+
+  if (timestampMatch) {
+    // Preserve the full timestamp, truncate the middle portion
+    const timestamp = timestampMatch[0]; // Includes the dash: -1768507714773
+    const maxPrefixLength = 80 - timestamp.length; // 80 - 14 = 66
+    const prefix = executionName.substring(0, maxPrefixLength);
+    return prefix + timestamp;
+  }
+
+  // No timestamp pattern found, just truncate to 80
+  return executionName.slice(0, 80);
+};
+
+/**
  * Checks if the url parameter "url" equals "ALL".
  * @param {string} url - URL parameter.
  * @returns {boolean} True if url equals "ALL", false otherwise.
@@ -172,6 +208,25 @@ export const sendInternalReportRunMessage = async (
   slackContext,
 });
 
+/**
+ * Sends a message to run a global import job to the provided SQS queue.
+ * Global imports don't require a siteId - they run across all data.
+ *
+ * @param {Object} sqs - The SQS service object.
+ * @param {string} queueUrl - The SQS queue URL.
+ * @param {string} importType - The type of global import to run.
+ * @param {Object} slackContext - The Slack context for notifications.
+ */
+export const sendGlobalImportRunMessage = async (
+  sqs,
+  queueUrl,
+  importType,
+  slackContext,
+) => sqs.sendMessage(queueUrl, {
+  type: importType,
+  slackContext,
+});
+
 export const sendReportTriggerMessage = async (
   sqs,
   queueUrl,
@@ -233,6 +288,38 @@ export const triggerAuditForSite = async (
   },
   site.getId(),
   auditData,
+);
+
+/**
+ * Triggers the A11y codefix flow for an existing opportunity.
+ * This sends a message to the audit worker to process the opportunity's suggestions
+ * and send them to Mystique for code fix processing.
+ *
+ * @param {Site} site - The site object.
+ * @param {string} opportunityId - The opportunity ID to process.
+ * @param {string} opportunityType - The opportunity type (e.g., 'a11y-assistive').
+ * @param {Object} slackContext - The Slack context object.
+ * @param {Object} lambdaContext - The Lambda context object.
+ * @return {Promise} - A promise representing the trigger operation.
+ */
+export const triggerA11yCodefixForOpportunity = async (
+  site,
+  opportunityId,
+  opportunityType,
+  slackContext,
+  lambdaContext,
+) => sendAuditMessage(
+  lambdaContext.sqs,
+  lambdaContext.env.AUDIT_JOBS_QUEUE_URL,
+  'trigger:a11y-codefix',
+  {
+    slackContext: {
+      channelId: slackContext.channelId,
+      threadTs: slackContext.threadTs,
+    },
+  },
+  site.getId(),
+  { opportunityId, opportunityType },
 );
 
 // todo: prototype - untested
@@ -319,6 +406,29 @@ export const triggerInternalReportRun = async (
   lambdaContext.sqs,
   config.getQueues().reports,
   reportType,
+  {
+    channelId: slackContext.channelId,
+    threadTs: slackContext.threadTs,
+  },
+);
+
+/**
+ * Triggers a global import run (imports that don't require a siteId).
+ *
+ * @param {Object} config - The configuration object.
+ * @param {string} importType - The type of global import to run.
+ * @param {Object} slackContext - The Slack context for notifications.
+ * @param {Object} lambdaContext - The Lambda context with SQS service.
+ */
+export const triggerGlobalImportRun = async (
+  config,
+  importType,
+  slackContext,
+  lambdaContext,
+) => sendGlobalImportRunMessage(
+  lambdaContext.sqs,
+  config.getQueues().imports,
+  importType,
   {
     channelId: slackContext.channelId,
     threadTs: slackContext.threadTs,
@@ -1121,7 +1231,7 @@ export const onboardSingleSite = async (
       workflowWaitTime: workflowWaitTime || env.WORKFLOW_WAIT_TIME_IN_SECONDS,
     };
 
-    const workflowName = `onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`;
+    const workflowName = sanitizeExecutionName(`onboard-${baseURL.replace(/[^a-zA-Z0-9]/g, '-')}-${Date.now()}`);
 
     const startCommand = new StartExecutionCommand({
       stateMachineArn: env.ONBOARD_WORKFLOW_STATE_MACHINE_ARN,
