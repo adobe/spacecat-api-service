@@ -1,3 +1,10 @@
+# [1.296.0](https://github.com/adobe/spacecat-api-service/compare/v1.295.0...v1.296.0) (2026-01-26)
+
+
+### Features
+
+* **AGENTCOM-302:** add commerce-page-enrichment to ALL_AUDITS in run-audit.js ([#1728](https://github.com/adobe/spacecat-api-service/issues/1728)) ([4853c26](https://github.com/adobe/spacecat-api-service/commit/4853c26daf7e744e63662b9336896c6e9cd79079))
+
 # [1.295.0](https://github.com/adobe/spacecat-api-service/compare/v1.294.3...v1.295.0) (2026-01-23)
 
 
