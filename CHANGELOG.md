@@ -1,3 +1,10 @@
+## [1.297.1](https://github.com/adobe/spacecat-api-service/compare/v1.297.0...v1.297.1) (2026-01-26)
+
+
+### Bug Fixes
+
+* adjust onboarding slack notification for clarity | LLMO-645 ([#1733](https://github.com/adobe/spacecat-api-service/issues/1733)) ([1abc403](https://github.com/adobe/spacecat-api-service/commit/1abc403b5d2868b29515b23f0a370d58cbabe65c))
+
 # [1.297.0](https://github.com/adobe/spacecat-api-service/compare/v1.296.0...v1.297.0) (2026-01-26)
 
 
