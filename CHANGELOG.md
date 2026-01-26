@@ -1,3 +1,38 @@
+# [1.297.0](https://github.com/adobe/spacecat-api-service/compare/v1.296.0...v1.297.0) (2026-01-26)
+
+
+### Features
+
+* enhance filterSitesForProductCode with detailed logging ([#1731](https://github.com/adobe/spacecat-api-service/issues/1731)) ([87c9a88](https://github.com/adobe/spacecat-api-service/commit/87c9a8845dab7d5c74d77dc3e9b3e22f1a347fab))
+
+# [1.296.0](https://github.com/adobe/spacecat-api-service/compare/v1.295.0...v1.296.0) (2026-01-26)
+
+
+### Features
+
+* **AGENTCOM-302:** add commerce-page-enrichment to ALL_AUDITS in run-audit.js ([#1728](https://github.com/adobe/spacecat-api-service/issues/1728)) ([4853c26](https://github.com/adobe/spacecat-api-service/commit/4853c26daf7e744e63662b9336896c6e9cd79079))
+
+# [1.295.0](https://github.com/adobe/spacecat-api-service/compare/v1.294.3...v1.295.0) (2026-01-23)
+
+
+### Features
+
+* add LLMO onboarding alerts to Slack channel ([#1714](https://github.com/adobe/spacecat-api-service/issues/1714)) ([c74f162](https://github.com/adobe/spacecat-api-service/commit/c74f162e9dde66985dc4d104f0e840802d012576))
+
+## [1.294.3](https://github.com/adobe/spacecat-api-service/compare/v1.294.2...v1.294.3) (2026-01-23)
+
+
+### Bug Fixes
+
+* edge deploy updated by ([#1726](https://github.com/adobe/spacecat-api-service/issues/1726)) ([6730e68](https://github.com/adobe/spacecat-api-service/commit/6730e689363b7cc33f7c8ce09d988987a73d87c4))
+
+## [1.294.2](https://github.com/adobe/spacecat-api-service/compare/v1.294.1...v1.294.2) (2026-01-22)
+
+
+### Bug Fixes
+
+* **slack/llmo:** unify onboarding ([#1715](https://github.com/adobe/spacecat-api-service/issues/1715)) ([590621b](https://github.com/adobe/spacecat-api-service/commit/590621bcdd9bceddc089e7c2d9eae52bfed02132))
+
 ## [1.294.1](https://github.com/adobe/spacecat-api-service/compare/v1.294.0...v1.294.1) (2026-01-22)
 
 
