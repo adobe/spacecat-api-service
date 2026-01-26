@@ -226,10 +226,10 @@ export async function validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, co
       await postLlmoAlert(
         ':warning: *Site is already onboarded* - Data folder already exists\n\n'
         + `• Site: \`${baseURL}\`\n`
-        + `• Requesting IMS Org: \`${imsOrgId}\`\n`
+        + `• Requested IMS Org: \`${imsOrgId}\`\n`
         + `• Current IMS Org: \`${currentImsOrgId}\`\n`
-        + `• Current Org ID: \`${currentOrgId}\`\n`
         + `• Requested Org ID: \`${requestedOrgId}\`\n`
+        + `• Current Org ID: \`${currentOrgId}\`\n`
         + `• Data Folder: \`${dataFolder}\`\n\n${notificationSuffix}`,
         context,
       );
@@ -276,10 +276,10 @@ export async function validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, co
         await postLlmoAlert(
           ':warning: *Site is already onboarded* - Assigned to a different organization\n\n'
           + `• Site: \`${baseURL}\`\n`
-          + `• Requesting IMS Org: \`${imsOrgId}\`\n`
+          + `• Requested IMS Org: \`${imsOrgId}\`\n`
           + `• Current IMS Org: \`${currentImsOrgId}\`\n`
-          + `• Current Org ID: \`${existingSite.getOrganizationId()}\`\n`
-          + `• Requested Org ID: \`${organization.getId()}\`\n\n`
+          + `• Requested Org ID: \`${organization.getId()}\`\n`
+          + `• Current Org ID: \`${existingSite.getOrganizationId()}\`\n\n`
           + 'The site has already been assigned to a different organization.',
           context,
         );
@@ -303,7 +303,7 @@ export async function validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, co
       await postLlmoAlert(
         ':warning: *Site is already onboarded* - Assigned to a different organization\n\n'
         + `• Site: \`${baseURL}\`\n`
-        + `• Requesting IMS Org: \`${imsOrgId}\`\n`
+        + `• Requested IMS Org: \`${imsOrgId}\`\n`
         + `• Current IMS Org: \`${currentImsOrgId}\`\n`
         + `• Current Org ID: \`${existingSite.getOrganizationId()}\`\n\n`
         + 'The site has already been assigned to a different organization.',
