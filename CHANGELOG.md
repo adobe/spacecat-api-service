@@ -1,3 +1,10 @@
+# [1.297.0](https://github.com/adobe/spacecat-api-service/compare/v1.296.0...v1.297.0) (2026-01-26)
+
+
+### Features
+
+* enhance filterSitesForProductCode with detailed logging ([#1731](https://github.com/adobe/spacecat-api-service/issues/1731)) ([87c9a88](https://github.com/adobe/spacecat-api-service/commit/87c9a8845dab7d5c74d77dc3e9b3e22f1a347fab))
+
 # [1.296.0](https://github.com/adobe/spacecat-api-service/compare/v1.295.0...v1.296.0) (2026-01-26)
 
 
