@@ -138,6 +138,46 @@ async function getCurrentImsOrgIdForSite(baseURL, context) {
 }
 
 /**
+ * Gets the current organization ID for a site by baseURL.
+ * Never throws - returns 'Unknown' on error.
+ * @param {string} baseURL - The site's base URL
+ * @param {object} context - The request context containing dataAccess and log
+ * @returns {Promise<string>} The organization ID or 'Unknown'
+ */
+async function getCurrentOrgIdForSite(baseURL, context) {
+  const { dataAccess, log } = context;
+  const { Site } = dataAccess;
+
+  try {
+    const site = await Site.findByBaseURL(baseURL);
+    return site ? site.getOrganizationId() : 'Unknown';
+  } catch (error) {
+    log.debug(`Could not fetch org ID for site: ${error.message}`);
+    return 'Unknown';
+  }
+}
+
+/**
+ * Gets the organization ID by IMS Org ID.
+ * Never throws - returns 'Unknown' on error.
+ * @param {string} imsOrgId - The IMS Organization ID
+ * @param {object} context - The request context containing dataAccess and log
+ * @returns {Promise<string>} The organization ID or 'Unknown'
+ */
+async function getOrgIdByImsOrgId(imsOrgId, context) {
+  const { dataAccess, log } = context;
+  const { Organization } = dataAccess;
+
+  try {
+    const organization = await Organization.findByImsOrgId(imsOrgId);
+    return organization ? organization.getId() : 'Unknown';
+  } catch (error) {
+    log.debug(`Could not fetch org ID by IMS Org ID: ${error.message}`);
+    return 'Unknown';
+  }
+}
+
+/**
  * Creates a SharePoint client for LLMO operations.
  * @param {object} env - Environment variables
  * @returns {Promise<object>} SharePoint client
@@ -171,16 +211,26 @@ export async function validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, co
     const folderExists = await folder.exists();
 
     if (folderExists) {
-      // Try to get current IMS Org if site exists (best effort - don't fail validation)
+      // Fetch notification context (best effort - don't fail validation)
       const currentImsOrgId = await getCurrentImsOrgIdForSite(baseURL, context);
+      const currentOrgId = await getCurrentOrgIdForSite(baseURL, context);
+      const requestedOrgId = await getOrgIdByImsOrgId(imsOrgId, context);
 
+      // Determine if this is the same org or a different org attempting to onboard
+      const isSameOrg = currentImsOrgId === imsOrgId;
+      const notificationSuffix = isSameOrg
+        ? 'The same organization is attempting to onboard the site again.'
+        : 'The site has already been assigned to a different organization.';
+
+      // Slack notification for case 1: SharePoint folder already exists
       await postLlmoAlert(
         ':warning: *Site is already onboarded* - Data folder already exists\n\n'
         + `• Site: \`${baseURL}\`\n`
         + `• Requesting IMS Org: \`${imsOrgId}\`\n`
         + `• Current IMS Org: \`${currentImsOrgId}\`\n`
-        + `• Data Folder: \`${dataFolder}\`\n\n`
-        + 'The site has already been assigned to a different organization.',
+        + `• Current Org ID: \`${currentOrgId}\`\n`
+        + `• Requested Org ID: \`${requestedOrgId}\`\n`
+        + `• Data Folder: \`${dataFolder}\`\n\n${notificationSuffix}`,
         context,
       );
 
@@ -222,6 +272,7 @@ export async function validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, co
           context,
         );
 
+        // Slack notification for case 2: Site is assigned to a different organization
         await postLlmoAlert(
           ':warning: *Site is already onboarded* - Assigned to a different organization\n\n'
           + `• Site: \`${baseURL}\`\n`
@@ -239,7 +290,7 @@ export async function validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, co
         };
       }
     } else if (existingSite.getOrganizationId() !== env.DEFAULT_ORGANIZATION_ID
-        && existingSite.getOrganizationId() !== ASO_DEMO_ORG) {
+      && existingSite.getOrganizationId() !== ASO_DEMO_ORG) {
       // if the organization doesn't exist, but the site does, check that the site isn't claimed yet
       // by another organization
       // Get current organization's IMS Org ID (best effort - don't fail validation)
@@ -248,6 +299,7 @@ export async function validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, co
         context,
       );
 
+      // Slack notification for case 3: Site is assigned to a different organization
       await postLlmoAlert(
         ':warning: *Site is already onboarded* - Assigned to a different organization\n\n'
         + `• Site: \`${baseURL}\`\n`
@@ -539,7 +591,7 @@ export async function unpublishFromAdminHlx(dataFolder, env, log) {
  * @param {Function} say - Optional function to send messages (e.g., Slack say function)
  * @returns {Promise<void>}
  */
-export async function copyFilesToSharepoint(dataFolder, context, say = () => {}) {
+export async function copyFilesToSharepoint(dataFolder, context, say = () => { }) {
   const { log, env } = context;
 
   const sharepointClient = await createSharePointClient(env);
@@ -578,7 +630,7 @@ export async function copyFilesToSharepoint(dataFolder, context, say = () => {})
  * @param {Function} say - Optional function to send messages (e.g., Slack say function)
  * @returns {Promise<void>}
  */
-export async function updateIndexConfig(dataFolder, context, say = () => {}) {
+export async function updateIndexConfig(dataFolder, context, say = () => { }) {
   const { log, env } = context;
 
   log.debug('Starting Git modification of helix query config');
@@ -629,7 +681,7 @@ export async function updateIndexConfig(dataFolder, context, say = () => {}) {
  * @param {Function} [say] - Optional callback function for sending Slack messages
  * @returns {Promise<object>} The organization object
  */
-export async function createOrFindOrganization(imsOrgId, context, say = () => {}) {
+export async function createOrFindOrganization(imsOrgId, context, say = () => { }) {
   const { dataAccess, log, imsClient } = context;
   const { Organization } = dataAccess;
 
@@ -931,7 +983,7 @@ export async function removeLlmoConfig(site, config, context) {
  * @param {Function} say - Optional function to send messages (e.g., Slack say function)
  * @returns {Promise<object>} The entitlement and enrollment objects
  */
-export async function createEntitlementAndEnrollment(site, context, say = () => {}) {
+export async function createEntitlementAndEnrollment(site, context, say = () => { }) {
   const { log } = context;
 
   try {
@@ -1004,7 +1056,7 @@ export async function triggerAudits(audits, context, site) {
  * @param {Function} [say] - Optional function to send progress messages
  * @returns {Promise<object>} Onboarding result
  */
-export async function performLlmoOnboarding(params, context, say = () => {}) {
+export async function performLlmoOnboarding(params, context, say = () => { }) {
   const {
     domain, baseURL: providedBaseURL, brandName, imsOrgId, deliveryType,
   } = params;
