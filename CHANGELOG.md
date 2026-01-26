@@ -1,3 +1,24 @@
+## [1.297.1](https://github.com/adobe/spacecat-api-service/compare/v1.297.0...v1.297.1) (2026-01-26)
+
+
+### Bug Fixes
+
+* adjust onboarding slack notification for clarity | LLMO-645 ([#1733](https://github.com/adobe/spacecat-api-service/issues/1733)) ([1abc403](https://github.com/adobe/spacecat-api-service/commit/1abc403b5d2868b29515b23f0a370d58cbabe65c))
+
+# [1.297.0](https://github.com/adobe/spacecat-api-service/compare/v1.296.0...v1.297.0) (2026-01-26)
+
+
+### Features
+
+* enhance filterSitesForProductCode with detailed logging ([#1731](https://github.com/adobe/spacecat-api-service/issues/1731)) ([87c9a88](https://github.com/adobe/spacecat-api-service/commit/87c9a8845dab7d5c74d77dc3e9b3e22f1a347fab))
+
+# [1.296.0](https://github.com/adobe/spacecat-api-service/compare/v1.295.0...v1.296.0) (2026-01-26)
+
+
+### Features
+
+* **AGENTCOM-302:** add commerce-page-enrichment to ALL_AUDITS in run-audit.js ([#1728](https://github.com/adobe/spacecat-api-service/issues/1728)) ([4853c26](https://github.com/adobe/spacecat-api-service/commit/4853c26daf7e744e63662b9336896c6e9cd79079))
+
 # [1.295.0](https://github.com/adobe/spacecat-api-service/compare/v1.294.3...v1.295.0) (2026-01-23)
 
 
