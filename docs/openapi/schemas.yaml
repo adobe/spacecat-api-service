@@ -380,7 +380,7 @@ Project:
     id:
       description: The project ID in uuid format
       $ref: '#/Id'
-    name:
+    projectName:
       description: The name of the project
       type: string
     organizationId:
@@ -394,7 +394,7 @@ Project:
       $ref: '#/DateTime'
   example:
     id: 'p1r2o3j4-e5c6-t7i8-d9a0-b11c12d13e14'
-    name: 'Example Project'
+    projectName: 'Example Project'
     organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
@@ -405,29 +405,29 @@ ProjectList:
 ProjectCreate:
   type: object
   required:
-    - name
+    - projectName
     - organizationId
   properties:
-    name:
+    projectName:
       description: The name of the project
       type: string
     organizationId:
       description: The ID of the organization this project belongs to
       $ref: '#/Id'
   example:
-    name: 'New Project'
+    projectName: 'New Project'
     organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
 ProjectUpdate:
   type: object
   properties:
-    name:
+    projectName:
       description: The name of the project
       type: string
     organizationId:
       description: The ID of the organization this project belongs to
       $ref: '#/Id'
   example:
-    name: 'Updated Project Name'
+    projectName: 'Updated Project Name'
     organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
 Site:
   type: object
@@ -656,7 +656,6 @@ SiteUpdate:
       $ref: '#/DeliveryConfig'
     goLiveDate:
       description: The date and time when the site went live on AEM Edge
-      nullable: true
       $ref: '#/DateTime'
     config:
       description: Optional. The configuration of the site
@@ -3068,7 +3067,7 @@ SuggestionUpdate:
       description: Map containing type-specific details of what fix is suggested
       type: object
       additionalProperties: true
-      oneOf:
+      anyOf:
         - $ref: '#/BrokenBacklinksRedirectData'
         - $ref: '#/BrokenInternalLinksSuggestionData'
     kpiDeltas:

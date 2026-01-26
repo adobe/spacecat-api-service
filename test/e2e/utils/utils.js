@@ -89,6 +89,46 @@ export async function pollUntilJobIsComplete(jobId) {
   return job;
 }
 
+/**
+ * Retries an async function with exponential backoff.
+ * Only retries on 5xx server errors by default.
+ *
+ * @param {Function} fn - Async function to retry (should return response object)
+ * @param {Object} options - Configuration options
+ * @param {number} [options.maxRetries=3] - Maximum number of retry attempts
+ * @param {number} [options.baseDelayMs=1000] - Base delay in milliseconds
+ * @param {Function} [options.shouldRetry] - Custom function to determine if retry needed
+ * @returns {Promise<*>} - Result of the function
+ */
+export async function retryWithBackoff(fn, options = {}) {
+  const {
+    maxRetries = 3,
+    baseDelayMs = 1000,
+    shouldRetry = (response) => response.status >= 500,
+  } = options;
+
+  let response;
+
+  for (let attempt = 0; attempt < maxRetries; attempt += 1) {
+    response = await fn();
+
+    if (!shouldRetry(response)) {
+      return response;
+    }
+
+    if (attempt < maxRetries - 1) {
+      const delay = baseDelayMs * (2 ** attempt);
+      const jitter = Math.floor(Math.random() * (delay / 2));
+      // eslint-disable-next-line no-console
+      console.log(`Retry ${attempt + 1}/${maxRetries - 1} after ${delay + jitter}ms (status: ${response.status})`);
+      // eslint-disable-next-line no-promise-executor-return
+      await new Promise((r) => setTimeout(r, delay + jitter));
+    }
+  }
+
+  return response;
+}
+
 export function expectJobsToMatch(expectedJob, actualJob) {
   const propertiesToIgnore = ['id', 'startTime', 'endTime', 'duration'];
 

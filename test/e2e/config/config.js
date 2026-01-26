@@ -15,7 +15,7 @@ function isTestingProd() {
   return process.env.ENVIRONMENT === 'prod';
 }
 
-const BASE_URL = 'https://spacecat.experiencecloud.live/api';
+export const BASE_URL = 'https://spacecat.experiencecloud.live/api';
 const IMPORT_JOBS_SUFFIX = 'tools/import/jobs';
 const DEV_API_URL = `${BASE_URL}/ci/${IMPORT_JOBS_SUFFIX}`;
 const PROD_API_URL = `${BASE_URL}/v1/${IMPORT_JOBS_SUFFIX}`;
