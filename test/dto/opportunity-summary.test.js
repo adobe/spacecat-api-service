@@ -174,6 +174,38 @@ describe('OpportunitySummaryDto', () => {
       expect(result.projectedTrafficValue).to.equal(0);
     });
 
+    it('handles suggestions with null getData gracefully', () => {
+      const opportunity = {
+        getId: () => 'oppty-1',
+        getTitle: () => 'Test Opportunity',
+        getDescription: () => 'Test Description',
+        getType: () => 'broken-backlinks',
+        getStatus: () => 'NEW',
+        getData: () => ({ projectedTrafficValue: 1000 }),
+      };
+
+      const suggestions = [
+        {
+          getData: () => null, // Null data should be skipped
+          getRank: () => 100,
+        },
+        {
+          getData: () => undefined, // Undefined data should be skipped
+          getRank: () => 200,
+        },
+        {
+          getData: () => ({ url: 'https://example.com/page1' }),
+          getRank: () => 50,
+        },
+      ];
+
+      const result = OpportunitySummaryDto.toJSON(opportunity, suggestions);
+
+      // Should only count the valid suggestion
+      expect(result.pageViews).to.equal(50);
+      expect(result.urls).to.deep.equal(['https://example.com/page1']);
+    });
+
     it('defaults pageViews to 0 when paidUrlsData has no pageViews', () => {
       const opportunity = {
         getId: () => 'oppty-1',

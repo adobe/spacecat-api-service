@@ -276,6 +276,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/traffic/paid/impact-by-page-traffic-type-device': trafficController.getImpactByPageTrafficTypeDevice,
     'GET /sites/:siteId/traffic/paid/traffic-loss-by-devices': trafficController.getTrafficLossByDevices,
     'POST /sites/:siteId/traffic/predominant-type': trafficToolsController.getPredominantTraffic,
+    'POST /sites/:siteId/traffic/predominant-type/:channel': trafficToolsController.getPredominantTraffic,
     'GET /sites/:siteId/brand-guidelines': brandsController.getBrandGuidelinesForSite,
     'GET /sites/:siteId/brand-profile': sitesController.getBrandProfile,
     'POST /sites/:siteId/brand-profile': sitesController.triggerBrandProfile,
@@ -361,6 +362,8 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/llmo/offboard': llmoController.offboardCustomer,
     'POST /sites/:siteId/llmo/edge-optimize-config': llmoController.createOrUpdateEdgeConfig,
     'GET /sites/:siteId/llmo/edge-optimize-config': llmoController.getEdgeConfig,
+    'GET /sites/:siteId/llmo/strategy': llmoController.getStrategy,
+    'PUT /sites/:siteId/llmo/strategy': llmoController.saveStrategy,
 
     // Tier Specific Routes
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,

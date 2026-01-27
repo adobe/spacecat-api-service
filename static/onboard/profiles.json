@@ -53,6 +53,7 @@
 			"experimentation-opportunities": {},
 			"meta-tags": {},
 			"product-metatags": {},
+			"commerce-product-enrichments": {},
 			"sitemap": {},
 			"redirect-chains": {},
 			"cwv": {},
@@ -75,7 +76,9 @@
 			"organic-traffic" : {},
 			"top-pages" : {},
 			"organic-keywords" :{},
-			"all-traffic": {}
+			"all-traffic": {},
+			"user-engagement": {},
+			"cwv-weekly": {}
 		},
 		"config": {
 			"scheduledRun": false
@@ -109,7 +112,9 @@
 			"organic-traffic" : {},
 			"top-pages" : {},
 			"organic-keywords" :{},
-			"all-traffic": {}
+			"all-traffic": {},
+			"user-engagement": {},
+			"cwv-weekly": {}
 		},
 		"config": {
 			"scheduledRun": true
