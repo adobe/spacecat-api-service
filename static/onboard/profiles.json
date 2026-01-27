@@ -14,8 +14,7 @@
 		"imports": {
 			"organic-traffic" : {},
 			"top-pages" : {},
-			"all-traffic": {},
-            "traffic-analysis": {}
+			"all-traffic": {}
 		},
 		"config": {
 			"scheduledRun": false

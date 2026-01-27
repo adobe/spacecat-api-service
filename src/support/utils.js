@@ -1122,13 +1122,14 @@ export const onboardSingleSite = async (
         context,
       );
     }
-
-    await triggerTrafficAnalysisBackfill(
-      siteID,
-      configuration,
-      slackContext,
-      context,
-    );
+    if (importTypes.includes('traffic-analysis')) { // trigger traffic analysis backfill only if traffic analysis import is enabled
+      await triggerTrafficAnalysisBackfill(
+        siteID,
+        configuration,
+        slackContext,
+        context,
+      );
+    }
 
     const auditTypes = Object.keys(profile.audits);
 
