@@ -1,3 +1,24 @@
+# [1.299.0](https://github.com/adobe/spacecat-api-service/compare/v1.298.1...v1.299.0) (2026-01-27)
+
+
+### Features
+
+* add traffic analysis to onboarding ([#1702](https://github.com/adobe/spacecat-api-service/issues/1702)) ([1bc6e9d](https://github.com/adobe/spacecat-api-service/commit/1bc6e9dafca44da924d93557a75525362806a39f))
+
+## [1.298.1](https://github.com/adobe/spacecat-api-service/compare/v1.298.0...v1.298.1) (2026-01-27)
+
+
+### Bug Fixes
+
+* updating headings check in preflight api doc ([#1718](https://github.com/adobe/spacecat-api-service/issues/1718)) ([855ca29](https://github.com/adobe/spacecat-api-service/commit/855ca29449086bf60bcb906c7c8269b502a932fd))
+
+# [1.298.0](https://github.com/adobe/spacecat-api-service/compare/v1.297.1...v1.298.0) (2026-01-27)
+
+
+### Features
+
+* register a11y auto-fix command ([#1732](https://github.com/adobe/spacecat-api-service/issues/1732)) ([fdcf1d7](https://github.com/adobe/spacecat-api-service/commit/fdcf1d729f3a5d44470f9954262a4ca3d187b95d))
+
 ## [1.297.1](https://github.com/adobe/spacecat-api-service/compare/v1.297.0...v1.297.1) (2026-01-26)
 
 
