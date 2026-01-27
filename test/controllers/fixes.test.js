@@ -1726,6 +1726,7 @@ describe('Fixes Controller', () => {
       });
 
       // Stub findById to return the updated objects (called after transaction)
+      fixEntityCollection.findById.withArgs(fixId).resolves(fix);
       suggestionCollection.findById.withArgs(suggestion1.getId()).resolves(suggestion1);
       suggestionCollection.findById.withArgs(suggestion2.getId()).resolves(suggestion2);
 
@@ -1734,8 +1735,17 @@ describe('Fixes Controller', () => {
 
       const result = await response.json();
       expect(result.message).to.include('All 2 suggestion(s) marked as SKIPPED');
-      expect(result.fix.status).to.equal('ROLLED_BACK');
+
+      // Check the wrapped response structure
+      expect(result.fixes).to.have.lengthOf(1);
+      expect(result.fixes[0].fix.status).to.equal('ROLLED_BACK');
+      expect(result.fixes[0].statusCode).to.equal(200);
+
       expect(result.suggestions.updated).to.have.lengthOf(2);
+      expect(result.suggestions.updated[0].suggestion.status).to.equal('SKIPPED');
+      expect(result.suggestions.updated[0].statusCode).to.equal(200);
+      expect(result.suggestions.updated[1].suggestion.status).to.equal('SKIPPED');
+      expect(result.suggestions.updated[1].statusCode).to.equal(200);
 
       expect(fix.getStatus()).to.equal('ROLLED_BACK');
       expect(suggestion1.getStatus()).to.equal('SKIPPED');

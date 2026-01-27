@@ -500,9 +500,21 @@ export class FixesController {
       );
 
       return ok({
-        fix: FixDto.toJSON(updatedFix),
+        fixes: [
+          {
+            index: 0,
+            uuid: updatedFix.getId(),
+            fix: FixDto.toJSON(updatedFix),
+            statusCode: 200,
+          },
+        ],
         suggestions: {
-          updated: updatedSuggestions.map(SuggestionDto.toJSON),
+          updated: updatedSuggestions.map((suggestion, index) => ({
+            index,
+            uuid: suggestion.getId(),
+            suggestion: SuggestionDto.toJSON(suggestion),
+            statusCode: 200,
+          })),
         },
         message: `Fix rolled back successfully. All ${updatedSuggestions.length} suggestion(s) marked as SKIPPED.`,
       });
