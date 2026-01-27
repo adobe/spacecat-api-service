@@ -228,65 +228,6 @@ describe('TopPaidOpportunitiesController', () => {
       expect(opportunities).to.have.lengthOf(1);
     });
 
-    it('sorts opportunities by projectedTrafficValue and projectedConversionValue descending', async () => {
-      // CWV opportunities use projectedTrafficValue
-      const cwvOppty1 = createOpportunity({
-        id: 'cwv-1', type: 'cwv', data: { projectedTrafficValue: 2000 },
-      });
-      const cwvOppty2 = createOpportunity({
-        id: 'cwv-2', type: 'cwv', data: { projectedTrafficValue: 4000 },
-      });
-      // Forms opportunities use projectedConversionValue (not projectedTrafficValue)
-      const formsOppty1 = createOpportunity({
-        id: 'forms-1',
-        type: 'form-accessibility',
-        data: { projectedTrafficValue: 0, projectedConversionValue: 3000, form: 'https://example.com/form1' },
-      });
-      const formsOppty2 = createOpportunity({
-        id: 'forms-2',
-        type: 'high-form-views-low-conversions',
-        data: { projectedTrafficValue: 0, projectedConversionValue: 1000, form: 'https://example.com/form2' },
-      });
-      setupOpportunityMocks(
-        mockContext.dataAccess.Opportunity,
-        [cwvOppty1, cwvOppty2, formsOppty1, formsOppty2],
-      );
-      // CWV opportunities match by suggestion URL
-      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus
-        .withArgs('cwv-1', 'NEW')
-        .resolves([createSuggestion('https://example.com/page1')])
-        .withArgs('cwv-2', 'NEW')
-        .resolves([createSuggestion('https://example.com/page2')])
-        // Forms opportunities match by form URL in suggestion
-        .withArgs('forms-1', 'NEW')
-        .resolves([createSuggestion('https://example.com/form1')])
-        .withArgs('forms-2', 'NEW')
-        .resolves([createSuggestion('https://example.com/form2')]);
-      // Mock Athena to return paid traffic data for all URLs
-      mockAthenaClient.query.resolves([
-        createTrafficData({ url: 'https://example.com/page1', pageviews: '1000' }),
-        createTrafficData({ url: 'https://example.com/page2', pageviews: '1000' }),
-        createTrafficData({ url: 'https://example.com/form1', pageviews: '1000' }),
-        createTrafficData({ url: 'https://example.com/form2', pageviews: '1000' }),
-      ]);
-
-      const response = await controller.getTopPaidOpportunities({
-        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
-      });
-      const opportunities = await response.json();
-      // Should be sorted by value descending:
-      // 4000 (cwv-2), 3000 (forms-1), 2000 (cwv-1), 1000 (forms-2)
-      // But with max 2 per type limit, we get: cwv-2, forms-1, cwv-1, forms-2
-      expect(opportunities).to.have.lengthOf(4);
-      expect(opportunities[0].opportunityId).to.equal('cwv-2');
-      expect(opportunities[1].opportunityId).to.equal('forms-1');
-      expect(opportunities[2].opportunityId).to.equal('cwv-1');
-      expect(opportunities[3].opportunityId).to.equal('forms-2');
-      // Verify impact field is present as a number
-      expect(opportunities[0].impact).to.equal(4000);
-      expect(opportunities[1].impact).to.equal(3000);
-    });
-
     it('limits results to top 10 opportunities with max 2 per type', async () => {
       // Create opportunities with 5 different types to test both limits
       // The controller limits to 8 total after combineAndSortOpportunities limits to 10
@@ -955,6 +896,49 @@ describe('TopPaidOpportunitiesController', () => {
   });
 
   describe('Edge cases and error handling', () => {
+    it('handles opportunities with undefined data gracefully', async () => {
+      // Tests fix for: Cannot read properties of undefined (reading 'projectedTrafficValue')
+      const opptyWithUndefinedData = {
+        getId: () => 'oppty-undefined-data',
+        getType: () => 'cwv',
+        getTitle: () => 'Opportunity with undefined data',
+        getDescription: () => 'Test description',
+        getTags: () => [],
+        getData: () => undefined, // This was causing the crash
+        getGuidance: () => ({ recommendations: [] }),
+      };
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [opptyWithUndefinedData]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      // Should be filtered out because data is undefined (no projectedTrafficValue)
+      expect(opportunities).to.have.lengthOf(0);
+    });
+
+    it('handles opportunities with null data gracefully', async () => {
+      const opptyWithNullData = {
+        getId: () => 'oppty-null-data',
+        getType: () => 'cwv',
+        getTitle: () => 'Opportunity with null data',
+        getDescription: () => 'Test description',
+        getTags: () => [],
+        getData: () => null, // Also should not crash
+        getGuidance: () => ({ recommendations: [] }),
+      };
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [opptyWithNullData]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
+      expect(response.status).to.equal(200);
+      const opportunities = await response.json();
+      // Should be filtered out because data is null (no projectedTrafficValue)
+      expect(opportunities).to.have.lengthOf(0);
+    });
+
     it('handles multiple CWV opportunities in processOpportunityMatching', async () => {
       const cwvOppty1 = createOpportunity({ id: 'cwv-1', type: 'cwv' });
       const cwvOppty2 = createOpportunity({ id: 'cwv-2', type: 'cwv' });

@@ -315,6 +315,38 @@ export const triggerAuditForSite = async (
   auditData,
 );
 
+/**
+ * Triggers the A11y codefix flow for an existing opportunity.
+ * This sends a message to the audit worker to process the opportunity's suggestions
+ * and send them to Mystique for code fix processing.
+ *
+ * @param {Site} site - The site object.
+ * @param {string} opportunityId - The opportunity ID to process.
+ * @param {string} opportunityType - The opportunity type (e.g., 'a11y-assistive').
+ * @param {Object} slackContext - The Slack context object.
+ * @param {Object} lambdaContext - The Lambda context object.
+ * @return {Promise} - A promise representing the trigger operation.
+ */
+export const triggerA11yCodefixForOpportunity = async (
+  site,
+  opportunityId,
+  opportunityType,
+  slackContext,
+  lambdaContext,
+) => sendAuditMessage(
+  lambdaContext.sqs,
+  lambdaContext.env.AUDIT_JOBS_QUEUE_URL,
+  'trigger:a11y-codefix',
+  {
+    slackContext: {
+      channelId: slackContext.channelId,
+      threadTs: slackContext.threadTs,
+    },
+  },
+  site.getId(),
+  { opportunityId, opportunityType },
+);
+
 // todo: prototype - untested
 /* c8 ignore start */
 export const triggerExperimentationCandidates = async (
@@ -1264,16 +1296,27 @@ export const filterSitesForProductCode = async (context, organization, sites, pr
   const tierClient = TierClient.createForOrg(context, organization, productCode);
   const { entitlement } = await tierClient.checkValidEntitlement();
 
+  const { log } = context;
+  log.info(`[filterSites] Input: orgId=${organization.getId()}, productCode=${productCode}, sitesCount=${sites.length}`);
+  log.info(`[filterSites] Site IDs: ${sites.map((s) => s.getId()).join(', ')}`);
+  log.info(`[filterSites] Entitlement found: ${entitlement ? entitlement.getId() : 'null'}`);
+
   if (!isNonEmptyObject(entitlement)) {
+    log.info('[filterSites] No entitlement, returning empty array');
     return [];
   }
 
   // Get all enrollments for this entitlement in one query
   const siteEnrollments = await SiteEnrollment.allByEntitlementId(entitlement.getId());
+  log.info(`[filterSites] Enrollments found: ${siteEnrollments.length}`);
+  log.info(`[filterSites] Enrolled siteIds: ${siteEnrollments.map((se) => se.getSiteId()).join(', ')}`);
 
   // Create a Set of enrolled site IDs for efficient lookup
   const enrolledSiteIds = new Set(siteEnrollments.map((se) => se.getSiteId()));
 
   // Filter sites based on enrollment
-  return sites.filter((site) => enrolledSiteIds.has(site.getId()));
+  const result = sites.filter((site) => enrolledSiteIds.has(site.getId()));
+  log.info(`[filterSites] Filtered result count: ${result.length}`);
+
+  return result;
 };
