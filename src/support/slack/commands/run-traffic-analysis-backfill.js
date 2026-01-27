@@ -117,18 +117,6 @@ function RunTrafficAnalysisBackfillCommand(context) {
         context,
         weeks || 52,
       );
-
-    //   await Promise.all(
-    //     weekYearPairs.map(async ({ week, year }) => {
-    //       await runTrafficAnalysisImportForSite(
-    //         site,
-    //         week,
-    //         year,
-    //         config,
-    //         slackContext,
-    //       );
-    //     }),
-    //   );
     } catch (error) {
       log.error(error);
       await postErrorMessage(say, error);
