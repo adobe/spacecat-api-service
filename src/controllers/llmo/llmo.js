@@ -153,6 +153,9 @@ function LlmoController(ctx) {
 
       if (!response.ok) {
         log.error(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
+        if (response.status === 404) {
+          return notFound(`Data not found: ${dataSource}`);
+        }
         throw new Error(`External API returned ${response.status}: ${response.statusText}`);
       }
 
@@ -249,6 +252,9 @@ function LlmoController(ctx) {
 
       if (!response.ok) {
         log.error(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
+        if (response.status === 404) {
+          return notFound(`Data not found: ${dataSource}`);
+        }
         throw new Error(`External API returned ${response.status}: ${response.statusText}`);
       }
 
@@ -374,6 +380,9 @@ function LlmoController(ctx) {
 
       if (!response.ok) {
         log.error(`Failed to fetch data from external endpoint: ${response.status} ${response.statusText}`);
+        if (response.status === 404) {
+          return notFound(`Data not found: ${configName}`);
+        }
         throw new Error(`External API returned ${response.status}: ${response.statusText}`);
       }
 

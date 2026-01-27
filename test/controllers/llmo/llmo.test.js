@@ -447,15 +447,15 @@ describe('LlmoController', () => {
       });
     });
 
-    it('should handle external API errors', async () => {
+    it('should return 404 when external API returns 404', async () => {
       const mockResponse = createMockResponse(null, false, 404);
       tracingFetchStub.resolves(mockResponse);
 
       const result = await controller.getLlmoSheetData(mockContext);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(404);
       const responseBody = await result.json();
-      expect(responseBody.message).to.include('External API returned 404');
+      expect(responseBody.message).to.include('Data not found');
     });
 
     it('should handle network errors', async () => {
@@ -583,13 +583,15 @@ describe('LlmoController', () => {
       });
     });
 
-    it('should handle external API errors', async () => {
+    it('should return 404 when external API returns 404', async () => {
       const mockResponse = createMockResponse(null, false, 404);
       tracingFetchStub.resolves(mockResponse);
 
       const result = await controller.getLlmoGlobalSheetData(mockContext);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Data not found');
     });
 
     it('should use fallback API key when env.LLMO_HLX_API_KEY is undefined', async () => {
