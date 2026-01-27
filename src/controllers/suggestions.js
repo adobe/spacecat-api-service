@@ -75,6 +75,19 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   /**
+   * Validates view parameter and returns error response if invalid.
+   * @param {string} viewParam - The view parameter from query string.
+   * @returns {{view: string, error: null}|{view: null, error: Response}}
+   */
+  const getValidatedView = (viewParam) => {
+    try {
+      return { view: validateView(viewParam), error: null };
+    } catch (e) {
+      return { view: null, error: badRequest(e.message) };
+    }
+  };
+
+  /**
    * Validates and parses the status parameter for filtering.
    * @param {string} statusParam - Comma-separated status values.
    * @returns {string[]} Array of valid status values, or empty array if no param.
@@ -140,12 +153,8 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('Opportunity ID required');
     }
 
-    let view;
-    try {
-      view = validateView(viewParam);
-    } catch (e) {
-      return badRequest(e.message);
-    }
+    const { view, error: viewError } = getValidatedView(viewParam);
+    if (viewError) return viewError;
 
     let statuses;
     try {
@@ -215,12 +224,8 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('Page size must be greater than 0');
     }
 
-    let view;
-    try {
-      view = validateView(viewParam);
-    } catch (e) {
-      return badRequest(e.message);
-    }
+    const { view, error: viewError } = getValidatedView(viewParam);
+    if (viewError) return viewError;
 
     const site = await Site.findById(siteId);
     if (!site) {
@@ -281,12 +286,8 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('Status is required');
     }
 
-    let view;
-    try {
-      view = validateView(viewParam);
-    } catch (e) {
-      return badRequest(e.message);
-    }
+    const { view, error: viewError } = getValidatedView(viewParam);
+    if (viewError) return viewError;
 
     const site = await Site.findById(siteId);
     if (!site) {
@@ -339,12 +340,8 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('Page size must be greater than 0');
     }
 
-    let view;
-    try {
-      view = validateView(viewParam);
-    } catch (e) {
-      return badRequest(e.message);
-    }
+    const { view, error: viewError } = getValidatedView(viewParam);
+    if (viewError) return viewError;
 
     const site = await Site.findById(siteId);
     if (!site) {
@@ -405,12 +402,8 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('Suggestion ID required');
     }
 
-    let view;
-    try {
-      view = validateView(viewParam);
-    } catch (e) {
-      return badRequest(e.message);
-    }
+    const { view, error: viewError } = getValidatedView(viewParam);
+    if (viewError) return viewError;
 
     const site = await Site.findById(siteId);
     if (!site) {

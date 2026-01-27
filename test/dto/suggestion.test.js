@@ -454,6 +454,9 @@ describe('Suggestion DTO', () => {
       });
 
       it('extracts url from nested recommendations[0].pageUrl', () => {
+        const opportunity = {
+          getType: () => 'alt-text',
+        };
         const suggestion = {
           ...createMockSuggestion(),
           getData: () => ({
@@ -463,12 +466,15 @@ describe('Suggestion DTO', () => {
           }),
         };
 
-        const json = SuggestionDto.toJSON(suggestion, 'summary');
+        const json = SuggestionDto.toJSON(suggestion, 'summary', opportunity);
 
         expect(json.url).to.equal('https://example.com/rec-page-url');
       });
 
       it('extracts url from nested recommendations[0].url when pageUrl not present', () => {
+        const opportunity = {
+          getType: () => 'alt-text',
+        };
         const suggestion = {
           ...createMockSuggestion(),
           getData: () => ({
@@ -478,7 +484,7 @@ describe('Suggestion DTO', () => {
           }),
         };
 
-        const json = SuggestionDto.toJSON(suggestion, 'summary');
+        const json = SuggestionDto.toJSON(suggestion, 'summary', opportunity);
 
         expect(json.url).to.equal('https://example.com/rec-url');
       });

@@ -11,6 +11,7 @@
  */
 
 import { buildAggregationKeyFromSuggestion } from '@adobe/spacecat-shared-utils';
+import { Suggestion } from '@adobe/spacecat-shared-data-access';
 
 /**
  * Valid projection views for suggestions.
@@ -19,147 +20,34 @@ import { buildAggregationKeyFromSuggestion } from '@adobe/spacecat-shared-utils'
 export const SUGGESTION_VIEWS = ['minimal', 'summary', 'full'];
 
 /**
- * Accessibility-related opportunity types that need special issue handling.
- * @type {Set<string>}
- */
-const ACCESSIBILITY_OPPORTUNITY_TYPES = new Set([
-  'form-accessibility',
-  'a11y-color-contrast',
-  'a11y-assistive',
-]);
-
-/**
- * Common URL-related fields that should always be included in minimal view.
- * @type {string[]}
- */
-const COMMON_URL_FIELDS = [
-  'url',
-  'urls',
-  'urlFrom',
-  'urlTo',
-  'url_from',
-  'url_to',
-  'urlsSuggested',
-  'sitemapUrl',
-  'pageUrl',
-  'pattern',
-  'link',
-  'type',
-];
-
-/**
- * Mapping of opportunity types to their specific data fields for minimal view.
- * Only fields relevant to each opportunity type are included.
- * @type {Object<string, string[]>}
- */
-const OPPORTUNITY_TYPE_FIELDS = {
-  'alt-text': ['recommendations'],
-  'security-vulnerabilities': ['cves'],
-  'security-csp': ['findings'],
-  'security-permissions': ['path'],
-  'redirect-chains': ['sourceUrl', 'destinationUrl'],
-  'form-opportunities': ['form', 'page'],
-  'form-accessibility': ['issues', 'form', 'page', 'accessibility'],
-  'a11y-color-contrast': ['issues'],
-  'a11y-assistive': ['issues'],
-  'cwv-lcp': ['metrics', 'pageviews', 'issues'],
-  'cwv-cls': ['metrics', 'pageviews', 'issues'],
-  'cwv-inp': ['metrics', 'pageviews', 'issues'],
-};
-
-/**
- * Fallback fields for unknown opportunity types.
- * @type {string[]}
- */
-const FALLBACK_DATA_FIELDS = [
-  'path',
-  'sourceUrl',
-  'destinationUrl',
-  'metrics',
-  'pageviews',
-  'issues',
-  'recommendations',
-  'cves',
-  'findings',
-  'form',
-  'page',
-  'accessibility',
-];
-
-/**
- * Filters issues array to only include occurrences count for accessibility types.
- * @param {Array} issues - Issues array from suggestion data.
- * @returns {Array} Filtered issues array with only occurrences.
- */
-const filterAccessibilityIssues = (issues) => {
-  if (!Array.isArray(issues)) return issues;
-  return issues.map((issue) => ({
-    occurrences: issue.occurrences,
-  }));
-};
-
-/**
- * Extracts minimal data fields from suggestion data with type-specific filtering.
+ * Extracts minimal data fields from suggestion data using schema-driven projection.
+ * Uses Suggestion.getProjection() from spacecat-shared-data-access.
+ *
  * @param {object} data - Suggestion data object.
- * @param {string} opportunityType - Type of opportunity (e.g., 'form-accessibility').
+ * @param {string} opportunityType - Type of opportunity (e.g., 'structured-data').
  * @returns {object|null} Object with only relevant fields, or null if no data.
  */
 const extractMinimalData = (data, opportunityType) => {
   if (!data) return null;
 
+  // Get schema-driven projection configuration
+  const projection = Suggestion.getProjection(opportunityType, 'minimal');
+
   const minimalData = {};
   let hasFields = false;
 
-  // Determine which fields to include based on opportunity type
-  const typeSpecificFields = opportunityType && OPPORTUNITY_TYPE_FIELDS[opportunityType]
-    ? OPPORTUNITY_TYPE_FIELDS[opportunityType]
-    : FALLBACK_DATA_FIELDS;
-
-  // Combine common URL fields with type-specific fields
-  const fieldsToInclude = [...COMMON_URL_FIELDS, ...typeSpecificFields];
-
-  for (const field of fieldsToInclude) {
+  // Apply projection fields
+  for (const field of projection.fields) {
     if (data[field] !== undefined) {
-      // Special handling for issues array in accessibility types
-      if (field === 'issues' && ACCESSIBILITY_OPPORTUNITY_TYPES.has(opportunityType)) {
-        minimalData[field] = filterAccessibilityIssues(data[field]);
-      } else {
-        minimalData[field] = data[field];
-      }
+      // Apply transformer if defined (resolve string reference to actual function)
+      const transformerName = projection.transformers?.[field];
+      const transformer = transformerName ? Suggestion.FIELD_TRANSFORMERS[transformerName] : null;
+      minimalData[field] = transformer ? transformer(data[field]) : data[field];
       hasFields = true;
     }
   }
 
   return hasFields ? minimalData : null;
-};
-
-/**
- * Extracts URL from suggestion data.
- * Handles both flat structures and nested recommendations.
- * @param {object} data - Suggestion data object.
- * @returns {string|null} URL or null if not found.
- */
-const extractUrl = (data) => {
-  if (!data) return null;
-
-  // Check top-level URL fields (most common)
-  if (data.url) return data.url;
-  if (data.pageUrl) return data.pageUrl;
-  if (data.url_from) return data.url_from;
-  if (data.urlFrom) return data.urlFrom;
-
-  // Check nested recommendations (e.g., alt-text suggestions)
-  const hasRecommendations = data.recommendations
-    && Array.isArray(data.recommendations)
-    && data.recommendations.length > 0;
-
-  if (hasRecommendations) {
-    const firstRec = data.recommendations[0];
-    if (firstRec.pageUrl) return firstRec.pageUrl;
-    if (firstRec.url) return firstRec.url;
-  }
-
-  return null;
 };
 
 /**
@@ -197,7 +85,7 @@ export const SuggestionDto = {
         opportunityId: suggestion.getOpportunityId(),
         type: suggestion.getType(),
         rank: suggestion.getRank(),
-        url: extractUrl(data),
+        url: Suggestion.extractUrl(data, opportunityType),
         createdAt: suggestion.getCreatedAt(),
         updatedAt: suggestion.getUpdatedAt(),
         updatedBy: suggestion.getUpdatedBy(),
