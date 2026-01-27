@@ -308,6 +308,22 @@ describe('Overview Metrics Calculator', () => {
         { Mentions: 'true', Prompt: 'p1' },
       ], 'https://example.com').mentionsCount).to.equal(1);
     });
+
+    it('should handle sources with non-string types and URLs without http prefix', () => {
+      // Sources as number (non-string type) - should be handled gracefully
+      expect(calculateMentionsAndCitations([
+        {
+          Sources: 12345, Prompt: 'p1', Region: 'US', Topics: 't1',
+        },
+      ], 'https://example.com').citationsCount).to.equal(0);
+
+      // URL without http prefix - should be prefixed with https://
+      expect(calculateMentionsAndCitations([
+        {
+          Sources: 'example.com/page', Prompt: 'p1', Region: 'US', Topics: 't1',
+        },
+      ], 'https://example.com').citationsCount).to.equal(1);
+    });
   });
 
   describe('calculateDelta', () => {
@@ -355,6 +371,13 @@ describe('Overview Metrics Calculator', () => {
     it('should use current date when none provided', () => {
       const result = getCurrentWeek();
       expect(result.year).to.be.at.least(2024);
+    });
+
+    it('should handle Sunday correctly (day 0 becomes 7)', () => {
+      // January 26, 2025 is a Sunday
+      const result = getCurrentWeek(new Date('2025-01-26'));
+      expect(result.week).to.be.a('number');
+      expect(result.year).to.equal(2025);
     });
   });
 
@@ -466,6 +489,24 @@ describe('Overview Metrics Calculator', () => {
       const weekStr = String(3).padStart(2, '0');
       expect(weekStr).to.equal('03');
     });
+
+    it('should handle missing hlxApiKey', async () => {
+      global.fetch = sandbox.stub().resolves({
+        ok: false,
+        status: 404,
+      });
+
+      // Call with undefined hlxApiKey to cover the fallback branch
+      const result = await fetchBrandPresenceData({
+        dataFolder: 'test-folder',
+        week: 2,
+        year: 2025,
+        hlxApiKey: undefined,
+        log: mockLog,
+      });
+
+      expect(result).to.deep.equal([]);
+    });
   });
 
   describe('calculateOverviewMetrics', () => {
@@ -576,6 +617,45 @@ describe('Overview Metrics Calculator', () => {
       } catch (error) {
         expect(error.message).to.include('LLMO configured');
       }
+    });
+
+    it('should use getLlmoConfig when llmo property is not present', async () => {
+      const mockData = {
+        ':type': 'sheet',
+        data: [
+          {
+            Mentions: 'true',
+            'Visibility Score': '75',
+            Sources: 'https://example.com/page',
+            Prompt: 'p1',
+            Region: 'US',
+            Topics: 't1',
+          },
+        ],
+      };
+      global.fetch = sandbox.stub().resolves({
+        ok: true,
+        json: () => Promise.resolve(mockData),
+      });
+
+      const siteWithGetLlmoConfig = {
+        getId: () => 'site-123',
+        getBaseURL: () => 'https://example.com',
+        getConfig: () => ({
+          getLlmoConfig: () => ({
+            dataFolder: 'test-data-folder-via-method',
+          }),
+        }),
+      };
+
+      const result = await calculateOverviewMetrics({
+        site: siteWithGetLlmoConfig,
+        hlxApiKey: 'test-key',
+        log: mockLog,
+      });
+
+      expect(result).to.have.property('visibilityScore');
+      expect(result).to.have.property('mentionsCount');
     });
   });
 });
