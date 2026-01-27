@@ -85,7 +85,6 @@ export const SuggestionDto = {
         opportunityId: suggestion.getOpportunityId(),
         type: suggestion.getType(),
         rank: suggestion.getRank(),
-        url: Suggestion.extractUrl(data, opportunityType),
         createdAt: suggestion.getCreatedAt(),
         updatedAt: suggestion.getUpdatedAt(),
         updatedBy: suggestion.getUpdatedBy(),

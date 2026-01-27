@@ -404,7 +404,6 @@ describe('Suggestion DTO', () => {
         expect(json).to.have.property('opportunityId', 'opportunity-id-456');
         expect(json).to.have.property('type', 'CONTENT_UPDATE');
         expect(json).to.have.property('rank', 42);
-        expect(json).to.have.property('url', 'https://example.com/page');
         expect(json).to.have.property('createdAt', '2025-01-01T00:00:00.000Z');
         expect(json).to.have.property('updatedAt', '2025-01-02T00:00:00.000Z');
         expect(json).to.have.property('updatedBy', 'system');
@@ -420,37 +419,13 @@ describe('Suggestion DTO', () => {
         expect(json).to.not.have.property('kpiDeltas');
       });
 
-      it('extracts url from pageUrl when url is not present', () => {
-        const suggestion = createMockSuggestion({ url: undefined, pageUrl: 'https://example.com/summary-url' });
+      it('does not include url at top level (only in data)', () => {
+        const suggestion = createMockSuggestion();
 
         const json = SuggestionDto.toJSON(suggestion, 'summary');
 
-        expect(json.url).to.equal('https://example.com/summary-url');
-      });
-
-      it('extracts url from url_from (snake_case) when url and pageUrl are not present', () => {
-        const suggestion = createMockSuggestion({
-          url: undefined,
-          pageUrl: undefined,
-          url_from: 'https://example.com/url-from-snake',
-        });
-
-        const json = SuggestionDto.toJSON(suggestion, 'summary');
-
-        expect(json.url).to.equal('https://example.com/url-from-snake');
-      });
-
-      it('extracts url from urlFrom (camelCase) when url, pageUrl, url_from are not present', () => {
-        const suggestion = createMockSuggestion({
-          url: undefined,
-          pageUrl: undefined,
-          url_from: undefined,
-          urlFrom: 'https://example.com/url-from-camel',
-        });
-
-        const json = SuggestionDto.toJSON(suggestion, 'summary');
-
-        expect(json.url).to.equal('https://example.com/url-from-camel');
+        expect(json).to.not.have.property('url'); // No top-level URL
+        expect(json.data).to.have.property('url'); // URL in data only
       });
 
       it('extracts url from nested recommendations[0].pageUrl', () => {
@@ -468,39 +443,12 @@ describe('Suggestion DTO', () => {
 
         const json = SuggestionDto.toJSON(suggestion, 'summary', opportunity);
 
-        expect(json.url).to.equal('https://example.com/rec-page-url');
+        // URL is in data, not at top level
+        expect(json).to.not.have.property('url');
+        expect(json.data).to.have.property('recommendations');
       });
 
-      it('extracts url from nested recommendations[0].url when pageUrl not present', () => {
-        const opportunity = {
-          getType: () => 'alt-text',
-        };
-        const suggestion = {
-          ...createMockSuggestion(),
-          getData: () => ({
-            recommendations: [
-              { url: 'https://example.com/rec-url', altText: 'test' },
-            ],
-          }),
-        };
-
-        const json = SuggestionDto.toJSON(suggestion, 'summary', opportunity);
-
-        expect(json.url).to.equal('https://example.com/rec-url');
-      });
-
-      it('returns null url when recommendations array is empty', () => {
-        const suggestion = {
-          ...createMockSuggestion(),
-          getData: () => ({ recommendations: [] }),
-        };
-
-        const json = SuggestionDto.toJSON(suggestion, 'summary');
-
-        expect(json.url).to.be.null;
-      });
-
-      it('returns null url when getData returns null', () => {
+      it('does not return null url when getData returns null', () => {
         const suggestion = {
           ...createMockSuggestion(),
           getData: () => null,
@@ -508,7 +456,8 @@ describe('Suggestion DTO', () => {
 
         const json = SuggestionDto.toJSON(suggestion, 'summary');
 
-        expect(json.url).to.be.null;
+        expect(json).to.not.have.property('url'); // No URL extraction anymore
+        expect(json).to.not.have.property('data'); // No data when getData returns null
       });
 
       describe('accessibility-specific filtering', () => {
