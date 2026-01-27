@@ -458,6 +458,17 @@ describe('LlmoController', () => {
       expect(responseBody.message).to.include('Data not found');
     });
 
+    it('should return 400 when external API returns non-404 error', async () => {
+      const mockResponse = createMockResponse(null, false, 500);
+      tracingFetchStub.resolves(mockResponse);
+
+      const result = await controller.getLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('External API returned 500');
+    });
+
     it('should handle network errors', async () => {
       tracingFetchStub.rejects(new Error('Network error'));
 
