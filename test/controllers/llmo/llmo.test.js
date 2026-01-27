@@ -594,6 +594,27 @@ describe('LlmoController', () => {
       expect(responseBody.message).to.include('Data not found');
     });
 
+    it('should return 400 when external API returns non-404 error', async () => {
+      const mockResponse = createMockResponse(null, false, 500);
+      tracingFetchStub.resolves(mockResponse);
+
+      const result = await controller.getLlmoGlobalSheetData(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('External API returned 500');
+    });
+
+    it('should handle network errors', async () => {
+      tracingFetchStub.rejects(new Error('Network error'));
+
+      const result = await controller.getLlmoGlobalSheetData(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Network error');
+    });
+
     it('should use fallback API key when env.LLMO_HLX_API_KEY is undefined', async () => {
       tracingFetchStub.resolves(createMockResponse({ data: 'test-data' }));
       mockContext.env.LLMO_HLX_API_KEY = undefined;
@@ -1079,6 +1100,18 @@ describe('LlmoController', () => {
         `${EXTERNAL_API_BASE_URL}/${TEST_FOLDER}/test-data.json?limit=1000000`,
         sinon.match.object,
       );
+    });
+
+    it('should return 404 when external API returns 404', async () => {
+      const mockResponse = createMockResponse(null, false, 404);
+      tracingFetchStub.resolves(mockResponse);
+      mockContext.data = null;
+
+      const result = await controller.queryLlmoSheetData(mockContext);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Data not found');
     });
   });
 
