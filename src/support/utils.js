@@ -25,6 +25,7 @@ import {
   detectAEMVersion,
   detectLocale,
   wwwUrlResolver as sharedWwwUrlResolver,
+  getLastNumberOfWeeks,
 } from '@adobe/spacecat-shared-utils';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
@@ -174,6 +175,30 @@ export const sendRunImportMessage = async (
   pageUrl,
   ...(data && { data }),
 });
+
+export const triggerTrafficAnalysisBackfill = async (
+  siteId,
+  config,
+  slackContext,
+  context,
+  weeks = 5,
+) => {
+  const weekYearPairs = getLastNumberOfWeeks(weeks || 52);
+  await Promise.all(
+    weekYearPairs.map(async ({ week, year }) => {
+      const { sqs } = context;
+      return sqs.sendMessage(config.getQueues().imports, {
+        type: 'traffic-analysis',
+        trigger: 'backfill',
+        siteId,
+        week,
+        year,
+        allowCache: false,
+        slackContext,
+      });
+    }),
+  );
+};
 
 export const sendAutofixMessage = async (
   sqs,
@@ -1093,6 +1118,14 @@ export const onboardSingleSite = async (
         siteID,
         profile.imports[importType].startDate,
         profile.imports[importType].endDate,
+        slackContext,
+        context,
+      );
+    }
+    if (importTypes.includes('traffic-analysis')) { // trigger traffic analysis backfill only if traffic analysis import is enabled
+      await triggerTrafficAnalysisBackfill(
+        siteID,
+        configuration,
         slackContext,
         context,
       );

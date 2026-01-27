@@ -38,7 +38,8 @@
 		"imports": {
 			"organic-traffic" : {},
 			"top-pages" : {},
-			"all-traffic": {}
+			"all-traffic": {},
+            "traffic-analysis": {}
 		},
 		"config": {
 			"scheduledRun": false
@@ -78,7 +79,8 @@
 			"organic-keywords" :{},
 			"all-traffic": {},
 			"user-engagement": {},
-			"cwv-weekly": {}
+			"cwv-weekly": {},
+            "traffic-analysis": {}
 		},
 		"config": {
 			"scheduledRun": false
@@ -113,6 +115,7 @@
 			"top-pages" : {},
 			"organic-keywords" :{},
 			"all-traffic": {},
+            "traffic-analysis": {},
 			"user-engagement": {},
 			"cwv-weekly": {}
 		},
