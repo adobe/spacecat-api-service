@@ -1,3 +1,10 @@
+## [1.298.1](https://github.com/adobe/spacecat-api-service/compare/v1.298.0...v1.298.1) (2026-01-27)
+
+
+### Bug Fixes
+
+* updating headings check in preflight api doc ([#1718](https://github.com/adobe/spacecat-api-service/issues/1718)) ([855ca29](https://github.com/adobe/spacecat-api-service/commit/855ca29449086bf60bcb906c7c8269b502a932fd))
+
 # [1.298.0](https://github.com/adobe/spacecat-api-service/compare/v1.297.1...v1.298.0) (2026-01-27)
 
 
