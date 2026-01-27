@@ -500,14 +500,12 @@ export class FixesController {
       );
 
       return ok({
-        fixes: [
-          {
-            index: 0,
-            uuid: updatedFix.getId(),
-            fix: FixDto.toJSON(updatedFix),
-            statusCode: 200,
-          },
-        ],
+        fix: {
+          index: 0,
+          uuid: updatedFix.getId(),
+          fix: FixDto.toJSON(updatedFix),
+          statusCode: 200,
+        },
         suggestions: {
           updated: updatedSuggestions.map((suggestion, index) => ({
             index,

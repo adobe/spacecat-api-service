@@ -1737,9 +1737,11 @@ describe('Fixes Controller', () => {
       expect(result.message).to.include('All 2 suggestion(s) marked as SKIPPED');
 
       // Check the wrapped response structure
-      expect(result.fixes).to.have.lengthOf(1);
-      expect(result.fixes[0].fix.status).to.equal('ROLLED_BACK');
-      expect(result.fixes[0].statusCode).to.equal(200);
+      expect(result.fix).to.exist;
+      expect(result.fix.fix.status).to.equal('ROLLED_BACK');
+      expect(result.fix.statusCode).to.equal(200);
+      expect(result.fix.index).to.equal(0);
+      expect(result.fix.uuid).to.equal(fix.getId());
 
       expect(result.suggestions.updated).to.have.lengthOf(2);
       expect(result.suggestions.updated[0].suggestion.status).to.equal('SKIPPED');

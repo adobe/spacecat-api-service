@@ -3761,8 +3761,29 @@ FixRollbackResponse:
   description: Response after successfully rolling back a failed fix
   properties:
     fix:
-      $ref: '#/Fix'
-      description: The updated fix entity with ROLLED_BACK status
+      type: object
+      description: The rolled back fix with metadata
+      properties:
+        index:
+          type: integer
+          description: Index of the fix in the response
+          example: 0
+        uuid:
+          type: string
+          format: uuid
+          description: UUID of the fix entity
+        fix:
+          $ref: '#/Fix'
+          description: The updated fix entity with ROLLED_BACK status
+        statusCode:
+          type: integer
+          description: HTTP status code for this fix operation
+          example: 200
+      required:
+        - index
+        - uuid
+        - fix
+        - statusCode
     suggestions:
       type: object
       description: Summary of suggestions that were updated
@@ -3770,7 +3791,27 @@ FixRollbackResponse:
         updated:
           type: array
           items:
-            $ref: '#/Suggestion'
+            type: object
+            properties:
+              index:
+                type: integer
+                description: Index of the suggestion in the response array
+              uuid:
+                type: string
+                format: uuid
+                description: UUID of the suggestion entity
+              suggestion:
+                $ref: '#/Suggestion'
+                description: The updated suggestion entity with SKIPPED status
+              statusCode:
+                type: integer
+                description: HTTP status code for this suggestion operation
+                example: 200
+            required:
+              - index
+              - uuid
+              - suggestion
+              - statusCode
           description: List of suggestions that were marked as SKIPPED
       required:
         - updated
