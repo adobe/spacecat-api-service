@@ -774,6 +774,8 @@ function LlmoController(ctx) {
     const { data } = context;
 
     try {
+      log.info('Onboarding customer request received.');
+
       // Validate required fields
       if (!data || typeof data !== 'object') {
         return badRequest('Onboarding data is required');
@@ -790,6 +792,8 @@ function LlmoController(ctx) {
       if (!authInfo) {
         return badRequest('Authentication information is required');
       }
+
+      log.info('Getting profile from authentication token.');
 
       const profile = authInfo.getProfile();
 
@@ -836,7 +840,7 @@ function LlmoController(ctx) {
 
       log.info(`LLMO onboarding completed successfully for domain ${domain}`);
 
-      return ok({
+      const onboardingResponse = {
         message: result.message,
         domain,
         brandName,
@@ -848,7 +852,15 @@ function LlmoController(ctx) {
         status: 'completed',
         createdAt: new Date().toISOString(),
         brandProfileExecutionName,
-      });
+      };
+
+      log.info(`LLMO onboarding response: ${JSON.stringify(onboardingResponse)}`);
+
+      const okResponse = ok(onboardingResponse);
+
+      log.info(`LLMO onboarding OK response: ${JSON.stringify(okResponse)}`);
+      log.info('Returning successful onboarding response');
+      return okResponse;
     } catch (error) {
       log.error(`Error during LLMO onboarding: ${error.message}`);
       return badRequest(error.message);
