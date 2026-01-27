@@ -1,3 +1,10 @@
+# [1.298.0](https://github.com/adobe/spacecat-api-service/compare/v1.297.1...v1.298.0) (2026-01-27)
+
+
+### Features
+
+* register a11y auto-fix command ([#1732](https://github.com/adobe/spacecat-api-service/issues/1732)) ([fdcf1d7](https://github.com/adobe/spacecat-api-service/commit/fdcf1d729f3a5d44470f9954262a4ca3d187b95d))
+
 ## [1.297.1](https://github.com/adobe/spacecat-api-service/compare/v1.297.0...v1.297.1) (2026-01-26)
 
 
