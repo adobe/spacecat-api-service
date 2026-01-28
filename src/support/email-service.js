@@ -219,10 +219,8 @@ export const sendWeeklyDigestEmail = async ({
   overviewUrl,
   settingsUrl,
 }) => {
-  const { env } = context;
-
-  // Use dedicated weekly digest template
-  const templateName = env.EMAIL_WEEKLY_DIGEST_TEMPLATE || 'expdev_llmo_overview_weekly_digest';
+  // Use dedicated weekly digest template (hardcoded, not from env)
+  const templateName = 'expdev_llmo_overview_weekly_digest';
 
   return sendEmail({
     context,

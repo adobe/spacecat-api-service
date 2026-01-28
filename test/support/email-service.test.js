@@ -36,7 +36,6 @@ describe('Email Service', () => {
     EMAIL_IMS_SCOPE: 'test-scope',
     ADOBE_POSTOFFICE_ENDPOINT: 'https://test-postoffice.adobe.com/po-server/message',
     EMAIL_LLMO_TEMPLATE: 'expdev_xwalk_trial_confirm',
-    EMAIL_WEEKLY_DIGEST_TEMPLATE: 'expdev_llmo_overview_weekly_digest',
   };
 
   const mockContext = {
