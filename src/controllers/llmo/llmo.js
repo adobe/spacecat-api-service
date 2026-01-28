@@ -929,8 +929,9 @@ function LlmoController(ctx) {
    * @returns {Promise<Response>} Created/updated edge config
    */
   const createOrUpdateEdgeConfig = async (context) => {
-    const { log } = context;
+    const { log, dataAccess } = context;
     const { siteId } = context.params;
+    const { Site } = dataAccess;
     const {
       enhancements, tokowakaEnabled, forceFail, patches = {},
     } = context.data || {};
@@ -954,8 +955,15 @@ function LlmoController(ctx) {
     }
 
     try {
-      // Validate site and LLMO access
-      const { site } = await getSiteAndValidateLlmo(context);
+      // Validate site exists and user has access
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
+
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('User does not have access to this site');
+      }
 
       const baseURL = site.getBaseURL();
       const tokowakaClient = TokowakaClient.createFrom(context);
@@ -1015,12 +1023,20 @@ function LlmoController(ctx) {
    * @returns {Promise<Response>} Edge config or not found
    */
   const getEdgeConfig = async (context) => {
-    const { log } = context;
+    const { log, dataAccess } = context;
     const { siteId } = context.params;
+    const { Site } = dataAccess;
 
     try {
-      // Validate site and LLMO access
-      const { site } = await getSiteAndValidateLlmo(context);
+      // Validate site exists and user has access
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
+
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('User does not have access to this site');
+      }
 
       const baseURL = site.getBaseURL();
 

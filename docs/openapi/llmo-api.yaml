@@ -1343,9 +1343,9 @@ site-llmo-edge-optimize-config:
   post:
     operationId: createOrUpdateSiteLlmoEdgeConfig
     summary: |
-      Create or update edge optimization configuration for an LLMO site
+      Create or update edge optimization configuration for a site
     description: |
-      Creates or updates edge optimization configuration for the specified LLMO-enabled site.
+      Creates or updates edge optimization configuration for the specified site.
       
       **Behavior:**
       - If metaconfig doesn't exist or has no API keys: Generates a unique API key and creates metaconfig in S3
@@ -1353,8 +1353,6 @@ site-llmo-edge-optimize-config:
       - Updates the site's edgeOptimizeConfig.enabled flag in the database
       
       The API key is generated using: SHA256(UUID + domain) encoded as base64url.
-      
-      **Note:** This endpoint requires LLMO access for the site.
     tags:
       - llmo
     requestBody:
@@ -1393,14 +1391,12 @@ site-llmo-edge-optimize-config:
   get:
     operationId: getSiteLlmoEdgeConfig
     summary: |
-      Retrieve edge optimization configuration for an LLMO site
+      Retrieve edge optimization configuration for a site
     description: |
-      Fetches the existing edge optimization configuration for the specified LLMO-enabled site.
+      Fetches the existing edge optimization configuration for the specified site.
       Returns the metaconfig from S3.
       
       Returns an empty object if no edge config has been created for this site yet.
-      
-      **Note:** This endpoint requires LLMO access for the site.
     tags:
       - llmo
     responses:
