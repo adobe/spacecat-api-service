@@ -973,6 +973,9 @@ function LlmoController(ctx) {
       const baseURL = site.getBaseURL();
       const tokowakaClient = TokowakaClient.createFrom(context);
 
+      const imsUserId = context.attributes?.authInfo?.getProfile()?.sub || 'system';
+      log.info(`User IMS ID: ${imsUserId} updating edge config for site ${siteId}`);
+
       // Handle S3 metaconfig
       let metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
 
@@ -1003,10 +1006,6 @@ function LlmoController(ctx) {
       const currentConfig = site.getConfig();
       // Update site config only if tokowakaEnabled is provided
       if (tokowakaEnabled !== undefined) {
-        // Get user IMS ID from auth context
-        const imsUserId = context.attributes?.authInfo?.getProfile()?.sub || 'system';
-        log.info(`User IMS ID: ${imsUserId} updating edge optimize config for site ${siteId}`);
-
         currentConfig.updateEdgeOptimizeConfig({
           ...(currentConfig.getEdgeOptimizeConfig() || {}),
           enabled: tokowakaEnabled,
