@@ -128,11 +128,34 @@ const processSiteDigest = async ({
   try {
     // Calculate metrics for the site
     log.info(`Calculating metrics for site ${siteId} (${baseURL})`);
-    const metrics = await calculateOverviewMetrics({
-      site,
-      hlxApiKey: env.LLMO_HLX_API_KEY,
-      log,
-    });
+
+    // ============================================================
+    // TEMPORARY TEST MODE - Use mock metrics data
+    // Remove this block before merging to production
+    // ============================================================
+    const USE_MOCK_METRICS = true; // Set to false to use real data
+    let metrics;
+
+    if (USE_MOCK_METRICS) {
+      log.warn('TEST MODE: Using mock metrics data');
+      metrics = {
+        hasData: true,
+        visibilityScore: 72,
+        visibilityDelta: '+5%',
+        mentionsCount: 1247,
+        mentionsDelta: '+12%',
+        citationsCount: 89,
+        citationsDelta: '-3%',
+        dateRange: 'Jan 13 - Jan 19, 2026',
+      };
+    } else {
+      metrics = await calculateOverviewMetrics({
+        site,
+        hlxApiKey: env.LLMO_HLX_API_KEY,
+        log,
+      });
+    }
+    // ============================================================
 
     if (!metrics.hasData) {
       log.info(`No data available for site ${siteId}, skipping`);
