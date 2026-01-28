@@ -1055,8 +1055,12 @@ function LlmoController(ctx) {
       const tokowakaClient = TokowakaClient.createFrom(context);
       const metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
 
+      const currentConfig = site.getConfig();
+      const edgeOptimizeConfig = currentConfig.getEdgeOptimizeConfig() || {};
+
       return ok({
         ...metaconfig,
+        edgeOptimizeConfig,
       });
     } catch (error) {
       log.error(`Failed to fetch edge config for site ${siteId}:`, error);
