@@ -1,3 +1,10 @@
+## [1.299.1](https://github.com/adobe/spacecat-api-service/compare/v1.299.0...v1.299.1) (2026-01-28)
+
+
+### Bug Fixes
+
+* allow prerender to update in edge config ([#1737](https://github.com/adobe/spacecat-api-service/issues/1737)) ([4bf3d6b](https://github.com/adobe/spacecat-api-service/commit/4bf3d6b5ee3486f0bc010e20bb71fc576d737ee1))
+
 # [1.299.0](https://github.com/adobe/spacecat-api-service/compare/v1.298.1...v1.299.0) (2026-01-27)
 
 
