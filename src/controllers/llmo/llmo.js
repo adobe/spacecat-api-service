@@ -932,7 +932,7 @@ function LlmoController(ctx) {
     const { log } = context;
     const { siteId } = context.params;
     const {
-      enhancements, tokowakaEnabled, forceFail, patches = {},
+      enhancements, tokowakaEnabled, forceFail, patches = {}, prerender,
     } = context.data || {};
 
     log.info(`createOrUpdateEdgeConfig request received for site ${siteId}, data=${JSON.stringify(context.data)}`);
@@ -951,6 +951,10 @@ function LlmoController(ctx) {
 
     if (patches !== undefined && typeof patches !== 'object') {
       return badRequest('patches field must be an object');
+    }
+
+    if (prerender !== undefined && (typeof prerender !== 'object' || Array.isArray(prerender) || !Array.isArray(prerender.allowList))) {
+      return badRequest('prerender field must be an object with allowList property that is an array');
     }
 
     try {
@@ -982,6 +986,7 @@ function LlmoController(ctx) {
             enhancements,
             patches,
             forceFail,
+            prerender,
           },
         );
       }

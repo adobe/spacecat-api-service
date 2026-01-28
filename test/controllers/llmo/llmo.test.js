@@ -3414,6 +3414,118 @@ describe('LlmoController', () => {
       expect(responseBody.message).to.include('patches');
     });
 
+    it('should return bad request when prerender is a string', async () => {
+      edgeConfigContext.data = { prerender: 'invalid' };
+
+      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('prerender field must be an object with allowList property that is an array');
+    });
+
+    it('should return bad request when prerender is a number', async () => {
+      edgeConfigContext.data = { prerender: 123 };
+
+      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('prerender field must be an object with allowList property that is an array');
+    });
+
+    it('should return bad request when prerender is a boolean', async () => {
+      edgeConfigContext.data = { prerender: true };
+
+      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('prerender field must be an object with allowList property that is an array');
+    });
+
+    it('should return bad request when prerender is an array', async () => {
+      edgeConfigContext.data = { prerender: [] };
+
+      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('prerender field must be an object with allowList property that is an array');
+    });
+
+    it('should return bad request when prerender is an object but allowList is missing', async () => {
+      edgeConfigContext.data = { prerender: { someOtherField: 'value' } };
+
+      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('prerender field must be an object with allowList property that is an array');
+    });
+
+    it('should return bad request when prerender allowList is not an array (string)', async () => {
+      edgeConfigContext.data = { prerender: { allowList: 'not-an-array' } };
+
+      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('prerender field must be an object with allowList property that is an array');
+    });
+
+    it('should return bad request when prerender allowList is not an array (object)', async () => {
+      edgeConfigContext.data = { prerender: { allowList: { key: 'value' } } };
+
+      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('prerender field must be an object with allowList property that is an array');
+    });
+
+    it('should return bad request when prerender allowList is not an array (number)', async () => {
+      edgeConfigContext.data = { prerender: { allowList: 42 } };
+
+      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('prerender field must be an object with allowList property that is an array');
+    });
+
+    it('should accept valid prerender with allowList as an array', async () => {
+      const existingMetaconfig = {
+        siteId: TEST_SITE_ID,
+        apiKeys: ['existing-api-key'],
+        tokowakaEnabled: true,
+      };
+
+      mockTokowakaClient.fetchMetaconfig.resolves(existingMetaconfig);
+      edgeConfigContext.data = { prerender: { allowList: ['path1', 'path2'] } };
+
+      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockTokowakaClient.updateMetaconfig).to.have.been.called;
+    });
+
+    it('should accept valid prerender with empty allowList array', async () => {
+      const existingMetaconfig = {
+        siteId: TEST_SITE_ID,
+        apiKeys: ['existing-api-key'],
+        tokowakaEnabled: true,
+      };
+
+      mockTokowakaClient.fetchMetaconfig.resolves(existingMetaconfig);
+      edgeConfigContext.data = { prerender: { allowList: [] } };
+
+      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockTokowakaClient.updateMetaconfig).to.have.been.called;
+    });
+
     it('should handle errors gracefully', async () => {
       mockTokowakaClient.fetchMetaconfig.rejects(new Error('S3 connection failed'));
 
