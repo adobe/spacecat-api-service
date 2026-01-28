@@ -34,17 +34,12 @@ const MAX_ITEMS_PER_REQUEST = 100;
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
 
-// Known audit types that can be assigned to topics
+// Known audit types that can be assigned to guidelines
 const KNOWN_AUDIT_TYPES = [
   'wikipedia-analysis',
   'reddit-analysis',
   'youtube-analysis',
   'twitter-analysis',
-  'accessibility',
-  'broken-backlinks',
-  'cwv',
-  'lhs-mobile',
-  'lhs-desktop',
 ];
 
 /**
@@ -728,6 +723,14 @@ function SentimentController(ctx, log) {
 
     if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('Only users belonging to the organization can update guidelines');
+    }
+
+    // Validate audit types if provided
+    if (updates.audits) {
+      const invalidAudits = validateAuditTypes(updates.audits);
+      if (invalidAudits.length > 0) {
+        return badRequest(`Invalid audit types: ${invalidAudits.join(', ')}. Valid types: ${KNOWN_AUDIT_TYPES.join(', ')}`);
+      }
     }
 
     const userId = getUserIdentifier(context);

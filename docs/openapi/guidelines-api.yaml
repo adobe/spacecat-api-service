@@ -71,6 +71,8 @@ topics-list:
       
       - Maximum 100 topics per request
       - Returns per-item success/failure information
+      - Not idempotent: duplicate names create separate entries
+      - Partial success possible: some items may succeed while others fail
     operationId: createSentimentTopics
     requestBody:
       required: true
@@ -102,7 +104,7 @@ topics-list:
     security:
       - api_key: [ ]
 
-topic-get:
+topic-by-id:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - name: topicId
@@ -146,6 +148,7 @@ topic-get:
     summary: Update a topic
     description: |
       Updates a sentiment topic. Only provided fields are updated.
+      Note: subPrompts array is replaced entirely, not merged.
     operationId: updateSentimentTopic
     requestBody:
       required: true
@@ -364,6 +367,8 @@ guidelines-list:
       
       - Maximum 100 guidelines per request
       - Returns per-item success/failure information
+      - Not idempotent: duplicate names create separate entries
+      - Partial success possible: some items may succeed while others fail
     operationId: createSentimentGuidelines
     requestBody:
       required: true
@@ -395,7 +400,7 @@ guidelines-list:
     security:
       - api_key: [ ]
 
-guideline-get:
+guideline-by-id:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - name: guidelineId
@@ -439,6 +444,7 @@ guideline-get:
     summary: Update a guideline
     description: |
       Updates a sentiment guideline. Only provided fields are updated.
+      Note: audits array is replaced entirely, not merged.
     operationId: updateSentimentGuideline
     requestBody:
       required: true
