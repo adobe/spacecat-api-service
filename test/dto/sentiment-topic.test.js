@@ -23,9 +23,7 @@ describe('SentimentTopicDto', () => {
         getTopicId: () => 'topic-456',
         getName: () => '2026 Corvette Stingray',
         getDescription: () => 'Latest corvette model reviews',
-        getTopicName: () => '2026 Corvette Stingray Analysis',
         getSubPrompts: () => ['Focus on performance', 'Analyze design feedback'],
-        getAudits: () => ['wikipedia-analysis', 'reddit-analysis'],
         getEnabled: () => true,
         getCreatedAt: () => '2026-01-01T00:00:00Z',
         getUpdatedAt: () => '2026-01-02T00:00:00Z',
@@ -40,9 +38,7 @@ describe('SentimentTopicDto', () => {
         topicId: 'topic-456',
         name: '2026 Corvette Stingray',
         description: 'Latest corvette model reviews',
-        topicName: '2026 Corvette Stingray Analysis',
         subPrompts: ['Focus on performance', 'Analyze design feedback'],
-        audits: ['wikipedia-analysis', 'reddit-analysis'],
         enabled: true,
         createdAt: '2026-01-01T00:00:00Z',
         updatedAt: '2026-01-02T00:00:00Z',
@@ -57,9 +53,7 @@ describe('SentimentTopicDto', () => {
         getTopicId: () => 'topic-789',
         getName: () => 'Empty Topic',
         getDescription: () => undefined,
-        getTopicName: () => '',
         getSubPrompts: () => [],
-        getAudits: () => [],
         getEnabled: () => false,
         getCreatedAt: () => '2026-01-01T00:00:00Z',
         getUpdatedAt: () => '2026-01-01T00:00:00Z',
@@ -69,9 +63,7 @@ describe('SentimentTopicDto', () => {
 
       const result = SentimentTopicDto.toJSON(mockTopic);
 
-      expect(result.topicName).to.equal('');
       expect(result.subPrompts).to.deep.equal([]);
-      expect(result.audits).to.deep.equal([]);
       expect(result.enabled).to.equal(false);
       expect(result.description).to.equal(undefined);
     });
@@ -82,9 +74,7 @@ describe('SentimentTopicDto', () => {
         getTopicId: () => 'topic-abc',
         getName: () => 'Test Topic',
         getDescription: () => null,
-        getTopicName: () => null,
         getSubPrompts: () => undefined,
-        getAudits: () => undefined,
         getEnabled: () => true,
         getCreatedAt: () => null,
         getUpdatedAt: () => undefined,
@@ -98,10 +88,8 @@ describe('SentimentTopicDto', () => {
       expect(result.topicId).to.equal('topic-abc');
       expect(result.name).to.equal('Test Topic');
       expect(result.description).to.equal(null);
-      expect(result.topicName).to.equal(null);
       // Arrays should default to empty arrays when null/undefined
       expect(result.subPrompts).to.deep.equal([]);
-      expect(result.audits).to.deep.equal([]);
     });
   });
 });
