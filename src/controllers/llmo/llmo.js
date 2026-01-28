@@ -931,6 +931,7 @@ function LlmoController(ctx) {
   const createOrUpdateEdgeConfig = async (context) => {
     const { log } = context;
     const { siteId } = context.params;
+    const { authInfo: { profile } } = context.attributes;
     const {
       enhancements, tokowakaEnabled, forceFail, patches = {},
     } = context.data || {};
@@ -996,7 +997,7 @@ function LlmoController(ctx) {
         await saveSiteConfig(site, currentConfig, log, `updating edge optimize config to enabled=${tokowakaEnabled}`);
         log.info(`Updated edgeOptimizeConfig enabled=${tokowakaEnabled} for site ${siteId}`);
       }
-
+      log.info(`[edge-optimize-config] Updated edge optimize config for site ${siteId} by ${profile?.email || 'tokowaka-edge-optimize-config'}`);
       return ok({
         ...metaconfig,
       });
