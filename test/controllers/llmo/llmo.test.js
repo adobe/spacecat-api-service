@@ -3625,6 +3625,22 @@ describe('LlmoController', () => {
         { enhancements: true },
       );
     });
+
+    it('should handle access denied failure', async () => {
+      const deniedController = controllerWithAccessDenied(mockContext);
+      const result = await deniedController.createOrUpdateEdgeConfig(edgeConfigContext);
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('User does not have access to this site');
+    });
+
+    it('should handle site not found failure', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Site not found');
+    });
   });
 
   describe('getEdgeConfig', () => {
@@ -3674,6 +3690,24 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.include('S3 fetch failed');
+    });
+
+    it('should handle access denied failure', async () => {
+      const deniedController = controllerWithAccessDenied(mockContext);
+
+      const result = await deniedController.getEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('User does not have access to this site');
+    });
+
+    it('should handle site not found failure', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.getEdgeConfig(edgeConfigContext);
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Site not found');
     });
   });
 
