@@ -90,6 +90,7 @@ const isValidUUIDV4 = (uuid) => uuidRegex.test(uuid);
  * LOCAL DEVELOPMENT ONLY - CORS middleware wrapper
  * Adds CORS headers to responses when ENABLE_CORS=true
  */
+/* c8 ignore start */
 function localCORSWrapper(fn) {
   return async (request, context) => {
     const response = await fn(request, context);
@@ -117,6 +118,7 @@ function localCORSWrapper(fn) {
     return response;
   };
 }
+/* c8 ignore stop */
 
 /**
  * This is the main function
@@ -129,6 +131,7 @@ async function run(request, context) {
   const { route, suffix, method } = pathInfo;
 
   // Add mock authInfo when authentication is skipped
+  /* c8 ignore start */
   if (env.SKIP_AUTH === 'true' && !context.attributes?.authInfo) {
     if (!context.attributes) {
       context.attributes = {};
@@ -146,6 +149,7 @@ async function run(request, context) {
       .withType('api_key')
       .withScopes([{ name: 'admin' }]);
   }
+  /* c8 ignore stop */
 
   if (!hasText(route)) {
     log.info(`Unable to extract path info. Wrong format: ${suffix}`);
@@ -270,16 +274,10 @@ async function run(request, context) {
 
 const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 
-// Skip authentication in local development mode
-const skipAuth = process.env.SKIP_AUTH === 'true';
-
-let wrappedMain = wrap(run);
-
-if (!skipAuth) {
-  wrappedMain = wrappedMain.with(authWrapper, {
+const wrappedMain = wrap(run)
+  .with(authWrapper, {
     authHandlers: [JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler],
   });
-}
 
 export const main = wrappedMain
   .with(localCORSWrapper)
