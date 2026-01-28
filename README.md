@@ -103,6 +103,12 @@ SLACK_OPS_CHANNEL_WORKSPACE_EXTERNAL=channel ID to use for operations messages i
 AGENT_WORKFLOW_STATE_MACHINE_ARN=ARN of the generic agent Step Functions workflow (used by the brand-profile Slack command)
 ```
 
+LLMO onboarding requires the following env variable:
+
+```plaintext
+SLACK_LLMO_ALERTS_CHANNEL_ID=slack channel id for LLMO onboarding alerts (data folder exists, site already assigned)
+```
+
 Sandbox audit rate-limit (optional):
 
 Minimum hours that must elapse before the same audit can run again for the same site. 

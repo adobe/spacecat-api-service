@@ -352,11 +352,13 @@ sandboxAuditType:
       Comma-separated list of audit types:
       - meta-tags: General meta tag analysis
       - product-metatags: PDP-focused audit for e-commerce sites (scrapes SKU, thumbnail, catalog/store view codes)
+      - commerce-product-enrichments: Commerce page enrichment audit for analyzing and enriching commerce pages
       - alt-text: Image alternative text analysis
-    example: "meta-tags,product-metatags,alt-text"
+    example: "meta-tags,product-metatags,commerce-product-enrichments,alt-text"
     enum:
       - 'meta-tags'
       - 'product-metatags'
+      - 'commerce-product-enrichments'
       - 'alt-text'
 
 llmoConfigVersion:

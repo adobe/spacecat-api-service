@@ -13,5 +13,9 @@ admin-idp-p*.json
 *.code-workspace
 .prettierrc
 .vscode/settings.json
+
+# Cursor
 .cursor/*
 !.cursor/rules/
+!.cursor/commands/
+.cursor/commands/speckit.*

@@ -143,13 +143,13 @@ describe('Sandbox Audit Controller', () => {
       const result = await response.json();
 
       expect(response.status).to.equal(200);
-      expect(result.message).to.match(/Triggered 3 (?:of 3 )?audits/);
+      expect(result.message).to.match(/Triggered 4 (?:of 4 )?audits/);
       expect(result).to.have.property('siteId', SITE_IDS[0]);
       expect(result).to.have.property('baseURL', 'https://sandbox.example.com');
       const triggeredAudits = result.results.filter((r) => r.status === 'triggered').map((r) => r.auditType);
-      expect(triggeredAudits).to.have.members(['meta-tags', 'product-metatags', 'alt-text']);
+      expect(triggeredAudits).to.have.members(['meta-tags', 'product-metatags', 'commerce-product-enrichments', 'alt-text']);
 
-      expect(mockSqs.sendMessage).to.have.been.calledThrice;
+      expect(mockSqs.sendMessage).to.have.callCount(4);
     });
 
     it('returns 400 when siteId is missing', async () => {
@@ -342,7 +342,7 @@ describe('Sandbox Audit Controller', () => {
       const result = await response.json();
 
       expect(response.status).to.equal(400);
-      expect(result.message).to.include('Invalid audit types: invalid-audit-type. Supported types: meta-tags, product-metatags, alt-text');
+      expect(result.message).to.include('Invalid audit types: invalid-audit-type. Supported types: meta-tags, product-metatags, commerce-product-enrichments, alt-text');
       expect(mockSqs.sendMessage).to.not.have.been.called;
     });
 
@@ -600,7 +600,7 @@ describe('Sandbox Audit Controller', () => {
       const body = await res.json();
 
       expect(res.status).to.equal(200);
-      expect(body.message).to.match(/Triggered 2 (?:of 3 )?audits/);
+      expect(body.message).to.match(/Triggered 3 (?:of 4 )?audits/);
       expect(loggerStub.error).to.have.been.calledWith(sinon.match(/alt-text/));
     });
 
