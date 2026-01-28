@@ -975,6 +975,7 @@ function LlmoController(ctx) {
 
       // Handle S3 metaconfig
       let metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
+      const now = new Date().toISOString();
 
       if (!metaconfig || !Array.isArray(metaconfig.apiKeys) || metaconfig.apiKeys.length === 0) {
         // Create new metaconfig with generated API key
@@ -984,6 +985,7 @@ function LlmoController(ctx) {
           {
             ...(tokowakaEnabled !== undefined && { tokowakaEnabled }),
             ...(enhancements !== undefined && { enhancements }),
+            createdAt: now,
           },
         );
       } else {
@@ -996,6 +998,7 @@ function LlmoController(ctx) {
             patches,
             forceFail,
             prerender,
+            modifiedAt: now,
           },
         );
       }
@@ -1003,12 +1006,17 @@ function LlmoController(ctx) {
       const currentConfig = site.getConfig();
       // Update site config only if tokowakaEnabled is provided
       if (tokowakaEnabled !== undefined) {
+        // Get user IMS ID from auth context
+        const imsUserId = context.attributes?.authInfo?.getProfile()?.sub || 'unknown';
+        log.info(`User IMS ID: ${imsUserId} updating edge optimize config for site ${siteId}`);
+
         currentConfig.updateEdgeOptimizeConfig({
           ...(currentConfig.getEdgeOptimizeConfig() || {}),
           enabled: tokowakaEnabled,
+          opted: true,
         });
         await saveSiteConfig(site, currentConfig, log, `updating edge optimize config to enabled=${tokowakaEnabled}`);
-        log.info(`Updated edgeOptimizeConfig enabled=${tokowakaEnabled} for site ${siteId}`);
+        log.info(`Updated edgeOptimizeConfig enabled=${tokowakaEnabled}, opted=true for site ${siteId} by user ${imsUserId}`);
       }
 
       return ok({
