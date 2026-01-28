@@ -3481,9 +3481,9 @@ describe('Suggestions Controller', () => {
       // Verify S3 was called (GET to fetch metaconfig and config, PUT to upload config)
       expect(s3ClientSendStub.callCount).to.be.at.least(1);
       // Verify PutObjectCommand was called for upload
-      // Both suggestions are for same URL, so 1 config file is created
+      // Each suggestion creates its own config file
       const putObjectCalls = s3ClientSendStub.getCalls().filter((call) => call.args[0].constructor.name === 'PutObjectCommand');
-      expect(putObjectCalls).to.have.length(1); // 1 for config file
+      expect(putObjectCalls).to.have.length(2); // 2 config files (one per suggestion)
 
       // Verify suggestion data was updated with deployment timestamp
       const firstSugg = tokowakaSuggestions[0];
@@ -3926,10 +3926,10 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(207);
 
-      // Find the PutObjectCommand call (1 config file)
+      // Find the PutObjectCommand calls (2 config files - one per suggestion)
       const putObjectCalls = s3ClientSendStub.getCalls().filter((call) => call.args[0].constructor.name === 'PutObjectCommand');
-      expect(putObjectCalls).to.have.length(1);
-      // The call is for the URL-specific config
+      expect(putObjectCalls).to.have.length(2);
+      // The calls are for the URL-specific configs
       const uploadedConfig = JSON.parse(putObjectCalls[0].args[0].input.Body);
       console.log(JSON.stringify(uploadedConfig, null, 2));
       // Validate config structure

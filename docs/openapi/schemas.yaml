@@ -484,7 +484,7 @@ Site:
       description: The date and time when the site was last updated
       $ref: '#/DateTime'
   example:
-    id: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    id: 'a1b2c3d4-e5f6-4789-a0b1-c2d3e4f5a6b7'
     organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
     baseURL: 'https://example-site.com'
     name: 'Example Site'
@@ -548,7 +548,7 @@ SiteWithLatestAudit:
           items:
             $ref: '#/Audit'
   example:
-    id: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    id: 'a1b2c3d4-e5f6-4789-a0b1-c2d3e4f5a6b7'
     organizationId: 'o1p2q3r4-s5t6-u7v8-w9x0-yz12x34y56z'
     baseURL: 'https://example-site.com'
     name: 'Example Site'
@@ -558,7 +558,7 @@ SiteWithLatestAudit:
     createdAt: '2023-12-15T09:30:00Z'
     updatedAt: '2024-01-19T11:20:00Z'
     audits:
-      - siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+      - siteId: 'a1b2c3d4-e5f6-4789-a0b1-c2d3e4f5a6b7'
         auditedAt: '2024-01-20T12:00:00Z'
         expiresAt: '2024-07-20T12:00:00Z'
         auditType: 'cwv'
@@ -751,7 +751,7 @@ Audit:
     previousAuditResult:
       $ref: '#/AuditResult'
   example:
-    siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    siteId: 'a1b2c3d4-e5f6-4789-a0b1-c2d3e4f5a6b7'
     auditedAt: '2024-01-20T12:00:00Z'
     expiresAt: '2024-07-20T12:00:00Z'
     auditType: 'cwv'
@@ -1628,7 +1628,7 @@ KeyEvent:
       description: Time of the key event occurred
       $ref: '#/DateTime'
   example:
-    id: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    id: 'a1b2c3d4-e5f6-4789-a0b1-c2d3e4f5a6b7'
     name: 'Multiple 404s detected'
     type: 'seo'
     time: '2023-12-15T09:30:00Z'
@@ -1815,7 +1815,7 @@ AuditUrlListResponse:
           description: Whether more items are available
   example:
     items:
-      - siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+      - siteId: 'a1b2c3d4-e5f6-4789-a0b1-c2d3e4f5a6b7'
         url: 'https://example.com/page1.html'
         byCustomer: true
         audits: ['accessibility']
@@ -1877,7 +1877,7 @@ AuditUrlBulkResponse:
       - url: 'https://example.com/invalid'
         reason: 'Invalid URL format'
     items:
-      - siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+      - siteId: 'a1b2c3d4-e5f6-4789-a0b1-c2d3e4f5a6b7'
         url: 'https://example.com/page1.html'
         byCustomer: true
         audits: ['accessibility']
@@ -2052,7 +2052,7 @@ SiteExperiment:
       description: The name of conversion event value
       type: string
   example:
-    siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    siteId: 'a1b2c3d4-e5f6-4789-a0b1-c2d3e4f5a6b7'
     experimentId: '1012-home-page-optimization'
     name: '1012 Home Page Optimization'
     url: 'https://example-site.com/foo/bar'
@@ -2109,7 +2109,7 @@ SiteMetric:
       description: The date and time when the metric was recorded
       $ref: '#/DateTime'
   example:
-    siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    siteId: 'a1b2c3d4-e5f6-4789-a0b1-c2d3e4f5a6b7'
     source: 'ahrefs'
     name: 'organic-traffic'
     value: 37900
@@ -2159,7 +2159,7 @@ PageOrganicKeywords:
       description: Whether the keyword is branded
       type: boolean
   example:
-    siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    siteId: 'a1b2c3d4-e5f6-4789-a0b1-c2d3e4f5a6b7'
     source: 'ahrefs'
     name: 'organic-keywords'
     time: '2024-04-29T00:00:00.000Z'
