@@ -929,10 +929,11 @@ function LlmoController(ctx) {
    * @returns {Promise<Response>} Created/updated edge config
    */
   const createOrUpdateEdgeConfig = async (context) => {
-    const { log } = context;
+    const { log, dataAccess } = context;
     const { siteId } = context.params;
+    const { Site } = dataAccess;
     const {
-      enhancements, tokowakaEnabled, forceFail, patches = {},
+      enhancements, tokowakaEnabled, forceFail, patches = {}, prerender,
     } = context.data || {};
 
     log.info(`createOrUpdateEdgeConfig request received for site ${siteId}, data=${JSON.stringify(context.data)}`);
@@ -953,9 +954,21 @@ function LlmoController(ctx) {
       return badRequest('patches field must be an object');
     }
 
+    if (prerender !== undefined && (typeof prerender !== 'object' || Array.isArray(prerender) || !Array.isArray(prerender.allowList))) {
+      return badRequest('prerender field must be an object with allowList property that is an array');
+    }
+
     try {
-      // Validate site and LLMO access
-      const { site } = await getSiteAndValidateLlmo(context);
+      // Get site
+      const site = await Site.findById(siteId);
+
+      if (!site) {
+        return notFound('Site not found');
+      }
+
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('User does not have access to this site');
+      }
 
       const baseURL = site.getBaseURL();
       const tokowakaClient = TokowakaClient.createFrom(context);
@@ -982,6 +995,7 @@ function LlmoController(ctx) {
             enhancements,
             patches,
             forceFail,
+            prerender,
           },
         );
       }
@@ -1015,12 +1029,21 @@ function LlmoController(ctx) {
    * @returns {Promise<Response>} Edge config or not found
    */
   const getEdgeConfig = async (context) => {
-    const { log } = context;
+    const { log, dataAccess } = context;
     const { siteId } = context.params;
+    const { Site } = dataAccess;
 
     try {
-      // Validate site and LLMO access
-      const { site } = await getSiteAndValidateLlmo(context);
+      // Get site
+      const site = await Site.findById(siteId);
+
+      if (!site) {
+        return notFound('Site not found');
+      }
+
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('User does not have access to this site');
+      }
 
       const baseURL = site.getBaseURL();
 
