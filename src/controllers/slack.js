@@ -108,7 +108,9 @@ function parsePayload(data) {
  * @returns {Object} An object containing the handleEvent function.
  */
 function SlackController(SlackApp) {
-  // Acknowledge function for Slack events (no operation)
+  // Acknowledge function for Slack events (no operation in current architecture)
+  // Note: For view submissions, Slack requires HTTP response within 3 seconds.
+  // Long-running handlers will cause modal timeout errors but processing continues.
   const ack = () => {};
 
   /**

@@ -601,6 +601,9 @@ function SitesController(ctx, log, env) {
     const metric = context.params?.metric;
     const source = context.params?.source;
     const filterByTop100PageViews = context.data?.filterByTop100PageViews === 'true';
+    const filterByBaseURL = context.data?.filterByBaseURL === 'true';
+    // Key to extract from object response, e.g., 'data' in { label, data: [...] }
+    const objectResponseDataKey = context.data?.objectResponseDataKey;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -623,21 +626,66 @@ function SitesController(ctx, log, env) {
       return forbidden('Only users belonging to the organization can view its metrics');
     }
 
-    let metrics = await getStoredMetrics({ siteId, metric, source }, context);
+    const metrics = await getStoredMetrics({ siteId, metric, source }, context);
 
-    // Filter to top 100 pages by pageViews when requested
+    // Handle object response: extract array from key if objectResponseDataKey is provided
+    let metricsData;
+    let objectWrapper = null;
+
+    if (objectResponseDataKey && isObject(metrics) && !isArray(metrics)
+        && isArray(metrics[objectResponseDataKey])) {
+      // Stored data is an object with array at specified key
+      metricsData = metrics[objectResponseDataKey];
+      objectWrapper = metrics;
+    } else {
+      // Stored data is a plain array (backward compatible)
+      metricsData = metrics;
+    }
+
+    // Filter by site baseURL when requested
+    if (filterByBaseURL) {
+      const siteBaseURL = site.getBaseURL();
+      const originalCount = metricsData.length;
+
+      // Normalize baseURL: remove protocol and www variants, keep path
+      const normalizedBaseURL = siteBaseURL
+        .replace(/^https?:\/\/(www\d*\.)?/, '') // Remove protocol and optional www/www2/www3 etc.
+        .replace(/\/$/, ''); // Remove trailing slash
+
+      metricsData = metricsData.filter((metricEntry) => {
+        if (!metricEntry.url || !normalizedBaseURL) {
+          return false;
+        }
+
+        // Normalize metric URL: remove protocol and www variants
+        const normalizedMetricURL = metricEntry.url
+          .replace(/^https?:\/\/(www\d*\.)?/, '') // Remove protocol and optional www/www2/www3 etc.
+          .replace(/\/$/, ''); // Remove trailing slash
+
+        // Check if metric URL starts with the normalized base URL
+        return normalizedMetricURL.startsWith(normalizedBaseURL);
+      });
+
+      log.info(`Filtered metrics from ${originalCount} to ${metricsData.length} entries based on site baseURL (${normalizedBaseURL})`);
+    }
+
+    // Filter to top 100 pages by pageViews when requested (applied last)
     if (filterByTop100PageViews) {
       // Sort by pageViews in descending order and take top 100
-      const originalCount = metrics.length;
-      metrics = metrics
+      const originalCount = metricsData.length;
+      metricsData = metricsData
         .filter((metricEntry) => metricEntry.pageviews !== undefined)
         .sort((a, b) => (b.pageviews || 0) - (a.pageviews || 0))
         .slice(0, 100);
 
-      log.info(`Filtered metrics from ${originalCount} to ${metrics.length} entries based on top pageViews`);
+      log.info(`Filtered metrics from ${originalCount} to ${metricsData.length} entries based on top pageViews`);
     }
 
-    return ok(metrics);
+    // Return object wrapper if objectResponseDataKey was used, otherwise return plain array
+    if (objectWrapper) {
+      return ok({ ...objectWrapper, [objectResponseDataKey]: metricsData });
+    }
+    return ok(metricsData);
   };
 
   const getLatestSiteMetrics = async (context) => {

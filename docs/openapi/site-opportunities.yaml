@@ -619,9 +619,9 @@ site-opportunity-suggestions-edge-live-preview:
   post:
     operationId: edgeLivePreview
     summary: |
-      Fetch live content from a URL using Tokowaka-AI User-Agent
+      Fetch live content from a URL using Edge Optimize specific User-Agent
     description: |
-      Fetches live content from a given URL using the Tokowaka-AI User-Agent.
+      Fetches live content from a given URL using the Edge Optimize specific User-Agent.
       This is useful for previewing what content is currently deployed or accessible
       from a specific URL.
     tags:

@@ -51,8 +51,8 @@ function isValidOpportunity(opportunityData) {
   // Must have positive value metric
   // CWV opportunities use projectedTrafficValue
   // Forms opportunities use projectedConversionValue
-  const projectedTrafficValue = data.projectedTrafficValue || 0;
-  const projectedConversionValue = data.projectedConversionValue || 0;
+  const projectedTrafficValue = data?.projectedTrafficValue || 0;
+  const projectedConversionValue = data?.projectedConversionValue || 0;
 
   const hasValue = projectedTrafficValue > 0 || projectedConversionValue > 0;
   if (!hasValue) return false;
@@ -306,7 +306,7 @@ async function processOpportunityMatching(
     const matchedPaidUrlsMap = new Map();
 
     // Forms opportunities have URL in data.form field, not in suggestions
-    if (config.category === 'forms' && oppData.data.form) {
+    if (config.category === 'forms' && oppData.data?.form) {
       const formUrl = oppData.data.form;
       const normalized = normalizeUrl(formUrl);
 
