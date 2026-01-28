@@ -18,6 +18,7 @@ import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 
 import SentimentController from '../../src/controllers/sentiment.js';
+import AccessControlUtil from '../../src/support/access-control-util.js';
 
 use(chaiAsPromised);
 
@@ -208,11 +209,31 @@ describe('Sentiment Controller', () => {
       expect(body.pagination).to.have.property('limit');
     });
 
+    it('returns topics when context.data is undefined', async () => {
+      context.data = undefined;
+      const result = await sentimentController.listTopics(context);
+      expect(result.status).to.equal(200);
+    });
+
+    it('returns empty array when result.data is null', async () => {
+      mockDataAccess.SentimentTopic.allBySiteIdPaginated.resolves({ data: null, cursor: null });
+      const result = await sentimentController.listTopics(context);
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.items).to.deep.equal([]);
+    });
+
     it('filters by enabled when provided', async () => {
       context.data = { enabled: 'true' };
       const result = await sentimentController.listTopics(context);
       expect(result.status).to.equal(200);
       expect(mockDataAccess.SentimentTopic.allBySiteIdEnabled).to.have.been.called;
+    });
+
+    it('returns forbidden if user does not have access', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      const result = await sentimentController.listTopics(context);
+      expect(result.status).to.equal(403);
     });
 
     it('handles errors gracefully', async () => {
@@ -256,6 +277,12 @@ describe('Sentiment Controller', () => {
       expect(result.status).to.equal(200);
     });
 
+    it('returns forbidden if user does not have access', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      const result = await sentimentController.getTopic(context);
+      expect(result.status).to.equal(403);
+    });
+
     it('handles errors gracefully', async () => {
       mockDataAccess.SentimentTopic.findById.rejects(new Error('DB error'));
       const result = await sentimentController.getTopic(context);
@@ -295,10 +322,64 @@ describe('Sentiment Controller', () => {
       expect(result.status).to.equal(404);
     });
 
+    it('returns forbidden if user does not have access', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      context.data = [{ name: 'Topic' }];
+      const result = await sentimentController.createTopics(context);
+      expect(result.status).to.equal(403);
+    });
+
     it('creates topics successfully', async () => {
       context.data = [{ name: 'New Topic' }];
       const result = await sentimentController.createTopics(context);
       expect(result.status).to.equal(201);
+    });
+
+    it('creates topics with system user when authInfo is missing', async () => {
+      const contextWithoutAuth = {
+        ...context,
+        attributes: {},
+      };
+      contextWithoutAuth.data = [{ name: 'New Topic' }];
+      const result = await sentimentController.createTopics(contextWithoutAuth);
+      expect(result.status).to.equal(201);
+    });
+
+    it('creates topics with non-array subPrompts defaulting to empty array', async () => {
+      context.data = [{ name: 'New Topic', subPrompts: 'not-an-array' }];
+      const result = await sentimentController.createTopics(context);
+      expect(result.status).to.equal(201);
+    });
+
+    it('creates topics with array subPrompts', async () => {
+      context.data = [{ name: 'New Topic', subPrompts: ['prompt1', 'prompt2'] }];
+      const result = await sentimentController.createTopics(context);
+      expect(result.status).to.equal(201);
+    });
+
+    it('uses profile.name when email is not available', async () => {
+      const authInfoWithNameOnly = new AuthInfo()
+        .withType('jwt')
+        .withScopes([{ name: 'admin' }])
+        .withProfile({ is_admin: true, name: 'Test User' })
+        .withAuthenticated(true);
+      const contextWithName = {
+        ...context,
+        attributes: { authInfo: authInfoWithNameOnly },
+      };
+      contextWithName.data = [{ name: 'New Topic' }];
+      const result = await sentimentController.createTopics(contextWithName);
+      expect(result.status).to.equal(201);
+    });
+
+    it('reports creation errors as failures', async () => {
+      mockDataAccess.SentimentTopic.create.rejects(new Error('DB error'));
+      context.data = [{ name: 'Error Topic' }];
+      const result = await sentimentController.createTopics(context);
+      expect(result.status).to.equal(201);
+      const body = await result.json();
+      expect(body.failures).to.have.lengthOf(1);
+      expect(body.failures[0].reason).to.equal('DB error');
     });
 
     it('reports validation failures for missing name', async () => {
@@ -339,6 +420,12 @@ describe('Sentiment Controller', () => {
       expect(result.status).to.equal(400);
     });
 
+    it('handles audits as non-array gracefully', async () => {
+      context.data = { audits: 'not-an-array' };
+      const result = await sentimentController.updateTopic(context);
+      expect(result.status).to.equal(200);
+    });
+
     it('returns not found if site does not exist', async () => {
       mockDataAccess.Site.findById.resolves(null);
       context.data = { name: 'Updated' };
@@ -357,6 +444,25 @@ describe('Sentiment Controller', () => {
       context.data = { name: 'Updated Topic', enabled: false };
       const result = await sentimentController.updateTopic(context);
       expect(result.status).to.equal(200);
+    });
+
+    it('updates topic description', async () => {
+      context.data = { description: 'Updated description' };
+      const result = await sentimentController.updateTopic(context);
+      expect(result.status).to.equal(200);
+    });
+
+    it('updates topic subPrompts', async () => {
+      context.data = { subPrompts: ['prompt1', 'prompt2'] };
+      const result = await sentimentController.updateTopic(context);
+      expect(result.status).to.equal(200);
+    });
+
+    it('returns forbidden if user does not have access', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      context.data = { name: 'Updated' };
+      const result = await sentimentController.updateTopic(context);
+      expect(result.status).to.equal(403);
     });
 
     it('handles errors gracefully', async () => {
@@ -401,6 +507,12 @@ describe('Sentiment Controller', () => {
       expect(result.status).to.equal(200);
     });
 
+    it('returns forbidden if user does not have access', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      const result = await sentimentController.deleteTopic(context);
+      expect(result.status).to.equal(403);
+    });
+
     it('handles errors gracefully', async () => {
       mockDataAccess.SentimentTopic.findById.rejects(new Error('DB error'));
       const result = await sentimentController.deleteTopic(context);
@@ -431,6 +543,12 @@ describe('Sentiment Controller', () => {
       expect(result.status).to.equal(400);
     });
 
+    it('returns bad request when context.data is undefined', async () => {
+      context.data = undefined;
+      const result = await sentimentController.addSubPrompts(context);
+      expect(result.status).to.equal(400);
+    });
+
     it('returns not found if site does not exist', async () => {
       mockDataAccess.Site.findById.resolves(null);
       context.data = { prompts: ['prompt1'] };
@@ -457,6 +575,13 @@ describe('Sentiment Controller', () => {
       const result = await sentimentController.addSubPrompts(context);
       expect(result.status).to.equal(200);
     });
+
+    it('returns forbidden if user does not have access', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      context.data = { prompts: ['prompt1'] };
+      const result = await sentimentController.addSubPrompts(context);
+      expect(result.status).to.equal(403);
+    });
   });
 
   describe('removeSubPrompts', () => {
@@ -478,6 +603,12 @@ describe('Sentiment Controller', () => {
 
     it('returns bad request for missing prompts', async () => {
       context.data = {};
+      const result = await sentimentController.removeSubPrompts(context);
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns bad request when context.data is undefined', async () => {
+      context.data = undefined;
       const result = await sentimentController.removeSubPrompts(context);
       expect(result.status).to.equal(400);
     });
@@ -508,6 +639,13 @@ describe('Sentiment Controller', () => {
       const result = await sentimentController.removeSubPrompts(context);
       expect(result.status).to.equal(200);
     });
+
+    it('returns forbidden if user does not have access', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      context.data = { prompts: ['prompt1'] };
+      const result = await sentimentController.removeSubPrompts(context);
+      expect(result.status).to.equal(403);
+    });
   });
 
   describe('linkAudits', () => {
@@ -529,6 +667,12 @@ describe('Sentiment Controller', () => {
 
     it('returns bad request for missing audits', async () => {
       context.data = {};
+      const result = await sentimentController.linkAudits(context);
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns bad request when context.data is undefined', async () => {
+      context.data = undefined;
       const result = await sentimentController.linkAudits(context);
       expect(result.status).to.equal(400);
     });
@@ -565,6 +709,13 @@ describe('Sentiment Controller', () => {
       const result = await sentimentController.linkAudits(context);
       expect(result.status).to.equal(200);
     });
+
+    it('returns forbidden if user does not have access', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      context.data = { audits: ['wikipedia-analysis'] };
+      const result = await sentimentController.linkAudits(context);
+      expect(result.status).to.equal(403);
+    });
   });
 
   describe('unlinkAudits', () => {
@@ -586,6 +737,12 @@ describe('Sentiment Controller', () => {
 
     it('returns bad request for missing audits', async () => {
       context.data = {};
+      const result = await sentimentController.unlinkAudits(context);
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns bad request when context.data is undefined', async () => {
+      context.data = undefined;
       const result = await sentimentController.unlinkAudits(context);
       expect(result.status).to.equal(400);
     });
@@ -615,6 +772,13 @@ describe('Sentiment Controller', () => {
       context.data = { audits: ['wikipedia-analysis'] };
       const result = await sentimentController.unlinkAudits(context);
       expect(result.status).to.equal(200);
+    });
+
+    it('returns forbidden if user does not have access', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      context.data = { audits: ['wikipedia-analysis'] };
+      const result = await sentimentController.unlinkAudits(context);
+      expect(result.status).to.equal(403);
     });
   });
 
@@ -646,11 +810,31 @@ describe('Sentiment Controller', () => {
       expect(body.items).to.be.an('array');
     });
 
+    it('returns guidelines when context.data is undefined', async () => {
+      context.data = undefined;
+      const result = await sentimentController.listGuidelines(context);
+      expect(result.status).to.equal(200);
+    });
+
+    it('returns empty array when result.data is null', async () => {
+      mockDataAccess.SentimentGuideline.allBySiteIdPaginated.resolves({ data: null, cursor: null });
+      const result = await sentimentController.listGuidelines(context);
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.items).to.deep.equal([]);
+    });
+
     it('filters by enabled when provided', async () => {
       context.data = { enabled: 'true' };
       const result = await sentimentController.listGuidelines(context);
       expect(result.status).to.equal(200);
       expect(mockDataAccess.SentimentGuideline.allBySiteIdEnabled).to.have.been.called;
+    });
+
+    it('returns forbidden if user does not have access', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      const result = await sentimentController.listGuidelines(context);
+      expect(result.status).to.equal(403);
     });
 
     it('handles errors gracefully', async () => {
@@ -694,6 +878,12 @@ describe('Sentiment Controller', () => {
       expect(result.status).to.equal(200);
     });
 
+    it('returns forbidden if user does not have access', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      const result = await sentimentController.getGuideline(context);
+      expect(result.status).to.equal(403);
+    });
+
     it('handles errors gracefully', async () => {
       mockDataAccess.SentimentGuideline.findById.rejects(new Error('DB error'));
       const result = await sentimentController.getGuideline(context);
@@ -733,10 +923,38 @@ describe('Sentiment Controller', () => {
       expect(result.status).to.equal(404);
     });
 
+    it('returns forbidden if user does not have access', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      context.data = [{ name: 'Guideline', instruction: 'Test' }];
+      const result = await sentimentController.createGuidelines(context);
+      expect(result.status).to.equal(403);
+    });
+
     it('creates guidelines successfully', async () => {
       context.data = [{ name: 'New Guideline', instruction: 'Test instruction' }];
       const result = await sentimentController.createGuidelines(context);
       expect(result.status).to.equal(201);
+    });
+
+    it('creates guidelines with non-array audits defaulting to empty array', async () => {
+      context.data = [{ name: 'New Guideline', instruction: 'Test instruction', audits: 'not-an-array' }];
+      const result = await sentimentController.createGuidelines(context);
+      expect(result.status).to.equal(201);
+    });
+
+    it('creates guidelines with array audits', async () => {
+      context.data = [{ name: 'New Guideline', instruction: 'Test instruction', audits: ['wikipedia-analysis'] }];
+      const result = await sentimentController.createGuidelines(context);
+      expect(result.status).to.equal(201);
+    });
+
+    it('reports validation failures for invalid audit types', async () => {
+      context.data = [{ name: 'Guideline', instruction: 'Test', audits: ['invalid-audit'] }];
+      const result = await sentimentController.createGuidelines(context);
+      expect(result.status).to.equal(201);
+      const body = await result.json();
+      expect(body.failures).to.have.lengthOf(1);
+      expect(body.failures[0].reason).to.include('Invalid audit types');
     });
 
     it('reports validation failures for missing name', async () => {
@@ -753,6 +971,16 @@ describe('Sentiment Controller', () => {
       expect(result.status).to.equal(201);
       const body = await result.json();
       expect(body.failures).to.have.lengthOf(1);
+    });
+
+    it('reports creation errors as failures', async () => {
+      mockDataAccess.SentimentGuideline.create.rejects(new Error('DB error'));
+      context.data = [{ name: 'Error Guideline', instruction: 'Test' }];
+      const result = await sentimentController.createGuidelines(context);
+      expect(result.status).to.equal(201);
+      const body = await result.json();
+      expect(body.failures).to.have.lengthOf(1);
+      expect(body.failures[0].reason).to.equal('DB error');
     });
   });
 
@@ -799,6 +1027,25 @@ describe('Sentiment Controller', () => {
       expect(result.status).to.equal(200);
     });
 
+    it('updates guideline instruction', async () => {
+      context.data = { instruction: 'Updated instruction' };
+      const result = await sentimentController.updateGuideline(context);
+      expect(result.status).to.equal(200);
+    });
+
+    it('updates guideline audits', async () => {
+      context.data = { audits: ['wikipedia-analysis'] };
+      const result = await sentimentController.updateGuideline(context);
+      expect(result.status).to.equal(200);
+    });
+
+    it('returns forbidden if user does not have access', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      context.data = { name: 'Updated' };
+      const result = await sentimentController.updateGuideline(context);
+      expect(result.status).to.equal(403);
+    });
+
     it('handles errors gracefully', async () => {
       context.data = { name: 'Updated' };
       mockDataAccess.SentimentGuideline.findById.rejects(new Error('DB error'));
@@ -841,6 +1088,12 @@ describe('Sentiment Controller', () => {
       expect(result.status).to.equal(200);
     });
 
+    it('returns forbidden if user does not have access', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      const result = await sentimentController.deleteGuideline(context);
+      expect(result.status).to.equal(403);
+    });
+
     it('handles errors gracefully', async () => {
       mockDataAccess.SentimentGuideline.findById.rejects(new Error('DB error'));
       const result = await sentimentController.deleteGuideline(context);
@@ -871,6 +1124,22 @@ describe('Sentiment Controller', () => {
       expect(body.guidelines).to.be.an('array');
     });
 
+    it('returns config when context.data is undefined', async () => {
+      context.data = undefined;
+      const result = await sentimentController.getConfig(context);
+      expect(result.status).to.equal(200);
+    });
+
+    it('returns empty arrays when data is null', async () => {
+      mockDataAccess.SentimentTopic.allBySiteIdEnabled.resolves({ data: null, cursor: null });
+      mockDataAccess.SentimentGuideline.allBySiteIdEnabled.resolves({ data: null, cursor: null });
+      const result = await sentimentController.getConfig(context);
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.topics).to.deep.equal([]);
+      expect(body.guidelines).to.deep.equal([]);
+    });
+
     it('filters guidelines by audit when provided', async () => {
       context.data = { audit: 'wikipedia-analysis' };
       const result = await sentimentController.getConfig(context);
@@ -882,6 +1151,12 @@ describe('Sentiment Controller', () => {
       mockDataAccess.SentimentTopic.allBySiteIdEnabled.rejects(new Error('DB error'));
       const result = await sentimentController.getConfig(context);
       expect(result.status).to.equal(500);
+    });
+
+    it('returns forbidden if user does not have access', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+      const result = await sentimentController.getConfig(context);
+      expect(result.status).to.equal(403);
     });
   });
 });
