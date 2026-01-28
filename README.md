@@ -43,10 +43,39 @@ USER_API_KEY=api_key_for_user_requests
 ADMIN_API_KEY=api_key_for_admin_requests
 ```
 
+**Getting AWS Credentials for Local Development:**
+
+To connect to production AWS data (DynamoDB, etc.) instead of LocalStack:
+
+1. Use [KLAM](https://git.corp.adobe.com/adobe/klam) to obtain temporary AWS credentials for the `spacecat-prod` profile
+2. Run KLAM in your terminal to get credentials
+3. Export the AWS credentials in your terminal session:
+   ```bash
+   export AWS_ACCESS_KEY_ID=<your-access-key>
+   export AWS_SECRET_ACCESS_KEY=<your-secret-key>
+   export AWS_SESSION_TOKEN=<your-session-token>
+   export AWS_REGION=us-east-1
+   ```
+4. Run `npm start` in the same terminal session
+
+Alternatively, you can add these values directly to your `.env` file, but be careful not to commit them.
+
 2. Start the development server
 
-```
+```bash
 npm start
+```
+
+The server will start on `http://localhost:3000` by default.
+
+**Changing the Port:**
+
+Most React applications (LLMO UI, ASO UI, etc.) run on port 3000 by default. If you're running the API service alongside a UI application locally, you'll need to change the port to avoid conflicts.
+
+To run on a different port, add or modify the `PORT` variable in your `.env` file:
+
+```plaintext
+PORT=3001
 ```
 
 ### Build
