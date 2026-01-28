@@ -27,6 +27,7 @@ import {
   AdobeImsHandler,
   JwtHandler,
 } from '@adobe/spacecat-shared-http-utils';
+import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import { imsClientWrapper } from '@adobe/spacecat-shared-ims-client';
 import {
   elevatedSlackClientWrapper,
@@ -87,14 +88,65 @@ const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a
 const isValidUUIDV4 = (uuid) => uuidRegex.test(uuid);
 
 /**
+ * LOCAL DEVELOPMENT ONLY - CORS middleware wrapper
+ * Adds CORS headers to responses when ENABLE_CORS=true
+ */
+function localCORSWrapper(fn) {
+  return async (request, context) => {
+    const response = await fn(request, context);
+    const { env } = context;
+    const enableCors = env.ENABLE_CORS === 'true';
+
+    if (enableCors) {
+      const allowedOrigins = (env.CORS_ALLOWED_ORIGINS || '').split(',').map((o) => o.trim());
+      const origin = request.headers.get('origin');
+
+      if (origin && allowedOrigins.includes(origin)) {
+        response.headers.set('Access-Control-Allow-Origin', origin);
+        response.headers.set('Access-Control-Allow-Credentials', 'true');
+      }
+
+      response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+      response.headers.set(
+        'Access-Control-Allow-Headers',
+        'Content-Type, Authorization, x-api-key, x-ims-org-id, x-client-type, x-import-api-key, '
+        + 'x-trigger-audits, x-requested-with, origin, accept',
+      );
+      response.headers.set('Access-Control-Max-Age', '86400');
+    }
+
+    return response;
+  };
+}
+
+/**
  * This is the main function
  * @param {Request} request the request object (see fetch api)
  * @param {UniversalContext} context the context of the universal serverless function
  * @returns {Response} a response
  */
 async function run(request, context) {
-  const { log, pathInfo } = context;
+  const { log, pathInfo, env } = context;
   const { route, suffix, method } = pathInfo;
+
+  // Add mock authInfo when authentication is skipped
+  if (env.SKIP_AUTH === 'true' && !context.attributes?.authInfo) {
+    if (!context.attributes) {
+      context.attributes = {};
+    }
+    // Create a mock admin authInfo
+    context.attributes.authInfo = new AuthInfo()
+      .withAuthenticated(true)
+      .withProfile({
+        user_id: 'local-dev-admin',
+        email: 'admin@localhost',
+        is_admin: true,
+        // Empty tenants means hasOrganization will return false, but is_admin bypasses that
+        tenants: [],
+      })
+      .withType('api_key')
+      .withScopes([{ name: 'admin' }]);
+  }
 
   if (!hasText(route)) {
     log.info(`Unable to extract path info. Wrong format: ${suffix}`);
@@ -221,10 +273,19 @@ async function run(request, context) {
 
 const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 
-export const main = wrap(run)
-  .with(authWrapper, {
+// Skip authentication in local development mode
+const skipAuth = process.env.SKIP_AUTH === 'true';
+
+let wrappedMain = wrap(run);
+
+if (!skipAuth) {
+  wrappedMain = wrappedMain.with(authWrapper, {
     authHandlers: [JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler],
-  })
+  });
+}
+
+export const main = wrappedMain
+  .with(localCORSWrapper)
   .with(logWrapper)
   .with(dataAccess)
   .with(bodyData)
