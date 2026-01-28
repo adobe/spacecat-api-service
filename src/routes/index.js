@@ -372,6 +372,10 @@ export default function getRouteHandlers(
     'GET /organizations/:organizationId/userDetails/:externalUserId': userDetailsController.getUserDetailsByExternalUserId,
     'POST /organizations/:organizationId/userDetails': userDetailsController.getUserDetailsInBulk,
     'POST /organizations/:organizationId/trial-user-invite': trialUserController.createTrialUserForEmailInvite,
+
+    // Trial User Email Preferences (current user)
+    'GET /trial-users/me/email-preferences': trialUserController.getEmailPreferences,
+    'PATCH /trial-users/me/email-preferences': trialUserController.updateEmailPreferences,
     'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
     'POST /organizations/:organizationId/entitlements': entitlementController.createEntitlement,
 
