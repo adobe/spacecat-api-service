@@ -5266,3 +5266,252 @@ PreflightResultItem:
       type: string
       enum: [identify, suggest]
       description: The step of the preflight job when this result was generated
+
+# =============================================================================
+# Sentiment Guidelines Schemas
+# =============================================================================
+
+SentimentTopic:
+  type: object
+  description: A sentiment analysis topic defining a subject of interest
+  properties:
+    siteId:
+      type: string
+      format: uuid
+      description: Parent site identifier
+    topicId:
+      type: string
+      format: uuid
+      description: Unique topic identifier
+    name:
+      type: string
+      description: Topic name/subject to analyze
+      example: "2026 Corvette Stingray"
+    description:
+      type: string
+      description: Optional description for context
+    subPrompts:
+      type: array
+      items:
+        type: string
+      description: Additional prompts/questions for deeper analysis
+      example: ["What do people say about performance?", "Price sentiment?"]
+    enabled:
+      type: boolean
+      description: Whether topic is active
+      default: true
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+    createdBy:
+      type: string
+      description: User/service who created
+    updatedBy:
+      type: string
+      description: Last user/service to modify
+
+SentimentTopicInput:
+  type: object
+  required:
+    - name
+  properties:
+    name:
+      type: string
+      description: Topic name/subject to analyze
+    description:
+      type: string
+      description: Optional description for context
+    subPrompts:
+      type: array
+      items:
+        type: string
+      description: Additional prompts/questions for deeper analysis
+    enabled:
+      type: boolean
+      default: true
+
+SentimentTopicUpdate:
+  type: object
+  properties:
+    name:
+      type: string
+    description:
+      type: string
+    subPrompts:
+      type: array
+      items:
+        type: string
+    enabled:
+      type: boolean
+
+SentimentTopicListResponse:
+  type: object
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/SentimentTopic'
+    pagination:
+      type: object
+      properties:
+        limit:
+          type: integer
+        cursor:
+          type: string
+          description: Pagination cursor (absent when no more pages)
+        hasMore:
+          type: boolean
+
+SentimentTopicBulkResponse:
+  type: object
+  properties:
+    successCount:
+      type: integer
+      description: Number of successfully processed items
+    results:
+      type: array
+      items:
+        $ref: '#/SentimentTopic'
+    failures:
+      type: array
+      items:
+        type: object
+        properties:
+          name:
+            type: string
+          reason:
+            type: string
+
+SentimentGuideline:
+  type: object
+  description: A sentiment analysis guideline defining how to analyze topics
+  properties:
+    siteId:
+      type: string
+      format: uuid
+      description: Parent site identifier
+    guidelineId:
+      type: string
+      format: uuid
+      description: Unique guideline identifier
+    name:
+      type: string
+      description: Display name
+      example: "Product Quality Focus"
+    instruction:
+      type: string
+      description: The actual guideline instruction
+      example: "Focus on sentiment related to product quality, durability, and craftsmanship."
+    audits:
+      type: array
+      items:
+        type: string
+      description: Enabled audit types
+      example: ["wikipedia-analysis", "reddit-analysis"]
+    enabled:
+      type: boolean
+      description: Whether guideline is active
+      default: true
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+    createdBy:
+      type: string
+      description: User/service who created
+    updatedBy:
+      type: string
+      description: Last user/service to modify
+
+SentimentGuidelineInput:
+  type: object
+  required:
+    - name
+    - instruction
+  properties:
+    name:
+      type: string
+      description: Display name
+    instruction:
+      type: string
+      description: The actual guideline instruction
+    audits:
+      type: array
+      items:
+        type: string
+      description: Audit types to associate
+    enabled:
+      type: boolean
+      default: true
+
+SentimentGuidelineUpdate:
+  type: object
+  properties:
+    name:
+      type: string
+    instruction:
+      type: string
+    audits:
+      type: array
+      items:
+        type: string
+    enabled:
+      type: boolean
+
+SentimentGuidelineListResponse:
+  type: object
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/SentimentGuideline'
+    pagination:
+      type: object
+      properties:
+        limit:
+          type: integer
+        cursor:
+          type: string
+          description: Pagination cursor (absent when no more pages)
+        hasMore:
+          type: boolean
+
+SentimentGuidelineBulkResponse:
+  type: object
+  properties:
+    successCount:
+      type: integer
+      description: Number of successfully processed items
+    results:
+      type: array
+      items:
+        $ref: '#/SentimentGuideline'
+    failures:
+      type: array
+      items:
+        type: object
+        properties:
+          name:
+            type: string
+          reason:
+            type: string
+
+SentimentConfig:
+  type: object
+  description: Combined sentiment configuration with topics and guidelines
+  properties:
+    topics:
+      type: array
+      items:
+        $ref: '#/SentimentTopic'
+      description: All enabled topics
+    guidelines:
+      type: array
+      items:
+        $ref: '#/SentimentGuideline'
+      description: Guidelines (optionally filtered by audit type)
