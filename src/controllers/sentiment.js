@@ -101,7 +101,6 @@ function SentimentController(ctx, log) {
     const {
       limit = DEFAULT_LIMIT,
       cursor,
-      audit, // Optional filter by audit type
       enabled, // Optional filter by enabled status
     } = context.data || {};
 
@@ -127,13 +126,7 @@ function SentimentController(ctx, log) {
     try {
       let result;
 
-      if (hasText(audit)) {
-        // Filter by audit type
-        result = await SentimentTopic.allBySiteIdAndAuditType(siteId, audit, {
-          limit: effectiveLimit,
-          cursor,
-        });
-      } else if (enabled === 'true' || enabled === true) {
+      if (enabled === 'true' || enabled === true) {
         // Filter by enabled
         result = await SentimentTopic.allBySiteIdEnabled(siteId, {
           limit: effectiveLimit,
@@ -240,26 +233,12 @@ function SentimentController(ctx, log) {
         };
       }
 
-      // Validate audit types if provided
-      if (topicData.audits) {
-        const invalidAudits = validateAuditTypes(topicData.audits);
-        if (invalidAudits.length > 0) {
-          return {
-            success: false,
-            name: topicData.name,
-            reason: `Invalid audit types: ${invalidAudits.join(', ')}. Valid types: ${KNOWN_AUDIT_TYPES.join(', ')}`,
-          };
-        }
-      }
-
       try {
         const newTopic = await SentimentTopic.create({
           siteId,
           name: topicData.name,
           description: topicData.description,
-          topicName: topicData.topicName || '',
           subPrompts: isArray(topicData.subPrompts) ? topicData.subPrompts : [],
-          audits: isArray(topicData.audits) ? topicData.audits : [],
           enabled: topicData.enabled !== false,
           createdBy: userId,
           updatedBy: userId,
@@ -350,9 +329,7 @@ function SentimentController(ctx, log) {
       // Update allowed fields
       if (hasText(updates.name)) topic.setName(updates.name);
       if (updates.description !== undefined) topic.setDescription(updates.description);
-      if (hasText(updates.topicName)) topic.setTopicName(updates.topicName);
       if (isArray(updates.subPrompts)) topic.setSubPrompts(updates.subPrompts);
-      if (isArray(updates.audits)) topic.setAudits(updates.audits);
       if (typeof updates.enabled === 'boolean') topic.setEnabled(updates.enabled);
 
       topic.setUpdatedBy(userId);
@@ -513,120 +490,6 @@ function SentimentController(ctx, log) {
     }
   };
 
-  /**
-   * Link audits to a topic.
-   * POST /sites/{siteId}/sentiment/topics/{topicId}/audits
-   */
-  const linkAudits = async (context) => {
-    const { siteId, topicId } = context.params;
-    const { audits } = context.data || {};
-
-    if (!isValidUUID(siteId)) {
-      return badRequest('Site ID required');
-    }
-
-    if (!hasText(topicId)) {
-      return badRequest('Topic ID required');
-    }
-
-    if (!isArray(audits) || audits.length === 0) {
-      return badRequest('Audits array required');
-    }
-
-    // Validate audit types
-    const invalidAudits = validateAuditTypes(audits);
-    if (invalidAudits.length > 0) {
-      return badRequest(`Invalid audit types: ${invalidAudits.join(', ')}. Valid types: ${KNOWN_AUDIT_TYPES.join(', ')}`);
-    }
-
-    const site = await Site.findById(siteId);
-    if (!site) {
-      return notFound('Site not found');
-    }
-
-    if (!await accessControlUtil.hasAccess(site)) {
-      return forbidden('Only users belonging to the organization can modify topics');
-    }
-
-    const userId = getUserIdentifier(context);
-
-    try {
-      let topic = await SentimentTopic.findById(siteId, topicId);
-
-      if (!topic) {
-        return notFound('Topic not found');
-      }
-
-      // Link audits
-      audits.forEach((audit) => {
-        if (hasText(audit)) {
-          topic.enableAudit(audit);
-        }
-      });
-
-      topic.setUpdatedBy(userId);
-      topic = await topic.save();
-
-      return ok(SentimentTopicDto.toJSON(topic));
-    } catch (error) {
-      log.error(`Error linking audits to topic ${topicId}: ${error.message}`);
-      return internalServerError('Failed to link audits');
-    }
-  };
-
-  /**
-   * Unlink audits from a topic.
-   * DELETE /sites/{siteId}/sentiment/topics/{topicId}/audits
-   */
-  const unlinkAudits = async (context) => {
-    const { siteId, topicId } = context.params;
-    const { audits } = context.data || {};
-
-    if (!isValidUUID(siteId)) {
-      return badRequest('Site ID required');
-    }
-
-    if (!hasText(topicId)) {
-      return badRequest('Topic ID required');
-    }
-
-    if (!isArray(audits) || audits.length === 0) {
-      return badRequest('Audits array required');
-    }
-
-    const site = await Site.findById(siteId);
-    if (!site) {
-      return notFound('Site not found');
-    }
-
-    if (!await accessControlUtil.hasAccess(site)) {
-      return forbidden('Only users belonging to the organization can modify topics');
-    }
-
-    const userId = getUserIdentifier(context);
-
-    try {
-      let topic = await SentimentTopic.findById(siteId, topicId);
-
-      if (!topic) {
-        return notFound('Topic not found');
-      }
-
-      // Unlink audits
-      audits.forEach((audit) => {
-        topic.disableAudit(audit);
-      });
-
-      topic.setUpdatedBy(userId);
-      topic = await topic.save();
-
-      return ok(SentimentTopicDto.toJSON(topic));
-    } catch (error) {
-      log.error(`Error unlinking audits from topic ${topicId}: ${error.message}`);
-      return internalServerError('Failed to unlink audits');
-    }
-  };
-
   // ==================== GUIDELINE ENDPOINTS ====================
 
   /**
@@ -779,11 +642,24 @@ function SentimentController(ctx, log) {
         };
       }
 
+      // Validate audit types if provided
+      if (isArray(guidelineData.audits) && guidelineData.audits.length > 0) {
+        const invalidAudits = validateAuditTypes(guidelineData.audits);
+        if (invalidAudits.length > 0) {
+          return {
+            success: false,
+            name: guidelineData.name,
+            reason: `Invalid audit types: ${invalidAudits.join(', ')}`,
+          };
+        }
+      }
+
       try {
         const newGuideline = await SentimentGuideline.create({
           siteId,
           name: guidelineData.name,
           instruction: guidelineData.instruction,
+          audits: isArray(guidelineData.audits) ? guidelineData.audits : [],
           enabled: guidelineData.enabled !== false,
           createdBy: userId,
           updatedBy: userId,
@@ -866,6 +742,7 @@ function SentimentController(ctx, log) {
       // Update allowed fields
       if (hasText(updates.name)) guideline.setName(updates.name);
       if (hasText(updates.instruction)) guideline.setInstruction(updates.instruction);
+      if (isArray(updates.audits)) guideline.setAudits(updates.audits);
       if (typeof updates.enabled === 'boolean') guideline.setEnabled(updates.enabled);
 
       guideline.setUpdatedBy(userId);
@@ -918,6 +795,120 @@ function SentimentController(ctx, log) {
     }
   };
 
+  /**
+   * Link audits to a guideline.
+   * POST /sites/{siteId}/sentiment/guidelines/{guidelineId}/audits
+   */
+  const linkAudits = async (context) => {
+    const { siteId, guidelineId } = context.params;
+    const { audits } = context.data || {};
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!hasText(guidelineId)) {
+      return badRequest('Guideline ID required');
+    }
+
+    if (!isArray(audits) || audits.length === 0) {
+      return badRequest('Audits array required');
+    }
+
+    // Validate audit types
+    const invalidAudits = validateAuditTypes(audits);
+    if (invalidAudits.length > 0) {
+      return badRequest(`Invalid audit types: ${invalidAudits.join(', ')}. Valid types: ${KNOWN_AUDIT_TYPES.join(', ')}`);
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can modify guidelines');
+    }
+
+    const userId = getUserIdentifier(context);
+
+    try {
+      let guideline = await SentimentGuideline.findById(siteId, guidelineId);
+
+      if (!guideline) {
+        return notFound('Guideline not found');
+      }
+
+      // Link audits
+      audits.forEach((audit) => {
+        if (hasText(audit)) {
+          guideline.enableAudit(audit);
+        }
+      });
+
+      guideline.setUpdatedBy(userId);
+      guideline = await guideline.save();
+
+      return ok(SentimentGuidelineDto.toJSON(guideline));
+    } catch (error) {
+      log.error(`Error linking audits to guideline ${guidelineId}: ${error.message}`);
+      return internalServerError('Failed to link audits');
+    }
+  };
+
+  /**
+   * Unlink audits from a guideline.
+   * DELETE /sites/{siteId}/sentiment/guidelines/{guidelineId}/audits
+   */
+  const unlinkAudits = async (context) => {
+    const { siteId, guidelineId } = context.params;
+    const { audits } = context.data || {};
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!hasText(guidelineId)) {
+      return badRequest('Guideline ID required');
+    }
+
+    if (!isArray(audits) || audits.length === 0) {
+      return badRequest('Audits array required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can modify guidelines');
+    }
+
+    const userId = getUserIdentifier(context);
+
+    try {
+      let guideline = await SentimentGuideline.findById(siteId, guidelineId);
+
+      if (!guideline) {
+        return notFound('Guideline not found');
+      }
+
+      // Unlink audits
+      audits.forEach((audit) => {
+        guideline.disableAudit(audit);
+      });
+
+      guideline.setUpdatedBy(userId);
+      guideline = await guideline.save();
+
+      return ok(SentimentGuidelineDto.toJSON(guideline));
+    } catch (error) {
+      log.error(`Error unlinking audits from guideline ${guidelineId}: ${error.message}`);
+      return internalServerError('Failed to unlink audits');
+    }
+  };
+
   // ==================== COMBINED CONFIG ENDPOINT ====================
 
   /**
@@ -942,16 +933,16 @@ function SentimentController(ctx, log) {
     }
 
     try {
-      // Get topics (optionally filtered by audit)
-      let topicsResult;
-      if (hasText(audit)) {
-        topicsResult = await SentimentTopic.allBySiteIdAndAuditType(siteId, audit, {});
-      } else {
-        topicsResult = await SentimentTopic.allBySiteIdEnabled(siteId, {});
-      }
+      // Get all enabled topics
+      const topicsResult = await SentimentTopic.allBySiteIdEnabled(siteId, {});
 
-      // Get all enabled guidelines (independent of topics)
-      const guidelinesResult = await SentimentGuideline.allBySiteIdEnabled(siteId, {});
+      // Get guidelines (optionally filtered by audit type)
+      let guidelinesResult;
+      if (hasText(audit)) {
+        guidelinesResult = await SentimentGuideline.allBySiteIdAndAuditType(siteId, audit, {});
+      } else {
+        guidelinesResult = await SentimentGuideline.allBySiteIdEnabled(siteId, {});
+      }
 
       return ok({
         topics: (topicsResult.data || []).map(SentimentTopicDto.toJSON),
@@ -972,14 +963,14 @@ function SentimentController(ctx, log) {
     deleteTopic,
     addSubPrompts,
     removeSubPrompts,
-    linkAudits,
-    unlinkAudits,
     // Guidelines
     listGuidelines,
     getGuideline,
     createGuidelines,
     updateGuideline,
     deleteGuideline,
+    linkAudits,
+    unlinkAudits,
     // Combined
     getConfig,
   };

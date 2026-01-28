@@ -49,9 +49,7 @@ describe('Sentiment Controller', () => {
     getTopicId: () => data.topicId || 'topic-1',
     getName: () => data.name || 'Test Topic',
     getDescription: () => data.description,
-    getTopicName: () => data.topicName || '',
     getSubPrompts: () => data.subPrompts || [],
-    getAudits: () => data.audits || [],
     getEnabled: () => data.enabled !== false,
     getCreatedAt: () => data.createdAt || '2026-01-01T00:00:00Z',
     getUpdatedAt: () => data.updatedAt || '2026-01-01T00:00:00Z',
@@ -59,16 +57,11 @@ describe('Sentiment Controller', () => {
     getUpdatedBy: () => data.updatedBy || 'system',
     setName: sandbox.stub(),
     setDescription: sandbox.stub(),
-    setTopicName: sandbox.stub(),
     setSubPrompts: sandbox.stub(),
-    setGuidelineIds: sandbox.stub(),
-    setAudits: sandbox.stub(),
     setEnabled: sandbox.stub(),
     setUpdatedBy: sandbox.stub(),
     addSubPrompt: sandbox.stub(),
     removeSubPrompt: sandbox.stub(),
-    enableAudit: sandbox.stub(),
-    disableAudit: sandbox.stub(),
     save: sandbox.stub().resolvesThis(),
     remove: sandbox.stub().resolves(),
   });
@@ -78,6 +71,7 @@ describe('Sentiment Controller', () => {
     getGuidelineId: () => data.guidelineId || 'guideline-1',
     getName: () => data.name || 'Test Guideline',
     getInstruction: () => data.instruction || 'Test instruction',
+    getAudits: () => data.audits || [],
     getEnabled: () => data.enabled !== false,
     getCreatedAt: () => data.createdAt || '2026-01-01T00:00:00Z',
     getUpdatedAt: () => data.updatedAt || '2026-01-01T00:00:00Z',
@@ -85,8 +79,11 @@ describe('Sentiment Controller', () => {
     getUpdatedBy: () => data.updatedBy || 'system',
     setName: sandbox.stub(),
     setInstruction: sandbox.stub(),
+    setAudits: sandbox.stub(),
     setEnabled: sandbox.stub(),
     setUpdatedBy: sandbox.stub(),
+    enableAudit: sandbox.stub(),
+    disableAudit: sandbox.stub(),
     save: sandbox.stub().resolvesThis(),
     remove: sandbox.stub().resolves(),
   });
@@ -128,6 +125,7 @@ describe('Sentiment Controller', () => {
       SentimentGuideline: {
         allBySiteIdPaginated: sandbox.stub().resolves({ data: mockGuidelines, cursor: null }),
         allBySiteIdEnabled: sandbox.stub().resolves({ data: mockGuidelines, cursor: null }),
+        allBySiteIdAndAuditType: sandbox.stub().resolves({ data: mockGuidelines, cursor: null }),
         findById: sandbox.stub().resolves(mockGuidelines[0]),
         findByIds: sandbox.stub().resolves(mockGuidelines),
         create: sandbox.stub().resolves(mockGuidelines[0]),
@@ -208,13 +206,6 @@ describe('Sentiment Controller', () => {
       const body = await result.json();
       expect(body.items).to.be.an('array');
       expect(body.pagination).to.have.property('limit');
-    });
-
-    it('filters by audit type when provided', async () => {
-      context.data = { audit: 'wikipedia-analysis' };
-      const result = await sentimentController.listTopics(context);
-      expect(result.status).to.equal(200);
-      expect(mockDataAccess.SentimentTopic.allBySiteIdAndAuditType).to.have.been.called;
     });
 
     it('filters by enabled when provided', async () => {
@@ -305,21 +296,13 @@ describe('Sentiment Controller', () => {
     });
 
     it('creates topics successfully', async () => {
-      context.data = [{ name: 'New Topic', topicName: 'Test Topic Name' }];
+      context.data = [{ name: 'New Topic' }];
       const result = await sentimentController.createTopics(context);
       expect(result.status).to.equal(201);
     });
 
     it('reports validation failures for missing name', async () => {
       context.data = [{ description: 'No name' }];
-      const result = await sentimentController.createTopics(context);
-      expect(result.status).to.equal(201);
-      const body = await result.json();
-      expect(body.failures).to.have.lengthOf(1);
-    });
-
-    it('reports validation failures for invalid audit types', async () => {
-      context.data = [{ name: 'Topic', audits: ['invalid-audit'] }];
       const result = await sentimentController.createTopics(context);
       expect(result.status).to.equal(201);
       const body = await result.json();
@@ -529,7 +512,7 @@ describe('Sentiment Controller', () => {
 
   describe('linkAudits', () => {
     beforeEach(() => {
-      context.params.topicId = 'topic-1';
+      context.params.guidelineId = 'guideline-1';
     });
 
     it('returns bad request for invalid siteId', async () => {
@@ -538,8 +521,8 @@ describe('Sentiment Controller', () => {
       expect(result.status).to.equal(400);
     });
 
-    it('returns bad request for missing topicId', async () => {
-      context.params.topicId = '';
+    it('returns bad request for missing guidelineId', async () => {
+      context.params.guidelineId = '';
       const result = await sentimentController.linkAudits(context);
       expect(result.status).to.equal(400);
     });
@@ -563,8 +546,8 @@ describe('Sentiment Controller', () => {
       expect(result.status).to.equal(404);
     });
 
-    it('returns not found if topic does not exist', async () => {
-      mockDataAccess.SentimentTopic.findById.resolves(null);
+    it('returns not found if guideline does not exist', async () => {
+      mockDataAccess.SentimentGuideline.findById.resolves(null);
       context.data = { audits: ['wikipedia-analysis'] };
       const result = await sentimentController.linkAudits(context);
       expect(result.status).to.equal(404);
@@ -572,7 +555,7 @@ describe('Sentiment Controller', () => {
 
     it('handles error gracefully', async () => {
       context.data = { audits: ['wikipedia-analysis'] };
-      mockDataAccess.SentimentTopic.findById.rejects(new Error('DB error'));
+      mockDataAccess.SentimentGuideline.findById.rejects(new Error('DB error'));
       const result = await sentimentController.linkAudits(context);
       expect(result.status).to.equal(500);
     });
@@ -586,7 +569,7 @@ describe('Sentiment Controller', () => {
 
   describe('unlinkAudits', () => {
     beforeEach(() => {
-      context.params.topicId = 'topic-1';
+      context.params.guidelineId = 'guideline-1';
     });
 
     it('returns bad request for invalid siteId', async () => {
@@ -595,8 +578,8 @@ describe('Sentiment Controller', () => {
       expect(result.status).to.equal(400);
     });
 
-    it('returns bad request for missing topicId', async () => {
-      context.params.topicId = '';
+    it('returns bad request for missing guidelineId', async () => {
+      context.params.guidelineId = '';
       const result = await sentimentController.unlinkAudits(context);
       expect(result.status).to.equal(400);
     });
@@ -614,8 +597,8 @@ describe('Sentiment Controller', () => {
       expect(result.status).to.equal(404);
     });
 
-    it('returns not found if topic does not exist', async () => {
-      mockDataAccess.SentimentTopic.findById.resolves(null);
+    it('returns not found if guideline does not exist', async () => {
+      mockDataAccess.SentimentGuideline.findById.resolves(null);
       context.data = { audits: ['wikipedia-analysis'] };
       const result = await sentimentController.unlinkAudits(context);
       expect(result.status).to.equal(404);
@@ -623,7 +606,7 @@ describe('Sentiment Controller', () => {
 
     it('handles error gracefully', async () => {
       context.data = { audits: ['wikipedia-analysis'] };
-      mockDataAccess.SentimentTopic.findById.rejects(new Error('DB error'));
+      mockDataAccess.SentimentGuideline.findById.rejects(new Error('DB error'));
       const result = await sentimentController.unlinkAudits(context);
       expect(result.status).to.equal(500);
     });
@@ -888,11 +871,11 @@ describe('Sentiment Controller', () => {
       expect(body.guidelines).to.be.an('array');
     });
 
-    it('filters by audit when provided', async () => {
+    it('filters guidelines by audit when provided', async () => {
       context.data = { audit: 'wikipedia-analysis' };
       const result = await sentimentController.getConfig(context);
       expect(result.status).to.equal(200);
-      expect(mockDataAccess.SentimentTopic.allBySiteIdAndAuditType).to.have.been.called;
+      expect(mockDataAccess.SentimentGuideline.allBySiteIdAndAuditType).to.have.been.called;
     });
 
     it('handles errors gracefully', async () => {

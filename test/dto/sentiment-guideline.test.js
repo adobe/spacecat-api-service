@@ -23,6 +23,7 @@ describe('SentimentGuidelineDto', () => {
         getGuidelineId: () => 'guideline-456',
         getName: () => 'Product Quality Focus',
         getInstruction: () => 'Focus on product quality aspects in sentiment analysis',
+        getAudits: () => ['wikipedia-analysis', 'reddit-analysis'],
         getEnabled: () => true,
         getCreatedAt: () => '2026-01-01T00:00:00Z',
         getUpdatedAt: () => '2026-01-02T00:00:00Z',
@@ -37,6 +38,7 @@ describe('SentimentGuidelineDto', () => {
         guidelineId: 'guideline-456',
         name: 'Product Quality Focus',
         instruction: 'Focus on product quality aspects in sentiment analysis',
+        audits: ['wikipedia-analysis', 'reddit-analysis'],
         enabled: true,
         createdAt: '2026-01-01T00:00:00Z',
         updatedAt: '2026-01-02T00:00:00Z',
@@ -45,12 +47,13 @@ describe('SentimentGuidelineDto', () => {
       });
     });
 
-    it('handles disabled guideline', () => {
+    it('handles disabled guideline with empty audits', () => {
       const mockGuideline = {
         getSiteId: () => 'site-456',
         getGuidelineId: () => 'guideline-789',
         getName: () => 'Competitor Analysis',
         getInstruction: () => 'Analyze competitor mentions',
+        getAudits: () => [],
         getEnabled: () => false,
         getCreatedAt: () => '2026-01-01T00:00:00Z',
         getUpdatedAt: () => '2026-01-01T00:00:00Z',
@@ -61,6 +64,7 @@ describe('SentimentGuidelineDto', () => {
       const result = SentimentGuidelineDto.toJSON(mockGuideline);
 
       expect(result.enabled).to.equal(false);
+      expect(result.audits).to.deep.equal([]);
       expect(result.name).to.equal('Competitor Analysis');
     });
 
@@ -70,6 +74,7 @@ describe('SentimentGuidelineDto', () => {
         getGuidelineId: () => 'guideline-abc',
         getName: () => 'Test Guideline',
         getInstruction: () => 'Test instruction',
+        getAudits: () => undefined,
         getEnabled: () => undefined,
         getCreatedAt: () => null,
         getUpdatedAt: () => undefined,
@@ -83,6 +88,7 @@ describe('SentimentGuidelineDto', () => {
       expect(result.guidelineId).to.equal('guideline-abc');
       expect(result.name).to.equal('Test Guideline');
       expect(result.instruction).to.equal('Test instruction');
+      expect(result.audits).to.deep.equal([]);
       expect(result.enabled).to.equal(undefined);
       expect(result.createdAt).to.equal(null);
       expect(result.updatedAt).to.equal(undefined);
