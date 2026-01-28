@@ -221,9 +221,8 @@ export const sendWeeklyDigestEmail = async ({
 }) => {
   const { env } = context;
 
-  // TODO: Replace EMAIL_LLMO_TEMPLATE with dedicated weekly digest template
-  // once the new template is created in Adobe Post Office
-  const templateName = env.EMAIL_LLMO_TEMPLATE;
+  // Use dedicated weekly digest template
+  const templateName = env.EMAIL_WEEKLY_DIGEST_TEMPLATE || 'expdev_llmo_overview_weekly_digest';
 
   return sendEmail({
     context,
