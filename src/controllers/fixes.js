@@ -429,6 +429,109 @@ export class FixesController {
   }
 
   /**
+   * Rolls back a failed fix atomically using DynamoDB transact write:
+   * - Marks the Fix as ROLLED_BACK (only if currently FAILED)
+   * - Marks all associated suggestions with ERROR status as SKIPPED
+   *
+   * This operation is atomic: either all updates succeed or none are applied.
+   *
+   * @param {RequestContext} context - request context
+   * @returns {Promise<Response>} the updated fix and suggestions data
+   */
+  async rollbackFailedFix(context) {
+    const { siteId, opportunityId, fixId } = context.params;
+
+    // Validate request params and access
+    let res = checkRequestParams(siteId, opportunityId, fixId) ?? await this.#checkAccess(siteId);
+    if (res) return res;
+
+    // Find the fix
+    const fix = await this.#FixEntity.findById(fixId);
+    if (!fix) return notFound('Fix not found');
+
+    // Check ownership
+    res = await checkOwnership(fix, opportunityId, siteId, this.#Opportunity);
+    if (res) return res;
+
+    // Validate fix is in FAILED status
+    const currentFixStatus = fix.getStatus();
+    if (currentFixStatus !== 'FAILED') {
+      return badRequest(`Fix cannot be rolled back: current status is '${currentFixStatus}', expected 'FAILED'`);
+    }
+
+    // Get all suggestions for this fix
+    const suggestions = await fix.getSuggestions();
+
+    if (!suggestions || suggestions.length === 0) {
+      return badRequest('No suggestions found for this fix');
+    }
+
+    // Filter suggestions that are in ERROR status (eligible for rollback)
+    const errorSuggestions = suggestions.filter((s) => s.getStatus() === 'ERROR');
+
+    // Check if ALL suggestions are in ERROR status
+    if (errorSuggestions.length !== suggestions.length) {
+      const nonErrorStatuses = suggestions
+        .filter((s) => s.getStatus() !== 'ERROR')
+        .map((s) => s.getStatus())
+        .join(', ');
+      return badRequest(
+        `All suggestions must be in ERROR status to rollback. Found suggestions with status: ${nonErrorStatuses}`,
+      );
+    }
+
+    // Build suggestion updates for the transaction
+    const suggestionUpdates = errorSuggestions.map((s) => ({
+      suggestionId: s.getId(),
+    }));
+
+    try {
+      // Use atomic transact write to update fix and all suggestions together
+      await this.#FixEntity.rollbackFixWithSuggestionUpdates(
+        fixId,
+        opportunityId,
+        suggestionUpdates,
+      );
+
+      // Fetch the updated fix and suggestions to return
+      const updatedFix = await this.#FixEntity.findById(fixId);
+      const updatedSuggestions = await Promise.all(
+        errorSuggestions.map((s) => this.#Suggestion.findById(s.getId())),
+      );
+
+      return ok({
+        fix: {
+          index: 0,
+          uuid: updatedFix.getId(),
+          fix: FixDto.toJSON(updatedFix),
+          statusCode: 200,
+        },
+        suggestions: {
+          updated: updatedSuggestions.map((suggestion, index) => ({
+            index,
+            uuid: suggestion.getId(),
+            suggestion: SuggestionDto.toJSON(suggestion),
+            statusCode: 200,
+          })),
+        },
+        message: `Fix rolled back successfully. All ${updatedSuggestions.length} suggestion(s) marked as SKIPPED.`,
+      });
+    } catch (e) {
+      /* c8 ignore next 3 */
+      if (e instanceof ValidationError) {
+        return badRequest(e.message);
+      }
+      // Check if the error is due to a condition check failure (transaction canceled)
+      if (e.message?.includes('Transaction canceled') || e.message?.includes('condition check failed')) {
+        return badRequest(`Rollback failed: ${e.message}`);
+      }
+      return createResponse({
+        message: `Error rolling back fix: ${e.message}`,
+      }, 500);
+    }
+  }
+
+  /**
    * Checks if the user has admin access.
    * @param {string} siteId
    * @returns {Response | null} forbidden response or null.
