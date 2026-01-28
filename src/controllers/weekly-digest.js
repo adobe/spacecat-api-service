@@ -197,6 +197,8 @@ const processSiteDigest = async ({
 
         if (emailResult.success) {
           result.emailsSent += 1;
+          // Include template name for debugging
+          result.templateUsed = emailResult.templateUsed;
         } else {
           result.emailsFailed += 1;
           log.error(`Failed to send digest to ${emailAddress}: ${emailResult.error}`);

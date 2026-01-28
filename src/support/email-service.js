@@ -222,7 +222,10 @@ export const sendWeeklyDigestEmail = async ({
   // Use dedicated weekly digest template (hardcoded, not from env)
   const templateName = 'expdev_llmo_overview_weekly_digest';
 
-  return sendEmail({
+  // Debug: log the template being used
+  context.log.info(`Weekly digest using template: ${templateName}`);
+
+  const result = await sendEmail({
     context,
     templateName,
     to: emailAddress,
@@ -241,4 +244,7 @@ export const sendWeeklyDigestEmail = async ({
       settings_url: settingsUrl,
     },
   });
+
+  // Include template name in response for debugging
+  return { ...result, templateUsed: templateName };
 };
