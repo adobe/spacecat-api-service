@@ -1679,7 +1679,7 @@ SiteTopPage:
       description: The date and time when the top page was imported
       $ref: '#/DateTime'
   example:
-    siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    siteId: 'a1b2c3d4-e5f6-4789-a0b1-c2d3e4f5a6b7'
     url: 'https://example-site.com/foo/bar'
     traffic: 360420000
     source: 'ahrefs'
@@ -1737,7 +1737,7 @@ AuditUrl:
       type: string
       example: user-bob
   example:
-    siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    siteId: 'a1b2c3d4-e5f6-4789-a0b1-c2d3e4f5a6b7'
     url: 'https://example.com/documents/report.pdf'
     byCustomer: true
     audits: ['accessibility', 'broken-backlinks']
