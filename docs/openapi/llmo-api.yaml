@@ -1520,3 +1520,124 @@ llmo-strategy:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+
+llmo-edge-optimize-status:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - llmo
+    summary: Check Edge Optimize Status
+    description: |
+      Checks if Edge Optimize is enabled for a specific page path on the site.
+      The endpoint makes a request to the target URL with a custom user-agent and checks for
+      Edge Optimize headers (x-tokowaka-request-id or x-edgeoptimize-request-id).
+      
+      Features:
+      - Follows up to one level of redirect (301, 302, 303, 307, 308)
+      - Retries up to 3 times on failures with exponential backoff (200ms, 400ms, 800ms)
+      - Returns false for multi-level redirects (2+ levels)
+      - Uses manual redirect handling to detect and follow redirects
+      - Returns HTTP status code along with the edge optimize enabled flag
+    operationId: checkEdgeOptimizeStatus
+    parameters:
+      - name: path
+        in: query
+        required: false
+        description: The path to check (e.g., /products/chair). Defaults to / if not provided.
+        schema:
+          type: string
+          default: /
+        example: /products/chair
+    responses:
+      '200':
+        description: Edge Optimize status retrieved successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: integer
+                  description: HTTP status code from the target URL
+                  example: 200
+                edgeoptimizedenabled:
+                  type: boolean
+                  description: Whether Edge Optimize is enabled (true if x-tokowaka-request-id or x-edgeoptimize-request-id header is present)
+                  example: true
+            examples:
+              enabled:
+                summary: Edge Optimize is enabled
+                value:
+                  status: 200
+                  edgeoptimizedenabled: true
+              disabled:
+                summary: Edge Optimize is not enabled
+                value:
+                  status: 200
+                  edgeoptimizedenabled: false
+              multiLevelRedirect:
+                summary: Multi-level redirect detected
+                value:
+                  status: 302
+                  edgeoptimizedenabled: false
+      '400':
+        description: Bad request - validation errors
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+            examples:
+              missingSiteId:
+                summary: Site ID is required
+                value:
+                  message: "Site ID required"
+              siteNotFound:
+                summary: Site not found
+                value:
+                  message: "Site not found"
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        description: Access denied - user does not have permission to access this site
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Access denied to this site"
+      '404':
+        description: Site not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Site not found"
+      '500':
+        description: Internal server error - failed to check edge optimize status
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+            examples:
+              fetchError:
+                summary: Failed to fetch URL after retries
+                value:
+                  message: "Failed to check edge optimize status: Connection timeout"
+              unexpectedError:
+                summary: Unexpected error occurred
+                value:
+                  message: "Failed to check edge optimize status: Unexpected error"
+    security:
+      - api_key: [ ]
