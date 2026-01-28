@@ -1,3 +1,10 @@
+## [1.299.2](https://github.com/adobe/spacecat-api-service/compare/v1.299.1...v1.299.2) (2026-01-28)
+
+
+### Bug Fixes
+
+* add logs for rollback and edge config update ([#1738](https://github.com/adobe/spacecat-api-service/issues/1738)) ([16891e4](https://github.com/adobe/spacecat-api-service/commit/16891e44743c00769585e5d29557119a297714e5))
+
 ## [1.299.1](https://github.com/adobe/spacecat-api-service/compare/v1.299.0...v1.299.1) (2026-01-28)
 
 
