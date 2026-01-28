@@ -15,12 +15,14 @@
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
+import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 
 import SentimentController from '../../src/controllers/sentiment.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
 
 use(chaiAsPromised);
+use(sinonChai);
 
 const siteId = '3f1c3ab1-9ad0-4231-ac87-8159acf52cb6';
 
