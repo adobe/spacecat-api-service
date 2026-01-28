@@ -202,6 +202,8 @@ const processSiteDigest = async ({
  * @param {Object} options.context - Request context
  * @param {Object} options.Organization - Organization data access
  * @param {Object} options.TrialUser - TrialUser data access
+ * @param {boolean} [options.testMode=false] - Test mode flag
+ * @param {string} [options.testEmail] - Override email in test mode
  * @returns {Promise<Object>} Results for this organization
  */
 const processOrganizationDigests = async ({
@@ -210,6 +212,8 @@ const processOrganizationDigests = async ({
   context,
   Organization,
   TrialUser,
+  testMode = false,
+  testEmail = null,
 }) => {
   const { log } = context;
   const result = {
@@ -230,21 +234,35 @@ const processOrganizationDigests = async ({
       return result;
     }
 
-    // Get trial users for this organization
-    const trialUsers = await TrialUser.allByOrganizationId(orgId);
+    let eligibleUsers;
 
-    // Filter to active users who haven't opted out
-    // Status should be REGISTERED or INVITED (not BLOCKED or DELETED)
-    const eligibleUsers = trialUsers.filter((user) => {
-      const status = user.getStatus();
-      if (status === 'BLOCKED' || status === 'DELETED') {
-        return false;
-      }
-      if (hasOptedOut(user)) {
-        return false;
-      }
-      return true;
-    });
+    // TEST MODE: Create a fake user with test email
+    if (testMode && testEmail) {
+      log.warn(`TEST MODE: Overriding users with test email: ${testEmail}`);
+      eligibleUsers = [{
+        getEmailId: () => testEmail,
+        getFirstName: () => 'Test',
+        getLastName: () => 'User',
+        getStatus: () => 'REGISTERED',
+        getMetadata: () => ({}),
+      }];
+    } else {
+      // Get trial users for this organization
+      const trialUsers = await TrialUser.allByOrganizationId(orgId);
+
+      // Filter to active users who haven't opted out
+      // Status should be REGISTERED or INVITED (not BLOCKED or DELETED)
+      eligibleUsers = trialUsers.filter((user) => {
+        const status = user.getStatus();
+        if (status === 'BLOCKED' || status === 'DELETED') {
+          return false;
+        }
+        if (hasOptedOut(user)) {
+          return false;
+        }
+        return true;
+      });
+    }
 
     if (eligibleUsers.length === 0) {
       log.info(`No eligible users for org ${orgId}, skipping ${sites.length} sites`);
@@ -303,6 +321,14 @@ function WeeklyDigestController(ctx) {
 
   const { Site, Organization, TrialUser } = dataAccess;
 
+  // ============================================================
+  // TEMPORARY TEST MODE - Remove before merging to production
+  // ============================================================
+  const TEST_MODE = true; // Set to false to disable test mode
+  const TEST_EMAIL = 'joselopez@adobe.com';
+  const TEST_SITE_DOMAIN = 'adobe.com'; // Only process sites matching this domain
+  // ============================================================
+
   /**
    * Process weekly digests for all LLMO-enabled sites.
    * This is the main entry point for the scheduled job.
@@ -315,6 +341,11 @@ function WeeklyDigestController(ctx) {
     const startTime = Date.now();
 
     log.info('Starting weekly digest processing');
+
+    // Log test mode status
+    if (TEST_MODE) {
+      log.warn(`TEST MODE ENABLED: Only processing sites matching "${TEST_SITE_DOMAIN}" and sending to "${TEST_EMAIL}"`);
+    }
 
     const summary = {
       sitesProcessed: 0,
@@ -331,13 +362,28 @@ function WeeklyDigestController(ctx) {
       log.info(`Found ${allSites.length} total sites`);
 
       // Filter to LLMO-enabled sites (those with llmo.dataFolder config)
-      const llmoSites = allSites.filter((site) => {
+      let llmoSites = allSites.filter((site) => {
         const config = site.getConfig();
         const llmoConfig = config?.llmo || config?.getLlmoConfig?.();
         return llmoConfig?.dataFolder;
       });
 
       log.info(`Found ${llmoSites.length} LLMO-enabled sites`);
+
+      // TEST MODE: Filter to only test site
+      if (TEST_MODE) {
+        llmoSites = llmoSites.filter((site) => {
+          const baseURL = site.getBaseURL();
+          return baseURL && baseURL.includes(TEST_SITE_DOMAIN);
+        });
+        log.warn(`TEST MODE: Filtered to ${llmoSites.length} sites matching "${TEST_SITE_DOMAIN}"`);
+
+        // Only process the first matching site in test mode
+        if (llmoSites.length > 1) {
+          llmoSites = [llmoSites[0]];
+          log.warn('TEST MODE: Limited to first matching site only');
+        }
+      }
 
       // Group sites by organization
       const sitesByOrg = new Map();
@@ -360,6 +406,8 @@ function WeeklyDigestController(ctx) {
           context,
           Organization,
           TrialUser,
+          testMode: TEST_MODE,
+          testEmail: TEST_EMAIL,
         });
 
         // Aggregate results
@@ -375,7 +423,8 @@ function WeeklyDigestController(ctx) {
       log.info(`Weekly digest processing complete in ${duration}ms: ${summary.sitesProcessed} sites processed, ${summary.totalEmailsSent} emails sent`);
 
       return ok({
-        message: 'Weekly digest processing complete',
+        message: TEST_MODE ? 'Weekly digest TEST processing complete' : 'Weekly digest processing complete',
+        testMode: TEST_MODE,
         duration: `${duration}ms`,
         summary: {
           sitesProcessed: summary.sitesProcessed,
