@@ -197,8 +197,9 @@ const processSiteDigest = async ({
 
         if (emailResult.success) {
           result.emailsSent += 1;
-          // Include template name for debugging
+          // Include debug info
           result.templateUsed = emailResult.templateUsed;
+          result.payloadSent = emailResult.payloadSent;
         } else {
           result.emailsFailed += 1;
           log.error(`Failed to send digest to ${emailAddress}: ${emailResult.error}`);
@@ -458,6 +459,8 @@ function WeeklyDigestController(ctx) {
           totalEmailsSent: summary.totalEmailsSent,
           totalEmailsFailed: summary.totalEmailsFailed,
         },
+        // Debug: include site results with payload
+        debug: summary.siteResults,
       });
     } catch (error) {
       log.error(`Weekly digest processing failed: ${error.message}`);

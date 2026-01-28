@@ -128,8 +128,13 @@ export const sendEmail = async ({
     // Build email payload
     const emailPayload = buildEmailPayload({ to, templateParams });
 
+    // Debug: log the payload being sent
+    log.info(`Email payload XML: ${emailPayload}`);
+    log.info(`Template params: ${JSON.stringify(templateParams)}`);
+
     // Send email
     const url = `${postOfficeEndpoint}/po-server/message?templateName=${templateName}&locale=${locale}`;
+    log.info(`Email URL: ${url}`);
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -142,7 +147,7 @@ export const sendEmail = async ({
 
     if (response.status === 200) {
       log.info(`Email sent successfully to ${Array.isArray(to) ? to.join(', ') : to}`);
-      return { success: true, statusCode: 200 };
+      return { success: true, statusCode: 200, payloadSent: emailPayload };
     }
 
     const errorText = await response.text().catch(() => 'Unknown error');
