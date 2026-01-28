@@ -1,0 +1,638 @@
+# Brand Sentiment Guidelines API
+# ==============================
+# Topics: Define WHAT to analyze (subjects of interest)
+# Guidelines: Define HOW to analyze (analysis instructions with audit associations)
+
+# =============================================================================
+# TOPICS
+# =============================================================================
+
+topics-list:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 100
+        description: Number of items to return per page
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Pagination cursor from previous response
+      - name: enabled
+        in: query
+        required: false
+        schema:
+          type: boolean
+        description: Filter by enabled status
+    tags:
+      - site
+      - sentiment
+    summary: List topics for a site
+    description: |
+      Retrieves sentiment analysis topics stored for a site with pagination support.
+      Topics define subjects of interest (e.g., "2026 Corvette Stingray", "BMW XM Latest").
+    operationId: listSentimentTopics
+    responses:
+      '200':
+        description: A paginated list of sentiment topics
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SentimentTopicListResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+  post:
+    tags:
+      - site
+      - sentiment
+    summary: Create topics (bulk operation)
+    description: |
+      Creates one or more sentiment analysis topics.
+      
+      - Maximum 100 topics per request
+      - Returns per-item success/failure information
+    operationId: createSentimentTopics
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 100
+            items:
+              $ref: './schemas.yaml#/SentimentTopicInput'
+    responses:
+      '201':
+        description: Topics created successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SentimentTopicBulkResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+topic-get:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: topicId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Topic identifier
+  get:
+    tags:
+      - site
+      - sentiment
+    summary: Get a specific topic
+    description: Retrieves a specific sentiment topic by ID.
+    operationId: getSentimentTopic
+    responses:
+      '200':
+        description: The requested sentiment topic
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SentimentTopic'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+  patch:
+    tags:
+      - site
+      - sentiment
+    summary: Update a topic
+    description: |
+      Updates a sentiment topic. Only provided fields are updated.
+    operationId: updateSentimentTopic
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/SentimentTopicUpdate'
+    responses:
+      '200':
+        description: Topic updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SentimentTopic'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+  delete:
+    tags:
+      - site
+      - sentiment
+    summary: Delete a topic
+    description: Deletes a sentiment topic.
+    operationId: deleteSentimentTopic
+    responses:
+      '200':
+        description: Topic deleted successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: Topic deleted successfully
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+topic-prompts:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: topicId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Topic identifier
+  post:
+    tags:
+      - site
+      - sentiment
+    summary: Add sub-prompts to a topic
+    description: Adds one or more sub-prompts to an existing topic.
+    operationId: addTopicSubPrompts
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - prompts
+            properties:
+              prompts:
+                type: array
+                items:
+                  type: string
+                description: Array of sub-prompts to add
+    responses:
+      '200':
+        description: Sub-prompts added successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SentimentTopic'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+  delete:
+    tags:
+      - site
+      - sentiment
+    summary: Remove sub-prompts from a topic
+    description: Removes one or more sub-prompts from an existing topic.
+    operationId: removeTopicSubPrompts
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - prompts
+            properties:
+              prompts:
+                type: array
+                items:
+                  type: string
+                description: Array of sub-prompts to remove
+    responses:
+      '200':
+        description: Sub-prompts removed successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SentimentTopic'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+# =============================================================================
+# GUIDELINES
+# =============================================================================
+
+guidelines-list:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 100
+        description: Number of items to return per page
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Pagination cursor from previous response
+      - name: enabled
+        in: query
+        required: false
+        schema:
+          type: boolean
+        description: Filter by enabled status
+    tags:
+      - site
+      - sentiment
+    summary: List guidelines for a site
+    description: |
+      Retrieves sentiment analysis guidelines stored for a site with pagination support.
+      Guidelines define how to analyze topics (e.g., "Focus on product quality").
+    operationId: listSentimentGuidelines
+    responses:
+      '200':
+        description: A paginated list of sentiment guidelines
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SentimentGuidelineListResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+  post:
+    tags:
+      - site
+      - sentiment
+    summary: Create guidelines (bulk operation)
+    description: |
+      Creates one or more sentiment analysis guidelines.
+      
+      - Maximum 100 guidelines per request
+      - Returns per-item success/failure information
+    operationId: createSentimentGuidelines
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 100
+            items:
+              $ref: './schemas.yaml#/SentimentGuidelineInput'
+    responses:
+      '201':
+        description: Guidelines created successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SentimentGuidelineBulkResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+guideline-get:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: guidelineId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Guideline identifier
+  get:
+    tags:
+      - site
+      - sentiment
+    summary: Get a specific guideline
+    description: Retrieves a specific sentiment guideline by ID.
+    operationId: getSentimentGuideline
+    responses:
+      '200':
+        description: The requested sentiment guideline
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SentimentGuideline'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+  patch:
+    tags:
+      - site
+      - sentiment
+    summary: Update a guideline
+    description: |
+      Updates a sentiment guideline. Only provided fields are updated.
+    operationId: updateSentimentGuideline
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/SentimentGuidelineUpdate'
+    responses:
+      '200':
+        description: Guideline updated successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SentimentGuideline'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+  delete:
+    tags:
+      - site
+      - sentiment
+    summary: Delete a guideline
+    description: Deletes a sentiment guideline.
+    operationId: deleteSentimentGuideline
+    responses:
+      '200':
+        description: Guideline deleted successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: Guideline deleted successfully
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+guideline-audits:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: guidelineId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Guideline identifier
+  post:
+    tags:
+      - site
+      - sentiment
+    summary: Link audit types to a guideline
+    description: |
+      Adds audit type associations to a guideline.
+      Valid audit types: wikipedia-analysis, reddit-analysis, youtube-analysis, etc.
+    operationId: linkGuidelineAudits
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - audits
+            properties:
+              audits:
+                type: array
+                items:
+                  type: string
+                description: Array of audit types to link
+    responses:
+      '200':
+        description: Audits linked successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SentimentGuideline'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+  delete:
+    tags:
+      - site
+      - sentiment
+    summary: Unlink audit types from a guideline
+    description: Removes audit type associations from a guideline.
+    operationId: unlinkGuidelineAudits
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - audits
+            properties:
+              audits:
+                type: array
+                items:
+                  type: string
+                description: Array of audit types to unlink
+    responses:
+      '200':
+        description: Audits unlinked successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SentimentGuideline'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+# =============================================================================
+# CONFIG (Combined)
+# =============================================================================
+
+sentiment-config:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    parameters:
+      - name: audit
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Filter guidelines by audit type (topics are always returned unfiltered)
+    tags:
+      - site
+      - sentiment
+    summary: Get full sentiment config
+    description: |
+      Retrieves the complete sentiment configuration for a site.
+      Returns all enabled topics and guidelines (optionally filtered by audit type).
+      
+      When `audit` is specified, only guidelines with that audit type are returned.
+      Topics are always returned (all enabled topics).
+    operationId: getSentimentConfig
+    responses:
+      '200':
+        description: Full sentiment configuration
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SentimentConfig'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
