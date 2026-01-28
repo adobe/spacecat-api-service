@@ -401,14 +401,14 @@ botBlockerController,
     'DELETE /sites/:siteId/sentiment/topics/:topicId': sentimentController.deleteTopic,
     'POST /sites/:siteId/sentiment/topics/:topicId/prompts': sentimentController.addSubPrompts,
     'DELETE /sites/:siteId/sentiment/topics/:topicId/prompts': sentimentController.removeSubPrompts,
-    'POST /sites/:siteId/sentiment/guidelines/:guidelineId/audits': sentimentController.linkAudits,
-    'DELETE /sites/:siteId/sentiment/guidelines/:guidelineId/audits': sentimentController.unlinkAudits,
     // Guidelines
     'GET /sites/:siteId/sentiment/guidelines': sentimentController.listGuidelines,
     'GET /sites/:siteId/sentiment/guidelines/:guidelineId': sentimentController.getGuideline,
     'POST /sites/:siteId/sentiment/guidelines': sentimentController.createGuidelines,
     'PATCH /sites/:siteId/sentiment/guidelines/:guidelineId': sentimentController.updateGuideline,
     'DELETE /sites/:siteId/sentiment/guidelines/:guidelineId': sentimentController.deleteGuideline,
+    'POST /sites/:siteId/sentiment/guidelines/:guidelineId/audits': sentimentController.linkAudits,
+    'DELETE /sites/:siteId/sentiment/guidelines/:guidelineId/audits': sentimentController.unlinkAudits,
     // Combined config
     'GET /sites/:siteId/sentiment/config': sentimentController.getConfig,
   };

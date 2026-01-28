@@ -5321,17 +5321,21 @@ SentimentTopicInput:
     name:
       type: string
       description: Topic name/subject to analyze
+      example: "2026 Corvette Stingray"
     description:
       type: string
       description: Optional description for context
+      example: "Track sentiment about the latest Corvette model"
     subPrompts:
       type: array
       items:
         type: string
       description: Additional prompts/questions for deeper analysis
+      example: ["What do people say about performance?", "Price sentiment?"]
     enabled:
       type: boolean
       default: true
+      example: true
 
 SentimentTopicUpdate:
   type: object
@@ -5368,13 +5372,18 @@ SentimentTopicListResponse:
 SentimentTopicBulkResponse:
   type: object
   properties:
-    successCount:
-      type: integer
-      description: Number of successfully processed items
-    results:
-      type: array
-      items:
-        $ref: '#/SentimentTopic'
+    metadata:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total number of items in request
+        success:
+          type: integer
+          description: Number of successfully processed items
+        failure:
+          type: integer
+          description: Number of failed items
     failures:
       type: array
       items:
@@ -5384,6 +5393,10 @@ SentimentTopicBulkResponse:
             type: string
           reason:
             type: string
+    items:
+      type: array
+      items:
+        $ref: '#/SentimentTopic'
 
 SentimentGuideline:
   type: object
@@ -5437,17 +5450,21 @@ SentimentGuidelineInput:
     name:
       type: string
       description: Display name
+      example: "Product Quality Focus"
     instruction:
       type: string
       description: The actual guideline instruction
+      example: "Focus on sentiment related to product quality, durability, and craftsmanship."
     audits:
       type: array
       items:
         type: string
       description: Audit types to associate
+      example: ["wikipedia-analysis", "reddit-analysis"]
     enabled:
       type: boolean
       default: true
+      example: true
 
 SentimentGuidelineUpdate:
   type: object
@@ -5484,13 +5501,18 @@ SentimentGuidelineListResponse:
 SentimentGuidelineBulkResponse:
   type: object
   properties:
-    successCount:
-      type: integer
-      description: Number of successfully processed items
-    results:
-      type: array
-      items:
-        $ref: '#/SentimentGuideline'
+    metadata:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total number of items in request
+        success:
+          type: integer
+          description: Number of successfully processed items
+        failure:
+          type: integer
+          description: Number of failed items
     failures:
       type: array
       items:
@@ -5500,6 +5522,10 @@ SentimentGuidelineBulkResponse:
             type: string
           reason:
             type: string
+    items:
+      type: array
+      items:
+        $ref: '#/SentimentGuideline'
 
 SentimentConfig:
   type: object
