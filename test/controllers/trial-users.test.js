@@ -1005,5 +1005,35 @@ describe('Trial User Controller', () => {
       result = await trialUserController.updateEmailPreferences(context);
       expect(result.status).to.equal(500);
     });
+
+    it('should handle edge cases for data and metadata', async () => {
+      const savedMetadata = {};
+      const mockTrialUserForUpdate = {
+        ...mockTrialUser,
+        getMetadata: () => null, // Test null metadata branch (line 251)
+        setMetadata: (meta) => { Object.assign(savedMetadata, meta); },
+        save: sandbox.stub().resolves(),
+      };
+      mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUserForUpdate);
+
+      // Test with undefined data (line 237) and undefined weeklyDigest (line 254)
+      const context = {
+        // data is undefined - tests line 237: context.data || {}
+        dataAccess: mockDataAccess,
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('ims')
+            .withProfile({ trial_email: 'test@example.com' })
+            .withAuthenticated(true),
+        },
+      };
+
+      const result = await trialUserController.updateEmailPreferences(context);
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      // weeklyDigest defaults to true when not explicitly set
+      expect(body.emailPreferences.weeklyDigest).to.equal(true);
+    });
   });
 });
