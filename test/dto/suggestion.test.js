@@ -111,6 +111,9 @@ describe('Suggestion DTO', () => {
       });
 
       it('includes recommendations array in data when present', () => {
+        const opportunity = {
+          getType: () => 'alt-text', // Use schema with recommendations
+        };
         const suggestion = {
           ...createMockSuggestion(),
           getData: () => ({
@@ -121,7 +124,7 @@ describe('Suggestion DTO', () => {
           }),
         };
 
-        const json = SuggestionDto.toJSON(suggestion, 'minimal');
+        const json = SuggestionDto.toJSON(suggestion, 'minimal', opportunity);
 
         expect(json.data).to.have.property('recommendations');
         expect(json.data.recommendations).to.have.length(2);
@@ -143,23 +146,18 @@ describe('Suggestion DTO', () => {
         expect(json.data).to.have.property('pattern', '*.html');
       });
 
-      it('includes cves, findings, form, page, accessibility when present', () => {
+      it('includes cves when schema is defined for the opportunity type', () => {
+        const opportunity = {
+          getType: () => 'security-vulnerabilities', // Has schema with cves
+        };
         const suggestion = createMockSuggestion({
           url: undefined,
-          cves: [{ id: 'CVE-2025-1234' }],
-          findings: [{ type: 'error' }],
-          form: { action: '/submit' },
-          page: { title: 'Test Page' },
-          accessibility: { score: 95 },
+          cves: [{ id: 'CVE-2025-1234', url: 'https://example.com/cve' }],
         });
 
-        const json = SuggestionDto.toJSON(suggestion, 'minimal');
+        const json = SuggestionDto.toJSON(suggestion, 'minimal', opportunity);
 
         expect(json.data).to.have.property('cves');
-        expect(json.data).to.have.property('findings');
-        expect(json.data).to.have.property('form');
-        expect(json.data).to.have.property('page');
-        expect(json.data).to.have.property('accessibility');
       });
 
       it('includes urls array, link, sourceUrl, destinationUrl when present', () => {
@@ -208,36 +206,52 @@ describe('Suggestion DTO', () => {
         ]);
       });
 
-      it('includes CWV fields: metrics, type, pageviews when present', () => {
+      it('includes CWV fields: metrics, type, issues when present with cwv schema', () => {
+        const opportunity = {
+          getType: () => 'cwv', // Has schema with metrics, type, issues
+        };
         const suggestion = createMockSuggestion({
           url: 'https://example.com/page',
-          metrics: { mobileMetric: 5, desktopMetric: 3 },
+          metrics: [
+            {
+              deviceType: 'mobile', lcp: 2500, inp: 100, cls: 0.1,
+            },
+            {
+              deviceType: 'desktop', lcp: 2000, inp: 50, cls: 0.05,
+            },
+          ],
           type: 'url',
-          pageviews: 1000,
+          issues: [{ issue: 'slow-lcp' }],
         });
 
-        const json = SuggestionDto.toJSON(suggestion, 'minimal');
+        const json = SuggestionDto.toJSON(suggestion, 'minimal', opportunity);
 
+        expect(json.data).to.have.property('url');
         expect(json.data).to.have.property('metrics');
-        expect(json.data.metrics).to.deep.equal({ mobileMetric: 5, desktopMetric: 3 });
+        expect(json.data.metrics).to.have.length(2);
         expect(json.data).to.have.property('type', 'url');
-        expect(json.data).to.have.property('pageviews', 1000);
+        expect(json.data).to.have.property('issues');
       });
 
       it('includes issues array for Accessibility/ColorContrast/Form suggestions', () => {
+        const opportunity = {
+          getType: () => 'a11y-color-contrast', // Has schema with issues
+        };
         const suggestion = createMockSuggestion({
-          url: undefined,
+          url: 'https://example.com/page',
           issues: [
-            { type: 'color-contrast', occurrences: 5 },
-            { type: 'missing-alt', occurrences: 3 },
+            { type: 'color-contrast', occurrences: 5, severity: 'serious' },
+            { type: 'missing-alt', occurrences: 3, severity: 'critical' },
           ],
         });
 
-        const json = SuggestionDto.toJSON(suggestion, 'minimal');
+        const json = SuggestionDto.toJSON(suggestion, 'minimal', opportunity);
 
         expect(json.data).to.have.property('issues');
         expect(json.data.issues).to.have.length(2);
+        // Issues are filtered to only include occurrences
         expect(json.data.issues[0]).to.have.property('occurrences', 5);
+        expect(json.data.issues[0]).to.not.have.property('type');
       });
 
       it('does not include data property when no URL-related fields exist', () => {
@@ -361,8 +375,9 @@ describe('Suggestion DTO', () => {
           expect(json.data.issues[0]).to.have.property('metric', 'LCP');
         });
 
-        it('does not filter issues when opportunity is not provided', () => {
+        it('does not filter issues when opportunity is not provided (uses fallback)', () => {
           const suggestion = createMockSuggestion({
+            url: 'https://example.com', // URL field will be in fallback
             issues: [
               {
                 type: 'some-issue',
@@ -374,8 +389,9 @@ describe('Suggestion DTO', () => {
 
           const json = SuggestionDto.toJSON(suggestion, 'minimal');
 
-          expect(json.data.issues[0]).to.have.property('occurrences', 5);
-          expect(json.data.issues[0]).to.have.property('severity', 'high');
+          // Fallback projection only includes URL fields, not issues
+          expect(json.data).to.have.property('url');
+          expect(json.data).to.not.have.property('issues');
         });
 
         it('handles non-array issues field gracefully', () => {
@@ -489,6 +505,7 @@ describe('Suggestion DTO', () => {
 
         it('does not filter issues for non-accessibility opportunities in summary view', () => {
           const suggestion = createMockSuggestion({
+            url: 'https://example.com/page',
             issues: [
               {
                 type: 'cwv-issue',
@@ -501,8 +518,9 @@ describe('Suggestion DTO', () => {
 
           const json = SuggestionDto.toJSON(suggestion, 'summary', opportunity);
 
-          expect(json.data.issues[0]).to.have.property('occurrences', 5);
-          expect(json.data.issues[0]).to.have.property('severity', 'high');
+          // broken-backlinks doesn't have a schema, uses fallback (URL only)
+          expect(json.data).to.have.property('url');
+          expect(json.data).to.not.have.property('issues'); // Not in fallback
         });
       });
     });
