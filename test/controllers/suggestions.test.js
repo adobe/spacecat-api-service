@@ -5682,6 +5682,28 @@ describe('Suggestions Controller', () => {
       expect(key).to.include('preview/opportunities/');
     });
 
+    it('logs tokowaka-preview when profile email is missing', async () => {
+      const response = await suggestionsController.previewSuggestions({
+        ...context,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'admin' }])
+            .withAuthenticated(true),
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(context.log.info.calledWithMatch('tokowaka-preview')).to.be.true;
+    });
+
     it('should return 400 if suggestions belong to different URLs', async () => {
       const response = await suggestionsController.previewSuggestions({
         ...context,
@@ -6540,6 +6562,76 @@ describe('Suggestions Controller', () => {
       expect(failedSuggestion).to.exist;
       expect(failedSuggestion.statusCode).to.equal(400);
       expect(failedSuggestion.message).to.equal('Domain-wide aggregate suggestions cannot be previewed individually');
+    });
+  });
+
+  describe('LLMO edge optimize config logging', () => {
+    it('logs tokowaka-edge-optimize-config when profile email is missing', async () => {
+      const log = {
+        info: sandbox.stub(),
+        error: sandbox.stub(),
+      };
+
+      const config = {
+        getLlmoConfig: () => ({ dataFolder: 'https://example.com/data' }),
+        getEdgeOptimizeConfig: () => ({}),
+        updateEdgeOptimizeConfig: sandbox.stub(),
+      };
+
+      const site = {
+        getId: () => SITE_ID,
+        getBaseURL: () => 'https://example.com',
+        getConfig: () => config,
+        setConfig: sandbox.stub(),
+        save: sandbox.stub().resolves(),
+      };
+
+      const mockSite = {
+        findById: sandbox.stub().resolves(site),
+      };
+
+      const tokowakaClientStub = {
+        fetchMetaconfig: sandbox.stub().resolves({ apiKeys: ['key'] }),
+        updateMetaconfig: sandbox.stub().resolves({ apiKeys: ['key'] }),
+      };
+
+      const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
+        '../../src/support/access-control-util.js': {
+          default: {
+            fromContext: () => ({
+              hasAccess: sandbox.stub().resolves(true),
+            }),
+          },
+        },
+        '@adobe/spacecat-shared-tokowaka-client': {
+          default: {
+            createFrom: sandbox.stub().returns(tokowakaClientStub),
+          },
+        },
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: {
+            toDynamoItem: (cfg) => cfg,
+          },
+        },
+      });
+
+      const llmoController = LlmoController({
+        dataAccess: { Site: mockSite },
+        attributes: { authInfo: { profile: {} } },
+        log,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+      });
+
+      const response = await llmoController.createOrUpdateEdgeConfig({
+        dataAccess: { Site: mockSite },
+        attributes: { authInfo: { profile: {} } },
+        log,
+        params: { siteId: SITE_ID },
+        data: { tokowakaEnabled: true },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(log.info.calledWithMatch('tokowaka-edge-optimize-config')).to.be.true;
     });
   });
 });

@@ -1,3 +1,24 @@
+## [1.299.3](https://github.com/adobe/spacecat-api-service/compare/v1.299.2...v1.299.3) (2026-01-29)
+
+
+### Bug Fixes
+
+* **llmo:** allow partial failures when enabling imports and audits ([#1752](https://github.com/adobe/spacecat-api-service/issues/1752)) ([313bc2f](https://github.com/adobe/spacecat-api-service/commit/313bc2f401b0e21063a0e0bc6637027ba6bfd4c1))
+
+## [1.299.2](https://github.com/adobe/spacecat-api-service/compare/v1.299.1...v1.299.2) (2026-01-28)
+
+
+### Bug Fixes
+
+* add logs for rollback and edge config update ([#1738](https://github.com/adobe/spacecat-api-service/issues/1738)) ([16891e4](https://github.com/adobe/spacecat-api-service/commit/16891e44743c00769585e5d29557119a297714e5))
+
+## [1.299.1](https://github.com/adobe/spacecat-api-service/compare/v1.299.0...v1.299.1) (2026-01-28)
+
+
+### Bug Fixes
+
+* allow prerender to update in edge config ([#1737](https://github.com/adobe/spacecat-api-service/issues/1737)) ([4bf3d6b](https://github.com/adobe/spacecat-api-service/commit/4bf3d6b5ee3486f0bc010e20bb71fc576d737ee1))
+
 # [1.299.0](https://github.com/adobe/spacecat-api-service/compare/v1.298.1...v1.299.0) (2026-01-27)
 
 
