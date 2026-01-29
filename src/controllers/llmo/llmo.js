@@ -974,9 +974,6 @@ function LlmoController(ctx) {
       const baseURL = site.getBaseURL();
       const tokowakaClient = TokowakaClient.createFrom(context);
 
-      const imsUserId = context.attributes?.authInfo?.getProfile()?.sub || 'system';
-      log.info(`User IMS ID: ${imsUserId} updating edge config for site ${siteId}`);
-
       // Handle S3 metaconfig
       let metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
 
@@ -1056,17 +1053,8 @@ function LlmoController(ctx) {
       const tokowakaClient = TokowakaClient.createFrom(context);
       const metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
 
-      // Return empty object if metaconfig doesn't exist
-      if (!metaconfig) {
-        return ok({});
-      }
-
-      const currentConfig = site.getConfig();
-      const edgeOptimizeConfig = currentConfig.getEdgeOptimizeConfig() || {};
-
       return ok({
         ...metaconfig,
-        edgeOptimizeConfig,
       });
     } catch (error) {
       log.error(`Failed to fetch edge config for site ${siteId}:`, error);

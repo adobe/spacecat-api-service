@@ -3641,29 +3641,6 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody.message).to.include('Site not found');
     });
-
-    it('should use system as user ID when authInfo is not available', async () => {
-      const newMetaconfig = {
-        siteId: TEST_SITE_ID,
-        apiKeys: ['test-api-key-123'],
-        tokowakaEnabled: true,
-      };
-
-      mockTokowakaClient.fetchMetaconfig.resolves(null);
-      mockTokowakaClient.createMetaconfig.resolves(newMetaconfig);
-
-      // Create context without authInfo
-      const contextWithoutAuth = {
-        ...edgeConfigContext,
-        attributes: {},
-      };
-
-      const result = await controller.createOrUpdateEdgeConfig(contextWithoutAuth);
-
-      expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-      expect(responseBody).to.deep.include(newMetaconfig);
-    });
   });
 
   describe('getEdgeConfig', () => {
@@ -3731,26 +3708,6 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(404);
       const responseBody = await result.json();
       expect(responseBody.message).to.include('Site not found');
-    });
-
-    it('should use empty object when getEdgeOptimizeConfig returns null', async () => {
-      const metaconfig = {
-        siteId: TEST_SITE_ID,
-        apiKeys: ['test-api-key'],
-        tokowakaEnabled: true,
-      };
-
-      mockConfig.getEdgeOptimizeConfig.returns(null);
-      mockTokowakaClient.fetchMetaconfig.resolves(metaconfig);
-
-      const result = await controller.getEdgeConfig(edgeConfigContext);
-
-      expect(result.status).to.equal(200);
-      const responseBody = await result.json();
-      expect(responseBody).to.deep.include({
-        ...metaconfig,
-        edgeOptimizeConfig: {},
-      });
     });
   });
 
