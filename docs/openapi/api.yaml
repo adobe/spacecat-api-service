@@ -452,6 +452,8 @@ paths:
     $ref: './site-api.yaml#/site-report'
   /sites/{siteId}/graph:
     $ref: './site-api.yaml#/site-graph'
+  /sites/{siteId}/llmo/edge-optimize-status:
+    $ref: './llmo-api.yaml#/llmo-edge-optimize-status'
 
 components:
   securitySchemes:
