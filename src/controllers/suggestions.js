@@ -900,6 +900,7 @@ function SuggestionsController(ctx, sqs, env) {
   const previewSuggestions = async (context) => {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
+    const { authInfo: { profile } } = context.attributes;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -1030,7 +1031,7 @@ function SuggestionsController(ctx, sqs, env) {
           optimizedHtml = htmlResult.optimizedHtml;
         }
 
-        context.log.info(`Successfully previewed ${succeededSuggestions.length} suggestions`);
+        context.log.info(`[edge-preview] Successfully previewed ${succeededSuggestions.length} suggestions by ${profile?.email || 'tokowaka-preview'}`);
       } catch (error) {
         context.log.error(`Error generating preview: ${error.message}`, error);
         // If preview fails, mark all valid suggestions as failed
@@ -1683,7 +1684,7 @@ function SuggestionsController(ctx, sqs, env) {
           });
         });
 
-        context.log.info(`[edge-rollback] Successfully rolled back ${succeededSuggestions.length} suggestions from Edge`);
+        context.log.info(`[edge-rollback] Successfully rolled back ${succeededSuggestions.length} suggestions from Edge by ${profile?.email || 'tokowaka-rollback'}`);
       } catch (error) {
         context.log.error(`Error during Tokowaka rollback: ${error.message}`, error);
         // If rollback fails, mark all valid suggestions as failed
