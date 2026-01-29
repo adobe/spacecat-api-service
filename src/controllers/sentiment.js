@@ -129,7 +129,7 @@ function SentimentController(ctx, log) {
         });
       } else {
         // Get all topics
-        result = await SentimentTopic.allBySiteIdPaginated(siteId, {
+        result = await SentimentTopic.allBySiteId(siteId, {
           limit: effectiveLimit,
           cursor,
         });
@@ -415,10 +415,12 @@ function SentimentController(ctx, log) {
         return notFound('Topic not found');
       }
 
-      // Add prompts
+      // Add prompts (skip duplicates)
+      const existingPrompts = new Set(topic.getSubPrompts() || []);
       prompts.forEach((prompt) => {
-        if (hasText(prompt)) {
+        if (hasText(prompt) && !existingPrompts.has(prompt)) {
           topic.addSubPrompt(prompt);
+          existingPrompts.add(prompt);
         }
       });
 
@@ -529,7 +531,7 @@ function SentimentController(ctx, log) {
         });
       } else {
         // Get all guidelines
-        result = await SentimentGuideline.allBySiteIdPaginated(siteId, {
+        result = await SentimentGuideline.allBySiteId(siteId, {
           limit: effectiveLimit,
           cursor,
         });
