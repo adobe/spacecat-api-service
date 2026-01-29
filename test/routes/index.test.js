@@ -378,8 +378,8 @@ describe('getRouteHandlers', () => {
       'POST /consent-banner',
       'POST /llmo/onboard',
       'GET /sites-resolve',
-      'GET /trial-users/me/email-preferences',
-      'PATCH /trial-users/me/email-preferences',
+      'GET /trial-users/email-preferences',
+      'PATCH /trial-users/email-preferences',
     );
 
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
@@ -400,8 +400,8 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
     expect(staticRoutes['POST /llmo/onboard']).to.equal(mockLlmoController.onboardCustomer);
     expect(staticRoutes['GET /sites/resolve']).to.equal(mockSitesController.resolveSite);
-    expect(staticRoutes['GET /trial-users/me/email-preferences']).to.equal(mockTrialUserController.getEmailPreferences);
-    expect(staticRoutes['PATCH /trial-users/me/email-preferences']).to.equal(mockTrialUserController.updateEmailPreferences);
+    expect(staticRoutes['GET /trial-users/email-preferences']).to.equal(mockTrialUserController.getEmailPreferences);
+    expect(staticRoutes['PATCH /trial-users/email-preferences']).to.equal(mockTrialUserController.updateEmailPreferences);
 
     expect(dynamicRoutes).to.have.all.keys(
       'GET /audits/latest/:auditType',
