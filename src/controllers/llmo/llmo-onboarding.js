@@ -947,6 +947,13 @@ export async function createEntitlementAndEnrollment(site, context, say = () => 
   }
 }
 
+/**
+ * Enables audits for a site. Continues processing if individual audits fail.
+ * @param {object} site - The site object
+ * @param {object} context - The request context
+ * @param {Array<string>} [audits=[]] - List of audit types to enable
+ * @param {Function} [say] - Optional callback for sending messages (e.g., Slack)
+ */
 export async function enableAudits(site, context, audits = [], say = () => {}) {
   const { dataAccess, log } = context;
   const { Configuration } = dataAccess;
@@ -965,6 +972,13 @@ export async function enableAudits(site, context, audits = [], say = () => {}) {
   await configuration.save();
 }
 
+/**
+ * Enables imports for a site config. Continues processing if individual imports fail.
+ * @param {object} siteConfig - The site configuration object
+ * @param {Array<{type: string, options?: object}>} imports - List of imports to enable
+ * @param {object} log - Logger instance
+ * @param {Function} [say] - Optional callback for sending messages (e.g., Slack)
+ */
 export async function enableImports(siteConfig, imports, log, say = () => {}) {
   const existingImports = siteConfig.getImports();
 
