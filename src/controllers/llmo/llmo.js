@@ -1111,12 +1111,12 @@ function LlmoController(ctx) {
     const { siteId } = context.params;
     const { path = '/' } = context.data || {};
 
-    log.info(`Checking Edge Optimize status for siteId: ${siteId} and path: ${path}`);
-
     // Validate siteId
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
+
+    log.info(`Checking Edge Optimize status for siteId: ${siteId} and path: ${path}`);
 
     // Get site from database
     const site = await Site.findById(siteId);
@@ -1129,7 +1129,6 @@ function LlmoController(ctx) {
       return forbidden('Access denied to this site');
     }
 
-    // Create TokowakaClient and check status
     try {
       const tokowakaClient = TokowakaClient.createFrom(context);
       const result = await tokowakaClient.checkEdgeOptimizeStatus(site, path);
