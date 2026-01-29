@@ -58,6 +58,10 @@ describe('getRouteHandlers', () => {
     getPredominantTraffic: sinon.stub(),
   };
 
+  const mockWeeklyDigestController = {
+    processWeeklyDigests: sinon.stub(),
+  };
+
   const mockUrlStoreController = {
     listUrls: sinon.stub(),
     listUrlsByAuditType: sinon.stub(),
@@ -290,6 +294,8 @@ describe('getRouteHandlers', () => {
   const mockTrialUserController = {
     getByOrganizationID: () => null,
     createTrialUserForEmailInvite: () => null,
+    getEmailPreferences: sinon.stub(),
+    updateEmailPreferences: sinon.stub(),
   };
 
   const mockUserDetailsController = {
@@ -347,6 +353,7 @@ describe('getRouteHandlers', () => {
       mockUrlStoreController,
       mockPTA2Controller,
       mockTrafficToolsController,
+      mockWeeklyDigestController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -373,6 +380,9 @@ describe('getRouteHandlers', () => {
       'GET /tools/api-keys',
       'POST /tools/import/jobs',
       'POST /tools/scrape/jobs',
+      'POST /tools/weekly-digest',
+      'GET /trial-users/me/email-preferences',
+      'PATCH /trial-users/me/email-preferences',
       'POST /consent-banner',
       'POST /llmo/onboard',
       'GET /sites-resolve',
@@ -394,6 +404,9 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['GET /tools/api-keys']).to.equal(mockApiKeyController.getApiKeys);
     expect(staticRoutes['POST /consent-banner']).to.equal(mockConsentBannerController.takeScreenshots);
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
+    expect(staticRoutes['POST /tools/weekly-digest']).to.equal(mockWeeklyDigestController.processWeeklyDigests);
+    expect(staticRoutes['GET /trial-users/me/email-preferences']).to.equal(mockTrialUserController.getEmailPreferences);
+    expect(staticRoutes['PATCH /trial-users/me/email-preferences']).to.equal(mockTrialUserController.updateEmailPreferences);
     expect(staticRoutes['POST /llmo/onboard']).to.equal(mockLlmoController.onboardCustomer);
     expect(staticRoutes['GET /sites/resolve']).to.equal(mockSitesController.resolveSite);
 

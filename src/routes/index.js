@@ -83,6 +83,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} urlStoreController - The URL store controller.
  * @param {Object} pta2Controller - The PTA2 controller.
  * @param {Object} trafficToolsController - The traffic tools controller.
+ * @param {Object} weeklyDigestController - The weekly digest controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -122,6 +123,7 @@ export default function getRouteHandlers(
   urlStoreController,
   pta2Controller,
   trafficToolsController,
+  weeklyDigestController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -321,6 +323,9 @@ export default function getRouteHandlers(
     'GET /tools/scrape/jobs/by-url/:url/:processingType': scrapeJobController.getScrapeUrlByProcessingType,
     'GET /tools/scrape/jobs/by-url/:url': scrapeJobController.getScrapeUrlByProcessingType,
 
+    // Weekly Digest
+    'POST /tools/weekly-digest': weeklyDigestController.processWeeklyDigests,
+
     // Fixes
     'GET /sites/:siteId/opportunities/:opportunityId/fixes': (c) => fixesController.getAllForOpportunity(c),
     'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': (c) => fixesController.getByStatus(c),
@@ -372,6 +377,10 @@ export default function getRouteHandlers(
     'GET /organizations/:organizationId/userDetails/:externalUserId': userDetailsController.getUserDetailsByExternalUserId,
     'POST /organizations/:organizationId/userDetails': userDetailsController.getUserDetailsInBulk,
     'POST /organizations/:organizationId/trial-user-invite': trialUserController.createTrialUserForEmailInvite,
+
+    // Trial User Email Preferences (current user)
+    'GET /trial-users/me/email-preferences': trialUserController.getEmailPreferences,
+    'PATCH /trial-users/me/email-preferences': trialUserController.updateEmailPreferences,
     'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
     'POST /organizations/:organizationId/entitlements': entitlementController.createEntitlement,
 
