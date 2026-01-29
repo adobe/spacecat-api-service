@@ -1002,16 +1002,12 @@ function LlmoController(ctx) {
       }
 
       const currentConfig = site.getConfig();
-      // Update site config only if tokowakaEnabled is provided
-      if (tokowakaEnabled !== undefined) {
-        currentConfig.updateEdgeOptimizeConfig({
-          ...(currentConfig.getEdgeOptimizeConfig() || {}),
-          enabled: tokowakaEnabled,
-          opted: true,
-        });
-        await saveSiteConfig(site, currentConfig, log, `updating edge optimize config to enabled=${tokowakaEnabled}`);
-        log.info(`Updated edgeOptimizeConfig enabled=${tokowakaEnabled} for site ${siteId}`);
-      }
+      currentConfig.updateEdgeOptimizeConfig({
+        ...(currentConfig.getEdgeOptimizeConfig() || {}),
+        opted: true,
+      });
+      await saveSiteConfig(site, currentConfig, log, 'updating edge optimize config');
+      log.info(`Updated edgeOptimizeConfig for site ${siteId}`);
       log.info(`[edge-optimize-config] Updated edge optimize config for site ${siteId} by ${profile?.email || 'tokowaka-edge-optimize-config'}`);
       return ok({
         ...metaconfig,

@@ -3553,7 +3553,7 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.deep.include(newMetaconfig);
       expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(
-        sinon.match({ enabled: true }),
+        sinon.match({ opted: true }),
       );
     });
 
