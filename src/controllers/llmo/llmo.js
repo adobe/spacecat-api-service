@@ -848,6 +848,8 @@ function LlmoController(ctx) {
         status: 'completed',
         createdAt: new Date().toISOString(),
         brandProfileExecutionName,
+      }, {
+        'Content-Encoding': 'gzip',
       });
     } catch (error) {
       log.error(`Error during LLMO onboarding: ${error.message}`);
