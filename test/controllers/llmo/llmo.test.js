@@ -3288,9 +3288,12 @@ describe('LlmoController', () => {
       expect(mockTokowakaClient.createMetaconfig).to.have.been.calledWith(
         'https://www.example.com',
         TEST_SITE_ID,
-        sinon.match({ tokowakaEnabled: true, lastModifiedBy: 'tokowaka-edge-optimize-config' }),
+        sinon.match({ tokowakaEnabled: true }),
+        sinon.match({ lastModifiedBy: 'tokowaka-edge-optimize-config' }),
       );
-      expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.called;
+      expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(
+        sinon.match({ opted: true }),
+      );
       expect(mockSite.save).to.have.been.called;
     });
 
@@ -3622,7 +3625,11 @@ describe('LlmoController', () => {
       expect(mockTokowakaClient.createMetaconfig).to.have.been.calledWith(
         'https://www.example.com',
         TEST_SITE_ID,
-        sinon.match({ enhancements: true, lastModifiedBy: 'tokowaka-edge-optimize-config' }),
+        sinon.match({ enhancements: true }),
+        sinon.match({ lastModifiedBy: 'tokowaka-edge-optimize-config' }),
+      );
+      expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(
+        sinon.match({ opted: true }),
       );
     });
 

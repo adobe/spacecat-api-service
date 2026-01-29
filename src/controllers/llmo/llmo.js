@@ -986,6 +986,8 @@ function LlmoController(ctx) {
           {
             ...(tokowakaEnabled !== undefined && { tokowakaEnabled }),
             ...(enhancements !== undefined && { enhancements }),
+          },
+          {
             lastModifiedBy,
           },
         );
@@ -999,6 +1001,8 @@ function LlmoController(ctx) {
             patches,
             forceFail,
             prerender,
+          },
+          {
             lastModifiedBy,
           },
         );
