@@ -1055,6 +1055,11 @@ function LlmoController(ctx) {
       const tokowakaClient = TokowakaClient.createFrom(context);
       const metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
 
+      // Return empty object if metaconfig doesn't exist
+      if (!metaconfig) {
+        return ok({});
+      }
+
       const currentConfig = site.getConfig();
       const edgeOptimizeConfig = currentConfig.getEdgeOptimizeConfig() || {};
 
