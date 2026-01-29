@@ -1,0 +1,100 @@
+customer-config-by-organization:
+  parameters:
+    - $ref: './parameters.yaml#/organizationId'
+  get:
+    tags:
+      - organization
+      - brands
+      - customer-config
+    summary: Retrieves customer configuration for an organization
+    description: |
+      This endpoint provides the complete customer configuration including brands, categories, topics, and prompts
+      for the given organization. Returns 404 if no customer configuration exists for this organization.
+      
+      The configuration includes:
+      - Brand information and metadata
+      - URLs, social accounts, and brand aliases
+      - Competitors and related brands
+      - Earned media content sources
+      - Categories, topics, and search prompts
+      - Available industry verticals
+    operationId: getCustomerConfigByOrganization
+    responses:
+      '200':
+        description: Customer configuration retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/CustomerConfig'
+            examples:
+              adobe:
+                $ref: './examples.yaml#/CustomerConfigAdobe'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        description: Customer configuration not found for this organization
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Customer configuration not found for organization"
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]
+      - api_key: [ ]
+customer-config-by-organization-v2:
+  parameters:
+    - $ref: './parameters.yaml#/organizationId'
+  get:
+    tags:
+      - organization
+      - brands
+      - customer-config
+    summary: Retrieves customer configuration for an organization (v2)
+    description: |
+      This endpoint provides the complete customer configuration including brands, categories, topics, and prompts
+      for the given organization. Returns 404 if no customer configuration exists for this organization.
+      
+      The configuration includes:
+      - Brand information and metadata
+      - URLs, social accounts, and brand aliases
+      - Competitors and related brands
+      - Earned media content sources
+      - Categories, topics, and search prompts
+      - Available industry verticals
+    operationId: getCustomerConfigByOrganizationV2
+    responses:
+      '200':
+        description: Customer configuration retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/CustomerConfig'
+            examples:
+              adobe:
+                $ref: './examples.yaml#/CustomerConfigAdobe'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        description: Customer configuration not found for this organization
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Customer configuration not found for organization"
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]
+      - api_key: [ ]

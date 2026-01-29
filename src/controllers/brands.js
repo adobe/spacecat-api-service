@@ -27,6 +27,7 @@ import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { getCustomerConfigByImsOrgId } from '../support/customer-config-data.js';
 
 const HEADER_ERROR = 'x-error';
 
@@ -159,9 +160,48 @@ function BrandsController(ctx, log, env) {
     }
   };
 
+  /**
+   * Gets customer configuration for an organization.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Customer configuration.
+   */
+  const getCustomerConfig = async (context) => {
+    const organizationId = context.params?.organizationId;
+    try {
+      if (!isValidUUID(organizationId)) {
+        return badRequest('Organization ID required');
+      }
+
+      const organization = await Organization.findById(organizationId);
+      if (!organization) {
+        return notFound(`Organization not found: ${organizationId}`);
+      }
+
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('Only users belonging to the organization can view its customer configuration');
+      }
+
+      const imsOrgId = organization.getImsOrgId();
+      if (!hasText(imsOrgId)) {
+        return notFound('Organization does not have an IMS Org ID configured');
+      }
+
+      const customerConfig = getCustomerConfigByImsOrgId(imsOrgId);
+      if (!customerConfig) {
+        return notFound('Customer configuration not found for organization');
+      }
+
+      return ok(customerConfig);
+    } catch (error) {
+      log.error(`Error getting customer config for organization: ${organizationId}`, error);
+      return createErrorResponse(error);
+    }
+  };
+
   return {
     getBrandsForOrganization,
     getBrandGuidelinesForSite,
+    getCustomerConfig,
   };
 }
 
