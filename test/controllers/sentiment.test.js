@@ -119,14 +119,14 @@ describe('Sentiment Controller', () => {
         findById: sandbox.stub().resolves({ siteId }),
       },
       SentimentTopic: {
-        allBySiteIdPaginated: sandbox.stub().resolves({ data: mockTopics, cursor: null }),
+        allBySiteId: sandbox.stub().resolves({ data: mockTopics, cursor: null }),
         allBySiteIdEnabled: sandbox.stub().resolves({ data: mockTopics, cursor: null }),
         allBySiteIdAndAuditType: sandbox.stub().resolves({ data: mockTopics, cursor: null }),
         findById: sandbox.stub().resolves(mockTopics[0]),
         create: sandbox.stub().resolves(mockTopics[0]),
       },
       SentimentGuideline: {
-        allBySiteIdPaginated: sandbox.stub().resolves({ data: mockGuidelines, cursor: null }),
+        allBySiteId: sandbox.stub().resolves({ data: mockGuidelines, cursor: null }),
         allBySiteIdEnabled: sandbox.stub().resolves({ data: mockGuidelines, cursor: null }),
         allBySiteIdAndAuditType: sandbox.stub().resolves({ data: mockGuidelines, cursor: null }),
         findById: sandbox.stub().resolves(mockGuidelines[0]),
@@ -218,7 +218,7 @@ describe('Sentiment Controller', () => {
     });
 
     it('returns empty array when result.data is null', async () => {
-      mockDataAccess.SentimentTopic.allBySiteIdPaginated.resolves({ data: null, cursor: null });
+      mockDataAccess.SentimentTopic.allBySiteId.resolves({ data: null, cursor: null });
       const result = await sentimentController.listTopics(context);
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -239,7 +239,7 @@ describe('Sentiment Controller', () => {
     });
 
     it('handles errors gracefully', async () => {
-      mockDataAccess.SentimentTopic.allBySiteIdPaginated.rejects(new Error('DB error'));
+      mockDataAccess.SentimentTopic.allBySiteId.rejects(new Error('DB error'));
       const result = await sentimentController.listTopics(context);
       expect(result.status).to.equal(500);
     });
@@ -578,6 +578,28 @@ describe('Sentiment Controller', () => {
       expect(result.status).to.equal(200);
     });
 
+    it('handles topic with null subPrompts', async () => {
+      const topicWithNullPrompts = {
+        getSiteId: () => siteId,
+        getTopicId: () => 'topic-1',
+        getName: () => 'Test Topic',
+        getDescription: () => undefined,
+        getSubPrompts: () => null,
+        getEnabled: () => true,
+        getCreatedAt: () => '2026-01-01T00:00:00Z',
+        getUpdatedAt: () => '2026-01-01T00:00:00Z',
+        getCreatedBy: () => 'system',
+        getUpdatedBy: () => 'system',
+        setUpdatedBy: sandbox.stub(),
+        addSubPrompt: sandbox.stub(),
+        save: sandbox.stub().resolvesThis(),
+      };
+      mockDataAccess.SentimentTopic.findById.resolves(topicWithNullPrompts);
+      context.data = { prompts: ['prompt1'] };
+      const result = await sentimentController.addSubPrompts(context);
+      expect(result.status).to.equal(200);
+    });
+
     it('returns forbidden if user does not have access', async () => {
       sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
       context.data = { prompts: ['prompt1'] };
@@ -819,7 +841,7 @@ describe('Sentiment Controller', () => {
     });
 
     it('returns empty array when result.data is null', async () => {
-      mockDataAccess.SentimentGuideline.allBySiteIdPaginated.resolves({ data: null, cursor: null });
+      mockDataAccess.SentimentGuideline.allBySiteId.resolves({ data: null, cursor: null });
       const result = await sentimentController.listGuidelines(context);
       expect(result.status).to.equal(200);
       const body = await result.json();
@@ -840,7 +862,7 @@ describe('Sentiment Controller', () => {
     });
 
     it('handles errors gracefully', async () => {
-      mockDataAccess.SentimentGuideline.allBySiteIdPaginated.rejects(new Error('DB error'));
+      mockDataAccess.SentimentGuideline.allBySiteId.rejects(new Error('DB error'));
       const result = await sentimentController.listGuidelines(context);
       expect(result.status).to.equal(500);
     });
@@ -1039,6 +1061,14 @@ describe('Sentiment Controller', () => {
       context.data = { audits: ['wikipedia-analysis'] };
       const result = await sentimentController.updateGuideline(context);
       expect(result.status).to.equal(200);
+    });
+
+    it('returns bad request for invalid audit types', async () => {
+      context.data = { audits: ['invalid-audit-type'] };
+      const result = await sentimentController.updateGuideline(context);
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('Invalid audit types');
     });
 
     it('returns forbidden if user does not have access', async () => {
