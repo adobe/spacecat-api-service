@@ -976,6 +976,7 @@ function LlmoController(ctx) {
 
       // Handle S3 metaconfig
       let metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
+      const lastModifiedBy = profile?.email || 'tokowaka-edge-optimize-config';
 
       if (!metaconfig || !Array.isArray(metaconfig.apiKeys) || metaconfig.apiKeys.length === 0) {
         // Create new metaconfig with generated API key
@@ -985,6 +986,7 @@ function LlmoController(ctx) {
           {
             ...(tokowakaEnabled !== undefined && { tokowakaEnabled }),
             ...(enhancements !== undefined && { enhancements }),
+            lastModifiedBy,
           },
         );
       } else {
@@ -997,6 +999,7 @@ function LlmoController(ctx) {
             patches,
             forceFail,
             prerender,
+            lastModifiedBy,
           },
         );
       }
@@ -1007,8 +1010,7 @@ function LlmoController(ctx) {
         opted: true,
       });
       await saveSiteConfig(site, currentConfig, log, 'updating edge optimize config');
-      log.info(`Updated edgeOptimizeConfig for site ${siteId}`);
-      log.info(`[edge-optimize-config] Updated edge optimize config for site ${siteId} by ${profile?.email || 'tokowaka-edge-optimize-config'}`);
+      log.info(`[edge-optimize-config] Updated edge optimize config for site ${siteId} by ${lastModifiedBy}`);
       return ok({
         ...metaconfig,
       });
