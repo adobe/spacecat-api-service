@@ -496,3 +496,72 @@ fix-create-list-response:
       total: 2
       success: 2
       failed: 0
+CustomerConfigAdobe:
+  summary: Adobe customer configuration example
+  description: Complete customer configuration for Adobe with multiple brands
+  value:
+    customer:
+      customerName: "Adobe"
+      imsOrgID: "1234567890ABCDEF@AdobeOrg"
+      brands:
+        - id: "pending-adobe-photoshop"
+          v1SiteId: "a1b2c3d4-5678-90ab-cdef-1234567890ab"
+          name: "Adobe Photoshop"
+          status: "active"
+          origin: "ai"
+          region: ["GL", "US", "GB", "DE", "FR", "JP", "CN"]
+          description: "Adobe's flagship image editing and compositing software used for photography, digital art, and visual design across desktop, web, and mobile."
+          updatedAt: "2026-01-03T09:15:22.000Z"
+          updatedBy: "system"
+          vertical: "Software & Technology"
+          urls:
+            - value: "https://www.adobe.com/products/photoshop.html"
+              regions: ["GL", "US", "GB", "DE", "FR", "JP", "CN"]
+          socialAccounts:
+            - platform: "twitter"
+              url: "https://x.com/Photoshop"
+              regions: ["GL"]
+            - platform: "facebook"
+              url: "https://www.facebook.com/Photoshop/"
+              regions: ["US", "GB"]
+          brandAliases:
+            - name: "Photoshop"
+              regions: ["GL"]
+            - name: "PS"
+              regions: ["US", "GB", "DE", "FR"]
+          competitors:
+            - name: "Affinity Photo"
+              url: "https://affinity.serif.com/photo"
+              regions: ["US", "GB"]
+            - name: "GIMP"
+              url: "https://www.gimp.org"
+              regions: ["GL"]
+          relatedBrands:
+            - name: "Wacom"
+              url: "https://www.wacom.com"
+              regions: ["GL"]
+          earnedContent:
+            - name: "Wikipedia"
+              type: "encyclopedia"
+              coverage_scope: "product history and feature overview"
+              url: "https://en.wikipedia.org/wiki/Adobe_Photoshop"
+              regions: ["GL"]
+          prompts:
+            - id: "photoshop-prompt-1"
+              prompt: "What is the best photo editing software for portraits?"
+              status: "active"
+              regions: ["us", "gb"]
+              origin: "ai"
+              source: "api"
+              updatedAt: "2026-01-03T09:15:22.000Z"
+              updatedBy: "system"
+              category:
+                id: "photoshop-photo-editing"
+                name: "Photo Editing"
+              topic:
+                id: "photoshop-topic-1"
+                name: "Photo Retouching"
+      availableVerticals:
+        - "News & Entertainment"
+        - "Software & Technology"
+        - "Professional Services"

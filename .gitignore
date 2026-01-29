@@ -19,3 +19,9 @@ admin-idp-p*.json
 !.cursor/rules/
 !.cursor/commands/
 .cursor/commands/speckit.*
+
+# V1 to V2 test conversion outputs
+scripts/v1v2test/*/*.json
+!scripts/v1v2test/*/mapping.json
+scripts/v1v2test/*/*.csv
+docs/index.html

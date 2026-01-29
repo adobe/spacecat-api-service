@@ -22,6 +22,7 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon, { stub } from 'sinon';
+import esmock from 'esmock';
 
 import BrandsController from '../../src/controllers/brands.js';
 
@@ -405,6 +406,153 @@ describe('Brands Controller', () => {
       }, loggerStub, mockEnv);
       const response = await unauthorizedBrandsController.getBrandGuidelinesForSite({
         params: { siteId: SITE_ID },
+      });
+
+      expect(response.status).to.equal(403);
+    });
+  });
+
+  describe('getCustomerConfig', () => {
+    it('returns customer config for a valid organization with IMS Org ID', async () => {
+      const mockCustomerConfig = {
+        customer: {
+          customerName: 'Adobe',
+          imsOrgID: IMS_ORG_ID,
+          brands: [
+            {
+              id: 'brand-1',
+              name: 'Brand 1',
+              status: 'active',
+              region: ['US'],
+            },
+          ],
+          availableVerticals: ['Software & Technology'],
+        },
+      };
+
+      // Mock the customer config data module
+      const customerConfigStub = sinon.stub().returns(mockCustomerConfig);
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '../../src/support/customer-config-data.js': {
+          getCustomerConfigByImsOrgId: customerConfigStub,
+        },
+      });
+
+      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
+      const response = await controller.getCustomerConfig({
+        ...context,
+        params: { organizationId: ORGANIZATION_ID },
+      });
+
+      expect(response.status).to.equal(200);
+      const config = await response.json();
+      expect(config).to.deep.equal(mockCustomerConfig);
+      expect(customerConfigStub).to.have.been.calledWith(IMS_ORG_ID);
+    });
+
+    it('returns bad request if organization ID is not provided', async () => {
+      const response = await brandsController.getCustomerConfig({
+        ...context,
+        params: {},
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Organization ID required');
+    });
+
+    it('returns not found if organization does not exist', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+
+      const response = await brandsController.getCustomerConfig({
+        ...context,
+        params: { organizationId: ORGANIZATION_ID },
+      });
+
+      expect(response.status).to.equal(404);
+      const error = await response.json();
+      expect(error).to.have.property('message', `Organization not found: ${ORGANIZATION_ID}`);
+    });
+
+    it('returns not found if organization does not have IMS Org ID', async () => {
+      const orgWithoutImsOrgId = new Organization(
+        {
+          entities: {
+            organization: {
+              model: {
+                indexes: {},
+                schema: {
+                  attributes: {
+                    organizationId: { type: 'string', get: (value) => value },
+                    imsOrgId: { type: 'string', get: (value) => value },
+                  },
+                },
+              },
+            },
+          },
+        },
+        {
+          log: loggerStub,
+          getCollection: stub().returns({
+            schema: OrganizationSchema,
+          }),
+        },
+        OrganizationSchema,
+        {
+          organizationId: ORGANIZATION_ID,
+          imsOrgId: '',
+        },
+        loggerStub,
+      );
+      mockDataAccess.Organization.findById.resolves(orgWithoutImsOrgId);
+
+      const response = await brandsController.getCustomerConfig({
+        ...context,
+        params: { organizationId: ORGANIZATION_ID },
+      });
+
+      expect(response.status).to.equal(404);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Organization does not have an IMS Org ID configured');
+    });
+
+    it('returns not found if customer config does not exist for IMS Org ID', async () => {
+      const customerConfigStub = sinon.stub().returns(null);
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '../../src/support/customer-config-data.js': {
+          getCustomerConfigByImsOrgId: customerConfigStub,
+        },
+      });
+
+      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
+      const response = await controller.getCustomerConfig({
+        ...context,
+        params: { organizationId: ORGANIZATION_ID },
+      });
+
+      expect(response.status).to.equal(404);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Customer configuration not found for organization');
+    });
+
+    it('returns forbidden if user does not have access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedBrandsController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+
+      const response = await unauthorizedBrandsController.getCustomerConfig({
+        params: { organizationId: ORGANIZATION_ID },
       });
 
       expect(response.status).to.equal(403);
