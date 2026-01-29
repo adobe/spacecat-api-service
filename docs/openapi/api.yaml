@@ -444,6 +444,8 @@ paths:
     $ref: './llmo-api.yaml#/llmo-offboard'
   /sites/{siteId}/llmo/edge-optimize-config:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-config'
+  /sites/{siteId}/llmo/edge-optimize-status:
+    $ref: './llmo-api.yaml#/llmo-edge-optimize-status'
   /sites/{siteId}/llmo/strategy:
     $ref: './llmo-api.yaml#/llmo-strategy'
   /sites/{siteId}/reports:
@@ -452,8 +454,6 @@ paths:
     $ref: './site-api.yaml#/site-report'
   /sites/{siteId}/graph:
     $ref: './site-api.yaml#/site-graph'
-  /sites/{siteId}/llmo/edge-optimize-status:
-    $ref: './llmo-api.yaml#/llmo-edge-optimize-status'
 
 components:
   securitySchemes:
