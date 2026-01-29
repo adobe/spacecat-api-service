@@ -25,6 +25,8 @@ use(chaiAsPromised);
 use(sinonChai);
 
 const siteId = '3f1c3ab1-9ad0-4231-ac87-8159acf52cb6';
+const topicUUID = '4a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d';
+const guidelineUUID = '5b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e';
 
 describe('Sentiment Controller', () => {
   const sandbox = sinon.createSandbox();
@@ -49,7 +51,7 @@ describe('Sentiment Controller', () => {
 
   const createMockTopic = (data) => ({
     getSiteId: () => data.siteId || siteId,
-    getTopicId: () => data.topicId || 'topic-1',
+    getTopicId: () => data.topicId || topicUUID,
     getName: () => data.name || 'Test Topic',
     getDescription: () => data.description,
     getSubPrompts: () => data.subPrompts || [],
@@ -71,7 +73,7 @@ describe('Sentiment Controller', () => {
 
   const createMockGuideline = (data) => ({
     getSiteId: () => data.siteId || siteId,
-    getGuidelineId: () => data.guidelineId || 'guideline-1',
+    getGuidelineId: () => data.guidelineId || guidelineUUID,
     getName: () => data.name || 'Test Guideline',
     getInstruction: () => data.instruction || 'Test instruction',
     getAudits: () => data.audits || [],
@@ -92,12 +94,12 @@ describe('Sentiment Controller', () => {
   });
 
   const mockTopics = [
-    createMockTopic({ topicId: 'topic-1', name: 'Topic 1' }),
+    createMockTopic({ topicId: topicUUID, name: 'Topic 1' }),
     createMockTopic({ topicId: 'topic-2', name: 'Topic 2' }),
   ];
 
   const mockGuidelines = [
-    createMockGuideline({ guidelineId: 'guideline-1', name: 'Guideline 1' }),
+    createMockGuideline({ guidelineId: guidelineUUID, name: 'Guideline 1' }),
     createMockGuideline({ guidelineId: 'guideline-2', name: 'Guideline 2' }),
   ];
 
@@ -247,7 +249,7 @@ describe('Sentiment Controller', () => {
 
   describe('getTopic', () => {
     beforeEach(() => {
-      context.params.topicId = 'topic-1';
+      context.params.topicId = topicUUID;
     });
 
     it('returns bad request for invalid siteId', async () => {
@@ -258,6 +260,12 @@ describe('Sentiment Controller', () => {
 
     it('returns bad request for missing topicId', async () => {
       context.params.topicId = '';
+      const result = await sentimentController.getTopic(context);
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns bad request for invalid topicId format', async () => {
+      context.params.topicId = 'invalid-topic-id';
       const result = await sentimentController.getTopic(context);
       expect(result.status).to.equal(400);
     });
@@ -395,7 +403,7 @@ describe('Sentiment Controller', () => {
 
   describe('updateTopic', () => {
     beforeEach(() => {
-      context.params.topicId = 'topic-1';
+      context.params.topicId = topicUUID;
     });
 
     it('returns bad request for invalid siteId', async () => {
@@ -477,7 +485,7 @@ describe('Sentiment Controller', () => {
 
   describe('deleteTopic', () => {
     beforeEach(() => {
-      context.params.topicId = 'topic-1';
+      context.params.topicId = topicUUID;
     });
 
     it('returns bad request for invalid siteId', async () => {
@@ -524,7 +532,7 @@ describe('Sentiment Controller', () => {
 
   describe('addSubPrompts', () => {
     beforeEach(() => {
-      context.params.topicId = 'topic-1';
+      context.params.topicId = topicUUID;
     });
 
     it('returns bad request for invalid siteId', async () => {
@@ -581,7 +589,7 @@ describe('Sentiment Controller', () => {
     it('handles topic with null subPrompts', async () => {
       const topicWithNullPrompts = {
         getSiteId: () => siteId,
-        getTopicId: () => 'topic-1',
+        getTopicId: () => topicUUID,
         getName: () => 'Test Topic',
         getDescription: () => undefined,
         getSubPrompts: () => null,
@@ -610,7 +618,7 @@ describe('Sentiment Controller', () => {
 
   describe('removeSubPrompts', () => {
     beforeEach(() => {
-      context.params.topicId = 'topic-1';
+      context.params.topicId = topicUUID;
     });
 
     it('returns bad request for invalid siteId', async () => {
@@ -674,7 +682,7 @@ describe('Sentiment Controller', () => {
 
   describe('linkAudits', () => {
     beforeEach(() => {
-      context.params.guidelineId = 'guideline-1';
+      context.params.guidelineId = guidelineUUID;
     });
 
     it('returns bad request for invalid siteId', async () => {
@@ -744,7 +752,7 @@ describe('Sentiment Controller', () => {
 
   describe('unlinkAudits', () => {
     beforeEach(() => {
-      context.params.guidelineId = 'guideline-1';
+      context.params.guidelineId = guidelineUUID;
     });
 
     it('returns bad request for invalid siteId', async () => {
@@ -870,7 +878,7 @@ describe('Sentiment Controller', () => {
 
   describe('getGuideline', () => {
     beforeEach(() => {
-      context.params.guidelineId = 'guideline-1';
+      context.params.guidelineId = guidelineUUID;
     });
 
     it('returns bad request for invalid siteId', async () => {
@@ -881,6 +889,12 @@ describe('Sentiment Controller', () => {
 
     it('returns bad request for missing guidelineId', async () => {
       context.params.guidelineId = '';
+      const result = await sentimentController.getGuideline(context);
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns bad request for invalid guidelineId format', async () => {
+      context.params.guidelineId = 'invalid-guideline-id';
       const result = await sentimentController.getGuideline(context);
       expect(result.status).to.equal(400);
     });
@@ -1010,7 +1024,7 @@ describe('Sentiment Controller', () => {
 
   describe('updateGuideline', () => {
     beforeEach(() => {
-      context.params.guidelineId = 'guideline-1';
+      context.params.guidelineId = guidelineUUID;
     });
 
     it('returns bad request for invalid siteId', async () => {
@@ -1088,7 +1102,7 @@ describe('Sentiment Controller', () => {
 
   describe('deleteGuideline', () => {
     beforeEach(() => {
-      context.params.guidelineId = 'guideline-1';
+      context.params.guidelineId = guidelineUUID;
     });
 
     it('returns bad request for invalid siteId', async () => {

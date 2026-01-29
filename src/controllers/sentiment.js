@@ -160,7 +160,7 @@ function SentimentController(ctx, log) {
       return badRequest('Site ID required');
     }
 
-    if (!hasText(topicId)) {
+    if (!isValidUUID(topicId)) {
       return badRequest('Topic ID required');
     }
 
@@ -287,7 +287,7 @@ function SentimentController(ctx, log) {
       return badRequest('Site ID required');
     }
 
-    if (!hasText(topicId)) {
+    if (!isValidUUID(topicId)) {
       return badRequest('Topic ID required');
     }
 
@@ -348,7 +348,7 @@ function SentimentController(ctx, log) {
       return badRequest('Site ID required');
     }
 
-    if (!hasText(topicId)) {
+    if (!isValidUUID(topicId)) {
       return badRequest('Topic ID required');
     }
 
@@ -389,7 +389,7 @@ function SentimentController(ctx, log) {
       return badRequest('Site ID required');
     }
 
-    if (!hasText(topicId)) {
+    if (!isValidUUID(topicId)) {
       return badRequest('Topic ID required');
     }
 
@@ -446,7 +446,7 @@ function SentimentController(ctx, log) {
       return badRequest('Site ID required');
     }
 
-    if (!hasText(topicId)) {
+    if (!isValidUUID(topicId)) {
       return badRequest('Topic ID required');
     }
 
@@ -562,7 +562,7 @@ function SentimentController(ctx, log) {
       return badRequest('Site ID required');
     }
 
-    if (!hasText(guidelineId)) {
+    if (!isValidUUID(guidelineId)) {
       return badRequest('Guideline ID required');
     }
 
@@ -710,7 +710,7 @@ function SentimentController(ctx, log) {
       return badRequest('Site ID required');
     }
 
-    if (!hasText(guidelineId)) {
+    if (!isValidUUID(guidelineId)) {
       return badRequest('Guideline ID required');
     }
 
@@ -771,7 +771,7 @@ function SentimentController(ctx, log) {
       return badRequest('Site ID required');
     }
 
-    if (!hasText(guidelineId)) {
+    if (!isValidUUID(guidelineId)) {
       return badRequest('Guideline ID required');
     }
 
@@ -812,7 +812,7 @@ function SentimentController(ctx, log) {
       return badRequest('Site ID required');
     }
 
-    if (!hasText(guidelineId)) {
+    if (!isValidUUID(guidelineId)) {
       return badRequest('Guideline ID required');
     }
 
@@ -873,7 +873,7 @@ function SentimentController(ctx, log) {
       return badRequest('Site ID required');
     }
 
-    if (!hasText(guidelineId)) {
+    if (!isValidUUID(guidelineId)) {
       return badRequest('Guideline ID required');
     }
 
