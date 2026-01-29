@@ -42,10 +42,13 @@ const createMockResponse = (data, ok = true, status = 200) => ({
   headers: { entries: sinon.stub().returns([]) },
 });
 
-const createMockAccessControlUtil = (accessResult) => ({
+// eslint-disable-next-line max-len
+const createMockAccessControlUtil = (accessResult, hasAdminAccessResult = true, isLLMOAdministratorResult = true) => ({
   fromContext: (context) => ({
     log: context.log,
     hasAccess: async () => accessResult,
+    hasAdminAccess: () => hasAdminAccessResult,
+    isLLMOAdministrator: () => isLLMOAdministratorResult,
   }),
 });
 
@@ -140,6 +143,12 @@ describe('LlmoController', () => {
             return {
               log: context.log,
               async hasAccess() {
+                return true;
+              },
+              hasAdminAccess() {
+                return true;
+              },
+              isLLMOAdministrator() {
                 return true;
               },
             };
@@ -1614,6 +1623,23 @@ describe('LlmoController', () => {
         sinon.match(/0 prompts/),
       );
     });
+
+    it('should return 403 when user is not LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '@adobe/spacecat-shared-utils': {
+          isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
+        },
+      });
+
+      const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
+      const result = await controllerNoAdmin.updateLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only LLMO administrators can update the LLMO config');
+    });
   });
 
   describe('getLlmoQuestions', () => {
@@ -1678,6 +1704,20 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       expect(mockLog.error).to.have.been.called;
     });
+
+    it('should return 403 when user is not LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      });
+
+      const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
+      const result = await controllerNoAdmin.addLlmoQuestion(mockContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only LLMO administrators can add questions');
+    });
   });
 
   describe('removeLlmoQuestion', () => {
@@ -1711,6 +1751,20 @@ describe('LlmoController', () => {
         expect(error.message).to.include('Invalid question key');
       }
     });
+
+    it('should return 403 when user is not LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      });
+
+      const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
+      const result = await controllerNoAdmin.removeLlmoQuestion(mockContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only LLMO administrators can remove questions');
+    });
   });
 
   describe('patchLlmoQuestion', () => {
@@ -1722,6 +1776,20 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       expect(mockConfig.updateLlmoQuestion).to.have.been.calledWith('test-question', updateData);
+    });
+
+    it('should return 403 when user is not LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      });
+
+      const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
+      const result = await controllerNoAdmin.patchLlmoQuestion(mockContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only LLMO administrators can update questions');
     });
   });
 
@@ -1858,6 +1926,21 @@ describe('LlmoController', () => {
       const result = await controller.addLlmoCustomerIntent(mockContext);
 
       expect(result.status).to.equal(400);
+    });
+
+    it('should return 403 when user is not LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      });
+
+      const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
+      mockContext.data = [{ key: 'test', value: 'test value' }];
+      const result = await controllerNoAdmin.addLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only LLMO administrators can add customer intent');
     });
   });
 
@@ -2057,6 +2140,20 @@ describe('LlmoController', () => {
         expect(body).to.be.an('array');
       },
     );
+
+    it('should return 403 when user is not LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      });
+
+      const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
+      const result = await controllerNoAdmin.patchLlmoCdnLogsFilter(mockContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only LLMO administrators can update the CDN logs filter');
+    });
   });
 
   describe('patchLlmoCdnBucketConfig', () => {
@@ -2110,6 +2207,20 @@ describe('LlmoController', () => {
         expect(body).to.be.an('object');
       },
     );
+
+    it('should return 403 when user is not LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      });
+
+      const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
+      const result = await controllerNoAdmin.patchLlmoCdnBucketConfig(mockContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only LLMO administrators can update the CDN bucket config');
+    });
   });
 
   describe('onboardCustomer', () => {
@@ -3641,6 +3752,20 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody.message).to.include('Site not found');
     });
+
+    it('should return 403 when user is not LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      });
+
+      const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
+      const result = await controllerNoAdmin.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only LLMO administrators can update the edge optimize config');
+    });
   });
 
   describe('getEdgeConfig', () => {
@@ -3921,6 +4046,23 @@ describe('LlmoController', () => {
         s3Client,
         { s3Bucket: TEST_BUCKET },
       );
+    });
+
+    it('should return 403 when user is not LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '@adobe/spacecat-shared-utils': {
+          isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
+        },
+      });
+
+      const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
+      const result = await controllerNoAdmin.saveStrategy(mockContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only LLMO administrators can save the LLMO strategy');
     });
   });
 });
