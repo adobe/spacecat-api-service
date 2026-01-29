@@ -14,7 +14,9 @@ import {
   badRequest,
   notFound,
   ok,
-  createResponse, forbidden,
+  createResponse,
+  forbidden,
+  internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   hasText,
@@ -27,6 +29,12 @@ import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { getCustomerConfigByOrganizationId } from '../support/customer-config-data.js';
+import {
+  getCustomerConfigV2FromS3,
+  saveCustomerConfigV2ToS3,
+} from '../support/customer-config-v2-s3.js';
+import { mergeCustomerConfigV2 } from '../support/customer-config-v2-metadata.js';
 
 const HEADER_ERROR = 'x-error';
 
@@ -53,10 +61,32 @@ function BrandsController(ctx, log, env) {
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
-  function createErrorResponse(error) {
-    return createResponse({ message: error.message }, error.status, {
-      [HEADER_ERROR]: error.message,
+  /**
+   * Get query parameters from context
+   * @param {object} context - The request context
+   * @returns {object} Parsed query parameters
+   */
+  function getQueryParams(context) {
+    const rawQueryString = context.invocation?.event?.rawQueryString;
+    if (!rawQueryString) return {};
+
+    const params = {};
+    rawQueryString.split('&').forEach((param) => {
+      const [key, value] = param.split('=');
+      if (key && value) {
+        params[decodeURIComponent(key)] = decodeURIComponent(value);
+      }
     });
+    return params;
+  }
+
+  function createErrorResponse(error) {
+    if (error.status) {
+      return createResponse({ message: error.message }, error.status, {
+        [HEADER_ERROR]: error.message,
+      });
+    }
+    return internalServerError(error.message);
   }
 
   /**
@@ -159,9 +189,509 @@ function BrandsController(ctx, log, env) {
     }
   };
 
+  /**
+   * Gets customer configuration for an organization (full config with prompts).
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Customer configuration.
+   */
+  const getCustomerConfig = async (context) => {
+    const { spaceCatId } = context.params || {};
+    const { status } = getQueryParams(context);
+
+    try {
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+
+      // Look up organization
+      const organization = await Organization.findById(spaceCatId);
+      if (!organization) {
+        return notFound(`Organization not found: ${spaceCatId}`);
+      }
+
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      // Try to get from S3 first
+      let customerConfig = null;
+      if (context.s3?.s3Client && context.s3?.s3Bucket) {
+        try {
+          customerConfig = await getCustomerConfigV2FromS3(
+            spaceCatId,
+            context.s3.s3Client,
+            context.s3.s3Bucket,
+          );
+          log.info(`Customer config loaded from S3 for organization: ${spaceCatId}`);
+        } catch (s3Error) {
+          log.warn(`Failed to load customer config from S3 for organization: ${spaceCatId}`, s3Error);
+        }
+      }
+
+      // Fallback to mock data
+      if (!customerConfig) {
+        customerConfig = getCustomerConfigByOrganizationId(spaceCatId);
+        if (customerConfig) {
+          log.info(`Customer config loaded from mock data for organization: ${spaceCatId}`);
+        }
+      }
+
+      if (!customerConfig) {
+        return notFound('Customer configuration not found for organization');
+      }
+
+      // Filter by status if needed
+      const filteredConfig = {
+        customer: {
+          ...customerConfig.customer,
+          ...(customerConfig.customer.categories && {
+            categories: customerConfig.customer.categories.filter((cat) => {
+              if (status) return cat.status === status;
+              return cat.status !== 'deleted';
+            }),
+          }),
+          ...(customerConfig.customer.topics && {
+            topics: customerConfig.customer.topics.filter((topic) => {
+              if (status) return topic.status === status;
+              return topic.status !== 'deleted';
+            }),
+          }),
+          brands: customerConfig.customer.brands.map((brand) => ({
+            ...brand,
+            ...(brand.prompts && {
+              prompts: brand.prompts.filter((prompt) => {
+                if (status) return prompt.status === status;
+                return prompt.status !== 'deleted';
+              }),
+            }),
+          })),
+        },
+      };
+      return ok(filteredConfig);
+    } catch (error) {
+      log.error(`Error getting customer config for organization: ${spaceCatId}`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  /**
+   * Gets lean customer configuration (without prompts) for an organization.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Lean customer configuration.
+   */
+  const getCustomerConfigLean = async (context) => {
+    const { spaceCatId } = context.params || {};
+    const { status } = getQueryParams(context);
+
+    try {
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+
+      // Look up organization
+      const organization = await Organization.findById(spaceCatId);
+      if (!organization) {
+        return notFound(`Organization not found: ${spaceCatId}`);
+      }
+
+      // Try to get from S3 first
+      let customerConfig = null;
+      if (context.s3?.s3Client && context.s3?.s3Bucket) {
+        try {
+          customerConfig = await getCustomerConfigV2FromS3(
+            spaceCatId,
+            context.s3.s3Client,
+            context.s3.s3Bucket,
+          );
+          log.info(`Customer config loaded from S3 for organization: ${spaceCatId}`);
+        } catch (s3Error) {
+          log.warn(`Failed to load customer config from S3 for organization: ${spaceCatId}`, s3Error);
+        }
+      }
+
+      // Fallback to mock data
+      if (!customerConfig) {
+        customerConfig = getCustomerConfigByOrganizationId(spaceCatId);
+        if (customerConfig) {
+          log.info(`Customer config loaded from mock data for organization: ${spaceCatId}`);
+        }
+      }
+
+      if (!customerConfig) {
+        return notFound('Customer configuration not found');
+      }
+
+      // Build maps for counting
+      const categoriesMap = new Map();
+      (customerConfig.customer.categories || []).forEach((cat) => {
+        categoriesMap.set(cat.id, cat);
+      });
+
+      const topicsMap = new Map();
+      (customerConfig.customer.topics || []).forEach((topic) => {
+        topicsMap.set(topic.id, topic);
+      });
+
+      // Remove prompts from brands but add counts
+      const leanConfig = {
+        customer: {
+          ...customerConfig.customer,
+          brands: customerConfig.customer.brands.map((brand) => {
+            // eslint-disable-next-line no-unused-vars
+            const { prompts, ...brandWithoutPrompts } = brand;
+
+            // Filter prompts by status for counting
+            const filteredPrompts = (prompts || []).filter((prompt) => {
+              if (status) return prompt.status === status;
+              return prompt.status !== 'deleted';
+            });
+
+            // Count unique categories and topics used by this brand's filtered prompts
+            const brandCategories = new Set();
+            const brandTopics = new Set();
+            filteredPrompts.forEach((prompt) => {
+              if (prompt.categoryId) brandCategories.add(prompt.categoryId);
+              if (prompt.topicId) brandTopics.add(prompt.topicId);
+            });
+
+            return {
+              ...brandWithoutPrompts,
+              totalCategories: brandCategories.size,
+              totalTopics: brandTopics.size,
+              totalPrompts: filteredPrompts.length,
+            };
+          }),
+          categories: undefined,
+          topics: undefined,
+        },
+      };
+
+      return ok(leanConfig);
+    } catch (error) {
+      log.error(`Error getting lean customer config for organization: ${spaceCatId}`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  /**
+   * Gets topics for an organization and optionally filters by brand.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Array of topics.
+   */
+  const getTopics = async (context) => {
+    const { spaceCatId } = context.params || {};
+    const { brandId, status } = getQueryParams(context);
+
+    try {
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+
+      // Look up organization
+      const organization = await Organization.findById(spaceCatId);
+      if (!organization) {
+        return notFound(`Organization not found: ${spaceCatId}`);
+      }
+
+      // Get config
+      let customerConfig = null;
+      if (context.s3?.s3Client && context.s3?.s3Bucket) {
+        try {
+          customerConfig = await getCustomerConfigV2FromS3(
+            spaceCatId,
+            context.s3.s3Client,
+            context.s3.s3Bucket,
+          );
+        } catch (s3Error) {
+          log.warn(`Failed to load customer config from S3 for organization: ${spaceCatId}`, s3Error);
+        }
+      }
+
+      if (!customerConfig) {
+        customerConfig = getCustomerConfigByOrganizationId(spaceCatId);
+      }
+
+      if (!customerConfig) {
+        return notFound('Customer configuration not found');
+      }
+
+      // Filter topics by status and optionally by brand
+      let topics = customerConfig.customer.topics || [];
+
+      // If brandId is provided, filter topics to only those used by that brand's prompts
+      if (brandId) {
+        const brand = customerConfig.customer.brands.find((b) => b.id === brandId);
+        if (!brand) {
+          return notFound(`Brand not found: ${brandId}`);
+        }
+
+        // Collect unique topic IDs used by this brand's prompts
+        const brandTopicIds = new Set();
+        (brand.prompts || []).forEach((prompt) => {
+          if (prompt.topicId) {
+            brandTopicIds.add(prompt.topicId);
+          }
+        });
+
+        topics = topics.filter((topic) => brandTopicIds.has(topic.id));
+      }
+
+      // Filter by status
+      if (status) {
+        // Filter by specific status if provided
+        topics = topics.filter((topic) => topic.status === status);
+      } else {
+        // Default: exclude deleted
+        topics = topics.filter((topic) => topic.status !== 'deleted');
+      }
+
+      return ok({ topics });
+    } catch (error) {
+      log.error(`Error getting topics for organization: ${spaceCatId}`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  /**
+   * Gets prompts for an organization and optionally filters by brand/category/topic.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Array of prompts with category/topic info.
+   */
+  const getPrompts = async (context) => {
+    const { spaceCatId } = context.params || {};
+    const {
+      brandId, categoryId, topicId, status,
+    } = getQueryParams(context);
+
+    try {
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+
+      // Look up organization
+      const organization = await Organization.findById(spaceCatId);
+      if (!organization) {
+        return notFound(`Organization not found: ${spaceCatId}`);
+      }
+
+      // Get config
+      let customerConfig = null;
+      if (context.s3?.s3Client && context.s3?.s3Bucket) {
+        try {
+          customerConfig = await getCustomerConfigV2FromS3(
+            spaceCatId,
+            context.s3.s3Client,
+            context.s3.s3Bucket,
+          );
+        } catch (s3Error) {
+          log.warn(`Failed to load customer config from S3 for organization: ${spaceCatId}`, s3Error);
+        }
+      }
+
+      if (!customerConfig) {
+        customerConfig = getCustomerConfigByOrganizationId(spaceCatId);
+      }
+
+      if (!customerConfig) {
+        return notFound('Customer configuration not found');
+      }
+
+      // Build lookup maps for enrichment
+      const categoriesMap = new Map();
+      (customerConfig.customer.categories || []).forEach((cat) => {
+        categoriesMap.set(cat.id, cat);
+      });
+
+      const topicsMap = new Map();
+      (customerConfig.customer.topics || []).forEach((topic) => {
+        topicsMap.set(topic.id, topic);
+      });
+
+      // Collect and filter prompts
+      const allPrompts = [];
+      customerConfig.customer.brands.forEach((brand) => {
+        if (brandId && brand.id !== brandId) return;
+
+        (brand.prompts || []).forEach((prompt) => {
+          if (categoryId && prompt.categoryId !== categoryId) return;
+          if (topicId && prompt.topicId !== topicId) return;
+
+          // Filter by status
+          if (status && prompt.status !== status) return;
+          if (!status && prompt.status === 'deleted') return;
+
+          // Enrich prompt with category/topic info
+          const category = categoriesMap.get(prompt.categoryId);
+          const topic = topicsMap.get(prompt.topicId);
+
+          allPrompts.push({
+            ...prompt,
+            brandId: brand.id,
+            brandName: brand.name,
+            category: category ? {
+              id: category.id,
+              name: category.name,
+              origin: category.origin,
+            } : null,
+            topic: topic ? {
+              id: topic.id,
+              name: topic.name,
+              categoryId: topic.categoryId,
+            } : null,
+          });
+        });
+      });
+
+      return ok({ prompts: allPrompts });
+    } catch (error) {
+      log.error(`Error getting prompts for organization: ${spaceCatId}`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  /**
+   * Saves customer configuration for an organization.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Success response.
+   */
+  const saveCustomerConfig = async (context) => {
+    const { spaceCatId } = context.params || {};
+    try {
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+
+      // Look up organization
+      const organization = await Organization.findById(spaceCatId);
+      if (!organization) {
+        return notFound(`Organization not found: ${spaceCatId}`);
+      }
+
+      const customerConfig = context.data;
+      if (!isNonEmptyObject(customerConfig)) {
+        return badRequest('Customer configuration data is required');
+      }
+
+      // Validate basic structure
+      const hasValidCustomer = customerConfig.customer
+        && customerConfig.customer.customerName;
+      if (!hasValidCustomer) {
+        return badRequest('Invalid customer configuration structure: customer.customerName is required');
+      }
+
+      // Check S3 is available
+      if (!context.s3?.s3Client || !context.s3?.s3Bucket) {
+        return badRequest('S3 storage is not configured for this environment');
+      }
+
+      // Save to S3
+      await saveCustomerConfigV2ToS3(
+        spaceCatId,
+        customerConfig,
+        context.s3.s3Client,
+        context.s3.s3Bucket,
+      );
+
+      log.info(`Customer config saved to S3 for organization: ${spaceCatId}`);
+
+      return ok({ message: 'Customer configuration saved successfully' });
+    } catch (error) {
+      log.error(`Error saving customer config for organization: ${spaceCatId}`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  /**
+   * Patches (merges) customer configuration for an organization.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Success response with stats.
+   */
+  const patchCustomerConfig = async (context) => {
+    const { spaceCatId } = context.params || {};
+    const { authInfo } = context.attributes || {};
+    const userId = authInfo?.profile?.email || 'system';
+
+    try {
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+
+      // Look up organization
+      const organization = await Organization.findById(spaceCatId);
+      if (!organization) {
+        return notFound(`Organization not found: ${spaceCatId}`);
+      }
+
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const updates = context.data;
+      if (!isNonEmptyObject(updates)) {
+        return badRequest('Customer configuration updates are required');
+      }
+
+      // Check S3 is available
+      if (!context.s3?.s3Client || !context.s3?.s3Bucket) {
+        return badRequest('S3 storage is not configured for this environment');
+      }
+
+      // Get existing config
+      let existingConfig = null;
+      try {
+        existingConfig = await getCustomerConfigV2FromS3(
+          spaceCatId,
+          context.s3.s3Client,
+          context.s3.s3Bucket,
+        );
+      } catch (s3Error) {
+        log.warn(`Failed to load existing config from S3 for organization: ${spaceCatId}`, s3Error);
+      }
+
+      // Merge updates with existing config
+      const { mergedConfig, stats } = mergeCustomerConfigV2(
+        updates,
+        existingConfig,
+        userId,
+      );
+
+      // Validate merged config has required fields
+      const hasValidCustomer = mergedConfig.customer
+        && mergedConfig.customer.customerName
+        && mergedConfig.customer.imsOrgID;
+      if (!hasValidCustomer) {
+        return badRequest('Invalid customer configuration: customer.customerName and customer.imsOrgID are required');
+      }
+
+      // Save merged config to S3
+      await saveCustomerConfigV2ToS3(
+        spaceCatId,
+        mergedConfig,
+        context.s3.s3Client,
+        context.s3.s3Bucket,
+      );
+
+      log.info(`Customer config patched for organization: ${spaceCatId} by ${userId}. Stats:`, stats);
+
+      return ok({
+        message: 'Customer configuration updated successfully',
+        stats,
+      });
+    } catch (error) {
+      log.error(`Error patching customer config for organization: ${spaceCatId}`, error);
+      return createErrorResponse(error);
+    }
+  };
+
   return {
     getBrandsForOrganization,
     getBrandGuidelinesForSite,
+    getCustomerConfig,
+    getCustomerConfigLean,
+    getTopics,
+    getPrompts,
+    saveCustomerConfig,
+    patchCustomerConfig,
   };
 }
 

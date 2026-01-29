@@ -277,8 +277,9 @@ async function run(request, context) {
 
 const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 
-const wrappedMain = wrap(run)
-  .with(authWrapper, {
+const wrappedMain = process.env.SKIP_AUTH === 'true'
+  ? wrap(run) // Skip auth wrapper entirely when SKIP_AUTH is true
+  : wrap(run).with(authWrapper, {
     authHandlers: [JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler],
   });
 

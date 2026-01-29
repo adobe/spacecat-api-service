@@ -1,0 +1,33 @@
+{
+  "customer": {
+    "brands": [
+      {
+        "id": "test-brand-new",
+        "name": "New Test Brand",
+        "status": "active",
+        "origin": "manual",
+        "region": ["US", "GB"],
+        "description": "A brand added via PATCH",
+        "vertical": "Software & Technology",
+        "urls": [
+          {
+            "value": "https://newbrand.example.com",
+            "regions": ["US", "GB"]
+          }
+        ],
+        "prompts": [
+          {
+            "id": "new-prompt-1",
+            "prompt": "What is the new brand about?",
+            "status": "active",
+            "regions": ["us", "gb"],
+            "origin": "manual",
+            "source": "api",
+            "categoryId": "859b91c5-0420-4f3b-a464-8d6f6ac34f64",
+            "topicId": "topic-acrobat-features"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "customer": {
+    "customerName": "David O Workfront",
+    "imsOrgID": "0AF81D6D688BC4E50A494131@AdobeOrg",
+    "brands": [
+      {
+        "id": "test-brand-1",
+        "name": "Test Brand",
+        "status": "active",
+        "origin": "manual",
+        "region": ["US"],
+        "description": "A test brand for API testing",
+        "updatedAt": "2026-02-10T10:00:00.000Z",
+        "updatedBy": "api-test",
+        "vertical": "Software & Technology",
+        "urls": [
+          {
+            "value": "https://example.com",
+            "regions": ["US"]
+          }
+        ],
+        "prompts": [
+          {
+            "id": "test-prompt-1",
+            "prompt": "What is this product?",
+            "status": "active",
+            "regions": ["us"],
+            "origin": "manual",
+            "source": "api",
+            "updatedAt": "2026-02-10T10:00:00.000Z",
+            "updatedBy": "api-test",
+            "categoryId": "test-category-1",
+            "topicId": "test-topic-1"
+          }
+        ]
+      }
+    ],
+    "categories": [
+      {
+        "id": "test-category-1",
+        "name": "Test Category",
+        "origin": "manual",
+        "status": "active"
+      }
+    ],
+    "topics": [
+      {
+        "id": "test-topic-1",
+        "name": "Test Topic",
+        "categoryId": "test-category-1",
+        "status": "active"
+      }
+    ],
+    "availableVerticals": [
+      "Software & Technology",
+      "Professional Services"
+    ]
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "customerName": "General Motors",
+  "imsOrgId": "757A02BE532B22BA0A490D4CAdobeOrg",
+  "brands": [
+    {
+      "name": "Chevrolet",
+      "v1File": "chevrolet-llmo-config.json",
+      "v1SiteId": "7645c5fb-e09a-4392-8155-376b06f4893b",
+      "baseUrl": "chevrolet.com",
+      "urls": [
+        "https://www.chevrolet.com"
+      ]
+    },
+    {
+      "name": "GMC",
+      "v1File": "gmc-llmo-config.json",
+      "v1SiteId": "fb0e02ab-c567-427c-b6c1-d281d75a07a7",
+      "baseUrl": "gmc.com",
+      "urls": [
+        "https://www.gmc.com"
+      ]
+    },
+    {
+      "name": "Buick",
+      "v1File": "buick-llmo-config.json",
+      "v1SiteId": "1e2eefd5-9cb8-4ba4-b392-6a6c3405945c",
+      "baseUrl": "buick.com",
+      "urls": [
+        "https://www.buick.com"
+      ]
+    },
+    {
+      "name": "Cadillac",
+      "v1File": "cadillac-llmo-config.json",
+      "v1SiteId": "f0d1283f-eecd-44a6-bcca-0a3f7e74a720",
+      "baseUrl": "cadillac.com",
+      "urls": [
+        "https://www.cadillac.com"
+      ]
+    },
+    {
+      "name": "OnStar",
+      "v1File": "onstar-llmo-config.json",
+      "v1SiteId": "dc6240fe-1c30-4f4f-a995-15aab11c100b",
+      "baseUrl": "onstar.com",
+      "urls": [
+        "https://www.onstar.com"
+      ]
+    },
+    {
+      "name": "GM News",
+      "v1File": "news-gm-llmo-config.json",
+      "v1SiteId": "9010567a-3264-42a3-8b00-846360478660",
+      "baseUrl": "news.gm.com",
+      "urls": [
+        "https://news.gm.com"
+      ]
+    }
+  ]
+}
