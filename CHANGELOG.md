@@ -1,3 +1,10 @@
+# [1.302.0](https://github.com/adobe/spacecat-api-service/compare/v1.301.0...v1.302.0) (2026-01-30)
+
+
+### Features
+
+* **slack/llmo:** add button for reenabling defaults ([#1753](https://github.com/adobe/spacecat-api-service/issues/1753)) ([5286be9](https://github.com/adobe/spacecat-api-service/commit/5286be9cabe8062ce87e056591c4a6d74603c7f5))
+
 # [1.301.0](https://github.com/adobe/spacecat-api-service/compare/v1.300.0...v1.301.0) (2026-01-30)
 
 
