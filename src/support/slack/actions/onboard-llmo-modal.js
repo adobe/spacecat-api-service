@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import {
   postErrorMessage,
 } from '../../../utils/slack/base.js';
@@ -18,6 +19,9 @@ import {
   validateSiteNotOnboarded,
   generateDataFolder,
   performLlmoOnboarding,
+  BASIC_AUDITS,
+  enableAudits,
+  enableImports,
 } from '../../../controllers/llmo/llmo-onboarding.js';
 import { triggerBrandProfileAgent } from '../../brand-profile-trigger.js';
 
@@ -831,6 +835,117 @@ export function updateIMSOrgModal(lambdaContext) {
       log.debug(`Updated org and applied entitlements for site ${siteId} (${brandURL}) for user ${user.id}`);
     } catch (error) {
       log.error('Error updating organization:', error);
+    }
+  };
+}
+
+/* Handles "Re-enable Defaults" button click */
+export function reEnableDefaultsAction(lambdaContext) {
+  const { log, dataAccess } = lambdaContext;
+
+  return async ({ ack, body, client }) => {
+    const metadata = JSON.parse(body.actions[0].value);
+    const originalChannel = body.channel?.id;
+
+    const {
+      brandURL,
+      siteId,
+      originalThreadTs,
+      existingBrand,
+    } = metadata;
+
+    try {
+      await ack();
+      const { user } = body;
+
+      await client.chat.update({
+        channel: originalChannel,
+        ts: body.message.ts,
+        text: `:gear: ${user.name} is re-enabling default audits and imports...`,
+        blocks: [],
+      });
+
+      const { Site, Configuration } = dataAccess;
+      const site = await Site.findById(siteId);
+
+      if (!site) {
+        await client.chat.postMessage({
+          channel: originalChannel,
+          text: ':x: Site not found. Please try again.',
+          thread_ts: originalThreadTs,
+        });
+        return;
+      }
+
+      const safeSay = (msg) => {
+        Promise.resolve(client.chat.postMessage({
+          channel: originalChannel,
+          text: msg,
+          thread_ts: originalThreadTs,
+        })).catch((e) => log.warn(`Slack say failed: ${e.message}`));
+      };
+
+      // Default LLMO audits to enable
+      const defaultAudits = [
+        ...BASIC_AUDITS,
+        'llm-error-pages',
+        'llmo-customer-analysis',
+        'wikipedia-analysis',
+      ];
+
+      // Enable default audits
+      await enableAudits(site, lambdaContext, defaultAudits, safeSay);
+
+      // Enable default brand presence audit only if no variant is already enabled
+      const configuration = await Configuration.findLatest();
+      const isWeeklyFreeEnabled = configuration.isHandlerEnabledForSite(
+        GEO_BRAND_PRESENCE_WEEKLY_FREE,
+        site,
+      );
+      const isWeeklyPaidEnabled = configuration.isHandlerEnabledForSite(
+        GEO_BRAND_PRESENCE_WEEKLY_PAID,
+        site,
+      );
+      const isDailyEnabled = configuration.isHandlerEnabledForSite(
+        GEO_BRAND_PRESENCE_DAILY,
+        site,
+      );
+      const hasExistingGeoBrandPresence = isWeeklyFreeEnabled
+        || isWeeklyPaidEnabled
+        || isDailyEnabled;
+
+      if (!hasExistingGeoBrandPresence) {
+        configuration.enableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_FREE, site);
+        await configuration.save();
+      }
+
+      // Enable default imports
+      const siteConfig = site.getConfig();
+      await enableImports(siteConfig, [{ type: 'top-pages' }], log, safeSay);
+      site.setConfig(Config.toDynamoItem(siteConfig));
+      await site.save();
+
+      const geoBrandPresenceStatus = hasExistingGeoBrandPresence
+        ? 'geo-brand-presence (existing configuration preserved)'
+        : 'geo-brand-presence-free';
+
+      await client.chat.postMessage({
+        channel: originalChannel,
+        text: `:white_check_mark: Successfully re-enabled default audits and imports for *${brandURL}* (brand: *${existingBrand}*).
+
+:clipboard: *Audits enabled:* ${defaultAudits.join(', ')}, ${geoBrandPresenceStatus}
+:inbox_tray: *Imports enabled:* top-pages`,
+        thread_ts: originalThreadTs,
+      });
+
+      log.debug(`Re-enabled defaults for site ${siteId} (${brandURL}) for user ${user.id}`);
+    } catch (error) {
+      log.error('Error re-enabling defaults:', error);
+      await client.chat.postMessage({
+        channel: originalChannel,
+        text: `:x: Error re-enabling defaults: ${error.message}`,
+        thread_ts: originalThreadTs,
+      });
     }
   };
 }
