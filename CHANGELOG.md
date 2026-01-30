@@ -1,3 +1,10 @@
+# [1.301.0](https://github.com/adobe/spacecat-api-service/compare/v1.300.0...v1.301.0) (2026-01-30)
+
+
+### Features
+
+* add bounce gap loss and estimated cost with ahref data ([#1757](https://github.com/adobe/spacecat-api-service/issues/1757)) ([b80a09a](https://github.com/adobe/spacecat-api-service/commit/b80a09a6b9b897d52a6945f3001ba288f6c075fb))
+
 # [1.300.0](https://github.com/adobe/spacecat-api-service/compare/v1.299.4...v1.300.0) (2026-01-30)
 
 
