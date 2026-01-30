@@ -14,7 +14,6 @@ import {
   accepted,
   badRequest,
   createResponse,
-  created,
   forbidden,
   internalServerError,
   noContent,
@@ -40,7 +39,6 @@ import { SiteDto } from '../dto/site.js';
 import { OrganizationDto } from '../dto/organization.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
-import { KeyEventDto } from '../dto/key-event.js';
 import { wwwUrlResolver, resolveWwwUrl } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
@@ -104,7 +102,7 @@ function SitesController(ctx, log, env) {
   }
 
   const {
-    Audit, KeyEvent, Organization, Site,
+    Audit, Organization, Site,
   } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
@@ -513,87 +511,6 @@ function SitesController(ctx, log, env) {
     }
 
     return badRequest('No updates provided');
-  };
-
-  /**
-   * Creates a key event. The key event ID is generated automatically.
-   * @param {object} context - Context of the request.
-   * @return {Promise<Response>} Key event response.
-   */
-  const createKeyEvent = async (context) => {
-    const { siteId } = context.params;
-    const { name, type, time } = context.data;
-
-    const site = await Site.findById(siteId);
-    if (!site) {
-      return notFound('Site not found');
-    }
-
-    if (!await accessControlUtil.hasAccess(site)) {
-      return forbidden('Only users belonging to the organization can create key events');
-    }
-
-    const keyEvent = await KeyEvent.create({
-      siteId,
-      name,
-      type,
-      time,
-    });
-
-    return created(KeyEventDto.toJSON(keyEvent));
-  };
-
-  /**
-   * Gets key events for a site
-   * @param {object} context - Context of the request.
-   * @returns {Promise<[object]>} Key events.
-   * @throws {Error} If site ID is not provided.
-   */
-  const getKeyEventsBySiteID = async (context) => {
-    const siteId = context.params?.siteId;
-
-    if (!isValidUUID(siteId)) {
-      return badRequest('Site ID required');
-    }
-
-    const site = await Site.findById(siteId);
-    if (!site) {
-      return notFound('Site not found');
-    }
-
-    if (!await accessControlUtil.hasAccess(site)) {
-      return forbidden('Only users belonging to the organization can view its key events');
-    }
-
-    const keyEvents = await site.getKeyEvents();
-
-    return ok(keyEvents.map((keyEvent) => KeyEventDto.toJSON(keyEvent)));
-  };
-
-  /**
-   * Removes a key event.
-   * @param {object} context - Context of the request.
-   * @return {Promise<Response>} Delete response.
-   */
-  const removeKeyEvent = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can remove key events');
-    }
-    const { keyEventId } = context.params;
-
-    if (!hasText(keyEventId)) {
-      return badRequest('Key Event ID required');
-    }
-
-    const keyEvent = await KeyEvent.findById(keyEventId);
-
-    if (!keyEvent) {
-      return notFound('Key Event not found');
-    }
-
-    await keyEvent.remove();
-
-    return noContent();
   };
 
   const getSiteMetricsBySource = async (context) => {
@@ -1065,11 +982,6 @@ function SitesController(ctx, log, env) {
     resolveSite,
     getBrandProfile,
     triggerBrandProfile,
-
-    // key events
-    createKeyEvent,
-    getKeyEventsBySiteID,
-    removeKeyEvent,
 
     // site metrics
     getSiteMetricsBySource,
