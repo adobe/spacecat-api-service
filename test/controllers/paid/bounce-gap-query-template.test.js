@@ -111,7 +111,7 @@ describe('Bounce Gap Query Template', () => {
       expect(query).to.include('approx_percentile(inp, 0.70)     AS p70_inp');
     });
 
-    it('uses min_totals CTE for pre-filtering', () => {
+    it('does not use pageview threshold filtering', () => {
       const query = getTop3PagesWithBounceGapTemplate({
         siteId: 'test-site-id',
         tableName: 'test_db.test_table',
@@ -119,12 +119,14 @@ describe('Bounce Gap Query Template', () => {
         dimensionColumns: 'device',
         groupBy: 'device',
         dimensionColumnsPrefixed: 'a.device',
-        pageViewThreshold: 1000,
         limit: 10,
       });
 
-      expect(query).to.include('WITH min_totals AS');
-      expect(query).to.include('SUM(pageviews) >= 1000');
+      // Should not have min_totals CTE or pageview threshold filtering
+      expect(query).to.not.include('WITH min_totals AS');
+      expect(query).to.not.include('HAVING SUM(pageviews)');
+      // Should start with raw CTE directly
+      expect(query).to.include('WITH raw AS');
     });
   });
 });

@@ -195,5 +195,29 @@ describe('Bounce Gap Calculator', () => {
       expect(bounceGapResult.hasShowData).to.be.true;
       expect(bounceGapResult.hasHiddenData).to.be.true;
     });
+
+    it('handles missing or invalid bounce_rate values', () => {
+      const results = [
+        {
+          device: 'desktop',
+          consent: 'show',
+          pageviews: '10000',
+          bounce_rate: null, // Missing bounce rate
+        },
+        {
+          device: 'desktop',
+          consent: 'hidden',
+          pageviews: '10000',
+          bounce_rate: 'invalid', // Invalid bounce rate
+        },
+      ];
+
+      const bounceGapResult = calculateConsentBounceGapLoss(results, ['device'], mockLog);
+
+      // Should handle gracefully with 0 as fallback
+      expect(bounceGapResult.byDimension.desktop).to.exist;
+      expect(bounceGapResult.byDimension.desktop.loss).to.equal(0); // 10000 * max(0, 0 - 0) = 0
+      expect(bounceGapResult.byDimension.desktop.delta).to.equal(0);
+    });
   });
 });

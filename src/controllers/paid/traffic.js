@@ -259,7 +259,7 @@ function TrafficController(context, log, env) {
     });
   }
 
-  async function fetchTop3PagesTrafficData(dimensions, disableThreshold, limit) {
+  async function fetchTop3PagesTrafficData(dimensions, limit) {
     /* c8 ignore next 1 */
     const requestId = context.invocation?.requestId;
     const siteId = context.params?.siteId;
@@ -287,15 +287,11 @@ function TrafficController(context, log, env) {
 
     const tableName = `${rumMetricsDatabase}.${rumMetricsCompactTable}`;
 
-    let pageViewThreshold = env.PAID_DATA_THRESHOLD ?? 1000;
-    if (disableThreshold) {
-      pageViewThreshold = 0;
-    }
-
     const dimensionColumns = dimensions.join(', ');
     const dimensionColumnsPrefixed = dimensions.map((col) => `a.${col}`).join(', ');
 
     // Use bounce gap query template to get both consent states
+    // Note: No pageview threshold filtering - we want all data for accurate aggregation
     const query = getTop3PagesWithBounceGapTemplate({
       siteId,
       tableName,
@@ -303,7 +299,6 @@ function TrafficController(context, log, env) {
       dimensionColumns,
       groupBy: dimensionColumns,
       dimensionColumnsPrefixed,
-      pageViewThreshold,
       limit: null, // Don't limit in query - we need all data for bounce gap calculation
     });
 
@@ -316,7 +311,7 @@ function TrafficController(context, log, env) {
       siteId,
       query,
       noCache,
-      pageViewThreshold,
+      0, // No pageview threshold for bounce gap queries
       null,
     );
     let thresholdConfig = {};
@@ -509,11 +504,11 @@ function TrafficController(context, log, env) {
     getPaidTrafficTemporalSeriesByUrlPlatform: async () => fetchPaidTrafficDataTemporalSeries(['path', 'trf_platform']),
     getPaidTrafficTemporalSeriesByUrlChannelPlatform: async () => fetchPaidTrafficDataTemporalSeries(['path', 'trf_channel', 'trf_platform']),
 
-    getTrafficLossByDevices: async () => fetchTop3PagesTrafficData(['device'], true, null),
-    getImpactByPage: async () => fetchTop3PagesTrafficData(['path'], true, 3),
-    getImpactByPageTrafficType: async () => fetchTop3PagesTrafficData(['path', 'trf_type'], true, null),
-    getImpactByPageDevice: async () => fetchTop3PagesTrafficData(['path', 'device'], true, null),
-    getImpactByPageTrafficTypeDevice: async () => fetchTop3PagesTrafficData(['path', 'trf_type', 'device'], true, null),
+    getTrafficLossByDevices: async () => fetchTop3PagesTrafficData(['device'], null),
+    getImpactByPage: async () => fetchTop3PagesTrafficData(['path'], 3),
+    getImpactByPageTrafficType: async () => fetchTop3PagesTrafficData(['path', 'trf_type'], null),
+    getImpactByPageDevice: async () => fetchTop3PagesTrafficData(['path', 'device'], null),
+    getImpactByPageTrafficTypeDevice: async () => fetchTop3PagesTrafficData(['path', 'trf_type', 'device'], null),
   };
 }
 

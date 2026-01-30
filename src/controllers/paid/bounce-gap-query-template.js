@@ -14,6 +14,7 @@
  * Generates an Athena SQL query template for bounce gap analysis.
  * This query includes BOTH consent states (show/hidden) to enable bounce gap loss calculation.
  *
+ *
  * @param {Object} params - Query parameters
  * @param {string} params.siteId - Site ID
  * @param {string} params.tableName - Full table name (database.table)
@@ -23,7 +24,6 @@
  * @param {string} params.groupBy - GROUP BY clause (same as dimensionColumns)
  * @param {string} params.dimensionColumnsPrefixed - Prefixed dimension columns
  *   (e.g., "a.path, a.trf_type")
- * @param {number} params.pageViewThreshold - Minimum pageviews threshold
  * @param {number|null} params.limit - Result limit (null for no limit)
  * @returns {string} SQL query string
  */
@@ -34,21 +34,10 @@ export function getTop3PagesWithBounceGapTemplate({
   dimensionColumns,
   groupBy,
   dimensionColumnsPrefixed,
-  pageViewThreshold,
   limit,
 }) {
   return `
-WITH min_totals AS (
-    SELECT
-        path AS min_key,
-        CAST(SUM(pageviews) AS BIGINT) AS total_pageviews
-    FROM ${tableName}
-    WHERE siteid = '${siteId}'
-    AND (${temporalCondition})
-    GROUP BY path
-    HAVING SUM(pageviews) >= ${pageViewThreshold}
-),
-raw AS (
+WITH raw AS (
     SELECT
         week,
         month,
@@ -71,9 +60,8 @@ raw AS (
         lcp,
         cls,
         inp
-    FROM ${tableName} m
-    JOIN min_totals t ON m.path = t.min_key
-    WHERE m.siteid = '${siteId}'
+    FROM ${tableName}
+    WHERE siteid = '${siteId}'
     AND (${temporalCondition})
     AND consent IN ('show', 'hidden')
 ),
