@@ -1,3 +1,15 @@
+BotBlockerResultBlocked:
+  description: Example for a site that is bot blocked
+  value:
+    crawlable: false
+    type: 'cloudflare'
+    confidence: 0.99
+BotBlockerResultAllowed:
+  description: Example for a site that is not bot blocked
+  value:
+    crawlable: true
+    type: 'none'
+    confidence: 1.0
 broken-backlinks-opportunity:
   description: Example for a broken backlinks opportunity
   value:

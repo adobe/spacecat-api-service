@@ -46,6 +46,47 @@ BrandProfile:
       type: object
       additionalProperties: true
       description: Free-form metadata bucket for future extensions.
+BotBlockerResult:
+  type: object
+  description: Result of bot blocker detection for a site. Indicates whether the site is crawlable by bots, what type of blocking was detected (if any), and the confidence level of the detection.
+  properties:
+    crawlable:
+      type: boolean
+      description: Whether the site can be crawled by bots
+      example: false
+    type:
+      type: string
+      description: The type of bot blocker detected or infrastructure present
+      enum:
+        - 'cloudflare'
+        - 'imperva'
+        - 'akamai'
+        - 'fastly'
+        - 'cloudfront'
+        - 'cloudflare-allowed'
+        - 'imperva-allowed'
+        - 'akamai-allowed'
+        - 'fastly-allowed'
+        - 'cloudfront-allowed'
+        - 'http2-block'
+        - 'none'
+        - 'unknown'
+      example: 'cloudflare'
+    confidence:
+      type: number
+      format: float
+      minimum: 0
+      maximum: 1
+      description: Confidence level of the detection (0.0 to 1.0). Values >= 0.95 indicate reliable detection. Lower values suggest uncertain situations.
+      example: 0.99
+    reason:
+      type: string
+      description: Optional reason or additional context for the detection result
+      example: 'HTTP 403 Forbidden - access denied'
+  required:
+    - crawlable
+    - type
+    - confidence
 Id:
   type: string
   format: uuid
