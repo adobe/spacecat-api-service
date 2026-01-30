@@ -1,3 +1,10 @@
+# [1.304.0](https://github.com/adobe/spacecat-api-service/compare/v1.303.0...v1.304.0) (2026-01-30)
+
+
+### Features
+
+* new flag opted added in edgeoptimizeconfig ([#1743](https://github.com/adobe/spacecat-api-service/issues/1743)) ([a4876b5](https://github.com/adobe/spacecat-api-service/commit/a4876b5d963e9f118dc9bfa6ee33e0cb04cba056))
+
 # [1.303.0](https://github.com/adobe/spacecat-api-service/compare/v1.302.0...v1.303.0) (2026-01-30)
 
 
