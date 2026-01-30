@@ -1,3 +1,10 @@
+# [1.303.0](https://github.com/adobe/spacecat-api-service/compare/v1.302.0...v1.303.0) (2026-01-30)
+
+
+### Features
+
+* Weekly digest email - API implementation ([#1730](https://github.com/adobe/spacecat-api-service/issues/1730)) ([7ab23f4](https://github.com/adobe/spacecat-api-service/commit/7ab23f40602561c3c1cff2d4d2c33fc236c20e9a))
+
 # [1.302.0](https://github.com/adobe/spacecat-api-service/compare/v1.301.0...v1.302.0) (2026-01-30)
 
 
