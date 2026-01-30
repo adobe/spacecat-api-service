@@ -1,3 +1,10 @@
+# [1.300.0](https://github.com/adobe/spacecat-api-service/compare/v1.299.4...v1.300.0) (2026-01-30)
+
+
+### Features
+
+* added bot blocker detection API ([#1756](https://github.com/adobe/spacecat-api-service/issues/1756)) ([9053cfe](https://github.com/adobe/spacecat-api-service/commit/9053cfebc42c2e67f04e97c8bf01e10b570447ef))
+
 ## [1.299.4](https://github.com/adobe/spacecat-api-service/compare/v1.299.3...v1.299.4) (2026-01-30)
 
 
