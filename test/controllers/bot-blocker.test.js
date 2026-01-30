@@ -182,8 +182,8 @@ describe('Bot Blocker Controller', () => {
       const result = await response.json();
       expect(result).to.deep.equal(botBlockerResult);
       expect(detectBotBlockerStub).to.have.been.calledWith({ baseUrl: baseURL });
-      expect(loggerStub.info).to.have.been.calledWith(`Checking bot blocker for site ${siteId} with baseURL: ${baseURL}`);
-      expect(loggerStub.info).to.have.been.calledWith(`Bot blocker check completed for site ${siteId}: crawlable=true, type=none, confidence=1`);
+      expect(loggerStub.debug).to.have.been.calledWith(`Checking bot blocker for site ${siteId} with baseURL: ${baseURL}`);
+      expect(loggerStub.debug).to.have.been.calledWith(`Bot blocker check completed for site ${siteId}: crawlable=true, type=none, confidence=1`);
     });
 
     it('successfully checks bot blocker and returns result when blocked by Cloudflare', async () => {
@@ -204,7 +204,7 @@ describe('Bot Blocker Controller', () => {
       const result = await response.json();
       expect(result).to.deep.equal(botBlockerResult);
       expect(detectBotBlockerStub).to.have.been.calledWith({ baseUrl: baseURL });
-      expect(loggerStub.info).to.have.been.calledWith(`Bot blocker check completed for site ${siteId}: crawlable=false, type=cloudflare, confidence=0.99`);
+      expect(loggerStub.debug).to.have.been.calledWith(`Bot blocker check completed for site ${siteId}: crawlable=false, type=cloudflare, confidence=0.99`);
     });
 
     it('returns internal server error when detectBotBlocker throws an error', async () => {

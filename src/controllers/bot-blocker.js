@@ -72,12 +72,12 @@ function BotBlockerController(ctx, log) {
         return internalServerError('Site has no baseURL configured');
       }
 
-      log.info(`Checking bot blocker for site ${siteId} with baseURL: ${baseURL}`);
+      log.debug(`Checking bot blocker for site ${siteId} with baseURL: ${baseURL}`);
 
       // Call the bot blocker detection function
       const result = await detectBotBlocker({ baseUrl: baseURL });
 
-      log.info(`Bot blocker check completed for site ${siteId}: crawlable=${result.crawlable}, type=${result.type}, confidence=${result.confidence}`);
+      log.debug(`Bot blocker check completed for site ${siteId}: crawlable=${result.crawlable}, type=${result.type}, confidence=${result.confidence}`);
 
       return ok(result);
     } catch (error) {
