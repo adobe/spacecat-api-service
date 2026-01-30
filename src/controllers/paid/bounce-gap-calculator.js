@@ -24,13 +24,14 @@
 export function calculateGenericBounceGapLoss(grouped, log, treatment = 'show', control = 'hidden') {
   const byGroup = {};
   let totalLoss = 0;
+  let skippedCount = 0;
 
   Object.entries(grouped).forEach(([group, variants]) => {
     const t = variants[treatment];
     const c = variants[control];
 
     if (!t || !c) {
-      log.debug(`[bounce-gap] Missing data for ${group}; skipping`);
+      skippedCount += 1;
       return;
     }
 
@@ -39,9 +40,11 @@ export function calculateGenericBounceGapLoss(grouped, log, treatment = 'show', 
 
     byGroup[group] = { loss, delta };
     totalLoss += loss;
-
-    log.debug(`[bounce-gap] ${group}: delta=${delta.toFixed(3)}, loss=${loss.toFixed(0)}`);
   });
+
+  if (skippedCount > 0) {
+    log.debug(`[bounce-gap] Skipped ${skippedCount} dimension group(s) with incomplete data`);
+  }
 
   return { totalLoss, byGroup };
 }

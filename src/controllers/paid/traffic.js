@@ -291,7 +291,6 @@ function TrafficController(context, log, env) {
     const dimensionColumnsPrefixed = dimensions.map((col) => `a.${col}`).join(', ');
 
     // Use bounce gap query template to get both consent states
-    // Note: No pageview threshold filtering - we want all data for accurate aggregation
     const query = getTop3PagesWithBounceGapTemplate({
       siteId,
       tableName,

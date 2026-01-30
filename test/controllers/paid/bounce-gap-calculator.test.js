@@ -187,10 +187,6 @@ describe('Bounce Gap Calculator', () => {
       expect(bounceGapResult.byDimension.desktop).to.exist;
       expect(bounceGapResult.byDimension.desktop.loss).to.be.closeTo(1000, 1);
 
-      // Should have logged debug messages for skipped groups
-      expect(mockLog.debug).to.have.been.calledWithMatch('[bounce-gap] Missing data for mobile');
-      expect(mockLog.debug).to.have.been.calledWithMatch('[bounce-gap] Missing data for tablet');
-
       // Overall flags should still be true since we have at least one of each
       expect(bounceGapResult.hasShowData).to.be.true;
       expect(bounceGapResult.hasHiddenData).to.be.true;
