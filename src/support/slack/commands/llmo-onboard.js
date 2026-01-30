@@ -112,6 +112,21 @@ function LlmoOnboardCommand(context) {
                   }),
                   action_id: 'update_org_action',
                 },
+                {
+                  type: 'button',
+                  text: {
+                    type: 'plain_text',
+                    text: 'Re-enable Defaults',
+                  },
+                  value: JSON.stringify({
+                    brandURL: normalizedSite,
+                    siteId: existingSite.getId(),
+                    existingBrand: brand,
+                    originalChannel: 'current',
+                    originalThreadTs: threadTs,
+                  }),
+                  action_id: 're_enable_defaults_action',
+                },
               ],
             },
           ],

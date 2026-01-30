@@ -28,29 +28,20 @@ import {
 } from '@adobe/spacecat-shared-utils';
 import { TrialUser as TrialUserModel } from '@adobe/spacecat-shared-data-access';
 
+import { ImsClient } from '@adobe/spacecat-shared-ims-client';
 import { TrialUserDto } from '../dto/trial-user.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { sendTrialUserInviteEmail } from '../support/email-service.js';
 
 /**
- * Gets the email of the current authenticated user from the auth profile.
- * @param {Object} context - Request context
- * @returns {string|null} User email or null if not found
+ * Builds the email payload XML for trial user invitation.
+ * @param {string} emailAddress - Single email address.
+ * @returns {string} XML email payload.
  */
-const getCurrentUserEmail = (context) => {
-  const authInfo = context.attributes?.authInfo;
-  if (!authInfo) {
-    return null;
-  }
-
-  const profile = authInfo.getProfile();
-  if (!profile) {
-    return null;
-  }
-
-  // Trial users have trial_email, regular users have email
-  return profile.trial_email || profile.email || null;
-};
+function buildEmailPayload(emailAddress) {
+  return `<sendTemplateEmailReq>
+    <toList>${emailAddress}</toList>
+</sendTemplateEmailReq>`;
+}
 /**
  * TrialUsers controller. Provides methods to read and create trial users.
  * @param {object} ctx - Context of the request.
@@ -111,6 +102,7 @@ function TrialUsersController(ctx) {
   const createTrialUserForEmailInvite = async (context) => {
     const { organizationId } = context.params;
     const { emailId } = context.data;
+    const { env } = context;
 
     if (!isValidUUID(organizationId)) {
       return badRequest('Organization ID required');
@@ -141,14 +133,28 @@ function TrialUsersController(ctx) {
         return createResponse({ message: `Trial user with this email already exists ${existingTrialUser.getId()}` }, 409);
       }
 
-      // Send invitation email using the email service
-      const emailResult = await sendTrialUserInviteEmail({
-        context,
-        emailAddress: emailId,
+      env.IMS_CLIENT_ID = env.EMAIL_IMS_CLIENT_ID;
+      env.IMS_CLIENT_SECRET = env.EMAIL_IMS_CLIENT_SECRET;
+      env.IMS_CLIENT_CODE = env.EMAIL_IMS_CLIENT_CODE;
+      env.IMS_SCOPE = env.EMAIL_IMS_SCOPE;
+      const imsClient = ImsClient.createFrom(context);
+      const imsTokenPayload = await imsClient.getServiceAccessToken();
+      const postOfficeEndpoint = env.ADOBE_POSTOFFICE_ENDPOINT;
+      const emailTemplateName = env.EMAIL_LLMO_TEMPLATE;
+      const emailPayload = buildEmailPayload(emailId);
+      // Send email using Adobe Post Office API
+      const emailSentResponse = await fetch(`${postOfficeEndpoint}/po-server/message?templateName=${emailTemplateName}&locale=en-us`, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/xml',
+          Authorization: `IMS ${imsTokenPayload.access_token}`,
+          'Content-Type': 'application/xml',
+        },
+        body: emailPayload,
       });
 
-      // Create user only when email is sent successfully
-      if (emailResult.success) {
+      // create user only when email is sent successfully
+      if (emailSentResponse.status === 200) {
         const trialUser = await TrialUser.create({
           emailId,
           organizationId,
@@ -157,8 +163,7 @@ function TrialUsersController(ctx) {
         });
         return created(TrialUserDto.toJSON(trialUser));
       } else {
-        context.log.error(`Failed to send invitation email: ${emailResult.error}`);
-        return badRequest('An error occurred while sending email to the user');
+        return badRequest('Some Error Occured while sending email to the user');
       }
     } catch (e) {
       context.log.error(`Error creating trial user invite for organization ${organizationId}: ${e.message}`);
@@ -167,88 +172,97 @@ function TrialUsersController(ctx) {
   };
 
   /**
-   * Updates email preferences for the current authenticated user.
-   * Allows users to opt-in/out of weekly digest emails.
+   * Gets the email address of the currently authenticated user.
+   * Tries multiple sources: trial_email, preferred_username, email.
    *
-   * @param {object} context - Context of the request.
-   * @returns {Promise<Response>} Updated email preferences response.
+   * @param {Object} context - Request context
+   * @returns {string|null} Email address or null if not found
    */
-  const updateEmailPreferences = async (context) => {
-    const { weeklyDigest } = context.data;
+  const getCurrentUserEmail = (context) => {
+    const authInfo = context.attributes?.authInfo;
+    if (!authInfo) return null;
 
-    // Validate input
-    if (typeof weeklyDigest !== 'boolean') {
-      return badRequest('weeklyDigest must be a boolean value');
-    }
+    const profile = authInfo.getProfile?.();
+    if (!profile) return null;
 
-    // Get current user email from auth context
-    const userEmail = getCurrentUserEmail(context);
-    if (!userEmail) {
+    // Try multiple fields that might contain the email
+    return profile.trial_email || profile.preferred_username || profile.email || null;
+  };
+
+  /**
+   * Gets email preferences for the currently authenticated user.
+   *
+   * @param {Object} context - Request context
+   * @returns {Promise<Response>} Email preferences response
+   */
+  const getEmailPreferences = async (context) => {
+    const email = getCurrentUserEmail(context);
+    if (!email) {
       return unauthorized('Unable to identify current user');
     }
 
     try {
-      // Find the trial user by email
-      const trialUser = await TrialUser.findByEmailId(userEmail);
+      const trialUser = await TrialUser.findByEmailId(email);
       if (!trialUser) {
-        return notFound('User not found');
+        return notFound('Trial user not found');
       }
 
-      // Get existing metadata or initialize empty object
       const metadata = trialUser.getMetadata() || {};
+      const emailPreferences = metadata.emailPreferences || {};
 
-      // Update email preferences in metadata
-      metadata.emailPreferences = {
-        ...(metadata.emailPreferences || {}),
-        weeklyDigest,
-      };
-
-      // Update the trial user with new metadata
-      trialUser.setMetadata(metadata);
-      await trialUser.save();
-
-      context.log.info(`Updated email preferences for user ${userEmail}: weeklyDigest=${weeklyDigest}`);
-
+      // Default to opted-in if not set
       return ok({
-        message: 'Email preferences updated successfully',
-        emailPreferences: metadata.emailPreferences,
+        emailPreferences: {
+          weeklyDigest: emailPreferences.weeklyDigest !== false,
+        },
       });
     } catch (e) {
-      context.log.error(`Error updating email preferences for user ${userEmail}: ${e.message}`);
+      context.log.error(`Error getting email preferences for ${email}: ${e.message}`);
       return internalServerError(e.message);
     }
   };
 
   /**
-   * Gets email preferences for the current authenticated user.
+   * Updates email preferences for the currently authenticated user.
    *
-   * @param {object} context - Context of the request.
-   * @returns {Promise<Response>} Email preferences response.
+   * @param {Object} context - Request context
+   * @returns {Promise<Response>} Updated email preferences response
    */
-  const getEmailPreferences = async (context) => {
-    // Get current user email from auth context
-    const userEmail = getCurrentUserEmail(context);
-    if (!userEmail) {
+  const updateEmailPreferences = async (context) => {
+    const email = getCurrentUserEmail(context);
+    if (!email) {
       return unauthorized('Unable to identify current user');
     }
 
+    const { weeklyDigest } = context.data || {};
+
+    // Validate that weeklyDigest is a boolean if provided
+    if (weeklyDigest !== undefined && typeof weeklyDigest !== 'boolean') {
+      return badRequest('weeklyDigest must be a boolean');
+    }
+
     try {
-      // Find the trial user by email
-      const trialUser = await TrialUser.findByEmailId(userEmail);
+      const trialUser = await TrialUser.findByEmailId(email);
       if (!trialUser) {
-        return notFound('User not found');
+        return notFound('Trial user not found');
       }
 
-      // Get email preferences from metadata, with defaults
+      // Update email preferences in metadata
       const metadata = trialUser.getMetadata() || {};
-      const emailPreferences = {
-        weeklyDigest: true, // Default to opted-in
+      metadata.emailPreferences = {
         ...(metadata.emailPreferences || {}),
+        ...(weeklyDigest !== undefined ? { weeklyDigest } : {}),
       };
+      trialUser.setMetadata(metadata);
+      await trialUser.save();
 
-      return ok({ emailPreferences });
+      return ok({
+        emailPreferences: {
+          weeklyDigest: metadata.emailPreferences.weeklyDigest !== false,
+        },
+      });
     } catch (e) {
-      context.log.error(`Error getting email preferences for user ${userEmail}: ${e.message}`);
+      context.log.error(`Error updating email preferences for ${email}: ${e.message}`);
       return internalServerError(e.message);
     }
   };
@@ -256,8 +270,8 @@ function TrialUsersController(ctx) {
   return {
     getByOrganizationID,
     createTrialUserForEmailInvite,
-    updateEmailPreferences,
     getEmailPreferences,
+    updateEmailPreferences,
   };
 }
 

@@ -40,6 +40,7 @@ const ALL_AUDITS = [
   'experimentation-opportunities',
   'meta-tags',
   'product-metatags',
+  'commerce-product-enrichments',
   'structured-data',
   'forms-opportunities',
   'alt-text',

@@ -20,7 +20,6 @@ import {
 import {
   AWSAthenaClient, TrafficDataResponseDto, getTrafficAnalysisQuery,
   TrafficDataWithCWVDto, getTrafficAnalysisQueryPlaceholdersFilled,
-  getTop3PagesWithTrafficLostTemplate,
 } from '@adobe/spacecat-shared-athena-client';
 import crypto from 'crypto';
 import AccessControlUtil from '../../support/access-control-util.js';
@@ -30,6 +29,9 @@ import {
   fileExists,
   getSignedUrlWithRetries,
 } from './caching-helper.js';
+import { getTop3PagesWithBounceGapTemplate } from './bounce-gap-query-template.js';
+import { calculateConsentBounceGapLoss } from './bounce-gap-calculator.js';
+import { fetchCPCData, getCPCForTrafficType, calculateEstimatedCost } from './cpc-calculator.js';
 
 function getCacheKey(siteId, query, cacheLocation, pageViewThreshold, filter = null) {
   const outPrefix = crypto.createHash('md5').update(`${query}_${pageViewThreshold}_${filter ? filter.filterKey : ''}`).digest('hex');
@@ -257,7 +259,7 @@ function TrafficController(context, log, env) {
     });
   }
 
-  async function fetchTop3PagesTrafficData(dimensions, disableThreshold, limit) {
+  async function fetchTop3PagesTrafficData(dimensions, limit) {
     /* c8 ignore next 1 */
     const requestId = context.invocation?.requestId;
     const siteId = context.params?.siteId;
@@ -285,26 +287,21 @@ function TrafficController(context, log, env) {
 
     const tableName = `${rumMetricsDatabase}.${rumMetricsCompactTable}`;
 
-    let pageViewThreshold = env.PAID_DATA_THRESHOLD ?? 1000;
-    if (disableThreshold) {
-      pageViewThreshold = 0;
-    }
-
     const dimensionColumns = dimensions.join(', ');
     const dimensionColumnsPrefixed = dimensions.map((col) => `a.${col}`).join(', ');
 
-    const query = getTop3PagesWithTrafficLostTemplate({
+    // Use bounce gap query template to get both consent states
+    const query = getTop3PagesWithBounceGapTemplate({
       siteId,
       tableName,
       temporalCondition: decodedTemporalCondition,
       dimensionColumns,
       groupBy: dimensionColumns,
       dimensionColumnsPrefixed,
-      pageViewThreshold,
-      limit,
+      limit: null, // Don't limit in query - we need all data for bounce gap calculation
     });
 
-    log.info(`getTop3PagesWithTrafficLostTemplate Query: ${query}`);
+    log.info(`getTop3PagesWithBounceGapTemplate Query: ${query}`);
 
     const description = `fetch top 3 pages traffic data db: ${rumMetricsDatabase}| siteKey: ${siteId} | temporalCondition: ${decodedTemporalCondition} | groupBy: [${dimensions.join(', ')}] `;
 
@@ -313,7 +310,7 @@ function TrafficController(context, log, env) {
       siteId,
       query,
       noCache,
-      pageViewThreshold,
+      0, // No pageview threshold for bounce gap queries
       null,
     );
     let thresholdConfig = {};
@@ -340,14 +337,60 @@ function TrafficController(context, log, env) {
     const athenaClient = AWSAthenaClient.fromContext(context, resultLocation);
 
     const results = await athenaClient.query(query, rumMetricsDatabase, description);
-    const response = results.map(
-      (row) => TrafficDataWithCWVDto.toJSON(row, thresholdConfig, baseURL),
-    );
+
+    // Calculate bounce gap loss using both consent states
+    const bounceGapResult = calculateConsentBounceGapLoss(results, dimensions, log);
+
+    log.info(`Bounce gap calculation: totalLoss=${bounceGapResult.projectedTrafficLost}, hasShow=${bounceGapResult.hasShowData}, hasHidden=${bounceGapResult.hasHiddenData}`);
+
+    // Fetch CPC data from Ahrefs (or use default)
+    const cpcData = await fetchCPCData(context, bucketName, siteId, log);
+    log.info(`CPC data loaded - source: ${cpcData.source}, organicCPC: $${cpcData.organicCPC.toFixed(4)}, paidCPC: $${cpcData.paidCPC.toFixed(4)}`);
+
+    // Filter to only 'show' consent data and transform to DTO
+    const showResults = results.filter((row) => row.consent === 'show');
+
+    // Create a map of dimension keys to bounce gap data for efficient lookup
+    const bounceGapByDimension = new Map();
+    Object.entries(bounceGapResult.byDimension).forEach(([dimensionKey, { loss, delta }]) => {
+      bounceGapByDimension.set(dimensionKey, { loss, delta });
+    });
+
+    // Transform results and add bounce gap loss
+    const response = showResults.map((row) => {
+      const dto = TrafficDataWithCWVDto.toJSON(row, thresholdConfig, baseURL);
+
+      // Create dimension key to match bounce gap calculation
+      const dimensionKey = dimensions.map((dim) => row[dim] || 'unknown').join('|');
+      const bounceGapData = bounceGapByDimension.get(dimensionKey) || { loss: 0, delta: 0 };
+
+      const result = {
+        ...dto,
+        bounceGapLoss: bounceGapData.loss,
+        bounceGapDelta: bounceGapData.delta,
+      };
+
+      // Only add cost fields if trf_type is present in the data
+      const trfType = row.trf_type;
+      if (trfType) {
+        const appliedCPC = getCPCForTrafficType(trfType, cpcData);
+        const estimatedCost = calculateEstimatedCost(bounceGapData.loss, appliedCPC);
+
+        result.estimatedCost = parseFloat(estimatedCost.toFixed(2));
+        result.appliedCPC = parseFloat(appliedCPC.toFixed(4));
+        result.cpcSource = cpcData.source;
+      }
+
+      return result;
+    });
+
+    // Apply limit after processing if specified
+    const finalResponse = limit ? response.slice(0, limit) : response;
 
     // add to cache
     let isCached = false;
-    if (response && response.length > 0) {
-      isCached = await addResultJsonToCache(s3, cacheKey, response, log);
+    if (finalResponse && finalResponse.length > 0) {
+      isCached = await addResultJsonToCache(s3, cacheKey, finalResponse, log);
       log.info(`Athena result JSON to S3 cache (${cacheKey}) successful: ${isCached}`);
     }
 
@@ -460,11 +503,11 @@ function TrafficController(context, log, env) {
     getPaidTrafficTemporalSeriesByUrlPlatform: async () => fetchPaidTrafficDataTemporalSeries(['path', 'trf_platform']),
     getPaidTrafficTemporalSeriesByUrlChannelPlatform: async () => fetchPaidTrafficDataTemporalSeries(['path', 'trf_channel', 'trf_platform']),
 
-    getTrafficLossByDevices: async () => fetchTop3PagesTrafficData(['device'], true, null),
-    getImpactByPage: async () => fetchTop3PagesTrafficData(['path'], true, 3),
-    getImpactByPageTrafficType: async () => fetchTop3PagesTrafficData(['path', 'trf_type'], true, null),
-    getImpactByPageDevice: async () => fetchTop3PagesTrafficData(['path', 'device'], true, null),
-    getImpactByPageTrafficTypeDevice: async () => fetchTop3PagesTrafficData(['path', 'trf_type', 'device'], true, null),
+    getTrafficLossByDevices: async () => fetchTop3PagesTrafficData(['device'], null),
+    getImpactByPage: async () => fetchTop3PagesTrafficData(['path'], 3),
+    getImpactByPageTrafficType: async () => fetchTop3PagesTrafficData(['path', 'trf_type'], null),
+    getImpactByPageDevice: async () => fetchTop3PagesTrafficData(['path', 'device'], null),
+    getImpactByPageTrafficTypeDevice: async () => fetchTop3PagesTrafficData(['path', 'trf_type', 'device'], null),
   };
 }
 
