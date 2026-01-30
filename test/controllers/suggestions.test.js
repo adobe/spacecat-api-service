@@ -6600,6 +6600,7 @@ describe('Suggestions Controller', () => {
           default: {
             fromContext: () => ({
               hasAccess: sandbox.stub().resolves(true),
+              isLLMOAdministrator: sandbox.stub().returns(true),
             }),
           },
         },
