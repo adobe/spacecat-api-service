@@ -273,53 +273,6 @@ export async function validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, co
 }
 
 /**
- * Publishes a file to admin.hlx.page.
- * @param {string} filename - The filename to publish
- * @param {string} outputLocation - The output location
- * @param {object} log - Logger instance
- */
-async function publishToAdminHlx(filename, outputLocation, log) {
-  try {
-    const org = 'adobe';
-    const site = 'project-elmo-ui-data';
-    const ref = 'main';
-    const jsonFilename = `${filename.replace(/\.[^/.]+$/, '')}.json`;
-    const path = `${outputLocation}/${jsonFilename}`;
-    const headers = { Cookie: `auth_token=${process.env.HLX_ADMIN_TOKEN}` };
-
-    if (!process.env.HLX_ADMIN_TOKEN) {
-      log.warn('LLMO onboarding: HLX_ADMIN_TOKEN is not set');
-    }
-
-    const baseUrl = 'https://admin.hlx.page';
-    const endpoints = [
-      { name: 'preview', url: `${baseUrl}/preview/${org}/${site}/${ref}/${path}` },
-      { name: 'live', url: `${baseUrl}/live/${org}/${site}/${ref}/${path}` },
-    ];
-
-    for (const [index, endpoint] of endpoints.entries()) {
-      log.debug(`Publishing Excel report via admin API (${endpoint.name}): ${endpoint.url}`);
-
-      // eslint-disable-next-line no-await-in-loop
-      const response = await fetch(endpoint.url, { method: 'POST', headers });
-
-      if (!response.ok) {
-        throw new Error(`${endpoint.name} failed: ${response.status} ${response.statusText}`);
-      }
-
-      log.debug(`Excel report successfully published to ${endpoint.name}`);
-
-      if (index === 0) {
-        // eslint-disable-next-line no-await-in-loop,max-statements-per-line
-        await new Promise((resolve) => { setTimeout(resolve, 2000); });
-      }
-    }
-  } catch (publishError) {
-    log.error(`Failed to publish via admin.hlx.page: ${publishError.message}`);
-  }
-}
-
-/**
  * Starts a bulk status job for a given path.
  * @param {string} path - The folder path to get status for
  * @param {object} env - Environment variables
@@ -563,9 +516,6 @@ export async function copyFilesToSharepoint(dataFolder, context, say = () => {})
     log.warn(`Warning: Query index at ${dataFolder} already exists. Skipping creation.`);
     await say(`Query index in ${dataFolder} already exists. Skipping creation.`);
   }
-
-  log.debug('Publishing query-index to admin.hlx.page');
-  await publishToAdminHlx('query-index', dataFolder, log);
 }
 
 /**

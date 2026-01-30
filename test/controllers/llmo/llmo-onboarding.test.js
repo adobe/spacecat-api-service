@@ -88,11 +88,6 @@ describe('LLMO Onboarding Functions', () => {
     }),
   });
 
-  const createMockTracingFetch = (sandbox = sinon, options = {}) => {
-    const { ok = true, status = 200, statusText = 'OK' } = options;
-    return sandbox.stub().resolves({ ok, status, statusText });
-  };
-
   const mockSetTimeoutImmediate = (sandbox = sinon) => {
     const original = global.setTimeout;
     global.setTimeout = sandbox.stub().callsFake((fn) => {
@@ -152,7 +147,6 @@ describe('LLMO Onboarding Functions', () => {
   const createCommonEsmockDependencies = (options = {}) => {
     const {
       mockTierClient,
-      mockTracingFetch,
       mockConfig,
       mockComposeBaseURL,
       mockSharePointClient: sharePointClient,
@@ -184,10 +178,8 @@ describe('LLMO Onboarding Functions', () => {
       deps['@adobe/spacecat-shared-data-access/src/models/site/config.js'] = { Config: mockConfig };
     }
 
-    if (mockTracingFetch || mockComposeBaseURL) {
-      deps['@adobe/spacecat-shared-utils'] = {};
-      if (mockTracingFetch) deps['@adobe/spacecat-shared-utils'].tracingFetch = mockTracingFetch;
-      if (mockComposeBaseURL) deps['@adobe/spacecat-shared-utils'].composeBaseURL = mockComposeBaseURL;
+    if (mockComposeBaseURL) {
+      deps['@adobe/spacecat-shared-utils'] = { composeBaseURL: mockComposeBaseURL };
     }
 
     return deps;
@@ -1207,7 +1199,6 @@ describe('LLMO Onboarding Functions', () => {
       // Use helper functions for common mocks
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
-      const mockTracingFetch = createMockTracingFetch();
       const originalSetTimeout = mockSetTimeoutImmediate();
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
@@ -1221,7 +1212,6 @@ describe('LLMO Onboarding Functions', () => {
         '../../../src/controllers/llmo/llmo-onboarding.js',
         createCommonEsmockDependencies({
           mockTierClient,
-          mockTracingFetch,
           mockConfig,
           mockComposeBaseURL,
           mockSharePointClient: sharePointClient,
@@ -1278,8 +1268,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('llmo-customer-analysis', mockSite);
       expect(mockConfiguration.save).to.have.been.called;
 
-      // Verify tracingFetch was called for publishing
-      expect(mockTracingFetch).to.have.been.called;
+      // Note: tracingFetch is no longer called during onboarding (helix publish/preview removed)
 
       // Verify logging
       expect(mockLog.info).to.have.been.calledWith('Starting LLMO onboarding for IMS org ABC123@AdobeOrg, baseURL https://example.com, brand Test Brand');
@@ -1328,7 +1317,6 @@ describe('LLMO Onboarding Functions', () => {
       // Use helper functions for common mocks
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
-      const mockTracingFetch = createMockTracingFetch();
       const originalSetTimeout = mockSetTimeoutImmediate();
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
@@ -1342,7 +1330,6 @@ describe('LLMO Onboarding Functions', () => {
         '../../../src/controllers/llmo/llmo-onboarding.js',
         createCommonEsmockDependencies({
           mockTierClient,
-          mockTracingFetch,
           mockConfig,
           mockComposeBaseURL,
           mockSharePointClient: sharePointClient,
@@ -1425,21 +1412,17 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
 
-      // Create mock fetch that handles both publish and bulk unpublish flows
+      // Create mock fetch that handles bulk unpublish flow (for cleanup)
       const mockTracingFetch = sinon.stub();
-      // Publish preview
-      mockTracingFetch.onCall(0).resolves({ ok: true, status: 200, statusText: 'OK' });
-      // Publish live
-      mockTracingFetch.onCall(1).resolves({ ok: true, status: 200, statusText: 'OK' });
       // Bulk status job start
-      mockTracingFetch.onCall(2).resolves({
+      mockTracingFetch.onCall(0).resolves({
         ok: true,
         status: 200,
         statusText: 'OK',
         json: async () => ({ name: 'job-test-123' }),
       });
       // Job polling
-      mockTracingFetch.onCall(3).resolves({
+      mockTracingFetch.onCall(1).resolves({
         ok: true,
         status: 200,
         statusText: 'OK',
@@ -1452,14 +1435,14 @@ describe('LLMO Onboarding Functions', () => {
         }),
       });
       // Bulk unpublish (live)
-      mockTracingFetch.onCall(4).resolves({
+      mockTracingFetch.onCall(2).resolves({
         ok: true,
         status: 200,
         statusText: 'OK',
         json: async () => ({ name: 'unpublish-job-123' }),
       });
       // Bulk un-preview
-      mockTracingFetch.onCall(5).resolves({
+      mockTracingFetch.onCall(3).resolves({
         ok: true,
         status: 200,
         statusText: 'OK',
@@ -1477,14 +1460,19 @@ describe('LLMO Onboarding Functions', () => {
       // Mock the Config import
       const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
         '../../../src/controllers/llmo/llmo-onboarding.js',
-        createCommonEsmockDependencies({
-          mockTierClient,
-          mockTracingFetch,
-          mockConfig,
-          mockComposeBaseURL,
-          mockSharePointClient: sharePointClientLocal,
-          mockOctokit,
-        }),
+        {
+          ...createCommonEsmockDependencies({
+            mockTierClient,
+            mockConfig,
+            mockComposeBaseURL,
+            mockSharePointClient: sharePointClientLocal,
+            mockOctokit,
+          }),
+          '@adobe/spacecat-shared-utils': {
+            composeBaseURL: mockComposeBaseURL,
+            tracingFetch: mockTracingFetch,
+          },
+        },
       );
 
       const context = {
@@ -1516,7 +1504,7 @@ describe('LLMO Onboarding Functions', () => {
       // Verify deleteSharePointFolder was called (which deletes folder and unpublishes)
       expect(mockSharePointFolderLocal.exists).to.have.been.called;
       expect(mockSharePointFolderLocal.delete).to.have.been.called;
-      expect(mockTracingFetch).to.have.callCount(6);
+      expect(mockTracingFetch).to.have.callCount(4);
 
       // Verify revokeEnrollment was called
       const tierClient = mockTierClient.createForSite.returnValues[0];
@@ -1579,7 +1567,6 @@ describe('LLMO Onboarding Functions', () => {
       // Use helper functions for common mocks
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
-      const mockTracingFetch = createMockTracingFetch();
       const originalSetTimeout = mockSetTimeoutImmediate();
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
@@ -1594,7 +1581,6 @@ describe('LLMO Onboarding Functions', () => {
         {
           ...createCommonEsmockDependencies({
             mockTierClient,
-            mockTracingFetch,
             mockConfig,
             mockComposeBaseURL,
             mockSharePointClient: sharePointClient,
@@ -1705,7 +1691,6 @@ describe('LLMO Onboarding Functions', () => {
       // Use helper functions for common mocks
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
-      const mockTracingFetch = createMockTracingFetch();
       const originalSetTimeout = mockSetTimeoutImmediate();
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
@@ -1720,7 +1705,6 @@ describe('LLMO Onboarding Functions', () => {
         {
           ...createCommonEsmockDependencies({
             mockTierClient,
-            mockTracingFetch,
             mockConfig,
             mockComposeBaseURL,
             mockSharePointClient: sharePointClient,
@@ -1810,7 +1794,6 @@ describe('LLMO Onboarding Functions', () => {
       // Use helper functions for common mocks
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
-      const mockTracingFetch = createMockTracingFetch();
       const originalSetTimeout = mockSetTimeoutImmediate();
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
@@ -1825,7 +1808,6 @@ describe('LLMO Onboarding Functions', () => {
         {
           ...createCommonEsmockDependencies({
             mockTierClient,
-            mockTracingFetch,
             mockConfig,
             mockComposeBaseURL,
             mockSharePointClient: sharePointClient,
