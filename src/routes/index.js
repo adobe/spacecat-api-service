@@ -83,6 +83,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} urlStoreController - The URL store controller.
  * @param {Object} pta2Controller - The PTA2 controller.
  * @param {Object} trafficToolsController - The traffic tools controller.
+ * @param {Object} weeklyDigestController - The weekly digest controller.
  * @param {Object} botBlockerController - The bot blocker controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
@@ -123,6 +124,7 @@ export default function getRouteHandlers(
   urlStoreController,
   pta2Controller,
   trafficToolsController,
+  weeklyDigestController,
   botBlockerController,
 ) {
   const staticRoutes = {};
@@ -323,6 +325,9 @@ export default function getRouteHandlers(
     'GET /tools/scrape/jobs/by-base-url/:baseURL/by-processingtype/:processingType': scrapeJobController.getScrapeJobsByBaseURL,
     'GET /tools/scrape/jobs/by-url/:url/:processingType': scrapeJobController.getScrapeUrlByProcessingType,
     'GET /tools/scrape/jobs/by-url/:url': scrapeJobController.getScrapeUrlByProcessingType,
+
+    // Weekly Digest
+    'POST /tools/weekly-digest': weeklyDigestController.processWeeklyDigests,
 
     // Fixes
     'GET /sites/:siteId/opportunities/:opportunityId/fixes': (c) => fixesController.getAllForOpportunity(c),
