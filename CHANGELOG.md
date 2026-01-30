@@ -1,3 +1,17 @@
+## [1.299.4](https://github.com/adobe/spacecat-api-service/compare/v1.299.3...v1.299.4) (2026-01-30)
+
+
+### Bug Fixes
+
+* enable preview button irrespective of site config ([#1754](https://github.com/adobe/spacecat-api-service/issues/1754)) ([a66f9ec](https://github.com/adobe/spacecat-api-service/commit/a66f9ec06d5864fec571aeeaf1ce868b64acef15))
+
+## [1.299.3](https://github.com/adobe/spacecat-api-service/compare/v1.299.2...v1.299.3) (2026-01-29)
+
+
+### Bug Fixes
+
+* **llmo:** allow partial failures when enabling imports and audits ([#1752](https://github.com/adobe/spacecat-api-service/issues/1752)) ([313bc2f](https://github.com/adobe/spacecat-api-service/commit/313bc2f401b0e21063a0e0bc6637027ba6bfd4c1))
+
 ## [1.299.2](https://github.com/adobe/spacecat-api-service/compare/v1.299.1...v1.299.2) (2026-01-28)
 
 
