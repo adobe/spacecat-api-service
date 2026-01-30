@@ -309,7 +309,7 @@ describe('getRouteHandlers', () => {
     deleteReport: sinon.stub(),
   };
 
-const mockBotBlockerController = {
+  const mockBotBlockerController = {
     checkBotBlocker: sinon.stub(),
   };
 
@@ -369,7 +369,7 @@ const mockBotBlockerController = {
       mockUrlStoreController,
       mockPTA2Controller,
       mockTrafficToolsController,
-mockBotBlockerController,
+      mockBotBlockerController,
       mockSentimentController,
     );
 

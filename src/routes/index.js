@@ -124,7 +124,7 @@ export default function getRouteHandlers(
   urlStoreController,
   pta2Controller,
   trafficToolsController,
-botBlockerController,
+  botBlockerController,
   sentimentController,
 ) {
   const staticRoutes = {};

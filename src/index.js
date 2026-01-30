@@ -149,7 +149,7 @@ async function run(request, context) {
     const urlStoreController = UrlStoreController(context, log);
     const pta2Controller = PTA2Controller(context, log, context.env);
     const trafficToolsController = TrafficToolsController(context, log, context.env);
-const botBlockerController = BotBlockerController(context, log);
+    const botBlockerController = BotBlockerController(context, log);
     const sentimentController = SentimentController(context, log);
 
     const routeHandlers = getRouteHandlers(
@@ -189,7 +189,7 @@ const botBlockerController = BotBlockerController(context, log);
       urlStoreController,
       pta2Controller,
       trafficToolsController,
-botBlockerController,
+      botBlockerController,
       sentimentController,
     );
 
