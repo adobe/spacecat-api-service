@@ -114,7 +114,8 @@ describe('Trial User Controller', () => {
 
   let trialUserController;
 
-  beforeEach(async () => {
+  beforeEach(async function () {
+    this.timeout(5000); // Increase timeout for esmock operations
     sandbox.restore();
 
     // Create a mock AccessControlUtil instance that will be used by the controller

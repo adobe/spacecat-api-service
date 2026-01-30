@@ -2,7 +2,7 @@ broken-backlinks-opportunity:
   description: Example for a broken backlinks opportunity
   value:
     id: '123e4567-e89b-12d3-a456-426614174000'
-    siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    siteId: 'a1b2c3d4-e5f6-4789-a0b1-c2d3e4f5a6b7'
     auditId: '123e4567-e89b-12d3-a456-426614174000'
     runbook: 'https://example.com/runbook/broken-backlinks'
     type: 'broken-backlinks'
@@ -18,7 +18,8 @@ broken-backlinks-opportunity:
         - 'Paste new entries in your website redirects file.'
         - 'Publish the changes.'
     tags:
-      - 'Traffic acquisition'
+      - 'Backlinks'
+      - 'SEO'
     createdAt: '2024-01-20T12:00:00Z'
     updatedAt: '2024-07-23T12:00:00Z'
 broken-backlinks-opportunity-create:
@@ -38,12 +39,16 @@ broken-backlinks-opportunity-create:
         - 'Paste new entries in your website redirects file.'
         - 'Publish the changes.'
     tags:
-      - 'Traffic acquisition'
+      - 'Backlinks'
+      - 'SEO'
 broken-backlinks-opportunity-update:
   description: Example for a broken backlinks opportunity update
   value:
     runbook: 'https://example.com/runbook/broken-backlinks-v2'
     title: '10 authoritative domains are linking to invalid SecurBank URLs. This could impact your SEO.'
+    tags:
+      - 'Backlinks'
+      - 'SEO'
 broken-backlinks-suggestion:
   description: Example for a broken backlinks suggestion
   value:
@@ -171,7 +176,7 @@ broken-backlinks-audit:
   summary: Example for a broken-backlinks audit
   value:
     id: '123e4567-e89b-12d3-a456-426614174000'
-    siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    siteId: 'a1b2c3d4-e5f6-4789-a0b1-c2d3e4f5a6b7'
     auditedAt: '2024-01-20T12:00:00Z'
     expiresAt: '2024-07-20T12:00:00Z'
     deliveryType: 'aem_edge'
@@ -188,7 +193,7 @@ broken-internal-links-audit:
   summary: Example for a broken-internal-links audit
   value:
     id: '123e4567-e89b-12d3-a456-426614174000'
-    siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    siteId: 'a1b2c3d4-e5f6-4789-a0b1-c2d3e4f5a6b7'
     auditedAt: '2024-01-20T12:00:00Z'
     expiresAt: '2024-07-20T12:00:00Z'
     deliveryType: 'aem_edge'

@@ -30,6 +30,8 @@ site-opportunities:
     operationId: createSiteOpportunity
     summary: |
       Create a new opportunity for a specific site
+    description: |
+      Creates a new opportunity, where tags are automatically applied based on the opportunity type (except for Generic Opportunity).
     tags:
       - opportunities
     requestBody:
