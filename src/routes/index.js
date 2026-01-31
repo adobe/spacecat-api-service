@@ -83,6 +83,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} urlStoreController - The URL store controller.
  * @param {Object} pta2Controller - The PTA2 controller.
  * @param {Object} trafficToolsController - The traffic tools controller.
+ * @param {Object} botBlockerController - The bot blocker controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -122,6 +123,7 @@ export default function getRouteHandlers(
   urlStoreController,
   pta2Controller,
   trafficToolsController,
+  botBlockerController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -172,6 +174,7 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId': sitesController.updateSite,
     'PATCH /sites/:siteId/config/cdn-logs': sitesController.updateCdnLogsConfig,
     'DELETE /sites/:siteId': sitesController.removeSite,
+    'GET /sites/:siteId/bot-blocker': botBlockerController.checkBotBlocker,
     'GET /sites/:siteId/audits': auditsController.getAllForSite,
     'GET /sites/:siteId/audits/latest': auditsController.getAllLatestForSite,
     'GET /sites/:siteId/audits/:auditType': auditsController.getAllForSite,
@@ -179,9 +182,6 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/:auditType': auditsController.patchAuditForSite,
     'GET /sites/:siteId/latest-audit/:auditType': auditsController.getLatestForSite,
     'GET /sites/:siteId/experiments': experimentsController.getExperiments,
-    'GET /sites/:siteId/key-events': sitesController.getKeyEventsBySiteID,
-    'POST /sites/:siteId/key-events': sitesController.createKeyEvent,
-    'DELETE /sites/:siteId/key-events/:keyEventId': sitesController.removeKeyEvent,
     'GET /sites/:siteId/metrics/:metric/:source': sitesController.getSiteMetricsBySource,
     'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': sitesController.getPageMetricsBySource,
     'GET /sites/:siteId/latest-metrics': sitesController.getLatestSiteMetrics,
@@ -373,6 +373,10 @@ export default function getRouteHandlers(
     'GET /organizations/:organizationId/userDetails/:externalUserId': userDetailsController.getUserDetailsByExternalUserId,
     'POST /organizations/:organizationId/userDetails': userDetailsController.getUserDetailsInBulk,
     'POST /organizations/:organizationId/trial-user-invite': trialUserController.createTrialUserForEmailInvite,
+
+    // Trial User Email Preferences (current user)
+    'GET /trial-users/email-preferences': trialUserController.getEmailPreferences,
+    'PATCH /trial-users/email-preferences': trialUserController.updateEmailPreferences,
     'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
     'POST /organizations/:organizationId/entitlements': entitlementController.createEntitlement,
 

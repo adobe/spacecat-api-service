@@ -1,3 +1,52 @@
+## [1.304.1](https://github.com/adobe/spacecat-api-service/compare/v1.304.0...v1.304.1) (2026-01-31)
+
+
+### Bug Fixes
+
+* remove KeyEvent entity ([#1758](https://github.com/adobe/spacecat-api-service/issues/1758)) ([ca16421](https://github.com/adobe/spacecat-api-service/commit/ca164213f2b95ed7feeca225823b3679f6c6d3b7))
+
+# [1.304.0](https://github.com/adobe/spacecat-api-service/compare/v1.303.0...v1.304.0) (2026-01-30)
+
+
+### Features
+
+* new flag opted added in edgeoptimizeconfig ([#1743](https://github.com/adobe/spacecat-api-service/issues/1743)) ([a4876b5](https://github.com/adobe/spacecat-api-service/commit/a4876b5d963e9f118dc9bfa6ee33e0cb04cba056))
+
+# [1.303.0](https://github.com/adobe/spacecat-api-service/compare/v1.302.0...v1.303.0) (2026-01-30)
+
+
+### Features
+
+* Weekly digest email - API implementation ([#1730](https://github.com/adobe/spacecat-api-service/issues/1730)) ([7ab23f4](https://github.com/adobe/spacecat-api-service/commit/7ab23f40602561c3c1cff2d4d2c33fc236c20e9a))
+
+# [1.302.0](https://github.com/adobe/spacecat-api-service/compare/v1.301.0...v1.302.0) (2026-01-30)
+
+
+### Features
+
+* **slack/llmo:** add button for reenabling defaults ([#1753](https://github.com/adobe/spacecat-api-service/issues/1753)) ([5286be9](https://github.com/adobe/spacecat-api-service/commit/5286be9cabe8062ce87e056591c4a6d74603c7f5))
+
+# [1.301.0](https://github.com/adobe/spacecat-api-service/compare/v1.300.0...v1.301.0) (2026-01-30)
+
+
+### Features
+
+* add bounce gap loss and estimated cost with ahref data ([#1757](https://github.com/adobe/spacecat-api-service/issues/1757)) ([b80a09a](https://github.com/adobe/spacecat-api-service/commit/b80a09a6b9b897d52a6945f3001ba288f6c075fb))
+
+# [1.300.0](https://github.com/adobe/spacecat-api-service/compare/v1.299.4...v1.300.0) (2026-01-30)
+
+
+### Features
+
+* added bot blocker detection API ([#1756](https://github.com/adobe/spacecat-api-service/issues/1756)) ([9053cfe](https://github.com/adobe/spacecat-api-service/commit/9053cfebc42c2e67f04e97c8bf01e10b570447ef))
+
+## [1.299.4](https://github.com/adobe/spacecat-api-service/compare/v1.299.3...v1.299.4) (2026-01-30)
+
+
+### Bug Fixes
+
+* enable preview button irrespective of site config ([#1754](https://github.com/adobe/spacecat-api-service/issues/1754)) ([a66f9ec](https://github.com/adobe/spacecat-api-service/commit/a66f9ec06d5864fec571aeeaf1ce868b64acef15))
+
 ## [1.299.3](https://github.com/adobe/spacecat-api-service/compare/v1.299.2...v1.299.3) (2026-01-29)
 
 
