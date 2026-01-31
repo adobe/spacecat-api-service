@@ -298,7 +298,7 @@ async function publishToAdminHlx(filename, outputLocation, log) {
     ];
 
     for (const [index, endpoint] of endpoints.entries()) {
-      log.debug(`Publishing Excel report via admin API (${endpoint.name}): ${endpoint.url}`);
+      log.info(`Publishing Excel report via admin API (${endpoint.name}): ${endpoint.url}`);
 
       // eslint-disable-next-line no-await-in-loop
       const response = await fetch(endpoint.url, { method: 'POST', headers });
@@ -307,7 +307,7 @@ async function publishToAdminHlx(filename, outputLocation, log) {
         throw new Error(`${endpoint.name} failed: ${response.status} ${response.statusText}`);
       }
 
-      log.debug(`Excel report successfully published to ${endpoint.name}`);
+      log.info(`Excel report successfully published to ${endpoint.name}`);
 
       if (index === 0) {
         // eslint-disable-next-line no-await-in-loop,max-statements-per-line
@@ -316,6 +316,7 @@ async function publishToAdminHlx(filename, outputLocation, log) {
     }
   } catch (publishError) {
     log.error(`Failed to publish via admin.hlx.page: ${publishError.message}`);
+    log.info(`Detail of the error: ${JSON.stringify(publishError)}`);
   }
 }
 
