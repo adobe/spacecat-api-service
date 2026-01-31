@@ -1,3 +1,10 @@
+## [1.304.1](https://github.com/adobe/spacecat-api-service/compare/v1.304.0...v1.304.1) (2026-01-31)
+
+
+### Bug Fixes
+
+* remove KeyEvent entity ([#1758](https://github.com/adobe/spacecat-api-service/issues/1758)) ([ca16421](https://github.com/adobe/spacecat-api-service/commit/ca164213f2b95ed7feeca225823b3679f6c6d3b7))
+
 # [1.304.0](https://github.com/adobe/spacecat-api-service/compare/v1.303.0...v1.304.0) (2026-01-30)
 
 
