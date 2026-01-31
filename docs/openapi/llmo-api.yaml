@@ -1528,7 +1528,7 @@ llmo-edge-optimize-status:
     summary: Check Edge Optimize status for a site path
     description: |
       Checks the edge optimization status for a specific path on a site.
-      This endpoint queries the Tokowaka service to determine whether edge optimization
+      This endpoint queries the Edge Optimize service to determine whether edge optimization
       is active and configured for the given path.
       
       Returns information about:
@@ -1553,7 +1553,7 @@ llmo-edge-optimize-status:
           application/json:
             schema:
               type: object
-              description: Edge optimization status response from Tokowaka
+              description: Edge optimization status response
               additionalProperties: true
               example:
                 enabled: true
