@@ -11,13 +11,14 @@
  */
 
 import {
-  ok, badRequest, forbidden, createResponse, notFound,
+  ok, badRequest, forbidden, createResponse, notFound, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   SPACECAT_USER_AGENT,
   tracingFetch as fetch,
   hasText,
   isObject,
+  isValidUUID,
   llmoConfig as llmo,
   llmoStrategy,
   schemas,
@@ -1131,6 +1132,43 @@ function LlmoController(ctx) {
     }
   };
 
+  const checkEdgeOptimizeStatus = async (context) => {
+    const { log, dataAccess } = context;
+    const { Site } = dataAccess;
+    const { siteId } = context.params;
+    const { path = '/' } = context.data || {};
+
+    // Validate siteId
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    log.info(`Checking Edge Optimize status for siteId: ${siteId} and path: ${path}`);
+
+    // Get site from database
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    // Check access control
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Access denied to this site');
+    }
+
+    try {
+      const tokowakaClient = TokowakaClient.createFrom(context);
+      const result = await tokowakaClient.checkEdgeOptimizeStatus(site, path);
+      return ok(result);
+    } catch (error) {
+      log.error(`Error checking edge optimize status: ${error.message} for site: ${siteId} and path: ${path}`);
+      if (error.status) {
+        return createResponse({ message: error.message }, error.status);
+      }
+      return internalServerError(error.message);
+    }
+  };
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -1155,6 +1193,7 @@ function LlmoController(ctx) {
     getEdgeConfig,
     getStrategy,
     saveStrategy,
+    checkEdgeOptimizeStatus,
   };
 }
 

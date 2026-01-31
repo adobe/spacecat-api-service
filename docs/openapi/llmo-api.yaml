@@ -1520,3 +1520,54 @@ llmo-strategy:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+
+llmo-edge-optimize-status:
+  get:
+    tags:
+      - llmo
+    summary: Check Edge Optimize status for a site path
+    description: |
+      Checks the edge optimization status for a specific path on a site.
+      This endpoint queries the Edge Optimize service to determine whether edge optimization
+      is active and configured for the given path.
+      
+      Returns information about:
+      - Whether edge optimization is enabled for the site
+      - Configuration status for the specific path
+      - Any path-specific optimization settings
+    operationId: checkEdgeOptimizeStatus
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+      - name: path
+        in: query
+        description: The path to check optimization status for (defaults to '/')
+        required: false
+        schema:
+          type: string
+          default: '/'
+          example: '/products/index.html'
+    responses:
+      '200':
+        description: Edge optimize status retrieved successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Edge optimization status response
+              additionalProperties: true
+              example:
+                enabled: true
+                optimized: true
+                path: '/products/index.html'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
