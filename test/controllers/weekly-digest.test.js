@@ -21,13 +21,12 @@ import esmock from 'esmock';
 use(chaiAsPromised);
 use(sinonChai);
 
-// TEMPORARY: Skip tests while test mode is enabled in the controller
-// Remove .skip and re-enable when TEST_MODE is set back to false
-describe.skip('Weekly Digest Controller', () => {
+describe('Weekly Digest Controller', () => {
   const sandbox = sinon.createSandbox();
   let WeeklyDigestController;
 
   const orgId = '123e4567-e89b-12d3-a456-426614174000';
+  const org2Id = '223e4567-e89b-12d3-a456-426614174001';
 
   const mockLog = {
     info: sandbox.stub(),
@@ -38,6 +37,11 @@ describe.skip('Weekly Digest Controller', () => {
 
   const mockEnv = {
     LLMO_HLX_API_KEY: 'test-hlx-key',
+    DIGEST_JOBS_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/123456789/spacecat-digest-jobs',
+  };
+
+  const mockSqs = {
+    sendMessage: sandbox.stub().resolves(),
   };
 
   const mockOrganization = {
@@ -57,9 +61,21 @@ describe.skip('Weekly Digest Controller', () => {
     }),
   };
 
-  const mockSiteWithoutLlmo = {
+  const mockSiteWithLlmoOrg2 = {
     getId: () => 'site-2',
     getBaseURL: () => 'https://other.com',
+    getOrganizationId: () => org2Id,
+    getConfig: () => ({
+      llmo: {
+        dataFolder: 'other-folder',
+        brandName: 'Other Brand',
+      },
+    }),
+  };
+
+  const mockSiteWithoutLlmo = {
+    getId: () => 'site-3',
+    getBaseURL: () => 'https://nollmo.com',
     getOrganizationId: () => orgId,
     getConfig: () => ({}),
   };
@@ -97,10 +113,17 @@ describe.skip('Weekly Digest Controller', () => {
 
   beforeEach(async () => {
     sandbox.restore();
+    mockLog.info.reset();
+    mockLog.error.reset();
+    mockLog.debug.reset();
+    mockLog.warn.reset();
+    // Reset and re-configure the SQS mock (sandbox.restore() removes the resolves behavior)
+    mockSqs.sendMessage = sandbox.stub().resolves();
 
     mockDataAccess = {
       Site: {
         all: sandbox.stub().resolves([mockSiteWithLlmo, mockSiteWithoutLlmo]),
+        findById: sandbox.stub(),
       },
       Organization: {
         findById: sandbox.stub().resolves(mockOrganization),
@@ -110,14 +133,18 @@ describe.skip('Weekly Digest Controller', () => {
       },
     };
 
+    // Setup Site.findById to return the right site
+    mockDataAccess.Site.findById.withArgs('site-1').resolves(mockSiteWithLlmo);
+    mockDataAccess.Site.findById.withArgs('site-2').resolves(mockSiteWithLlmoOrg2);
+
     mockCalculateOverviewMetrics = sandbox.stub().resolves({
       hasData: true,
       visibilityScore: 85,
-      visibilityDelta: 5,
+      visibilityDelta: '+5%',
       mentionsCount: 100,
-      mentionsDelta: 10,
+      mentionsDelta: '+10%',
       citationsCount: 50,
-      citationsDelta: -5,
+      citationsDelta: '-5%',
       dateRange: 'Jan 1 - Jan 7, 2025',
     });
 
@@ -155,101 +182,239 @@ describe.skip('Weekly Digest Controller', () => {
     });
   });
 
-  describe('processWeeklyDigests', () => {
+  describe('triggerWeeklyDigests', () => {
     let controller;
 
     beforeEach(() => {
       controller = WeeklyDigestController({ dataAccess: mockDataAccess });
     });
 
-    it('should process weekly digests successfully', async () => {
+    it('should queue messages for each organization with LLMO-enabled sites', async () => {
+      const allSites = [mockSiteWithLlmo, mockSiteWithLlmoOrg2, mockSiteWithoutLlmo];
+      mockDataAccess.Site.all.resolves(allSites);
+
       const context = {
         log: mockLog,
         env: mockEnv,
+        sqs: mockSqs,
       };
 
-      const result = await controller.processWeeklyDigests(context);
+      const result = await controller.triggerWeeklyDigests(context);
+
+      expect(result.status).to.equal(202);
+      const body = await result.json();
+      expect(body.message).to.equal('Weekly digest jobs queued for processing');
+      expect(body.stats.organizationsQueued).to.equal(2);
+      expect(body.stats.llmoEnabledSites).to.equal(2);
+      expect(mockSqs.sendMessage).to.have.been.calledTwice;
+    });
+
+    it('should return error when DIGEST_JOBS_QUEUE_URL not configured', async () => {
+      const context = {
+        log: mockLog,
+        env: { LLMO_HLX_API_KEY: 'test' }, // No queue URL
+        sqs: mockSqs,
+      };
+
+      const result = await controller.triggerWeeklyDigests(context);
+
+      expect(result.status).to.equal(500);
+    });
+
+    it('should handle no LLMO-enabled sites', async () => {
+      mockDataAccess.Site.all.resolves([mockSiteWithoutLlmo]);
+
+      const context = {
+        log: mockLog,
+        env: mockEnv,
+        sqs: mockSqs,
+      };
+
+      const result = await controller.triggerWeeklyDigests(context);
 
       expect(result.status).to.equal(200);
       const body = await result.json();
-      expect(body.message).to.equal('Weekly digest processing complete');
-      expect(body.summary).to.have.property('sitesProcessed');
-      expect(body.summary).to.have.property('totalEmailsSent');
+      expect(body.message).to.equal('No LLMO-enabled sites found');
+      expect(mockSqs.sendMessage).to.not.have.been.called;
     });
 
-    it('should filter out sites without LLMO config', async () => {
-      const context = {
-        log: mockLog,
-        env: mockEnv,
-      };
-
-      await controller.processWeeklyDigests(context);
-
-      // Only the site with LLMO config should be processed
-      expect(mockCalculateOverviewMetrics).to.have.been.calledOnce;
-    });
-
-    it('should skip sites with no data', async () => {
-      mockCalculateOverviewMetrics.resolves({ hasData: false });
+    it('should handle SQS send failures gracefully', async () => {
+      mockSqs.sendMessage.rejects(new Error('SQS error'));
 
       const context = {
         log: mockLog,
         env: mockEnv,
+        sqs: mockSqs,
       };
 
-      const result = await controller.processWeeklyDigests(context);
+      const result = await controller.triggerWeeklyDigests(context);
+
+      expect(result.status).to.equal(202);
       const body = await result.json();
-
-      expect(body.summary.sitesSkipped).to.be.at.least(1);
-      expect(mockSendWeeklyDigestEmail).to.not.have.been.called;
+      expect(body.stats.queueErrors).to.equal(1);
     });
 
-    it('should filter out opted-out users', async () => {
-      mockDataAccess.TrialUser.allByOrganizationId.resolves([
-        mockTrialUser,
-        mockOptedOutUser,
-      ]);
+    it('should handle fatal errors', async () => {
+      mockDataAccess.Site.all.rejects(new Error('Database error'));
 
       const context = {
         log: mockLog,
         env: mockEnv,
+        sqs: mockSqs,
       };
 
-      await controller.processWeeklyDigests(context);
+      const result = await controller.triggerWeeklyDigests(context);
 
-      // Should only send to non-opted-out user
-      expect(mockSendWeeklyDigestEmail).to.have.been.calledOnce;
+      expect(result.status).to.equal(500);
     });
 
-    it('should filter out blocked users', async () => {
-      mockDataAccess.TrialUser.allByOrganizationId.resolves([
-        mockTrialUser,
-        mockBlockedUser,
-      ]);
+    it('should send correct message format to SQS', async () => {
+      const context = {
+        log: mockLog,
+        env: mockEnv,
+        sqs: mockSqs,
+      };
+
+      await controller.triggerWeeklyDigests(context);
+
+      const sentMessage = mockSqs.sendMessage.getCall(0).args[1];
+      expect(sentMessage.type).to.equal('weekly-digest-org');
+      expect(sentMessage.organizationId).to.equal(orgId);
+      expect(sentMessage.siteIds).to.deep.equal(['site-1']);
+      expect(sentMessage.triggeredAt).to.be.a('string');
+    });
+
+    it('should filter sites by LLMO config correctly', async () => {
+      const siteWithLlmoMethod = {
+        getId: () => 'site-method',
+        getBaseURL: () => 'https://method.com',
+        getOrganizationId: () => orgId,
+        getConfig: () => ({
+          getLlmoConfig: () => ({
+            dataFolder: 'method-folder',
+          }),
+        }),
+      };
+      mockDataAccess.Site.all.resolves([siteWithLlmoMethod]);
 
       const context = {
         log: mockLog,
         env: mockEnv,
+        sqs: mockSqs,
       };
 
-      await controller.processWeeklyDigests(context);
+      const result = await controller.triggerWeeklyDigests(context);
 
-      expect(mockSendWeeklyDigestEmail).to.have.been.calledOnce;
+      expect(result.status).to.equal(202);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+    });
+  });
+
+  describe('processOrganizationDigest', () => {
+    let controller;
+
+    beforeEach(() => {
+      controller = WeeklyDigestController({ dataAccess: mockDataAccess });
     });
 
-    it('should skip organization when not found', async () => {
+    it('should process organization digest successfully', async () => {
+      const context = {
+        log: mockLog,
+        env: mockEnv,
+        data: {
+          type: 'weekly-digest-org',
+          organizationId: orgId,
+          siteIds: ['site-1'],
+        },
+      };
+
+      const result = await controller.processOrganizationDigest(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.message).to.equal('Organization digest processing complete');
+      expect(body.sitesProcessed).to.equal(1);
+      expect(body.totalEmailsSent).to.equal(1);
+    });
+
+    it('should reject invalid job type', async () => {
+      const context = {
+        log: mockLog,
+        env: mockEnv,
+        data: {
+          type: 'invalid-type',
+          organizationId: orgId,
+          siteIds: ['site-1'],
+        },
+      };
+
+      const result = await controller.processOrganizationDigest(context);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('should reject missing organizationId', async () => {
+      const context = {
+        log: mockLog,
+        env: mockEnv,
+        data: {
+          type: 'weekly-digest-org',
+          siteIds: ['site-1'],
+        },
+      };
+
+      const result = await controller.processOrganizationDigest(context);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('should reject missing siteIds', async () => {
+      const context = {
+        log: mockLog,
+        env: mockEnv,
+        data: {
+          type: 'weekly-digest-org',
+          organizationId: orgId,
+        },
+      };
+
+      const result = await controller.processOrganizationDigest(context);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('should reject empty siteIds', async () => {
+      const context = {
+        log: mockLog,
+        env: mockEnv,
+        data: {
+          type: 'weekly-digest-org',
+          organizationId: orgId,
+          siteIds: [],
+        },
+      };
+
+      const result = await controller.processOrganizationDigest(context);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('should return error when organization not found', async () => {
       mockDataAccess.Organization.findById.resolves(null);
 
       const context = {
         log: mockLog,
         env: mockEnv,
+        data: {
+          type: 'weekly-digest-org',
+          organizationId: 'nonexistent',
+          siteIds: ['site-1'],
+        },
       };
 
-      const result = await controller.processWeeklyDigests(context);
-      const body = await result.json();
+      const result = await controller.processOrganizationDigest(context);
 
-      expect(body.summary.sitesSkipped).to.be.at.least(1);
-      expect(mockLog.warn).to.have.been.called;
+      expect(result.status).to.equal(400);
     });
 
     it('should skip when no eligible users', async () => {
@@ -258,141 +423,208 @@ describe.skip('Weekly Digest Controller', () => {
       const context = {
         log: mockLog,
         env: mockEnv,
+        data: {
+          type: 'weekly-digest-org',
+          organizationId: orgId,
+          siteIds: ['site-1'],
+        },
       };
 
-      const result = await controller.processWeeklyDigests(context);
-      const body = await result.json();
+      const result = await controller.processOrganizationDigest(context);
 
-      expect(body.summary.sitesSkipped).to.be.at.least(1);
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.message).to.equal('No eligible users for organization');
+      expect(body.sitesSkipped).to.equal(1);
     });
 
-    it('should handle email send failures gracefully', async () => {
+    it('should filter out opted-out users', async () => {
+      mockDataAccess.TrialUser.allByOrganizationId.resolves([mockTrialUser, mockOptedOutUser]);
+
+      const context = {
+        log: mockLog,
+        env: mockEnv,
+        data: {
+          type: 'weekly-digest-org',
+          organizationId: orgId,
+          siteIds: ['site-1'],
+        },
+      };
+
+      await controller.processOrganizationDigest(context);
+
+      expect(mockSendWeeklyDigestEmail).to.have.been.calledOnce;
+    });
+
+    it('should filter out blocked users', async () => {
+      mockDataAccess.TrialUser.allByOrganizationId.resolves([mockTrialUser, mockBlockedUser]);
+
+      const context = {
+        log: mockLog,
+        env: mockEnv,
+        data: {
+          type: 'weekly-digest-org',
+          organizationId: orgId,
+          siteIds: ['site-1'],
+        },
+      };
+
+      await controller.processOrganizationDigest(context);
+
+      expect(mockSendWeeklyDigestEmail).to.have.been.calledOnce;
+    });
+
+    it('should skip sites not found', async () => {
+      mockDataAccess.Site.findById.withArgs('nonexistent').resolves(null);
+
+      const context = {
+        log: mockLog,
+        env: mockEnv,
+        data: {
+          type: 'weekly-digest-org',
+          organizationId: orgId,
+          siteIds: ['nonexistent'],
+        },
+      };
+
+      const result = await controller.processOrganizationDigest(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.sitesSkipped).to.equal(1);
+    });
+
+    it('should skip sites with no metrics data', async () => {
+      mockCalculateOverviewMetrics.resolves({ hasData: false });
+
+      const context = {
+        log: mockLog,
+        env: mockEnv,
+        data: {
+          type: 'weekly-digest-org',
+          organizationId: orgId,
+          siteIds: ['site-1'],
+        },
+      };
+
+      const result = await controller.processOrganizationDigest(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.sitesSkipped).to.equal(1);
+      expect(mockSendWeeklyDigestEmail).to.not.have.been.called;
+    });
+
+    it('should handle email send failures', async () => {
       mockSendWeeklyDigestEmail.resolves({ success: false, error: 'Email failed' });
 
       const context = {
         log: mockLog,
         env: mockEnv,
+        data: {
+          type: 'weekly-digest-org',
+          organizationId: orgId,
+          siteIds: ['site-1'],
+        },
       };
 
-      const result = await controller.processWeeklyDigests(context);
+      const result = await controller.processOrganizationDigest(context);
       const body = await result.json();
 
-      expect(body.summary.totalEmailsFailed).to.be.at.least(1);
+      expect(body.totalEmailsFailed).to.equal(1);
     });
 
-    it('should handle email send exceptions gracefully', async () => {
+    it('should handle email send exceptions', async () => {
       mockSendWeeklyDigestEmail.rejects(new Error('Network error'));
 
       const context = {
         log: mockLog,
         env: mockEnv,
+        data: {
+          type: 'weekly-digest-org',
+          organizationId: orgId,
+          siteIds: ['site-1'],
+        },
       };
 
-      const result = await controller.processWeeklyDigests(context);
+      const result = await controller.processOrganizationDigest(context);
       const body = await result.json();
 
-      expect(body.summary.totalEmailsFailed).to.be.at.least(1);
-      expect(mockLog.error).to.have.been.called;
+      expect(body.totalEmailsFailed).to.equal(1);
     });
 
-    it('should handle metrics calculation errors', async () => {
-      mockCalculateOverviewMetrics.rejects(new Error('Calculation failed'));
-
+    it('should send correct email parameters', async () => {
       const context = {
         log: mockLog,
         env: mockEnv,
+        data: {
+          type: 'weekly-digest-org',
+          organizationId: orgId,
+          siteIds: ['site-1'],
+        },
       };
 
-      const result = await controller.processWeeklyDigests(context);
-
-      expect(result.status).to.equal(200);
-      expect(mockLog.error).to.have.been.called;
-    });
-
-    it('should handle organization lookup errors', async () => {
-      mockDataAccess.Organization.findById.rejects(new Error('DB error'));
-
-      const context = {
-        log: mockLog,
-        env: mockEnv,
-      };
-
-      const result = await controller.processWeeklyDigests(context);
-      const body = await result.json();
-
-      expect(body.summary.sitesFailed).to.be.at.least(1);
-    });
-
-    it('should return 500 on fatal error', async () => {
-      mockDataAccess.Site.all.rejects(new Error('Fatal error'));
-
-      const context = {
-        log: mockLog,
-        env: mockEnv,
-      };
-
-      const result = await controller.processWeeklyDigests(context);
-
-      expect(result.status).to.equal(500);
-    });
-
-    it('should use brand name from config when available', async () => {
-      const context = {
-        log: mockLog,
-        env: mockEnv,
-      };
-
-      await controller.processWeeklyDigests(context);
+      await controller.processOrganizationDigest(context);
 
       const emailCall = mockSendWeeklyDigestEmail.getCall(0);
       expect(emailCall.args[0].brandName).to.equal('Test Brand');
+      expect(emailCall.args[0].orgName).to.equal('Test Organization');
+      expect(emailCall.args[0].customerName).to.equal('John Doe');
+      expect(emailCall.args[0].overviewUrl).to.include('https://llmo.now');
+      expect(emailCall.args[0].settingsUrl).to.include('https://llmo.now');
     });
 
     it('should fall back to domain when brand name not configured', async () => {
       const siteNoBrandName = {
-        ...mockSiteWithLlmo,
+        getId: () => 'site-1',
+        getBaseURL: () => 'https://example.com',
+        getOrganizationId: () => orgId,
         getConfig: () => ({
           llmo: {
             dataFolder: 'test-folder',
           },
         }),
       };
-      mockDataAccess.Site.all.resolves([siteNoBrandName]);
+      mockDataAccess.Site.findById.withArgs('site-1').resolves(siteNoBrandName);
 
       const context = {
         log: mockLog,
         env: mockEnv,
+        data: {
+          type: 'weekly-digest-org',
+          organizationId: orgId,
+          siteIds: ['site-1'],
+        },
       };
 
-      await controller.processWeeklyDigests(context);
+      await controller.processOrganizationDigest(context);
 
       const emailCall = mockSendWeeklyDigestEmail.getCall(0);
       expect(emailCall.args[0].brandName).to.equal('example.com');
     });
 
-    it('should send correct URLs in email', async () => {
+    it('should use first name only when last name is dash', async () => {
+      const userFirstNameOnly = {
+        ...mockTrialUser,
+        getFirstName: () => 'John',
+        getLastName: () => '-',
+      };
+      mockDataAccess.TrialUser.allByOrganizationId.resolves([userFirstNameOnly]);
+
       const context = {
         log: mockLog,
         env: mockEnv,
+        data: {
+          type: 'weekly-digest-org',
+          organizationId: orgId,
+          siteIds: ['site-1'],
+        },
       };
 
-      await controller.processWeeklyDigests(context);
+      await controller.processOrganizationDigest(context);
 
       const emailCall = mockSendWeeklyDigestEmail.getCall(0);
-      expect(emailCall.args[0].overviewUrl).to.include('https://llmo.now');
-      expect(emailCall.args[0].settingsUrl).to.include('https://llmo.now');
-    });
-
-    it('should use user display name in email', async () => {
-      const context = {
-        log: mockLog,
-        env: mockEnv,
-      };
-
-      await controller.processWeeklyDigests(context);
-
-      const emailCall = mockSendWeeklyDigestEmail.getCall(0);
-      expect(emailCall.args[0].customerName).to.equal('John Doe');
+      expect(emailCall.args[0].customerName).to.equal('John');
     });
 
     it('should fall back to email when name is missing', async () => {
@@ -406,65 +638,20 @@ describe.skip('Weekly Digest Controller', () => {
       const context = {
         log: mockLog,
         env: mockEnv,
+        data: {
+          type: 'weekly-digest-org',
+          organizationId: orgId,
+          siteIds: ['site-1'],
+        },
       };
 
-      await controller.processWeeklyDigests(context);
+      await controller.processOrganizationDigest(context);
 
       const emailCall = mockSendWeeklyDigestEmail.getCall(0);
       expect(emailCall.args[0].customerName).to.equal('user@example.com');
     });
 
-    it('should use first name only when last name is missing', async () => {
-      const userFirstNameOnly = {
-        ...mockTrialUser,
-        getFirstName: () => 'John',
-        getLastName: () => '-',
-      };
-      mockDataAccess.TrialUser.allByOrganizationId.resolves([userFirstNameOnly]);
-
-      const context = {
-        log: mockLog,
-        env: mockEnv,
-      };
-
-      await controller.processWeeklyDigests(context);
-
-      const emailCall = mockSendWeeklyDigestEmail.getCall(0);
-      expect(emailCall.args[0].customerName).to.equal('John');
-    });
-
-    it('should handle invalid base URL gracefully', async () => {
-      const siteInvalidUrl = {
-        ...mockSiteWithLlmo,
-        getBaseURL: () => 'not-a-valid-url',
-      };
-      mockDataAccess.Site.all.resolves([siteInvalidUrl]);
-
-      const context = {
-        log: mockLog,
-        env: mockEnv,
-      };
-
-      const result = await controller.processWeeklyDigests(context);
-
-      expect(result.status).to.equal(200);
-    });
-
-    it('should handle empty sites list', async () => {
-      mockDataAccess.Site.all.resolves([]);
-
-      const context = {
-        log: mockLog,
-        env: mockEnv,
-      };
-
-      const result = await controller.processWeeklyDigests(context);
-      const body = await result.json();
-
-      expect(body.summary.sitesProcessed).to.equal(0);
-    });
-
-    it('should handle user with null metadata for opt-out check', async () => {
+    it('should handle null metadata in opt-out check', async () => {
       const userNullMetadata = {
         ...mockTrialUser,
         getMetadata: () => null,
@@ -474,54 +661,56 @@ describe.skip('Weekly Digest Controller', () => {
       const context = {
         log: mockLog,
         env: mockEnv,
+        data: {
+          type: 'weekly-digest-org',
+          organizationId: orgId,
+          siteIds: ['site-1'],
+        },
       };
 
-      // User with null metadata should not be opted out (default is opted-in)
-      const result = await controller.processWeeklyDigests(context);
+      const result = await controller.processOrganizationDigest(context);
       const body = await result.json();
 
-      expect(body.summary.totalEmailsSent).to.be.at.least(1);
+      // User with null metadata should default to opted-in
+      expect(body.totalEmailsSent).to.equal(1);
     });
 
-    it('should handle site with getLlmoConfig method', async () => {
-      const siteWithMethod = {
-        ...mockSiteWithLlmo,
-        getConfig: () => ({
-          getLlmoConfig: () => ({
-            dataFolder: 'test-folder',
-            brandName: 'Method Brand',
-          }),
-        }),
-      };
-      mockDataAccess.Site.all.resolves([siteWithMethod]);
+    it('should handle fatal errors', async () => {
+      mockDataAccess.Organization.findById.rejects(new Error('Database error'));
 
       const context = {
         log: mockLog,
         env: mockEnv,
+        data: {
+          type: 'weekly-digest-org',
+          organizationId: orgId,
+          siteIds: ['site-1'],
+        },
+      };
+
+      const result = await controller.processOrganizationDigest(context);
+
+      expect(result.status).to.equal(500);
+    });
+  });
+
+  describe('processWeeklyDigests (legacy)', () => {
+    it('should delegate to triggerWeeklyDigests', async () => {
+      const controller = WeeklyDigestController({ dataAccess: mockDataAccess });
+
+      const context = {
+        log: mockLog,
+        env: mockEnv,
+        sqs: mockSqs,
       };
 
       const result = await controller.processWeeklyDigests(context);
 
-      expect(result.status).to.equal(200);
-    });
-
-    it('should process multiple organizations', async () => {
-      const org2Id = '223e4567-e89b-12d3-a456-426614174001';
-      const site2 = {
-        ...mockSiteWithLlmo,
-        getId: () => 'site-3',
-        getOrganizationId: () => org2Id,
-      };
-      mockDataAccess.Site.all.resolves([mockSiteWithLlmo, site2]);
-
-      const context = {
-        log: mockLog,
-        env: mockEnv,
-      };
-
-      await controller.processWeeklyDigests(context);
-
-      expect(mockDataAccess.Organization.findById).to.have.been.calledTwice;
+      // Should behave like triggerWeeklyDigests
+      expect(result.status).to.equal(202);
+      expect(mockLog.warn).to.have.been.calledWith(
+        'Using legacy synchronous processWeeklyDigests - consider using /trigger endpoint',
+      );
     });
   });
 });

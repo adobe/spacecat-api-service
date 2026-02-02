@@ -327,7 +327,9 @@ export default function getRouteHandlers(
     'GET /tools/scrape/jobs/by-url/:url': scrapeJobController.getScrapeUrlByProcessingType,
 
     // Weekly Digest
-    'POST /tools/weekly-digest': weeklyDigestController.processWeeklyDigests,
+    'POST /tools/weekly-digest': weeklyDigestController.processWeeklyDigests, // Legacy - delegates to trigger
+    'POST /tools/weekly-digest/trigger': weeklyDigestController.triggerWeeklyDigests, // Trigger: enqueues per-org jobs
+    'POST /tools/weekly-digest/process': weeklyDigestController.processOrganizationDigest, // Worker: processes single org
 
     // Fixes
     'GET /sites/:siteId/opportunities/:opportunityId/fixes': (c) => fixesController.getAllForOpportunity(c),

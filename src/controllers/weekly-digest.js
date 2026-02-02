@@ -12,6 +12,8 @@
 
 import {
   ok,
+  accepted,
+  badRequest,
   internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
@@ -21,6 +23,9 @@ import { sendWeeklyDigestEmail } from '../support/email-service.js';
 
 // Base URL for the LLM Optimizer app
 const LLMO_APP_BASE_URL = 'https://llmo.now';
+
+// Job type identifier for SQS messages
+const DIGEST_JOB_TYPE = 'weekly-digest-org';
 
 /**
  * Check if a user has opted out of weekly digest emails.
@@ -129,33 +134,11 @@ const processSiteDigest = async ({
     // Calculate metrics for the site
     log.info(`Calculating metrics for site ${siteId} (${baseURL})`);
 
-    // ============================================================
-    // TEMPORARY TEST MODE - Use mock metrics data
-    // Remove this block before merging to production
-    // ============================================================
-    const USE_MOCK_METRICS = true; // Set to false to use real data
-    let metrics;
-
-    if (USE_MOCK_METRICS) {
-      log.warn('TEST MODE: Using mock metrics data');
-      metrics = {
-        hasData: true,
-        visibilityScore: 72,
-        visibilityDelta: '+5%',
-        mentionsCount: 1247,
-        mentionsDelta: '+12%',
-        citationsCount: 89,
-        citationsDelta: '-3%',
-        dateRange: 'Jan 13 - Jan 19, 2026',
-      };
-    } else {
-      metrics = await calculateOverviewMetrics({
-        site,
-        hlxApiKey: env.LLMO_HLX_API_KEY,
-        log,
-      });
-    }
-    // ============================================================
+    const metrics = await calculateOverviewMetrics({
+      site,
+      hlxApiKey: env.LLMO_HLX_API_KEY,
+      log,
+    });
 
     if (!metrics.hasData) {
       log.info(`No data available for site ${siteId}, skipping`);
@@ -197,9 +180,6 @@ const processSiteDigest = async ({
 
         if (emailResult.success) {
           result.emailsSent += 1;
-          // Include debug info
-          result.templateUsed = emailResult.templateUsed;
-          result.payloadSent = emailResult.payloadSent;
         } else {
           result.emailsFailed += 1;
           log.error(`Failed to send digest to ${emailAddress}: ${emailResult.error}`);
@@ -220,117 +200,10 @@ const processSiteDigest = async ({
 };
 
 /**
- * Process digests for all sites in an organization.
- *
- * @param {Object} options - Options
- * @param {string} options.orgId - Organization ID
- * @param {Array} options.sites - Sites belonging to this organization
- * @param {Object} options.context - Request context
- * @param {Object} options.Organization - Organization data access
- * @param {Object} options.TrialUser - TrialUser data access
- * @param {boolean} [options.testMode=false] - Test mode flag
- * @param {string} [options.testEmail] - Override email in test mode
- * @returns {Promise<Object>} Results for this organization
- */
-const processOrganizationDigests = async ({
-  orgId,
-  sites,
-  context,
-  Organization,
-  TrialUser,
-  testMode = false,
-  testEmail = null,
-}) => {
-  const { log } = context;
-  const result = {
-    sitesProcessed: 0,
-    sitesSkipped: 0,
-    sitesFailed: 0,
-    emailsSent: 0,
-    emailsFailed: 0,
-    siteResults: [],
-  };
-
-  try {
-    // Get organization details
-    const organization = await Organization.findById(orgId);
-    if (!organization) {
-      log.warn(`Organization ${orgId} not found, skipping ${sites.length} sites`);
-      result.sitesSkipped = sites.length;
-      return result;
-    }
-
-    let eligibleUsers;
-
-    // TEST MODE: Create a fake user with test email
-    if (testMode && testEmail) {
-      log.warn(`TEST MODE: Overriding users with test email: ${testEmail}`);
-      eligibleUsers = [{
-        getEmailId: () => testEmail,
-        getFirstName: () => 'Test',
-        getLastName: () => 'User',
-        getStatus: () => 'REGISTERED',
-        getMetadata: () => ({}),
-      }];
-    } else {
-      // Get trial users for this organization
-      const trialUsers = await TrialUser.allByOrganizationId(orgId);
-
-      // Filter to active users who haven't opted out
-      // Status should be REGISTERED or INVITED (not BLOCKED or DELETED)
-      eligibleUsers = trialUsers.filter((user) => {
-        const status = user.getStatus();
-        if (status === 'BLOCKED' || status === 'DELETED') {
-          return false;
-        }
-        if (hasOptedOut(user)) {
-          return false;
-        }
-        return true;
-      });
-    }
-
-    if (eligibleUsers.length === 0) {
-      log.info(`No eligible users for org ${orgId}, skipping ${sites.length} sites`);
-      result.sitesSkipped = sites.length;
-      return result;
-    }
-
-    log.info(`Processing ${sites.length} sites for org ${orgId} with ${eligibleUsers.length} users`);
-
-    // Process each site in the organization
-    for (const site of sites) {
-      // eslint-disable-next-line no-await-in-loop
-      const siteResult = await processSiteDigest({
-        site,
-        organization,
-        eligibleUsers,
-        context,
-      });
-
-      result.siteResults.push(siteResult);
-
-      if (siteResult.skipped) {
-        result.sitesSkipped += 1;
-      } else if (siteResult.error && siteResult.emailsSent === 0) {
-        result.sitesFailed += 1;
-      } else {
-        result.sitesProcessed += 1;
-      }
-
-      result.emailsSent += siteResult.emailsSent;
-      result.emailsFailed += siteResult.emailsFailed;
-    }
-  } catch (orgError) {
-    log.error(`Error processing org ${orgId}: ${orgError.message}`);
-    result.sitesFailed = sites.length;
-  }
-
-  return result;
-};
-
-/**
  * WeeklyDigest controller. Handles sending weekly digest emails to users.
+ * Uses a fan-out pattern for scalability:
+ * 1. triggerWeeklyDigests - Called by scheduler, enqueues per-org messages
+ * 2. processOrganizationDigest - Worker, processes single org from SQS
  *
  * @param {Object} ctx - Context of the request
  * @returns {Object} WeeklyDigest controller
@@ -347,68 +220,58 @@ function WeeklyDigestController(ctx) {
 
   const { Site, Organization, TrialUser } = dataAccess;
 
-  // ============================================================
-  // TEMPORARY TEST MODE - Remove before merging to production
-  // ============================================================
-  const TEST_MODE = true; // Set to false to disable test mode
-  const TEST_EMAIL = 'joselopez@adobe.com';
-  const TEST_SITE_DOMAIN = 'adobe.com'; // Only process sites matching this domain
-  // ============================================================
-
   /**
-   * Process weekly digests for all LLMO-enabled sites.
-   * This is the main entry point for the scheduled job.
+   * Trigger weekly digest processing by enqueuing per-organization messages.
+   * This is the entry point called by the scheduler/dispatcher.
+   *
+   * Flow:
+   * 1. Query all LLMO-enabled sites
+   * 2. Group sites by organization
+   * 3. Send one SQS message per organization
+   * 4. Return immediately (async processing)
    *
    * @param {Object} context - Request context
-   * @returns {Promise<Response>} Processing result
+   * @returns {Promise<Response>} Accepted response with queue stats
    */
-  const processWeeklyDigests = async (context) => {
-    const { log } = context;
+  const triggerWeeklyDigests = async (context) => {
+    const { log, sqs, env } = context;
     const startTime = Date.now();
 
-    log.info('Starting weekly digest processing');
+    log.info('Starting weekly digest trigger - queueing per-org jobs');
 
-    // Log test mode status
-    if (TEST_MODE) {
-      log.warn(`TEST MODE ENABLED: Only processing sites matching "${TEST_SITE_DOMAIN}" and sending to "${TEST_EMAIL}"`);
+    const queueUrl = env.DIGEST_JOBS_QUEUE_URL;
+    if (!queueUrl) {
+      log.error('DIGEST_JOBS_QUEUE_URL not configured');
+      return internalServerError('Digest queue not configured');
     }
 
-    const summary = {
-      sitesProcessed: 0,
-      sitesSkipped: 0,
-      sitesFailed: 0,
-      totalEmailsSent: 0,
-      totalEmailsFailed: 0,
-      siteResults: [],
+    const stats = {
+      totalSites: 0,
+      llmoEnabledSites: 0,
+      organizationsQueued: 0,
+      queueErrors: 0,
     };
 
     try {
       // Get all sites
       const allSites = await Site.all();
-      log.info(`Found ${allSites.length} total sites`);
+      stats.totalSites = allSites.length;
+      log.info(`Found ${stats.totalSites} total sites`);
 
       // Filter to LLMO-enabled sites (those with llmo.dataFolder config)
-      let llmoSites = allSites.filter((site) => {
+      const llmoSites = allSites.filter((site) => {
         const config = site.getConfig();
         const llmoConfig = config?.llmo || config?.getLlmoConfig?.();
         return llmoConfig?.dataFolder;
       });
+      stats.llmoEnabledSites = llmoSites.length;
+      log.info(`Found ${stats.llmoEnabledSites} LLMO-enabled sites`);
 
-      log.info(`Found ${llmoSites.length} LLMO-enabled sites`);
-
-      // TEST MODE: Filter to only test site
-      if (TEST_MODE) {
-        llmoSites = llmoSites.filter((site) => {
-          const baseURL = site.getBaseURL();
-          return baseURL && baseURL.includes(TEST_SITE_DOMAIN);
+      if (llmoSites.length === 0) {
+        return ok({
+          message: 'No LLMO-enabled sites found',
+          stats,
         });
-        log.warn(`TEST MODE: Filtered to ${llmoSites.length} sites matching "${TEST_SITE_DOMAIN}"`);
-
-        // Only process the first matching site in test mode
-        if (llmoSites.length > 1) {
-          llmoSites = [llmoSites[0]];
-          log.warn('TEST MODE: Limited to first matching site only');
-        }
       }
 
       // Group sites by organization
@@ -423,53 +286,202 @@ function WeeklyDigestController(ctx) {
 
       log.info(`Sites grouped into ${sitesByOrg.size} organizations`);
 
-      // Process each organization
+      // Queue a message for each organization
+      const queuePromises = [];
       for (const [orgId, sites] of sitesByOrg) {
-        // eslint-disable-next-line no-await-in-loop
-        const orgResult = await processOrganizationDigests({
-          orgId,
-          sites,
-          context,
-          Organization,
-          TrialUser,
-          testMode: TEST_MODE,
-          testEmail: TEST_EMAIL,
-        });
+        const message = {
+          type: DIGEST_JOB_TYPE,
+          organizationId: orgId,
+          siteIds: sites.map((s) => s.getId()),
+          triggeredAt: new Date().toISOString(),
+        };
 
-        // Aggregate results
-        summary.sitesProcessed += orgResult.sitesProcessed;
-        summary.sitesSkipped += orgResult.sitesSkipped;
-        summary.sitesFailed += orgResult.sitesFailed;
-        summary.totalEmailsSent += orgResult.emailsSent;
-        summary.totalEmailsFailed += orgResult.emailsFailed;
-        summary.siteResults.push(...orgResult.siteResults);
+        queuePromises.push(
+          sqs.sendMessage(queueUrl, message)
+            .then(() => {
+              stats.organizationsQueued += 1;
+              log.debug(`Queued digest job for org ${orgId} with ${sites.length} sites`);
+            })
+            .catch((error) => {
+              stats.queueErrors += 1;
+              log.error(`Failed to queue digest for org ${orgId}: ${error.message}`);
+            }),
+        );
       }
 
-      const duration = Date.now() - startTime;
-      log.info(`Weekly digest processing complete in ${duration}ms: ${summary.sitesProcessed} sites processed, ${summary.totalEmailsSent} emails sent`);
+      // Wait for all queue operations
+      await Promise.all(queuePromises);
 
-      return ok({
-        message: TEST_MODE ? 'Weekly digest TEST processing complete' : 'Weekly digest processing complete',
-        testMode: TEST_MODE,
+      const duration = Date.now() - startTime;
+      log.info(`Weekly digest trigger complete in ${duration}ms: ${stats.organizationsQueued} orgs queued`);
+
+      return accepted({
+        message: 'Weekly digest jobs queued for processing',
         duration: `${duration}ms`,
-        summary: {
-          sitesProcessed: summary.sitesProcessed,
-          sitesSkipped: summary.sitesSkipped,
-          sitesFailed: summary.sitesFailed,
-          totalEmailsSent: summary.totalEmailsSent,
-          totalEmailsFailed: summary.totalEmailsFailed,
-        },
-        // Debug: include site results with payload
-        debug: summary.siteResults,
+        stats,
       });
     } catch (error) {
-      log.error(`Weekly digest processing failed: ${error.message}`);
+      log.error(`Weekly digest trigger failed: ${error.message}`);
       return internalServerError(error.message);
     }
   };
 
+  /**
+   * Process weekly digest for a single organization.
+   * This is called by the SQS worker when processing queued messages.
+   *
+   * Expected request body (from SQS message):
+   * {
+   *   type: 'weekly-digest-org',
+   *   organizationId: 'org-uuid',
+   *   siteIds: ['site-uuid-1', 'site-uuid-2'],
+   *   triggeredAt: 'ISO timestamp'
+   * }
+   *
+   * @param {Object} context - Request context
+   * @returns {Promise<Response>} Processing result
+   */
+  const processOrganizationDigest = async (context) => {
+    const { log, data } = context;
+    const startTime = Date.now();
+
+    // Parse message from SQS (comes via request body)
+    const message = data || {};
+    const { type, organizationId, siteIds } = message;
+
+    // Validate message
+    if (type !== DIGEST_JOB_TYPE) {
+      log.warn(`Invalid job type: ${type}, expected ${DIGEST_JOB_TYPE}`);
+      return badRequest(`Invalid job type: ${type}`);
+    }
+
+    if (!organizationId) {
+      log.error('Missing organizationId in message');
+      return badRequest('Missing organizationId');
+    }
+
+    if (!Array.isArray(siteIds) || siteIds.length === 0) {
+      log.error('Missing or empty siteIds in message');
+      return badRequest('Missing siteIds');
+    }
+
+    log.info(`Processing digest for org ${organizationId} with ${siteIds.length} sites`);
+
+    const result = {
+      organizationId,
+      sitesProcessed: 0,
+      sitesSkipped: 0,
+      sitesFailed: 0,
+      totalEmailsSent: 0,
+      totalEmailsFailed: 0,
+      siteResults: [],
+    };
+
+    try {
+      // Get organization details
+      const organization = await Organization.findById(organizationId);
+      if (!organization) {
+        log.warn(`Organization ${organizationId} not found`);
+        return badRequest(`Organization ${organizationId} not found`);
+      }
+
+      // Get trial users for this organization
+      const trialUsers = await TrialUser.allByOrganizationId(organizationId);
+
+      // Filter to active users who haven't opted out
+      const eligibleUsers = trialUsers.filter((user) => {
+        const status = user.getStatus();
+        if (status === 'BLOCKED' || status === 'DELETED') {
+          return false;
+        }
+        if (hasOptedOut(user)) {
+          return false;
+        }
+        return true;
+      });
+
+      if (eligibleUsers.length === 0) {
+        log.info(`No eligible users for org ${organizationId}, skipping all sites`);
+        result.sitesSkipped = siteIds.length;
+        return ok({
+          message: 'No eligible users for organization',
+          ...result,
+        });
+      }
+
+      log.info(`Found ${eligibleUsers.length} eligible users for org ${organizationId}`);
+
+      // Fetch and process each site
+      for (const siteId of siteIds) {
+        // eslint-disable-next-line no-await-in-loop
+        const site = await Site.findById(siteId);
+
+        if (!site) {
+          log.warn(`Site ${siteId} not found, skipping`);
+          result.sitesSkipped += 1;
+          result.siteResults.push({
+            siteId,
+            skipped: true,
+            error: 'Site not found',
+          });
+        } else {
+          // eslint-disable-next-line no-await-in-loop
+          const siteResult = await processSiteDigest({
+            site,
+            organization,
+            eligibleUsers,
+            context,
+          });
+
+          result.siteResults.push(siteResult);
+
+          if (siteResult.skipped) {
+            result.sitesSkipped += 1;
+          } else if (siteResult.error && siteResult.emailsSent === 0) {
+            result.sitesFailed += 1;
+          } else {
+            result.sitesProcessed += 1;
+          }
+
+          result.totalEmailsSent += siteResult.emailsSent;
+          result.totalEmailsFailed += siteResult.emailsFailed;
+        }
+      }
+
+      const duration = Date.now() - startTime;
+      log.info(`Org ${organizationId} digest complete in ${duration}ms: ${result.sitesProcessed} sites, ${result.totalEmailsSent} emails`);
+
+      return ok({
+        message: 'Organization digest processing complete',
+        duration: `${duration}ms`,
+        ...result,
+      });
+    } catch (error) {
+      log.error(`Error processing org ${organizationId} digest: ${error.message}`);
+      return internalServerError(error.message);
+    }
+  };
+
+  /**
+   * Legacy endpoint for backwards compatibility.
+   * Processes all digests synchronously (use triggerWeeklyDigests for production).
+   *
+   * @deprecated Use triggerWeeklyDigests + processOrganizationDigest instead
+   * @param {Object} context - Request context
+   * @returns {Promise<Response>} Processing result
+   */
+  const processWeeklyDigests = async (context) => {
+    const { log } = context;
+    log.warn('Using legacy synchronous processWeeklyDigests - consider using /trigger endpoint');
+
+    // Delegate to trigger, which will queue the jobs
+    return triggerWeeklyDigests(context);
+  };
+
   return {
-    processWeeklyDigests,
+    triggerWeeklyDigests,
+    processOrganizationDigest,
+    processWeeklyDigests, // Keep for backwards compatibility
   };
 }
 
