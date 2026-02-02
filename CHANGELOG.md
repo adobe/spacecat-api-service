@@ -1,3 +1,38 @@
+## [1.305.1](https://github.com/adobe/spacecat-api-service/compare/v1.305.0...v1.305.1) (2026-02-02)
+
+
+### Bug Fixes
+
+* filter out forms opp not shown on ui ([#1759](https://github.com/adobe/spacecat-api-service/issues/1759)) ([7e4436b](https://github.com/adobe/spacecat-api-service/commit/7e4436ba24292eba92e1946dc2d7ae57c4c21530))
+
+# [1.305.0](https://github.com/adobe/spacecat-api-service/compare/v1.304.1...v1.305.0) (2026-02-02)
+
+
+### Features
+
+* add edge optimize status api ([#1739](https://github.com/adobe/spacecat-api-service/issues/1739)) ([7e2f1d2](https://github.com/adobe/spacecat-api-service/commit/7e2f1d268368686dfe2800c53fe5a2300b33ded7))
+
+## [1.304.1](https://github.com/adobe/spacecat-api-service/compare/v1.304.0...v1.304.1) (2026-01-31)
+
+
+### Bug Fixes
+
+* remove KeyEvent entity ([#1758](https://github.com/adobe/spacecat-api-service/issues/1758)) ([ca16421](https://github.com/adobe/spacecat-api-service/commit/ca164213f2b95ed7feeca225823b3679f6c6d3b7))
+
+# [1.304.0](https://github.com/adobe/spacecat-api-service/compare/v1.303.0...v1.304.0) (2026-01-30)
+
+
+### Features
+
+* new flag opted added in edgeoptimizeconfig ([#1743](https://github.com/adobe/spacecat-api-service/issues/1743)) ([a4876b5](https://github.com/adobe/spacecat-api-service/commit/a4876b5d963e9f118dc9bfa6ee33e0cb04cba056))
+
+# [1.303.0](https://github.com/adobe/spacecat-api-service/compare/v1.302.0...v1.303.0) (2026-01-30)
+
+
+### Features
+
+* Weekly digest email - API implementation ([#1730](https://github.com/adobe/spacecat-api-service/issues/1730)) ([7ab23f4](https://github.com/adobe/spacecat-api-service/commit/7ab23f40602561c3c1cff2d4d2c33fc236c20e9a))
+
 # [1.302.0](https://github.com/adobe/spacecat-api-service/compare/v1.301.0...v1.302.0) (2026-01-30)
 
 

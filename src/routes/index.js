@@ -184,9 +184,6 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/:auditType': auditsController.patchAuditForSite,
     'GET /sites/:siteId/latest-audit/:auditType': auditsController.getLatestForSite,
     'GET /sites/:siteId/experiments': experimentsController.getExperiments,
-    'GET /sites/:siteId/key-events': sitesController.getKeyEventsBySiteID,
-    'POST /sites/:siteId/key-events': sitesController.createKeyEvent,
-    'DELETE /sites/:siteId/key-events/:keyEventId': sitesController.removeKeyEvent,
     'GET /sites/:siteId/metrics/:metric/:source': sitesController.getSiteMetricsBySource,
     'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': sitesController.getPageMetricsBySource,
     'GET /sites/:siteId/latest-metrics': sitesController.getLatestSiteMetrics,
@@ -372,6 +369,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/edge-optimize-config': llmoController.getEdgeConfig,
     'GET /sites/:siteId/llmo/strategy': llmoController.getStrategy,
     'PUT /sites/:siteId/llmo/strategy': llmoController.saveStrategy,
+    'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,
 
     // Tier Specific Routes
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,
