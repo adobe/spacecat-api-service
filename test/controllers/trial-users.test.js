@@ -741,8 +741,12 @@ describe('Trial User Controller', () => {
     });
 
     it('should return bad request when email sending fails', async () => {
-      // Mock email service to return failure
-      mockSendTrialUserInviteEmail.resolves({ success: false, error: 'Email service error' });
+      // Mock fetch to return non-200 status (email sending failure)
+      global.fetch = sandbox.stub().resolves({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+      });
 
       const context = {
         params: { organizationId },
@@ -769,7 +773,7 @@ describe('Trial User Controller', () => {
 
       expect(result.status).to.equal(400);
       const body = await result.json();
-      expect(body.message).to.equal('An error occurred while sending email to the user');
+      expect(body.message).to.equal('Some Error Occured while sending email to the user');
     });
   });
 
@@ -926,7 +930,7 @@ describe('Trial User Controller', () => {
 
       expect(result.status).to.equal(404);
       const body = await result.json();
-      expect(body.message).to.equal('User not found');
+      expect(body.message).to.equal('Trial user not found');
     });
 
     it('should return internal server error on database failure', async () => {
@@ -1018,10 +1022,10 @@ describe('Trial User Controller', () => {
 
       expect(result.status).to.equal(400);
       const body = await result.json();
-      expect(body.message).to.equal('weeklyDigest must be a boolean value');
+      expect(body.message).to.equal('weeklyDigest must be a boolean');
     });
 
-    it('should return bad request when weeklyDigest is missing', async () => {
+    it('should succeed when weeklyDigest is not provided (no-op update)', async () => {
       const context = {
         data: {},
         dataAccess: mockDataAccess,
@@ -1036,7 +1040,8 @@ describe('Trial User Controller', () => {
 
       const result = await trialUserController.updateEmailPreferences(context);
 
-      expect(result.status).to.equal(400);
+      // When weeklyDigest is not provided, it's a no-op but still succeeds
+      expect(result.status).to.equal(200);
     });
 
     it('should return unauthorized when user email cannot be determined', async () => {

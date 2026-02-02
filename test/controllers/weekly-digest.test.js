@@ -337,6 +337,18 @@ describe('Weekly Digest Controller', () => {
       expect(body.totalEmailsSent).to.equal(1);
     });
 
+    it('should reject when data is undefined', async () => {
+      const context = {
+        log: mockLog,
+        env: mockEnv,
+        // data is undefined
+      };
+
+      const result = await controller.processOrganizationDigest(context);
+
+      expect(result.status).to.equal(400);
+    });
+
     it('should reject invalid job type', async () => {
       const context = {
         log: mockLog,
@@ -691,6 +703,36 @@ describe('Weekly Digest Controller', () => {
       const result = await controller.processOrganizationDigest(context);
 
       expect(result.status).to.equal(500);
+    });
+
+    it('should use getLlmoConfig method when llmo property is not present', async () => {
+      const siteWithLlmoMethod = {
+        getId: () => 'site-1',
+        getBaseURL: () => 'https://method-site.com',
+        getOrganizationId: () => orgId,
+        getConfig: () => ({
+          getLlmoConfig: () => ({
+            dataFolder: 'method-folder',
+            brandName: 'Method Brand',
+          }),
+        }),
+      };
+      mockDataAccess.Site.findById.withArgs('site-1').resolves(siteWithLlmoMethod);
+
+      const context = {
+        log: mockLog,
+        env: mockEnv,
+        data: {
+          type: 'weekly-digest-org',
+          organizationId: orgId,
+          siteIds: ['site-1'],
+        },
+      };
+
+      await controller.processOrganizationDigest(context);
+
+      const emailCall = mockSendWeeklyDigestEmail.getCall(0);
+      expect(emailCall.args[0].brandName).to.equal('Method Brand');
     });
 
     it('should fall back to baseURL when URL parsing fails', async () => {
