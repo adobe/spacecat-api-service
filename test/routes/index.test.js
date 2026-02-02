@@ -290,6 +290,8 @@ describe('getRouteHandlers', () => {
   const mockTrialUserController = {
     getByOrganizationID: () => null,
     createTrialUserForEmailInvite: () => null,
+    getEmailPreferences: sinon.stub(),
+    updateEmailPreferences: sinon.stub(),
   };
 
   const mockUserDetailsController = {
@@ -307,6 +309,10 @@ describe('getRouteHandlers', () => {
     getReport: sinon.stub(),
     patchReport: sinon.stub(),
     deleteReport: sinon.stub(),
+  };
+
+  const mockBotBlockerController = {
+    checkBotBlocker: sinon.stub(),
   };
 
   it('segregates static and dynamic routes', () => {
@@ -347,6 +353,7 @@ describe('getRouteHandlers', () => {
       mockUrlStoreController,
       mockPTA2Controller,
       mockTrafficToolsController,
+      mockBotBlockerController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -376,6 +383,8 @@ describe('getRouteHandlers', () => {
       'POST /consent-banner',
       'POST /llmo/onboard',
       'GET /sites-resolve',
+      'GET /trial-users/email-preferences',
+      'PATCH /trial-users/email-preferences',
     );
 
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
@@ -396,6 +405,8 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
     expect(staticRoutes['POST /llmo/onboard']).to.equal(mockLlmoController.onboardCustomer);
     expect(staticRoutes['GET /sites/resolve']).to.equal(mockSitesController.resolveSite);
+    expect(staticRoutes['GET /trial-users/email-preferences']).to.equal(mockTrialUserController.getEmailPreferences);
+    expect(staticRoutes['PATCH /trial-users/email-preferences']).to.equal(mockTrialUserController.updateEmailPreferences);
 
     expect(dynamicRoutes).to.have.all.keys(
       'GET /audits/latest/:auditType',
@@ -441,11 +452,9 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/:auditType',
       'GET /sites/:siteId/audits/latest',
       'GET /sites/:siteId/latest-audit/:auditType',
+      'GET /sites/:siteId/bot-blocker',
       'GET /sites/:siteId/latest-metrics',
       'GET /sites/:siteId/experiments',
-      'GET /sites/:siteId/key-events',
-      'POST /sites/:siteId/key-events',
-      'DELETE /sites/:siteId/key-events/:keyEventId',
       'GET /sites/:siteId/metrics/:metric/:source',
       'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl',
       'GET /sites/:siteId/site-enrollments',
@@ -651,6 +660,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/audits/latest'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/latest-audit/:auditType'].handler).to.equal(mockAuditsController.getLatestForSite);
     expect(dynamicRoutes['GET /sites/:siteId/latest-audit/:auditType'].paramNames).to.deep.equal(['siteId', 'auditType']);
+    expect(dynamicRoutes['GET /sites/:siteId/bot-blocker'].handler).to.equal(mockBotBlockerController.checkBotBlocker);
+    expect(dynamicRoutes['GET /sites/:siteId/bot-blocker'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/experiments'].handler).to.equal(mockExperimentsController.getExperiments);
     expect(dynamicRoutes['DELETE /tools/api-keys/:id'].handler).to.equal(mockApiKeyController.deleteApiKey);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities'].handler).to.equal(mockOpportunitiesController.getAllForSite);

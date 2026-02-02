@@ -12,13 +12,11 @@
 
 /* eslint-env mocha */
 
-import { KeyEvent, Organization, Site } from '@adobe/spacecat-shared-data-access';
+import { Organization, Site } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
-import KeyEventSchema from '@adobe/spacecat-shared-data-access/src/models/key-event/key-event.schema.js';
 import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/models/organization/organization.schema.js';
 import SiteSchema from '@adobe/spacecat-shared-data-access/src/models/site/site.schema.js';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
-import { hasText } from '@adobe/spacecat-shared-utils';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 
 import { use, expect } from 'chai';
@@ -117,36 +115,7 @@ describe('Sites Controller', () => {
     loggerStub,
   ));
 
-  const buildKeyEvents = (siteList) => [{
-    keyEventId: 'k1', siteId: siteList[0].getId(), name: 'some-key-event', type: KeyEvent.KEY_EVENT_TYPES.CODE, time: new Date().toISOString(),
-  },
-  {
-    keyEventId: 'k2', siteId: siteList[0].getId(), name: 'other-key-event', type: KeyEvent.KEY_EVENT_TYPES.SEO, time: new Date().toISOString(),
-  },
-  ].map((keyEvent) => new KeyEvent(
-    {
-      entities: {
-        keyEvent: {
-          model: {
-            indexes: {},
-            schema: {},
-          },
-        },
-      },
-    },
-    {
-      log: loggerStub,
-      getCollection: stub().returns({
-        schema: KeyEventSchema,
-      }),
-    },
-    KeyEventSchema,
-    keyEvent,
-    loggerStub,
-  ));
-
   let sites;
-  let keyEvents;
 
   const siteFunctions = [
     'createSite',
@@ -164,9 +133,6 @@ describe('Sites Controller', () => {
     'updateSite',
     'updateCdnLogsConfig',
     'getTopPages',
-    'createKeyEvent',
-    'getKeyEventsBySiteID',
-    'removeKeyEvent',
     'getSiteMetricsBySource',
     'getPageMetricsBySource',
     'resolveSite',
@@ -180,7 +146,6 @@ describe('Sites Controller', () => {
 
   beforeEach(() => {
     sites = buildSites();
-    keyEvents = buildKeyEvents(sites);
 
     mockDataAccess = {
       Audit: {
@@ -194,11 +159,6 @@ describe('Sites Controller', () => {
           getSiteId: sandbox.stub().returns(SITE_IDS[0]),
           getInvocationId: sandbox.stub().returns('some-invocation-id'),
         }),
-      },
-      KeyEvent: {
-        allBySiteId: sandbox.stub().resolves(keyEvents),
-        findById: stub().resolves(keyEvents[0]),
-        create: sandbox.stub().resolves(keyEvents[0]),
       },
       Site: {
         all: sandbox.stub().resolves(sites),
@@ -1382,160 +1342,6 @@ describe('Sites Controller', () => {
 
     expect(result.status).to.equal(400);
     expect(error).to.have.property('message', 'Base URL required');
-  });
-
-  it('create key event returns created key event', async () => {
-    const siteId = sites[0].getId();
-    const keyEvent = keyEvents[0];
-
-    mockDataAccess.KeyEvent.create.withArgs({
-      siteId, name: keyEvent.getName(), type: keyEvent.getType(), time: keyEvent.getTime(),
-    }).resolves(keyEvent);
-
-    const resp = await (await sitesController.createKeyEvent({
-      params: { siteId },
-      data: { name: keyEvent.getName(), type: keyEvent.getType(), time: keyEvent.getTime() },
-    })).json();
-
-    expect(mockDataAccess.KeyEvent.create).to.have.been.calledOnce;
-    expect(hasText(resp.id)).to.be.true;
-    expect(resp.name).to.equal(keyEvent.getName());
-    expect(resp.type).to.equal(keyEvent.getType());
-    expect(resp.time).to.equal(keyEvent.getTime());
-  });
-
-  it('create key event returns not found when site does not exist', async () => {
-    const siteId = 'site-id';
-    const keyEvent = keyEvents[0];
-
-    mockDataAccess.Site.findById.resolves(null);
-
-    const result = await sitesController.createKeyEvent({
-      params: { siteId },
-      data: { name: keyEvent.getName(), type: keyEvent.getType(), time: keyEvent.getTime() },
-    });
-    const error = await result.json();
-
-    expect(result.status).to.equal(404);
-    expect(error).to.have.property('message', 'Site not found');
-  });
-
-  it('create key event returns forbidden when site does not exist', async () => {
-    const siteId = 'site-id';
-    const keyEvent = keyEvents[0];
-    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
-    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
-    const result = await sitesController.createKeyEvent({
-      params: { siteId },
-      data: { name: keyEvent.getName(), type: keyEvent.getType(), time: keyEvent.getTime() },
-    });
-    const error = await result.json();
-
-    expect(result.status).to.equal(403);
-    expect(error).to.have.property('message', 'Only users belonging to the organization can create key events');
-  });
-
-  it('get key events returns list of key events', async () => {
-    const site = sites[0];
-    site.getKeyEvents = sandbox.stub().resolves(keyEvents);
-    const siteId = sites[0].getId();
-
-    mockDataAccess.KeyEvent.allBySiteId.withArgs(siteId).resolves(keyEvents);
-
-    const resp = await (await sitesController.getKeyEventsBySiteID({
-      params: { siteId },
-    })).json();
-
-    expect(site.getKeyEvents).to.have.been.calledOnce;
-    expect(resp.length).to.equal(keyEvents.length);
-  });
-
-  it('get key events returns list of key events for non belonging to the organization', async () => {
-    const site = sites[0];
-    site.getKeyEvents = sandbox.stub().resolves(keyEvents);
-    const siteId = sites[0].getId();
-    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
-    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
-
-    const result = await sitesController.getKeyEventsBySiteID({
-      params: { siteId },
-    });
-    const error = await result.json();
-
-    expect(result.status).to.equal(403);
-    expect(error).to.have.property('message', 'Only users belonging to the organization can view its key events');
-  });
-
-  it('get key events returns bad request when siteId is missing', async () => {
-    const result = await sitesController.getKeyEventsBySiteID({
-      params: {},
-    });
-    const error = await result.json();
-
-    expect(result.status).to.equal(400);
-    expect(error).to.have.property('message', 'Site ID required');
-  });
-
-  it('get key events returns not found when site is not found', async () => {
-    const siteId = sites[0].getId();
-    mockDataAccess.Site.findById.resolves(null);
-
-    const result = await sitesController.getKeyEventsBySiteID({
-      params: { siteId },
-    });
-    const error = await result.json();
-
-    expect(result.status).to.equal(404);
-    expect(error).to.have.property('message', 'Site not found');
-  });
-
-  it('remove key events endpoint call', async () => {
-    const keyEvent = keyEvents[0];
-    keyEvent.remove = sinon.stub().resolves();
-    const keyEventId = keyEvent.getId();
-
-    await sitesController.removeKeyEvent({
-      params: { keyEventId },
-    });
-
-    expect(keyEvent.remove).to.have.been.calledOnce;
-  });
-
-  it('remove key events endpoint call for a non-admin user', async () => {
-    context.attributes.authInfo.withProfile({ is_admin: false });
-    const keyEvent = keyEvents[0];
-    keyEvent.remove = sinon.stub().resolves();
-    const keyEventId = keyEvent.getId();
-    const result = await sitesController.removeKeyEvent({
-      params: { keyEventId },
-    });
-    const error = await result.json();
-
-    expect(result.status).to.equal(403);
-    expect(error).to.have.property('message', 'Only admins can remove key events');
-  });
-
-  it('remove key events returns bad request when keyEventId is missing', async () => {
-    const result = await sitesController.removeKeyEvent({
-      params: {},
-    });
-    const error = await result.json();
-
-    expect(result.status).to.equal(400);
-    expect(error).to.have.property('message', 'Key Event ID required');
-  });
-
-  it('remove key events returns not found when key event is not found', async () => {
-    const keyEventId = 'key-event-id';
-    mockDataAccess.KeyEvent.findById.resolves(null);
-
-    const result = await sitesController.removeKeyEvent({
-      params: { keyEventId },
-    });
-    const error = await result.json();
-
-    expect(result.status).to.equal(404);
-    expect(error).to.have.property('message', 'Key Event not found');
   });
 
   it('get site metrics by source returns list of metrics', async () => {

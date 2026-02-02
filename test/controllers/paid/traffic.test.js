@@ -1031,9 +1031,33 @@ describe('Paid TrafficController', async () => {
   });
 
   describe('fetchTop3PagesTrafficData (Impact endpoints)', () => {
+    let mockS3GetObject;
+
     beforeEach(() => {
       // Set temporalCondition for these tests
       mockContext.data.temporalCondition = encodeURIComponent('(year = 2024 AND week = 23) OR (year = 2024 AND week = 22) OR (year = 2024 AND week = 21) OR (year = 2024 AND week = 20)');
+
+      // Mock S3 GetObject for Ahrefs CPC data (needed for bounce gap endpoints)
+      mockS3GetObject = sandbox.stub();
+      mockS3.send.callsFake((cmd) => {
+        if (cmd.constructor && cmd.constructor.name === 'GetObjectCommand') {
+          return mockS3GetObject(cmd);
+        }
+        if (cmd.constructor && cmd.constructor.name === 'HeadObjectCommand' && cmd.input.Key.includes(`${SITE_ID}/`)) {
+          // Default: Simulate cache miss
+          const err = new Error('not found');
+          err.name = 'NotFound';
+          return Promise.reject(err);
+        }
+        if (cmd.constructor && cmd.constructor.name === 'PutObjectCommand') {
+          lastPutObject = cmd;
+          return Promise.resolve({});
+        }
+        return Promise.resolve({});
+      });
+
+      // Default: Ahrefs data not available (will use default CPC)
+      mockS3GetObject.rejects(new Error('Not found'));
     });
 
     it('getImpactByPage returns expected data with limit of 3', async () => {
@@ -1272,6 +1296,7 @@ describe('Paid TrafficController', async () => {
       const mockResponse = [
         {
           path: '/home',
+          consent: 'show',
           pageviews: 1000,
           pct_pageviews: 0.5,
           click_rate: 0.1,
@@ -1280,6 +1305,18 @@ describe('Paid TrafficController', async () => {
           p70_lcp: 5,
           p70_cls: 5,
           p70_inp: 5,
+        },
+        {
+          path: '/home',
+          consent: 'hidden',
+          pageviews: 1000,
+          pct_pageviews: 0.5,
+          click_rate: 0.15,
+          engagement_rate: 0.25,
+          bounce_rate: 0.2,
+          p70_lcp: 4,
+          p70_cls: 4,
+          p70_inp: 4,
         },
       ];
       mockAthenaQuery.resolves(mockResponse);
@@ -1308,6 +1345,7 @@ describe('Paid TrafficController', async () => {
       const mockResponse = [
         {
           path: '/home',
+          consent: 'show',
           pageviews: 1000,
           pct_pageviews: 0.5,
           click_rate: 0.1,
@@ -1316,6 +1354,18 @@ describe('Paid TrafficController', async () => {
           p70_lcp: 5,
           p70_cls: 5,
           p70_inp: 5,
+        },
+        {
+          path: '/home',
+          consent: 'hidden',
+          pageviews: 1000,
+          pct_pageviews: 0.5,
+          click_rate: 0.15,
+          engagement_rate: 0.25,
+          bounce_rate: 0.2,
+          p70_lcp: 4,
+          p70_cls: 4,
+          p70_inp: 4,
         },
       ];
       mockAthenaQuery.resolves(mockResponse);
@@ -1359,6 +1409,10 @@ describe('Paid TrafficController', async () => {
 
     it('returns response directly if caching fails for impact endpoints', async () => {
       mockS3.send.callsFake((cmd) => {
+        if (cmd.constructor && cmd.constructor.name === 'GetObjectCommand') {
+          // Ahrefs data not available
+          return mockS3GetObject(cmd);
+        }
         if (cmd.constructor && cmd.constructor.name === 'PutObjectCommand') {
           throw new Error('S3 put failed');
         }
@@ -1393,6 +1447,10 @@ describe('Paid TrafficController', async () => {
     it('returns signed URL when cache is successfully verified after being created for impact endpoints', async () => {
       let cacheExists = false;
       mockS3.send.callsFake((cmd) => {
+        if (cmd.constructor && cmd.constructor.name === 'GetObjectCommand') {
+          // Ahrefs data not available
+          return mockS3GetObject(cmd);
+        }
         if (cmd.constructor && cmd.constructor.name === 'HeadObjectCommand') {
           if (cacheExists) {
             return Promise.resolve({});
@@ -1413,6 +1471,7 @@ describe('Paid TrafficController', async () => {
       const mockResponse = [
         {
           path: '/home',
+          consent: 'show',
           pageviews: 1000,
           pct_pageviews: 0.5,
           click_rate: 0.1,
@@ -1421,6 +1480,18 @@ describe('Paid TrafficController', async () => {
           p70_lcp: 2.5,
           p70_cls: 0.1,
           p70_inp: 200,
+        },
+        {
+          path: '/home',
+          consent: 'hidden',
+          pageviews: 1000,
+          pct_pageviews: 0.5,
+          click_rate: 0.15,
+          engagement_rate: 0.25,
+          bounce_rate: 0.2,
+          p70_lcp: 2.0,
+          p70_cls: 0.08,
+          p70_inp: 150,
         },
       ];
       mockAthenaQuery.resolves(mockResponse);
@@ -1453,6 +1524,599 @@ describe('Paid TrafficController', async () => {
       // The query should filter by traffic type
       const query = mockAthenaQuery.getCall(0).args[0];
       expect(query).to.be.a('string');
+    });
+  });
+
+  describe('Bounce Gap Analysis Endpoints', () => {
+    let bounceGapMock;
+    let bounceGapWithTrafficTypeMock;
+    let mockS3GetObject;
+
+    beforeEach(async () => {
+      const bounceGapRaw = await fs.readFile(path.join(FIXTURES_DIR, 'sample-bounce-gap-athena-response.json'), 'utf-8');
+      const bounceGapTrafficRaw = await fs.readFile(path.join(FIXTURES_DIR, 'sample-bounce-gap-with-traffic-type.json'), 'utf-8');
+      bounceGapMock = JSON.parse(bounceGapRaw);
+      bounceGapWithTrafficTypeMock = JSON.parse(bounceGapTrafficRaw);
+
+      // Set temporalCondition for bounce gap tests
+      mockContext.data.temporalCondition = encodeURIComponent('(year = 2024 AND week = 23) OR (year = 2024 AND week = 22) OR (year = 2024 AND week = 21) OR (year = 2024 AND week = 20)');
+      // Set noCache to get JSON responses instead of gzipped cached responses
+      mockContext.data.noCache = true;
+
+      // Mock S3 GetObject for Ahrefs CPC data
+      mockS3GetObject = sandbox.stub();
+      mockS3.send.callsFake((cmd) => {
+        if (cmd.constructor && cmd.constructor.name === 'GetObjectCommand') {
+          return mockS3GetObject(cmd);
+        }
+        if (cmd.constructor && cmd.constructor.name === 'HeadObjectCommand' && cmd.input.Key.includes(`${SITE_ID}/`)) {
+          // Simulate cache miss
+          const err = new Error('not found');
+          err.name = 'NotFound';
+          return Promise.reject(err);
+        }
+        if (cmd.constructor && cmd.constructor.name === 'PutObjectCommand') {
+          lastPutObject = cmd;
+          return Promise.resolve({});
+        }
+        return Promise.resolve({});
+      });
+    });
+
+    describe('getTrafficLossByDevices', () => {
+      it('returns bounce gap data grouped by device without cost fields', async () => {
+        mockAthenaQuery.resolves(bounceGapMock);
+        mockS3GetObject.rejects(new Error('Not found')); // Ahrefs data not available
+
+        const controller = TrafficController(mockContext, mockLog, mockEnv);
+        const res = await controller.getTrafficLossByDevices();
+
+        expect(res.status).to.equal(200);
+
+        // Validate the cached data from PutObjectCommand
+        expect(lastPutObject).to.exist;
+        const decompressed = await gunzipAsync(lastPutObject.input.Body);
+        const body = JSON.parse(decompressed.toString());
+
+        // Should have 3 devices: desktop, mobile, tablet
+        expect(body).to.be.an('array');
+        expect(body.length).to.equal(3);
+
+        // Check desktop entry
+        const desktop = body.find((item) => item.device === 'desktop');
+        expect(desktop).to.exist;
+        expect(desktop.pageviews).to.equal('50000');
+        expect(desktop.bounce_rate).to.equal('0.35');
+        expect(desktop.bounceGapLoss).to.be.a('number');
+        expect(desktop.bounceGapDelta).to.be.a('number');
+        expect(desktop.bounceGapDelta).to.be.closeTo(0.10, 0.001); // 0.35 - 0.25 = 0.10
+
+        // Should NOT have cost fields (no trf_type in data)
+        expect(desktop.estimatedCost).to.be.undefined;
+        expect(desktop.appliedCPC).to.be.undefined;
+        expect(desktop.cpcSource).to.be.undefined;
+      });
+
+      it('calculates bounce gap loss correctly', async () => {
+        mockAthenaQuery.resolves(bounceGapMock);
+        mockS3GetObject.rejects(new Error('Not found'));
+
+        const controller = TrafficController(mockContext, mockLog, mockEnv);
+        const res = await controller.getTrafficLossByDevices();
+
+        expect(res.status).to.equal(200);
+
+        // Validate cached data
+        expect(lastPutObject).to.exist;
+        const decompressed = await gunzipAsync(lastPutObject.input.Body);
+        const body = JSON.parse(decompressed.toString());
+
+        const desktop = body.find((item) => item.device === 'desktop');
+        // Desktop: 50000 pageviews * 0.10 bounce gap = 5000 lost users
+        expect(desktop.bounceGapLoss).to.be.closeTo(5000, 1);
+
+        const mobile = body.find((item) => item.device === 'mobile');
+        // Mobile: 30000 pageviews * 0.10 bounce gap = 3000 lost users
+        expect(mobile.bounceGapLoss).to.be.closeTo(3000, 1);
+
+        const tablet = body.find((item) => item.device === 'tablet');
+        // Tablet: 10000 pageviews * 0.00 bounce gap = 0 lost users (same bounce rate)
+        expect(tablet.bounceGapLoss).to.equal(0);
+      });
+    });
+
+    describe('getImpactByPage', () => {
+      it('returns top 3 pages with bounce gap data', async () => {
+        mockAthenaQuery.resolves(bounceGapMock);
+        mockS3GetObject.rejects(new Error('Not found'));
+
+        const controller = TrafficController(mockContext, mockLog, mockEnv);
+        const res = await controller.getImpactByPage();
+
+        expect(res.status).to.equal(200);
+
+        // Validate cached data
+        expect(lastPutObject).to.exist;
+        const decompressed = await gunzipAsync(lastPutObject.input.Body);
+        const body = JSON.parse(decompressed.toString());
+
+        // Should have 3 pages (limited by top 3)
+        expect(body).to.be.an('array');
+        expect(body.length).to.be.at.most(3);
+
+        // Check that each page has bounce gap data
+        body.forEach((page) => {
+          expect(page.path).to.be.a('string');
+          expect(page.bounceGapLoss).to.be.a('number');
+          expect(page.bounceGapDelta).to.be.a('number');
+        });
+      });
+    });
+
+    describe('getImpactByPageTrafficType', () => {
+      it('returns bounce gap data with CPC cost estimates when Ahrefs data available', async () => {
+        mockAthenaQuery.resolves(bounceGapWithTrafficTypeMock);
+
+        // Mock successful Ahrefs data fetch
+        // Both cost and traffic are already fully converted during import
+        // CPC = cost / traffic
+        mockS3GetObject.resolves({
+          Body: {
+            transformToString: async () => JSON.stringify({
+              organicTraffic: 100000, // 100,000 actual visitors
+              organicCost: 19100, // $19,100
+              paidTraffic: 50000, // 50,000 actual visitors
+              paidCost: 15615, // $15,615
+            }),
+          },
+        });
+
+        const controller = TrafficController(mockContext, mockLog, mockEnv);
+        const res = await controller.getImpactByPageTrafficType();
+
+        expect(res.status).to.equal(200);
+
+        // Validate cached data
+        expect(lastPutObject).to.exist;
+        const decompressed = await gunzipAsync(lastPutObject.input.Body);
+        const body = JSON.parse(decompressed.toString());
+
+        expect(body).to.be.an('array');
+        expect(body.length).to.be.greaterThan(0);
+
+        // Find paid traffic entry (DTO transforms trf_type to type)
+        const paidEntry = body.find((item) => item.type === 'paid');
+        expect(paidEntry).to.exist;
+
+        // Should have cost fields
+        expect(paidEntry.estimatedCost).to.be.a('number');
+        expect(paidEntry.appliedCPC).to.be.a('number');
+        expect(paidEntry.cpcSource).to.equal('ahrefs');
+
+        // Verify CPC calculation: paidCPC = 15615 / 50000 = 0.3123
+        expect(paidEntry.appliedCPC).to.be.closeTo(0.3123, 0.0001);
+
+        // Verify cost calculation: bounceGapLoss * CPC
+        const expectedCost = paidEntry.bounceGapLoss * paidEntry.appliedCPC;
+        expect(paidEntry.estimatedCost).to.be.closeTo(expectedCost, 0.01);
+      });
+
+      it('uses default CPC when Ahrefs data unavailable', async () => {
+        mockAthenaQuery.resolves(bounceGapWithTrafficTypeMock);
+        mockS3GetObject.rejects(new Error('Not found'));
+
+        const controller = TrafficController(mockContext, mockLog, mockEnv);
+        const res = await controller.getImpactByPageTrafficType();
+
+        expect(res.status).to.equal(200);
+
+        // Validate cached data
+        expect(lastPutObject).to.exist;
+        const decompressed = await gunzipAsync(lastPutObject.input.Body);
+        const body = JSON.parse(decompressed.toString());
+
+        const paidEntry = body.find((item) => item.type === 'paid');
+        expect(paidEntry).to.exist;
+
+        // Should use default CPC
+        expect(paidEntry.appliedCPC).to.equal(0.80);
+        expect(paidEntry.cpcSource).to.equal('default');
+      });
+
+      it('applies correct CPC for different traffic types', async () => {
+        mockAthenaQuery.resolves(bounceGapWithTrafficTypeMock);
+
+        // Mock Ahrefs data with different organic and paid CPC
+        // Both cost and traffic are already fully converted
+        mockS3GetObject.resolves({
+          Body: {
+            transformToString: async () => JSON.stringify({
+              organicTraffic: 100000, // 100,000 actual visitors
+              organicCost: 19100, // $19,100 -> organicCPC = 0.191
+              paidTraffic: 50000, // 50,000 actual visitors
+              paidCost: 15615, // $15,615 -> paidCPC = 0.3123
+            }),
+          },
+        });
+
+        const controller = TrafficController(mockContext, mockLog, mockEnv);
+        const res = await controller.getImpactByPageTrafficType();
+
+        expect(res.status).to.equal(200);
+
+        // Validate cached data
+        expect(lastPutObject).to.exist;
+        const decompressed = await gunzipAsync(lastPutObject.input.Body);
+        const body = JSON.parse(decompressed.toString());
+
+        // Paid traffic should use paidCPC
+        const paidEntry = body.find((item) => item.type === 'paid');
+        expect(paidEntry.appliedCPC).to.be.closeTo(0.3123, 0.0001);
+
+        // Organic traffic should use organicCPC
+        const organicEntry = body.find((item) => item.type === 'organic');
+        expect(organicEntry.appliedCPC).to.be.closeTo(0.191, 0.001);
+
+        // Earned traffic should also use organicCPC
+        const earnedEntry = body.find((item) => item.type === 'earned');
+        expect(earnedEntry.appliedCPC).to.be.closeTo(0.191, 0.001);
+      });
+    });
+
+    describe('getImpactByPageDevice', () => {
+      it('returns bounce gap data grouped by page and device', async () => {
+        mockAthenaQuery.resolves(bounceGapMock);
+        mockS3GetObject.rejects(new Error('Not found'));
+
+        const controller = TrafficController(mockContext, mockLog, mockEnv);
+        const res = await controller.getImpactByPageDevice();
+
+        expect(res.status).to.equal(200);
+
+        // Validate cached data
+        expect(lastPutObject).to.exist;
+        const decompressed = await gunzipAsync(lastPutObject.input.Body);
+        const body = JSON.parse(decompressed.toString());
+
+        expect(body).to.be.an('array');
+
+        // Should have entries with both path and device
+        body.forEach((entry) => {
+          expect(entry.path).to.be.a('string');
+          expect(entry.device).to.be.a('string');
+          expect(entry.bounceGapLoss).to.be.a('number');
+          expect(entry.bounceGapDelta).to.be.a('number');
+        });
+
+        // Should NOT have cost fields (no trf_type)
+        body.forEach((entry) => {
+          expect(entry.estimatedCost).to.be.undefined;
+          expect(entry.appliedCPC).to.be.undefined;
+          expect(entry.cpcSource).to.be.undefined;
+        });
+      });
+    });
+
+    describe('getImpactByPageTrafficTypeDevice', () => {
+      it('returns complete bounce gap data with all dimensions', async () => {
+        // Create mock data with path, trf_type, and device
+        const multiDimensionMock = [
+          {
+            path: '/homepage',
+            trf_type: 'paid',
+            device: 'desktop',
+            consent: 'show',
+            pageviews: '25000',
+            bounce_rate: '0.35',
+            pct_pageviews: '0.20',
+            click_rate: '0.45',
+            engagement_rate: '0.65',
+            p70_lcp: '2500',
+            p70_cls: '0.05',
+            p70_inp: '150',
+          },
+          {
+            path: '/homepage',
+            trf_type: 'paid',
+            device: 'desktop',
+            consent: 'hidden',
+            pageviews: '25000',
+            bounce_rate: '0.25',
+            pct_pageviews: '0.20',
+            click_rate: '0.55',
+            engagement_rate: '0.75',
+            p70_lcp: '2400',
+            p70_cls: '0.04',
+            p70_inp: '140',
+          },
+        ];
+
+        mockAthenaQuery.resolves(multiDimensionMock);
+        mockS3GetObject.resolves({
+          Body: {
+            transformToString: async () => JSON.stringify({
+              organicTraffic: 100000, // 100,000 actual visitors
+              organicCost: 19100, // $19,100
+              paidTraffic: 50000, // 50,000 actual visitors
+              paidCost: 15615, // $15,615
+            }),
+          },
+        });
+
+        const controller = TrafficController(mockContext, mockLog, mockEnv);
+        const res = await controller.getImpactByPageTrafficTypeDevice();
+
+        expect(res.status).to.equal(200);
+
+        // Validate cached data
+        expect(lastPutObject).to.exist;
+        const decompressed = await gunzipAsync(lastPutObject.input.Body);
+        const body = JSON.parse(decompressed.toString());
+
+        expect(body).to.be.an('array');
+        expect(body.length).to.be.greaterThan(0);
+
+        const entry = body[0];
+        expect(entry.path).to.equal('/homepage');
+        expect(entry.type).to.equal('paid'); // DTO transforms trf_type to type
+        expect(entry.device).to.equal('desktop');
+        expect(entry.bounceGapLoss).to.be.closeTo(2500, 1); // 25000 * 0.10
+        expect(entry.bounceGapDelta).to.be.closeTo(0.10, 0.001);
+
+        // Should have cost fields
+        expect(entry.estimatedCost).to.be.a('number');
+        expect(entry.appliedCPC).to.be.closeTo(0.3123, 0.0001);
+        expect(entry.cpcSource).to.equal('ahrefs');
+      });
+    });
+
+    describe('Bounce Gap Edge Cases', () => {
+      it('handles missing hidden consent data gracefully', async () => {
+        const missingHiddenMock = [
+          {
+            path: '/homepage',
+            device: 'desktop',
+            consent: 'show',
+            pageviews: '50000',
+            bounce_rate: '0.35',
+            pct_pageviews: '0.25',
+            click_rate: '0.45',
+            engagement_rate: '0.65',
+            p70_lcp: '2500',
+            p70_cls: '0.05',
+            p70_inp: '150',
+          },
+        ];
+
+        mockAthenaQuery.resolves(missingHiddenMock);
+        mockS3GetObject.rejects(new Error('Not found'));
+
+        const controller = TrafficController(mockContext, mockLog, mockEnv);
+        const res = await controller.getTrafficLossByDevices();
+
+        expect(res.status).to.equal(200);
+
+        // Validate cached data
+        expect(lastPutObject).to.exist;
+        const decompressed = await gunzipAsync(lastPutObject.input.Body);
+        const body = JSON.parse(decompressed.toString());
+
+        // Should still return data but with 0 bounce gap
+        expect(body).to.be.an('array');
+        expect(body.length).to.equal(1);
+        expect(body[0].bounceGapLoss).to.equal(0);
+      });
+
+      it('handles zero pageviews correctly', async () => {
+        const zeroPageviewsMock = [
+          {
+            path: '/homepage',
+            device: 'desktop',
+            consent: 'show',
+            pageviews: '0',
+            bounce_rate: '0.35',
+            pct_pageviews: '0.00',
+            click_rate: '0.45',
+            engagement_rate: '0.65',
+            p70_lcp: '2500',
+            p70_cls: '0.05',
+            p70_inp: '150',
+          },
+          {
+            path: '/homepage',
+            device: 'desktop',
+            consent: 'hidden',
+            pageviews: '0',
+            bounce_rate: '0.25',
+            pct_pageviews: '0.00',
+            click_rate: '0.55',
+            engagement_rate: '0.75',
+            p70_lcp: '2400',
+            p70_cls: '0.04',
+            p70_inp: '140',
+          },
+        ];
+
+        mockAthenaQuery.resolves(zeroPageviewsMock);
+        mockS3GetObject.rejects(new Error('Not found'));
+
+        const controller = TrafficController(mockContext, mockLog, mockEnv);
+        const res = await controller.getTrafficLossByDevices();
+
+        expect(res.status).to.equal(200);
+
+        // Validate cached data
+        expect(lastPutObject).to.exist;
+        const decompressed = await gunzipAsync(lastPutObject.input.Body);
+        const body = JSON.parse(decompressed.toString());
+
+        expect(body[0].bounceGapLoss).to.equal(0);
+      });
+
+      it('handles missing treatment data (only control)', async () => {
+        const missingTreatmentMock = [
+          {
+            path: '/test',
+            device: 'desktop',
+            consent: 'show', // Treatment with data
+            pageviews: '10000',
+            bounce_rate: '0.30',
+            pct_pageviews: '0.10',
+            click_rate: '0.50',
+            engagement_rate: '0.70',
+            p70_lcp: '2400',
+            p70_cls: '0.04',
+            p70_inp: '140',
+          },
+          // Missing 'hidden' (control) data - this triggers the missing data path
+        ];
+
+        mockAthenaQuery.resolves(missingTreatmentMock);
+        mockS3GetObject.rejects(new Error('Not found'));
+
+        const controller = TrafficController(mockContext, mockLog, mockEnv);
+        const res = await controller.getTrafficLossByDevices();
+
+        expect(res.status).to.equal(200);
+
+        // Validate cached data - should have data but with zero bounce gap
+        expect(lastPutObject).to.exist;
+        const decompressed = await gunzipAsync(lastPutObject.input.Body);
+        const body = JSON.parse(decompressed.toString());
+
+        expect(body).to.be.an('array');
+        expect(body.length).to.equal(1);
+        // When control is missing, bounce gap should be 0
+        expect(body[0].bounceGapLoss).to.equal(0);
+        expect(body[0].bounceGapDelta).to.equal(0);
+      });
+
+      it('uses default CPC when Ahrefs has zero traffic', async () => {
+        mockAthenaQuery.resolves(bounceGapWithTrafficTypeMock);
+
+        // Mock Ahrefs data with zero traffic values
+        mockS3GetObject.resolves({
+          Body: {
+            transformToString: async () => JSON.stringify({
+              organicTraffic: 0, // Zero traffic
+              organicCost: 19100,
+              paidTraffic: 0, // Zero traffic
+              paidCost: 15615,
+            }),
+          },
+        });
+
+        const controller = TrafficController(mockContext, mockLog, mockEnv);
+        const res = await controller.getImpactByPageTrafficType();
+
+        expect(res.status).to.equal(200);
+
+        // Validate cached data
+        expect(lastPutObject).to.exist;
+        const decompressed = await gunzipAsync(lastPutObject.input.Body);
+        const body = JSON.parse(decompressed.toString());
+
+        // All entries should use default CPC (0.80)
+        const paidEntry = body.find((item) => item.type === 'paid');
+        expect(paidEntry.appliedCPC).to.equal(0.80);
+        expect(paidEntry.cpcSource).to.equal('ahrefs'); // Source is still ahrefs, just using default
+
+        const organicEntry = body.find((item) => item.type === 'organic');
+        expect(organicEntry.appliedCPC).to.equal(0.80);
+      });
+
+      it('handles missing dimension values with "unknown" fallback', async () => {
+        const missingDimensionMock = [
+          {
+            path: '/page1',
+            device: null, // Missing device dimension
+            consent: 'show',
+            pageviews: '5000',
+            bounce_rate: '0.50',
+            pct_pageviews: '0.05',
+            click_rate: '0.45',
+            engagement_rate: '0.65',
+            p70_lcp: '2500',
+            p70_cls: '0.05',
+            p70_inp: '150',
+          },
+          {
+            path: '/page1',
+            device: null, // Missing device dimension
+            consent: 'hidden',
+            pageviews: '5000',
+            bounce_rate: '0.40',
+            pct_pageviews: '0.05',
+            click_rate: '0.55',
+            engagement_rate: '0.75',
+            p70_lcp: '2400',
+            p70_cls: '0.04',
+            p70_inp: '140',
+          },
+        ];
+
+        mockAthenaQuery.resolves(missingDimensionMock);
+        mockS3GetObject.rejects(new Error('Not found'));
+
+        const controller = TrafficController(mockContext, mockLog, mockEnv);
+        const res = await controller.getImpactByPageDevice();
+
+        expect(res.status).to.equal(200);
+
+        // Validate cached data
+        expect(lastPutObject).to.exist;
+        const decompressed = await gunzipAsync(lastPutObject.input.Body);
+        const body = JSON.parse(decompressed.toString());
+
+        // Should have data - device will be null but dimension key uses 'unknown'
+        expect(body).to.be.an('array');
+        expect(body.length).to.equal(1);
+        expect(body[0].device).to.be.null; // DTO preserves null value
+        expect(body[0].path).to.equal('/page1');
+        // Bounce gap calculation still works via 'unknown' key
+        expect(body[0].bounceGapLoss).to.be.closeTo(500, 1);
+      });
+
+      it('returns signed URL (302) when cache verification succeeds', async () => {
+        mockAthenaQuery.resolves(bounceGapMock);
+        mockS3GetObject.rejects(new Error('Not found'));
+
+        // Mock successful cache write and verification
+        let putKey = null;
+        mockS3.send.callsFake((cmd) => {
+          if (cmd.constructor && cmd.constructor.name === 'GetObjectCommand') {
+            // For Ahrefs CPC data
+            if (cmd.input.Key && cmd.input.Key.includes('ahrefs')) {
+              return mockS3GetObject(cmd);
+            }
+            // For signed URL verification - return success
+            return Promise.resolve({});
+          }
+          if (cmd.constructor && cmd.constructor.name === 'HeadObjectCommand') {
+            // Simulate successful verification after PUT
+            if (putKey && cmd.input.Key === putKey) {
+              return Promise.resolve({}); // File exists
+            }
+            // Initial cache check - miss
+            const err = new Error('not found');
+            err.name = 'NotFound';
+            return Promise.reject(err);
+          }
+          if (cmd.constructor && cmd.constructor.name === 'PutObjectCommand') {
+            putKey = cmd.input.Key;
+            lastPutObject = cmd;
+            return Promise.resolve({});
+          }
+          return Promise.resolve({});
+        });
+
+        const controller = TrafficController(mockContext, mockLog, mockEnv);
+        const res = await controller.getTrafficLossByDevices();
+
+        // Should return 302 redirect to signed URL
+        expect(res.status).to.equal(302);
+        expect(res.headers.get('location')).to.equal(TEST_PRESIGNED_URL);
+      });
     });
   });
 });
