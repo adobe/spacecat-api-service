@@ -228,10 +228,6 @@ paths:
     $ref: './site-enrollments-api.yaml#/site-enrollments-by-site'
   /sites/{siteId}/user-activities:
     $ref: './user-activities-api.yaml#/paths/~1sites~1{siteId}~1user-activities'
-  /sites/{siteId}/key-events:
-    $ref: './key-events-api.yaml#/key-events'
-  /sites/{siteId}/key-events/{keyEventId}:
-    $ref: './key-event-api.yaml#/key-event'
   /sites/{siteId}/scraped-content/{type}:
     $ref: './scrape-api.yaml#/get-scraped-content-list'
   /sites/{siteId}/files:
