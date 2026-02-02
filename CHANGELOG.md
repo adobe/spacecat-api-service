@@ -1,3 +1,17 @@
+## [1.305.1](https://github.com/adobe/spacecat-api-service/compare/v1.305.0...v1.305.1) (2026-02-02)
+
+
+### Bug Fixes
+
+* filter out forms opp not shown on ui ([#1759](https://github.com/adobe/spacecat-api-service/issues/1759)) ([7e4436b](https://github.com/adobe/spacecat-api-service/commit/7e4436ba24292eba92e1946dc2d7ae57c4c21530))
+
+# [1.305.0](https://github.com/adobe/spacecat-api-service/compare/v1.304.1...v1.305.0) (2026-02-02)
+
+
+### Features
+
+* add edge optimize status api ([#1739](https://github.com/adobe/spacecat-api-service/issues/1739)) ([7e2f1d2](https://github.com/adobe/spacecat-api-service/commit/7e2f1d268368686dfe2800c53fe5a2300b33ded7))
+
 ## [1.304.1](https://github.com/adobe/spacecat-api-service/compare/v1.304.0...v1.304.1) (2026-01-31)
 
 
