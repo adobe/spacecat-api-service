@@ -30,8 +30,6 @@ export function extractDeliveryConfigFromPreviewUrl(previewUrl, imsOrgId) {
   if (!isValidUrl(previewUrl)) {
     return null;
   }
-
-  // Safe to construct URL here since isValidUrl() already validated it
   const url = new URL(previewUrl);
   const { hostname } = url;
 
@@ -708,7 +706,7 @@ export function onboardSiteModal(lambdaContext) {
 
         await client.chat.postMessage({
           channel: responseChannel,
-          text: botProtectionMessage, // Already includes title, emoji, and site URL
+          text: botProtectionMessage,
           thread_ts: responseThreadTs,
         });
       }
