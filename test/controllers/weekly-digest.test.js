@@ -692,5 +692,54 @@ describe('Weekly Digest Controller', () => {
 
       expect(result.status).to.equal(500);
     });
+
+    it('should fall back to baseURL when URL parsing fails', async () => {
+      const siteWithInvalidUrl = {
+        getId: () => 'site-1',
+        getBaseURL: () => 'not-a-valid-url',
+        getOrganizationId: () => orgId,
+        getConfig: () => ({
+          llmo: {
+            dataFolder: 'test-folder',
+          },
+        }),
+      };
+      mockDataAccess.Site.findById.withArgs('site-1').resolves(siteWithInvalidUrl);
+
+      const context = {
+        log: mockLog,
+        env: mockEnv,
+        data: {
+          type: 'weekly-digest-org',
+          organizationId: orgId,
+          siteIds: ['site-1'],
+        },
+      };
+
+      await controller.processOrganizationDigest(context);
+
+      const emailCall = mockSendWeeklyDigestEmail.getCall(0);
+      expect(emailCall.args[0].brandName).to.equal('not-a-valid-url');
+    });
+
+    it('should count site as failed when metrics calculation throws', async () => {
+      mockCalculateOverviewMetrics.rejects(new Error('Metrics calculation failed'));
+
+      const context = {
+        log: mockLog,
+        env: mockEnv,
+        data: {
+          type: 'weekly-digest-org',
+          organizationId: orgId,
+          siteIds: ['site-1'],
+        },
+      };
+
+      const result = await controller.processOrganizationDigest(context);
+      const body = await result.json();
+
+      expect(body.sitesFailed).to.equal(1);
+      expect(body.totalEmailsSent).to.equal(0);
+    });
   });
 });
