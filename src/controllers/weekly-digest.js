@@ -462,26 +462,9 @@ function WeeklyDigestController(ctx) {
     }
   };
 
-  /**
-   * Legacy endpoint for backwards compatibility.
-   * Processes all digests synchronously (use triggerWeeklyDigests for production).
-   *
-   * @deprecated Use triggerWeeklyDigests + processOrganizationDigest instead
-   * @param {Object} context - Request context
-   * @returns {Promise<Response>} Processing result
-   */
-  const processWeeklyDigests = async (context) => {
-    const { log } = context;
-    log.warn('Using legacy synchronous processWeeklyDigests - consider using /trigger endpoint');
-
-    // Delegate to trigger, which will queue the jobs
-    return triggerWeeklyDigests(context);
-  };
-
   return {
     triggerWeeklyDigests,
     processOrganizationDigest,
-    processWeeklyDigests, // Keep for backwards compatibility
   };
 }
 

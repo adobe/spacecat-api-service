@@ -693,24 +693,4 @@ describe('Weekly Digest Controller', () => {
       expect(result.status).to.equal(500);
     });
   });
-
-  describe('processWeeklyDigests (legacy)', () => {
-    it('should delegate to triggerWeeklyDigests', async () => {
-      const controller = WeeklyDigestController({ dataAccess: mockDataAccess });
-
-      const context = {
-        log: mockLog,
-        env: mockEnv,
-        sqs: mockSqs,
-      };
-
-      const result = await controller.processWeeklyDigests(context);
-
-      // Should behave like triggerWeeklyDigests
-      expect(result.status).to.equal(202);
-      expect(mockLog.warn).to.have.been.calledWith(
-        'Using legacy synchronous processWeeklyDigests - consider using /trigger endpoint',
-      );
-    });
-  });
 });
