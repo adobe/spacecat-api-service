@@ -1553,12 +1553,14 @@ llmo-edge-optimize-status:
           application/json:
             schema:
               type: object
-              description: Edge optimization status response
-              additionalProperties: true
+              required:
+                - edgeOptimizeEnabled
+              properties:
+                edgeOptimizeEnabled:
+                  type: boolean
+                  description: Whether Edge Optimize headers were detected in the HTTP response
               example:
-                enabled: true
-                optimized: true
-                path: '/products/index.html'
+                edgeOptimizeEnabled: true
       '400':
         $ref: './responses.yaml#/400'
       '401':
