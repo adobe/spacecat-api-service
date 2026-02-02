@@ -1012,7 +1012,7 @@ function LlmoController(ctx) {
       const currentConfig = site.getConfig();
       currentConfig.updateEdgeOptimizeConfig({
         ...(currentConfig.getEdgeOptimizeConfig() || {}),
-        opted: true,
+        opted: Date.now(),
       });
       await saveSiteConfig(site, currentConfig, log, 'updating edge optimize config');
       log.info(`[edge-optimize-config] Updated edge optimize config for site ${siteId} by ${lastModifiedBy}`);
