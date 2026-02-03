@@ -4232,6 +4232,7 @@ LlmoConfig:
     - entities
     - categories
     - topics
+    - aiTopics
     - brands
     - competitors
   properties:
@@ -4271,6 +4272,20 @@ LlmoConfig:
             - prompt: "What are the latest AI trends?"
               regions: ["us"]
               origin: "human"
+              source: "config"
+    aiTopics:
+      type: object
+      description: A record of AI topics with nested AI prompts keyed by UUID
+      additionalProperties:
+        $ref: '#/LlmoTopic'
+      example:
+        "456e7890-e89b-12d3-a456-426614174001":
+          name: "AI/ML"
+          category: "123e4567-e89b-12d3-a456-426614174000"
+          prompts:
+            - prompt: "What are the latest AI trends?"
+              regions: ["us"]
+              origin: "ai"
               source: "config"
     brands:
       type: object
