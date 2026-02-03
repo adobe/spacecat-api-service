@@ -1428,3 +1428,148 @@ site-llmo-edge-optimize-config:
         $ref: './responses.yaml#/503'
     security:
       - ims_key: [ ]
+
+llmo-strategy:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: version
+      in: query
+      required: false
+      description: Optional S3 version ID to retrieve a specific version of the strategy
+      schema:
+        type: string
+        example: 'abc123def456'
+  get:
+    tags:
+      - llmo
+    summary: Get LLMO strategy
+    description: |
+      Retrieves the LLMO (Large Language Model Optimizer) strategy data for a specific site.
+      The strategy is stored in S3 at `workspace/llmo/{siteId}/strategy.json` and can contain
+      any valid JSON data without schema validation.
+
+      If a version parameter is provided, the specific version of the strategy will be
+      retrieved. If the strategy does not exist, a 404 error will be returned.
+    operationId: getStrategy
+    responses:
+      '200':
+        description: LLMO strategy retrieved successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                data:
+                  type: object
+                  additionalProperties: true
+                  description: The strategy data (any valid JSON object)
+                version:
+                  type: string
+                  description: The S3 object version ID of the strategy
+                  example: "abc123def456"
+              required:
+                - data
+                - version
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+  put:
+    tags:
+      - llmo
+    summary: Save LLMO strategy
+    description: |
+      Saves the LLMO (Large Language Model Optimizer) strategy data for a specific site.
+      This operation completely overwrites the existing strategy with the provided payload.
+      The payload can be any valid JSON object - no schema validation is performed.
+      The strategy is stored in S3 at `workspace/llmo/{siteId}/strategy.json`.
+    operationId: saveStrategy
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+            description: Any valid JSON object to store as the strategy
+    responses:
+      '200':
+        description: LLMO strategy saved successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version:
+                  type: string
+                  description: The S3 object version ID of the saved strategy
+                  example: "abc123def456"
+              required:
+                - version
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+llmo-edge-optimize-status:
+  get:
+    tags:
+      - llmo
+    summary: Check Edge Optimize status for a site path
+    description: |
+      Checks the edge optimization status for a specific path on a site.
+      This endpoint queries the Edge Optimize service to determine whether edge optimization
+      is active and configured for the given path.
+      
+      Returns information about:
+      - Whether edge optimization is enabled for the site
+      - Configuration status for the specific path
+      - Any path-specific optimization settings
+    operationId: checkEdgeOptimizeStatus
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+      - name: path
+        in: query
+        description: The path to check optimization status for (defaults to '/')
+        required: false
+        schema:
+          type: string
+          default: '/'
+          example: '/products/index.html'
+    responses:
+      '200':
+        description: Edge optimize status retrieved successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - edgeOptimizeEnabled
+              properties:
+                edgeOptimizeEnabled:
+                  type: boolean
+                  description: Whether Edge Optimize headers were detected in the HTTP response
+              example:
+                edgeOptimizeEnabled: true
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]

@@ -18,6 +18,7 @@ import TierClient from '@adobe/spacecat-shared-tier-client';
 import { composeBaseURL, tracingFetch as fetch, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
 import AhrefsAPIClient from '@adobe/spacecat-shared-ahrefs-client';
 import { parse as parseDomain } from 'tldts';
+import { postSlackMessage } from '../../utils/slack/base.js';
 
 // LLMO Constants
 const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
@@ -70,6 +71,73 @@ export function generateDataFolder(baseURL, env = 'dev') {
 }
 
 /**
+ * Posts an alert to the LLMO alerts Slack channel.
+ * Fails gracefully if channel/token not configured or if posting fails.
+ * @param {string} message - The message to post
+ * @param {object} context - The request context containing env and log
+ * @returns {Promise<void>}
+ */
+async function postLlmoAlert(message, context) {
+  const { env, log } = context;
+  const slackChannel = env.SLACK_LLMO_ALERTS_CHANNEL_ID;
+  const slackToken = env.SLACK_BOT_TOKEN;
+
+  if (slackChannel && slackToken) {
+    try {
+      await postSlackMessage(slackChannel, message, slackToken);
+    } catch (slackError) {
+      log.error(`Failed to post LLMO alert to Slack: ${slackError.message}`);
+    }
+  }
+}
+
+/**
+ * Gets the IMS Org ID for a given organization ID.
+ * Used for enriching notification messages. Never throws - returns 'Unknown' on error.
+ * @param {string} organizationId - The SpaceCat organization ID
+ * @param {object} context - The request context containing dataAccess and log
+ * @returns {Promise<string>} The IMS Org ID or 'Unknown'
+ */
+async function getCurrentImsOrgIdForNotification(organizationId, context) {
+  const { dataAccess, log } = context;
+  const { Organization } = dataAccess;
+
+  try {
+    const organization = await Organization.findById(organizationId);
+    return organization ? organization.getImsOrgId() : 'Unknown';
+  } catch (error) {
+    log.warn(`Could not fetch IMS Org ID for notification: ${error.message}`);
+    return 'Unknown';
+  }
+}
+
+/**
+ * Gets the current IMS Org ID for a site by baseURL.
+ * Never throws - returns 'Unknown' on error.
+ * @param {string} baseURL - The site's base URL
+ * @param {object} context - The request context containing dataAccess and log
+ * @returns {Promise<string>} The IMS Org ID or 'Unknown'
+ */
+async function getCurrentImsOrgIdForSite(baseURL, context) {
+  const { dataAccess, log } = context;
+  const { Site } = dataAccess;
+
+  try {
+    const site = await Site.findByBaseURL(baseURL);
+    if (site) {
+      return await getCurrentImsOrgIdForNotification(
+        site.getOrganizationId(),
+        context,
+      );
+    }
+    return 'Unknown';
+  } catch (error) {
+    log.warn(`Could not fetch IMS Org ID for site: ${error.message}`);
+    return 'Unknown';
+  }
+}
+
+/**
  * Creates a SharePoint client for LLMO operations.
  * @param {object} env - Environment variables
  * @returns {Promise<object>} SharePoint client
@@ -103,6 +171,18 @@ export async function validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, co
     const folderExists = await folder.exists();
 
     if (folderExists) {
+      // Try to get current IMS Org if site exists (best effort - don't fail validation)
+      const currentImsOrgId = await getCurrentImsOrgIdForSite(baseURL, context);
+
+      await postLlmoAlert(
+        ':warning: *Site is already onboarded* - Data folder already exists\n\n'
+        + `• Site: \`${baseURL}\`\n`
+        + `• Requested IMS Org: \`${imsOrgId}\`\n`
+        + `• Current IMS Org: \`${currentImsOrgId}\`\n`
+        + `• Data Folder: \`${dataFolder}`,
+        context,
+      );
+
       return {
         isValid: false,
         error: `Data folder for site ${baseURL} already exists. The site is already onboarded.`,
@@ -135,6 +215,22 @@ export async function validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, co
       if (existingSite.getOrganizationId() !== organization.getId()
         && existingSite.getOrganizationId() !== env.DEFAULT_ORGANIZATION_ID
         && existingSite.getOrganizationId() !== ASO_DEMO_ORG) {
+        // Get current organization's IMS Org ID (best effort - don't fail validation)
+        const currentImsOrgId = await getCurrentImsOrgIdForNotification(
+          existingSite.getOrganizationId(),
+          context,
+        );
+
+        await postLlmoAlert(
+          ':warning: *Site is already onboarded* - Assigned to a different organization\n\n'
+          + `• Site: \`${baseURL}\`\n`
+          + `• Requested IMS Org: \`${imsOrgId}\`\n`
+          + `• Current IMS Org: \`${currentImsOrgId}\`\n`
+          + `• Requested Org ID: \`${organization.getId()}\n`
+          + `• Current Org ID: \`${existingSite.getOrganizationId()}`,
+          context,
+        );
+
         return {
           isValid: false,
           error: `Site ${baseURL} has already been assigned to a different organization.`,
@@ -144,6 +240,21 @@ export async function validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, co
         && existingSite.getOrganizationId() !== ASO_DEMO_ORG) {
       // if the organization doesn't exist, but the site does, check that the site isn't claimed yet
       // by another organization
+      // Get current organization's IMS Org ID (best effort - don't fail validation)
+      const currentImsOrgId = await getCurrentImsOrgIdForNotification(
+        existingSite.getOrganizationId(),
+        context,
+      );
+
+      await postLlmoAlert(
+        ':warning: *Site is already onboarded* - Assigned to a different organization\n\n'
+        + `• Site: \`${baseURL}\`\n`
+        + `• Requested IMS Org: \`${imsOrgId}\`\n`
+        + `• Current IMS Org: \`${currentImsOrgId}\`\n`
+        + `• Current Org ID: \`${existingSite.getOrganizationId()}`,
+        context,
+      );
+
       return {
         isValid: false,
         error: `Site ${baseURL} has already been assigned to a different organization.`,
@@ -512,11 +623,11 @@ export async function updateIndexConfig(dataFolder, context, say = () => {}) {
  * Creates or finds an organization based on IMS Org ID.
  * @param {string} imsOrgId - The IMS Organization ID
  * @param {object} context - The request context
- * @param {object} slackContext - Slack context (optional, for Slack operations)
+ * @param {Function} [say] - Optional callback function for sending Slack messages
  * @returns {Promise<object>} The organization object
  */
 export async function createOrFindOrganization(imsOrgId, context, say = () => {}) {
-  const { dataAccess, log } = context;
+  const { dataAccess, log, imsClient } = context;
   const { Organization } = dataAccess;
 
   // Check if organization already exists
@@ -527,12 +638,25 @@ export async function createOrFindOrganization(imsOrgId, context, say = () => {}
     return organization;
   }
 
+  // Fetch real org name from IMS if client available
+  let orgName = `Organization ${imsOrgId}`;
+  if (imsClient) {
+    try {
+      const imsOrgDetails = await imsClient.getImsOrganizationDetails(imsOrgId);
+      if (imsOrgDetails?.orgName) {
+        orgName = imsOrgDetails.orgName;
+      }
+    } catch (error) {
+      log.warn(`Could not fetch IMS org details for ${imsOrgId}: ${error.message}`);
+    }
+  }
+
   // Create new organization
   log.info(`Creating new organization for IMS Org ID: ${imsOrgId}`);
-  await say(`Creating organization for IMS Org ID: ${imsOrgId}`);
+  say(`Creating organization for IMS Org ID: ${imsOrgId}`);
 
   organization = await Organization.create({
-    name: `Organization ${imsOrgId}`,
+    name: orgName,
     imsOrgId,
   });
 
@@ -677,9 +801,10 @@ export async function determineOverrideBaseURL(baseURL, context) {
  * @param {string} baseURL - The base URL of the site
  * @param {string} organizationId - The organization ID if we create a new site
  * @param {object} context - The request context
+ * @param {string} [deliveryType] - The delivery type for the site
  * @returns {Promise<object>} The site object
  */
-export async function createOrFindSite(baseURL, organizationId, context) {
+export async function createOrFindSite(baseURL, organizationId, context, deliveryType) {
   const { dataAccess } = context;
   const { Site } = dataAccess;
 
@@ -692,10 +817,12 @@ export async function createOrFindSite(baseURL, organizationId, context) {
     return site;
   }
 
-  const newSite = await Site.create({
-    baseURL,
-    organizationId,
-  });
+  const siteData = { baseURL, organizationId };
+  if (deliveryType) {
+    siteData.deliveryType = deliveryType;
+  }
+
+  const newSite = await Site.create(siteData);
   return newSite;
 }
 
@@ -820,28 +947,54 @@ export async function createEntitlementAndEnrollment(site, context, say = () => 
   }
 }
 
-export async function enableAudits(site, context, audits = []) {
-  const { dataAccess } = context;
+/**
+ * Enables audits for a site. Continues processing if individual audits fail.
+ * @param {object} site - The site object
+ * @param {object} context - The request context
+ * @param {Array<string>} [audits=[]] - List of audit types to enable
+ * @param {Function} [say] - Optional callback for sending messages (e.g., Slack)
+ */
+export async function enableAudits(site, context, audits = [], say = () => {}) {
+  const { dataAccess, log } = context;
   const { Configuration } = dataAccess;
 
   const configuration = await Configuration.findLatest();
+
   audits.forEach((audit) => {
-    configuration.enableHandlerForSite(audit, site);
+    try {
+      configuration.enableHandlerForSite(audit, site);
+    } catch (error) {
+      log.warn(`Failed to enable audit '${audit}' for site ${site.getId()}: ${error.message}`);
+      say(`:warning: Failed to enable audit '${audit}': ${error.message}`);
+    }
   });
+
   await configuration.save();
 }
 
-export async function enableImports(siteConfig, imports = []) {
+/**
+ * Enables imports for a site config. Continues processing if individual imports fail.
+ * @param {object} siteConfig - The site configuration object
+ * @param {Array<{type: string, options?: object}>} imports - List of imports to enable
+ * @param {object} log - Logger instance
+ * @param {Function} [say] - Optional callback for sending messages (e.g., Slack)
+ */
+export async function enableImports(siteConfig, imports, log, say = () => {}) {
   const existingImports = siteConfig.getImports();
 
   imports.forEach(({ type, options }) => {
-    // Check if import is already enabled
-    const isEnabled = existingImports?.find(
-      (imp) => imp.type === type && imp.enabled,
-    );
+    try {
+      // Check if import is already enabled
+      const isEnabled = existingImports?.find(
+        (imp) => imp.type === type && imp.enabled,
+      );
 
-    if (!isEnabled) {
-      siteConfig.enableImport(type, options);
+      if (!isEnabled) {
+        siteConfig.enableImport(type, options);
+      }
+    } catch (error) {
+      log.warn(`Failed to enable import '${type}': ${error.message}`);
+      say(`:warning: Failed to enable import '${type}': ${error.message}`);
     }
   });
 }
@@ -865,52 +1018,59 @@ export async function triggerAudits(audits, context, site) {
 /**
  * Complete LLMO onboarding process.
  * @param {object} params - Onboarding parameters
- * @param {string} params.domain - The domain name
+ * @param {string} [params.domain] - The domain name (alternative to baseURL)
+ * @param {string} [params.baseURL] - The base URL (alternative to domain)
  * @param {string} params.brandName - The brand name
  * @param {string} params.imsOrgId - The IMS Organization ID
+ * @param {string} [params.deliveryType] - The delivery type for site creation
  * @param {object} context - The request context
- * @param {object} slackContext - Slack context (optional, for Slack operations)
+ * @param {Function} [say] - Optional function to send progress messages
  * @returns {Promise<object>} Onboarding result
  */
-export async function performLlmoOnboarding(params, context) {
-  const { domain, brandName, imsOrgId } = params;
+export async function performLlmoOnboarding(params, context, say = () => {}) {
+  const {
+    domain, baseURL: providedBaseURL, brandName, imsOrgId, deliveryType,
+  } = params;
   const { env, log } = context;
 
-  // Construct base URL and data folder name
-  const baseURL = composeBaseURL(domain);
+  // Support both domain (HTTP) and baseURL (Slack) inputs
+  const baseURL = providedBaseURL || composeBaseURL(domain);
   const dataFolder = generateDataFolder(baseURL, env.ENV);
 
   let site;
   try {
-    log.info(`Starting LLMO onboarding for IMS org ${imsOrgId}, domain ${domain}, brand ${brandName}`);
+    log.info(`Starting LLMO onboarding for IMS org ${imsOrgId}, baseURL ${baseURL}, brand ${brandName}`);
 
     // Create or find organization
-    const organization = await createOrFindOrganization(imsOrgId, context);
+    const organization = await createOrFindOrganization(imsOrgId, context, say);
 
     // Create site
-    site = await createOrFindSite(baseURL, organization.getId(), context);
+    site = await createOrFindSite(baseURL, organization.getId(), context, deliveryType);
 
     log.info(`Created site ${site.getId()} for ${baseURL}`);
 
     // Create entitlement and enrollment
-    await createEntitlementAndEnrollment(site, context);
+    await createEntitlementAndEnrollment(site, context, say);
 
     // Copy files to SharePoint
-    await copyFilesToSharepoint(dataFolder, context);
+    await copyFilesToSharepoint(dataFolder, context, say);
 
     // Update index config
-    await updateIndexConfig(dataFolder, context);
+    await updateIndexConfig(dataFolder, context, say);
 
-    // Enable audits
-    await enableAudits(site, context, [...BASIC_AUDITS, 'llm-error-pages', 'llmo-customer-analysis', 'wikipedia-analysis']);
+    // Enable audits (continues on partial failure, logs warnings)
+    await enableAudits(
+      site,
+      context,
+      [...BASIC_AUDITS, 'llm-error-pages', 'llmo-customer-analysis', 'wikipedia-analysis'],
+      say,
+    );
 
     // Get current site config
     const siteConfig = site.getConfig();
 
-    // Enable imports
-    await enableImports(siteConfig, [
-      { type: 'top-pages' },
-    ]);
+    // Enable imports (continues on partial failure, logs warnings)
+    await enableImports(siteConfig, [{ type: 'top-pages' }], log, say);
 
     // Update brand and data directory
     siteConfig.updateLlmoBrand(brandName.trim());
@@ -929,6 +1089,7 @@ export async function performLlmoOnboarding(params, context) {
           overrideBaseURL,
         });
         log.info(`Set overrideBaseURL to ${overrideBaseURL} for site ${site.getId()}`);
+        say(`:arrows_counterclockwise: Set overrideBaseURL to ${overrideBaseURL}`);
       }
     } else {
       log.info(`Site ${site.getId()} already has overrideBaseURL: ${currentFetchConfig.overrideBaseURL}, skipping auto-detection`);
@@ -942,6 +1103,7 @@ export async function performLlmoOnboarding(params, context) {
     await triggerAudits([...BASIC_AUDITS, 'llmo-customer-analysis', 'wikipedia-analysis'], context, site);
 
     return {
+      site,
       siteId: site.getId(),
       organizationId: organization.getId(),
       baseURL,

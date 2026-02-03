@@ -11,14 +11,16 @@
  */
 
 import {
-  ok, badRequest, forbidden, createResponse, notFound,
+  ok, badRequest, forbidden, createResponse, notFound, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   SPACECAT_USER_AGENT,
   tracingFetch as fetch,
   hasText,
   isObject,
+  isValidUUID,
   llmoConfig as llmo,
+  llmoStrategy,
   schemas,
   composeBaseURL,
 } from '@adobe/spacecat-shared-utils';
@@ -48,6 +50,7 @@ import { updateModifiedByDetails } from './llmo-config-metadata.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
 
 const { readConfig, writeConfig } = llmo;
+const { readStrategy, writeStrategy } = llmoStrategy;
 const { llmoConfig: llmoConfigSchema } = schemas;
 
 function LlmoController(ctx) {
@@ -927,10 +930,12 @@ function LlmoController(ctx) {
    * @returns {Promise<Response>} Created/updated edge config
    */
   const createOrUpdateEdgeConfig = async (context) => {
-    const { log } = context;
+    const { log, dataAccess } = context;
     const { siteId } = context.params;
+    const { authInfo: { profile } } = context.attributes;
+    const { Site } = dataAccess;
     const {
-      enhancements, tokowakaEnabled, forceFail, patches = {},
+      enhancements, tokowakaEnabled, forceFail, patches = {}, prerender,
     } = context.data || {};
 
     log.info(`createOrUpdateEdgeConfig request received for site ${siteId}, data=${JSON.stringify(context.data)}`);
@@ -951,15 +956,28 @@ function LlmoController(ctx) {
       return badRequest('patches field must be an object');
     }
 
+    if (prerender !== undefined && (typeof prerender !== 'object' || Array.isArray(prerender) || !Array.isArray(prerender.allowList))) {
+      return badRequest('prerender field must be an object with allowList property that is an array');
+    }
+
     try {
-      // Validate site and LLMO access
-      const { site } = await getSiteAndValidateLlmo(context);
+      // Get site
+      const site = await Site.findById(siteId);
+
+      if (!site) {
+        return notFound('Site not found');
+      }
+
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('User does not have access to this site');
+      }
 
       const baseURL = site.getBaseURL();
       const tokowakaClient = TokowakaClient.createFrom(context);
 
       // Handle S3 metaconfig
       let metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
+      const lastModifiedBy = profile?.email || 'tokowaka-edge-optimize-config';
 
       if (!metaconfig || !Array.isArray(metaconfig.apiKeys) || metaconfig.apiKeys.length === 0) {
         // Create new metaconfig with generated API key
@@ -969,6 +987,9 @@ function LlmoController(ctx) {
           {
             ...(tokowakaEnabled !== undefined && { tokowakaEnabled }),
             ...(enhancements !== undefined && { enhancements }),
+          },
+          {
+            lastModifiedBy,
           },
         );
       } else {
@@ -980,21 +1001,22 @@ function LlmoController(ctx) {
             enhancements,
             patches,
             forceFail,
+            prerender,
+          },
+          {
+            lastModifiedBy,
           },
         );
       }
 
       const currentConfig = site.getConfig();
-      // Update site config only if tokowakaEnabled is provided
-      if (tokowakaEnabled !== undefined) {
-        currentConfig.updateEdgeOptimizeConfig({
-          ...(currentConfig.getEdgeOptimizeConfig() || {}),
-          enabled: tokowakaEnabled,
-        });
-        await saveSiteConfig(site, currentConfig, log, `updating edge optimize config to enabled=${tokowakaEnabled}`);
-        log.info(`Updated edgeOptimizeConfig enabled=${tokowakaEnabled} for site ${siteId}`);
-      }
-
+      const existingEdgeConfig = currentConfig.getEdgeOptimizeConfig() || {};
+      currentConfig.updateEdgeOptimizeConfig({
+        ...existingEdgeConfig,
+        opted: existingEdgeConfig.opted ?? Date.now(),
+      });
+      await saveSiteConfig(site, currentConfig, log, 'updating edge optimize config');
+      log.info(`[edge-optimize-config] Updated edge optimize config for site ${siteId} by ${lastModifiedBy}`);
       return ok({
         ...metaconfig,
       });
@@ -1013,12 +1035,21 @@ function LlmoController(ctx) {
    * @returns {Promise<Response>} Edge config or not found
    */
   const getEdgeConfig = async (context) => {
-    const { log } = context;
+    const { log, dataAccess } = context;
     const { siteId } = context.params;
+    const { Site } = dataAccess;
 
     try {
-      // Validate site and LLMO access
-      const { site } = await getSiteAndValidateLlmo(context);
+      // Get site
+      const site = await Site.findById(siteId);
+
+      if (!site) {
+        return notFound('Site not found');
+      }
+
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('User does not have access to this site');
+      }
 
       const baseURL = site.getBaseURL();
 
@@ -1032,6 +1063,110 @@ function LlmoController(ctx) {
     } catch (error) {
       log.error(`Failed to fetch edge config for site ${siteId}:`, error);
       return badRequest(error.message);
+    }
+  };
+
+  /**
+   * GET /sites/{siteId}/llmo/strategy
+   * Retrieves LLMO strategy data from S3
+   * @param {object} context - Request context
+   * @returns {Promise<Response>} Strategy data and version, or 404 if not found
+   */
+  const getStrategy = async (context) => {
+    const { log, s3 } = context;
+    const { siteId } = context.params;
+    const version = context.data?.version;
+
+    try {
+      if (!s3 || !s3.s3Client) {
+        return badRequest('LLMO strategy storage is not configured for this environment');
+      }
+
+      log.info(`Fetching LLMO strategy from S3 for siteId: ${siteId}${version != null ? ` with version: ${version}` : ''}`);
+      const { data, exists, version: strategyVersion } = await readStrategy(siteId, s3.s3Client, {
+        s3Bucket: s3.s3Bucket,
+        version,
+      });
+
+      if (!exists) {
+        return notFound(`LLMO strategy not found for site '${siteId}'${version != null ? ` with version '${version}'` : ''}`);
+      }
+
+      return ok({ data, version: strategyVersion }, {
+        'Content-Encoding': 'br',
+      });
+    } catch (error) {
+      log.error(`Error getting llmo strategy for siteId: ${siteId}, error: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
+  /**
+   * PUT /sites/{siteId}/llmo/strategy
+   * Saves LLMO strategy data to S3
+   * @param {object} context - Request context
+   * @returns {Promise<Response>} Version of the saved strategy
+   */
+  const saveStrategy = async (context) => {
+    const { log, s3, data } = context;
+    const { siteId } = context.params;
+
+    try {
+      if (!isObject(data)) {
+        return badRequest('LLMO strategy must be provided as an object');
+      }
+
+      if (!s3 || !s3.s3Client) {
+        return badRequest('LLMO strategy storage is not configured for this environment');
+      }
+
+      log.info(`Writing LLMO strategy to S3 for siteId: ${siteId}`);
+      const { version } = await writeStrategy(siteId, data, s3.s3Client, {
+        s3Bucket: s3.s3Bucket,
+      });
+
+      log.info(`Successfully saved LLMO strategy for siteId: ${siteId}, version: ${version}`);
+      return ok({ version });
+    } catch (error) {
+      log.error(`Error saving llmo strategy for siteId: ${siteId}, error: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
+  const checkEdgeOptimizeStatus = async (context) => {
+    const { log, dataAccess } = context;
+    const { Site } = dataAccess;
+    const { siteId } = context.params;
+    const { path = '/' } = context.data || {};
+
+    // Validate siteId
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    log.info(`Checking Edge Optimize status for siteId: ${siteId} and path: ${path}`);
+
+    // Get site from database
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    // Check access control
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Access denied to this site');
+    }
+
+    try {
+      const tokowakaClient = TokowakaClient.createFrom(context);
+      const result = await tokowakaClient.checkEdgeOptimizeStatus(site, path);
+      return ok(result);
+    } catch (error) {
+      log.error(`Error checking edge optimize status: ${error.message} for site: ${siteId} and path: ${path}`);
+      if (error.status) {
+        return createResponse({ message: error.message }, error.status);
+      }
+      return internalServerError(error.message);
     }
   };
 
@@ -1057,6 +1192,9 @@ function LlmoController(ctx) {
     getLlmoRationale,
     createOrUpdateEdgeConfig,
     getEdgeConfig,
+    getStrategy,
+    saveStrategy,
+    checkEdgeOptimizeStatus,
   };
 }
 
