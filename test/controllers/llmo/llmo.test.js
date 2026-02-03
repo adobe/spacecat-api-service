@@ -2146,85 +2146,57 @@ describe('LlmoController', () => {
       },
     );
 
-    it('should return 403 when user is not LLMO administrator', async () => {
-      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
-        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
-        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+    describe('patchLlmoCdnBucketConfig', () => {
+      beforeEach(() => {
+        mockContext.data = {
+          cdnBucketConfig: {
+            bucketName: TEST_BUCKET,
+            orgId: TEST_ORG_ID,
+          },
+        };
       });
 
-      const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
-      const result = await controllerNoAdmin.patchLlmoCdnLogsFilter(mockContext);
-
-      expect(result.status).to.equal(403);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal('Only LLMO administrators can update the CDN logs filter');
-    });
-  });
-
-  describe('patchLlmoCdnBucketConfig', () => {
-    beforeEach(() => {
-      mockContext.data = {
-        cdnBucketConfig: {
-          bucketName: TEST_BUCKET,
-          orgId: TEST_ORG_ID,
-        },
-      };
-    });
-
-    it('should update CDN bucket config successfully', async () => {
-      const result = await controller.patchLlmoCdnBucketConfig(mockContext);
-
-      expect(result.status).to.equal(200);
-    });
-
-    it('should return bad request when no data provided', async () => {
-      mockContext.data = null;
-
-      const result = await controller.patchLlmoCdnBucketConfig(mockContext);
-
-      expect(result.status).to.equal(400);
-    });
-
-    it('should handle errors and log them', async () => {
-      mockDataAccess.Site.findById.rejects(new Error('Database error'));
-
-      const result = await controller.patchLlmoCdnBucketConfig(mockContext);
-
-      expect(result.status).to.equal(400);
-      expect(mockLog.error).to.have.been.calledWith(
-        `Error updating CDN bucket config for siteId: ${TEST_SITE_ID}, error: Database error`,
-      );
-    });
-
-    it(
-      'should return empty object when getLlmoConfig().cdnBucketConfig is null',
-      async () => {
-        mockConfig.getLlmoConfig.returns({
-          dataFolder: TEST_FOLDER,
-          brand: TEST_BRAND,
-          cdnBucketConfig: null,
-        });
-
+      it('should update CDN bucket config successfully', async () => {
         const result = await controller.patchLlmoCdnBucketConfig(mockContext);
 
         expect(result.status).to.equal(200);
-        const body = await result.json();
-        expect(body).to.be.an('object');
-      },
-    );
-
-    it('should return 403 when user is not LLMO administrator', async () => {
-      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
-        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
-        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
       });
 
-      const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
-      const result = await controllerNoAdmin.patchLlmoCdnBucketConfig(mockContext);
+      it('should return bad request when no data provided', async () => {
+        mockContext.data = null;
 
-      expect(result.status).to.equal(403);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.equal('Only LLMO administrators can update the CDN bucket config');
+        const result = await controller.patchLlmoCdnBucketConfig(mockContext);
+
+        expect(result.status).to.equal(400);
+      });
+
+      it('should handle errors and log them', async () => {
+        mockDataAccess.Site.findById.rejects(new Error('Database error'));
+
+        const result = await controller.patchLlmoCdnBucketConfig(mockContext);
+
+        expect(result.status).to.equal(400);
+        expect(mockLog.error).to.have.been.calledWith(
+          `Error updating CDN bucket config for siteId: ${TEST_SITE_ID}, error: Database error`,
+        );
+      });
+
+      it(
+        'should return empty object when getLlmoConfig().cdnBucketConfig is null',
+        async () => {
+          mockConfig.getLlmoConfig.returns({
+            dataFolder: TEST_FOLDER,
+            brand: TEST_BRAND,
+            cdnBucketConfig: null,
+          });
+
+          const result = await controller.patchLlmoCdnBucketConfig(mockContext);
+
+          expect(result.status).to.equal(200);
+          const body = await result.json();
+          expect(body).to.be.an('object');
+        },
+      );
     });
   });
 
@@ -3837,6 +3809,26 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(403);
       const responseBody = await result.json();
       expect(responseBody.message).to.include('User does not have access to this site');
+    });
+
+    it('should return 403 when user is not an LLMO administrator', async () => {
+      // Create a controller where user has site access but is not an LLMO administrator
+      const LlmoControllerNonAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': {
+          default: createMockAccessControlUtil(true, true, false),
+        },
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+      });
+      const nonAdminController = LlmoControllerNonAdmin;
+
+      const result = await nonAdminController(mockContext).getEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only LLMO administrators can get the edge optimize config');
     });
 
     it('should handle site not found failure', async () => {

@@ -733,9 +733,6 @@ function LlmoController(ctx) {
     const { siteId } = context.params;
 
     try {
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can update the CDN logs filter');
-      }
       const { site, config } = await getSiteAndValidateLlmo(context);
 
       if (!isObject(data)) {
@@ -762,10 +759,6 @@ function LlmoController(ctx) {
     const { siteId } = context.params;
 
     try {
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can update the CDN bucket config');
-      }
-
       const { site, config } = await getSiteAndValidateLlmo(context);
 
       if (!isObject(data)) {
@@ -1075,6 +1068,10 @@ function LlmoController(ctx) {
 
       if (!await accessControlUtil.hasAccess(site)) {
         return forbidden('User does not have access to this site');
+      }
+
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can get the edge optimize config');
       }
 
       const baseURL = site.getBaseURL();
