@@ -733,6 +733,10 @@ function LlmoController(ctx) {
     const { siteId } = context.params;
 
     try {
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can update the CDN logs filter');
+      }
+
       const { site, config } = await getSiteAndValidateLlmo(context);
 
       if (!isObject(data)) {
@@ -759,6 +763,10 @@ function LlmoController(ctx) {
     const { siteId } = context.params;
 
     try {
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can update the CDN bucket config');
+      }
+
       const { site, config } = await getSiteAndValidateLlmo(context);
 
       if (!isObject(data)) {
