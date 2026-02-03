@@ -46,6 +46,47 @@ BrandProfile:
       type: object
       additionalProperties: true
       description: Free-form metadata bucket for future extensions.
+BotBlockerResult:
+  type: object
+  description: Result of bot blocker detection for a site. Indicates whether the site is crawlable by bots, what type of blocking was detected (if any), and the confidence level of the detection.
+  properties:
+    crawlable:
+      type: boolean
+      description: Whether the site can be crawled by bots
+      example: false
+    type:
+      type: string
+      description: The type of bot blocker detected or infrastructure present
+      enum:
+        - 'cloudflare'
+        - 'imperva'
+        - 'akamai'
+        - 'fastly'
+        - 'cloudfront'
+        - 'cloudflare-allowed'
+        - 'imperva-allowed'
+        - 'akamai-allowed'
+        - 'fastly-allowed'
+        - 'cloudfront-allowed'
+        - 'http2-block'
+        - 'none'
+        - 'unknown'
+      example: 'cloudflare'
+    confidence:
+      type: number
+      format: float
+      minimum: 0
+      maximum: 1
+      description: Confidence level of the detection (0.0 to 1.0). Values >= 0.95 indicate reliable detection. Lower values suggest uncertain situations.
+      example: 0.99
+    reason:
+      type: string
+      description: Optional reason or additional context for the detection result
+      example: 'HTTP 403 Forbidden - access denied'
+  required:
+    - crawlable
+    - type
+    - confidence
 Id:
   type: string
   format: uuid
@@ -104,6 +145,7 @@ AuditType:
     - 'costs'
     - 'meta-tags'
     - 'product-metatags'
+    - 'commerce-product-enrichments'
     - 'broken-internal-links'
     - 'experimentation-opportunities'
     - 'llm-error-pages'
@@ -1601,54 +1643,6 @@ AnalyticsSiteIntegration:
         $ref: './examples.yaml#/analytics-site-integration-cja-tags'
     - analytics-site-integration-cja-websdk:
         $ref: './examples.yaml#/analytics-site-integration-cja-websdk'
-KeyEventType:
-  type: string
-  enum:
-    - 'performance'
-    - 'seo'
-    - 'content'
-    - 'code'
-    - 'third party'
-    - 'experimentation'
-    - 'network'
-    - 'status change'
-KeyEvent:
-  type: object
-  properties:
-    id:
-      description: The key event ID in uuid format
-      $ref: '#/Id'
-    name:
-      description: Name of the key event
-      type: string
-    type:
-      $ref: '#/KeyEventType'
-    time:
-      description: Time of the key event occurred
-      $ref: '#/DateTime'
-  example:
-    id: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
-    name: 'Multiple 404s detected'
-    type: 'seo'
-    time: '2023-12-15T09:30:00Z'
-KeyEventsList:
-  type: array
-  items:
-    $ref: './schemas.yaml#/KeyEvent'
-KeyEventCreate:
-  type: object
-  required:
-    - name
-    - type
-  properties:
-    name:
-      description: Name of the key event
-      type: string
-    type:
-      $ref: '#/KeyEventType'
-    time:
-      description: Time of the key event occurred (optional). Current time is used when the field is missing
-      $ref: '#/DateTime'
 SiteTopPage:
   type: object
   required:
@@ -2862,6 +2856,7 @@ SuggestionStatus:
     - 'IN_PROGRESS'
     - 'OUTDATED'
     - 'PENDING_VALIDATION'
+    - 'REJECTED'
   example: 'NEW'
 SuggestionType:
   description: |
@@ -5034,10 +5029,12 @@ SandboxAuditType:
     - meta-tags: General meta tag analysis for all page types
     - product-metatags: Specialized audit for Product Detail Pages (PDP) of commerce sites,
       analyzing product-specific meta tags and scraping SKU, thumbnail, and catalog/store view codes for autofixing
+    - commerce-product-enrichments: Commerce page enrichment audit for analyzing and enriching commerce pages
     - alt-text: Alternative text analysis for images
   enum:
     - 'meta-tags'
     - 'product-metatags'
+    - 'commerce-product-enrichments'
     - 'alt-text'
   example: 'meta-tags'
 

@@ -12,13 +12,11 @@
 
 /* eslint-env mocha */
 
-import { KeyEvent, Organization, Site } from '@adobe/spacecat-shared-data-access';
+import { Organization, Site } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
-import KeyEventSchema from '@adobe/spacecat-shared-data-access/src/models/key-event/key-event.schema.js';
 import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/models/organization/organization.schema.js';
 import SiteSchema from '@adobe/spacecat-shared-data-access/src/models/site/site.schema.js';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
-import { hasText } from '@adobe/spacecat-shared-utils';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 
 import { use, expect } from 'chai';
@@ -117,36 +115,7 @@ describe('Sites Controller', () => {
     loggerStub,
   ));
 
-  const buildKeyEvents = (siteList) => [{
-    keyEventId: 'k1', siteId: siteList[0].getId(), name: 'some-key-event', type: KeyEvent.KEY_EVENT_TYPES.CODE, time: new Date().toISOString(),
-  },
-  {
-    keyEventId: 'k2', siteId: siteList[0].getId(), name: 'other-key-event', type: KeyEvent.KEY_EVENT_TYPES.SEO, time: new Date().toISOString(),
-  },
-  ].map((keyEvent) => new KeyEvent(
-    {
-      entities: {
-        keyEvent: {
-          model: {
-            indexes: {},
-            schema: {},
-          },
-        },
-      },
-    },
-    {
-      log: loggerStub,
-      getCollection: stub().returns({
-        schema: KeyEventSchema,
-      }),
-    },
-    KeyEventSchema,
-    keyEvent,
-    loggerStub,
-  ));
-
   let sites;
-  let keyEvents;
 
   const siteFunctions = [
     'createSite',
@@ -164,9 +133,6 @@ describe('Sites Controller', () => {
     'updateSite',
     'updateCdnLogsConfig',
     'getTopPages',
-    'createKeyEvent',
-    'getKeyEventsBySiteID',
-    'removeKeyEvent',
     'getSiteMetricsBySource',
     'getPageMetricsBySource',
     'resolveSite',
@@ -180,7 +146,6 @@ describe('Sites Controller', () => {
 
   beforeEach(() => {
     sites = buildSites();
-    keyEvents = buildKeyEvents(sites);
 
     mockDataAccess = {
       Audit: {
@@ -194,11 +159,6 @@ describe('Sites Controller', () => {
           getSiteId: sandbox.stub().returns(SITE_IDS[0]),
           getInvocationId: sandbox.stub().returns('some-invocation-id'),
         }),
-      },
-      KeyEvent: {
-        allBySiteId: sandbox.stub().resolves(keyEvents),
-        findById: stub().resolves(keyEvents[0]),
-        create: sandbox.stub().resolves(keyEvents[0]),
       },
       Site: {
         all: sandbox.stub().resolves(sites),
@@ -1384,160 +1344,6 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Base URL required');
   });
 
-  it('create key event returns created key event', async () => {
-    const siteId = sites[0].getId();
-    const keyEvent = keyEvents[0];
-
-    mockDataAccess.KeyEvent.create.withArgs({
-      siteId, name: keyEvent.getName(), type: keyEvent.getType(), time: keyEvent.getTime(),
-    }).resolves(keyEvent);
-
-    const resp = await (await sitesController.createKeyEvent({
-      params: { siteId },
-      data: { name: keyEvent.getName(), type: keyEvent.getType(), time: keyEvent.getTime() },
-    })).json();
-
-    expect(mockDataAccess.KeyEvent.create).to.have.been.calledOnce;
-    expect(hasText(resp.id)).to.be.true;
-    expect(resp.name).to.equal(keyEvent.getName());
-    expect(resp.type).to.equal(keyEvent.getType());
-    expect(resp.time).to.equal(keyEvent.getTime());
-  });
-
-  it('create key event returns not found when site does not exist', async () => {
-    const siteId = 'site-id';
-    const keyEvent = keyEvents[0];
-
-    mockDataAccess.Site.findById.resolves(null);
-
-    const result = await sitesController.createKeyEvent({
-      params: { siteId },
-      data: { name: keyEvent.getName(), type: keyEvent.getType(), time: keyEvent.getTime() },
-    });
-    const error = await result.json();
-
-    expect(result.status).to.equal(404);
-    expect(error).to.have.property('message', 'Site not found');
-  });
-
-  it('create key event returns forbidden when site does not exist', async () => {
-    const siteId = 'site-id';
-    const keyEvent = keyEvents[0];
-    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
-    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
-    const result = await sitesController.createKeyEvent({
-      params: { siteId },
-      data: { name: keyEvent.getName(), type: keyEvent.getType(), time: keyEvent.getTime() },
-    });
-    const error = await result.json();
-
-    expect(result.status).to.equal(403);
-    expect(error).to.have.property('message', 'Only users belonging to the organization can create key events');
-  });
-
-  it('get key events returns list of key events', async () => {
-    const site = sites[0];
-    site.getKeyEvents = sandbox.stub().resolves(keyEvents);
-    const siteId = sites[0].getId();
-
-    mockDataAccess.KeyEvent.allBySiteId.withArgs(siteId).resolves(keyEvents);
-
-    const resp = await (await sitesController.getKeyEventsBySiteID({
-      params: { siteId },
-    })).json();
-
-    expect(site.getKeyEvents).to.have.been.calledOnce;
-    expect(resp.length).to.equal(keyEvents.length);
-  });
-
-  it('get key events returns list of key events for non belonging to the organization', async () => {
-    const site = sites[0];
-    site.getKeyEvents = sandbox.stub().resolves(keyEvents);
-    const siteId = sites[0].getId();
-    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
-    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
-
-    const result = await sitesController.getKeyEventsBySiteID({
-      params: { siteId },
-    });
-    const error = await result.json();
-
-    expect(result.status).to.equal(403);
-    expect(error).to.have.property('message', 'Only users belonging to the organization can view its key events');
-  });
-
-  it('get key events returns bad request when siteId is missing', async () => {
-    const result = await sitesController.getKeyEventsBySiteID({
-      params: {},
-    });
-    const error = await result.json();
-
-    expect(result.status).to.equal(400);
-    expect(error).to.have.property('message', 'Site ID required');
-  });
-
-  it('get key events returns not found when site is not found', async () => {
-    const siteId = sites[0].getId();
-    mockDataAccess.Site.findById.resolves(null);
-
-    const result = await sitesController.getKeyEventsBySiteID({
-      params: { siteId },
-    });
-    const error = await result.json();
-
-    expect(result.status).to.equal(404);
-    expect(error).to.have.property('message', 'Site not found');
-  });
-
-  it('remove key events endpoint call', async () => {
-    const keyEvent = keyEvents[0];
-    keyEvent.remove = sinon.stub().resolves();
-    const keyEventId = keyEvent.getId();
-
-    await sitesController.removeKeyEvent({
-      params: { keyEventId },
-    });
-
-    expect(keyEvent.remove).to.have.been.calledOnce;
-  });
-
-  it('remove key events endpoint call for a non-admin user', async () => {
-    context.attributes.authInfo.withProfile({ is_admin: false });
-    const keyEvent = keyEvents[0];
-    keyEvent.remove = sinon.stub().resolves();
-    const keyEventId = keyEvent.getId();
-    const result = await sitesController.removeKeyEvent({
-      params: { keyEventId },
-    });
-    const error = await result.json();
-
-    expect(result.status).to.equal(403);
-    expect(error).to.have.property('message', 'Only admins can remove key events');
-  });
-
-  it('remove key events returns bad request when keyEventId is missing', async () => {
-    const result = await sitesController.removeKeyEvent({
-      params: {},
-    });
-    const error = await result.json();
-
-    expect(result.status).to.equal(400);
-    expect(error).to.have.property('message', 'Key Event ID required');
-  });
-
-  it('remove key events returns not found when key event is not found', async () => {
-    const keyEventId = 'key-event-id';
-    mockDataAccess.KeyEvent.findById.resolves(null);
-
-    const result = await sitesController.removeKeyEvent({
-      params: { keyEventId },
-    });
-    const error = await result.json();
-
-    expect(result.status).to.equal(404);
-    expect(error).to.have.property('message', 'Key Event not found');
-  });
-
   it('get site metrics by source returns list of metrics', async () => {
     const siteId = sites[0].getId();
     const source = 'ahrefs';
@@ -1842,6 +1648,396 @@ describe('Sites Controller', () => {
       expect([0, null]).to.include(response[2].pageviews);
       expect([0, null]).to.include(response[3].pageviews);
       expect([0, null]).to.include(response[4].pageviews);
+    });
+  });
+
+  // Metadata wrapper format tests with objectResponseDataKey parameter
+  describe('Metrics with objectResponseDataKey parameter', () => {
+    it('extracts and filters array from object when objectResponseDataKey=data is provided', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-last-week';
+
+      // Create mock metadata wrapper with 150 items
+      const mockData = Array.from({ length: 150 }, (_, i) => ({
+        url: `https://example.com/page${i}`,
+        pageviews: 150 - i,
+        metrics: [],
+      }));
+
+      const mockMetricsWrapper = {
+        label: 'last-week',
+        startTime: '2026-01-05T12:00:00.000Z',
+        endTime: '2026-01-12T12:00:00.000Z',
+        data: mockData,
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetricsWrapper);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { objectResponseDataKey: 'data', filterByTop100PageViews: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Should preserve wrapper format
+      expect(response).to.have.property('label', 'last-week');
+      expect(response).to.have.property('startTime', '2026-01-05T12:00:00.000Z');
+      expect(response).to.have.property('endTime', '2026-01-12T12:00:00.000Z');
+      expect(response).to.have.property('data');
+
+      // Should filter data to top 100
+      expect(response.data).to.have.length(100);
+
+      // Should be sorted by pageviews descending
+      expect(response.data[0].pageviews).to.equal(150);
+      expect(response.data[99].pageviews).to.equal(51);
+    });
+
+    it('extracts array from object when objectResponseDataKey=data without filtering', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'user-engagement-7d-last-to-last-week';
+
+      const mockMetricsWrapper = {
+        label: 'last-to-last-week',
+        startTime: '2025-12-29T12:00:00.000Z',
+        endTime: '2026-01-05T12:00:00.000Z',
+        data: [
+          { url: 'https://example.com/page1', engagement: 0.8 },
+          { url: 'https://example.com/page2', engagement: 0.6 },
+        ],
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetricsWrapper);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { objectResponseDataKey: 'data' },
+      });
+
+      const response = await result.json();
+
+      // Should preserve entire wrapper
+      expect(response).to.have.property('label', 'last-to-last-week');
+      expect(response).to.have.property('startTime', '2025-12-29T12:00:00.000Z');
+      expect(response).to.have.property('endTime', '2026-01-05T12:00:00.000Z');
+      expect(response).to.have.property('data');
+      expect(response.data).to.have.length(2);
+    });
+
+    it('handles object with empty data array when objectResponseDataKey=data', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-last-week';
+
+      const mockMetricsWrapper = {
+        label: 'last-week',
+        startTime: '2026-01-05T12:00:00.000Z',
+        endTime: '2026-01-12T12:00:00.000Z',
+        data: [],
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetricsWrapper);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { objectResponseDataKey: 'data', filterByTop100PageViews: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Should preserve wrapper with empty data
+      expect(response).to.have.property('label', 'last-week');
+      expect(response).to.have.property('data');
+      expect(response.data).to.have.length(0);
+    });
+
+    it('returns plain array when objectResponseDataKey is not provided (backward compatibility)', async () => {
+      const siteId = sites[0].getId();
+      const source = 'ahrefs';
+      const metric = 'organic-traffic';
+
+      const mockMetricsArray = [
+        { url: 'https://example.com/page1', pageviews: 1000 },
+        { url: 'https://example.com/page2', pageviews: 800 },
+      ];
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetricsArray);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+      });
+
+      const response = await result.json();
+
+      // Should return array directly (no wrapper)
+      expect(response).to.be.an('array');
+      expect(response).to.have.length(2);
+      expect(response).to.not.have.property('label');
+    });
+
+    it('returns plain array when stored data is object but objectResponseDataKey is not provided', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-last-week';
+
+      const mockMetricsWrapper = {
+        label: 'last-week',
+        startTime: '2026-01-05T12:00:00.000Z',
+        endTime: '2026-01-12T12:00:00.000Z',
+        data: [
+          { url: 'https://example.com/page1', pageviews: 100 },
+          { url: 'https://example.com/page2', pageviews: 200 },
+        ],
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetricsWrapper);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        // No objectResponseDataKey provided
+      });
+
+      const response = await result.json();
+
+      // Should return the object as-is (backward compatible - treats object as data)
+      expect(response).to.be.an('object');
+      expect(response).to.have.property('label');
+      expect(response).to.have.property('data');
+    });
+
+    it('works with custom objectResponseDataKey other than "data"', async () => {
+      const siteId = sites[0].getId();
+      const source = 'custom';
+      const metric = 'custom-metric';
+
+      const mockMetricsWrapper = {
+        label: 'custom-label',
+        items: [
+          { url: 'https://example.com/page1', pageviews: 500 },
+          { url: 'https://example.com/page2', pageviews: 300 },
+          { url: 'https://example.com/page3', pageviews: 400 },
+        ],
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetricsWrapper);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { objectResponseDataKey: 'items', filterByTop100PageViews: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Should use 'items' key
+      expect(response).to.have.property('label', 'custom-label');
+      expect(response).to.have.property('items');
+      expect(response.items).to.have.length(3);
+      // Should be sorted by pageviews descending
+      expect(response.items[0].pageviews).to.equal(500);
+      expect(response.items[1].pageviews).to.equal(400);
+      expect(response.items[2].pageviews).to.equal(300);
+    });
+
+    it('filters metrics by site baseURL when filterByBaseURL=true', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockMetrics = [
+        { url: 'https://site1.com/page1', pageviews: 5000, lcp: 1500 },
+        { url: 'https://other.com/page2', pageviews: 3000, lcp: 2000 },
+        { url: 'https://site1.com/page3', pageviews: 4000, lcp: 1800 },
+        { url: 'https://different.com/page4', pageviews: 2000, lcp: 2200 },
+      ];
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByBaseURL: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Should only include metrics from site1.com (site baseURL)
+      expect(response).to.have.length(2);
+      expect(response[0].url).to.equal('https://site1.com/page1');
+      expect(response[1].url).to.equal('https://site1.com/page3');
+    });
+
+    it('normalizes www prefix when filtering by baseURL', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      // Test: Site baseURL is "https://site1.com" (no www)
+      // Metrics include both with and without www - all should match
+      const mockMetrics = [
+        { url: 'https://www.site1.com/page1', pageviews: 5000, lcp: 1500 },
+        { url: 'http://site1.com/page2', pageviews: 4000, lcp: 1600 },
+        { url: 'https://site1.com/page3', pageviews: 3000, lcp: 1700 },
+        { url: 'https://www.other.com/page4', pageviews: 2000, lcp: 1800 },
+        { url: 'http://www.site1.com/page5', pageviews: 1000, lcp: 1900 },
+      ];
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByBaseURL: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Should match all site1.com URLs regardless of www prefix or protocol
+      expect(response).to.have.length(4);
+      expect(response[0].url).to.equal('https://www.site1.com/page1');
+      expect(response[1].url).to.equal('http://site1.com/page2');
+      expect(response[2].url).to.equal('https://site1.com/page3');
+      expect(response[3].url).to.equal('http://www.site1.com/page5');
+    });
+
+    it('applies filterByBaseURL before top100 filtering', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      // Create 150 metrics: 75 from site1.com, 75 from other.com
+      const mockMetrics = [
+        ...Array.from({ length: 75 }, (_, i) => ({
+          url: `https://site1.com/page${i}`,
+          pageviews: 1000 + i,
+          lcp: 1500,
+        })),
+        ...Array.from({ length: 75 }, (_, i) => ({
+          url: `https://other.com/page${i}`,
+          pageviews: 2000 + i,
+          lcp: 1500,
+        })),
+      ];
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: {
+          filterByBaseURL: 'true',
+          filterByTop100PageViews: 'true',
+        },
+      });
+
+      const response = await result.json();
+
+      // Should filter to site1.com first (75 items), then take top 75
+      // (since less than 100)
+      expect(response).to.have.length(75);
+      response.forEach((item) => {
+        expect(item.url).to.include('site1.com');
+      });
+    });
+
+    it('handles missing url field gracefully when filterByBaseURL=true', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockMetrics = [
+        { url: 'https://site1.com/page1', pageviews: 5000 },
+        { pageviews: 3000 }, // Missing url
+        { url: 'https://site1.com/page3', pageviews: 4000 },
+      ];
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByBaseURL: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Should only include valid entries with URLs matching baseURL
+      expect(response).to.have.length(2);
+      expect(response[0].url).to.equal('https://site1.com/page1');
+      expect(response[1].url).to.equal('https://site1.com/page3');
+    });
+
+    it('filters by path when baseURL includes a path', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      // Override site baseURL to include a path
+      sites[0].getBaseURL = () => 'https://site1.com/book';
+
+      const mockMetrics = [
+        { url: 'https://site1.com/book/flights', pageviews: 5000 },
+        { url: 'https://site1.com/book/hotels', pageviews: 4000 },
+        { url: 'https://site1.com/other/page', pageviews: 3000 },
+        { url: 'https://www.site1.com/book/cars', pageviews: 2000 },
+      ];
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByBaseURL: 'true' },
+      });
+
+      const response = await result.json();
+
+      // Should only include URLs that start with site1.com/book
+      expect(response).to.have.length(3);
+      expect(response[0].url).to.equal('https://site1.com/book/flights');
+      expect(response[1].url).to.equal('https://site1.com/book/hotels');
+      expect(response[2].url).to.equal('https://www.site1.com/book/cars');
     });
   });
 

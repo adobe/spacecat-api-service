@@ -51,15 +51,15 @@ function isValidOpportunity(opportunityData) {
   // Must have positive value metric
   // CWV opportunities use projectedTrafficValue
   // Forms opportunities use projectedConversionValue
-  const projectedTrafficValue = data.projectedTrafficValue || 0;
-  const projectedConversionValue = data.projectedConversionValue || 0;
+  const projectedTrafficValue = data?.projectedTrafficValue || 0;
+  const projectedConversionValue = data?.projectedConversionValue || 0;
 
   const hasValue = projectedTrafficValue > 0 || projectedConversionValue > 0;
   if (!hasValue) return false;
 
-  // Exclude forms opportunities with null brief fields in guidance recommendations
-  // This happens when scrapedStatus is false (form wasn't successfully scraped)
-  // These cause UI rendering issues
+  // Exclude forms opportunities with scrapedStatus = false
+  // When forms aren't successfully scraped, they have incomplete data (null formDetails)
+  // which causes UI rendering issues
   const formTypes = [
     'high-form-views-low-conversions',
     'high-page-views-low-form-nav',
@@ -67,6 +67,10 @@ function isValidOpportunity(opportunityData) {
     'form-accessibility',
   ];
   if (formTypes.includes(type)) {
+    // Filter out opportunities where scrapedStatus is false
+    if (data?.scrapedStatus === false) return false;
+
+    // Also check for null brief fields in guidance recommendations as a fallback
     const recommendations = original.getGuidance?.()?.recommendations;
     const hasInvalidBrief = recommendations?.some(
       (rec) => rec?.brief === null || rec?.brief === undefined,
@@ -90,7 +94,9 @@ const OPPORTUNITY_TYPE_CONFIGS = [
     requiresUrlMatching: false,
     matcher: (oppData) => {
       const { tags, type, data } = oppData;
-      return tags?.some((tag) => tag?.toLowerCase() === 'paid media')
+      const lowerTags = tags?.map((tag) => tag?.toLowerCase());
+      return lowerTags?.includes('paid media')
+        || lowerTags?.includes('paid traffic')
         || type === 'consent-banner'
         || data?.opportunityType === 'no-cta-above-the-fold';
     },
@@ -306,7 +312,7 @@ async function processOpportunityMatching(
     const matchedPaidUrlsMap = new Map();
 
     // Forms opportunities have URL in data.form field, not in suggestions
-    if (config.category === 'forms' && oppData.data.form) {
+    if (config.category === 'forms' && oppData.data?.form) {
       const formUrl = oppData.data.form;
       const normalized = normalizeUrl(formUrl);
 

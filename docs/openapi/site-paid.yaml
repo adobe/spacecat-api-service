@@ -202,6 +202,51 @@ site-traffic-predominant-type:
     security:
       - api_key: []
 
+site-traffic-predominant-type-channel:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/channel'
+  post:
+    tags:
+      - site
+      - traffic
+      - paid
+    summary: Determine predominant traffic type for URLs by channel
+    description: |
+      Analyzes traffic patterns for a list of URLs over the last 4 weeks, filtered by a specific traffic channel,
+      and determines the predominant traffic type (paid, earned, owned, or mixed) for each URL based on
+      a configurable percentage threshold. This endpoint extends the base predominant traffic analysis by
+      filtering results to only include data from the specified channel (e.g., search, social, display, video).
+
+      The channel parameter allows you to analyze predominant traffic patterns for specific marketing channels,
+      helping you understand which traffic types dominate on each channel separately.
+
+      **_Prerequisite:_** This functionality queries traffic data. It is required to activate the "traffic-analysis" import first and run the "traffic-analysis-backfill" for 5 weeks to have enough data for the first time. After this, the import will keep the OpTel data up-to-date.
+    operationId: getPredominantTrafficTypeByChannel
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/PredominantTrafficRequest'
+    responses:
+      '200':
+        description: Predominant traffic analysis results filtered by channel
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/PredominantTrafficResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: []
+
 site-traffic-paid-top-pages:
   parameters:
     - $ref: './parameters.yaml#/siteId'

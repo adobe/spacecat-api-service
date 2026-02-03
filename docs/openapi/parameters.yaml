@@ -93,13 +93,6 @@ hookSecret:
   required: true
   schema:
     type: string
-keyEventId:
-  name: keyEventId
-  description: The key event ID in uuid format
-  in: path
-  required: true
-  schema:
-    $ref: './schemas.yaml#/Id'
 source:
   name: source
   description: The source of the top pages
@@ -273,6 +266,15 @@ trafficType:
       - 'paid'
     example: 'paid'
 
+channel:
+  name: channel
+  description: Filter by traffic channel (e.g., search, social, display, video)
+  in: path
+  required: true
+  schema:
+    type: string
+    example: 'search'
+
 # New parameters for entitlements API
 entitlementId:
   name: entitlementId
@@ -343,11 +345,13 @@ sandboxAuditType:
       Comma-separated list of audit types:
       - meta-tags: General meta tag analysis
       - product-metatags: PDP-focused audit for e-commerce sites (scrapes SKU, thumbnail, catalog/store view codes)
+      - commerce-product-enrichments: Commerce page enrichment audit for analyzing and enriching commerce pages
       - alt-text: Image alternative text analysis
-    example: "meta-tags,product-metatags,alt-text"
+    example: "meta-tags,product-metatags,commerce-product-enrichments,alt-text"
     enum:
       - 'meta-tags'
       - 'product-metatags'
+      - 'commerce-product-enrichments'
       - 'alt-text'
 
 llmoConfigVersion:

@@ -38,7 +38,8 @@
 		"imports": {
 			"organic-traffic" : {},
 			"top-pages" : {},
-			"all-traffic": {}
+			"all-traffic": {},
+            "traffic-analysis": {}
 		},
 		"config": {
 			"scheduledRun": false
@@ -53,6 +54,7 @@
 			"experimentation-opportunities": {},
 			"meta-tags": {},
 			"product-metatags": {},
+			"commerce-product-enrichments": {},
 			"sitemap": {},
 			"redirect-chains": {},
 			"cwv": {},
@@ -75,7 +77,10 @@
 			"organic-traffic" : {},
 			"top-pages" : {},
 			"organic-keywords" :{},
-			"all-traffic": {}
+			"all-traffic": {},
+			"user-engagement": {},
+			"cwv-weekly": {},
+            "traffic-analysis": {}
 		},
 		"config": {
 			"scheduledRun": false
@@ -109,7 +114,10 @@
 			"organic-traffic" : {},
 			"top-pages" : {},
 			"organic-keywords" :{},
-			"all-traffic": {}
+			"all-traffic": {},
+            "traffic-analysis": {},
+			"user-engagement": {},
+			"cwv-weekly": {}
 		},
 		"config": {
 			"scheduledRun": true

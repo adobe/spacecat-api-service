@@ -25,6 +25,7 @@ import {
   detectAEMVersion,
   detectLocale,
   wwwUrlResolver as sharedWwwUrlResolver,
+  getLastNumberOfWeeks,
 } from '@adobe/spacecat-shared-utils';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
@@ -175,6 +176,30 @@ export const sendRunImportMessage = async (
   ...(data && { data }),
 });
 
+export const triggerTrafficAnalysisBackfill = async (
+  siteId,
+  config,
+  slackContext,
+  context,
+  weeks = 5,
+) => {
+  const weekYearPairs = getLastNumberOfWeeks(weeks || 52);
+  await Promise.all(
+    weekYearPairs.map(async ({ week, year }) => {
+      const { sqs } = context;
+      return sqs.sendMessage(config.getQueues().imports, {
+        type: 'traffic-analysis',
+        trigger: 'backfill',
+        siteId,
+        week,
+        year,
+        allowCache: false,
+        slackContext,
+      });
+    }),
+  );
+};
+
 export const sendAutofixMessage = async (
   sqs,
   queueUrl,
@@ -288,6 +313,38 @@ export const triggerAuditForSite = async (
   },
   site.getId(),
   auditData,
+);
+
+/**
+ * Triggers the A11y codefix flow for an existing opportunity.
+ * This sends a message to the audit worker to process the opportunity's suggestions
+ * and send them to Mystique for code fix processing.
+ *
+ * @param {Site} site - The site object.
+ * @param {string} opportunityId - The opportunity ID to process.
+ * @param {string} opportunityType - The opportunity type (e.g., 'a11y-assistive').
+ * @param {Object} slackContext - The Slack context object.
+ * @param {Object} lambdaContext - The Lambda context object.
+ * @return {Promise} - A promise representing the trigger operation.
+ */
+export const triggerA11yCodefixForOpportunity = async (
+  site,
+  opportunityId,
+  opportunityType,
+  slackContext,
+  lambdaContext,
+) => sendAuditMessage(
+  lambdaContext.sqs,
+  lambdaContext.env.AUDIT_JOBS_QUEUE_URL,
+  'trigger:a11y-codefix',
+  {
+    slackContext: {
+      channelId: slackContext.channelId,
+      threadTs: slackContext.threadTs,
+    },
+  },
+  site.getId(),
+  { opportunityId, opportunityType },
 );
 
 // todo: prototype - untested
@@ -1065,6 +1122,14 @@ export const onboardSingleSite = async (
         context,
       );
     }
+    if (importTypes.includes('traffic-analysis')) { // trigger traffic analysis backfill only if traffic analysis import is enabled
+      await triggerTrafficAnalysisBackfill(
+        siteID,
+        configuration,
+        slackContext,
+        context,
+      );
+    }
 
     const auditTypes = Object.keys(profile.audits);
 
@@ -1232,16 +1297,27 @@ export const filterSitesForProductCode = async (context, organization, sites, pr
   const tierClient = TierClient.createForOrg(context, organization, productCode);
   const { entitlement } = await tierClient.checkValidEntitlement();
 
+  const { log } = context;
+  log.info(`[filterSites] Input: orgId=${organization.getId()}, productCode=${productCode}, sitesCount=${sites.length}`);
+  log.info(`[filterSites] Site IDs: ${sites.map((s) => s.getId()).join(', ')}`);
+  log.info(`[filterSites] Entitlement found: ${entitlement ? entitlement.getId() : 'null'}`);
+
   if (!isNonEmptyObject(entitlement)) {
+    log.info('[filterSites] No entitlement, returning empty array');
     return [];
   }
 
   // Get all enrollments for this entitlement in one query
   const siteEnrollments = await SiteEnrollment.allByEntitlementId(entitlement.getId());
+  log.info(`[filterSites] Enrollments found: ${siteEnrollments.length}`);
+  log.info(`[filterSites] Enrolled siteIds: ${siteEnrollments.map((se) => se.getSiteId()).join(', ')}`);
 
   // Create a Set of enrolled site IDs for efficient lookup
   const enrolledSiteIds = new Set(siteEnrollments.map((se) => se.getSiteId()));
 
   // Filter sites based on enrollment
-  return sites.filter((site) => enrolledSiteIds.has(site.getId()));
+  const result = sites.filter((site) => enrolledSiteIds.has(site.getId()));
+  log.info(`[filterSites] Filtered result count: ${result.length}`);
+
+  return result;
 };

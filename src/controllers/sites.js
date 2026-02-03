@@ -14,7 +14,6 @@ import {
   accepted,
   badRequest,
   createResponse,
-  created,
   forbidden,
   internalServerError,
   noContent,
@@ -40,7 +39,6 @@ import { SiteDto } from '../dto/site.js';
 import { OrganizationDto } from '../dto/organization.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
-import { KeyEventDto } from '../dto/key-event.js';
 import { wwwUrlResolver, resolveWwwUrl } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
@@ -104,7 +102,7 @@ function SitesController(ctx, log, env) {
   }
 
   const {
-    Audit, KeyEvent, Organization, Site,
+    Audit, Organization, Site,
   } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
@@ -515,92 +513,14 @@ function SitesController(ctx, log, env) {
     return badRequest('No updates provided');
   };
 
-  /**
-   * Creates a key event. The key event ID is generated automatically.
-   * @param {object} context - Context of the request.
-   * @return {Promise<Response>} Key event response.
-   */
-  const createKeyEvent = async (context) => {
-    const { siteId } = context.params;
-    const { name, type, time } = context.data;
-
-    const site = await Site.findById(siteId);
-    if (!site) {
-      return notFound('Site not found');
-    }
-
-    if (!await accessControlUtil.hasAccess(site)) {
-      return forbidden('Only users belonging to the organization can create key events');
-    }
-
-    const keyEvent = await KeyEvent.create({
-      siteId,
-      name,
-      type,
-      time,
-    });
-
-    return created(KeyEventDto.toJSON(keyEvent));
-  };
-
-  /**
-   * Gets key events for a site
-   * @param {object} context - Context of the request.
-   * @returns {Promise<[object]>} Key events.
-   * @throws {Error} If site ID is not provided.
-   */
-  const getKeyEventsBySiteID = async (context) => {
-    const siteId = context.params?.siteId;
-
-    if (!isValidUUID(siteId)) {
-      return badRequest('Site ID required');
-    }
-
-    const site = await Site.findById(siteId);
-    if (!site) {
-      return notFound('Site not found');
-    }
-
-    if (!await accessControlUtil.hasAccess(site)) {
-      return forbidden('Only users belonging to the organization can view its key events');
-    }
-
-    const keyEvents = await site.getKeyEvents();
-
-    return ok(keyEvents.map((keyEvent) => KeyEventDto.toJSON(keyEvent)));
-  };
-
-  /**
-   * Removes a key event.
-   * @param {object} context - Context of the request.
-   * @return {Promise<Response>} Delete response.
-   */
-  const removeKeyEvent = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can remove key events');
-    }
-    const { keyEventId } = context.params;
-
-    if (!hasText(keyEventId)) {
-      return badRequest('Key Event ID required');
-    }
-
-    const keyEvent = await KeyEvent.findById(keyEventId);
-
-    if (!keyEvent) {
-      return notFound('Key Event not found');
-    }
-
-    await keyEvent.remove();
-
-    return noContent();
-  };
-
   const getSiteMetricsBySource = async (context) => {
     const siteId = context.params?.siteId;
     const metric = context.params?.metric;
     const source = context.params?.source;
     const filterByTop100PageViews = context.data?.filterByTop100PageViews === 'true';
+    const filterByBaseURL = context.data?.filterByBaseURL === 'true';
+    // Key to extract from object response, e.g., 'data' in { label, data: [...] }
+    const objectResponseDataKey = context.data?.objectResponseDataKey;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -623,21 +543,66 @@ function SitesController(ctx, log, env) {
       return forbidden('Only users belonging to the organization can view its metrics');
     }
 
-    let metrics = await getStoredMetrics({ siteId, metric, source }, context);
+    const metrics = await getStoredMetrics({ siteId, metric, source }, context);
 
-    // Filter to top 100 pages by pageViews when requested
+    // Handle object response: extract array from key if objectResponseDataKey is provided
+    let metricsData;
+    let objectWrapper = null;
+
+    if (objectResponseDataKey && isObject(metrics) && !isArray(metrics)
+        && isArray(metrics[objectResponseDataKey])) {
+      // Stored data is an object with array at specified key
+      metricsData = metrics[objectResponseDataKey];
+      objectWrapper = metrics;
+    } else {
+      // Stored data is a plain array (backward compatible)
+      metricsData = metrics;
+    }
+
+    // Filter by site baseURL when requested
+    if (filterByBaseURL) {
+      const siteBaseURL = site.getBaseURL();
+      const originalCount = metricsData.length;
+
+      // Normalize baseURL: remove protocol and www variants, keep path
+      const normalizedBaseURL = siteBaseURL
+        .replace(/^https?:\/\/(www\d*\.)?/, '') // Remove protocol and optional www/www2/www3 etc.
+        .replace(/\/$/, ''); // Remove trailing slash
+
+      metricsData = metricsData.filter((metricEntry) => {
+        if (!metricEntry.url || !normalizedBaseURL) {
+          return false;
+        }
+
+        // Normalize metric URL: remove protocol and www variants
+        const normalizedMetricURL = metricEntry.url
+          .replace(/^https?:\/\/(www\d*\.)?/, '') // Remove protocol and optional www/www2/www3 etc.
+          .replace(/\/$/, ''); // Remove trailing slash
+
+        // Check if metric URL starts with the normalized base URL
+        return normalizedMetricURL.startsWith(normalizedBaseURL);
+      });
+
+      log.info(`Filtered metrics from ${originalCount} to ${metricsData.length} entries based on site baseURL (${normalizedBaseURL})`);
+    }
+
+    // Filter to top 100 pages by pageViews when requested (applied last)
     if (filterByTop100PageViews) {
       // Sort by pageViews in descending order and take top 100
-      const originalCount = metrics.length;
-      metrics = metrics
+      const originalCount = metricsData.length;
+      metricsData = metricsData
         .filter((metricEntry) => metricEntry.pageviews !== undefined)
         .sort((a, b) => (b.pageviews || 0) - (a.pageviews || 0))
         .slice(0, 100);
 
-      log.info(`Filtered metrics from ${originalCount} to ${metrics.length} entries based on top pageViews`);
+      log.info(`Filtered metrics from ${originalCount} to ${metricsData.length} entries based on top pageViews`);
     }
 
-    return ok(metrics);
+    // Return object wrapper if objectResponseDataKey was used, otherwise return plain array
+    if (objectWrapper) {
+      return ok({ ...objectWrapper, [objectResponseDataKey]: metricsData });
+    }
+    return ok(metricsData);
   };
 
   const getLatestSiteMetrics = async (context) => {
@@ -1017,11 +982,6 @@ function SitesController(ctx, log, env) {
     resolveSite,
     getBrandProfile,
     triggerBrandProfile,
-
-    // key events
-    createKeyEvent,
-    getKeyEventsBySiteID,
-    removeKeyEvent,
 
     // site metrics
     getSiteMetricsBySource,

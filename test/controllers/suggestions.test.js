@@ -2401,6 +2401,154 @@ describe('Suggestions Controller', () => {
     expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'Validation error');
   });
 
+  describe('REJECTED status validation', () => {
+    it('should return 403 when non-admin user tries to reject a suggestion', async () => {
+      // Create a suggestion with PENDING_VALIDATION status
+      const pendingSuggestion = {
+        id: SUGGESTION_IDS[0],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CODE_CHANGE',
+        status: 'PENDING_VALIDATION',
+        rank: 1,
+        data: { info: 'sample data' },
+      };
+
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(mockSuggestionEntity(pendingSuggestion, removeStub));
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(opportunity);
+      mockSite.findById.withArgs(SITE_ID).resolves(site);
+
+      // Mock AccessControlUtil - allow hasAccess (for initial check), deny hasAdminAccess (for REJECTED check)
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+
+      const response = await suggestionsController.patchSuggestionsStatus({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: [{ id: SUGGESTION_IDS[0], status: 'REJECTED' }],
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 403);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('uuid', SUGGESTION_IDS[0]);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'Only admins can reject suggestions');
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.not.exist;
+    });
+
+    it('should return 400 when trying to reject a suggestion that is not PENDING_VALIDATION', async () => {
+      // Create a suggestion with NEW status (not PENDING_VALIDATION)
+      const newSuggestion = {
+        id: SUGGESTION_IDS[0],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CODE_CHANGE',
+        status: 'NEW',
+        rank: 1,
+        data: { info: 'sample data' },
+      };
+
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(mockSuggestionEntity(newSuggestion, removeStub));
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(opportunity);
+      mockSite.findById.withArgs(SITE_ID).resolves(site);
+
+      // Mock AccessControlUtil - allow both hasAccess and hasAdminAccess
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+
+      const response = await suggestionsController.patchSuggestionsStatus({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: [{ id: SUGGESTION_IDS[0], status: 'REJECTED' }],
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 400);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('uuid', SUGGESTION_IDS[0]);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'Can only reject suggestions with status PENDING_VALIDATION');
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.not.exist;
+    });
+
+    it('should successfully reject a suggestion with PENDING_VALIDATION status when user has admin access', async () => {
+      // Create a suggestion with PENDING_VALIDATION status
+      const pendingSuggestion = {
+        id: SUGGESTION_IDS[0],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CODE_CHANGE',
+        status: 'PENDING_VALIDATION',
+        rank: 1,
+        data: { info: 'sample data' },
+      };
+
+      const suggestionEntity = mockSuggestionEntity(pendingSuggestion, removeStub);
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(suggestionEntity);
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(opportunity);
+      mockSite.findById.withArgs(SITE_ID).resolves(site);
+
+      // Mock AccessControlUtil - allow both hasAccess and hasAdminAccess
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+
+      const response = await suggestionsController.patchSuggestionsStatus({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: [{ id: SUGGESTION_IDS[0], status: 'REJECTED' }],
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('suggestion');
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'REJECTED');
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('id', SUGGESTION_IDS[0]);
+      expect(bulkPatchResponse.metadata).to.have.property('success', 1);
+      expect(bulkPatchResponse.metadata).to.have.property('failed', 0);
+    });
+
+    it('should return 400 when trying to reject a suggestion with APPROVED status', async () => {
+      // Create a suggestion with APPROVED status (not PENDING_VALIDATION)
+      const approvedSuggestion = {
+        id: SUGGESTION_IDS[0],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CODE_CHANGE',
+        status: 'APPROVED',
+        rank: 1,
+        data: { info: 'sample data' },
+      };
+
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(mockSuggestionEntity(approvedSuggestion, removeStub));
+      mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(opportunity);
+      mockSite.findById.withArgs(SITE_ID).resolves(site);
+
+      // Mock AccessControlUtil - allow both hasAccess and hasAdminAccess
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+
+      const response = await suggestionsController.patchSuggestionsStatus({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: [{ id: SUGGESTION_IDS[0], status: 'REJECTED' }],
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('statusCode', 400);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('uuid', SUGGESTION_IDS[0]);
+      expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'Can only reject suggestions with status PENDING_VALIDATION');
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.not.exist;
+    });
+  });
+
   describe('auto-fix suggestions', () => {
     let suggestionsControllerWithMock;
     beforeEach(async () => {
@@ -3578,12 +3726,130 @@ describe('Suggestions Controller', () => {
       expect(firstCallArgs.tokowakaDeployed).to.be.a('number');
 
       // Verify updatedBy was set
-      expect(firstSugg.setUpdatedBy.calledWith('tokowaka-deployment')).to.be.true;
-      expect(secondSugg.setUpdatedBy.calledWith('tokowaka-deployment')).to.be.true;
+      expect(firstSugg.setUpdatedBy.calledWith('test@test.com')).to.be.true;
+      expect(secondSugg.setUpdatedBy.calledWith('test@test.com')).to.be.true;
 
       // Verify save was called
       expect(firstSugg.save.calledOnce).to.be.true;
       expect(secondSugg.save.calledOnce).to.be.true;
+    });
+
+    it('should remove edgeOptimizeStatus when STALE during deployment', async () => {
+      // Update suggestions to have edgeOptimizeStatus: STALE
+      tokowakaSuggestions[0].getData = () => ({
+        url: 'https://example.com/page1',
+        recommendedAction: 'New Heading Title',
+        checkType: 'heading-empty',
+        transformRules: {
+          action: 'replace',
+          selector: 'h1.test-selector',
+        },
+        edgeOptimizeStatus: 'STALE',
+      });
+
+      tokowakaSuggestions[1].getData = () => ({
+        url: 'https://example.com/page1',
+        recommendedAction: 'New Subtitle',
+        checkType: 'heading-empty',
+        transformRules: {
+          action: 'replace',
+          selector: 'h2.test-selector',
+        },
+        edgeOptimizeStatus: 'STALE',
+      });
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+
+      // Verify edgeOptimizeStatus was removed from both suggestions
+      const firstCallArgs = tokowakaSuggestions[0].setData.firstCall.args[0];
+      const secondCallArgs = tokowakaSuggestions[1].setData.firstCall.args[0];
+
+      expect(firstCallArgs).to.not.have.property('edgeOptimizeStatus');
+      expect(secondCallArgs).to.not.have.property('edgeOptimizeStatus');
+      expect(firstCallArgs).to.have.property('tokowakaDeployed');
+      expect(secondCallArgs).to.have.property('tokowakaDeployed');
+    });
+
+    it('should preserve edgeOptimizeStatus when not STALE during deployment', async () => {
+      // Update suggestions to have edgeOptimizeStatus with other values
+      tokowakaSuggestions[0].getData = () => ({
+        url: 'https://example.com/page1',
+        recommendedAction: 'New Heading Title',
+        checkType: 'heading-empty',
+        transformRules: {
+          action: 'replace',
+          selector: 'h1.test-selector',
+        },
+        edgeOptimizeStatus: 'ACTIVE',
+      });
+
+      tokowakaSuggestions[1].getData = () => ({
+        url: 'https://example.com/page1',
+        recommendedAction: 'New Subtitle',
+        checkType: 'heading-empty',
+        transformRules: {
+          action: 'replace',
+          selector: 'h2.test-selector',
+        },
+        edgeOptimizeStatus: 'PENDING',
+      });
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+
+      // Verify edgeOptimizeStatus was preserved
+      const firstCallArgs = tokowakaSuggestions[0].setData.firstCall.args[0];
+      const secondCallArgs = tokowakaSuggestions[1].setData.firstCall.args[0];
+
+      expect(firstCallArgs).to.have.property('edgeOptimizeStatus', 'ACTIVE');
+      expect(secondCallArgs).to.have.property('edgeOptimizeStatus', 'PENDING');
+      expect(firstCallArgs).to.have.property('tokowakaDeployed');
+      expect(secondCallArgs).to.have.property('tokowakaDeployed');
+    });
+
+    it('uses tokowaka-deployment when profile email is missing', async () => {
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'admin' }])
+            .withAuthenticated(true),
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(tokowakaSuggestions[0].setUpdatedBy.calledWith('tokowaka-deployment')).to.be.true;
+      expect(tokowakaSuggestions[1].setUpdatedBy.calledWith('tokowaka-deployment')).to.be.true;
+      expect(context.log.info.calledWithMatch('tokowaka-deployment')).to.be.true;
     });
 
     it('should return 400 if siteId is invalid', async () => {
@@ -4070,7 +4336,7 @@ describe('Suggestions Controller', () => {
         const setDataArgs = domainWideSuggestion.setData.firstCall.args[0];
         expect(setDataArgs).to.have.property('tokowakaDeployed');
         expect(setDataArgs.tokowakaDeployed).to.be.a('number');
-        expect(domainWideSuggestion.setUpdatedBy.calledWith('tokowaka-deployment')).to.be.true;
+        expect(domainWideSuggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
         expect(domainWideSuggestion.save.calledOnce).to.be.true;
       });
 
@@ -4176,7 +4442,61 @@ describe('Suggestions Controller', () => {
         expect(anotherSuggestion.setData.called).to.be.true;
         const anotherData = anotherSuggestion.setData.firstCall.args[0];
         expect(anotherData).to.have.property('coveredByDomainWide', SUGGESTION_IDS[0]);
-        expect(anotherSuggestion.setUpdatedBy.calledWith('domain-wide-deployment')).to.be.true;
+        expect(anotherSuggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
+      });
+
+      it('uses fallback updatedBy for domain-wide deployment and coverage', async () => {
+        const extraSuggestion = {
+          getId: () => 'suggestion-id-5',
+          getType: () => 'prerender',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 4,
+          getData: () => ({
+            url: 'https://example.com/page3',
+          }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().returnsThis(),
+        };
+
+        mockSuggestion.allByOpportunityId.resolves([
+          domainWideSuggestion,
+          ...regularSuggestions,
+          extraSuggestion,
+        ]);
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          attributes: {
+            authInfo: new AuthInfo()
+              .withType('jwt')
+              .withScopes([{ name: 'admin' }])
+              .withAuthenticated(true),
+          },
+          params: {
+            siteId: SITE_ID,
+            opportunityId: OPPORTUNITY_ID,
+          },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1], SUGGESTION_IDS[2]],
+          },
+        });
+
+        expect(response.status).to.equal(207);
+        expect(domainWideSuggestion.setUpdatedBy.calledWith('tokowaka-deployment')).to.be.true;
+        expect(regularSuggestions[0].setUpdatedBy.calledWith('domain-wide-deployment')).to.be.true;
+        expect(regularSuggestions[1].setUpdatedBy.calledWith('domain-wide-deployment')).to.be.true;
+        expect(extraSuggestion.setUpdatedBy.calledWith('domain-wide-deployment')).to.be.true;
+
+        const infoCalls = context.log.info.getCalls();
+        const domainWideLog = infoCalls.find((call) => call.args[0].includes('domain-wide suggestion'));
+        expect(domainWideLog).to.exist;
+        expect(domainWideLog.args[0]).to.include('tokowaka-deployment');
       });
 
       it('should not mark non-NEW suggestions as covered by domain-wide', async () => {
@@ -4922,10 +5242,32 @@ describe('Suggestions Controller', () => {
       expect(dataArg).to.not.have.property('tokowakaDeployed');
 
       // Verify setUpdatedBy was called
-      expect(suggestion.setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
+      expect(suggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
 
       // Verify save was called
       expect(suggestion.save.calledOnce).to.be.true;
+    });
+
+    it('uses fallback updatedBy when profile email is missing', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'admin' }])
+            .withAuthenticated(true),
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(tokowakaSuggestions[0].setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
     });
 
     it('should return 400 for suggestions without tokowakaDeployed during rollback', async () => {
@@ -4982,7 +5324,7 @@ describe('Suggestions Controller', () => {
       // Verify both suggestions were updated
       tokowakaSuggestions.forEach((suggestion) => {
         expect(suggestion.setData.calledOnce).to.be.true;
-        expect(suggestion.setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
+        expect(suggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
         expect(suggestion.save.calledOnce).to.be.true;
       });
     });
@@ -5228,7 +5570,7 @@ describe('Suggestions Controller', () => {
       expect(domainWideSuggestion.setData.calledOnce).to.be.true;
       const domainWideData = domainWideSuggestion.setData.firstCall.args[0];
       expect(domainWideData).to.not.have.property('tokowakaDeployed');
-      expect(domainWideSuggestion.setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
+      expect(domainWideSuggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
       expect(domainWideSuggestion.save.calledOnce).to.be.true;
 
       // Verify covered suggestions were also rolled back
@@ -5237,8 +5579,33 @@ describe('Suggestions Controller', () => {
         const suggestionData = suggestion.setData.firstCall.args[0];
         expect(suggestionData).to.not.have.property('tokowakaDeployed');
         expect(suggestionData).to.not.have.property('coveredByDomainWide');
-        expect(suggestion.setUpdatedBy.calledWith('domain-wide-rollback')).to.be.true;
+        expect(suggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
         expect(suggestion.save.calledOnce).to.be.true;
+      });
+    });
+
+    it('uses fallback updatedBy when profile email is missing', async () => {
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'admin' }])
+            .withAuthenticated(true),
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(domainWideSuggestion.setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
+      coveredSuggestions.forEach((suggestion) => {
+        expect(suggestion.setUpdatedBy.calledWith('domain-wide-rollback')).to.be.true;
       });
     });
 
@@ -5352,7 +5719,7 @@ describe('Suggestions Controller', () => {
         statusText: 'OK',
         headers: {
           get: (headerName) => {
-            if (headerName === 'x-tokowaka-cache') {
+            if (headerName === 'x-edge-optimize-cache') {
               return 'hit';
             }
             return null;
@@ -5541,6 +5908,28 @@ describe('Suggestions Controller', () => {
       const putCall = putObjectCalls[0];
       const key = putCall.args[0].input.Key;
       expect(key).to.include('preview/opportunities/');
+    });
+
+    it('logs tokowaka-preview when profile email is missing', async () => {
+      const response = await suggestionsController.previewSuggestions({
+        ...context,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'admin' }])
+            .withAuthenticated(true),
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(context.log.info.calledWithMatch('tokowaka-preview')).to.be.true;
     });
 
     it('should return 400 if suggestions belong to different URLs', async () => {
@@ -6401,6 +6790,76 @@ describe('Suggestions Controller', () => {
       expect(failedSuggestion).to.exist;
       expect(failedSuggestion.statusCode).to.equal(400);
       expect(failedSuggestion.message).to.equal('Domain-wide aggregate suggestions cannot be previewed individually');
+    });
+  });
+
+  describe('LLMO edge optimize config logging', () => {
+    it('logs tokowaka-edge-optimize-config when profile email is missing', async () => {
+      const log = {
+        info: sandbox.stub(),
+        error: sandbox.stub(),
+      };
+
+      const config = {
+        getLlmoConfig: () => ({ dataFolder: 'https://example.com/data' }),
+        getEdgeOptimizeConfig: () => ({}),
+        updateEdgeOptimizeConfig: sandbox.stub(),
+      };
+
+      const site = {
+        getId: () => SITE_ID,
+        getBaseURL: () => 'https://example.com',
+        getConfig: () => config,
+        setConfig: sandbox.stub(),
+        save: sandbox.stub().resolves(),
+      };
+
+      const mockSite = {
+        findById: sandbox.stub().resolves(site),
+      };
+
+      const tokowakaClientStub = {
+        fetchMetaconfig: sandbox.stub().resolves({ apiKeys: ['key'] }),
+        updateMetaconfig: sandbox.stub().resolves({ apiKeys: ['key'] }),
+      };
+
+      const LlmoController = await esmock('../../src/controllers/llmo/llmo.js', {
+        '../../src/support/access-control-util.js': {
+          default: {
+            fromContext: () => ({
+              hasAccess: sandbox.stub().resolves(true),
+            }),
+          },
+        },
+        '@adobe/spacecat-shared-tokowaka-client': {
+          default: {
+            createFrom: sandbox.stub().returns(tokowakaClientStub),
+          },
+        },
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: {
+            toDynamoItem: (cfg) => cfg,
+          },
+        },
+      });
+
+      const llmoController = LlmoController({
+        dataAccess: { Site: mockSite },
+        attributes: { authInfo: { profile: {} } },
+        log,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+      });
+
+      const response = await llmoController.createOrUpdateEdgeConfig({
+        dataAccess: { Site: mockSite },
+        attributes: { authInfo: { profile: {} } },
+        log,
+        params: { siteId: SITE_ID },
+        data: { tokowakaEnabled: true },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(log.info.calledWithMatch('tokowaka-edge-optimize-config')).to.be.true;
     });
   });
 });
