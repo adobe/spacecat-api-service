@@ -46,6 +46,47 @@ BrandProfile:
       type: object
       additionalProperties: true
       description: Free-form metadata bucket for future extensions.
+BotBlockerResult:
+  type: object
+  description: Result of bot blocker detection for a site. Indicates whether the site is crawlable by bots, what type of blocking was detected (if any), and the confidence level of the detection.
+  properties:
+    crawlable:
+      type: boolean
+      description: Whether the site can be crawled by bots
+      example: false
+    type:
+      type: string
+      description: The type of bot blocker detected or infrastructure present
+      enum:
+        - 'cloudflare'
+        - 'imperva'
+        - 'akamai'
+        - 'fastly'
+        - 'cloudfront'
+        - 'cloudflare-allowed'
+        - 'imperva-allowed'
+        - 'akamai-allowed'
+        - 'fastly-allowed'
+        - 'cloudfront-allowed'
+        - 'http2-block'
+        - 'none'
+        - 'unknown'
+      example: 'cloudflare'
+    confidence:
+      type: number
+      format: float
+      minimum: 0
+      maximum: 1
+      description: Confidence level of the detection (0.0 to 1.0). Values >= 0.95 indicate reliable detection. Lower values suggest uncertain situations.
+      example: 0.99
+    reason:
+      type: string
+      description: Optional reason or additional context for the detection result
+      example: 'HTTP 403 Forbidden - access denied'
+  required:
+    - crawlable
+    - type
+    - confidence
 Id:
   type: string
   format: uuid
@@ -1602,54 +1643,6 @@ AnalyticsSiteIntegration:
         $ref: './examples.yaml#/analytics-site-integration-cja-tags'
     - analytics-site-integration-cja-websdk:
         $ref: './examples.yaml#/analytics-site-integration-cja-websdk'
-KeyEventType:
-  type: string
-  enum:
-    - 'performance'
-    - 'seo'
-    - 'content'
-    - 'code'
-    - 'third party'
-    - 'experimentation'
-    - 'network'
-    - 'status change'
-KeyEvent:
-  type: object
-  properties:
-    id:
-      description: The key event ID in uuid format
-      $ref: '#/Id'
-    name:
-      description: Name of the key event
-      type: string
-    type:
-      $ref: '#/KeyEventType'
-    time:
-      description: Time of the key event occurred
-      $ref: '#/DateTime'
-  example:
-    id: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
-    name: 'Multiple 404s detected'
-    type: 'seo'
-    time: '2023-12-15T09:30:00Z'
-KeyEventsList:
-  type: array
-  items:
-    $ref: './schemas.yaml#/KeyEvent'
-KeyEventCreate:
-  type: object
-  required:
-    - name
-    - type
-  properties:
-    name:
-      description: Name of the key event
-      type: string
-    type:
-      $ref: '#/KeyEventType'
-    time:
-      description: Time of the key event occurred (optional). Current time is used when the field is missing
-      $ref: '#/DateTime'
 SiteTopPage:
   type: object
   required:
@@ -4319,6 +4312,7 @@ LlmoConfig:
     - entities
     - categories
     - topics
+    - aiTopics
     - brands
     - competitors
   properties:
@@ -4358,6 +4352,20 @@ LlmoConfig:
             - prompt: "What are the latest AI trends?"
               regions: ["us"]
               origin: "human"
+              source: "config"
+    aiTopics:
+      type: object
+      description: A record of AI topics with nested AI prompts keyed by UUID
+      additionalProperties:
+        $ref: '#/LlmoTopic'
+      example:
+        "456e7890-e89b-12d3-a456-426614174001":
+          name: "AI/ML"
+          category: "123e4567-e89b-12d3-a456-426614174000"
+          prompts:
+            - prompt: "What are the latest AI trends?"
+              regions: ["us"]
+              origin: "ai"
               source: "config"
     brands:
       type: object
