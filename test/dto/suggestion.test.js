@@ -76,7 +76,7 @@ describe('Suggestion DTO', () => {
     });
 
     describe('minimal view', () => {
-      it('returns id, status, and URL-related data fields', () => {
+      it('returns id, status, timestamps, and URL-related data fields', () => {
         const suggestion = createMockSuggestion();
 
         const json = SuggestionDto.toJSON(suggestion, 'minimal');
@@ -87,6 +87,8 @@ describe('Suggestion DTO', () => {
         expect(json.data).to.have.property('url', 'https://example.com/page');
         // Should not include non-URL fields like 'content'
         expect(json.data).to.not.have.property('content');
+        expect(json).to.have.property('createdAt', '2025-01-01T00:00:00.000Z');
+        expect(json).to.have.property('updatedAt', '2025-01-02T00:00:00.000Z');
       });
 
       it('includes pageUrl in data when present', () => {
@@ -278,6 +280,8 @@ describe('Suggestion DTO', () => {
         expect(json).to.deep.equal({
           id: 'suggestion-id-123',
           status: 'NEW',
+          createdAt: '2025-01-01T00:00:00.000Z',
+          updatedAt: '2025-01-02T00:00:00.000Z',
         });
       });
 

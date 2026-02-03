@@ -65,13 +65,15 @@ export const SuggestionDto = {
     const data = suggestion.getData();
     const opportunityType = opportunity?.getType() || null;
 
-    // Minimal view: id, status, and URL-related data fields
+    // Minimal view: id, status, timestamps, and URL-related data fields
     if (view === 'minimal') {
       const minimalData = extractMinimalData(data, opportunityType);
       return {
         id: suggestion.getId(),
         status: suggestion.getStatus(),
         ...(minimalData && { data: minimalData }),
+        createdAt: suggestion.getCreatedAt(),
+        updatedAt: suggestion.getUpdatedAt(),
       };
     }
 

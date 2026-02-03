@@ -2925,7 +2925,7 @@ SuggestionList:
     $ref: '#/Suggestion'
 SuggestionMinimal:
   type: object
-  description: Minimal suggestion projection containing id, status, and URL-related data fields for listing views
+  description: Minimal suggestion projection containing id, status, timestamps, and URL-related data fields for listing views
   properties:
     id:
       description: UUID of this suggestion
@@ -3011,9 +3011,17 @@ SuggestionMinimal:
           description: Issues array for Accessibility, ColorContrast, FormNonExperimental (includes occurrences field)
           items:
             type: object
+    createdAt:
+      description: UTC timestamp of when the suggestion was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: UTC timestamp of when the suggestion was last updated
+      $ref: '#/DateTime'
   required:
     - id
     - status
+    - createdAt
+    - updatedAt
 SuggestionSummary:
   type: object
   description: Summary suggestion projection (superset of minimal, subset of full). Contains minimal data fields plus metadata for table displays.
