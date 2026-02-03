@@ -16,40 +16,46 @@ import { expect, use } from 'chai';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import nock from 'nock';
-
-import RunScrapeCommand from '../../../../src/support/slack/commands/run-scrape.js';
+import esmock from 'esmock';
 
 use(sinonChai);
 
 describe('RunScrapeCommand', () => {
+  let sandbox;
   let context;
   let slackContext;
   let dataAccessStub;
   let logStub;
   let sqsStub;
+  let mockScrapeClient;
+  let RunScrapeCommand;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    sandbox = sinon.createSandbox();
+    mockScrapeClient = {
+      createScrapeJob: sandbox.stub().resolves({ id: 'job-123', urlCount: 2 }),
+    };
     dataAccessStub = {
       Configuration: {
-        findLatest: sinon.stub(),
+        findLatest: sandbox.stub(),
       },
       Site: {
-        findByBaseURL: sinon.stub(),
+        findByBaseURL: sandbox.stub(),
       },
     };
     const getConfigStub = {
-      getSlackRoles: sinon.stub().returns({
+      getSlackRoles: sandbox.stub().returns({
         admin: ['USER123'],
         scrape: ['USER123'],
       }),
     };
     dataAccessStub.Configuration.findLatest.returns(getConfigStub);
     logStub = {
-      info: sinon.stub(),
-      error: sinon.stub(),
+      info: sandbox.stub(),
+      error: sandbox.stub(),
     };
     sqsStub = {
-      sendMessage: sinon.stub().resolves(),
+      sendMessage: sandbox.stub().resolves(),
     };
     context = {
       dataAccess: dataAccessStub,
@@ -58,9 +64,22 @@ describe('RunScrapeCommand', () => {
       env: { SCRAPING_JOBS_QUEUE_URL: 'https://example.com' },
     };
     slackContext = {
-      say: sinon.spy(),
+      say: sandbox.spy(),
       user: 'USER123',
     };
+
+    const RunScrapeCommandMocked = await esmock('../../../../src/support/slack/commands/run-scrape.js', {
+      '@adobe/spacecat-shared-scrape-client': {
+        ScrapeClient: {
+          createFrom: sandbox.stub().returns(mockScrapeClient),
+        },
+      },
+    });
+    RunScrapeCommand = RunScrapeCommandMocked.default;
+  });
+
+  afterEach(() => {
+    sandbox.restore();
   });
 
   describe('Initialization and BaseCommand Integration', () => {
@@ -76,21 +95,23 @@ describe('RunScrapeCommand', () => {
     it('handles null result from SiteTopPage.allBySiteId', async () => {
       dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
-        getSiteTopPagesBySourceAndGeo: sinon.stub().resolves(null),
+        getSiteTopPagesBySourceAndGeo: sandbox.stub().resolves(null),
       });
       const command = RunScrapeCommand(context);
       await command.handleExecution(['https://example.com'], slackContext);
       expect(slackContext.say.calledWith(':warning: No top pages found for site `https://example.com`')).to.be.true;
+      expect(mockScrapeClient.createScrapeJob.called).to.be.false;
     });
 
     it('handles empty array result from SiteTopPage.allBySiteId', async () => {
       dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
-        getSiteTopPagesBySourceAndGeo: sinon.stub().resolves([]),
+        getSiteTopPagesBySourceAndGeo: sandbox.stub().resolves([]),
       });
       const command = RunScrapeCommand(context);
       await command.handleExecution(['https://example.com'], slackContext);
       expect(slackContext.say.calledWith(':warning: No top pages found for site `https://example.com`')).to.be.true;
+      expect(mockScrapeClient.createScrapeJob.called).to.be.false;
     });
 
     it('parses SLACK_IDS_RUN_IMPORT correctly when present', async () => {
@@ -103,7 +124,7 @@ describe('RunScrapeCommand', () => {
     it('triggers a scrape for a valid site with top pages', async () => {
       dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
-        getSiteTopPagesBySourceAndGeo: sinon.stub().resolves([
+        getSiteTopPagesBySourceAndGeo: sandbox.stub().resolves([
           { getUrl: () => 'https://example.com/page1' },
           { getUrl: () => 'https://example.com/page2' },
         ]),
@@ -115,6 +136,12 @@ describe('RunScrapeCommand', () => {
 
       expect(slackContext.say.called).to.be.true;
       expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering scrape run for site `https://example.com`');
+      expect(slackContext.say.secondCall.args[0]).to.equal(':white_check_mark: Completed triggering scrape for `https://example.com` (jobId: job-123, urlCount: 2).');
+      expect(mockScrapeClient.createScrapeJob).to.have.been.calledWith({
+        processingType: 'default',
+        urls: ['https://example.com/page1', 'https://example.com/page2'],
+        maxScrapeAge: 0,
+      });
     });
 
     /* todo: uncomment after summit and back-office-UI support
@@ -141,7 +168,7 @@ describe('RunScrapeCommand', () => {
     it('informs user if no top pages are found', async () => {
       dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
-        getSiteTopPagesBySourceAndGeo: sinon.stub().resolves([]),
+        getSiteTopPagesBySourceAndGeo: sandbox.stub().resolves([]),
       });
 
       const command = RunScrapeCommand(context);
@@ -149,6 +176,7 @@ describe('RunScrapeCommand', () => {
       await command.handleExecution(['https://example.com'], slackContext);
 
       expect(slackContext.say.calledWith(':warning: No top pages found for site `https://example.com`')).to.be.true;
+      expect(mockScrapeClient.createScrapeJob.called).to.be.false;
     });
 
     it('informs user if the site was not found', async () => {
@@ -220,7 +248,7 @@ describe('RunScrapeCommand', () => {
       const fileUrl = 'https://example.com/sites.csv';
       dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
-        getSiteTopPagesBySourceAndGeo: sinon.stub().resolves([
+        getSiteTopPagesBySourceAndGeo: sandbox.stub().resolves([
           { getUrl: () => 'https://site.com' },
           { getUrl: () => 'https://valid.url' },
         ]),
@@ -243,13 +271,14 @@ describe('RunScrapeCommand', () => {
       await command.handleExecution([], slackContext);
 
       expect(slackContext.say.calledWith(':adobe-run: Triggering scrape run for 2 sites.')).to.be.true;
+      expect(mockScrapeClient.createScrapeJob.callCount).to.equal(2);
     });
 
     it('handles failing scrape for a site in the CSV file', async () => {
       const fileUrl = 'https://example.com/sites.csv';
       dataAccessStub.Site.findByBaseURL.onCall(0).resolves({
         getId: () => '123',
-        getSiteTopPagesBySourceAndGeo: sinon.stub().resolves([
+        getSiteTopPagesBySourceAndGeo: sandbox.stub().resolves([
           { getUrl: () => 'https://site.com' },
           { getUrl: () => 'https://valid.url' },
         ]),
@@ -279,6 +308,36 @@ describe('RunScrapeCommand', () => {
       const command = RunScrapeCommand(context);
       await command.handleExecution(['https://example.com', 'invalid', 'true'], slackContext);
       expect(slackContext.say.calledWith(':error: Batch size must be a number.')).to.be.true;
+    });
+
+    it('treats second arg as allowCache when boolean-like', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves({
+        getId: () => '123',
+        getSiteTopPagesBySourceAndGeo: sandbox.stub().resolves([
+          { getUrl: () => 'https://example.com/page1' },
+        ]),
+      });
+      const command = RunScrapeCommand(context);
+      await command.handleExecution(['https://example.com', 'true'], slackContext);
+      const scrapeArgs = mockScrapeClient.createScrapeJob.firstCall.args[0];
+      expect(scrapeArgs.processingType).to.equal('default');
+      expect(scrapeArgs.urls).to.deep.equal(['https://example.com/page1']);
+      expect(scrapeArgs).to.not.have.property('maxScrapeAge');
+    });
+
+    it('uses allowCacheArg when provided as third argument', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves({
+        getId: () => '123',
+        getSiteTopPagesBySourceAndGeo: sandbox.stub().resolves([
+          { getUrl: () => 'https://example.com/page1' },
+        ]),
+      });
+      const command = RunScrapeCommand(context);
+      await command.handleExecution(['https://example.com', '20', 'true'], slackContext);
+      const scrapeArgs = mockScrapeClient.createScrapeJob.firstCall.args[0];
+      expect(scrapeArgs.processingType).to.equal('default');
+      expect(scrapeArgs.urls).to.deep.equal(['https://example.com/page1']);
+      expect(scrapeArgs).to.not.have.property('maxScrapeAge');
     });
   });
 });
