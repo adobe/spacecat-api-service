@@ -1,3 +1,10 @@
+## [1.306.1](https://github.com/adobe/spacecat-api-service/compare/v1.306.0...v1.306.1) (2026-02-03)
+
+
+### Bug Fixes
+
+* rename tokowakaDeployed to edgeDeployed ([#1716](https://github.com/adobe/spacecat-api-service/issues/1716)) ([f57b1f3](https://github.com/adobe/spacecat-api-service/commit/f57b1f316831164e04330e16fe1ce77d5aafb67e))
+
 # [1.306.0](https://github.com/adobe/spacecat-api-service/compare/v1.305.4...v1.306.0) (2026-02-03)
 
 
