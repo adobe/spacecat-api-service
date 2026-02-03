@@ -41,7 +41,7 @@ describe('Suggestion Projection Views - E2E Tests', () => {
 
   before(async function beforeHook() {
     // Auto-discover opportunities
-    console.log('🔍 Auto-discovering opportunities for site:', SITE_ID);
+    console.log('[SETUP] Auto-discovering opportunities for site:', SITE_ID);
     try {
       const response = await makeSpacecatRequest({
         path: `/sites/${SITE_ID}/opportunities`,
@@ -63,7 +63,7 @@ describe('Suggestion Projection Views - E2E Tests', () => {
               const suggestions = await sugResponse.json();
               if (suggestions.length > 0) {
                 OPPORTUNITY_ID = opp.id;
-                console.log(`✅ Found opportunity with suggestions: ${opp.id} (type: ${opp.type})`);
+                console.log(`[OK] Found opportunity with suggestions: ${opp.id} (type: ${opp.type})`);
                 break;
               }
             }
@@ -71,16 +71,16 @@ describe('Suggestion Projection Views - E2E Tests', () => {
         }
       }
     } catch (err) {
-      console.log('⚠️  Failed to auto-discover opportunities:', err.message);
+      console.log('[WARN] Failed to auto-discover opportunities:', err.message);
     }
 
     if (!OPPORTUNITY_ID) {
-      console.log('⚠️  No opportunity with suggestions found - skipping tests');
+      console.log('[WARN] No opportunity with suggestions found - skipping tests');
       this.skip();
       return;
     }
 
-    console.log(`📋 Testing with opportunity: ${OPPORTUNITY_ID}`);
+    console.log(`[INFO] Testing with opportunity: ${OPPORTUNITY_ID}`);
   });
 
   describe('MINIMAL VIEW - Timestamp Validation', () => {
@@ -96,7 +96,7 @@ describe('Suggestion Projection Views - E2E Tests', () => {
       expect(suggestions).to.be.an('array');
 
       if (suggestions.length === 0) {
-        console.log('⚠️  No suggestions found - skipping validation');
+        console.log('[WARN] No suggestions found - skipping validation');
         this.skip();
         return;
       }
@@ -129,7 +129,7 @@ describe('Suggestion Projection Views - E2E Tests', () => {
       expect(suggestion).to.not.have.property('kpiDeltas', 'Minimal view should not include kpiDeltas');
       expect(suggestion).to.not.have.property('updatedBy', 'Minimal view should not include updatedBy');
 
-      console.log(`✓ Minimal view includes timestamps: createdAt=${suggestion.createdAt}, updatedAt=${suggestion.updatedAt}`);
+      console.log(`[OK] Minimal view includes timestamps: createdAt=${suggestion.createdAt}, updatedAt=${suggestion.updatedAt}`);
     });
 
     it('should include timestamps even when data field is absent', async () => {
@@ -152,7 +152,7 @@ describe('Suggestion Projection Views - E2E Tests', () => {
         expect(suggestion).to.have.property('updatedAt');
       });
 
-      console.log(`✓ All ${suggestions.length} suggestion(s) have timestamps in minimal view`);
+      console.log(`[OK] All ${suggestions.length} suggestion(s) have timestamps in minimal view`);
     });
   });
 
@@ -190,7 +190,7 @@ describe('Suggestion Projection Views - E2E Tests', () => {
         expect(suggestion).to.not.have.property('kpiDeltas');
       }
 
-      console.log('✓ Summary view includes timestamps and metadata');
+      console.log('[OK] Summary view includes timestamps and metadata');
     });
   });
 
@@ -226,7 +226,7 @@ describe('Suggestion Projection Views - E2E Tests', () => {
       // The key test is that we have timestamps - kpiDeltas is optional
       const hasKpiDeltas = Object.prototype.hasOwnProperty.call(suggestion, 'kpiDeltas');
 
-      console.log('✓ Full view includes all fields');
+      console.log('[OK] Full view includes all fields');
       console.log(`  - kpiDeltas present: ${hasKpiDeltas}`);
     });
   });
@@ -256,7 +256,7 @@ describe('Suggestion Projection Views - E2E Tests', () => {
       expect(suggestion).to.have.property('updatedAt');
 
       // kpiDeltas may or may not be present - not the focus of this test
-      console.log('✓ Default view is full view (backward compatible)');
+      console.log('[OK] Default view is full view (backward compatible)');
     });
   });
 
@@ -268,7 +268,7 @@ describe('Suggestion Projection Views - E2E Tests', () => {
       });
 
       if (response.status !== 200) {
-        console.log(`⚠️  Paged endpoint returned ${response.status} - may not support view parameter yet`);
+        console.log(`[WARN] Paged endpoint returned ${response.status} - may not support view parameter yet`);
         this.skip();
         return;
       }
@@ -277,7 +277,7 @@ describe('Suggestion Projection Views - E2E Tests', () => {
 
       // Paged endpoint returns { items: [...], cursor?: string }
       if (!result.items) {
-        console.log('⚠️  Paged endpoint has unexpected structure - skipping');
+        console.log('[WARN] Paged endpoint has unexpected structure - skipping');
         this.skip();
         return;
       }
@@ -290,9 +290,9 @@ describe('Suggestion Projection Views - E2E Tests', () => {
         expect(suggestion).to.have.property('createdAt');
         expect(suggestion).to.have.property('updatedAt');
 
-        console.log(`✓ Paged endpoint supports minimal view with timestamps (${items.length} items)`);
+        console.log(`[OK] Paged endpoint supports minimal view with timestamps (${items.length} items)`);
       } else {
-        console.log('⚠️  No items in paged response - skipping');
+        console.log('[WARN] No items in paged response - skipping');
         this.skip();
       }
     });
@@ -318,10 +318,10 @@ describe('Suggestion Projection Views - E2E Tests', () => {
         // Check if minimal view is being applied (should not have opportunityId)
         const isMinimalView = !suggestion.opportunityId;
         if (!isMinimalView) {
-          console.log('⚠️  By-status endpoint may not support view parameter yet - returning full view');
+          console.log('[WARN] By-status endpoint may not support view parameter yet - returning full view');
         }
 
-        console.log(`✓ By-status endpoint returns timestamps (${suggestions.length} items)`);
+        console.log(`[OK] By-status endpoint returns timestamps (${suggestions.length} items)`);
       }
     });
   });
@@ -338,7 +338,7 @@ describe('Suggestion Projection Views - E2E Tests', () => {
 
       const suggestions = await response.json();
       if (suggestions.length === 0) {
-        console.log('⚠️  No suggestions available for single suggestion test');
+        console.log('[WARN] No suggestions available for single suggestion test');
         this.skip();
         return;
       }
@@ -365,7 +365,7 @@ describe('Suggestion Projection Views - E2E Tests', () => {
       expect(suggestion).to.have.property('updatedAt');
       expect(suggestion).to.not.have.property('kpiDeltas');
 
-      console.log('✓ Single suggestion endpoint supports minimal view with timestamps');
+      console.log('[OK] Single suggestion endpoint supports minimal view with timestamps');
     });
   });
 
@@ -393,14 +393,14 @@ describe('Suggestion Projection Views - E2E Tests', () => {
       const minimalSize = minimalText.length;
       const reductionPercent = Math.round(((fullSize - minimalSize) / fullSize) * 100);
 
-      console.log('✓ Payload size comparison:');
+      console.log('[OK] Payload size comparison:');
       console.log(`  - Full view: ${fullSize} bytes`);
       console.log(`  - Minimal view: ${minimalSize} bytes`);
       console.log(`  - Reduction: ${reductionPercent}%`);
 
       // Minimal should be smaller or equal (if view param not supported, they'll be same)
       if (fullSize === minimalSize) {
-        console.log('⚠️  Payload sizes are identical - view parameter may not be applied on this endpoint');
+        console.log('[WARN] Payload sizes are identical - view parameter may not be applied on this endpoint');
       } else {
         expect(minimalSize).to.be.lessThan(fullSize);
         expect(reductionPercent).to.be.greaterThan(20, 'Minimal view should reduce payload by at least 20%');
@@ -447,7 +447,7 @@ describe('Suggestion Projection Views - E2E Tests', () => {
         }
       });
 
-      console.log('✓ Timestamps are consistent across different views');
+      console.log('[OK] Timestamps are consistent across different views');
     });
   });
 
@@ -460,7 +460,7 @@ describe('Suggestion Projection Views - E2E Tests', () => {
 
       // Some endpoints may not validate view param and just ignore it (returning 200)
       if (response.status === 200) {
-        console.log('⚠️  Invalid view parameter was ignored (returned 200) - validation may not be implemented');
+        console.log('[WARN] Invalid view parameter was ignored (returned 200) - validation may not be implemented');
         this.skip();
         return;
       }
@@ -469,7 +469,7 @@ describe('Suggestion Projection Views - E2E Tests', () => {
       const result = await response.json();
       expect(result).to.have.property('message');
 
-      console.log('✓ Invalid view parameter correctly returns 400');
+      console.log('[OK] Invalid view parameter correctly returns 400');
     });
   });
 
@@ -503,7 +503,7 @@ describe('Suggestion Projection Views - E2E Tests', () => {
         expect(suggestion.data).to.have.property('aggregationKey');
       }
 
-      console.log('✓ Existing clients (no view param) still get full data');
+      console.log('[OK] Existing clients (no view param) still get full data');
     });
   });
 
@@ -515,7 +515,7 @@ describe('Suggestion Projection Views - E2E Tests', () => {
         : [OPPORTUNITY_ID].filter(Boolean);
 
       if (opportunityIds.length <= 1) {
-        console.log('⚠️  Only one opportunity found - multi-type validation limited');
+        console.log('[WARN] Only one opportunity found - multi-type validation limited');
       }
 
       const results = [];
@@ -574,13 +574,13 @@ describe('Suggestion Projection Views - E2E Tests', () => {
       }
 
       // Print summary
-      console.log('\n📊 Multi-Type Validation Results:');
-      console.log('─'.repeat(80));
+      console.log('\nMulti-Type Validation Results:');
+      console.log('-'.repeat(80));
 
       results.forEach((r, index) => {
-        let statusIcon = '❌';
-        if (r.status === 'pass') statusIcon = '✅';
-        else if (r.status === 'empty') statusIcon = '⚠️';
+        let statusIcon = '[FAIL]';
+        if (r.status === 'pass') statusIcon = '[PASS]';
+        else if (r.status === 'empty') statusIcon = '[SKIP]';
         console.log(`${index + 1}. ${statusIcon} Opportunity: ${r.opportunityId}`);
         if (r.suggestionType) {
           console.log(`      Type: ${r.suggestionType}`);
@@ -594,10 +594,10 @@ describe('Suggestion Projection Views - E2E Tests', () => {
         if (r.message) {
           console.log(`      Message: ${r.message}`);
         }
-        console.log(`      createdAt: ${r.hasCreatedAt ? '✓' : '✗'}, updatedAt: ${r.hasUpdatedAt ? '✓' : '✗'}`);
+        console.log(`      createdAt: ${r.hasCreatedAt ? 'yes' : 'no'}, updatedAt: ${r.hasUpdatedAt ? 'yes' : 'no'}`);
       });
 
-      console.log('─'.repeat(80));
+      console.log('-'.repeat(80));
 
       // Assert all passed
       const passed = results.filter((r) => r.status === 'pass');
@@ -619,7 +619,7 @@ describe('Suggestion Projection Views - E2E Tests', () => {
       });
 
       if (oppsResponse.status !== 200) {
-        console.log('⚠️  Could not fetch opportunities for site - skipping auto-discovery');
+        console.log('[WARN] Could not fetch opportunities for site - skipping auto-discovery');
         this.skip();
         return;
       }
@@ -627,12 +627,12 @@ describe('Suggestion Projection Views - E2E Tests', () => {
       const discoveredOpps = await oppsResponse.json();
 
       if (!Array.isArray(discoveredOpps) || discoveredOpps.length === 0) {
-        console.log('⚠️  No opportunities found for site - skipping auto-discovery');
+        console.log('[WARN] No opportunities found for site - skipping auto-discovery');
         this.skip();
         return;
       }
 
-      console.log(`\n🔍 Auto-discovered ${discoveredOpps.length} opportunities for site ${SITE_ID}`);
+      console.log(`\n[INFO] Auto-discovered ${discoveredOpps.length} opportunities for site ${SITE_ID}`);
 
       // Group by type
       const typeMap = new Map();
@@ -643,7 +643,7 @@ describe('Suggestion Projection Views - E2E Tests', () => {
         }
       });
 
-      console.log(`📋 Found ${typeMap.size} unique opportunity types: ${[...typeMap.keys()].join(', ')}`);
+      console.log(`[INFO] Found ${typeMap.size} unique opportunity types: ${[...typeMap.keys()].join(', ')}`);
 
       // Test one opportunity of each type
       const results = [];
@@ -699,13 +699,13 @@ describe('Suggestion Projection Views - E2E Tests', () => {
       }
 
       // Print results
-      console.log('\n📊 Auto-Discovery Results by Opportunity Type:');
-      console.log('─'.repeat(80));
+      console.log('\nAuto-Discovery Results by Opportunity Type:');
+      console.log('-'.repeat(80));
 
       results.forEach((r) => {
-        let icon = '❌';
-        if (r.status === 'pass') icon = '✅';
-        else if (r.status === 'empty') icon = '⚠️';
+        let icon = '[FAIL]';
+        if (r.status === 'pass') icon = '[PASS]';
+        else if (r.status === 'empty') icon = '[SKIP]';
         console.log(`${icon} ${r.type}`);
         console.log(`      Opportunity ID: ${r.oppId}`);
         if (r.dataFields && r.dataFields.length > 0) {
@@ -714,15 +714,15 @@ describe('Suggestion Projection Views - E2E Tests', () => {
         if (r.message) {
           console.log(`      ${r.message}`);
         }
-        console.log(`      Timestamps: createdAt=${r.hasCreatedAt ? '✓' : '✗'}, updatedAt=${r.hasUpdatedAt ? '✓' : '✗'}`);
+        console.log(`      Timestamps: createdAt=${r.hasCreatedAt ? 'yes' : 'no'}, updatedAt=${r.hasUpdatedAt ? 'yes' : 'no'}`);
       });
 
-      console.log('─'.repeat(80));
+      console.log('-'.repeat(80));
 
       const passed = results.filter((r) => r.status === 'pass');
       const failed = results.filter((r) => r.status === 'fail');
 
-      console.log(`✓ Validated ${passed.length}/${results.length} opportunity types`);
+      console.log(`[OK] Validated ${passed.length}/${results.length} opportunity types`);
 
       // All types that have suggestions should have timestamps
       expect(failed.length).to.equal(0, `Timestamps missing for types: ${failed.map((r) => r.type).join(', ')}`);
