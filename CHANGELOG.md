@@ -1,3 +1,17 @@
+## [1.306.1](https://github.com/adobe/spacecat-api-service/compare/v1.306.0...v1.306.1) (2026-02-03)
+
+
+### Bug Fixes
+
+* rename tokowakaDeployed to edgeDeployed ([#1716](https://github.com/adobe/spacecat-api-service/issues/1716)) ([f57b1f3](https://github.com/adobe/spacecat-api-service/commit/f57b1f316831164e04330e16fe1ce77d5aafb67e))
+
+# [1.306.0](https://github.com/adobe/spacecat-api-service/compare/v1.305.4...v1.306.0) (2026-02-03)
+
+
+### Features
+
+* migrate scrape-command to use scrapeClient ([#1763](https://github.com/adobe/spacecat-api-service/issues/1763)) ([edcf75d](https://github.com/adobe/spacecat-api-service/commit/edcf75d27585ca9e4479dd93ebc73eb83e230aba))
+
 ## [1.305.4](https://github.com/adobe/spacecat-api-service/compare/v1.305.3...v1.305.4) (2026-02-03)
 
 
