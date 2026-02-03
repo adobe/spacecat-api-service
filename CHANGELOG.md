@@ -1,3 +1,10 @@
+# [1.306.0](https://github.com/adobe/spacecat-api-service/compare/v1.305.4...v1.306.0) (2026-02-03)
+
+
+### Features
+
+* migrate scrape-command to use scrapeClient ([#1763](https://github.com/adobe/spacecat-api-service/issues/1763)) ([edcf75d](https://github.com/adobe/spacecat-api-service/commit/edcf75d27585ca9e4479dd93ebc73eb83e230aba))
+
 ## [1.305.4](https://github.com/adobe/spacecat-api-service/compare/v1.305.3...v1.305.4) (2026-02-03)
 
 
