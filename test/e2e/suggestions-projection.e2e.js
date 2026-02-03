@@ -298,6 +298,80 @@ describe('Suggestion Projection Views - E2E Tests', () => {
     });
   });
 
+  describe('STATUS FILTER - Query Parameter Support', () => {
+    it('should support minimal view with status query parameter', async () => {
+      const response = await makeSpacecatRequest({
+        path: `/sites/${SITE_ID}/opportunities/${OPPORTUNITY_ID}/suggestions?status=NEW&view=minimal`,
+        method: 'GET',
+      });
+
+      expect(response.status).to.equal(200);
+      const suggestions = await response.json();
+
+      expect(suggestions).to.be.an('array');
+
+      if (suggestions.length > 0) {
+        // Verify ALL suggestions have the correct status and structure
+        suggestions.forEach((suggestion) => {
+          expect(suggestion).to.have.property('id');
+          expect(suggestion).to.have.property('status');
+          expect(suggestion).to.have.property('createdAt');
+          expect(suggestion).to.have.property('updatedAt');
+
+          // Verify status filter is applied - ALL must be NEW
+          expect(suggestion.status).to.equal('NEW');
+
+          // Verify minimal view is applied (should not have opportunityId)
+          expect(suggestion).to.not.have.property('opportunityId');
+        });
+
+        console.log(`[OK] Status filter with minimal view works (all ${suggestions.length} items have status=NEW)`);
+      } else {
+        console.log('[WARN] No suggestions with status=NEW found');
+      }
+    });
+
+    it('should support minimal view with multiple status values', async () => {
+      const response = await makeSpacecatRequest({
+        path: `/sites/${SITE_ID}/opportunities/${OPPORTUNITY_ID}/suggestions?status=NEW,FIXED&view=minimal`,
+        method: 'GET',
+      });
+
+      expect(response.status).to.equal(200);
+      const suggestions = await response.json();
+
+      expect(suggestions).to.be.an('array');
+
+      if (suggestions.length > 0) {
+        const allowedStatuses = ['NEW', 'FIXED'];
+
+        // Verify ALL suggestions have one of the allowed statuses
+        suggestions.forEach((suggestion) => {
+          expect(suggestion).to.have.property('id');
+          expect(suggestion).to.have.property('status');
+          expect(suggestion).to.have.property('createdAt');
+          expect(suggestion).to.have.property('updatedAt');
+
+          // Verify status is one of the filtered values
+          expect(allowedStatuses).to.include(suggestion.status);
+
+          // Verify minimal view is applied
+          expect(suggestion).to.not.have.property('opportunityId');
+        });
+
+        // Count statuses for reporting
+        const statusCounts = suggestions.reduce((acc, s) => {
+          acc[s.status] = (acc[s.status] || 0) + 1;
+          return acc;
+        }, {});
+
+        console.log(`[OK] Multiple status filter with minimal view works (${suggestions.length} items: ${JSON.stringify(statusCounts)})`);
+      } else {
+        console.log('[WARN] No suggestions with status=NEW,FIXED found');
+      }
+    });
+  });
+
   describe('BY STATUS ENDPOINTS - Projection Support', () => {
     it('should support minimal view in by-status endpoint', async () => {
       const response = await makeSpacecatRequest({
@@ -507,8 +581,14 @@ describe('Suggestion Projection Views - E2E Tests', () => {
     });
   });
 
-  describe('MULTI-TYPE VALIDATION - Timestamps Across All Opportunity Types', () => {
-    it('should include timestamps in minimal view for ALL configured opportunity types', async () => {
+  describe('MULTI-TYPE VALIDATION - Complete Minimal View Structure', () => {
+    // Fields that MUST be present in minimal view
+    const REQUIRED_MINIMAL_FIELDS = ['id', 'status', 'createdAt', 'updatedAt'];
+
+    // Fields that MUST NOT be present in minimal view
+    const EXCLUDED_MINIMAL_FIELDS = ['opportunityId', 'type', 'rank', 'kpiDeltas', 'updatedBy'];
+
+    it('should validate complete minimal view structure for ALL opportunity types', async () => {
       // Use discovered opportunities or just the single configured one
       const opportunityIds = opportunities.length > 0
         ? opportunities.map((o) => o.id)
@@ -545,21 +625,48 @@ describe('Suggestion Projection Views - E2E Tests', () => {
                 message: 'No suggestions found',
               });
             } else {
-              // Validate timestamps for first suggestion
+              // Validate structure for first suggestion
               const suggestion = suggestions[0];
-              const hasCreatedAt = !!suggestion.createdAt;
-              const hasUpdatedAt = !!suggestion.updatedAt;
 
-              // Try to determine opportunity type from suggestion
-              const suggestionType = suggestion.type || 'unknown';
+              // Check required fields
+              const missingRequired = REQUIRED_MINIMAL_FIELDS.filter((f) => !(f in suggestion));
+              const hasAllRequired = missingRequired.length === 0;
+
+              // Check excluded fields
+              const presentExcluded = EXCLUDED_MINIMAL_FIELDS.filter((f) => f in suggestion);
+              const hasNoExcluded = presentExcluded.length === 0;
+
+              // Validate id is UUID format
+              const isValidId = typeof suggestion.id === 'string'
+                && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(suggestion.id);
+
+              // Validate status is string
+              const isValidStatus = typeof suggestion.status === 'string';
+
+              // Validate timestamps are ISO dates
+              const isValidCreatedAt = typeof suggestion.createdAt === 'string'
+                && !Number.isNaN(Date.parse(suggestion.createdAt));
+              const isValidUpdatedAt = typeof suggestion.updatedAt === 'string'
+                && !Number.isNaN(Date.parse(suggestion.updatedAt));
+
+              // Validate data field if present
+              const dataValidation = !suggestion.data || typeof suggestion.data === 'object';
+
+              const allValid = hasAllRequired && hasNoExcluded && isValidId
+                && isValidStatus && isValidCreatedAt && isValidUpdatedAt && dataValidation;
 
               results.push({
                 opportunityId: oppId,
-                status: hasCreatedAt && hasUpdatedAt ? 'pass' : 'fail',
+                status: allValid ? 'pass' : 'fail',
                 suggestionCount: suggestions.length,
-                suggestionType,
-                hasCreatedAt,
-                hasUpdatedAt,
+                hasAllRequired,
+                missingRequired,
+                hasNoExcluded,
+                presentExcluded,
+                isValidId,
+                isValidStatus,
+                isValidCreatedAt,
+                isValidUpdatedAt,
                 dataFields: suggestion.data ? Object.keys(suggestion.data) : [],
               });
             }
@@ -574,7 +681,7 @@ describe('Suggestion Projection Views - E2E Tests', () => {
       }
 
       // Print summary
-      console.log('\nMulti-Type Validation Results:');
+      console.log('\nMinimal View Structure Validation Results:');
       console.log('-'.repeat(80));
 
       results.forEach((r, index) => {
@@ -582,19 +689,27 @@ describe('Suggestion Projection Views - E2E Tests', () => {
         if (r.status === 'pass') statusIcon = '[PASS]';
         else if (r.status === 'empty') statusIcon = '[SKIP]';
         console.log(`${index + 1}. ${statusIcon} Opportunity: ${r.opportunityId}`);
-        if (r.suggestionType) {
-          console.log(`      Type: ${r.suggestionType}`);
-        }
         if (r.suggestionCount !== undefined) {
           console.log(`      Suggestions: ${r.suggestionCount}`);
         }
-        if (r.dataFields && r.dataFields.length > 0) {
-          console.log(`      Data fields: [${r.dataFields.join(', ')}]`);
+        if (r.status === 'pass') {
+          console.log('      Required fields: id, status, createdAt, updatedAt - all present');
+          console.log('      Excluded fields: opportunityId, type, rank, kpiDeltas, updatedBy - none present');
+          if (r.dataFields && r.dataFields.length > 0) {
+            console.log(`      Data fields: [${r.dataFields.join(', ')}]`);
+          }
+        } else if (r.status === 'fail') {
+          if (r.missingRequired && r.missingRequired.length > 0) {
+            console.log(`      Missing required: [${r.missingRequired.join(', ')}]`);
+          }
+          if (r.presentExcluded && r.presentExcluded.length > 0) {
+            console.log(`      Should not have: [${r.presentExcluded.join(', ')}]`);
+          }
+          console.log(`      Validations: id=${r.isValidId ? 'ok' : 'fail'}, status=${r.isValidStatus ? 'ok' : 'fail'}, createdAt=${r.isValidCreatedAt ? 'ok' : 'fail'}, updatedAt=${r.isValidUpdatedAt ? 'ok' : 'fail'}`);
         }
         if (r.message) {
           console.log(`      Message: ${r.message}`);
         }
-        console.log(`      createdAt: ${r.hasCreatedAt ? 'yes' : 'no'}, updatedAt: ${r.hasUpdatedAt ? 'yes' : 'no'}`);
       });
 
       console.log('-'.repeat(80));
