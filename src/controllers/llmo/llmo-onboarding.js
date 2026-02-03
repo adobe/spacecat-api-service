@@ -947,28 +947,54 @@ export async function createEntitlementAndEnrollment(site, context, say = () => 
   }
 }
 
-export async function enableAudits(site, context, audits = []) {
-  const { dataAccess } = context;
+/**
+ * Enables audits for a site. Continues processing if individual audits fail.
+ * @param {object} site - The site object
+ * @param {object} context - The request context
+ * @param {Array<string>} [audits=[]] - List of audit types to enable
+ * @param {Function} [say] - Optional callback for sending messages (e.g., Slack)
+ */
+export async function enableAudits(site, context, audits = [], say = () => {}) {
+  const { dataAccess, log } = context;
   const { Configuration } = dataAccess;
 
   const configuration = await Configuration.findLatest();
+
   audits.forEach((audit) => {
-    configuration.enableHandlerForSite(audit, site);
+    try {
+      configuration.enableHandlerForSite(audit, site);
+    } catch (error) {
+      log.warn(`Failed to enable audit '${audit}' for site ${site.getId()}: ${error.message}`);
+      say(`:warning: Failed to enable audit '${audit}': ${error.message}`);
+    }
   });
+
   await configuration.save();
 }
 
-export async function enableImports(siteConfig, imports = []) {
+/**
+ * Enables imports for a site config. Continues processing if individual imports fail.
+ * @param {object} siteConfig - The site configuration object
+ * @param {Array<{type: string, options?: object}>} imports - List of imports to enable
+ * @param {object} log - Logger instance
+ * @param {Function} [say] - Optional callback for sending messages (e.g., Slack)
+ */
+export async function enableImports(siteConfig, imports, log, say = () => {}) {
   const existingImports = siteConfig.getImports();
 
   imports.forEach(({ type, options }) => {
-    // Check if import is already enabled
-    const isEnabled = existingImports?.find(
-      (imp) => imp.type === type && imp.enabled,
-    );
+    try {
+      // Check if import is already enabled
+      const isEnabled = existingImports?.find(
+        (imp) => imp.type === type && imp.enabled,
+      );
 
-    if (!isEnabled) {
-      siteConfig.enableImport(type, options);
+      if (!isEnabled) {
+        siteConfig.enableImport(type, options);
+      }
+    } catch (error) {
+      log.warn(`Failed to enable import '${type}': ${error.message}`);
+      say(`:warning: Failed to enable import '${type}': ${error.message}`);
     }
   });
 }
@@ -1032,16 +1058,19 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     // Update index config
     await updateIndexConfig(dataFolder, context, say);
 
-    // Enable audits
-    await enableAudits(site, context, [...BASIC_AUDITS, 'llm-error-pages', 'llmo-customer-analysis', 'wikipedia-analysis']);
+    // Enable audits (continues on partial failure, logs warnings)
+    await enableAudits(
+      site,
+      context,
+      [...BASIC_AUDITS, 'llm-error-pages', 'llmo-customer-analysis', 'wikipedia-analysis'],
+      say,
+    );
 
     // Get current site config
     const siteConfig = site.getConfig();
 
-    // Enable imports
-    await enableImports(siteConfig, [
-      { type: 'top-pages' },
-    ]);
+    // Enable imports (continues on partial failure, logs warnings)
+    await enableImports(siteConfig, [{ type: 'top-pages' }], log, say);
 
     // Update brand and data directory
     siteConfig.updateLlmoBrand(brandName.trim());

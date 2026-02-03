@@ -2638,4 +2638,45 @@ describe('LLMO Onboarding Functions', () => {
       expect(resultWithSlash.endsWith('/')).to.be.true;
     });
   });
+
+  describe('enableAudits failure handling', () => {
+    it('should log warning, call say, continue processing, and still save when an audit fails', async () => {
+      const { enableAudits } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+      const mockSite = { getId: () => 'site123' };
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub().callsFake((audit) => {
+          if (audit === 'fail') throw new Error('fail error');
+        }),
+        save: sinon.stub().resolves(),
+      };
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+      const mockSay = sinon.stub();
+
+      await enableAudits(mockSite, { dataAccess: mockDataAccess, log: mockLog }, ['ok', 'fail'], mockSay);
+
+      expect(mockLog.warn).to.have.been.calledWith(sinon.match(/Failed to enable audit 'fail'/));
+      expect(mockSay).to.have.been.calledWith(sinon.match(/:warning:.*fail/));
+      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledTwice;
+      expect(mockConfiguration.save).to.have.been.calledOnce;
+    });
+  });
+
+  describe('enableImports failure handling', () => {
+    it('should log warning, call say, and continue processing when an import fails', async () => {
+      const { enableImports } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+      const mockSiteConfig = {
+        getImports: () => [],
+        enableImport: sinon.stub().callsFake((type) => {
+          if (type === 'fail') throw new Error('fail error');
+        }),
+      };
+      const mockSay = sinon.stub();
+
+      await enableImports(mockSiteConfig, [{ type: 'ok' }, { type: 'fail' }], mockLog, mockSay);
+
+      expect(mockLog.warn).to.have.been.calledWith(sinon.match(/Failed to enable import 'fail'/));
+      expect(mockSay).to.have.been.calledWith(sinon.match(/:warning:.*fail/));
+      expect(mockSiteConfig.enableImport).to.have.been.calledTwice;
+    });
+  });
 });
