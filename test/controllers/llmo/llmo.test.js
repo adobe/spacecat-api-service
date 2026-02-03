@@ -104,6 +104,7 @@ describe('LlmoController', () => {
       fetchMetaconfig: sinon.stub(),
       createMetaconfig: sinon.stub(),
       updateMetaconfig: sinon.stub(),
+      checkEdgeOptimizeStatus: sinon.stub(),
     };
 
     // Set up esmock once for all tests
@@ -130,6 +131,10 @@ describe('LlmoController', () => {
         hasText: (str) => typeof str === 'string' && str.trim().length > 0,
         isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
         composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+        isValidUUID: (uuid) => {
+          const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+          return uuidRegex.test(uuid);
+        },
       },
       '../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
@@ -3288,9 +3293,12 @@ describe('LlmoController', () => {
       expect(mockTokowakaClient.createMetaconfig).to.have.been.calledWith(
         'https://www.example.com',
         TEST_SITE_ID,
-        { tokowakaEnabled: true },
+        sinon.match({ tokowakaEnabled: true }),
+        sinon.match({ lastModifiedBy: 'tokowaka-edge-optimize-config' }),
       );
-      expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.called;
+      expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(
+        sinon.match({ opted: sinon.match.number }),
+      );
       expect(mockSite.save).to.have.been.called;
     });
 
@@ -3553,7 +3561,7 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.deep.include(newMetaconfig);
       expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(
-        sinon.match({ enabled: true }),
+        sinon.match({ opted: sinon.match.number }),
       );
     });
 
@@ -3622,7 +3630,11 @@ describe('LlmoController', () => {
       expect(mockTokowakaClient.createMetaconfig).to.have.been.calledWith(
         'https://www.example.com',
         TEST_SITE_ID,
-        { enhancements: true },
+        sinon.match({ enhancements: true }),
+        sinon.match({ lastModifiedBy: 'tokowaka-edge-optimize-config' }),
+      );
+      expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(
+        sinon.match({ opted: sinon.match.number }),
       );
     });
 
@@ -3921,6 +3933,211 @@ describe('LlmoController', () => {
         s3Client,
         { s3Bucket: TEST_BUCKET },
       );
+    });
+  });
+
+  describe('checkEdgeOptimizeStatus', () => {
+    let edgeStatusContext;
+    const validSiteId = '12345678-1234-4123-8123-123456789012';
+
+    beforeEach(() => {
+      edgeStatusContext = {
+        ...mockContext,
+        params: { siteId: validSiteId },
+        data: { path: '/' },
+      };
+
+      mockSite.getBaseURL = sinon.stub().returns('https://www.example.com');
+      mockDataAccess.Site.findById.resetBehavior();
+      mockDataAccess.Site.findById.resolves(mockSite);
+      mockTokowakaClient.checkEdgeOptimizeStatus.reset();
+      mockTokowakaClient.checkEdgeOptimizeStatus.resolves({});
+    });
+
+    it('should return edge optimize status successfully with default path', async () => {
+      const statusResult = {
+        enabled: true,
+        optimized: true,
+        path: '/',
+        configuration: {
+          enhancements: true,
+          tokowakaEnabled: true,
+        },
+      };
+
+      mockTokowakaClient.checkEdgeOptimizeStatus.resolves(statusResult);
+
+      const result = await controller.checkEdgeOptimizeStatus(edgeStatusContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(statusResult);
+      expect(mockTokowakaClient.checkEdgeOptimizeStatus).to.have.been.calledWith(
+        mockSite,
+        '/',
+      );
+    });
+
+    it('should return edge optimize status successfully with custom path', async () => {
+      const customPath = '/products/index.html';
+      edgeStatusContext.data = { path: customPath };
+
+      const statusResult = {
+        enabled: true,
+        optimized: false,
+        path: customPath,
+      };
+
+      mockTokowakaClient.checkEdgeOptimizeStatus.resolves(statusResult);
+
+      const result = await controller.checkEdgeOptimizeStatus(edgeStatusContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(statusResult);
+      expect(mockTokowakaClient.checkEdgeOptimizeStatus).to.have.been.calledWith(
+        mockSite,
+        customPath,
+      );
+    });
+
+    it('should use default path when data is undefined', async () => {
+      edgeStatusContext.data = undefined;
+
+      const statusResult = {
+        enabled: true,
+        optimized: true,
+        path: '/',
+      };
+
+      mockTokowakaClient.checkEdgeOptimizeStatus.resolves(statusResult);
+
+      const result = await controller.checkEdgeOptimizeStatus(edgeStatusContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockTokowakaClient.checkEdgeOptimizeStatus).to.have.been.calledWith(
+        mockSite,
+        '/',
+      );
+    });
+
+    it('should return 400 when siteId is invalid', async () => {
+      edgeStatusContext.params.siteId = 'invalid-uuid';
+
+      const result = await controller.checkEdgeOptimizeStatus(edgeStatusContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Site ID required');
+      expect(mockDataAccess.Site.findById).to.not.have.been.called;
+    });
+
+    it('should return 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resetBehavior();
+      mockDataAccess.Site.findById.resolves(null);
+
+      const result = await controller.checkEdgeOptimizeStatus(edgeStatusContext);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Site not found');
+      expect(mockTokowakaClient.checkEdgeOptimizeStatus).to.not.have.been.called;
+    });
+
+    it('should return 403 when user does not have access to site', async () => {
+      const deniedController = controllerWithAccessDenied(mockContext);
+
+      // Reset and set up the mock for this specific test
+      mockDataAccess.Site.findById.resetBehavior();
+      mockDataAccess.Site.findById.resolves(mockSite);
+
+      const result = await deniedController.checkEdgeOptimizeStatus(edgeStatusContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Access denied to this site');
+      expect(mockTokowakaClient.checkEdgeOptimizeStatus).to.not.have.been.called;
+    });
+
+    it('should handle tokowaka client error with status code', async () => {
+      const error = new Error('Tokowaka service unavailable');
+      error.status = 503;
+      mockTokowakaClient.checkEdgeOptimizeStatus.rejects(error);
+
+      const result = await controller.checkEdgeOptimizeStatus(edgeStatusContext);
+
+      expect(result.status).to.equal(503);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Tokowaka service unavailable');
+    });
+
+    it('should return 500 when tokowaka client throws error without status', async () => {
+      const error = new Error('Unexpected error occurred');
+      mockTokowakaClient.checkEdgeOptimizeStatus.rejects(error);
+
+      const result = await controller.checkEdgeOptimizeStatus(edgeStatusContext);
+
+      expect(result.status).to.equal(500);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Unexpected error occurred');
+    });
+
+    it('should handle network timeout errors', async () => {
+      const error = new Error('Request timeout');
+      error.status = 408;
+      mockTokowakaClient.checkEdgeOptimizeStatus.rejects(error);
+
+      const result = await controller.checkEdgeOptimizeStatus(edgeStatusContext);
+
+      expect(result.status).to.equal(408);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Request timeout');
+    });
+
+    it('should handle disabled optimization status', async () => {
+      const statusResult = {
+        enabled: false,
+        optimized: false,
+        path: '/',
+        message: 'Edge optimization is not enabled for this site',
+      };
+
+      mockTokowakaClient.checkEdgeOptimizeStatus.resolves(statusResult);
+
+      const result = await controller.checkEdgeOptimizeStatus(edgeStatusContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.enabled).to.be.false;
+      expect(responseBody.optimized).to.be.false;
+    });
+
+    it('should log appropriate messages during status check', async () => {
+      const statusResult = {
+        enabled: true,
+        optimized: true,
+        path: '/test',
+      };
+
+      edgeStatusContext.data = { path: '/test' };
+      mockTokowakaClient.checkEdgeOptimizeStatus.resolves(statusResult);
+
+      await controller.checkEdgeOptimizeStatus(edgeStatusContext);
+
+      expect(mockLog.info).to.have.been.calledWith(
+        `Checking Edge Optimize status for siteId: ${validSiteId} and path: /test`,
+      );
+    });
+
+    it('should log error when status check fails', async () => {
+      const error = new Error('Service error');
+      mockTokowakaClient.checkEdgeOptimizeStatus.rejects(error);
+
+      await controller.checkEdgeOptimizeStatus(edgeStatusContext);
+
+      expect(mockLog.error).to.have.been.called;
+      const errorCall = mockLog.error.firstCall.args[0];
+      expect(errorCall).to.match(/Error checking edge optimize status.*Service error/);
     });
   });
 });
