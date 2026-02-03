@@ -1,3 +1,10 @@
+## [1.305.2](https://github.com/adobe/spacecat-api-service/compare/v1.305.1...v1.305.2) (2026-02-03)
+
+
+### Bug Fixes
+
+* opted changed to timestamp ([#1760](https://github.com/adobe/spacecat-api-service/issues/1760)) ([667620b](https://github.com/adobe/spacecat-api-service/commit/667620bb87f17683a539bae861b326ab665117ba))
+
 ## [1.305.1](https://github.com/adobe/spacecat-api-service/compare/v1.305.0...v1.305.1) (2026-02-02)
 
 
