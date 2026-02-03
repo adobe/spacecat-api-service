@@ -205,8 +205,8 @@ site-opportunity-suggestions:
       Returns all suggestions (non-paginated) with optional field projection and status filtering.
       
       **Field Projection:**
-      - `view=minimal` - Returns id, status, and URL-related data fields (lightest)
-      - `view=summary` - Returns minimal fields plus metadata (type, rank, timestamps)
+      - `view=minimal` - Returns id, status, timestamps (createdAt, updatedAt), and URL-related data fields (lightest)
+      - `view=summary` - Returns minimal fields plus metadata (opportunityId, type, rank, updatedBy)
       - `view=full` - Returns all fields including complete data object (default)
       
       **Status Filtering:**
