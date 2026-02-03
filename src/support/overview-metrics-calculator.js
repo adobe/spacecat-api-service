@@ -239,26 +239,6 @@ export const getCurrentWeek = (date = new Date()) => {
 };
 
 /**
- * Get the previous week's ISO week number and year.
- *
- * @param {number} week - Current week number
- * @param {number} year - Current year
- * @returns {{ week: number, year: number }}
- */
-export const getPreviousWeek = (week, year) => {
-  if (week > 1) {
-    return { week: week - 1, year };
-  }
-  // Week 1 of current year -> last week of previous year
-  // ISO weeks can have 52 or 53 weeks per year
-  const prevYear = year - 1;
-  // Calculate last week of previous year
-  const dec31 = new Date(Date.UTC(prevYear, 11, 31));
-  const { week: lastWeek } = getCurrentWeek(dec31);
-  return { week: lastWeek, year: prevYear };
-};
-
-/**
  * Format week identifier as "Jan 13-19, 2026" style string.
  *
  * @param {number} week - ISO week number
@@ -292,31 +272,57 @@ export const formatWeekRange = (week, year) => {
 };
 
 /**
- * Fetch brand presence data for a specific week.
+ * Extract week and year from a brandpresence-all filename.
+ * Supports both weekly and daily formats:
+ * - Weekly: brandpresence-all-w45-2025.json
+ * - Daily: brandpresence-all-w44-2025-281025.json
+ *
+ * @param {string} filename - The filename to parse
+ * @returns {{ week: number, year: number } | null} Week info or null if invalid
+ */
+export const parseWeekFromFilename = (filename) => {
+  // Match patterns like: brandpresence-all-w45-2025.json or brandpresence-all-w44-2025-281025.json
+  const match = filename.match(/brandpresence-all-w(\d+)-(\d{4})(?:-\d+)?\.json$/);
+  if (match) {
+    return {
+      week: parseInt(match[1], 10),
+      year: parseInt(match[2], 10),
+    };
+  }
+  return null;
+};
+
+/**
+ * Check if a path is a valid brandpresence-all file (not in config_absent folder).
+ *
+ * @param {string} path - The file path to check
+ * @returns {boolean} True if this is a valid brandpresence-all file
+ */
+export const isValidBrandPresenceAllFile = (path) => {
+  // Exclude paths containing /config_absent/
+  if (path.includes('/config_absent/')) {
+    return false;
+  }
+  // Check if filename matches brandpresence-all pattern
+  const filename = path.split('/').pop();
+  return /^brandpresence-all-w\d+-\d{4}(?:-\d+)?\.json$/.test(filename);
+};
+
+/**
+ * Fetch the query index to discover available brand presence files.
  *
  * @param {Object} options - Options
  * @param {string} options.dataFolder - LLMO data folder path
- * @param {number} options.week - ISO week number
- * @param {number} options.year - Year
  * @param {string} options.hlxApiKey - Helix API key
  * @param {Object} options.log - Logger instance
- * @returns {Promise<Array<Object>>} Array of brand presence records
+ * @returns {Promise<Array<{path: string, lastModified: string}>>} Array of file entries
  */
-export const fetchBrandPresenceData = async ({
+export const fetchQueryIndex = async ({
   dataFolder,
-  week,
-  year,
   hlxApiKey,
   log,
 }) => {
-  // Format week as 2-digit string (e.g., "03" for week 3)
-  const weekStr = String(week).padStart(2, '0');
-  const weekIdentifier = `${year}-W${weekStr}`;
-
-  // Construct the URL for brand presence data
-  // Path format: {dataFolder}/brand-presence/{weekIdentifier}/all.json
-  const sheetURL = `${dataFolder}/brand-presence/${weekIdentifier}/all.json`;
-  const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${sheetURL}`);
+  const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/${dataFolder}/query-index.json`);
 
   try {
     const response = await fetch(url.toString(), {
@@ -330,7 +336,83 @@ export const fetchBrandPresenceData = async ({
     /* c8 ignore start - fetch paths require mocking native fetch */
     if (!response.ok) {
       if (response.status === 404) {
-        log.info(`No brand presence data found for week ${weekIdentifier}`);
+        log.info(`No query index found for ${dataFolder}`);
+        return [];
+      }
+      log.error(`Failed to fetch query index: ${response.status} ${response.statusText}`);
+      return [];
+    }
+
+    const data = await response.json();
+
+    if (!data.data || !Array.isArray(data.data)) {
+      log.warn(`Query index has unexpected format for ${dataFolder}`);
+      return [];
+    }
+
+    log.info(`Fetched query index with ${data.data.length} entries for ${dataFolder}`);
+    return data.data;
+  } catch (error) {
+    log.error(`Error fetching query index for ${dataFolder}: ${error.message}`);
+    return [];
+  }
+  /* c8 ignore stop */
+};
+
+/**
+ * Get the two most recent brandpresence-all files from the query index.
+ *
+ * @param {Array<{path: string, lastModified: string}>} queryIndexData - Query index entries
+ * @returns {Array<{path: string, lastModified: string}>} Two most recent valid files
+ */
+export const getTwoMostRecentBrandPresenceFiles = (queryIndexData) => {
+  if (!queryIndexData || !Array.isArray(queryIndexData)) {
+    return [];
+  }
+
+  // Filter to only valid brandpresence-all files (exclude config_absent)
+  const validFiles = queryIndexData.filter((entry) => isValidBrandPresenceAllFile(entry.path));
+
+  // Sort by lastModified descending (most recent first)
+  validFiles.sort((a, b) => {
+    const aTime = parseInt(a.lastModified, 10) || 0;
+    const bTime = parseInt(b.lastModified, 10) || 0;
+    return bTime - aTime;
+  });
+
+  // Return the two most recent
+  return validFiles.slice(0, 2);
+};
+
+/**
+ * Fetch brand presence data from a specific file path.
+ *
+ * @param {Object} options - Options
+ * @param {string} options.filePath - Full path to the file (from query index)
+ * @param {string} options.hlxApiKey - Helix API key
+ * @param {Object} options.log - Logger instance
+ * @returns {Promise<Array<Object>>} Array of brand presence records
+ */
+export const fetchBrandPresenceDataFromPath = async ({
+  filePath,
+  hlxApiKey,
+  log,
+}) => {
+  const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}${filePath}`);
+
+  try {
+    const response = await fetch(url.toString(), {
+      headers: {
+        Authorization: `token ${hlxApiKey || 'hlx_api_key_missing'}`,
+        'User-Agent': SPACECAT_USER_AGENT,
+        'Accept-Encoding': 'br',
+      },
+    });
+
+    /* c8 ignore start - fetch paths require mocking native fetch */
+    if (!response.ok) {
+      if (response.status === 404) {
+        log.info(`No brand presence data found at ${filePath}`);
         return [];
       }
       log.error(`Failed to fetch brand presence data: ${response.status} ${response.statusText}`);
@@ -353,12 +435,15 @@ export const fetchBrandPresenceData = async ({
           records.push(...sheetRecords);
         }
       });
+    } else if (Array.isArray(data.data)) {
+      // Direct data array format
+      records = data.data;
     }
 
-    log.info(`Fetched ${records.length} brand presence records for week ${weekIdentifier}`);
+    log.info(`Fetched ${records.length} brand presence records from ${filePath}`);
     return records;
   } catch (error) {
-    log.error(`Error fetching brand presence data for week ${weekIdentifier}: ${error.message}`);
+    log.error(`Error fetching brand presence data from ${filePath}: ${error.message}`);
     return [];
   }
   /* c8 ignore stop */
@@ -366,7 +451,8 @@ export const fetchBrandPresenceData = async ({
 
 /**
  * Calculate overview metrics for a site.
- * Fetches data for the last 2 completed weeks and calculates:
+ * Fetches the query index to discover the two most recent brandpresence-all files,
+ * then calculates:
  * - Visibility score with delta
  * - Mentions count with delta
  * - Citations count with delta
@@ -388,41 +474,65 @@ export const calculateOverviewMetrics = async ({ site, hlxApiKey, log }) => {
   const { dataFolder } = llmoConfig;
   const siteBaseUrl = site.getBaseURL();
 
-  // Get current week and previous week
-  const currentWeekInfo = getCurrentWeek();
+  // Fetch the query index to discover available files
+  const queryIndexData = await fetchQueryIndex({
+    dataFolder,
+    hlxApiKey,
+    log,
+  });
 
-  // We want the last COMPLETED week, so if we're in week N, get week N-1
-  const lastCompletedWeek = getPreviousWeek(currentWeekInfo.week, currentWeekInfo.year);
-  const previousWeek = getPreviousWeek(lastCompletedWeek.week, lastCompletedWeek.year);
+  // Get the two most recent brandpresence-all files
+  const recentFiles = getTwoMostRecentBrandPresenceFiles(queryIndexData);
 
-  log.info(`Calculating metrics for site ${site.getId()}: current week ${lastCompletedWeek.year}-W${lastCompletedWeek.week}, previous week ${previousWeek.year}-W${previousWeek.week}`);
+  if (recentFiles.length === 0) {
+    log.info(`No brand presence data files found for site ${site.getId()}`);
+    return {
+      dateRange: '',
+      week: null,
+      visibilityScore: 0,
+      visibilityDelta: '0%',
+      mentionsCount: 0,
+      mentionsDelta: '0%',
+      citationsCount: 0,
+      citationsDelta: '0%',
+      hasData: false,
+    };
+  }
 
-  // Fetch data for both weeks in parallel
-  const [currentWeekRecords, previousWeekRecords] = await Promise.all([
-    fetchBrandPresenceData({
-      dataFolder,
-      week: lastCompletedWeek.week,
-      year: lastCompletedWeek.year,
+  const currentFile = recentFiles[0];
+  const previousFile = recentFiles[1] || null;
+
+  log.info(`Calculating metrics for site ${site.getId()}: current file ${currentFile.path}${previousFile ? `, previous file ${previousFile.path}` : ' (no previous file)'}`);
+
+  // Fetch data for both files (current is required, previous is optional)
+  const fetchPromises = [
+    fetchBrandPresenceDataFromPath({
+      filePath: currentFile.path,
       hlxApiKey,
       log,
     }),
-    fetchBrandPresenceData({
-      dataFolder,
-      week: previousWeek.week,
-      year: previousWeek.year,
-      hlxApiKey,
-      log,
-    }),
-  ]);
+  ];
 
-  // Calculate metrics for current week
-  const currentVisibilityScore = calculateVisibilityScore(currentWeekRecords);
-  const currentMetrics = calculateMentionsAndCitations(currentWeekRecords, siteBaseUrl);
+  if (previousFile) {
+    fetchPromises.push(
+      fetchBrandPresenceDataFromPath({
+        filePath: previousFile.path,
+        hlxApiKey,
+        log,
+      }),
+    );
+  }
+
+  const [currentRecords, previousRecords = []] = await Promise.all(fetchPromises);
+
+  // Calculate metrics for current period
+  const currentVisibilityScore = calculateVisibilityScore(currentRecords);
+  const currentMetrics = calculateMentionsAndCitations(currentRecords, siteBaseUrl);
   const { mentionsCount: currentMentions, citationsCount: currentCitations } = currentMetrics;
 
-  // Calculate metrics for previous week
-  const previousVisibilityScore = calculateVisibilityScore(previousWeekRecords);
-  const previousMetrics = calculateMentionsAndCitations(previousWeekRecords, siteBaseUrl);
+  // Calculate metrics for previous period
+  const previousVisibilityScore = calculateVisibilityScore(previousRecords);
+  const previousMetrics = calculateMentionsAndCitations(previousRecords, siteBaseUrl);
   const { mentionsCount: previousMentions, citationsCount: previousCitations } = previousMetrics;
 
   // Calculate deltas
@@ -430,18 +540,20 @@ export const calculateOverviewMetrics = async ({ site, hlxApiKey, log }) => {
   const mentionsDelta = calculateDelta(currentMentions, previousMentions);
   const citationsDelta = calculateDelta(currentCitations, previousCitations);
 
-  // Format the date range for the email
-  const dateRange = formatWeekRange(lastCompletedWeek.week, lastCompletedWeek.year);
+  // Extract week info from the current file's filename for date range formatting
+  const currentFilename = currentFile.path.split('/').pop();
+  const weekInfo = parseWeekFromFilename(currentFilename);
+  const dateRange = weekInfo ? formatWeekRange(weekInfo.week, weekInfo.year) : '';
 
   return {
     dateRange,
-    week: lastCompletedWeek,
+    week: weekInfo,
     visibilityScore: currentVisibilityScore,
     visibilityDelta,
     mentionsCount: currentMentions,
     mentionsDelta,
     citationsCount: currentCitations,
     citationsDelta,
-    hasData: currentWeekRecords.length > 0,
+    hasData: currentRecords.length > 0,
   };
 };

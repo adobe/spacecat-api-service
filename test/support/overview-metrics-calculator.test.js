@@ -16,15 +16,16 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
+import esmock from 'esmock';
 import {
   calculateVisibilityScore,
   calculateMentionsAndCitations,
   calculateDelta,
   getCurrentWeek,
-  getPreviousWeek,
   formatWeekRange,
-  fetchBrandPresenceData,
-  calculateOverviewMetrics,
+  parseWeekFromFilename,
+  isValidBrandPresenceAllFile,
+  getTwoMostRecentBrandPresenceFiles,
 } from '../../src/support/overview-metrics-calculator.js';
 
 use(chaiAsPromised);
@@ -381,34 +382,6 @@ describe('Overview Metrics Calculator', () => {
     });
   });
 
-  describe('getPreviousWeek', () => {
-    it('should return previous week in same year', () => {
-      const result = getPreviousWeek(10, 2025);
-      expect(result.week).to.equal(9);
-      expect(result.year).to.equal(2025);
-    });
-
-    it('should handle year boundary', () => {
-      const result = getPreviousWeek(1, 2025);
-      // When week is 1, getPreviousWeek goes to the last week of the previous year
-      expect(result.year).to.equal(2024);
-      // The week number should be the last ISO week of the previous year (could be 52 or 53)
-      expect(result.week).to.be.at.least(1);
-    });
-
-    it('should handle week 52 to 51', () => {
-      const result = getPreviousWeek(52, 2025);
-      expect(result.week).to.equal(51);
-      expect(result.year).to.equal(2025);
-    });
-
-    it('should handle week 2 to 1', () => {
-      const result = getPreviousWeek(2, 2025);
-      expect(result.week).to.equal(1);
-      expect(result.year).to.equal(2025);
-    });
-  });
-
   describe('formatWeekRange', () => {
     it('should return formatted date range string', () => {
       const result = formatWeekRange(2, 2025);
@@ -423,27 +396,131 @@ describe('Overview Metrics Calculator', () => {
     });
   });
 
-  describe('fetchBrandPresenceData', () => {
-    let originalFetch;
-
-    beforeEach(() => {
-      originalFetch = global.fetch;
+  describe('parseWeekFromFilename', () => {
+    it('should parse weekly format filename', () => {
+      const result = parseWeekFromFilename('brandpresence-all-w45-2025.json');
+      expect(result).to.deep.equal({ week: 45, year: 2025 });
     });
 
-    afterEach(() => {
-      global.fetch = originalFetch;
+    it('should parse daily format filename', () => {
+      const result = parseWeekFromFilename('brandpresence-all-w44-2025-281025.json');
+      expect(result).to.deep.equal({ week: 44, year: 2025 });
     });
 
+    it('should return null for non-matching filename', () => {
+      expect(parseWeekFromFilename('brandpresence-perplexity-w45-2025.json')).to.be.null;
+      expect(parseWeekFromFilename('some-other-file.json')).to.be.null;
+      expect(parseWeekFromFilename('')).to.be.null;
+    });
+
+    it('should handle single digit week numbers', () => {
+      const result = parseWeekFromFilename('brandpresence-all-w5-2025.json');
+      expect(result).to.deep.equal({ week: 5, year: 2025 });
+    });
+  });
+
+  describe('isValidBrandPresenceAllFile', () => {
+    it('should return true for valid weekly file', () => {
+      const path = '/customer/brand-presence/brandpresence-all-w45-2025.json';
+      expect(isValidBrandPresenceAllFile(path)).to.be.true;
+    });
+
+    it('should return true for valid daily file', () => {
+      const path = '/customer/brand-presence/w44/brandpresence-all-w44-2025-281025.json';
+      expect(isValidBrandPresenceAllFile(path)).to.be.true;
+    });
+
+    it('should return false for config_absent paths', () => {
+      const path = '/customer/brand-presence/config_absent/brandpresence-all-w45-2025.json';
+      expect(isValidBrandPresenceAllFile(path)).to.be.false;
+    });
+
+    it('should return false for non-all files', () => {
+      expect(isValidBrandPresenceAllFile('/customer/brandpresence-perplexity-w45-2025.json')).to.be.false;
+      expect(isValidBrandPresenceAllFile('/customer/brandpresence-gemini-w45-2025.json')).to.be.false;
+    });
+  });
+
+  describe('getTwoMostRecentBrandPresenceFiles', () => {
+    it('should return two most recent files sorted by lastModified', () => {
+      const queryIndexData = [
+        { path: '/customer/brandpresence-all-w43-2025.json', lastModified: '1000' },
+        { path: '/customer/brandpresence-all-w45-2025.json', lastModified: '3000' },
+        { path: '/customer/brandpresence-all-w44-2025.json', lastModified: '2000' },
+      ];
+
+      const result = getTwoMostRecentBrandPresenceFiles(queryIndexData);
+
+      expect(result).to.have.length(2);
+      expect(result[0].path).to.equal('/customer/brandpresence-all-w45-2025.json');
+      expect(result[1].path).to.equal('/customer/brandpresence-all-w44-2025.json');
+    });
+
+    it('should filter out config_absent paths', () => {
+      const queryIndexData = [
+        { path: '/customer/config_absent/brandpresence-all-w45-2025.json', lastModified: '3000' },
+        { path: '/customer/brandpresence-all-w44-2025.json', lastModified: '2000' },
+        { path: '/customer/brandpresence-all-w43-2025.json', lastModified: '1000' },
+      ];
+
+      const result = getTwoMostRecentBrandPresenceFiles(queryIndexData);
+
+      expect(result).to.have.length(2);
+      expect(result[0].path).to.equal('/customer/brandpresence-all-w44-2025.json');
+      expect(result[1].path).to.equal('/customer/brandpresence-all-w43-2025.json');
+    });
+
+    it('should filter out non-all files', () => {
+      const queryIndexData = [
+        { path: '/customer/brandpresence-perplexity-w45-2025.json', lastModified: '3000' },
+        { path: '/customer/brandpresence-all-w44-2025.json', lastModified: '2000' },
+        { path: '/customer/brandpresence-gemini-w43-2025.json', lastModified: '1000' },
+      ];
+
+      const result = getTwoMostRecentBrandPresenceFiles(queryIndexData);
+
+      expect(result).to.have.length(1);
+      expect(result[0].path).to.equal('/customer/brandpresence-all-w44-2025.json');
+    });
+
+    it('should return empty array for null input', () => {
+      expect(getTwoMostRecentBrandPresenceFiles(null)).to.deep.equal([]);
+    });
+
+    it('should return empty array for empty input', () => {
+      expect(getTwoMostRecentBrandPresenceFiles([])).to.deep.equal([]);
+    });
+
+    it('should handle invalid lastModified values', () => {
+      const queryIndexData = [
+        { path: '/customer/brandpresence-all-w45-2025.json', lastModified: 'invalid' },
+        { path: '/customer/brandpresence-all-w44-2025.json', lastModified: '2000' },
+      ];
+
+      const result = getTwoMostRecentBrandPresenceFiles(queryIndexData);
+
+      expect(result).to.have.length(2);
+      // 'invalid' becomes 0, so w44 with 2000 comes first
+      expect(result[0].path).to.equal('/customer/brandpresence-all-w44-2025.json');
+    });
+  });
+
+  describe('fetchQueryIndex', () => {
     it('should return empty array on 404', async () => {
-      global.fetch = sandbox.stub().resolves({
+      const mockFetch = sandbox.stub().resolves({
         ok: false,
         status: 404,
       });
 
-      const result = await fetchBrandPresenceData({
+      const { fetchQueryIndex } = await esmock('../../src/support/overview-metrics-calculator.js', {
+        '@adobe/spacecat-shared-utils': {
+          tracingFetch: mockFetch,
+          SPACECAT_USER_AGENT: 'test-agent',
+        },
+      });
+
+      const result = await fetchQueryIndex({
         dataFolder: 'test-folder',
-        week: 2,
-        year: 2025,
         hlxApiKey: 'test-key',
         log: mockLog,
       });
@@ -452,12 +529,17 @@ describe('Overview Metrics Calculator', () => {
     });
 
     it('should return empty array on network error', async () => {
-      global.fetch = sandbox.stub().rejects(new Error('Network error'));
+      const mockFetch = sandbox.stub().rejects(new Error('Network error'));
 
-      const result = await fetchBrandPresenceData({
+      const { fetchQueryIndex } = await esmock('../../src/support/overview-metrics-calculator.js', {
+        '@adobe/spacecat-shared-utils': {
+          tracingFetch: mockFetch,
+          SPACECAT_USER_AGENT: 'test-agent',
+        },
+      });
+
+      const result = await fetchQueryIndex({
         dataFolder: 'test-folder',
-        week: 2,
-        year: 2025,
         hlxApiKey: 'test-key',
         log: mockLog,
       });
@@ -466,16 +548,21 @@ describe('Overview Metrics Calculator', () => {
     });
 
     it('should return empty array on non-404 error', async () => {
-      global.fetch = sandbox.stub().resolves({
+      const mockFetch = sandbox.stub().resolves({
         ok: false,
         status: 500,
         statusText: 'Internal Server Error',
       });
 
-      const result = await fetchBrandPresenceData({
+      const { fetchQueryIndex } = await esmock('../../src/support/overview-metrics-calculator.js', {
+        '@adobe/spacecat-shared-utils': {
+          tracingFetch: mockFetch,
+          SPACECAT_USER_AGENT: 'test-agent',
+        },
+      });
+
+      const result = await fetchQueryIndex({
         dataFolder: 'test-folder',
-        week: 2,
-        year: 2025,
         hlxApiKey: 'test-key',
         log: mockLog,
       });
@@ -483,24 +570,95 @@ describe('Overview Metrics Calculator', () => {
       expect(result).to.deep.equal([]);
     });
 
-    it('should format week with leading zero', () => {
-      // This is a unit test for the week formatting logic
-      // Week 3 should be formatted as "03"
-      const weekStr = String(3).padStart(2, '0');
-      expect(weekStr).to.equal('03');
-    });
-
     it('should handle missing hlxApiKey', async () => {
-      global.fetch = sandbox.stub().resolves({
+      const mockFetch = sandbox.stub().resolves({
         ok: false,
         status: 404,
       });
 
-      // Call with undefined hlxApiKey to cover the fallback branch
-      const result = await fetchBrandPresenceData({
+      const { fetchQueryIndex } = await esmock('../../src/support/overview-metrics-calculator.js', {
+        '@adobe/spacecat-shared-utils': {
+          tracingFetch: mockFetch,
+          SPACECAT_USER_AGENT: 'test-agent',
+        },
+      });
+
+      const result = await fetchQueryIndex({
         dataFolder: 'test-folder',
-        week: 2,
-        year: 2025,
+        hlxApiKey: undefined,
+        log: mockLog,
+      });
+
+      expect(result).to.deep.equal([]);
+    });
+  });
+
+  describe('fetchBrandPresenceDataFromPath', () => {
+    it('should return empty array on 404', async () => {
+      const mockFetch = sandbox.stub().resolves({
+        ok: false,
+        status: 404,
+      });
+
+      const { fetchBrandPresenceDataFromPath } = await esmock(
+        '../../src/support/overview-metrics-calculator.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockFetch,
+            SPACECAT_USER_AGENT: 'test-agent',
+          },
+        },
+      );
+
+      const result = await fetchBrandPresenceDataFromPath({
+        filePath: '/test/brandpresence-all-w45-2025.json',
+        hlxApiKey: 'test-key',
+        log: mockLog,
+      });
+
+      expect(result).to.deep.equal([]);
+    });
+
+    it('should return empty array on network error', async () => {
+      const mockFetch = sandbox.stub().rejects(new Error('Network error'));
+
+      const { fetchBrandPresenceDataFromPath } = await esmock(
+        '../../src/support/overview-metrics-calculator.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockFetch,
+            SPACECAT_USER_AGENT: 'test-agent',
+          },
+        },
+      );
+
+      const result = await fetchBrandPresenceDataFromPath({
+        filePath: '/test/brandpresence-all-w45-2025.json',
+        hlxApiKey: 'test-key',
+        log: mockLog,
+      });
+
+      expect(result).to.deep.equal([]);
+    });
+
+    it('should handle missing hlxApiKey', async () => {
+      const mockFetch = sandbox.stub().resolves({
+        ok: false,
+        status: 404,
+      });
+
+      const { fetchBrandPresenceDataFromPath } = await esmock(
+        '../../src/support/overview-metrics-calculator.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockFetch,
+            SPACECAT_USER_AGENT: 'test-agent',
+          },
+        },
+      );
+
+      const result = await fetchBrandPresenceDataFromPath({
+        filePath: '/test/brandpresence-all-w45-2025.json',
         hlxApiKey: undefined,
         log: mockLog,
       });
@@ -520,17 +678,22 @@ describe('Overview Metrics Calculator', () => {
       }),
     };
 
-    let originalFetch;
-
-    beforeEach(() => {
-      originalFetch = global.fetch;
-    });
-
-    afterEach(() => {
-      global.fetch = originalFetch;
-    });
-
     it('should throw error when site has no LLMO config', async () => {
+      const mockFetch = sandbox.stub().resolves({
+        ok: true,
+        json: () => Promise.resolve({ data: [] }),
+      });
+
+      const { calculateOverviewMetrics } = await esmock(
+        '../../src/support/overview-metrics-calculator.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockFetch,
+            SPACECAT_USER_AGENT: 'test-agent',
+          },
+        },
+      );
+
       const siteNoConfig = {
         getId: () => 'site-123',
         getBaseURL: () => 'https://example.com',
@@ -549,11 +712,21 @@ describe('Overview Metrics Calculator', () => {
       }
     });
 
-    it('should return hasData false when no data available', async () => {
-      global.fetch = sandbox.stub().resolves({
-        ok: false,
-        status: 404,
+    it('should return hasData false when no files found in query index', async () => {
+      const mockFetch = sandbox.stub().resolves({
+        ok: true,
+        json: () => Promise.resolve({ data: [] }),
       });
+
+      const { calculateOverviewMetrics } = await esmock(
+        '../../src/support/overview-metrics-calculator.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockFetch,
+            SPACECAT_USER_AGENT: 'test-agent',
+          },
+        },
+      );
 
       const result = await calculateOverviewMetrics({
         site: mockSite,
@@ -562,10 +735,18 @@ describe('Overview Metrics Calculator', () => {
       });
 
       expect(result.hasData).to.be.false;
+      expect(result.visibilityScore).to.equal(0);
     });
 
     it('should return result with expected properties', async () => {
-      const mockData = {
+      const queryIndexResponse = {
+        data: [
+          { path: '/test/brandpresence-all-w45-2025.json', lastModified: '2000' },
+          { path: '/test/brandpresence-all-w44-2025.json', lastModified: '1000' },
+        ],
+      };
+
+      const brandPresenceData = {
         ':type': 'sheet',
         data: [
           {
@@ -578,10 +759,29 @@ describe('Overview Metrics Calculator', () => {
           },
         ],
       };
-      global.fetch = sandbox.stub().resolves({
-        ok: true,
-        json: () => Promise.resolve(mockData),
+
+      const mockFetch = sandbox.stub().callsFake((url) => {
+        if (url.includes('query-index.json')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(queryIndexResponse),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(brandPresenceData),
+        });
       });
+
+      const { calculateOverviewMetrics } = await esmock(
+        '../../src/support/overview-metrics-calculator.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockFetch,
+            SPACECAT_USER_AGENT: 'test-agent',
+          },
+        },
+      );
 
       const result = await calculateOverviewMetrics({
         site: mockSite,
@@ -596,9 +796,25 @@ describe('Overview Metrics Calculator', () => {
       expect(result).to.have.property('visibilityDelta');
       expect(result).to.have.property('mentionsDelta');
       expect(result).to.have.property('citationsDelta');
+      expect(result.hasData).to.be.true;
     });
 
     it('should throw error when site has empty llmo config', async () => {
+      const mockFetch = sandbox.stub().resolves({
+        ok: true,
+        json: () => Promise.resolve({ data: [] }),
+      });
+
+      const { calculateOverviewMetrics } = await esmock(
+        '../../src/support/overview-metrics-calculator.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockFetch,
+            SPACECAT_USER_AGENT: 'test-agent',
+          },
+        },
+      );
+
       const siteEmptyLlmo = {
         getId: () => 'site-123',
         getBaseURL: () => 'https://example.com',
@@ -620,7 +836,13 @@ describe('Overview Metrics Calculator', () => {
     });
 
     it('should use getLlmoConfig when llmo property is not present', async () => {
-      const mockData = {
+      const queryIndexResponse = {
+        data: [
+          { path: '/test/brandpresence-all-w45-2025.json', lastModified: '2000' },
+        ],
+      };
+
+      const brandPresenceData = {
         ':type': 'sheet',
         data: [
           {
@@ -633,10 +855,29 @@ describe('Overview Metrics Calculator', () => {
           },
         ],
       };
-      global.fetch = sandbox.stub().resolves({
-        ok: true,
-        json: () => Promise.resolve(mockData),
+
+      const mockFetch = sandbox.stub().callsFake((url) => {
+        if (url.includes('query-index.json')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(queryIndexResponse),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(brandPresenceData),
+        });
       });
+
+      const { calculateOverviewMetrics } = await esmock(
+        '../../src/support/overview-metrics-calculator.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockFetch,
+            SPACECAT_USER_AGENT: 'test-agent',
+          },
+        },
+      );
 
       const siteWithGetLlmoConfig = {
         getId: () => 'site-123',
@@ -656,6 +897,61 @@ describe('Overview Metrics Calculator', () => {
 
       expect(result).to.have.property('visibilityScore');
       expect(result).to.have.property('mentionsCount');
+    });
+
+    it('should handle single file in query index (no previous data)', async () => {
+      const queryIndexResponse = {
+        data: [
+          { path: '/test/brandpresence-all-w45-2025.json', lastModified: '2000' },
+        ],
+      };
+
+      const brandPresenceData = {
+        ':type': 'sheet',
+        data: [
+          {
+            Mentions: 'true',
+            'Visibility Score': '75',
+            Sources: 'https://example.com/page',
+            Prompt: 'p1',
+            Region: 'US',
+            Topics: 't1',
+          },
+        ],
+      };
+
+      const mockFetch = sandbox.stub().callsFake((url) => {
+        if (url.includes('query-index.json')) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(queryIndexResponse),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(brandPresenceData),
+        });
+      });
+
+      const { calculateOverviewMetrics } = await esmock(
+        '../../src/support/overview-metrics-calculator.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockFetch,
+            SPACECAT_USER_AGENT: 'test-agent',
+          },
+        },
+      );
+
+      const result = await calculateOverviewMetrics({
+        site: mockSite,
+        hlxApiKey: 'test-key',
+        log: mockLog,
+      });
+
+      // With no previous data, delta should show increase from 0
+      expect(result.visibilityDelta).to.equal('+100%');
+      expect(result.mentionsDelta).to.equal('+100%');
     });
   });
 });
