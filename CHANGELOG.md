@@ -1,3 +1,10 @@
+## [1.305.3](https://github.com/adobe/spacecat-api-service/compare/v1.305.2...v1.305.3) (2026-02-03)
+
+
+### Bug Fixes
+
+* version upgradation of shared-data-access ([#1761](https://github.com/adobe/spacecat-api-service/issues/1761)) ([02a11bd](https://github.com/adobe/spacecat-api-service/commit/02a11bdc46f49b14d6d6f5321861fca30b608136))
+
 ## [1.305.2](https://github.com/adobe/spacecat-api-service/compare/v1.305.1...v1.305.2) (2026-02-03)
 
 
