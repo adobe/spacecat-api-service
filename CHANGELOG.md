@@ -1,3 +1,10 @@
+## [1.305.4](https://github.com/adobe/spacecat-api-service/compare/v1.305.3...v1.305.4) (2026-02-03)
+
+
+### Bug Fixes
+
+* update http-utils version ([#1762](https://github.com/adobe/spacecat-api-service/issues/1762)) ([9213cf7](https://github.com/adobe/spacecat-api-service/commit/9213cf717a3a83e537ec1832f402f8211d0bd3f5))
+
 ## [1.305.3](https://github.com/adobe/spacecat-api-service/compare/v1.305.2...v1.305.3) (2026-02-03)
 
 
