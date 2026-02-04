@@ -56,17 +56,25 @@ export const buildEmailPayload = ({ to, templateParams = {} }) => {
   // Handle single email or array of emails
   const toList = Array.isArray(to) ? to.join(',') : to;
 
-  // Build template parameters XML if provided
-  let paramsXml = '';
+  // Build template data XML if provided
+  // Adobe Post Office expects:
+  // <templateData><data><key>...</key><value>...</value></data></templateData>
+  let templateDataXml = '';
   if (Object.keys(templateParams).length > 0) {
-    const paramEntries = Object.entries(templateParams)
-      .map(([key, value]) => `<param name="${key}">${escapeXml(String(value))}</param>`)
-      .join('\n    ');
-    paramsXml = `\n    ${paramEntries}`;
+    const dataEntries = Object.entries(templateParams)
+      .map(([key, value]) => `
+        <data>
+            <key>${escapeXml(key)}</key>
+            <value>${escapeXml(String(value))}</value>
+        </data>`)
+      .join('');
+    templateDataXml = `
+    <templateData>${dataEntries}
+    </templateData>`;
   }
 
   return `<sendTemplateEmailReq>
-    <toList>${escapeXml(toList)}</toList>${paramsXml}
+    <toList>${escapeXml(toList)}</toList>${templateDataXml}
 </sendTemplateEmailReq>`;
 };
 

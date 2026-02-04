@@ -84,7 +84,7 @@ describe('Email Service', () => {
       expect(payload).to.include('<sendTemplateEmailReq>');
     });
 
-    it('should include template parameters', () => {
+    it('should include template parameters in templateData format', () => {
       const payload = buildEmailPayload({
         to: 'test@example.com',
         templateParams: {
@@ -93,8 +93,12 @@ describe('Email Service', () => {
         },
       });
 
-      expect(payload).to.include('<param name="name">John</param>');
-      expect(payload).to.include('<param name="value">100</param>');
+      expect(payload).to.include('<templateData>');
+      expect(payload).to.include('<data>');
+      expect(payload).to.include('<key>name</key>');
+      expect(payload).to.include('<value>John</value>');
+      expect(payload).to.include('<key>value</key>');
+      expect(payload).to.include('<value>100</value>');
     });
 
     it('should escape XML special characters', () => {
@@ -152,10 +156,12 @@ describe('Email Service', () => {
         },
       });
 
-      expect(payload).to.include('<param name="nullValue">');
-      expect(payload).to.include('<param name="undefinedValue">');
-      expect(payload).to.include('<param name="emptyValue"></param>');
-      expect(payload).to.include('<param name="zeroValue">0</param>');
+      expect(payload).to.include('<key>nullValue</key>');
+      expect(payload).to.include('<key>undefinedValue</key>');
+      expect(payload).to.include('<key>emptyValue</key>');
+      expect(payload).to.include('<value></value>');
+      expect(payload).to.include('<key>zeroValue</key>');
+      expect(payload).to.include('<value>0</value>');
     });
   });
 
