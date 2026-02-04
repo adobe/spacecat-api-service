@@ -1082,6 +1082,10 @@ function SuggestionsController(ctx, sqs, env) {
     const opportunityId = context.params?.opportunityId;
     const { authInfo: { profile } } = context.attributes;
 
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can deploy suggestions to edge');
+    }
+
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
@@ -1501,6 +1505,9 @@ function SuggestionsController(ctx, sqs, env) {
     const { authInfo: { profile } } = context.attributes;
     if (!isNonEmptyObject(context.data)) {
       return badRequest('No data provided');
+    }
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can rollback suggestions');
     }
     const { suggestionIds } = context.data;
     if (!isArray(suggestionIds) || suggestionIds.length === 0) {
