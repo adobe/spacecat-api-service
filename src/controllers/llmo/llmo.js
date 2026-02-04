@@ -798,6 +798,10 @@ function LlmoController(ctx) {
     const { data } = context;
 
     try {
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can onboard');
+      }
+
       // Validate required fields
       if (!data || typeof data !== 'object') {
         return badRequest('Onboarding data is required');
