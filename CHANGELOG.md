@@ -1,3 +1,10 @@
+## [1.306.3](https://github.com/adobe/spacecat-api-service/compare/v1.306.2...v1.306.3) (2026-02-04)
+
+
+### Bug Fixes
+
+* preview for all using apply Stale ([#1764](https://github.com/adobe/spacecat-api-service/issues/1764)) ([1c3c1d4](https://github.com/adobe/spacecat-api-service/commit/1c3c1d47817e2c4065b021509b910101854c23f5))
+
 ## [1.306.2](https://github.com/adobe/spacecat-api-service/compare/v1.306.1...v1.306.2) (2026-02-03)
 
 
