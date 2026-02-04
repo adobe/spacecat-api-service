@@ -1,3 +1,24 @@
+# [1.307.0](https://github.com/adobe/spacecat-api-service/compare/v1.306.3...v1.307.0) (2026-02-04)
+
+
+### Features
+
+* access control on config and deploy for LLMO ([#1749](https://github.com/adobe/spacecat-api-service/issues/1749)) ([10abbc5](https://github.com/adobe/spacecat-api-service/commit/10abbc55910f1def4d381f1d87b6c99d1dd496d8))
+
+## [1.306.3](https://github.com/adobe/spacecat-api-service/compare/v1.306.2...v1.306.3) (2026-02-04)
+
+
+### Bug Fixes
+
+* preview for all using apply Stale ([#1764](https://github.com/adobe/spacecat-api-service/issues/1764)) ([1c3c1d4](https://github.com/adobe/spacecat-api-service/commit/1c3c1d47817e2c4065b021509b910101854c23f5))
+
+## [1.306.2](https://github.com/adobe/spacecat-api-service/compare/v1.306.1...v1.306.2) (2026-02-03)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1675](https://github.com/adobe/spacecat-api-service/issues/1675)) ([4307798](https://github.com/adobe/spacecat-api-service/commit/43077981faf3bd978ecc4745c2768f76f9191bac))
+
 ## [1.306.1](https://github.com/adobe/spacecat-api-service/compare/v1.306.0...v1.306.1) (2026-02-03)
 
 
