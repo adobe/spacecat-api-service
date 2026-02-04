@@ -1,3 +1,66 @@
+# [1.308.0](https://github.com/adobe/spacecat-api-service/compare/v1.307.0...v1.308.0) (2026-02-04)
+
+
+### Features
+
+* scrape job complete response ([#1770](https://github.com/adobe/spacecat-api-service/issues/1770)) ([6763434](https://github.com/adobe/spacecat-api-service/commit/67634343056f62ba02c49d8992d1052297fed394))
+
+# [1.307.0](https://github.com/adobe/spacecat-api-service/compare/v1.306.3...v1.307.0) (2026-02-04)
+
+
+### Features
+
+* access control on config and deploy for LLMO ([#1749](https://github.com/adobe/spacecat-api-service/issues/1749)) ([10abbc5](https://github.com/adobe/spacecat-api-service/commit/10abbc55910f1def4d381f1d87b6c99d1dd496d8))
+
+## [1.306.3](https://github.com/adobe/spacecat-api-service/compare/v1.306.2...v1.306.3) (2026-02-04)
+
+
+### Bug Fixes
+
+* preview for all using apply Stale ([#1764](https://github.com/adobe/spacecat-api-service/issues/1764)) ([1c3c1d4](https://github.com/adobe/spacecat-api-service/commit/1c3c1d47817e2c4065b021509b910101854c23f5))
+
+## [1.306.2](https://github.com/adobe/spacecat-api-service/compare/v1.306.1...v1.306.2) (2026-02-03)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1675](https://github.com/adobe/spacecat-api-service/issues/1675)) ([4307798](https://github.com/adobe/spacecat-api-service/commit/43077981faf3bd978ecc4745c2768f76f9191bac))
+
+## [1.306.1](https://github.com/adobe/spacecat-api-service/compare/v1.306.0...v1.306.1) (2026-02-03)
+
+
+### Bug Fixes
+
+* rename tokowakaDeployed to edgeDeployed ([#1716](https://github.com/adobe/spacecat-api-service/issues/1716)) ([f57b1f3](https://github.com/adobe/spacecat-api-service/commit/f57b1f316831164e04330e16fe1ce77d5aafb67e))
+
+# [1.306.0](https://github.com/adobe/spacecat-api-service/compare/v1.305.4...v1.306.0) (2026-02-03)
+
+
+### Features
+
+* migrate scrape-command to use scrapeClient ([#1763](https://github.com/adobe/spacecat-api-service/issues/1763)) ([edcf75d](https://github.com/adobe/spacecat-api-service/commit/edcf75d27585ca9e4479dd93ebc73eb83e230aba))
+
+## [1.305.4](https://github.com/adobe/spacecat-api-service/compare/v1.305.3...v1.305.4) (2026-02-03)
+
+
+### Bug Fixes
+
+* update http-utils version ([#1762](https://github.com/adobe/spacecat-api-service/issues/1762)) ([9213cf7](https://github.com/adobe/spacecat-api-service/commit/9213cf717a3a83e537ec1832f402f8211d0bd3f5))
+
+## [1.305.3](https://github.com/adobe/spacecat-api-service/compare/v1.305.2...v1.305.3) (2026-02-03)
+
+
+### Bug Fixes
+
+* version upgradation of shared-data-access ([#1761](https://github.com/adobe/spacecat-api-service/issues/1761)) ([02a11bd](https://github.com/adobe/spacecat-api-service/commit/02a11bdc46f49b14d6d6f5321861fca30b608136))
+
+## [1.305.2](https://github.com/adobe/spacecat-api-service/compare/v1.305.1...v1.305.2) (2026-02-03)
+
+
+### Bug Fixes
+
+* opted changed to timestamp ([#1760](https://github.com/adobe/spacecat-api-service/issues/1760)) ([667620b](https://github.com/adobe/spacecat-api-service/commit/667620bb87f17683a539bae861b326ab665117ba))
+
 ## [1.305.1](https://github.com/adobe/spacecat-api-service/compare/v1.305.0...v1.305.1) (2026-02-02)
 
 

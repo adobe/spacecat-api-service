@@ -14,9 +14,9 @@ import {
   isNonEmptyObject,
   isValidUrl,
 } from '@adobe/spacecat-shared-utils';
+import { ScrapeClient } from '@adobe/spacecat-shared-scrape-client';
 
 import BaseCommand from './base.js';
-import { triggerScraperRun } from '../../utils.js';
 import {
   extractURLFromSlackInput, parseCSV,
   postErrorMessage,
@@ -45,9 +45,19 @@ function RunScrapeCommand(context) {
 
   const { dataAccess, log } = context;
   const { Site } = dataAccess;
+  let scrapeClient;
+  const getScrapeClient = () => {
+    if (!scrapeClient) {
+      scrapeClient = ScrapeClient.createFrom(context);
+    }
+    return scrapeClient;
+  };
 
-  const scrapeSite = async (baseURL, batchSize, allowCache, slackContext) => {
-    const { say } = slackContext;
+  const isBooleanLike = (value) => ['true', 'false'].includes(`${value}`.toLowerCase());
+  const parseBoolean = (value) => `${value}`.toLowerCase() === 'true';
+
+  const scrapeSite = async (baseURL, allowCache, slackContext) => {
+    const { say, channelId, threadTs } = slackContext;
     const site = await Site.findByBaseURL(baseURL);
     if (!isNonEmptyObject(site)) {
       await postSiteNotFoundMessage(say, baseURL);
@@ -62,16 +72,19 @@ function RunScrapeCommand(context) {
       return null;
     }
 
-    const urls = topPages.map((page) => ({ url: page.getUrl() }));
+    const urls = topPages.map((page) => page.getUrl());
 
-    const batches = [];
-    for (let i = 0; i < urls.length; i += batchSize) {
-      batches.push(urls.slice(i, i + batchSize));
-    }
-
-    return Promise.all(
-      batches.map((urlsBatch) => triggerScraperRun(`${site.getId()}`, urlsBatch, slackContext, context, allowCache)),
-    );
+    return getScrapeClient().createScrapeJob({
+      processingType: 'default',
+      urls,
+      ...(allowCache ? {} : { maxScrapeAge: 0 }),
+      metaData: {
+        slackData: {
+          channel: channelId,
+          thread_ts: threadTs,
+        },
+      },
+    });
   };
 
   /**
@@ -96,8 +109,9 @@ function RunScrapeCommand(context) {
     }
     */
     try {
-      const [baseURLInput, batchSize = 20, allowCache = false] = args;
-      const batchSizeNum = Number(batchSize);
+      const [baseURLInput, batchSizeOrAllowCache, allowCacheArg] = args;
+      let allowCache = false;
+
       const baseURL = extractURLFromSlackInput(baseURLInput);
       const isValidBaseURL = isValidUrl(baseURL);
       const hasFiles = isNonEmptyArray(files);
@@ -111,9 +125,17 @@ function RunScrapeCommand(context) {
         await say(':warning: Please provide either a baseURL or a CSV file with a list of site URLs.');
         return;
       }
-      if (Number.isNaN(batchSizeNum)) {
-        await say(':error: Batch size must be a number.');
-        return;
+      if (typeof batchSizeOrAllowCache !== 'undefined' && !isBooleanLike(batchSizeOrAllowCache)) {
+        if (Number.isNaN(Number(batchSizeOrAllowCache))) {
+          await say(':error: Batch size must be a number.');
+          return;
+        }
+      }
+
+      if (typeof allowCacheArg !== 'undefined') {
+        allowCache = parseBoolean(allowCacheArg);
+      } else if (typeof batchSizeOrAllowCache !== 'undefined' && isBooleanLike(batchSizeOrAllowCache)) {
+        allowCache = parseBoolean(batchSizeOrAllowCache);
       }
 
       if (hasFiles) {
@@ -131,20 +153,33 @@ function RunScrapeCommand(context) {
         const csvData = await parseCSV(file, botToken);
 
         say(`:adobe-run: Triggering scrape run for ${csvData.length} sites.`);
-        await Promise.all(
+        const jobResults = await Promise.all(
           csvData.map(async (row) => {
             const [csvBaseURL] = row;
             try {
-              await scrapeSite(csvBaseURL, batchSizeNum, allowCache, slackContext);
+              const job = await scrapeSite(csvBaseURL, allowCache, slackContext);
+              return job ? { baseURL: csvBaseURL, jobId: job.id } : null;
             } catch (error) {
               say(`:warning: Failed scrape for \`${csvBaseURL}\`: ${error.message}`);
             }
+            return null;
           }),
         );
+        const successfulJobs = jobResults.filter(Boolean);
+        if (successfulJobs.length) {
+          const jobLines = successfulJobs
+            .map(({ baseURL: jobBaseURL, jobId }) => `${jobBaseURL} -> ${jobId}`)
+            .join('\n');
+          await say(`:white_check_mark: Triggered ${successfulJobs.length} scrape jobs:\n\`\`\`\n${jobLines}\n\`\`\``);
+        } else {
+          await say(':warning: No scrape jobs were triggered.');
+        }
       } else if (isValidBaseURL) {
-        say(`:adobe-run: Triggering scrape run for site \`${baseURL}\` with batchSize: ${batchSize} and allowCache: ${allowCache}`);
-        await scrapeSite(baseURL, batchSizeNum, allowCache, slackContext);
-        say(`:white_check_mark: Completed triggering scrape for \`${baseURL}\`.`);
+        say(`:adobe-run: Triggering scrape run for site \`${baseURL}\` with allowCache: ${allowCache}`);
+        const job = await scrapeSite(baseURL, allowCache, slackContext);
+        if (job) {
+          say(`:white_check_mark: Completed triggering scrape for \`${baseURL}\` (jobId: ${job.id}, urlCount: ${job.urlCount}).`);
+        }
       }
     } catch (error) {
       log.error(error);
