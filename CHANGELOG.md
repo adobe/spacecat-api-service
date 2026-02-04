@@ -1,3 +1,10 @@
+# [1.309.0](https://github.com/adobe/spacecat-api-service/compare/v1.308.1...v1.309.0) (2026-02-04)
+
+
+### Features
+
+* add impact field name ([#1767](https://github.com/adobe/spacecat-api-service/issues/1767)) ([acce192](https://github.com/adobe/spacecat-api-service/commit/acce1927fc8c15975b9ce31bb01d920f69733143))
+
 ## [1.308.1](https://github.com/adobe/spacecat-api-service/compare/v1.308.0...v1.308.1) (2026-02-04)
 
 

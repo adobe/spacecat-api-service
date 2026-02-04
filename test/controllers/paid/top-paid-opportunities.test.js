@@ -191,6 +191,26 @@ describe('TopPaidOpportunitiesController', () => {
       expect(opportunities).to.have.lengthOf(1);
     });
 
+    it('does not filter out opportunities with projectedEngagementValue', async () => {
+      const engagementOppty = createOpportunity({
+        id: 'oppty-1',
+        tags: ['paid traffic'],
+        data: {
+          projectedEngagementValue: 5000,
+          projectedTrafficValue: 0,
+          projectedConversionValue: 0,
+        },
+      });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [engagementOppty]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(1);
+      expect(opportunities[0].impact).to.equal(5000);
+    });
+
     it('returns paid media opportunities (with paid media tag)', async () => {
       const paidOppty = createOpportunity({ id: 'oppty-1', tags: ['paid media'] });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [paidOppty]);
@@ -237,6 +257,46 @@ describe('TopPaidOpportunitiesController', () => {
       });
       const opportunities = await response.json();
       expect(opportunities).to.have.lengthOf(1);
+    });
+
+    it('includes projectedEngagementValue and impactFieldName in response', async () => {
+      const engagementOppty = createOpportunity({
+        id: 'engagement-1',
+        type: 'high-organic-low-ctr',
+        tags: ['paid traffic'],
+        data: { projectedEngagementValue: 5000 },
+      });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [engagementOppty]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(1);
+      expect(opportunities[0].projectedEngagementValue).to.equal(5000);
+      expect(opportunities[0].impact).to.equal(5000);
+      expect(opportunities[0].impactFieldName).to.equal('projectedEngagementValue');
+    });
+
+    it('prioritizes projectedEngagementValue over other impact fields', async () => {
+      const engagementOppty = createOpportunity({
+        id: 'engagement-1',
+        type: 'high-organic-low-ctr',
+        tags: ['paid traffic'],
+        data: {
+          projectedEngagementValue: 8000,
+          projectedConversionValue: 5000,
+          projectedTrafficValue: 3000,
+        },
+      });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [engagementOppty]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
+      const opportunities = await response.json();
+      expect(opportunities[0].impact).to.equal(8000);
+      expect(opportunities[0].impactFieldName).to.equal('projectedEngagementValue');
     });
 
     it('limits results to top 10 opportunities with max 2 per type', async () => {
