@@ -1,3 +1,10 @@
+# [1.307.0](https://github.com/adobe/spacecat-api-service/compare/v1.306.3...v1.307.0) (2026-02-04)
+
+
+### Features
+
+* access control on config and deploy for LLMO ([#1749](https://github.com/adobe/spacecat-api-service/issues/1749)) ([10abbc5](https://github.com/adobe/spacecat-api-service/commit/10abbc55910f1def4d381f1d87b6c99d1dd496d8))
+
 ## [1.306.3](https://github.com/adobe/spacecat-api-service/compare/v1.306.2...v1.306.3) (2026-02-04)
 
 
