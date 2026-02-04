@@ -1,3 +1,10 @@
+# [1.308.0](https://github.com/adobe/spacecat-api-service/compare/v1.307.0...v1.308.0) (2026-02-04)
+
+
+### Features
+
+* scrape job complete response ([#1770](https://github.com/adobe/spacecat-api-service/issues/1770)) ([6763434](https://github.com/adobe/spacecat-api-service/commit/67634343056f62ba02c49d8992d1052297fed394))
+
 # [1.307.0](https://github.com/adobe/spacecat-api-service/compare/v1.306.3...v1.307.0) (2026-02-04)
 
 
