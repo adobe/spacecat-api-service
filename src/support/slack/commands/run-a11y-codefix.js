@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { hasText } from '@adobe/spacecat-shared-utils';
+import { hasText, buildAggregationKeyFromSuggestion } from '@adobe/spacecat-shared-utils';
 import { Opportunity as OpportunityModel } from '@adobe/spacecat-shared-data-access';
 
 import BaseCommand from './base.js';
@@ -29,6 +29,9 @@ const VALID_OPPORTUNITY_STATUSES = [
 
 // Supported accessibility opportunity types
 const SUPPORTED_OPPORTUNITY_TYPES = ['a11y-assistive', 'a11y-color-contrast'];
+
+// Valid suggestion statuses for counting
+const VALID_SUGGESTION_STATUSES = ['NEW', 'APPROVED', 'IN_PROGRESS'];
 
 /**
  * Normalizes the opportunity type input to the full type name.
@@ -80,9 +83,10 @@ function RunA11yCodefixCommand(context) {
     name: 'Run A11y Codefix',
     description: 'Triggers accessibility code fix flow for an existing opportunity. '
       + 'Searches for a site by name or URL, finds the latest matching opportunity, '
-      + 'and sends its suggestions to Mystique for code fix processing.',
+      + 'and sends its suggestions to Mystique for code fix processing. '
+      + 'Optionally filter by aggregation_key to process only matching suggestions.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} {site_name_or_url} [opportunity_type: assistive|color-contrast]`,
+    usageText: `${PHRASES[0]} {site_name_or_url} [opportunity_type: assistive|color-contrast] [aggregation_key]`,
   });
 
   const { dataAccess, log } = context;
@@ -117,20 +121,28 @@ function RunA11yCodefixCommand(context) {
     return validOpportunities[0];
   };
 
-  /**
-   * Validates input, finds the site and opportunity,
-   * and triggers the codefix flow.
-   *
-   * @param {string[]} args - The arguments provided to the command.
-   * @param {Object} slackContext - The Slack context object.
-   * @param {Function} slackContext.say - The Slack say function.
-   * @returns {Promise} A promise that resolves when the operation is complete.
-   */
+  const countMatchingSuggestions = (suggestions, aggregationKey) => {
+    if (!aggregationKey) {
+      return suggestions.filter(
+        (s) => VALID_SUGGESTION_STATUSES.includes(s.getStatus()),
+      ).length;
+    }
+
+    return suggestions.filter((s) => {
+      if (!VALID_SUGGESTION_STATUSES.includes(s.getStatus())) {
+        return false;
+      }
+      const suggestionData = s.getData();
+      const suggestionAggKey = buildAggregationKeyFromSuggestion(suggestionData);
+      return suggestionAggKey === aggregationKey;
+    }).length;
+  };
+
   const handleExecution = async (args, slackContext) => {
     const { say } = slackContext;
 
     try {
-      const [siteNameInput, opportunityTypeInput] = args;
+      const [siteNameInput, opportunityTypeInput, aggregationKeyInput] = args;
 
       if (!hasText(siteNameInput)) {
         await say(baseCommand.usage());
@@ -138,6 +150,7 @@ function RunA11yCodefixCommand(context) {
       }
 
       const opportunityType = normalizeOpportunityType(opportunityTypeInput);
+      const aggregationKey = hasText(aggregationKeyInput) ? aggregationKeyInput.trim() : null;
 
       if (!SUPPORTED_OPPORTUNITY_TYPES.includes(opportunityType)) {
         await say(`:x: Invalid opportunity type: \`${opportunityType}\`. Supported types: ${SUPPORTED_OPPORTUNITY_TYPES.join(', ')}`);
@@ -183,20 +196,41 @@ function RunA11yCodefixCommand(context) {
       const opportunityStatus = opportunity.getStatus();
 
       const suggestions = await opportunity.getSuggestions();
-      const suggestionCount = suggestions.length;
+      const totalSuggestionCount = suggestions.filter(
+        (s) => VALID_SUGGESTION_STATUSES.includes(s.getStatus()),
+      ).length;
+      const matchingSuggestionCount = countMatchingSuggestions(suggestions, aggregationKey);
 
-      await say(`:adobe-run: Triggering A11y codefix for:\n• Site: \`${baseURL}\`\n• Opportunity: \`${opportunityId}\` (${opportunityType})\n• Status: ${opportunityStatus}\n• Suggestions: ${suggestionCount}`);
+      // Build the trigger message
+      let triggerMessage = `:adobe-run: Triggering A11y codefix for:\n• Site: \`${baseURL}\`\n• Opportunity: \`${opportunityId}\` (${opportunityType})\n• Status: ${opportunityStatus}`;
+
+      if (aggregationKey) {
+        triggerMessage += `\n• Aggregation Key: \`${aggregationKey}\`\n• Matching Suggestions: ${matchingSuggestionCount} (of ${totalSuggestionCount} total)`;
+
+        if (matchingSuggestionCount === 0) {
+          await say(`:x: No suggestions found matching aggregation key: \`${aggregationKey}\``);
+          return;
+        }
+      } else {
+        triggerMessage += `\n• Suggestions: ${totalSuggestionCount}`;
+      }
+
+      await say(triggerMessage);
 
       // Trigger the codefix flow
       await triggerA11yCodefixForOpportunity(
         site,
         opportunityId,
         opportunityType,
+        aggregationKey,
         slackContext,
         context,
       );
 
-      await say(':white_check_mark: A11y codefix request sent successfully. Suggestions will be processed and sent to Mystique.');
+      const filterNote = aggregationKey
+        ? ` Only suggestions matching aggregation key \`${aggregationKey}\` will be processed.`
+        : '';
+      await say(`:white_check_mark: A11y codefix request sent successfully.${filterNote} Suggestions will be processed and sent to Mystique.`);
     } catch (error) {
       log.error('Error in run-a11y-codefix command:', error);
       await postErrorMessage(say, error);
