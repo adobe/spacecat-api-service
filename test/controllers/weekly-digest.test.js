@@ -196,7 +196,7 @@ describe('Weekly Digest Controller', () => {
     let controller;
 
     beforeEach(() => {
-      controller = WeeklyDigestController({ dataAccess: mockDataAccess });
+      controller = WeeklyDigestController({ dataAccess: mockDataAccess }, mockLog);
     });
 
     it('should queue messages for each organization with LLMO-enabled sites', async () => {
@@ -340,7 +340,7 @@ describe('Weekly Digest Controller', () => {
     let controller;
 
     beforeEach(() => {
-      controller = WeeklyDigestController({ dataAccess: mockDataAccess });
+      controller = WeeklyDigestController({ dataAccess: mockDataAccess }, mockLog);
     });
 
     it('should process organization digest successfully', async () => {

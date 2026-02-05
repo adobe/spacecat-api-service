@@ -116,8 +116,9 @@ const processSiteDigest = async ({
   organization,
   eligibleUsers,
   context,
+  log,
 }) => {
-  const { log, env } = context;
+  const { env } = context;
   const siteId = site.getId();
   const baseURL = site.getBaseURL();
   const brandName = getBrandName(site);
@@ -212,9 +213,10 @@ const processSiteDigest = async ({
  * 2. processOrganizationDigest - Worker, processes single org from SQS
  *
  * @param {Object} ctx - Context of the request
+ * @param {Object} log - Logger instance
  * @returns {Object} WeeklyDigest controller
  */
-function WeeklyDigestController(ctx) {
+function WeeklyDigestController(ctx, log) {
   if (!isNonEmptyObject(ctx)) {
     throw new Error('Context required');
   }
@@ -241,11 +243,13 @@ function WeeklyDigestController(ctx) {
    * @returns {Promise<Response>} Accepted response with queue stats
    */
   const triggerWeeklyDigests = async (context) => {
+    log.info('[WeeklyDigest] triggerWeeklyDigests called');
+
     if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can trigger weekly digests');
     }
 
-    const { log, sqs, env } = context;
+    const { sqs, env } = context;
     const startTime = Date.now();
 
     log.info('Starting weekly digest trigger - queueing per-org jobs');
@@ -353,11 +357,13 @@ function WeeklyDigestController(ctx) {
    * @returns {Promise<Response>} Processing result
    */
   const processOrganizationDigest = async (context) => {
+    log.info('[WeeklyDigest] processOrganizationDigest called');
+
     if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can process organization digests');
     }
 
-    const { log, data } = context;
+    const { data } = context;
     const startTime = Date.now();
 
     // Parse message from SQS (comes via request body)
@@ -446,6 +452,7 @@ function WeeklyDigestController(ctx) {
             organization,
             eligibleUsers,
             context,
+            log,
           });
 
           result.siteResults.push(siteResult);

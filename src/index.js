@@ -150,7 +150,7 @@ async function run(request, context) {
     const urlStoreController = UrlStoreController(context, log);
     const pta2Controller = PTA2Controller(context, log, context.env);
     const trafficToolsController = TrafficToolsController(context, log, context.env);
-    const weeklyDigestController = WeeklyDigestController(context);
+    const weeklyDigestController = WeeklyDigestController(context, log);
     const botBlockerController = BotBlockerController(context, log);
     const sentimentController = SentimentController(context, log);
 
