@@ -898,6 +898,7 @@ function SuggestionsController(ctx, sqs, env) {
    * @returns {Promise<Response>} Preview response with HTML comparison
    */
   const previewSuggestions = async (context) => {
+    const previewStartTime = Date.now();
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
     const { authInfo: { profile } } = context.attributes;
@@ -1031,7 +1032,8 @@ function SuggestionsController(ctx, sqs, env) {
           optimizedHtml = htmlResult.optimizedHtml;
         }
 
-        context.log.info(`[edge-preview] Successfully previewed ${succeededSuggestions.length} suggestions by ${profile?.email || 'tokowaka-preview'}`);
+        context.log.info(`[edge-preview] Successfully previewed ${succeededSuggestions.length} suggestions`
+          + ` by ${profile?.email || 'tokowaka-preview'}, took ${Date.now() - previewStartTime}ms`);
       } catch (error) {
         context.log.error(`Error generating preview: ${error.message}`, error);
         // If preview fails, mark all valid suggestions as failed
