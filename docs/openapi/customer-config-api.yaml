@@ -179,6 +179,13 @@ llmo-topics-by-space-cat-id-v2:
         type: string
         format: uuid
         example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    - name: brandId
+      in: query
+      required: false
+      description: Filter topics by brand ID (returns only topics used by that brand's prompts)
+      schema:
+        type: string
+        example: 'chevrolet'
     - name: status
       in: query
       required: false
@@ -197,6 +204,8 @@ llmo-topics-by-space-cat-id-v2:
       
       By default, deleted topics are excluded.
       Use the `status` query parameter to filter by specific status or include deleted topics.
+      
+      Optionally filter by `brandId` to return only topics used by that brand's prompts.
     operationId: getTopicsBySpaceCatIdV2
     security:
       - ims_key: [ ]
