@@ -1082,6 +1082,10 @@ function SuggestionsController(ctx, sqs, env) {
     const opportunityId = context.params?.opportunityId;
     const { authInfo: { profile } } = context.attributes;
 
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can deploy suggestions to edge');
+    }
+
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
@@ -1245,7 +1249,6 @@ function SuggestionsController(ctx, sqs, env) {
             const currentData = suggestion.getData();
             const updatedData = {
               ...currentData,
-              tokowakaDeployed: deploymentTimestamp,
               edgeDeployed: deploymentTimestamp,
             };
             // Remove edgeOptimizeStatus if it's STALE
@@ -1323,7 +1326,6 @@ function SuggestionsController(ctx, sqs, env) {
             const currentData = suggestion.getData();
             suggestion.setData({
               ...currentData,
-              tokowakaDeployed: deploymentTimestamp,
               edgeDeployed: deploymentTimestamp,
             });
             suggestion.setUpdatedBy(profile?.email || 'tokowaka-deployment');
@@ -1385,7 +1387,6 @@ function SuggestionsController(ctx, sqs, env) {
                     const coveredData = coveredSuggestion.getData();
                     coveredSuggestion.setData({
                       ...coveredData,
-                      tokowakaDeployed: deploymentTimestamp,
                       edgeDeployed: deploymentTimestamp,
                       coveredByDomainWide: suggestion.getId(),
                     });
@@ -1444,7 +1445,6 @@ function SuggestionsController(ctx, sqs, env) {
             const currentData = skippedSuggestion.getData();
             skippedSuggestion.setData({
               ...currentData,
-              tokowakaDeployed: deploymentTimestamp,
               edgeDeployed: deploymentTimestamp,
               coveredByDomainWide: 'same-batch-deployment',
               skippedInDeployment: true,
@@ -1506,6 +1506,9 @@ function SuggestionsController(ctx, sqs, env) {
     if (!isNonEmptyObject(context.data)) {
       return badRequest('No data provided');
     }
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can rollback suggestions');
+    }
     const { suggestionIds } = context.data;
     if (!isArray(suggestionIds) || suggestionIds.length === 0) {
       return badRequest('Request body must contain a non-empty array of suggestionIds');
@@ -1545,8 +1548,7 @@ function SuggestionsController(ctx, sqs, env) {
         });
       } else {
         // For rollback, check if suggestion has been deployed
-        const hasBeenDeployed = suggestion.getData()?.edgeDeployed
-                                || suggestion.getData()?.tokowakaDeployed;
+        const hasBeenDeployed = suggestion.getData()?.edgeDeployed;
         if (!hasBeenDeployed) {
           failedSuggestions.push({
             uuid: suggestionId,
@@ -1589,8 +1591,10 @@ function SuggestionsController(ctx, sqs, env) {
               context.log.info(`Removed prerender config from metaconfig for domain-wide suggestion ${suggestion.getId()}`);
             }
 
-            // Remove tokowakaDeployed from the domain-wide suggestion
+            // Remove edgeDeployed (and legacy tokowakaDeployed) from the domain-wide suggestion
             const currentData = suggestion.getData();
+            delete currentData.edgeDeployed;
+            // TODO: To be removed, kept for backward compatibility
             delete currentData.tokowakaDeployed;
             delete currentData.edgeDeployed;
             suggestion.setData(currentData);
@@ -1612,6 +1616,8 @@ function SuggestionsController(ctx, sqs, env) {
               await Promise.all(
                 coveredSuggestions.map(async (coveredSuggestion) => {
                   const coveredData = coveredSuggestion.getData();
+                  delete coveredData.edgeDeployed;
+                  // TODO: To be removed, kept for backward compatibility
                   delete coveredData.tokowakaDeployed;
                   delete coveredData.edgeDeployed;
                   delete coveredData.coveredByDomainWide;
@@ -1662,10 +1668,13 @@ function SuggestionsController(ctx, sqs, env) {
           failedSuggestions: ineligibleSuggestions,
         } = result;
 
-        // Update successfully rolled back suggestions - remove tokowakaDeployed timestamp
+        // Update successfully rolled back suggestions
+        // - remove edgeDeployed (and legacy tokowakaDeployed) timestamp
         succeededSuggestions = await Promise.all(
           processedSuggestions.map(async (suggestion) => {
             const currentData = suggestion.getData();
+            delete currentData.edgeDeployed;
+            // TODO: To be removed, kept for backward compatibility
             delete currentData.tokowakaDeployed;
             delete currentData.edgeDeployed;
             suggestion.setData(currentData);
@@ -1781,7 +1790,7 @@ function SuggestionsController(ctx, sqs, env) {
       const response = await fetch(url, {
         method: 'GET',
         headers: {
-          'User-Agent': 'Tokowaka-AI Tokowaka/1.0',
+          'User-Agent': 'Tokowaka-AI Tokowaka/1.0 AdobeEdgeOptimize-AI AdobeEdgeOptimize/1.0',
           Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         },
       });

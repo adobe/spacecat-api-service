@@ -42,10 +42,13 @@ const createMockResponse = (data, ok = true, status = 200) => ({
   headers: { entries: sinon.stub().returns([]) },
 });
 
-const createMockAccessControlUtil = (accessResult) => ({
+// eslint-disable-next-line max-len
+const createMockAccessControlUtil = (accessResult, hasAdminAccessResult = true, isLLMOAdministratorResult = true) => ({
   fromContext: (context) => ({
     log: context.log,
     hasAccess: async () => accessResult,
+    hasAdminAccess: () => hasAdminAccessResult,
+    isLLMOAdministrator: () => isLLMOAdministratorResult,
   }),
 });
 
@@ -104,6 +107,7 @@ describe('LlmoController', () => {
       fetchMetaconfig: sinon.stub(),
       createMetaconfig: sinon.stub(),
       updateMetaconfig: sinon.stub(),
+      checkEdgeOptimizeStatus: sinon.stub(),
     };
 
     // Set up esmock once for all tests
@@ -130,6 +134,10 @@ describe('LlmoController', () => {
         hasText: (str) => typeof str === 'string' && str.trim().length > 0,
         isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
         composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+        isValidUUID: (uuid) => {
+          const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+          return uuidRegex.test(uuid);
+        },
       },
       '../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
@@ -140,6 +148,12 @@ describe('LlmoController', () => {
             return {
               log: context.log,
               async hasAccess() {
+                return true;
+              },
+              hasAdminAccess() {
+                return true;
+              },
+              isLLMOAdministrator() {
                 return true;
               },
             };
@@ -1614,6 +1628,23 @@ describe('LlmoController', () => {
         sinon.match(/0 prompts/),
       );
     });
+
+    it('should return 403 when user is not LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '@adobe/spacecat-shared-utils': {
+          isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
+        },
+      });
+
+      const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
+      const result = await controllerNoAdmin.updateLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only LLMO administrators can update the LLMO config');
+    });
   });
 
   describe('getLlmoQuestions', () => {
@@ -1678,6 +1709,20 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       expect(mockLog.error).to.have.been.called;
     });
+
+    it('should return 403 when user is not LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      });
+
+      const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
+      const result = await controllerNoAdmin.addLlmoQuestion(mockContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only LLMO administrators can add questions');
+    });
   });
 
   describe('removeLlmoQuestion', () => {
@@ -1711,6 +1756,20 @@ describe('LlmoController', () => {
         expect(error.message).to.include('Invalid question key');
       }
     });
+
+    it('should return 403 when user is not LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      });
+
+      const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
+      const result = await controllerNoAdmin.removeLlmoQuestion(mockContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only LLMO administrators can remove questions');
+    });
   });
 
   describe('patchLlmoQuestion', () => {
@@ -1722,6 +1781,20 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       expect(mockConfig.updateLlmoQuestion).to.have.been.calledWith('test-question', updateData);
+    });
+
+    it('should return 403 when user is not LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      });
+
+      const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
+      const result = await controllerNoAdmin.patchLlmoQuestion(mockContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only LLMO administrators can update questions');
     });
   });
 
@@ -1858,6 +1931,21 @@ describe('LlmoController', () => {
       const result = await controller.addLlmoCustomerIntent(mockContext);
 
       expect(result.status).to.equal(400);
+    });
+
+    it('should return 403 when user is not LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      });
+
+      const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
+      mockContext.data = [{ key: 'test', value: 'test value' }];
+      const result = await controllerNoAdmin.addLlmoCustomerIntent(mockContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only LLMO administrators can add customer intent');
     });
   });
 
@@ -2057,59 +2145,87 @@ describe('LlmoController', () => {
         expect(body).to.be.an('array');
       },
     );
-  });
 
-  describe('patchLlmoCdnBucketConfig', () => {
-    beforeEach(() => {
-      mockContext.data = {
-        cdnBucketConfig: {
-          bucketName: TEST_BUCKET,
-          orgId: TEST_ORG_ID,
-        },
-      };
+    it('should return 403 when user is not LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      });
+
+      const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
+      const result = await controllerNoAdmin.patchLlmoCdnLogsFilter(mockContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only LLMO administrators can update the CDN logs filter');
     });
 
-    it('should update CDN bucket config successfully', async () => {
-      const result = await controller.patchLlmoCdnBucketConfig(mockContext);
+    describe('patchLlmoCdnBucketConfig', () => {
+      beforeEach(() => {
+        mockContext.data = {
+          cdnBucketConfig: {
+            bucketName: TEST_BUCKET,
+            orgId: TEST_ORG_ID,
+          },
+        };
+      });
 
-      expect(result.status).to.equal(200);
-    });
-
-    it('should return bad request when no data provided', async () => {
-      mockContext.data = null;
-
-      const result = await controller.patchLlmoCdnBucketConfig(mockContext);
-
-      expect(result.status).to.equal(400);
-    });
-
-    it('should handle errors and log them', async () => {
-      mockDataAccess.Site.findById.rejects(new Error('Database error'));
-
-      const result = await controller.patchLlmoCdnBucketConfig(mockContext);
-
-      expect(result.status).to.equal(400);
-      expect(mockLog.error).to.have.been.calledWith(
-        `Error updating CDN bucket config for siteId: ${TEST_SITE_ID}, error: Database error`,
-      );
-    });
-
-    it(
-      'should return empty object when getLlmoConfig().cdnBucketConfig is null',
-      async () => {
-        mockConfig.getLlmoConfig.returns({
-          dataFolder: TEST_FOLDER,
-          brand: TEST_BRAND,
-          cdnBucketConfig: null,
-        });
-
+      it('should update CDN bucket config successfully', async () => {
         const result = await controller.patchLlmoCdnBucketConfig(mockContext);
 
         expect(result.status).to.equal(200);
-        const body = await result.json();
-        expect(body).to.be.an('object');
-      },
-    );
+      });
+
+      it('should return bad request when no data provided', async () => {
+        mockContext.data = null;
+
+        const result = await controller.patchLlmoCdnBucketConfig(mockContext);
+
+        expect(result.status).to.equal(400);
+      });
+
+      it('should handle errors and log them', async () => {
+        mockDataAccess.Site.findById.rejects(new Error('Database error'));
+
+        const result = await controller.patchLlmoCdnBucketConfig(mockContext);
+
+        expect(result.status).to.equal(400);
+        expect(mockLog.error).to.have.been.calledWith(
+          `Error updating CDN bucket config for siteId: ${TEST_SITE_ID}, error: Database error`,
+        );
+      });
+
+      it(
+        'should return empty object when getLlmoConfig().cdnBucketConfig is null',
+        async () => {
+          mockConfig.getLlmoConfig.returns({
+            dataFolder: TEST_FOLDER,
+            brand: TEST_BRAND,
+            cdnBucketConfig: null,
+          });
+
+          const result = await controller.patchLlmoCdnBucketConfig(mockContext);
+
+          expect(result.status).to.equal(200);
+          const body = await result.json();
+          expect(body).to.be.an('object');
+        },
+      );
+
+      it('should return 403 when user is not LLMO administrator', async () => {
+        const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+          '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+          '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        });
+
+        const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
+        const result = await controllerNoAdmin.patchLlmoCdnBucketConfig(mockContext);
+
+        expect(result.status).to.equal(403);
+        const responseBody = await result.json();
+        expect(responseBody.message).to.equal('Only LLMO administrators can update the CDN bucket config');
+      });
+    });
   });
 
   describe('onboardCustomer', () => {
@@ -2403,6 +2519,20 @@ describe('LlmoController', () => {
         triggerBrandProfileAgentStub.resetBehavior();
         triggerBrandProfileAgentStub.resolves('exec-123');
       }
+    });
+
+    it('should return 403 when user is not LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      });
+
+      const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
+      const result = await controllerNoAdmin.onboardCustomer(onboardingContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only LLMO administrators can onboard');
     });
   });
 
@@ -3292,7 +3422,7 @@ describe('LlmoController', () => {
         sinon.match({ lastModifiedBy: 'tokowaka-edge-optimize-config' }),
       );
       expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(
-        sinon.match({ opted: true }),
+        sinon.match({ opted: sinon.match.number }),
       );
       expect(mockSite.save).to.have.been.called;
     });
@@ -3556,7 +3686,7 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.deep.include(newMetaconfig);
       expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(
-        sinon.match({ opted: true }),
+        sinon.match({ opted: sinon.match.number }),
       );
     });
 
@@ -3629,7 +3759,7 @@ describe('LlmoController', () => {
         sinon.match({ lastModifiedBy: 'tokowaka-edge-optimize-config' }),
       );
       expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(
-        sinon.match({ opted: true }),
+        sinon.match({ opted: sinon.match.number }),
       );
     });
 
@@ -3647,6 +3777,20 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(404);
       const responseBody = await result.json();
       expect(responseBody.message).to.include('Site not found');
+    });
+
+    it('should return 403 when user is not LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      });
+
+      const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
+      const result = await controllerNoAdmin.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only LLMO administrators can update the edge optimize config');
     });
   });
 
@@ -3707,6 +3851,26 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(403);
       const responseBody = await result.json();
       expect(responseBody.message).to.include('User does not have access to this site');
+    });
+
+    it('should return 403 when user is not an LLMO administrator', async () => {
+      // Create a controller where user has site access but is not an LLMO administrator
+      const LlmoControllerNonAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': {
+          default: createMockAccessControlUtil(true, true, false),
+        },
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+      });
+      const nonAdminController = LlmoControllerNonAdmin;
+
+      const result = await nonAdminController(mockContext).getEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only LLMO administrators can get the edge optimize config');
     });
 
     it('should handle site not found failure', async () => {
@@ -3928,6 +4092,228 @@ describe('LlmoController', () => {
         s3Client,
         { s3Bucket: TEST_BUCKET },
       );
+    });
+
+    it('should return 403 when user is not LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '@adobe/spacecat-shared-utils': {
+          isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
+        },
+      });
+
+      const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
+      const result = await controllerNoAdmin.saveStrategy(mockContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only LLMO administrators can save the LLMO strategy');
+    });
+  });
+
+  describe('checkEdgeOptimizeStatus', () => {
+    let edgeStatusContext;
+    const validSiteId = '12345678-1234-4123-8123-123456789012';
+
+    beforeEach(() => {
+      edgeStatusContext = {
+        ...mockContext,
+        params: { siteId: validSiteId },
+        data: { path: '/' },
+      };
+
+      mockSite.getBaseURL = sinon.stub().returns('https://www.example.com');
+      mockDataAccess.Site.findById.resetBehavior();
+      mockDataAccess.Site.findById.resolves(mockSite);
+      mockTokowakaClient.checkEdgeOptimizeStatus.reset();
+      mockTokowakaClient.checkEdgeOptimizeStatus.resolves({});
+    });
+
+    it('should return edge optimize status successfully with default path', async () => {
+      const statusResult = {
+        enabled: true,
+        optimized: true,
+        path: '/',
+        configuration: {
+          enhancements: true,
+          tokowakaEnabled: true,
+        },
+      };
+
+      mockTokowakaClient.checkEdgeOptimizeStatus.resolves(statusResult);
+
+      const result = await controller.checkEdgeOptimizeStatus(edgeStatusContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(statusResult);
+      expect(mockTokowakaClient.checkEdgeOptimizeStatus).to.have.been.calledWith(
+        mockSite,
+        '/',
+      );
+    });
+
+    it('should return edge optimize status successfully with custom path', async () => {
+      const customPath = '/products/index.html';
+      edgeStatusContext.data = { path: customPath };
+
+      const statusResult = {
+        enabled: true,
+        optimized: false,
+        path: customPath,
+      };
+
+      mockTokowakaClient.checkEdgeOptimizeStatus.resolves(statusResult);
+
+      const result = await controller.checkEdgeOptimizeStatus(edgeStatusContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal(statusResult);
+      expect(mockTokowakaClient.checkEdgeOptimizeStatus).to.have.been.calledWith(
+        mockSite,
+        customPath,
+      );
+    });
+
+    it('should use default path when data is undefined', async () => {
+      edgeStatusContext.data = undefined;
+
+      const statusResult = {
+        enabled: true,
+        optimized: true,
+        path: '/',
+      };
+
+      mockTokowakaClient.checkEdgeOptimizeStatus.resolves(statusResult);
+
+      const result = await controller.checkEdgeOptimizeStatus(edgeStatusContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockTokowakaClient.checkEdgeOptimizeStatus).to.have.been.calledWith(
+        mockSite,
+        '/',
+      );
+    });
+
+    it('should return 400 when siteId is invalid', async () => {
+      edgeStatusContext.params.siteId = 'invalid-uuid';
+
+      const result = await controller.checkEdgeOptimizeStatus(edgeStatusContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Site ID required');
+      expect(mockDataAccess.Site.findById).to.not.have.been.called;
+    });
+
+    it('should return 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resetBehavior();
+      mockDataAccess.Site.findById.resolves(null);
+
+      const result = await controller.checkEdgeOptimizeStatus(edgeStatusContext);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Site not found');
+      expect(mockTokowakaClient.checkEdgeOptimizeStatus).to.not.have.been.called;
+    });
+
+    it('should return 403 when user does not have access to site', async () => {
+      const deniedController = controllerWithAccessDenied(mockContext);
+
+      // Reset and set up the mock for this specific test
+      mockDataAccess.Site.findById.resetBehavior();
+      mockDataAccess.Site.findById.resolves(mockSite);
+
+      const result = await deniedController.checkEdgeOptimizeStatus(edgeStatusContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Access denied to this site');
+      expect(mockTokowakaClient.checkEdgeOptimizeStatus).to.not.have.been.called;
+    });
+
+    it('should handle tokowaka client error with status code', async () => {
+      const error = new Error('Tokowaka service unavailable');
+      error.status = 503;
+      mockTokowakaClient.checkEdgeOptimizeStatus.rejects(error);
+
+      const result = await controller.checkEdgeOptimizeStatus(edgeStatusContext);
+
+      expect(result.status).to.equal(503);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Tokowaka service unavailable');
+    });
+
+    it('should return 500 when tokowaka client throws error without status', async () => {
+      const error = new Error('Unexpected error occurred');
+      mockTokowakaClient.checkEdgeOptimizeStatus.rejects(error);
+
+      const result = await controller.checkEdgeOptimizeStatus(edgeStatusContext);
+
+      expect(result.status).to.equal(500);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Unexpected error occurred');
+    });
+
+    it('should handle network timeout errors', async () => {
+      const error = new Error('Request timeout');
+      error.status = 408;
+      mockTokowakaClient.checkEdgeOptimizeStatus.rejects(error);
+
+      const result = await controller.checkEdgeOptimizeStatus(edgeStatusContext);
+
+      expect(result.status).to.equal(408);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Request timeout');
+    });
+
+    it('should handle disabled optimization status', async () => {
+      const statusResult = {
+        enabled: false,
+        optimized: false,
+        path: '/',
+        message: 'Edge optimization is not enabled for this site',
+      };
+
+      mockTokowakaClient.checkEdgeOptimizeStatus.resolves(statusResult);
+
+      const result = await controller.checkEdgeOptimizeStatus(edgeStatusContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.enabled).to.be.false;
+      expect(responseBody.optimized).to.be.false;
+    });
+
+    it('should log appropriate messages during status check', async () => {
+      const statusResult = {
+        enabled: true,
+        optimized: true,
+        path: '/test',
+      };
+
+      edgeStatusContext.data = { path: '/test' };
+      mockTokowakaClient.checkEdgeOptimizeStatus.resolves(statusResult);
+
+      await controller.checkEdgeOptimizeStatus(edgeStatusContext);
+
+      expect(mockLog.info).to.have.been.calledWith(
+        `Checking Edge Optimize status for siteId: ${validSiteId} and path: /test`,
+      );
+    });
+
+    it('should log error when status check fails', async () => {
+      const error = new Error('Service error');
+      mockTokowakaClient.checkEdgeOptimizeStatus.rejects(error);
+
+      await controller.checkEdgeOptimizeStatus(edgeStatusContext);
+
+      expect(mockLog.error).to.have.been.called;
+      const errorCall = mockLog.error.firstCall.args[0];
+      expect(errorCall).to.match(/Error checking edge optimize status.*Service error/);
     });
   });
 });
