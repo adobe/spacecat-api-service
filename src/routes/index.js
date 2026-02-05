@@ -83,7 +83,8 @@ function isStaticRoute(routePattern) {
  * @param {Object} urlStoreController - The URL store controller.
  * @param {Object} pta2Controller - The PTA2 controller.
  * @param {Object} trafficToolsController - The traffic tools controller.
- * @param {Object} botBlockerController - The bot blocker controller.
+* @param {Object} botBlockerController - The bot blocker controller.
+ * @param {Object} sentimentController - The sentiment controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -124,6 +125,7 @@ export default function getRouteHandlers(
   pta2Controller,
   trafficToolsController,
   botBlockerController,
+  sentimentController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -391,6 +393,26 @@ export default function getRouteHandlers(
     'DELETE /sites/:siteId/reports/:reportId': reportsController.deleteReport,
 
     'GET /sites-resolve': sitesController.resolveSite,
+
+    // Sentiment Analysis endpoints
+    // Topics
+    'GET /sites/:siteId/sentiment/topics': sentimentController.listTopics,
+    'GET /sites/:siteId/sentiment/topics/:topicId': sentimentController.getTopic,
+    'POST /sites/:siteId/sentiment/topics': sentimentController.createTopics,
+    'PATCH /sites/:siteId/sentiment/topics/:topicId': sentimentController.updateTopic,
+    'DELETE /sites/:siteId/sentiment/topics/:topicId': sentimentController.deleteTopic,
+    'POST /sites/:siteId/sentiment/topics/:topicId/prompts': sentimentController.addSubPrompts,
+    'DELETE /sites/:siteId/sentiment/topics/:topicId/prompts': sentimentController.removeSubPrompts,
+    // Guidelines
+    'GET /sites/:siteId/sentiment/guidelines': sentimentController.listGuidelines,
+    'GET /sites/:siteId/sentiment/guidelines/:guidelineId': sentimentController.getGuideline,
+    'POST /sites/:siteId/sentiment/guidelines': sentimentController.createGuidelines,
+    'PATCH /sites/:siteId/sentiment/guidelines/:guidelineId': sentimentController.updateGuideline,
+    'DELETE /sites/:siteId/sentiment/guidelines/:guidelineId': sentimentController.deleteGuideline,
+    'POST /sites/:siteId/sentiment/guidelines/:guidelineId/audits': sentimentController.linkAudits,
+    'DELETE /sites/:siteId/sentiment/guidelines/:guidelineId/audits': sentimentController.unlinkAudits,
+    // Combined config
+    'GET /sites/:siteId/sentiment/config': sentimentController.getConfig,
   };
 
   // Initialization of static and dynamic routes

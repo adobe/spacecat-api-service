@@ -315,6 +315,24 @@ describe('getRouteHandlers', () => {
     checkBotBlocker: sinon.stub(),
   };
 
+  const mockSentimentController = {
+    listTopics: sinon.stub(),
+    getTopic: sinon.stub(),
+    createTopics: sinon.stub(),
+    updateTopic: sinon.stub(),
+    deleteTopic: sinon.stub(),
+    addSubPrompts: sinon.stub(),
+    removeSubPrompts: sinon.stub(),
+    linkAudits: sinon.stub(),
+    unlinkAudits: sinon.stub(),
+    listGuidelines: sinon.stub(),
+    getGuideline: sinon.stub(),
+    createGuidelines: sinon.stub(),
+    updateGuideline: sinon.stub(),
+    deleteGuideline: sinon.stub(),
+    getConfig: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -354,6 +372,7 @@ describe('getRouteHandlers', () => {
       mockPTA2Controller,
       mockTrafficToolsController,
       mockBotBlockerController,
+      mockSentimentController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -626,6 +645,22 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/url-store',
       'PATCH /sites/:siteId/url-store',
       'DELETE /sites/:siteId/url-store',
+      // Sentiment routes
+      'GET /sites/:siteId/sentiment/topics',
+      'GET /sites/:siteId/sentiment/topics/:topicId',
+      'POST /sites/:siteId/sentiment/topics',
+      'PATCH /sites/:siteId/sentiment/topics/:topicId',
+      'DELETE /sites/:siteId/sentiment/topics/:topicId',
+      'POST /sites/:siteId/sentiment/topics/:topicId/prompts',
+      'DELETE /sites/:siteId/sentiment/topics/:topicId/prompts',
+      'POST /sites/:siteId/sentiment/guidelines/:guidelineId/audits',
+      'DELETE /sites/:siteId/sentiment/guidelines/:guidelineId/audits',
+      'GET /sites/:siteId/sentiment/guidelines',
+      'GET /sites/:siteId/sentiment/guidelines/:guidelineId',
+      'POST /sites/:siteId/sentiment/guidelines',
+      'PATCH /sites/:siteId/sentiment/guidelines/:guidelineId',
+      'DELETE /sites/:siteId/sentiment/guidelines/:guidelineId',
+      'GET /sites/:siteId/sentiment/config',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);

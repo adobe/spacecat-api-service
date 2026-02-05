@@ -69,6 +69,8 @@ tags:
     description: Project management operations
   - name: site urls
     description: Site URL tracking and management operations
+  - name: sentiment
+    description: Brand sentiment analysis topics and guidelines management
 
 paths:
   /audits/latest/{auditType}:
@@ -452,6 +454,20 @@ paths:
     $ref: './site-api.yaml#/site-report'
   /sites/{siteId}/graph:
     $ref: './site-api.yaml#/site-graph'
+  /sites/{siteId}/sentiment/topics:
+    $ref: './guidelines-api.yaml#/topics-list'
+  /sites/{siteId}/sentiment/topics/{topicId}:
+    $ref: './guidelines-api.yaml#/topic-by-id'
+  /sites/{siteId}/sentiment/topics/{topicId}/prompts:
+    $ref: './guidelines-api.yaml#/topic-prompts'
+  /sites/{siteId}/sentiment/guidelines:
+    $ref: './guidelines-api.yaml#/guidelines-list'
+  /sites/{siteId}/sentiment/guidelines/{guidelineId}:
+    $ref: './guidelines-api.yaml#/guideline-by-id'
+  /sites/{siteId}/sentiment/guidelines/{guidelineId}/audits:
+    $ref: './guidelines-api.yaml#/guideline-audits'
+  /sites/{siteId}/sentiment/config:
+    $ref: './guidelines-api.yaml#/sentiment-config'
 
 components:
   securitySchemes:
