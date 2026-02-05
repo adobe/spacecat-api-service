@@ -1297,27 +1297,16 @@ export const filterSitesForProductCode = async (context, organization, sites, pr
   const tierClient = TierClient.createForOrg(context, organization, productCode);
   const { entitlement } = await tierClient.checkValidEntitlement();
 
-  const { log } = context;
-  log.info(`[filterSites] Input: orgId=${organization.getId()}, productCode=${productCode}, sitesCount=${sites.length}`);
-  log.info(`[filterSites] Site IDs: ${sites.map((s) => s.getId()).join(', ')}`);
-  log.info(`[filterSites] Entitlement found: ${entitlement ? entitlement.getId() : 'null'}`);
-
   if (!isNonEmptyObject(entitlement)) {
-    log.info('[filterSites] No entitlement, returning empty array');
     return [];
   }
 
   // Get all enrollments for this entitlement in one query
   const siteEnrollments = await SiteEnrollment.allByEntitlementId(entitlement.getId());
-  log.info(`[filterSites] Enrollments found: ${siteEnrollments.length}`);
-  log.info(`[filterSites] Enrolled siteIds: ${siteEnrollments.map((se) => se.getSiteId()).join(', ')}`);
 
   // Create a Set of enrolled site IDs for efficient lookup
   const enrolledSiteIds = new Set(siteEnrollments.map((se) => se.getSiteId()));
 
   // Filter sites based on enrollment
-  const result = sites.filter((site) => enrolledSiteIds.has(site.getId()));
-  log.info(`[filterSites] Filtered result count: ${result.length}`);
-
-  return result;
+  return sites.filter((site) => enrolledSiteIds.has(site.getId()));
 };

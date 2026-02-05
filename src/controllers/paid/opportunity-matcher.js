@@ -51,10 +51,14 @@ function isValidOpportunity(opportunityData) {
   // Must have positive value metric
   // CWV opportunities use projectedTrafficValue
   // Forms opportunities use projectedConversionValue
+  // high-organic-low-ctr opportunities use projectedEngagementValue
   const projectedTrafficValue = data?.projectedTrafficValue || 0;
   const projectedConversionValue = data?.projectedConversionValue || 0;
+  const projectedEngagementValue = data?.projectedEngagementValue || 0;
 
-  const hasValue = projectedTrafficValue > 0 || projectedConversionValue > 0;
+  const hasValue = projectedTrafficValue > 0
+    || projectedConversionValue > 0
+    || projectedEngagementValue > 0;
   if (!hasValue) return false;
 
   // Exclude forms opportunities with scrapedStatus = false
@@ -386,12 +390,18 @@ function combineAndSortOpportunities(categorizedOpportunities, matchResults) {
   }
 
   // Sort by value descending
-  // Prioritize projectedConversionValue or projectedTrafficValue (matches DTO impact calculation)
+  // Priority: projectedEngagementValue > projectedConversionValue > projectedTrafficValue
+  // (matches DTO impact calculation)
   // Forms opportunities use projectedConversionValue
   // CWV opportunities use projectedTrafficValue
+  // high-organic-low-ctr opportunities use projectedEngagementValue
   filteredOpportunitiesData.sort((a, b) => {
-    const aValue = a.data.projectedConversionValue || a.data.projectedTrafficValue;
-    const bValue = b.data.projectedConversionValue || b.data.projectedTrafficValue;
+    const aValue = a.data.projectedEngagementValue
+      || a.data.projectedConversionValue
+      || a.data.projectedTrafficValue;
+    const bValue = b.data.projectedEngagementValue
+      || b.data.projectedConversionValue
+      || b.data.projectedTrafficValue;
     return bValue - aValue;
   });
 

@@ -1792,7 +1792,7 @@ function SuggestionsController(ctx, sqs, env) {
       const response = await fetch(url, {
         method: 'GET',
         headers: {
-          'User-Agent': 'Tokowaka-AI Tokowaka/1.0',
+          'User-Agent': 'Tokowaka-AI Tokowaka/1.0 AdobeEdgeOptimize-AI AdobeEdgeOptimize/1.0',
           Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         },
       });
