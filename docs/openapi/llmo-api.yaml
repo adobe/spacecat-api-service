@@ -664,7 +664,7 @@ llmo-config:
     description: |
       Retrieves the LLMO (Large Language Model Optimizer) configuration for a specific site.
       This endpoint retrieves the configuration directly from S3 storage. The configuration
-      includes entities (categories, topics), brand aliases, and competitor information.
+      includes entities (categories, topics, aiTopics), brand aliases, and competitor information.
       Categories may include optional URLs for content matching.
 
       If a version parameter is provided, the specific version of the configuration will be
@@ -1553,12 +1553,14 @@ llmo-edge-optimize-status:
           application/json:
             schema:
               type: object
-              description: Edge optimization status response
-              additionalProperties: true
+              required:
+                - edgeOptimizeEnabled
+              properties:
+                edgeOptimizeEnabled:
+                  type: boolean
+                  description: Whether Edge Optimize headers were detected in the HTTP response
               example:
-                enabled: true
-                optimized: true
-                path: '/products/index.html'
+                edgeOptimizeEnabled: true
       '400':
         $ref: './responses.yaml#/400'
       '401':

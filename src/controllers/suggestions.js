@@ -28,7 +28,7 @@ import {
 
 import { ValidationError, Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
-import { SuggestionDto } from '../dto/suggestion.js';
+import { SuggestionDto, SUGGESTION_VIEWS } from '../dto/suggestion.js';
 import { FixDto } from '../dto/fix.js';
 import { sendAutofixMessage, getIMSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
@@ -62,6 +62,53 @@ function SuggestionsController(ctx, sqs, env) {
   ];
 
   const DEFAULT_PAGE_SIZE = 100;
+
+  /**
+   * Validates the view parameter for projection.
+   * @param {string} view - The view parameter from query string.
+   * @returns {string} Valid view name or 'full' as default.
+   * @throws {Error} If view is invalid.
+   */
+  const validateView = (view) => {
+    if (!view) return 'full';
+    if (!SUGGESTION_VIEWS.includes(view)) {
+      throw new Error(`Invalid view. Must be one of: ${SUGGESTION_VIEWS.join(', ')}`);
+    }
+    return view;
+  };
+
+  /**
+   * Validates view parameter and returns error response if invalid.
+   * @param {string} viewParam - The view parameter from query string.
+   * @returns {{view: string, error: null}|{view: null, error: Response}}
+   */
+  const getValidatedView = (viewParam) => {
+    try {
+      return { view: validateView(viewParam), error: null };
+    } catch (e) {
+      return { view: null, error: badRequest(e.message) };
+    }
+  };
+
+  /**
+   * Validates and parses the status parameter for filtering.
+   * @param {string} statusParam - Comma-separated status values.
+   * @returns {string[]} Array of valid status values, or empty array if no param.
+   * @throws {Error} If any status value is invalid.
+   */
+  const validateStatuses = (statusParam) => {
+    if (!statusParam) return [];
+    const statuses = statusParam.split(',').map((s) => s.trim()).filter(Boolean);
+    if (statuses.length === 0) return [];
+
+    const validStatuses = Object.values(SuggestionModel.STATUSES);
+    const invalidStatuses = statuses.filter((s) => !validStatuses.includes(s));
+
+    if (invalidStatuses.length > 0) {
+      throw new Error(`Invalid status value(s): ${invalidStatuses.join(', ')}. Valid: ${validStatuses.join(', ')}`);
+    }
+    return statuses;
+  };
 
   const shouldGroupSuggestionsForAutofix = (type) => !AUTOFIX_UNGROUPED_OPPTY_TYPES.includes(type);
 
@@ -98,6 +145,8 @@ function SuggestionsController(ctx, sqs, env) {
   const getAllForOpportunity = async (context) => {
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId;
+    const viewParam = context.data?.view;
+    const statusParam = context.data?.status;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -105,6 +154,16 @@ function SuggestionsController(ctx, sqs, env) {
 
     if (!isValidUUID(opptyId)) {
       return badRequest('Opportunity ID required');
+    }
+
+    const { view, error: viewError } = getValidatedView(viewParam);
+    if (viewError) return viewError;
+
+    let statuses;
+    try {
+      statuses = validateStatuses(statusParam);
+    } catch (e) {
+      return badRequest(e.message);
     }
 
     const site = await Site.findById(siteId);
@@ -116,15 +175,28 @@ function SuggestionsController(ctx, sqs, env) {
       return forbidden('User does not belong to the organization');
     }
 
-    const suggestionEntities = await Suggestion.allByOpportunityId(opptyId);
+    // Fetch all suggestions (single DB call)
+    let suggestionEntities = await Suggestion.allByOpportunityId(opptyId);
+
     // Check if the opportunity belongs to the site
+    let opportunity = null;
     if (suggestionEntities.length > 0) {
-      const oppty = await suggestionEntities[0].getOpportunity();
-      if (!oppty || oppty.getSiteId() !== siteId) {
+      opportunity = await suggestionEntities[0].getOpportunity();
+      if (!opportunity || opportunity.getSiteId() !== siteId) {
         return notFound('Opportunity not found');
       }
     }
-    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg));
+
+    // Filter by status in memory if validated statuses provided
+    if (statuses.length > 0) {
+      suggestionEntities = suggestionEntities.filter(
+        (sugg) => statuses.includes(sugg.getStatus()),
+      );
+    }
+
+    const suggestions = suggestionEntities.map(
+      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
+    );
     return ok(suggestions);
   };
 
@@ -133,6 +205,7 @@ function SuggestionsController(ctx, sqs, env) {
    * @param {Object} context of the request
    * @param {number} context.params.limit - Number of suggestions per page. Default=100.
    * @param {number} context.params.cursor - The next cursor or null for first page.
+   * @param {string} context.params.view - Projection view: 'minimal', 'summary', or 'full'.
    * @returns {Promise<Response>} Array of suggestions response.
    */
   const getAllForOpportunityPaged = async (context) => {
@@ -140,6 +213,7 @@ function SuggestionsController(ctx, sqs, env) {
     const opptyId = context.params?.opportunityId;
     const limit = parseInt(context.params?.limit, 10) || DEFAULT_PAGE_SIZE;
     const cursor = context.params?.cursor || null;
+    const viewParam = context.data?.view;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -153,6 +227,9 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('Page size must be greater than 0');
     }
 
+    const { view, error: viewError } = getValidatedView(viewParam);
+    if (viewError) return viewError;
+
     const site = await Site.findById(siteId);
     if (!site) {
       return notFound('Site not found');
@@ -162,23 +239,24 @@ function SuggestionsController(ctx, sqs, env) {
       return forbidden('User does not belong to the organization');
     }
 
-    const results = await Suggestion
-      .allByOpportunityId(opptyId, {
-        limit,
-        cursor,
-        returnCursor: true,
-      });
-    const { data: suggestionEntities = [], cursor: newCursor = null } = results;
+    // Fetch suggestions with pagination
+    const paginationOptions = { limit, cursor, returnCursor: true };
+    const results = await Suggestion.allByOpportunityId(opptyId, paginationOptions);
+    const suggestionEntities = results.data || [];
+    const newCursor = results.cursor || null;
 
     // Check if the opportunity belongs to the site
+    let opportunity = null;
     if (suggestionEntities.length > 0) {
-      const oppty = await suggestionEntities[0].getOpportunity();
-      if (!oppty || oppty.getSiteId() !== siteId) {
+      opportunity = await suggestionEntities[0].getOpportunity();
+      if (!opportunity || opportunity.getSiteId() !== siteId) {
         return notFound('Opportunity not found');
       }
     }
 
-    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg));
+    const suggestions = suggestionEntities.map(
+      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
+    );
 
     return ok({
       suggestions,
@@ -199,6 +277,8 @@ function SuggestionsController(ctx, sqs, env) {
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId;
     const status = context.params?.status || undefined;
+    const viewParam = context.data?.view;
+
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
@@ -208,6 +288,9 @@ function SuggestionsController(ctx, sqs, env) {
     if (!hasText(status)) {
       return badRequest('Status is required');
     }
+
+    const { view, error: viewError } = getValidatedView(viewParam);
+    if (viewError) return viewError;
 
     const site = await Site.findById(siteId);
     if (!site) {
@@ -220,13 +303,16 @@ function SuggestionsController(ctx, sqs, env) {
 
     const suggestionEntities = await Suggestion.allByOpportunityIdAndStatus(opptyId, status);
     // Check if the opportunity belongs to the site
+    let opportunity = null;
     if (suggestionEntities.length > 0) {
-      const oppty = await suggestionEntities[0].getOpportunity();
-      if (!oppty || oppty.getSiteId() !== siteId) {
+      opportunity = await suggestionEntities[0].getOpportunity();
+      if (!opportunity || opportunity.getSiteId() !== siteId) {
         return notFound('Opportunity not found');
       }
     }
-    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg));
+    const suggestions = suggestionEntities.map(
+      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
+    );
     return ok(suggestions);
   };
 
@@ -241,6 +327,7 @@ function SuggestionsController(ctx, sqs, env) {
     const status = context.params?.status || undefined;
     const limit = parseInt(context.params?.limit, 10) || DEFAULT_PAGE_SIZE;
     const cursor = context.params?.cursor || null;
+    const viewParam = context.data?.view;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -255,6 +342,9 @@ function SuggestionsController(ctx, sqs, env) {
     if (!isInteger(limit) || limit < 1) {
       return badRequest('Page size must be greater than 0');
     }
+
+    const { view, error: viewError } = getValidatedView(viewParam);
+    if (viewError) return viewError;
 
     const site = await Site.findById(siteId);
     if (!site) {
@@ -272,13 +362,16 @@ function SuggestionsController(ctx, sqs, env) {
     });
     const { data: suggestionEntities = [], cursor: newCursor = null } = results;
     // Check if the opportunity belongs to the site
+    let opportunity = null;
     if (suggestionEntities.length > 0) {
-      const oppty = await suggestionEntities[0].getOpportunity();
-      if (!oppty || oppty.getSiteId() !== siteId) {
+      opportunity = await suggestionEntities[0].getOpportunity();
+      if (!opportunity || opportunity.getSiteId() !== siteId) {
         return notFound('Opportunity not found');
       }
     }
-    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg));
+    const suggestions = suggestionEntities.map(
+      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
+    );
     return ok({
       suggestions,
       pagination: {
@@ -298,6 +391,7 @@ function SuggestionsController(ctx, sqs, env) {
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId || undefined;
     const suggestionId = context.params?.suggestionId || undefined;
+    const viewParam = context.data?.view;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -310,6 +404,9 @@ function SuggestionsController(ctx, sqs, env) {
     if (!isValidUUID(suggestionId)) {
       return badRequest('Suggestion ID required');
     }
+
+    const { view, error: viewError } = getValidatedView(viewParam);
+    if (viewError) return viewError;
 
     const site = await Site.findById(siteId);
     if (!site) {
@@ -328,7 +425,7 @@ function SuggestionsController(ctx, sqs, env) {
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound();
     }
-    return ok(SuggestionDto.toJSON(suggestion));
+    return ok(SuggestionDto.toJSON(suggestion, view, opportunity));
   };
 
   /**
@@ -1082,6 +1179,10 @@ function SuggestionsController(ctx, sqs, env) {
     const opportunityId = context.params?.opportunityId;
     const { authInfo: { profile } } = context.attributes;
 
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can deploy suggestions to edge');
+    }
+
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
@@ -1245,7 +1346,6 @@ function SuggestionsController(ctx, sqs, env) {
             const currentData = suggestion.getData();
             const updatedData = {
               ...currentData,
-              tokowakaDeployed: deploymentTimestamp,
               edgeDeployed: deploymentTimestamp,
             };
             // Remove edgeOptimizeStatus if it's STALE
@@ -1323,7 +1423,6 @@ function SuggestionsController(ctx, sqs, env) {
             const currentData = suggestion.getData();
             suggestion.setData({
               ...currentData,
-              tokowakaDeployed: deploymentTimestamp,
               edgeDeployed: deploymentTimestamp,
             });
             suggestion.setUpdatedBy(profile?.email || 'tokowaka-deployment');
@@ -1385,7 +1484,6 @@ function SuggestionsController(ctx, sqs, env) {
                     const coveredData = coveredSuggestion.getData();
                     coveredSuggestion.setData({
                       ...coveredData,
-                      tokowakaDeployed: deploymentTimestamp,
                       edgeDeployed: deploymentTimestamp,
                       coveredByDomainWide: suggestion.getId(),
                     });
@@ -1444,7 +1542,6 @@ function SuggestionsController(ctx, sqs, env) {
             const currentData = skippedSuggestion.getData();
             skippedSuggestion.setData({
               ...currentData,
-              tokowakaDeployed: deploymentTimestamp,
               edgeDeployed: deploymentTimestamp,
               coveredByDomainWide: 'same-batch-deployment',
               skippedInDeployment: true,
@@ -1506,6 +1603,9 @@ function SuggestionsController(ctx, sqs, env) {
     if (!isNonEmptyObject(context.data)) {
       return badRequest('No data provided');
     }
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can rollback suggestions');
+    }
     const { suggestionIds } = context.data;
     if (!isArray(suggestionIds) || suggestionIds.length === 0) {
       return badRequest('Request body must contain a non-empty array of suggestionIds');
@@ -1545,8 +1645,7 @@ function SuggestionsController(ctx, sqs, env) {
         });
       } else {
         // For rollback, check if suggestion has been deployed
-        const hasBeenDeployed = suggestion.getData()?.edgeDeployed
-                                || suggestion.getData()?.tokowakaDeployed;
+        const hasBeenDeployed = suggestion.getData()?.edgeDeployed;
         if (!hasBeenDeployed) {
           failedSuggestions.push({
             uuid: suggestionId,
@@ -1589,8 +1688,10 @@ function SuggestionsController(ctx, sqs, env) {
               context.log.info(`Removed prerender config from metaconfig for domain-wide suggestion ${suggestion.getId()}`);
             }
 
-            // Remove tokowakaDeployed from the domain-wide suggestion
+            // Remove edgeDeployed (and legacy tokowakaDeployed) from the domain-wide suggestion
             const currentData = suggestion.getData();
+            delete currentData.edgeDeployed;
+            // TODO: To be removed, kept for backward compatibility
             delete currentData.tokowakaDeployed;
             delete currentData.edgeDeployed;
             suggestion.setData(currentData);
@@ -1612,6 +1713,8 @@ function SuggestionsController(ctx, sqs, env) {
               await Promise.all(
                 coveredSuggestions.map(async (coveredSuggestion) => {
                   const coveredData = coveredSuggestion.getData();
+                  delete coveredData.edgeDeployed;
+                  // TODO: To be removed, kept for backward compatibility
                   delete coveredData.tokowakaDeployed;
                   delete coveredData.edgeDeployed;
                   delete coveredData.coveredByDomainWide;
@@ -1662,10 +1765,13 @@ function SuggestionsController(ctx, sqs, env) {
           failedSuggestions: ineligibleSuggestions,
         } = result;
 
-        // Update successfully rolled back suggestions - remove tokowakaDeployed timestamp
+        // Update successfully rolled back suggestions
+        // - remove edgeDeployed (and legacy tokowakaDeployed) timestamp
         succeededSuggestions = await Promise.all(
           processedSuggestions.map(async (suggestion) => {
             const currentData = suggestion.getData();
+            delete currentData.edgeDeployed;
+            // TODO: To be removed, kept for backward compatibility
             delete currentData.tokowakaDeployed;
             delete currentData.edgeDeployed;
             suggestion.setData(currentData);
@@ -1781,7 +1887,7 @@ function SuggestionsController(ctx, sqs, env) {
       const response = await fetch(url, {
         method: 'GET',
         headers: {
-          'User-Agent': 'Tokowaka-AI Tokowaka/1.0',
+          'User-Agent': 'Tokowaka-AI Tokowaka/1.0 AdobeEdgeOptimize-AI AdobeEdgeOptimize/1.0',
           Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         },
       });

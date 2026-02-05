@@ -426,6 +426,9 @@ function LlmoController(ctx) {
   };
 
   async function updateLlmoConfig(context) {
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can update the LLMO config');
+    }
     const {
       log,
       s3,
@@ -518,6 +521,9 @@ function LlmoController(ctx) {
   // Handles requests to the LLMO questions endpoint, adds a new question
   // the body format is { Human: [question1, question2], AI: [question3, question4] }
   const addLlmoQuestion = async (context) => {
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can add questions');
+    }
     const { log } = context;
     const { site, config } = await getSiteAndValidateLlmo(context);
 
@@ -558,6 +564,9 @@ function LlmoController(ctx) {
 
   // Handles requests to the LLMO questions endpoint, removes a question
   const removeLlmoQuestion = async (context) => {
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can remove questions');
+    }
     const { log } = context;
     const { questionKey } = context.params;
     const { site, config } = await getSiteAndValidateLlmo(context);
@@ -575,6 +584,9 @@ function LlmoController(ctx) {
 
   // Handles requests to the LLMO questions endpoint, updates a question
   const patchLlmoQuestion = async (context) => {
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can update questions');
+    }
     const { log } = context;
     const { questionKey } = context.params;
     const { data } = context;
@@ -607,6 +619,9 @@ function LlmoController(ctx) {
   // Handles requests to the LLMO customer intent endpoint, adds new customer intent items
   const addLlmoCustomerIntent = async (context) => {
     const { log } = context;
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can add customer intent');
+    }
 
     try {
       const { site, config } = await getSiteAndValidateLlmo(context);
@@ -718,6 +733,10 @@ function LlmoController(ctx) {
     const { siteId } = context.params;
 
     try {
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can update the CDN logs filter');
+      }
+
       const { site, config } = await getSiteAndValidateLlmo(context);
 
       if (!isObject(data)) {
@@ -744,6 +763,10 @@ function LlmoController(ctx) {
     const { siteId } = context.params;
 
     try {
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can update the CDN bucket config');
+      }
+
       const { site, config } = await getSiteAndValidateLlmo(context);
 
       if (!isObject(data)) {
@@ -775,6 +798,10 @@ function LlmoController(ctx) {
     const { data } = context;
 
     try {
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can onboard');
+      }
+
       // Validate required fields
       if (!data || typeof data !== 'object') {
         return badRequest('Onboarding data is required');
@@ -938,6 +965,10 @@ function LlmoController(ctx) {
       enhancements, tokowakaEnabled, forceFail, patches = {}, prerender,
     } = context.data || {};
 
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can update the edge optimize config');
+    }
+
     log.info(`createOrUpdateEdgeConfig request received for site ${siteId}, data=${JSON.stringify(context.data)}`);
 
     if (tokowakaEnabled !== undefined && typeof tokowakaEnabled !== 'boolean') {
@@ -1010,9 +1041,10 @@ function LlmoController(ctx) {
       }
 
       const currentConfig = site.getConfig();
+      const existingEdgeConfig = currentConfig.getEdgeOptimizeConfig() || {};
       currentConfig.updateEdgeOptimizeConfig({
-        ...(currentConfig.getEdgeOptimizeConfig() || {}),
-        opted: true,
+        ...existingEdgeConfig,
+        opted: existingEdgeConfig.opted ?? Date.now(),
       });
       await saveSiteConfig(site, currentConfig, log, 'updating edge optimize config');
       log.info(`[edge-optimize-config] Updated edge optimize config for site ${siteId} by ${lastModifiedBy}`);
@@ -1048,6 +1080,10 @@ function LlmoController(ctx) {
 
       if (!await accessControlUtil.hasAccess(site)) {
         return forbidden('User does not have access to this site');
+      }
+
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can get the edge optimize config');
       }
 
       const baseURL = site.getBaseURL();
@@ -1111,6 +1147,10 @@ function LlmoController(ctx) {
     const { siteId } = context.params;
 
     try {
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can save the LLMO strategy');
+      }
+
       if (!isObject(data)) {
         return badRequest('LLMO strategy must be provided as an object');
       }

@@ -89,6 +89,10 @@ export default class AccessControlUtil {
     return this.authInfo.isAdmin();
   }
 
+  isLLMOAdministrator() {
+    return this.authInfo.isLLMOAdministrator();
+  }
+
   async validateEntitlement(org, site, productCode) {
     // Use TierClient to fetch entitlement
     let tierClient;

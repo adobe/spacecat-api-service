@@ -329,6 +329,28 @@ describe('Organizations Controller', () => {
     expect(error).to.have.property('message', 'Failed to create organization');
   });
 
+  it('returns existing organization when organization with same imsOrgId already exists', async () => {
+    const existingOrg = organizations[1];
+    mockDataAccess.Organization.findByImsOrgId.resolves(existingOrg);
+
+    const response = await organizationsController.createOrganization({
+      data: {
+        name: 'New Org Name',
+        imsOrgId: '1234567890ABCDEF12345678@AdobeOrg',
+      },
+      ...context,
+    });
+
+    expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledOnceWith('1234567890ABCDEF12345678@AdobeOrg');
+    expect(mockDataAccess.Organization.create).to.not.have.been.called;
+    expect(response.status).to.equal(200);
+
+    const organization = await response.json();
+    expect(organization).to.have.property('id', '5f3b3626-029c-476e-924b-0c1bba2e871f');
+    expect(organization).to.have.property('name', 'Org 2');
+    expect(organization).to.have.property('imsOrgId', '1234567890ABCDEF12345678@AdobeOrg');
+  });
+
   it('updates an organization', async () => {
     organizations[0].save = sinon.stub().resolves(organizations[0]);
     mockDataAccess.Organization.findById.resolves(organizations[0]);

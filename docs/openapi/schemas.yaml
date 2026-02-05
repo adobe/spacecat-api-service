@@ -2923,6 +2923,147 @@ SuggestionList:
   type: array
   items:
     $ref: '#/Suggestion'
+SuggestionMinimal:
+  type: object
+  description: Minimal suggestion projection containing id, status, timestamps, and URL-related data fields for listing views
+  properties:
+    id:
+      description: UUID of this suggestion
+      $ref: '#/Id'
+    status:
+      description: Status of this suggestion
+      $ref: '#/SuggestionStatus'
+    data:
+      type: object
+      description: URL-related fields extracted from the full data object. Only present if any URL fields exist.
+      properties:
+        url:
+          type: string
+          example: "https://example.com/page"
+        urls:
+          type: array
+          items:
+            type: string
+        urlFrom:
+          type: string
+          example: "https://example.com/source"
+        urlTo:
+          type: string
+          example: "https://example.com/destination"
+        url_from:
+          type: string
+          description: Source URL (snake_case variant for broken backlinks)
+          example: "https://example.com/source"
+        url_to:
+          type: string
+          description: Target URL (snake_case variant for broken backlinks)
+          example: "https://example.com/destination"
+        urlsSuggested:
+          type: array
+          description: Array of suggested URLs
+          items:
+            type: string
+        sitemapUrl:
+          type: string
+          example: "https://example.com/sitemap.xml"
+        pageUrl:
+          type: string
+          example: "https://example.com/page"
+        pattern:
+          type: string
+        link:
+          type: string
+        path:
+          type: string
+        sourceUrl:
+          type: string
+        destinationUrl:
+          type: string
+        recommendations:
+          type: array
+          items:
+            type: object
+        cves:
+          type: array
+          items:
+            type: object
+        findings:
+          type: array
+          items:
+            type: object
+        form:
+          type: object
+        page:
+          type: object
+        accessibility:
+          type: object
+        metrics:
+          type: object
+          description: CWV metrics (mobileMetric, desktopMetric) for calculating totalIssues
+        type:
+          type: string
+          description: Type indicator (e.g., 'url' vs 'group' for CWV)
+        pageviews:
+          type: number
+          description: Page views count for display
+        issues:
+          type: array
+          description: Issues array for Accessibility, ColorContrast, FormNonExperimental (includes occurrences field)
+          items:
+            type: object
+    createdAt:
+      description: UTC timestamp of when the suggestion was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: UTC timestamp of when the suggestion was last updated
+      $ref: '#/DateTime'
+  required:
+    - id
+    - status
+    - createdAt
+    - updatedAt
+SuggestionSummary:
+  type: object
+  description: Summary suggestion projection (superset of minimal, subset of full). Contains minimal data fields plus metadata for table displays.
+  properties:
+    id:
+      description: UUID of this suggestion
+      $ref: '#/Id'
+    status:
+      description: Status of this suggestion
+      $ref: '#/SuggestionStatus'
+    data:
+      type: object
+      description: URL-related fields from minimal view (same as SuggestionMinimal.data). Only present if any URL fields exist.
+    opportunityId:
+      description: UUID of the opportunity this suggestion belongs to
+      $ref: '#/Id'
+    type:
+      $ref: '#/SuggestionType'
+    rank:
+      description: Type-specific numeric rank value (e.g., "domainTraffic" for a broken-backlink) helps sorting
+      type: number
+      example: 45600
+    url:
+      description: URL associated with the suggestion (extracted from data). May be null if no URL found.
+      type: string
+      example: "https://example.com/page"
+    createdAt:
+      description: UTC timestamp of when the suggestion was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: UTC timestamp of when the suggestion was last updated
+      $ref: '#/DateTime'
+    updatedBy:
+      description: Who last updated this suggestion
+      type: string
+      example: "user@example.com"
+  required:
+    - id
+    - status
+    - opportunityId
+    - type
+    - rank
 PaginationMetadata:
   type: object
   description: Metadata for paginated responses
@@ -4312,6 +4453,7 @@ LlmoConfig:
     - entities
     - categories
     - topics
+    - aiTopics
     - brands
     - competitors
   properties:
@@ -4351,6 +4493,20 @@ LlmoConfig:
             - prompt: "What are the latest AI trends?"
               regions: ["us"]
               origin: "human"
+              source: "config"
+    aiTopics:
+      type: object
+      description: A record of AI topics with nested AI prompts keyed by UUID
+      additionalProperties:
+        $ref: '#/LlmoTopic'
+      example:
+        "456e7890-e89b-12d3-a456-426614174001":
+          name: "AI/ML"
+          category: "123e4567-e89b-12d3-a456-426614174000"
+          prompts:
+            - prompt: "What are the latest AI trends?"
+              regions: ["us"]
+              origin: "ai"
               source: "config"
     brands:
       type: object
@@ -5218,3 +5374,278 @@ PreflightResultItem:
       type: string
       enum: [identify, suggest]
       description: The step of the preflight job when this result was generated
+
+# =============================================================================
+# Sentiment Guidelines Schemas
+# =============================================================================
+
+SentimentTopic:
+  type: object
+  description: A sentiment analysis topic defining a subject of interest
+  properties:
+    siteId:
+      type: string
+      format: uuid
+      description: Parent site identifier
+    topicId:
+      type: string
+      format: uuid
+      description: Unique topic identifier
+    name:
+      type: string
+      description: Topic name/subject to analyze
+      example: "2026 Corvette Stingray"
+    description:
+      type: string
+      description: Optional description for context
+    subPrompts:
+      type: array
+      items:
+        type: string
+      description: Additional prompts/questions for deeper analysis
+      example: ["What do people say about performance?", "Price sentiment?"]
+    enabled:
+      type: boolean
+      description: Whether topic is active
+      default: true
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+    createdBy:
+      type: string
+      description: User/service who created
+    updatedBy:
+      type: string
+      description: Last user/service to modify
+
+SentimentTopicInput:
+  type: object
+  required:
+    - name
+  properties:
+    name:
+      type: string
+      description: Topic name/subject to analyze
+      example: "2026 Corvette Stingray"
+    description:
+      type: string
+      description: Optional description for context
+      example: "Track sentiment about the latest Corvette model"
+    subPrompts:
+      type: array
+      items:
+        type: string
+      description: Additional prompts/questions for deeper analysis
+      example: ["What do people say about performance?", "Price sentiment?"]
+    enabled:
+      type: boolean
+      default: true
+      example: true
+
+SentimentTopicUpdate:
+  type: object
+  properties:
+    name:
+      type: string
+    description:
+      type: string
+    subPrompts:
+      type: array
+      items:
+        type: string
+    enabled:
+      type: boolean
+
+SentimentTopicListResponse:
+  type: object
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/SentimentTopic'
+    pagination:
+      type: object
+      properties:
+        limit:
+          type: integer
+        cursor:
+          type: string
+          description: Pagination cursor (absent when no more pages)
+        hasMore:
+          type: boolean
+
+SentimentTopicBulkResponse:
+  type: object
+  properties:
+    metadata:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total number of items in request
+        success:
+          type: integer
+          description: Number of successfully processed items
+        failure:
+          type: integer
+          description: Number of failed items
+    failures:
+      type: array
+      items:
+        type: object
+        properties:
+          name:
+            type: string
+          reason:
+            type: string
+    items:
+      type: array
+      items:
+        $ref: '#/SentimentTopic'
+
+SentimentGuideline:
+  type: object
+  description: A sentiment analysis guideline defining how to analyze topics
+  properties:
+    siteId:
+      type: string
+      format: uuid
+      description: Parent site identifier
+    guidelineId:
+      type: string
+      format: uuid
+      description: Unique guideline identifier
+    name:
+      type: string
+      description: Display name
+      example: "Product Quality Focus"
+    instruction:
+      type: string
+      description: The actual guideline instruction
+      example: "Focus on sentiment related to product quality, durability, and craftsmanship."
+    audits:
+      type: array
+      items:
+        type: string
+      description: Enabled audit types
+      example: ["wikipedia-analysis", "reddit-analysis"]
+    enabled:
+      type: boolean
+      description: Whether guideline is active
+      default: true
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+    createdBy:
+      type: string
+      description: User/service who created
+    updatedBy:
+      type: string
+      description: Last user/service to modify
+
+SentimentGuidelineInput:
+  type: object
+  required:
+    - name
+    - instruction
+  properties:
+    name:
+      type: string
+      description: Display name
+      example: "Product Quality Focus"
+    instruction:
+      type: string
+      description: The actual guideline instruction
+      example: "Focus on sentiment related to product quality, durability, and craftsmanship."
+    audits:
+      type: array
+      items:
+        type: string
+      description: Audit types to associate
+      example: ["wikipedia-analysis", "reddit-analysis"]
+    enabled:
+      type: boolean
+      default: true
+      example: true
+
+SentimentGuidelineUpdate:
+  type: object
+  properties:
+    name:
+      type: string
+    instruction:
+      type: string
+    audits:
+      type: array
+      items:
+        type: string
+    enabled:
+      type: boolean
+
+SentimentGuidelineListResponse:
+  type: object
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/SentimentGuideline'
+    pagination:
+      type: object
+      properties:
+        limit:
+          type: integer
+        cursor:
+          type: string
+          description: Pagination cursor (absent when no more pages)
+        hasMore:
+          type: boolean
+
+SentimentGuidelineBulkResponse:
+  type: object
+  properties:
+    metadata:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total number of items in request
+        success:
+          type: integer
+          description: Number of successfully processed items
+        failure:
+          type: integer
+          description: Number of failed items
+    failures:
+      type: array
+      items:
+        type: object
+        properties:
+          name:
+            type: string
+          reason:
+            type: string
+    items:
+      type: array
+      items:
+        $ref: '#/SentimentGuideline'
+
+SentimentConfig:
+  type: object
+  description: Combined sentiment configuration with topics and guidelines
+  properties:
+    topics:
+      type: array
+      items:
+        $ref: '#/SentimentTopic'
+      description: All enabled topics
+    guidelines:
+      type: array
+      items:
+        $ref: '#/SentimentGuideline'
+      description: Guidelines (optionally filtered by audit type)
