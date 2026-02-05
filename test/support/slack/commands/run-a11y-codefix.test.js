@@ -579,6 +579,19 @@ describe('RunA11yCodefixCommand', () => {
       expect(slackContext.say).to.have.been.calledWith(sinon.match(/Suggestions: 1/));
     });
 
+    it('excludes invalid status suggestions when filtering by aggregation key', async () => {
+      buildAggregationKeyFromSuggestionStub.returns('agg-key-123');
+      mockOpportunity.getSuggestions = sinon.stub().resolves([
+        { getId: () => 'sugg-1', getStatus: () => 'FIXED', getData: () => ({ url: 'https://example.com/page1' }) },
+        { getId: () => 'sugg-2', getStatus: () => 'NEW', getData: () => ({ url: 'https://example.com/page2' }) },
+      ]);
+      const command = RunA11yCodefixCommand(context);
+
+      await command.handleExecution(['example.com', 'assistive', 'agg-key-123'], slackContext);
+
+      expect(slackContext.say).to.have.been.calledWith(sinon.match(/Matching Suggestions: 1/));
+    });
+
     it('trims whitespace from aggregation key', async () => {
       buildAggregationKeyFromSuggestionStub.returns('agg-key-123');
       const command = RunA11yCodefixCommand(context);
