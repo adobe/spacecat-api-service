@@ -1,0 +1,196 @@
+# Customer Config V2 API Testing
+# ===============================
+# This file contains HTTP requests for testing the Customer Config V2 API endpoints.
+# 
+# Prerequisites:
+# 1. Install "REST Client" extension in Cursor/VS Code
+# 2. Set your API key and organization ID below
+# 3. Click "Send Request" above any request to execute
+#
+# Environment: Update these variables for your environment
+# - local: http://localhost:3001
+# - dev: https://spacecat-services--api-service.aem-dev.hlx.page
+# - stage: https://spacecat-services--api-service.aem-stage.hlx.page
+# - prod: https://spacecat-services--api-service.aem.hlx.page
+
+@baseUrl = http://localhost:3001
+@apiKey = YOUR_API_KEY_HERE
+@spaceCatId = dc6240fe-1c30-4f4f-a995-15aab11c100b
+
+# =============================================================================
+# CUSTOMER CONFIG - FULL
+# =============================================================================
+
+### Get full customer configuration (all brands, categories, topics, prompts)
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-customer-config
+x-api-key: {{apiKey}}
+
+### Get full customer configuration - filter by active status
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-customer-config?status=active
+x-api-key: {{apiKey}}
+
+### Get full customer configuration - include deleted items
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-customer-config?status=deleted
+x-api-key: {{apiKey}}
+
+# =============================================================================
+# CUSTOMER CONFIG - LEAN
+# =============================================================================
+
+### Get lean customer configuration (brands with counts, no prompts/categories/topics)
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-customer-config-lean
+x-api-key: {{apiKey}}
+
+### Get lean customer configuration - filter by status
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-customer-config-lean?status=active
+x-api-key: {{apiKey}}
+
+# =============================================================================
+# TOPICS
+# =============================================================================
+
+### Get all topics
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-topics
+x-api-key: {{apiKey}}
+
+### Get topics for Chevrolet brand
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-topics?brandId=chevrolet
+x-api-key: {{apiKey}}
+
+### Get topics for GMC brand
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-topics?brandId=gmc
+x-api-key: {{apiKey}}
+
+### Get topics for Buick brand
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-topics?brandId=buick
+x-api-key: {{apiKey}}
+
+### Get topics for Cadillac brand
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-topics?brandId=cadillac
+x-api-key: {{apiKey}}
+
+### Get topics for OnStar brand
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-topics?brandId=onstar
+x-api-key: {{apiKey}}
+
+### Get topics for GM News brand
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-topics?brandId=gm-news
+x-api-key: {{apiKey}}
+
+### Get only active topics
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-topics?status=active
+x-api-key: {{apiKey}}
+
+### Get only deleted topics
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-topics?status=deleted
+x-api-key: {{apiKey}}
+
+### Get active topics for a specific brand
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-topics?brandId=chevrolet&status=active
+x-api-key: {{apiKey}}
+
+# =============================================================================
+# PROMPTS
+# =============================================================================
+
+### Get all prompts (enriched with brand, category, topic info)
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-prompts
+x-api-key: {{apiKey}}
+
+### Get prompts for Chevrolet brand
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-prompts?brandId=chevrolet
+x-api-key: {{apiKey}}
+
+### Get prompts for GMC brand
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-prompts?brandId=gmc
+x-api-key: {{apiKey}}
+
+### Get prompts for Buick brand
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-prompts?brandId=buick
+x-api-key: {{apiKey}}
+
+### Get prompts for Cadillac brand
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-prompts?brandId=cadillac
+x-api-key: {{apiKey}}
+
+### Get prompts for OnStar brand
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-prompts?brandId=onstar
+x-api-key: {{apiKey}}
+
+### Get prompts for GM News brand
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-prompts?brandId=gm-news
+x-api-key: {{apiKey}}
+
+### Get prompts by category
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-prompts?categoryId=product-features
+x-api-key: {{apiKey}}
+
+### Get prompts by topic
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-prompts?topicId=performance
+x-api-key: {{apiKey}}
+
+### Get active prompts only
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-prompts?status=active
+x-api-key: {{apiKey}}
+
+### Get deleted prompts only
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-prompts?status=deleted
+x-api-key: {{apiKey}}
+
+### Combine filters: Chevrolet active prompts
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-prompts?brandId=chevrolet&status=active
+x-api-key: {{apiKey}}
+
+### Combine filters: Specific brand, category, and status
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-prompts?brandId=chevrolet&categoryId=product-features&status=active
+x-api-key: {{apiKey}}
+
+# =============================================================================
+# SAVE CUSTOMER CONFIG
+# =============================================================================
+
+### Save customer configuration to S3
+POST {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-customer-config
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+< ./../../scripts/v1v2test/generalmotors/757A02BE532B22BA0A490D4CAdobeOrg.json
+
+# =============================================================================
+# ERROR CASES (for testing error handling)
+# =============================================================================
+
+### Invalid organization ID
+GET {{baseUrl}}/v2/orgs/invalid-uuid/llmo-customer-config
+x-api-key: {{apiKey}}
+
+### Organization not found
+GET {{baseUrl}}/v2/orgs/00000000-0000-0000-0000-000000000000/llmo-customer-config
+x-api-key: {{apiKey}}
+
+### Missing API key (should return 401)
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-customer-config
+
+### Invalid brand ID filter
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-prompts?brandId=non-existent-brand
+x-api-key: {{apiKey}}
+
+### Invalid status filter
+GET {{baseUrl}}/v2/orgs/{{spaceCatId}}/llmo-prompts?status=invalid-status
+x-api-key: {{apiKey}}
+
+# =============================================================================
+# WORKFLOW: Complete Test Scenario
+# =============================================================================
+# Run these in order to test a complete workflow:
+#
+# 1. Get lean config (overview of brands and counts)
+# 2. Get all topics (see available topics)
+# 3. Get topics for specific brand (filter by brand)
+# 4. Get all prompts (see all prompts with enriched data)
+# 5. Get prompts for specific brand (filter by brand)
+# 6. Get prompts by category (filter by category)
+# 7. Get prompts by topic (filter by topic)
+# 8. Get full config (complete data with all prompts)
+# 9. Save config (upload modified config to S3)
+#
