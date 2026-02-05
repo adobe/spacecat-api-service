@@ -180,27 +180,26 @@ export const sendEmail = async ({
  *
  * @param {Object} options - Send options
  * @param {Object} options.context - Request context
+ * @param {string} options.templateName - Post Office template name
  * @param {string} options.emailAddress - Recipient email address
  * @returns {Promise<{ success: boolean, statusCode: number, error?: string }>}
  */
-export const sendTrialUserInviteEmail = async ({ context, emailAddress }) => {
-  const { env } = context;
-
-  // TODO: Replace with dedicated trial user invite template when available
-  const templateName = env.EMAIL_LLMO_TEMPLATE;
-
-  return sendEmail({
-    context,
-    templateName,
-    to: emailAddress,
-  });
-};
+export const sendTrialUserInviteEmail = async ({
+  context,
+  templateName,
+  emailAddress,
+}) => sendEmail({
+  context,
+  templateName,
+  to: emailAddress,
+});
 
 /**
  * Send a weekly digest email with overview metrics.
  *
  * @param {Object} options - Send options
  * @param {Object} options.context - Request context
+ * @param {string} options.templateName - Post Office template name
  * @param {string} options.emailAddress - Recipient email address
  * @param {string} options.customerName - Recipient's display name
  * @param {string} options.brandName - Brand name for the site
@@ -218,6 +217,7 @@ export const sendTrialUserInviteEmail = async ({ context, emailAddress }) => {
  */
 export const sendWeeklyDigestEmail = async ({
   context,
+  templateName,
   emailAddress,
   customerName,
   brandName,
@@ -232,12 +232,6 @@ export const sendWeeklyDigestEmail = async ({
   overviewUrl,
   settingsUrl,
 }) => {
-  // Use dedicated weekly digest template (hardcoded, not from env)
-  const templateName = 'expdev_llmo_overview_weekly_digest';
-
-  // Debug: log the template being used
-  context.log.info(`Weekly digest using template: ${templateName}`);
-
   const result = await sendEmail({
     context,
     templateName,

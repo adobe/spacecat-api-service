@@ -255,6 +255,7 @@ describe('Email Service', () => {
     it('should send trial user invite email', async () => {
       const result = await emailServiceWithMocks.sendTrialUserInviteEmail({
         context: mockContext,
+        templateName: 'test-invite-template',
         emailAddress: 'newuser@example.com',
       });
 
@@ -263,15 +264,15 @@ describe('Email Service', () => {
       expect(fetchCall.args[1].body).to.include('newuser@example.com');
     });
 
-    it('should use correct template for invite', async () => {
+    it('should use the provided template name', async () => {
       await emailServiceWithMocks.sendTrialUserInviteEmail({
         context: mockContext,
+        templateName: 'my-invite-template',
         emailAddress: 'newuser@example.com',
       });
 
       const fetchCall = global.fetch.getCall(0);
-      // Template is passed in the URL, not body
-      expect(fetchCall.args[0]).to.include(`templateName=${mockEnv.EMAIL_LLMO_TEMPLATE}`);
+      expect(fetchCall.args[0]).to.include('templateName=my-invite-template');
     });
   });
 
@@ -292,6 +293,7 @@ describe('Email Service', () => {
   describe('sendWeeklyDigestEmail', () => {
     const digestParams = {
       context: mockContext,
+      templateName: 'weekly-digest-template',
       emailAddress: 'user@example.com',
       customerName: 'John Doe',
       brandName: 'Acme Corp',

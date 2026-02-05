@@ -27,6 +27,9 @@ const LLMO_APP_BASE_URL = 'https://llmo.now';
 // Job type identifier for SQS messages
 const DIGEST_JOB_TYPE = 'weekly-digest-org';
 
+// Post Office template name for weekly digest emails
+const WEEKLY_DIGEST_TEMPLATE = 'expdev_llmo_overview_weekly_digest';
+
 /**
  * Check if a user has opted out of weekly digest emails.
  * Users can opt out via the emailPreferences.weeklyDigest field in metadata.
@@ -163,6 +166,7 @@ const processSiteDigest = async ({
         // eslint-disable-next-line no-await-in-loop
         const emailResult = await sendWeeklyDigestEmail({
           context,
+          templateName: WEEKLY_DIGEST_TEMPLATE,
           emailAddress,
           customerName,
           brandName,
