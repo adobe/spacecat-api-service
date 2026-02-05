@@ -129,10 +129,20 @@ export const sendEmail = async ({
     return { success: false, statusCode: 500, error: 'Email service not configured' };
   }
 
+  // Get IMS access token
+  let accessToken;
   try {
-    // Get IMS access token
-    const accessToken = await getEmailAccessToken(context);
+    accessToken = await getEmailAccessToken(context);
+  } catch (error) {
+    log.error(`Failed to obtain IMS access token: ${error.message}`);
+    return {
+      success: false,
+      statusCode: 401,
+      error: `IMS authentication failed: ${error.message}`,
+    };
+  }
 
+  try {
     // Build email payload
     const emailPayload = buildEmailPayload({ to, templateParams });
 

@@ -196,7 +196,7 @@ describe('Email Service', () => {
       expect(result.statusCode).to.equal(500);
     });
 
-    it('should return error when IMS token fails', async () => {
+    it('should return 401 with specific message when IMS token fails', async () => {
       mockImsClient.createFrom.returns({
         getServiceAccessToken: sandbox.stub().rejects(new Error('Token error')),
       });
@@ -208,6 +208,8 @@ describe('Email Service', () => {
       });
 
       expect(result.success).to.be.false;
+      expect(result.statusCode).to.equal(401);
+      expect(result.error).to.include('IMS authentication failed');
       expect(result.error).to.include('Token error');
     });
 
