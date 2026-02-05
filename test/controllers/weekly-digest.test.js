@@ -18,6 +18,8 @@ import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import esmock from 'esmock';
 
+import AccessControlUtil from '../../src/support/access-control-util.js';
+
 use(chaiAsPromised);
 use(sinonChai);
 
@@ -110,6 +112,7 @@ describe('Weekly Digest Controller', () => {
   let mockDataAccess;
   let mockCalculateOverviewMetrics;
   let mockSendWeeklyDigestEmail;
+  let mockAccessControlUtil;
 
   beforeEach(async () => {
     sandbox.restore();
@@ -119,6 +122,13 @@ describe('Weekly Digest Controller', () => {
     mockLog.warn.reset();
     // Reset and re-configure the SQS mock (sandbox.restore() removes the resolves behavior)
     mockSqs.sendMessage = sandbox.stub().resolves();
+
+    // Stub AccessControlUtil.fromContext to return a mock instance
+    mockAccessControlUtil = {
+      hasAdminAccess: sandbox.stub().returns(true),
+    };
+    sandbox.stub(AccessControlUtil, 'fromContext')
+      .returns(mockAccessControlUtil);
 
     mockDataAccess = {
       Site: {
@@ -307,6 +317,22 @@ describe('Weekly Digest Controller', () => {
 
       expect(result.status).to.equal(202);
       expect(mockSqs.sendMessage).to.have.been.calledOnce;
+    });
+
+    it('should return 403 when user is not admin', async () => {
+      mockAccessControlUtil.hasAdminAccess.returns(false);
+
+      const context = {
+        log: mockLog,
+        env: mockEnv,
+        sqs: mockSqs,
+      };
+
+      const result = await controller.triggerWeeklyDigests(context);
+
+      expect(result.status).to.equal(403);
+      const body = await result.json();
+      expect(body.message).to.include('Only admins');
     });
   });
 
@@ -782,6 +808,26 @@ describe('Weekly Digest Controller', () => {
 
       expect(body.sitesFailed).to.equal(1);
       expect(body.totalEmailsSent).to.equal(0);
+    });
+
+    it('should return 403 when user is not admin', async () => {
+      mockAccessControlUtil.hasAdminAccess.returns(false);
+
+      const context = {
+        log: mockLog,
+        env: mockEnv,
+        data: {
+          type: 'weekly-digest-org',
+          organizationId: orgId,
+          siteIds: ['site-1'],
+        },
+      };
+
+      const result = await controller.processOrganizationDigest(context);
+
+      expect(result.status).to.equal(403);
+      const body = await result.json();
+      expect(body.message).to.include('Only admins');
     });
   });
 });

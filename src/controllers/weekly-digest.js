@@ -14,10 +14,12 @@ import {
   ok,
   accepted,
   badRequest,
+  forbidden,
   internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 
+import AccessControlUtil from '../support/access-control-util.js';
 import { calculateOverviewMetrics } from '../support/overview-metrics-calculator.js';
 import { sendWeeklyDigestEmail } from '../support/email-service.js';
 
@@ -223,6 +225,7 @@ function WeeklyDigestController(ctx) {
   }
 
   const { Site, Organization, TrialUser } = dataAccess;
+  const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
    * Trigger weekly digest processing by enqueuing per-organization messages.
@@ -238,6 +241,10 @@ function WeeklyDigestController(ctx) {
    * @returns {Promise<Response>} Accepted response with queue stats
    */
   const triggerWeeklyDigests = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can trigger weekly digests');
+    }
+
     const { log, sqs, env } = context;
     const startTime = Date.now();
 
@@ -346,6 +353,10 @@ function WeeklyDigestController(ctx) {
    * @returns {Promise<Response>} Processing result
    */
   const processOrganizationDigest = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can process organization digests');
+    }
+
     const { log, data } = context;
     const startTime = Date.now();
 
