@@ -1,3 +1,10 @@
+## [1.309.3](https://github.com/adobe/spacecat-api-service/compare/v1.309.2...v1.309.3) (2026-02-05)
+
+
+### Bug Fixes
+
+* empty list of ASO critical sites list ([#1774](https://github.com/adobe/spacecat-api-service/issues/1774)) ([74ed060](https://github.com/adobe/spacecat-api-service/commit/74ed060a5c685827ce00f793b934f878212b7dcd))
+
 ## [1.309.2](https://github.com/adobe/spacecat-api-service/compare/v1.309.1...v1.309.2) (2026-02-05)
 
 
