@@ -1,3 +1,10 @@
+## [1.311.2](https://github.com/adobe/spacecat-api-service/compare/v1.311.1...v1.311.2) (2026-02-05)
+
+
+### Bug Fixes
+
+* A11y autofix slack trigger ([#1777](https://github.com/adobe/spacecat-api-service/issues/1777)) ([f523937](https://github.com/adobe/spacecat-api-service/commit/f523937e8220b4365e9c5420deef8c90c6c072b4))
+
 ## [1.311.1](https://github.com/adobe/spacecat-api-service/compare/v1.311.0...v1.311.1) (2026-02-05)
 
 
