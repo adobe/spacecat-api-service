@@ -1,3 +1,10 @@
+# [1.310.0](https://github.com/adobe/spacecat-api-service/compare/v1.309.5...v1.310.0) (2026-02-05)
+
+
+### Features
+
+* **LLMO-Offsite:** Define Brand Sentiment Guidelines Service ([#1740](https://github.com/adobe/spacecat-api-service/issues/1740)) ([07f53a0](https://github.com/adobe/spacecat-api-service/commit/07f53a081b4fdf931f7dc1490b6dafc4b9241fb2))
+
 ## [1.309.5](https://github.com/adobe/spacecat-api-service/compare/v1.309.4...v1.309.5) (2026-02-05)
 
 
