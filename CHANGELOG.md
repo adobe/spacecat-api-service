@@ -1,3 +1,73 @@
+## [1.309.4](https://github.com/adobe/spacecat-api-service/compare/v1.309.3...v1.309.4) (2026-02-05)
+
+
+### Bug Fixes
+
+* user agent changes for edge-live-preview api ([#1776](https://github.com/adobe/spacecat-api-service/issues/1776)) ([163ff48](https://github.com/adobe/spacecat-api-service/commit/163ff488ecf69e82d48de9e62a2396971f59858d))
+
+## [1.309.3](https://github.com/adobe/spacecat-api-service/compare/v1.309.2...v1.309.3) (2026-02-05)
+
+
+### Bug Fixes
+
+* empty list of ASO critical sites list ([#1774](https://github.com/adobe/spacecat-api-service/issues/1774)) ([74ed060](https://github.com/adobe/spacecat-api-service/commit/74ed060a5c685827ce00f793b934f878212b7dcd))
+
+## [1.309.2](https://github.com/adobe/spacecat-api-service/compare/v1.309.1...v1.309.2) (2026-02-05)
+
+
+### Bug Fixes
+
+* handle pre existance of org ([#1772](https://github.com/adobe/spacecat-api-service/issues/1772)) ([9e32a00](https://github.com/adobe/spacecat-api-service/commit/9e32a00ff5b477cb745a664b3292f15b367a1463))
+
+## [1.309.1](https://github.com/adobe/spacecat-api-service/compare/v1.309.0...v1.309.1) (2026-02-05)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.103.0 ([#1773](https://github.com/adobe/spacecat-api-service/issues/1773)) ([2cc70d2](https://github.com/adobe/spacecat-api-service/commit/2cc70d2a20d50b3ff97fae328bbedd16d986276c))
+
+# [1.309.0](https://github.com/adobe/spacecat-api-service/compare/v1.308.1...v1.309.0) (2026-02-04)
+
+
+### Features
+
+* add impact field name ([#1767](https://github.com/adobe/spacecat-api-service/issues/1767)) ([acce192](https://github.com/adobe/spacecat-api-service/commit/acce1927fc8c15975b9ce31bb01d920f69733143))
+
+## [1.308.1](https://github.com/adobe/spacecat-api-service/compare/v1.308.0...v1.308.1) (2026-02-04)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1769](https://github.com/adobe/spacecat-api-service/issues/1769)) ([9160cf0](https://github.com/adobe/spacecat-api-service/commit/9160cf0bf75142bfe5d42f6218b4deca63769a05))
+
+# [1.308.0](https://github.com/adobe/spacecat-api-service/compare/v1.307.0...v1.308.0) (2026-02-04)
+
+
+### Features
+
+* scrape job complete response ([#1770](https://github.com/adobe/spacecat-api-service/issues/1770)) ([6763434](https://github.com/adobe/spacecat-api-service/commit/67634343056f62ba02c49d8992d1052297fed394))
+
+# [1.307.0](https://github.com/adobe/spacecat-api-service/compare/v1.306.3...v1.307.0) (2026-02-04)
+
+
+### Features
+
+* access control on config and deploy for LLMO ([#1749](https://github.com/adobe/spacecat-api-service/issues/1749)) ([10abbc5](https://github.com/adobe/spacecat-api-service/commit/10abbc55910f1def4d381f1d87b6c99d1dd496d8))
+
+## [1.306.3](https://github.com/adobe/spacecat-api-service/compare/v1.306.2...v1.306.3) (2026-02-04)
+
+
+### Bug Fixes
+
+* preview for all using apply Stale ([#1764](https://github.com/adobe/spacecat-api-service/issues/1764)) ([1c3c1d4](https://github.com/adobe/spacecat-api-service/commit/1c3c1d47817e2c4065b021509b910101854c23f5))
+
+## [1.306.2](https://github.com/adobe/spacecat-api-service/compare/v1.306.1...v1.306.2) (2026-02-03)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1675](https://github.com/adobe/spacecat-api-service/issues/1675)) ([4307798](https://github.com/adobe/spacecat-api-service/commit/43077981faf3bd978ecc4745c2768f76f9191bac))
+
 ## [1.306.1](https://github.com/adobe/spacecat-api-service/compare/v1.306.0...v1.306.1) (2026-02-03)
 
 

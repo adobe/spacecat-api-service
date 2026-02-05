@@ -3560,6 +3560,9 @@ describe('Suggestions Controller', () => {
     let headingsOpportunity;
 
     beforeEach(() => {
+      // Default: allow LLMO administrator access (can be overridden in specific tests)
+      sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(true);
+
       tokowakaSuggestions = [
         {
           getId: () => SUGGESTION_IDS[0],
@@ -3899,6 +3902,27 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(400);
       const body = await response.json();
       expect(body.message).to.equal('No data provided');
+    });
+
+    it('should return 403 if user is not an LLMO administrator', async () => {
+      // Restore the default stub and create a new one that returns false
+      AccessControlUtil.prototype.isLLMOAdministrator.restore();
+      sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(false);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.equal('Only LLMO administrators can deploy suggestions to edge');
     });
 
     it('should return 400 if suggestionIds is empty', async () => {
@@ -4979,6 +5003,10 @@ describe('Suggestions Controller', () => {
     let headingsOpportunity;
 
     beforeEach(() => {
+      // Default: allow LLMO administrator access (can be overridden in specific tests)
+      sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(true);
+
+      // Mock suggestions with tokowakaDeployed timestamp
       // Mock suggestions with edgeDeployed timestamp
       tokowakaSuggestions = [
         {
@@ -5155,6 +5183,27 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(400);
       const error = await response.json();
       expect(error).to.have.property('message', 'Request body must contain a non-empty array of suggestionIds');
+    });
+
+    it('should return 403 when user is not an LLMO administrator', async () => {
+      // Restore the default stub and create a new one that returns false
+      AccessControlUtil.prototype.isLLMOAdministrator.restore();
+      sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(false);
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(403);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Only LLMO administrators can rollback suggestions');
     });
 
     it('should return 404 when site not found', async () => {
@@ -5462,6 +5511,9 @@ describe('Suggestions Controller', () => {
     let tokowakaClientStub;
 
     beforeEach(() => {
+      // Default: allow LLMO administrator access (can be overridden in specific tests)
+      sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(true);
+
       // Create a domain-wide suggestion that has been deployed
       domainWideSuggestion = {
         getId: () => SUGGESTION_IDS[0],
@@ -6534,7 +6586,7 @@ describe('Suggestions Controller', () => {
       expect(fetchStub).to.have.been.calledOnce;
       const fetchArgs = fetchStub.getCall(0).args;
       expect(fetchArgs[0]).to.equal('https://www.lovesac.com/sactionals');
-      expect(fetchArgs[1].headers['User-Agent']).to.equal('Tokowaka-AI Tokowaka/1.0');
+      expect(fetchArgs[1].headers['User-Agent']).to.equal('Tokowaka-AI Tokowaka/1.0 AdobeEdgeOptimize-AI AdobeEdgeOptimize/1.0');
     });
 
     it('should handle fetch failure with 404', async () => {
@@ -6867,6 +6919,7 @@ describe('Suggestions Controller', () => {
           default: {
             fromContext: () => ({
               hasAccess: sandbox.stub().resolves(true),
+              isLLMOAdministrator: sandbox.stub().returns(true),
             }),
           },
         },
