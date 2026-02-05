@@ -492,7 +492,7 @@ describe('Organizations Controller', () => {
     const resultSites = await result.json();
 
     expect(mockDataAccess.Site.allByOrganizationId).to.have.been.calledOnceWith('9033554c-de8a-44ac-a356-09b51af8cc28');
-    expect(resultSites).to.be.an('array').with.lengthOf(2);
+    expect(resultSites).to.be.an('array').with.lengthOf(3);
     expect(resultSites[0]).to.have.property('id', 'site1');
     expect(resultSites[1]).to.have.property('id', 'site2');
   });
