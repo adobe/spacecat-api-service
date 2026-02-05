@@ -1435,6 +1435,81 @@ RUMDomainDiscoveryAlert:
     domain:
       description: Domain of the page which triggered the domain discovery alert
       $ref: '#/Domain'
+DrsJobCompletedWebhook:
+  type: object
+  required:
+    - event_type
+    - job_id
+    - result_location
+    - metadata
+  properties:
+    event_type:
+      description: The type of event. Currently only JOB_COMPLETED is supported.
+      type: string
+      enum:
+        - JOB_COMPLETED
+      example: 'JOB_COMPLETED'
+    job_id:
+      description: The unique identifier of the DRS job
+      type: string
+      example: 'job-abc123'
+    provider_id:
+      description: The DRS provider that processed the job
+      type: string
+      example: 'prompt_generation_base_url'
+    result_location:
+      description: S3 URI where the job results are stored
+      type: string
+      example: 's3://drs-main-results/results/prompt_generation_base_url/2026/02/05/job-abc123/job-abc123.json'
+    completed_at:
+      description: Unix timestamp when the job completed
+      type: integer
+      example: 1738756200
+    timestamp:
+      description: ISO 8601 timestamp of when the webhook was sent
+      type: string
+      format: date-time
+      example: '2026-02-05T12:30:00Z'
+    metadata:
+      description: Metadata associated with the job, including site information
+      type: object
+      required:
+        - site_id
+      properties:
+        site_id:
+          description: The SpaceCat site ID
+          type: string
+          format: uuid
+          example: '123e4567-e89b-12d3-a456-426614174000'
+        imsOrgId:
+          description: The Adobe IMS organization ID
+          type: string
+          example: 'org@AdobeOrg'
+        brand:
+          description: The brand name
+          type: string
+          example: 'BrandName'
+        base_url:
+          description: The base URL of the site
+          type: string
+          format: uri
+          example: 'https://example.com'
+        region:
+          description: The region for prompts
+          type: string
+          example: 'US'
+      additionalProperties: true
+DrsWebhookAcceptedResponse:
+  type: object
+  properties:
+    message:
+      description: Confirmation message
+      type: string
+      example: 'Webhook accepted for processing'
+    jobId:
+      description: The job ID that was accepted
+      type: string
+      example: 'job-abc123'
 SlackInviteToChannelByUserIdRequest:
   type: object
   required:

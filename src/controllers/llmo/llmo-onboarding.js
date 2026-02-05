@@ -19,6 +19,7 @@ import { composeBaseURL, tracingFetch as fetch, isNonEmptyArray } from '@adobe/s
 import AhrefsAPIClient from '@adobe/spacecat-shared-ahrefs-client';
 import { parse as parseDomain } from 'tldts';
 import { postSlackMessage } from '../../utils/slack/base.js';
+import DrsClient from '../../support/drs-client.js';
 
 // LLMO Constants
 const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
@@ -1034,6 +1035,30 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
 
     // Enable audits
     await enableAudits(site, context, [...BASIC_AUDITS, 'llm-error-pages', 'llmo-customer-analysis', 'wikipedia-analysis']);
+
+    // Submit DRS prompt generation job (non-blocking)
+    try {
+      const drsClient = DrsClient(context);
+      if (drsClient.isConfigured()) {
+        const drsJob = await drsClient.submitPromptGenerationJob({
+          baseUrl: baseURL,
+          brandName: brandName.trim(),
+          audience: 'general audience', // Default audience for onboarding
+          region: 'US', // Default region for onboarding
+          numPrompts: 40,
+          siteId: site.getId(),
+          imsOrgId,
+        });
+        log.info(`Started DRS prompt generation: job=${drsJob.job_id}`);
+        say(`:robot_face: Started DRS prompt generation job: ${drsJob.job_id}`);
+      } else {
+        log.debug('DRS client not configured, skipping prompt generation');
+      }
+    } catch (drsError) {
+      // Don't fail onboarding if DRS job fails - prompts can be generated manually later
+      log.error(`Failed to start DRS prompt generation: ${drsError.message}`);
+      say(':warning: Failed to start DRS prompt generation (will need manual trigger)');
+    }
 
     // Get current site config
     const siteConfig = site.getConfig();

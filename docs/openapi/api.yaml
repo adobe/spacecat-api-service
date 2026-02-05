@@ -105,6 +105,8 @@ paths:
     $ref: './hooks-api.yaml#/site-detection-rum'
   /hooks/site-integration/analytics/{hookSecret}:
     $ref: './hooks-api.yaml#/site-integration-analytics'
+  /hooks/drs/{hookSecret}/prompt-generation:
+    $ref: './hooks-api.yaml#/drs-prompt-generation'
   /organizations:
     $ref: './organizations-api.yaml#/organizations'
   /organizations/{organizationId}:
