@@ -1,3 +1,10 @@
+## [1.309.4](https://github.com/adobe/spacecat-api-service/compare/v1.309.3...v1.309.4) (2026-02-05)
+
+
+### Bug Fixes
+
+* user agent changes for edge-live-preview api ([#1776](https://github.com/adobe/spacecat-api-service/issues/1776)) ([163ff48](https://github.com/adobe/spacecat-api-service/commit/163ff488ecf69e82d48de9e62a2396971f59858d))
+
 ## [1.309.3](https://github.com/adobe/spacecat-api-service/compare/v1.309.2...v1.309.3) (2026-02-05)
 
 
