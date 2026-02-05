@@ -52,6 +52,7 @@ export async function makeSpacecatRequest({
   const url = `${apiBaseUrl}${path}`;
   const requestHeaders = new Headers({
     'Content-Type': 'application/json',
+    'x-client-type': 'api-e2e-tests',
     ...headers,
   });
 
