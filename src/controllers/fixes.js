@@ -193,7 +193,10 @@ export class FixesController {
     if (res) return res;
 
     const suggestions = await fix.getSuggestions();
-    return ok(suggestions.map(SuggestionDto.toJSON));
+    return ok(suggestions.map((s) => {
+      const opportunity = s.getOpportunity();
+      return SuggestionDto.toJSON(s, 'full', opportunity);
+    }));
   }
 
   /**

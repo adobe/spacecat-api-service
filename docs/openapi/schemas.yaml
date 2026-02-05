@@ -2923,6 +2923,147 @@ SuggestionList:
   type: array
   items:
     $ref: '#/Suggestion'
+SuggestionMinimal:
+  type: object
+  description: Minimal suggestion projection containing id, status, timestamps, and URL-related data fields for listing views
+  properties:
+    id:
+      description: UUID of this suggestion
+      $ref: '#/Id'
+    status:
+      description: Status of this suggestion
+      $ref: '#/SuggestionStatus'
+    data:
+      type: object
+      description: URL-related fields extracted from the full data object. Only present if any URL fields exist.
+      properties:
+        url:
+          type: string
+          example: "https://example.com/page"
+        urls:
+          type: array
+          items:
+            type: string
+        urlFrom:
+          type: string
+          example: "https://example.com/source"
+        urlTo:
+          type: string
+          example: "https://example.com/destination"
+        url_from:
+          type: string
+          description: Source URL (snake_case variant for broken backlinks)
+          example: "https://example.com/source"
+        url_to:
+          type: string
+          description: Target URL (snake_case variant for broken backlinks)
+          example: "https://example.com/destination"
+        urlsSuggested:
+          type: array
+          description: Array of suggested URLs
+          items:
+            type: string
+        sitemapUrl:
+          type: string
+          example: "https://example.com/sitemap.xml"
+        pageUrl:
+          type: string
+          example: "https://example.com/page"
+        pattern:
+          type: string
+        link:
+          type: string
+        path:
+          type: string
+        sourceUrl:
+          type: string
+        destinationUrl:
+          type: string
+        recommendations:
+          type: array
+          items:
+            type: object
+        cves:
+          type: array
+          items:
+            type: object
+        findings:
+          type: array
+          items:
+            type: object
+        form:
+          type: object
+        page:
+          type: object
+        accessibility:
+          type: object
+        metrics:
+          type: object
+          description: CWV metrics (mobileMetric, desktopMetric) for calculating totalIssues
+        type:
+          type: string
+          description: Type indicator (e.g., 'url' vs 'group' for CWV)
+        pageviews:
+          type: number
+          description: Page views count for display
+        issues:
+          type: array
+          description: Issues array for Accessibility, ColorContrast, FormNonExperimental (includes occurrences field)
+          items:
+            type: object
+    createdAt:
+      description: UTC timestamp of when the suggestion was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: UTC timestamp of when the suggestion was last updated
+      $ref: '#/DateTime'
+  required:
+    - id
+    - status
+    - createdAt
+    - updatedAt
+SuggestionSummary:
+  type: object
+  description: Summary suggestion projection (superset of minimal, subset of full). Contains minimal data fields plus metadata for table displays.
+  properties:
+    id:
+      description: UUID of this suggestion
+      $ref: '#/Id'
+    status:
+      description: Status of this suggestion
+      $ref: '#/SuggestionStatus'
+    data:
+      type: object
+      description: URL-related fields from minimal view (same as SuggestionMinimal.data). Only present if any URL fields exist.
+    opportunityId:
+      description: UUID of the opportunity this suggestion belongs to
+      $ref: '#/Id'
+    type:
+      $ref: '#/SuggestionType'
+    rank:
+      description: Type-specific numeric rank value (e.g., "domainTraffic" for a broken-backlink) helps sorting
+      type: number
+      example: 45600
+    url:
+      description: URL associated with the suggestion (extracted from data). May be null if no URL found.
+      type: string
+      example: "https://example.com/page"
+    createdAt:
+      description: UTC timestamp of when the suggestion was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: UTC timestamp of when the suggestion was last updated
+      $ref: '#/DateTime'
+    updatedBy:
+      description: Who last updated this suggestion
+      type: string
+      example: "user@example.com"
+  required:
+    - id
+    - status
+    - opportunityId
+    - type
+    - rank
 PaginationMetadata:
   type: object
   description: Metadata for paginated responses

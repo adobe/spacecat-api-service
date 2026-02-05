@@ -590,6 +590,14 @@ describe('Fixes Controller', () => {
         suggestionCollection.create({ opportunityId }),
         suggestionCollection.create({ opportunityId }),
       ]);
+      // Add getOpportunity method to mock suggestions
+      const mockOpportunity = {
+        getSiteId: () => siteId,
+        getType: () => 'test-opportunity-type',
+      };
+      suggestions.forEach((s) => {
+        s.getOpportunity = () => mockOpportunity;
+      });
       suggestionCollection.batchGetByKeys.resolves({
         data: suggestions,
         unprocessed: [],
@@ -600,7 +608,7 @@ describe('Fixes Controller', () => {
       })));
       const response = await fixesController.getAllSuggestionsForFix(requestContext);
       expect(response).includes({ status: 200 });
-      expect(await response.json()).deep.equals(suggestions.map(SuggestionDto.toJSON));
+      expect(await response.json()).deep.equals(suggestions.map((s) => SuggestionDto.toJSON(s)));
     });
 
     it('responds 404 if the fix does not exist', async () => {
