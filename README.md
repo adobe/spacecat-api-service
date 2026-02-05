@@ -61,6 +61,27 @@ $ npm install
 $ npm test
 ```
 
+### E2E Tests
+
+End-to-end tests validate the API against the live CI environment.
+
+#### Setup
+
+Add the following to your `.env` file:
+
+```plaintext
+USER_API_KEY=your_api_key_for_ci_environment
+```
+
+The E2E tests use a hardcoded test site ID and auto-discover opportunities/suggestions for testing.
+(You can change site id according to you)
+
+#### Run E2E Tests Locally
+
+```bash
+$ npm run test-e2e
+```
+
 ### Lint
 
 ```bash

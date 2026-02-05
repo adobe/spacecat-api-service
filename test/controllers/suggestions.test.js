@@ -120,6 +120,9 @@ describe('Suggestions Controller', () => {
         getSiteId() {
           return SITE_ID;
         },
+        getType() {
+          return 'test-opportunity-type';
+        },
       };
     },
     save() {
@@ -571,6 +574,148 @@ describe('Suggestions Controller', () => {
     expect(error).to.have.property('message', 'Site not found');
   });
 
+  it('gets all suggestions for an opportunity returns bad request for invalid view parameter', async () => {
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { view: 'invalid-view' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid view. Must be one of: minimal, summary, full');
+  });
+
+  it('gets all suggestions for an opportunity with minimal view', async () => {
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { view: 'minimal' },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    const suggestions = await response.json();
+    expect(suggestions).to.be.an('array').with.lengthOf(1);
+    expect(suggestions[0]).to.have.property('id');
+    expect(suggestions[0]).to.have.property('status');
+    // Minimal view now includes data with URL-related fields only
+    expect(suggestions[0]).to.not.have.property('kpiDeltas');
+    expect(suggestions[0]).to.not.have.property('opportunityId');
+    expect(suggestions[0]).to.not.have.property('type');
+  });
+
+  it('gets all suggestions for an opportunity filtered by single status', async () => {
+    const suggWithStatus = { ...suggs[0], status: 'NEW' };
+    mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggWithStatus)]);
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { status: 'NEW' },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(mockSuggestion.allByOpportunityId).to.have.been.calledWith(OPPORTUNITY_ID);
+    const suggestions = await response.json();
+    expect(suggestions).to.be.an('array').with.lengthOf(1);
+  });
+
+  it('gets all suggestions for an opportunity filtered by multiple statuses (comma-separated)', async () => {
+    const sugg1 = { ...suggs[0], status: 'NEW' };
+    const sugg2 = { ...suggs[0], id: 'different-id', status: 'APPROVED' };
+    const sugg3 = { ...suggs[0], id: 'another-id', status: 'COMPLETED' };
+    mockSuggestion.allByOpportunityId.resolves([
+      mockSuggestionEntity(sugg1),
+      mockSuggestionEntity(sugg2),
+      mockSuggestionEntity(sugg3),
+    ]);
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { status: 'NEW,APPROVED' },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    const suggestions = await response.json();
+    // Should only return NEW and APPROVED, not COMPLETED
+    expect(suggestions).to.be.an('array').with.lengthOf(2);
+  });
+
+  it('gets all suggestions for an opportunity with status and view filters', async () => {
+    const suggWithStatus = { ...suggs[0], status: 'NEW' };
+    mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggWithStatus)]);
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { status: 'NEW', view: 'minimal' },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    const suggestions = await response.json();
+    expect(suggestions).to.be.an('array').with.lengthOf(1);
+    expect(suggestions[0]).to.have.property('id');
+    expect(suggestions[0]).to.have.property('status');
+    // Minimal view now includes data with URL-related fields only
+    expect(suggestions[0]).to.not.have.property('kpiDeltas');
+    expect(suggestions[0]).to.not.have.property('opportunityId');
+    expect(suggestions[0]).to.not.have.property('type');
+  });
+
+  it('returns bad request for invalid status values', async () => {
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { status: 'INVALID_STATUS' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error.message).to.include('Invalid status value(s): INVALID_STATUS');
+    expect(error.message).to.include('Valid:');
+  });
+
+  it('returns bad request for multiple invalid status values', async () => {
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { status: 'NEW,INVALID,APPROVED,BOGUS' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error.message).to.include('INVALID');
+    expect(error.message).to.include('BOGUS');
+  });
+
+  it('returns all suggestions when status param is empty commas', async () => {
+    mockSuggestion.allByOpportunityId.resolves(suggs.map(mockSuggestionEntity));
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { status: ',,,' },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    const suggestions = await response.json();
+    // Should return all suggestions since no valid statuses were provided
+    expect(suggestions).to.be.an('array').with.lengthOf(suggs.length);
+  });
+
   it('gets paged suggestions returns bad request if limit is less than 1', async () => {
     const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
@@ -649,6 +794,21 @@ describe('Suggestions Controller', () => {
     expect(error).to.have.property('message', 'Opportunity not found');
   });
 
+  it('gets paged suggestions returns bad request for invalid view parameter', async () => {
+    const response = await suggestionsController.getAllForOpportunityPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        limit: 10,
+      },
+      data: { view: 'invalid-view' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid view. Must be one of: minimal, summary, full');
+  });
+
   it('gets paged suggestions for an opportunity successfully', async () => {
     const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
@@ -668,12 +828,35 @@ describe('Suggestions Controller', () => {
     expect(result.pagination).to.have.property('hasMore', false);
   });
 
+
   it('gets paged suggestions returns empty array when no suggestions exist', async () => {
     const emptyResults = {
       data: [],
       cursor: undefined,
     };
     mockSuggestion.allByOpportunityId.resolves(emptyResults);
+    const response = await suggestionsController.getAllForOpportunityPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        limit: 10,
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    const result = await response.json();
+    expect(result).to.have.property('suggestions');
+    expect(result.suggestions).to.be.an('array').with.lengthOf(0);
+    expect(result.pagination).to.have.property('limit', 10);
+    expect(result.pagination).to.have.property('cursor', null);
+    expect(result.pagination).to.have.property('hasMore', false);
+  });
+
+  it('gets paged suggestions handles undefined data property gracefully', async () => {
+    const resultsWithoutData = {
+      cursor: undefined,
+    };
+    mockSuggestion.allByOpportunityId.resolves(resultsWithoutData);
     const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
         siteId: SITE_ID,
@@ -872,6 +1055,21 @@ describe('Suggestions Controller', () => {
     expect(error).to.have.property('message', 'Status is required');
   });
 
+  it('gets all suggestions for an opportunity by status returns bad request for invalid view parameter', async () => {
+    const response = await suggestionsController.getByStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+      },
+      data: { view: 'invalid-view' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid view. Must be one of: minimal, summary, full');
+  });
+
   it('gets all suggestions for a site does not exist', async () => {
     const response = await suggestionsController.getByStatus({
       params: {
@@ -1023,6 +1221,21 @@ describe('Suggestions Controller', () => {
     expect(response.status).to.equal(404);
     const error = await response.json();
     expect(error).to.have.property('message', 'Opportunity not found');
+  });
+
+  it('gets paged suggestions by status returns bad request for invalid view parameter', async () => {
+    const response = await suggestionsController.getByStatusPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+      },
+      data: { view: 'invalid-view' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid view. Must be one of: minimal, summary, full');
   });
 
   it('gets paged suggestions by status successfully', async () => {
@@ -1297,6 +1510,21 @@ describe('Suggestions Controller', () => {
     expect(response.status).to.equal(400);
     const error = await response.json();
     expect(error).to.have.property('message', 'Suggestion ID required');
+  });
+
+  it('gets suggestion by ID returns bad request for invalid view parameter', async () => {
+    const response = await suggestionsController.getByID({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: { view: 'invalid-view' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid view. Must be one of: minimal, summary, full');
   });
 
   it('gets suggestion by ID returns not found if suggestion is not found', async () => {
@@ -5959,7 +6187,7 @@ describe('Suggestions Controller', () => {
       expect(body.suggestions[0].message).to.include('Preview generation failed');
     });
 
-    it('should handle missing and invalid status suggestions', async function () {
+    it('should handle missing suggestions and allow any status', async function () {
       tokowakaSuggestions[1].getStatus = () => 'IN_PROGRESS';
 
       const response = await suggestionsController.previewSuggestions({
@@ -5977,16 +6205,16 @@ describe('Suggestions Controller', () => {
       const body = await response.json();
 
       expect(body.metadata.total).to.equal(3);
-      expect(body.metadata.success).to.equal(1);
-      expect(body.metadata.failed).to.equal(2);
+      expect(body.metadata.success).to.equal(2);
+      expect(body.metadata.failed).to.equal(1);
 
       const notFoundSuggestion = body.suggestions.find((s) => s.uuid === 'not-found-id');
       expect(notFoundSuggestion.statusCode).to.equal(404);
       expect(notFoundSuggestion.message).to.include('not found');
 
-      const invalidStatusSuggestion = body.suggestions.find((s) => s.uuid === SUGGESTION_IDS[1]);
-      expect(invalidStatusSuggestion.statusCode).to.equal(400);
-      expect(invalidStatusSuggestion.message).to.include('not in NEW status');
+      // Suggestion with IN_PROGRESS status should now succeed
+      const inProgressSuggestion = body.suggestions.find((s) => s.uuid === SUGGESTION_IDS[1]);
+      expect(inProgressSuggestion.statusCode).to.equal(200);
     });
 
     it('should validate preview config structure uses preview path', async function () {
