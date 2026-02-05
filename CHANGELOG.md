@@ -1,3 +1,10 @@
+# [1.311.0](https://github.com/adobe/spacecat-api-service/compare/v1.310.0...v1.311.0) (2026-02-05)
+
+
+### Features
+
+* add projection support to suggestions API [SITES-39183] ([#1693](https://github.com/adobe/spacecat-api-service/issues/1693)) ([eb559d2](https://github.com/adobe/spacecat-api-service/commit/eb559d293f4b069edfe8233a95afa6dcd55b9cf5))
+
 # [1.310.0](https://github.com/adobe/spacecat-api-service/compare/v1.309.5...v1.310.0) (2026-02-05)
 
 
