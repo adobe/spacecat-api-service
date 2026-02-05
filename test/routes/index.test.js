@@ -38,6 +38,7 @@ describe('getRouteHandlers', () => {
   };
 
   const mockHooksController = {
+    processDrsPromptGenerationHook: sinon.stub(),
   };
 
   const mockSitesController = {
@@ -406,6 +407,7 @@ describe('getRouteHandlers', () => {
       'PATCH /configurations/latest/jobs/:jobType',
       'POST /hooks/site-detection/cdn/:hookSecret',
       'POST /hooks/site-detection/rum/:hookSecret',
+      'POST /hooks/drs/:hookSecret/prompt-generation',
       'GET /organizations/:organizationId',
       'GET /organizations/:organizationId/brands',
       'GET /organizations/:organizationId/projects',
