@@ -236,6 +236,20 @@ describe('Email Service', () => {
       expect(fetchCall.args[0]).to.include('locale=fr-fr');
     });
 
+    it('should return 500 when fetch throws an exception', async () => {
+      global.fetch.rejects(new Error('Network timeout'));
+
+      const result = await emailServiceWithMocks.sendEmail({
+        context: mockContext,
+        templateName: 'test-template',
+        to: 'test@example.com',
+      });
+
+      expect(result.success).to.be.false;
+      expect(result.statusCode).to.equal(500);
+      expect(result.error).to.equal('Network timeout');
+    });
+
     it('should return error when endpoint not configured', async () => {
       const contextNoEndpoint = {
         ...mockContext,

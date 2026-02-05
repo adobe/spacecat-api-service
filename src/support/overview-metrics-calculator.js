@@ -543,6 +543,7 @@ export const calculateOverviewMetrics = async ({ site, hlxApiKey, log }) => {
   // Extract week info from the current file's filename for date range formatting
   const currentFilename = currentFile.path.split('/').pop();
   const weekInfo = parseWeekFromFilename(currentFilename);
+  /* c8 ignore next - defensive: all files passing isValidBrandPresenceAllFile are parseable */
   const dateRange = weekInfo ? formatWeekRange(weekInfo.week, weekInfo.year) : '';
 
   return {

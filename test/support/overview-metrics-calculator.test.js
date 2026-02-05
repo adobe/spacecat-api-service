@@ -394,6 +394,14 @@ describe('Overview Metrics Calculator', () => {
       const week10 = formatWeekRange(10, 2025);
       expect(week1).to.not.equal(week10);
     });
+
+    it('should handle year where Jan 4 is a Sunday', () => {
+      // Jan 4, 2015 is a Sunday (getUTCDay() === 0), triggers || 7
+      const result = formatWeekRange(1, 2015);
+      expect(result).to.be.a('string');
+      expect(result).to.include('Dec 29');
+      expect(result).to.include('Jan 4');
+    });
   });
 
   describe('parseWeekFromFilename', () => {
@@ -502,6 +510,18 @@ describe('Overview Metrics Calculator', () => {
       expect(result).to.have.length(2);
       // 'invalid' becomes 0, so w44 with 2000 comes first
       expect(result[0].path).to.equal('/customer/brandpresence-all-w44-2025.json');
+    });
+
+    it('should handle all invalid lastModified values', () => {
+      const queryIndexData = [
+        { path: '/customer/brandpresence-all-w45-2025.json', lastModified: 'abc' },
+        { path: '/customer/brandpresence-all-w44-2025.json', lastModified: undefined },
+      ];
+
+      const result = getTwoMostRecentBrandPresenceFiles(queryIndexData);
+
+      // Both become 0 after || 0 fallback, so order is stable
+      expect(result).to.have.length(2);
     });
   });
 
