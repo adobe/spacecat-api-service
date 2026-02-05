@@ -1,3 +1,10 @@
+## [1.309.2](https://github.com/adobe/spacecat-api-service/compare/v1.309.1...v1.309.2) (2026-02-05)
+
+
+### Bug Fixes
+
+* handle pre existance of org ([#1772](https://github.com/adobe/spacecat-api-service/issues/1772)) ([9e32a00](https://github.com/adobe/spacecat-api-service/commit/9e32a00ff5b477cb745a664b3292f15b367a1463))
+
 ## [1.309.1](https://github.com/adobe/spacecat-api-service/compare/v1.309.0...v1.309.1) (2026-02-05)
 
 
