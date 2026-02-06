@@ -1,3 +1,10 @@
+## [1.311.4](https://github.com/adobe/spacecat-api-service/compare/v1.311.3...v1.311.4) (2026-02-06)
+
+
+### Bug Fixes
+
+* remove NEW status restriction from edge-preview ([#1778](https://github.com/adobe/spacecat-api-service/issues/1778)) ([dd82772](https://github.com/adobe/spacecat-api-service/commit/dd82772032ae262579d20336fece456340f30d1c))
+
 ## [1.311.3](https://github.com/adobe/spacecat-api-service/compare/v1.311.2...v1.311.3) (2026-02-05)
 
 
