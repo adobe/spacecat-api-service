@@ -1127,7 +1127,7 @@ function SuggestionsController(ctx, sqs, env) {
           + ` by ${profile?.email || 'tokowaka-preview'}, took ${previewTimeTaken}ms`);
         /* c8 ignore next 5 */
         if (previewTimeTaken > 13000) {
-          context.log.info(`Edge-Preview took ${previewTimeTaken} ms for ${site.getBaseURL()} , siteId: ${site.getId()}`
+          context.log.warn(`Edge-Preview took ${previewTimeTaken} ms for ${site.getBaseURL()} , siteId: ${site.getId()}`
           + ` opportunityId: ${opportunity.getId()} , opportunityType: ${opportunity.getType()}`
           + ` and ${succeededSuggestions.length} suggestions`);
         }
