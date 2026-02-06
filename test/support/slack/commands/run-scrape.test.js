@@ -66,6 +66,8 @@ describe('RunScrapeCommand', () => {
     slackContext = {
       say: sandbox.spy(),
       user: 'USER123',
+      channelId: 'CHANNEL123',
+      threadTs: 'THREAD123',
     };
 
     const RunScrapeCommandMocked = await esmock('../../../../src/support/slack/commands/run-scrape.js', {
@@ -141,6 +143,12 @@ describe('RunScrapeCommand', () => {
         processingType: 'default',
         urls: ['https://example.com/page1', 'https://example.com/page2'],
         maxScrapeAge: 0,
+        metaData: {
+          slackData: {
+            channel: 'CHANNEL123',
+            thread_ts: 'THREAD123',
+          },
+        },
       });
     });
 
@@ -272,6 +280,25 @@ describe('RunScrapeCommand', () => {
 
       expect(slackContext.say.calledWith(':adobe-run: Triggering scrape run for 2 sites.')).to.be.true;
       expect(mockScrapeClient.createScrapeJob.callCount).to.equal(2);
+    });
+
+    it('warns when no scrape jobs are triggered from CSV', async () => {
+      const fileUrl = 'https://example.com/sites.csv';
+      dataAccessStub.Site.findByBaseURL.resolves(null);
+      slackContext.files = [
+        {
+          name: 'sites.csv',
+          url_private: fileUrl,
+        },
+      ];
+      nock(fileUrl)
+        .get('')
+        .reply(200, 'https://missing.site,uuidv4');
+
+      const command = RunScrapeCommand(context);
+      await command.handleExecution([], slackContext);
+
+      expect(slackContext.say.calledWith(':warning: No scrape jobs were triggered.')).to.be.true;
     });
 
     it('handles failing scrape for a site in the CSV file', async () => {

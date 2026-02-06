@@ -558,6 +558,60 @@ describe('Access Control Util', () => {
       const hasAccessToDifferentOrg = await accessControl.hasAccess(differentOrg);
       expect(hasAccessToDifferentOrg).to.be.true;
     });
+
+    it('should return true when user is LLMO administrator', () => {
+      const mockAuthInfo = {
+        getType: () => 'ims',
+        isAuthenticated: () => true,
+        getProfile: () => ({ is_llmo_administrator: true }),
+        isLLMOAdministrator: () => true,
+      };
+
+      const contextWithLLMOAdmin = {
+        log: {
+          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
+        pathInfo: {
+          headers: { 'x-product': 'llmo' },
+        },
+        attributes: { authInfo: mockAuthInfo },
+        dataAccess: {
+          Entitlement: {},
+          TrialUser: {},
+          OrganizationIdentityProvider: {},
+        },
+      };
+
+      const accessControl = AccessControlUtil.fromContext(contextWithLLMOAdmin);
+      expect(accessControl.isLLMOAdministrator()).to.be.true;
+    });
+
+    it('should return false when user is not LLMO administrator', () => {
+      const mockAuthInfo = {
+        getType: () => 'ims',
+        isAuthenticated: () => true,
+        getProfile: () => ({ is_llmo_administrator: false }),
+        isLLMOAdministrator: () => false,
+      };
+
+      const contextWithoutLLMOAdmin = {
+        log: {
+          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
+        pathInfo: {
+          headers: { 'x-product': 'llmo' },
+        },
+        attributes: { authInfo: mockAuthInfo },
+        dataAccess: {
+          Entitlement: {},
+          TrialUser: {},
+          OrganizationIdentityProvider: {},
+        },
+      };
+
+      const accessControl = AccessControlUtil.fromContext(contextWithoutLLMOAdmin);
+      expect(accessControl.isLLMOAdministrator()).to.be.false;
+    });
   });
 
   describe('Entitlement Validation', () => {

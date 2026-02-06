@@ -57,7 +57,7 @@ function RunScrapeCommand(context) {
   const parseBoolean = (value) => `${value}`.toLowerCase() === 'true';
 
   const scrapeSite = async (baseURL, allowCache, slackContext) => {
-    const { say } = slackContext;
+    const { say, channelId, threadTs } = slackContext;
     const site = await Site.findByBaseURL(baseURL);
     if (!isNonEmptyObject(site)) {
       await postSiteNotFoundMessage(say, baseURL);
@@ -78,6 +78,12 @@ function RunScrapeCommand(context) {
       processingType: 'default',
       urls,
       ...(allowCache ? {} : { maxScrapeAge: 0 }),
+      metaData: {
+        slackData: {
+          channel: channelId,
+          thread_ts: threadTs,
+        },
+      },
     });
   };
 
@@ -147,16 +153,27 @@ function RunScrapeCommand(context) {
         const csvData = await parseCSV(file, botToken);
 
         say(`:adobe-run: Triggering scrape run for ${csvData.length} sites.`);
-        await Promise.all(
+        const jobResults = await Promise.all(
           csvData.map(async (row) => {
             const [csvBaseURL] = row;
             try {
-              await scrapeSite(csvBaseURL, allowCache, slackContext);
+              const job = await scrapeSite(csvBaseURL, allowCache, slackContext);
+              return job ? { baseURL: csvBaseURL, jobId: job.id } : null;
             } catch (error) {
               say(`:warning: Failed scrape for \`${csvBaseURL}\`: ${error.message}`);
             }
+            return null;
           }),
         );
+        const successfulJobs = jobResults.filter(Boolean);
+        if (successfulJobs.length) {
+          const jobLines = successfulJobs
+            .map(({ baseURL: jobBaseURL, jobId }) => `${jobBaseURL} -> ${jobId}`)
+            .join('\n');
+          await say(`:white_check_mark: Triggered ${successfulJobs.length} scrape jobs:\n\`\`\`\n${jobLines}\n\`\`\``);
+        } else {
+          await say(':warning: No scrape jobs were triggered.');
+        }
       } else if (isValidBaseURL) {
         say(`:adobe-run: Triggering scrape run for site \`${baseURL}\` with allowCache: ${allowCache}`);
         const job = await scrapeSite(baseURL, allowCache, slackContext);

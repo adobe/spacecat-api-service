@@ -38,25 +38,7 @@ export const BASIC_AUDITS = [
 
 export const ASO_DEMO_ORG = '66331367-70e6-4a49-8445-4f6d9c265af9';
 
-export const ASO_CRITICAL_SITES = [
-  'bed9197a-bd50-442d-93d4-ce7b39f6b8ad',
-  'd9bd3ce3-8266-40bd-9ba7-00ee1ec0e5a3',
-  '99f358de-fed1-47ea-a3a8-eb64c3ed9b0e',
-  '5a3449d9-94ed-4c0f-9249-c1f592c13a28',
-  '8836462f-3819-4f31-afc0-aa57fd326f67',
-  'c61a0556-8c4a-42a1-be43-7d9297138cbb',
-  '014af735-2399-460a-8d0a-2d99a62c8d31',
-  '536d9335-0389-41f1-9f1e-19f533f1b7a5',
-  'd9c82ee0-1c3f-492f-b9c6-2b66c2314da6',
-  '635c5051-1491-49ca-ae22-02ea2c3929db',
-  '3c4e9f11-59e9-4b1a-ab84-42442eef4624',
-  '32424aff-0084-42a5-9b5d-1bd46e75224c',
-  '3d020e61-ce89-48ad-b539-ae052bac3aee',
-  'd30cce24-5222-49aa-ba1f-97304f5400b1',
-  '256c9e72-692d-4234-bf0e-c5d144fb6616',
-  '430343e7-ddda-48f2-a5ee-74f05446c8e0',
-  'ae3db999-a749-4fbd-a21b-2318094808b5',
-];
+export const ASO_CRITICAL_SITES = [];
 
 /**
  * Generates the data folder name from a domain.
