@@ -79,6 +79,7 @@ import SandboxAuditController from './controllers/sandbox-audit.js';
 import UrlStoreController from './controllers/url-store.js';
 import PTA2Controller from './controllers/paid/pta2.js';
 import TrafficToolsController from './controllers/paid/traffic-tools.js';
+import WeeklyDigestController from './controllers/weekly-digest.js';
 import BotBlockerController from './controllers/bot-blocker.js';
 import SentimentController from './controllers/sentiment.js';
 
@@ -149,6 +150,7 @@ async function run(request, context) {
     const urlStoreController = UrlStoreController(context, log);
     const pta2Controller = PTA2Controller(context, log, context.env);
     const trafficToolsController = TrafficToolsController(context, log, context.env);
+    const weeklyDigestController = WeeklyDigestController(context, log);
     const botBlockerController = BotBlockerController(context, log);
     const sentimentController = SentimentController(context, log);
 
@@ -189,6 +191,7 @@ async function run(request, context) {
       urlStoreController,
       pta2Controller,
       trafficToolsController,
+      weeklyDigestController,
       botBlockerController,
       sentimentController,
     );
