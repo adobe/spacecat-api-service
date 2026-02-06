@@ -105,6 +105,12 @@ Fulfillment worker requires the following env variable:
 FULFILLMENT_EVENTS_QUEUE_URL=url of the queue to send fulfillment events to
 ```
 
+Weekly digest controller requires the following env variable:
+
+```plaintext
+DIGEST_JOBS_QUEUE_URL=url of the queue to send weekly digest jobs to
+```
+
 Organizations controller requires the following env variable:
 
 ```plaintext
