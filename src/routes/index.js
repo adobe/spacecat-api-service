@@ -327,7 +327,6 @@ export default function getRouteHandlers(
 
     // Weekly Digest
     'POST /tools/weekly-digest/trigger': weeklyDigestController.triggerWeeklyDigests,
-    'POST /tools/weekly-digest/process': weeklyDigestController.processOrganizationDigest,
 
     // Fixes
     'GET /sites/:siteId/opportunities/:opportunityId/fixes': (c) => fixesController.getAllForOpportunity(c),
