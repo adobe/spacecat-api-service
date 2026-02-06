@@ -1,3 +1,10 @@
+# [1.312.0](https://github.com/adobe/spacecat-api-service/compare/v1.311.5...v1.312.0) (2026-02-06)
+
+
+### Features
+
+* enable paid ahref fetch on onboard ([#1785](https://github.com/adobe/spacecat-api-service/issues/1785)) ([5311888](https://github.com/adobe/spacecat-api-service/commit/531188801de5f2abca97065568b86e1322fafa46))
+
 ## [1.311.5](https://github.com/adobe/spacecat-api-service/compare/v1.311.4...v1.311.5) (2026-02-06)
 
 
