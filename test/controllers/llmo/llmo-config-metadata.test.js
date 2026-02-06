@@ -672,5 +672,40 @@ describe('LLMO Config Metadata Utils', () => {
       expect(newConfig.categories['cat-1'].updatedBy).to.equal(userId);
       expect(stats.categories.modified).to.equal(1);
     });
+
+    it('should handle prompts when a prompt is removed', () => {
+      const oldConfig = {
+        topics: {
+          [topicId]: {
+            name: 'Topic',
+            prompts: [
+              {
+                prompt: 'Prompt 1', origin: 'human', updatedBy: 'old-user', updatedAt: '2023-01-01',
+              },
+              {
+                prompt: 'Prompt 2', origin: 'human', updatedBy: 'old-user', updatedAt: '2023-01-01',
+              },
+            ],
+          },
+        },
+      };
+      const inputConfig = {
+        topics: {
+          [topicId]: {
+            name: 'Topic',
+            prompts: [
+              { prompt: 'Prompt 1', origin: 'human' },
+            ],
+          },
+        },
+      };
+
+      const { newConfig, stats } = updateModifiedByDetails(inputConfig, oldConfig, userId);
+
+      expect(newConfig.topics[topicId].prompts).to.have.length(1);
+      expect(newConfig.topics[topicId].prompts[0].updatedBy).to.equal('old-user');
+      expect(stats.prompts.total).to.equal(1);
+      expect(stats.prompts.modified).to.equal(0);
+    });
   });
 });
