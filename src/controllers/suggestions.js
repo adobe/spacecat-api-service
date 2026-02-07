@@ -995,6 +995,7 @@ function SuggestionsController(ctx, sqs, env) {
    * @returns {Promise<Response>} Preview response with HTML comparison
    */
   const previewSuggestions = async (context) => {
+    const previewStartTime = Date.now();
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
     const { authInfo: { profile } } = context.attributes;
@@ -1054,13 +1055,6 @@ function SuggestionsController(ctx, sqs, env) {
           uuid: suggestionId,
           index,
           message: 'Domain-wide aggregate suggestions cannot be previewed individually',
-          statusCode: 400,
-        });
-      } else if (suggestion.getStatus() !== SuggestionModel.STATUSES.NEW) {
-        failedSuggestions.push({
-          uuid: suggestionId,
-          index,
-          message: 'Suggestion is not in NEW status',
           statusCode: 400,
         });
       } else {
@@ -1128,7 +1122,15 @@ function SuggestionsController(ctx, sqs, env) {
           optimizedHtml = htmlResult.optimizedHtml;
         }
 
-        context.log.info(`[edge-preview] Successfully previewed ${succeededSuggestions.length} suggestions by ${profile?.email || 'tokowaka-preview'}`);
+        const previewTimeTaken = Date.now() - previewStartTime;
+        context.log.info(`Successfully previewed ${succeededSuggestions.length} suggestions`
+          + ` by ${profile?.email || 'tokowaka-preview'}, took ${previewTimeTaken}ms`);
+        /* c8 ignore next 5 */
+        if (previewTimeTaken > 13000) {
+          context.log.warn(`Edge-Preview took ${previewTimeTaken} ms for ${site.getBaseURL()} , siteId: ${site.getId()}`
+          + ` opportunityId: ${opportunity.getId()} , opportunityType: ${opportunity.getType()}`
+          + ` and ${succeededSuggestions.length} suggestions`);
+        }
       } catch (error) {
         context.log.error(`Error generating preview: ${error.message}`, error);
         // If preview fails, mark all valid suggestions as failed

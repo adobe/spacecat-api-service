@@ -1,3 +1,24 @@
+# [1.312.0](https://github.com/adobe/spacecat-api-service/compare/v1.311.5...v1.312.0) (2026-02-06)
+
+
+### Features
+
+* enable paid ahref fetch on onboard ([#1785](https://github.com/adobe/spacecat-api-service/issues/1785)) ([5311888](https://github.com/adobe/spacecat-api-service/commit/531188801de5f2abca97065568b86e1322fafa46))
+
+## [1.311.5](https://github.com/adobe/spacecat-api-service/compare/v1.311.4...v1.311.5) (2026-02-06)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tier-client to v1.3.11 ([#1783](https://github.com/adobe/spacecat-api-service/issues/1783)) ([dc50603](https://github.com/adobe/spacecat-api-service/commit/dc506036a9c412df0a16e8cd1f56e3fd37e4316f))
+
+## [1.311.4](https://github.com/adobe/spacecat-api-service/compare/v1.311.3...v1.311.4) (2026-02-06)
+
+
+### Bug Fixes
+
+* remove NEW status restriction from edge-preview ([#1778](https://github.com/adobe/spacecat-api-service/issues/1778)) ([dd82772](https://github.com/adobe/spacecat-api-service/commit/dd82772032ae262579d20336fece456340f30d1c))
+
 ## [1.311.3](https://github.com/adobe/spacecat-api-service/compare/v1.311.2...v1.311.3) (2026-02-05)
 
 

@@ -6187,7 +6187,7 @@ describe('Suggestions Controller', () => {
       expect(body.suggestions[0].message).to.include('Preview generation failed');
     });
 
-    it('should handle missing and invalid status suggestions', async function () {
+    it('should handle missing suggestions and allow any status', async function () {
       tokowakaSuggestions[1].getStatus = () => 'IN_PROGRESS';
 
       const response = await suggestionsController.previewSuggestions({
@@ -6205,16 +6205,16 @@ describe('Suggestions Controller', () => {
       const body = await response.json();
 
       expect(body.metadata.total).to.equal(3);
-      expect(body.metadata.success).to.equal(1);
-      expect(body.metadata.failed).to.equal(2);
+      expect(body.metadata.success).to.equal(2);
+      expect(body.metadata.failed).to.equal(1);
 
       const notFoundSuggestion = body.suggestions.find((s) => s.uuid === 'not-found-id');
       expect(notFoundSuggestion.statusCode).to.equal(404);
       expect(notFoundSuggestion.message).to.include('not found');
 
-      const invalidStatusSuggestion = body.suggestions.find((s) => s.uuid === SUGGESTION_IDS[1]);
-      expect(invalidStatusSuggestion.statusCode).to.equal(400);
-      expect(invalidStatusSuggestion.message).to.include('not in NEW status');
+      // Suggestion with IN_PROGRESS status should now succeed
+      const inProgressSuggestion = body.suggestions.find((s) => s.uuid === SUGGESTION_IDS[1]);
+      expect(inProgressSuggestion.statusCode).to.equal(200);
     });
 
     it('should validate preview config structure uses preview path', async function () {
