@@ -757,4 +757,163 @@ describe('Hooks Controller', () => {
       expect(context.log.error).to.have.been.calledWith('Unexpected error while processing the CDN site candidate');
     });
   });
+
+  describe('DRS Prompt Generation Webhook', () => {
+    const DRS_HOOK_SECRET = 'hook-secret-for-drs';
+    const SITE_ID = '123e4567-e89b-12d3-a456-426614174000';
+    const JOB_ID = 'job-abc123';
+
+    beforeEach('set up', () => {
+      context.env.INCOMING_WEBHOOK_SECRET_DRS = DRS_HOOK_SECRET;
+      context.env.AUDIT_JOBS_QUEUE_URL = 'https://sqs.us-east-1.amazonaws.com/123456789/audit-jobs';
+      context.sqs = {
+        sendMessage: sinon.stub().resolves(),
+      };
+      context.params = { hookSecret: DRS_HOOK_SECRET };
+    });
+
+    it('returns 404 if DRS hook secret env was not set up', async () => {
+      delete context.env.INCOMING_WEBHOOK_SECRET_DRS;
+
+      const resp = await hooksController.processDrsPromptGenerationHook(context);
+      expect(resp.status).to.equal(404);
+      expect(context.sqs.sendMessage.notCalled).to.be.true;
+    });
+
+    it('returns 404 if DRS secret does not match', async () => {
+      context.params = { hookSecret: 'wrong-secret' };
+
+      const resp = await hooksController.processDrsPromptGenerationHook(context);
+      expect(resp.status).to.equal(404);
+      expect(context.sqs.sendMessage.notCalled).to.be.true;
+    });
+
+    it('returns 400 if event_type is not JOB_COMPLETED', async () => {
+      context.data = {
+        event_type: 'JOB_FAILED',
+        job_id: JOB_ID,
+        result_location: 's3://bucket/path',
+        metadata: { site_id: SITE_ID },
+      };
+
+      const resp = await hooksController.processDrsPromptGenerationHook(context);
+      expect(resp.status).to.equal(400);
+      const body = await resp.json();
+      expect(body.message).to.equal('Only JOB_COMPLETED events are supported');
+      expect(context.sqs.sendMessage.notCalled).to.be.true;
+    });
+
+    it('returns 400 if job_id is missing', async () => {
+      context.data = {
+        event_type: 'JOB_COMPLETED',
+        result_location: 's3://bucket/path',
+        metadata: { site_id: SITE_ID },
+      };
+
+      const resp = await hooksController.processDrsPromptGenerationHook(context);
+      expect(resp.status).to.equal(400);
+      const body = await resp.json();
+      expect(body.message).to.equal('job_id is required');
+      expect(context.sqs.sendMessage.notCalled).to.be.true;
+    });
+
+    it('returns 400 if result_location is missing', async () => {
+      context.data = {
+        event_type: 'JOB_COMPLETED',
+        job_id: JOB_ID,
+        metadata: { site_id: SITE_ID },
+      };
+
+      const resp = await hooksController.processDrsPromptGenerationHook(context);
+      expect(resp.status).to.equal(400);
+      const body = await resp.json();
+      expect(body.message).to.equal('result_location is required');
+      expect(context.sqs.sendMessage.notCalled).to.be.true;
+    });
+
+    it('returns 400 if metadata.site_id is missing', async () => {
+      context.data = {
+        event_type: 'JOB_COMPLETED',
+        job_id: JOB_ID,
+        result_location: 's3://bucket/path',
+        metadata: {},
+      };
+
+      const resp = await hooksController.processDrsPromptGenerationHook(context);
+      expect(resp.status).to.equal(400);
+      const body = await resp.json();
+      expect(body.message).to.equal('metadata.site_id is required');
+      expect(context.sqs.sendMessage.notCalled).to.be.true;
+    });
+
+    it('returns 400 if metadata is missing entirely', async () => {
+      context.data = {
+        event_type: 'JOB_COMPLETED',
+        job_id: JOB_ID,
+        result_location: 's3://bucket/path',
+      };
+
+      const resp = await hooksController.processDrsPromptGenerationHook(context);
+      expect(resp.status).to.equal(400);
+      const body = await resp.json();
+      expect(body.message).to.equal('metadata.site_id is required');
+      expect(context.sqs.sendMessage.notCalled).to.be.true;
+    });
+
+    it('successfully processes valid DRS webhook and queues message', async () => {
+      const resultLocation = 's3://drs-results/path/to/results.json';
+      const providerId = 'prompt_generation_base_url';
+      const metadata = {
+        site_id: SITE_ID,
+        imsOrgId: 'org@AdobeOrg',
+        brand: 'TestBrand',
+        base_url: 'https://example.com',
+        region: 'US',
+      };
+
+      context.data = {
+        event_type: 'JOB_COMPLETED',
+        job_id: JOB_ID,
+        provider_id: providerId,
+        result_location: resultLocation,
+        completed_at: 1738756200,
+        timestamp: '2026-02-05T12:30:00Z',
+        metadata,
+      };
+
+      const resp = await hooksController.processDrsPromptGenerationHook(context);
+
+      expect(resp.status).to.equal(202);
+      const body = await resp.json();
+      expect(body.message).to.equal('Webhook accepted for processing');
+      expect(body.jobId).to.equal(JOB_ID);
+
+      expect(context.sqs.sendMessage.calledOnce).to.be.true;
+      const [queueUrl, message] = context.sqs.sendMessage.firstCall.args;
+      expect(queueUrl).to.equal(context.env.AUDIT_JOBS_QUEUE_URL);
+      expect(message.type).to.equal('llmo-prompt-import');
+      expect(message.siteId).to.equal(SITE_ID);
+      expect(message.auditContext.drsJobId).to.equal(JOB_ID);
+      expect(message.auditContext.resultLocation).to.equal(resultLocation);
+      expect(message.auditContext.providerId).to.equal(providerId);
+      expect(message.auditContext.metadata).to.deep.equal(metadata);
+
+      expect(context.log.info).to.have.been.calledWith(`DRS webhook received: job=${JOB_ID}, site=${SITE_ID}, provider=${providerId}`);
+      expect(context.log.info).to.have.been.calledWith(`DRS webhook queued for processing: job=${JOB_ID}`);
+    });
+
+    it('successfully processes webhook with minimal metadata', async () => {
+      context.data = {
+        event_type: 'JOB_COMPLETED',
+        job_id: JOB_ID,
+        result_location: 's3://bucket/path',
+        metadata: { site_id: SITE_ID },
+      };
+
+      const resp = await hooksController.processDrsPromptGenerationHook(context);
+
+      expect(resp.status).to.equal(202);
+      expect(context.sqs.sendMessage.calledOnce).to.be.true;
+    });
+  });
 });
