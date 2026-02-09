@@ -800,6 +800,14 @@ describe('Hooks Controller', () => {
       expect(context.sqs.sendMessage.notCalled).to.be.true;
     });
 
+    it('returns 404 if headers object is undefined', async () => {
+      delete context.pathInfo.headers;
+
+      const resp = await hooksController.processDrsPromptGenerationHook(context);
+      expect(resp.status).to.equal(404);
+      expect(context.sqs.sendMessage.notCalled).to.be.true;
+    });
+
     it('returns 400 if event_type is not JOB_COMPLETED', async () => {
       context.data = {
         event_type: 'JOB_FAILED',
