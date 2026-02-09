@@ -58,6 +58,40 @@ site-detection-rum:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+drs-prompt-generation:
+  parameters:
+    - $ref: './parameters.yaml#/hookSecret'
+  post:
+    tags:
+      - hooks
+    summary: Process DRS prompt generation job completion webhooks
+    description: |
+      This endpoint receives webhook callbacks from the Data Retrieval Service (DRS) when
+      prompt generation jobs complete. Upon receiving the webhook, it validates the payload
+      and queues the job for async processing, which includes downloading the generated prompts,
+      converting them to parquet format, uploading to SpaceCat S3, and updating the LLMO config.
+    operationId: drsPromptGeneration
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/DrsJobCompletedWebhook'
+    responses:
+      '202':
+        description: Webhook accepted for processing
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/DrsWebhookAcceptedResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        description: Invalid webhook secret (endpoint not found to hide existence)
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
 site-integration-analytics:
   parameters:
     - $ref: './parameters.yaml#/hookSecret'
