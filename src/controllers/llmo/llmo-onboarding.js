@@ -15,8 +15,7 @@ import { createFrom } from '@adobe/spacecat-helix-content-sdk';
 import { Octokit } from '@octokit/rest';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import TierClient from '@adobe/spacecat-shared-tier-client';
-import { composeBaseURL, tracingFetch as fetch, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
-import AhrefsAPIClient from '@adobe/spacecat-shared-ahrefs-client';
+import { composeBaseURL, tracingFetch as fetch, resolveCanonicalUrl } from '@adobe/spacecat-shared-utils';
 import { parse as parseDomain } from 'tldts';
 import { postSlackMessage } from '../../utils/slack/base.js';
 
@@ -707,29 +706,23 @@ function toggleWWW(url) {
   }
 }
 
-/**
- * Tests a URL against the Ahrefs top pages endpoint to see if it returns data.
- * @param {string} url - The URL to test
- * @param {object} ahrefsClient - The Ahrefs API client
- * @param {object} log - Logger instance
- * @returns {Promise<boolean>} - True if the URL returns top pages data, false otherwise
- */
-async function testAhrefsTopPages(url, ahrefsClient, log) {
-  try {
-    const { result } = await ahrefsClient.getTopPages(url, 1);
-    const hasData = isNonEmptyArray(result?.pages);
-    log.debug(`Ahrefs top pages test for ${url}: ${hasData ? 'SUCCESS' : 'NO DATA'}`);
-    return hasData;
-  } catch (error) {
-    log.debug(`Ahrefs top pages test for ${url}: FAILED - ${error.message}`);
-    return false;
+function deriveWwwOverrideBaseURL(baseURL, alternateURL, resolvedUrl) {
+  const baseUrlObj = new URL(baseURL);
+  const alternateUrlObj = new URL(alternateURL);
+  const resolvedUrlObj = new URL(resolvedUrl);
+
+  // Only set override when canonical hostname indicates the www-toggled variant.
+  if (resolvedUrlObj.hostname !== alternateUrlObj.hostname) {
+    return null;
   }
+
+  const basePathname = baseUrlObj.pathname;
+  return basePathname !== '/' ? `${alternateUrlObj.origin}${basePathname}` : alternateUrlObj.origin;
 }
 
 /**
- * Determines if overrideBaseURL should be set based on Ahrefs top pages data.
- * Tests both the base URL and its www-variant. If only the alternate variation succeeds,
- * returns that variation as the overrideBaseURL.
+ * Determines if overrideBaseURL should be set based on canonical URL resolution.
+ * Resolves the base URL first and falls back to the www-toggled variant when needed.
  *
  * @param {string} baseURL - The site's base URL
  * @param {object} context - The request context
@@ -740,7 +733,6 @@ export async function determineOverrideBaseURL(baseURL, context) {
 
   try {
     log.info(`Determining overrideBaseURL for ${baseURL}`);
-    const ahrefsClient = AhrefsAPIClient.createFrom(context);
     const alternateURL = toggleWWW(baseURL);
 
     // If toggleWWW returns the same URL, it means the URL has a subdomain
@@ -750,24 +742,34 @@ export async function determineOverrideBaseURL(baseURL, context) {
       return null;
     }
 
-    log.debug(`Testing base URL: ${baseURL} and alternate: ${alternateURL}`);
+    const baseResolvedUrl = await resolveCanonicalUrl(baseURL);
+    const baseOverride = baseResolvedUrl
+      ? deriveWwwOverrideBaseURL(baseURL, alternateURL, baseResolvedUrl)
+      : null;
 
-    const [baseURLSuccess, alternateURLSuccess] = await Promise.all([
-      testAhrefsTopPages(baseURL, ahrefsClient, log),
-      testAhrefsTopPages(alternateURL, ahrefsClient, log),
-    ]);
-
-    if (!baseURLSuccess && alternateURLSuccess) {
-      log.info(`Setting overrideBaseURL to ${alternateURL} (base URL failed, alternate succeeded)`);
-      return alternateURL;
+    if (baseOverride) {
+      log.info(`Setting overrideBaseURL to ${baseOverride} (base URL canonical resolved to alternate hostname)`);
+      return baseOverride;
     }
 
-    if (baseURLSuccess && alternateURLSuccess) {
-      log.debug('Both URLs succeeded, no overrideBaseURL needed');
-    } else if (baseURLSuccess && !alternateURLSuccess) {
-      log.debug('Base URL succeeded, no overrideBaseURL needed');
+    if (baseResolvedUrl) {
+      log.info('Base URL resolved, no overrideBaseURL needed');
+      return null;
+    }
+    const alternateResolvedUrl = await resolveCanonicalUrl(alternateURL);
+    const alternateOverride = alternateResolvedUrl
+      ? deriveWwwOverrideBaseURL(baseURL, alternateURL, alternateResolvedUrl)
+      : null;
+
+    if (alternateOverride) {
+      log.info(`Setting overrideBaseURL to ${alternateOverride} (base URL unresolved, alternate URL resolved)`);
+      return alternateOverride;
+    }
+
+    if (alternateResolvedUrl) {
+      log.info('Alternate URL resolved but no hostname toggle detected, no overrideBaseURL needed');
     } else {
-      log.warn('Both URLs failed Ahrefs test, no overrideBaseURL set');
+      log.warn('Both URLs could not be resolved canonically, no overrideBaseURL set');
     }
 
     return null;

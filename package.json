@@ -74,7 +74,6 @@
     "@adobe/helix-status": "10.1.5",
     "@adobe/helix-universal-logger": "3.0.28",
     "@adobe/spacecat-helix-content-sdk": "1.4.33",
-    "@adobe/spacecat-shared-ahrefs-client": "1.10.5",
     "@adobe/spacecat-shared-athena-client": "1.9.2",
     "@adobe/spacecat-shared-brand-client": "1.1.35",
     "@adobe/spacecat-shared-data-access": "2.104.0",
