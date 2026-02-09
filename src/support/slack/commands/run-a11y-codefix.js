@@ -33,6 +33,34 @@ const SUPPORTED_OPPORTUNITY_TYPES = ['a11y-assistive', 'a11y-color-contrast'];
 // Valid suggestion statuses for counting
 const VALID_SUGGESTION_STATUSES = ['NEW', 'APPROVED', 'IN_PROGRESS'];
 
+// Slack link format: <URL|display-text> or <URL>
+const SLACK_LINK_REGEX = /^<([^|>]+)(?:\|([^>]+))?>$/;
+
+/**
+ * Extracts the original content from Slack's link format.
+ * Slack converts URLs like "https://example.com|text" to "<https://example.com|text>"
+ * This function reconstructs the original "URL|text" format.
+ * @param {string} input - The input that may contain Slack link formatting
+ * @returns {string|null} The original content or null if input is empty
+ */
+function extractFromSlackLinkFormat(input) {
+  if (!hasText(input)) {
+    return null;
+  }
+
+  const trimmed = input.trim();
+  const match = SLACK_LINK_REGEX.exec(trimmed);
+
+  if (match) {
+    const url = match[1];
+    const displayText = match[2];
+    // Reconstruct original format: URL|text
+    return displayText ? `${url}|${displayText}` : url;
+  }
+
+  return trimmed;
+}
+
 /**
  * Normalizes the opportunity type input to the full type name.
  * @param {string} input - The opportunity type input (e.g., 'assistive', 'color-contrast')
@@ -150,7 +178,7 @@ function RunA11yCodefixCommand(context) {
       }
 
       const opportunityType = normalizeOpportunityType(opportunityTypeInput);
-      const aggregationKey = hasText(aggregationKeyInput) ? aggregationKeyInput.trim() : null;
+      const aggregationKey = extractFromSlackLinkFormat(aggregationKeyInput);
 
       if (!SUPPORTED_OPPORTUNITY_TYPES.includes(opportunityType)) {
         await say(`:x: Invalid opportunity type: \`${opportunityType}\`. Supported types: ${SUPPORTED_OPPORTUNITY_TYPES.join(', ')}`);
