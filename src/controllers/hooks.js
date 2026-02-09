@@ -33,7 +33,7 @@ import { isHelixSite } from '../support/utils.js';
 import { getHlxConfigMessagePart } from '../utils/slack/base.js';
 
 const CDN_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_CDN';
-const DRS_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_DRS';
+const DRS_CALLBACK_API_KEY_NAME = 'DRS_CALLBACK_API_KEY';
 
 export const BUTTON_LABELS = {
   APPROVE_CUSTOMER: 'As Customer',
@@ -55,6 +55,30 @@ function hookAuth(fn, opts) {
     return hasText(expectedSecret) && expectedSecret === secretFromPath
       ? fn(context)
       : notFound();
+  };
+}
+
+function apiKeyAuth(fn, opts) {
+  return (context) => {
+    const expectedApiKey = context.env[opts.apiKeyName];
+    const headers = context.pathInfo?.headers || {};
+
+    // Case-insensitive header lookup for x-api-key
+    const providedApiKey = Object.keys(headers)
+      .find((key) => key.toLowerCase() === 'x-api-key');
+    const apiKeyValue = providedApiKey ? headers[providedApiKey] : null;
+
+    if (!hasText(expectedApiKey)) {
+      context.log?.error(`${opts.apiKeyName} environment variable is not configured`);
+      return internalServerError('Webhook authentication not configured');
+    }
+
+    if (!hasText(apiKeyValue) || apiKeyValue !== expectedApiKey) {
+      context.log?.warn('DRS webhook received with invalid or missing API key');
+      return notFound(); // Return 404 to hide endpoint existence
+    }
+
+    return fn(context);
   };
 }
 
@@ -498,7 +522,7 @@ function HooksController(lambdaContext) {
       .with(errorHandler, { type: 'CDN' })
       .with(hookAuth, { secretName: CDN_HOOK_SECRET_NAME }),
     processDrsPromptGenerationHook: wrap(processDrsPromptGenerationHook)
-      .with(hookAuth, { secretName: DRS_HOOK_SECRET_NAME }),
+      .with(apiKeyAuth, { apiKeyName: DRS_CALLBACK_API_KEY_NAME }),
   };
 }
 

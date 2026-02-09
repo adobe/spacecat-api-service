@@ -759,29 +759,41 @@ describe('Hooks Controller', () => {
   });
 
   describe('DRS Prompt Generation Webhook', () => {
-    const DRS_HOOK_SECRET = 'hook-secret-for-drs';
+    const DRS_API_KEY = 'test-drs-callback-api-key';
     const SITE_ID = '123e4567-e89b-12d3-a456-426614174000';
     const JOB_ID = 'job-abc123';
 
     beforeEach('set up', () => {
-      context.env.INCOMING_WEBHOOK_SECRET_DRS = DRS_HOOK_SECRET;
+      context.env.DRS_CALLBACK_API_KEY = DRS_API_KEY;
       context.env.AUDIT_JOBS_QUEUE_URL = 'https://sqs.us-east-1.amazonaws.com/123456789/audit-jobs';
       context.sqs = {
         sendMessage: sinon.stub().resolves(),
       };
-      context.params = { hookSecret: DRS_HOOK_SECRET };
+      context.pathInfo = {
+        headers: {
+          'x-api-key': DRS_API_KEY,
+        },
+      };
     });
 
-    it('returns 404 if DRS hook secret env was not set up', async () => {
-      delete context.env.INCOMING_WEBHOOK_SECRET_DRS;
+    it('returns 500 if DRS_CALLBACK_API_KEY env was not set up', async () => {
+      delete context.env.DRS_CALLBACK_API_KEY;
+
+      const resp = await hooksController.processDrsPromptGenerationHook(context);
+      expect(resp.status).to.equal(500);
+      expect(context.sqs.sendMessage.notCalled).to.be.true;
+    });
+
+    it('returns 404 if x-api-key header does not match', async () => {
+      context.pathInfo.headers['x-api-key'] = 'wrong-api-key';
 
       const resp = await hooksController.processDrsPromptGenerationHook(context);
       expect(resp.status).to.equal(404);
       expect(context.sqs.sendMessage.notCalled).to.be.true;
     });
 
-    it('returns 404 if DRS secret does not match', async () => {
-      context.params = { hookSecret: 'wrong-secret' };
+    it('returns 404 if x-api-key header is missing', async () => {
+      delete context.pathInfo.headers['x-api-key'];
 
       const resp = await hooksController.processDrsPromptGenerationHook(context);
       expect(resp.status).to.equal(404);
