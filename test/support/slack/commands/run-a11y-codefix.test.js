@@ -618,5 +618,55 @@ describe('RunA11yCodefixCommand', () => {
         sinon.match(/Only suggestions matching aggregation key/),
       );
     });
+
+    it('extracts aggregation key from Slack link format with URL|text', async () => {
+      const slackFormattedKey = '<https://www.example.com/page.html|link-name>';
+      buildAggregationKeyFromSuggestionStub.returns('https://www.example.com/page.html|link-name');
+      const command = RunA11yCodefixCommand(context);
+
+      await command.handleExecution(['example.com', 'assistive', slackFormattedKey], slackContext);
+
+      expect(triggerA11yCodefixStub).to.have.been.calledWith(
+        mockSite,
+        'opp-123',
+        'a11y-assistive',
+        'https://www.example.com/page.html|link-name',
+        slackContext,
+        context,
+      );
+    });
+
+    it('extracts aggregation key from Slack link format with URL only', async () => {
+      const slackFormattedUrl = '<https://www.example.com/page.html>';
+      buildAggregationKeyFromSuggestionStub.returns('https://www.example.com/page.html');
+      const command = RunA11yCodefixCommand(context);
+
+      await command.handleExecution(['example.com', 'assistive', slackFormattedUrl], slackContext);
+
+      expect(triggerA11yCodefixStub).to.have.been.calledWith(
+        mockSite,
+        'opp-123',
+        'a11y-assistive',
+        'https://www.example.com/page.html',
+        slackContext,
+        context,
+      );
+    });
+
+    it('preserves plain aggregation key without Slack formatting', async () => {
+      buildAggregationKeyFromSuggestionStub.returns('plain-aggregation-key');
+      const command = RunA11yCodefixCommand(context);
+
+      await command.handleExecution(['example.com', 'assistive', 'plain-aggregation-key'], slackContext);
+
+      expect(triggerA11yCodefixStub).to.have.been.calledWith(
+        mockSite,
+        'opp-123',
+        'a11y-assistive',
+        'plain-aggregation-key',
+        slackContext,
+        context,
+      );
+    });
   });
 });
