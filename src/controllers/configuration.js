@@ -252,6 +252,92 @@ function ConfigurationController(ctx) {
   };
 
   /**
+   * Replaces enabled/disabled lists for a handler.
+   * This is a temporary API that replaces (not merges) the provided arrays.
+   *
+   * TEMPORARY API: This endpoint was created to clean up enabled and disabled lists
+   * by removing unnecessary site IDs. Unlike the existing updateHandler endpoint
+   * which merges arrays, this endpoint completely replaces the specified arrays.
+   * This API will be removed once the cleanup task is completed.
+   *
+   * @param {UniversalContext} context - Context of the request.
+   * @return {Promise<Response>} Updated configuration response.
+   */
+  /* c8 ignore start - temporary API, no unit tests needed */
+  const replaceHandlerEnabledDisabled = async (context) => {
+    if (!accessControlUtil.hasAdminAccess()) {
+      return forbidden('Only admins can update handler configuration');
+    }
+
+    const { handlerType } = context.params;
+    const { data } = context;
+
+    if (!hasText(handlerType)) {
+      return badRequest('Handler type is required');
+    }
+
+    if (!isNonEmptyObject(data)) {
+      return badRequest('Request body is required and cannot be empty');
+    }
+
+    // Validate that at least one of enabled or disabled is provided
+    const hasEnabled = data.enabled !== undefined;
+    const hasDisabled = data.disabled !== undefined;
+
+    if (!hasEnabled && !hasDisabled) {
+      return badRequest('At least one of enabled or disabled must be provided');
+    }
+
+    // Validate that at least one array is provided within enabled/disabled
+    // (empty arrays are allowed)
+    if (hasEnabled) {
+      const hasEnabledSites = data.enabled.sites !== undefined;
+      const hasEnabledOrgs = data.enabled.orgs !== undefined;
+      if (!hasEnabledSites && !hasEnabledOrgs) {
+        return badRequest('At least one of enabled.sites or enabled.orgs must be provided');
+      }
+      // Validate that if provided, they must be arrays
+      if (hasEnabledSites && !Array.isArray(data.enabled.sites)) {
+        return badRequest('enabled.sites must be an array');
+      }
+      if (hasEnabledOrgs && !Array.isArray(data.enabled.orgs)) {
+        return badRequest('enabled.orgs must be an array');
+      }
+    }
+
+    if (hasDisabled) {
+      const hasDisabledSites = data.disabled.sites !== undefined;
+      const hasDisabledOrgs = data.disabled.orgs !== undefined;
+      if (!hasDisabledSites && !hasDisabledOrgs) {
+        return badRequest('At least one of disabled.sites or disabled.orgs must be provided');
+      }
+      // Validate that if provided, they must be arrays
+      if (hasDisabledSites && !Array.isArray(data.disabled.sites)) {
+        return badRequest('disabled.sites must be an array');
+      }
+      if (hasDisabledOrgs && !Array.isArray(data.disabled.orgs)) {
+        return badRequest('disabled.orgs must be an array');
+      }
+    }
+
+    try {
+      const configuration = await Configuration.findLatest();
+      if (!configuration) {
+        return notFound('Configuration not found');
+      }
+
+      configuration.replaceHandlerEnabledDisabled(handlerType, data);
+      setUpdatedBy(configuration, context);
+      await configuration.save();
+
+      return ok(ConfigurationDto.toJSON(configuration));
+    } catch (error) {
+      return badRequest(error.message);
+    }
+  };
+  /* c8 ignore stop */
+
+  /**
    * Updates the entire configuration or specific sections.
    * Allows updating handlers, jobs, and/or queues in a single request.
    * @param {UniversalContext} context - Context of the request.
@@ -362,6 +448,7 @@ function ConfigurationController(ctx) {
     updateQueues,
     updateJob,
     updateHandler,
+    replaceHandlerEnabledDisabled,
     updateConfiguration,
     restoreVersion,
   };

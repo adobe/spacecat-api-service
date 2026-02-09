@@ -115,6 +115,7 @@ describe('Configurations Controller', () => {
     'updateQueues',
     'updateJob',
     'updateHandler',
+    'replaceHandlerEnabledDisabled',
     'updateConfiguration',
     'restoreVersion',
   ];
