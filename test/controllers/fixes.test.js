@@ -23,7 +23,7 @@ import EntityRegistry from '@adobe/spacecat-shared-data-access/src/models/base/e
 import * as electrodb from 'electrodb';
 import * as crypto from 'crypto';
 
-import { FixEntity, Suggestion } from '@adobe/spacecat-shared-data-access';
+import { FixEntity, Suggestion, ValidationError } from '@adobe/spacecat-shared-data-access';
 import AccessControlUtil from '../../src/support/access-control-util.js';
 import { FixesController } from '../../src/controllers/fixes.js';
 import { FixDto } from '../../src/dto/fix.js';
@@ -1665,8 +1665,7 @@ describe('Fixes Controller', () => {
       const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
       requestContext.params.fixId = fixId;
 
-      const fix = await createFixWithStatus(fixId, 'PENDING');
-      sandbox.stub(fix, 'getSuggestions').resolves([]);
+      await createFixWithStatus(fixId, 'PENDING');
 
       const response = await fixesController.rollbackFailedFix(requestContext);
       expect(response).includes({ status: 400 });
@@ -1679,126 +1678,143 @@ describe('Fixes Controller', () => {
       const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
       requestContext.params.fixId = fixId;
 
-      const fix = await createFixWithStatus(fixId, 'FAILED');
-      sandbox.stub(fix, 'getSuggestions').resolves([]);
-
-      const response = await fixesController.rollbackFailedFix(requestContext);
-      expect(response).includes({ status: 400 });
-      expect(await response.json()).deep.equals({ message: 'No suggestions found for this fix' });
-    });
-
-    it('responds 400 if there are suggestions but none in ERROR status', async () => {
-      const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
-      requestContext.params.fixId = fixId;
-
-      const fix = await createFixWithStatus(fixId, 'FAILED');
-      const fixedSuggestion = await createSuggestionWithStatus('FIXED');
-      const newSuggestion = await createSuggestionWithStatus('NEW');
-
-      sandbox.stub(fix, 'getSuggestions').resolves([fixedSuggestion, newSuggestion]);
+      await createFixWithStatus(fixId, 'FAILED');
+      fixEntityCollection.rollbackFixWithSuggestionUpdates.rejects(
+        new ValidationError('No suggestions found for the fix entity'),
+      );
 
       const response = await fixesController.rollbackFailedFix(requestContext);
       expect(response).includes({ status: 400 });
       const result = await response.json();
-      expect(result.message).to.include('All suggestions must be in ERROR status to rollback');
-      expect(result.message).to.include('FIXED, NEW');
+      expect(result.message).to.include('No suggestions found for the fix entity');
     });
 
-    it('successfully rolls back a failed fix with ERROR suggestions', async () => {
+    it('successfully rolls back a failed fix with suggestions', async () => {
       const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
       requestContext.params.fixId = fixId;
 
-      const fix = await createFixWithStatus(fixId, 'FAILED');
+      await createFixWithStatus(fixId, 'FAILED');
       const suggestion1 = await createSuggestionWithStatus('ERROR');
       const suggestion2 = await createSuggestionWithStatus('ERROR');
 
-      sandbox.stub(fix, 'getSuggestions').resolves([suggestion1, suggestion2]);
+      // Mock the transaction result with raw data (as returned by rollbackFixWithSuggestionUpdates)
+      const mockFixData = {
+        fixEntityId: fixId,
+        status: 'ROLLED_BACK',
+        opportunityId,
+        type: 'CONTENT_UPDATE',
+        createdAt: '2025-05-19T01:23:45.678Z',
+      };
+      const mockSuggestionData1 = {
+        suggestionId: suggestion1.getId(),
+        status: 'SKIPPED',
+        rank: 10,
+        opportunityId,
+      };
+      const mockSuggestionData2 = {
+        suggestionId: suggestion2.getId(),
+        status: 'SKIPPED',
+        rank: 11,
+        opportunityId,
+      };
 
-      fixEntityCollection.rollbackFixWithSuggestionUpdates.callsFake(async () => {
-        // Simulate the database changes that would happen in the transaction
-        fix.setStatus('ROLLED_BACK');
-        suggestion1.setStatus('SKIPPED');
-        suggestion2.setStatus('SKIPPED');
-        return {
-          canceled: false,
-          data: [],
-        };
+      fixEntityCollection.rollbackFixWithSuggestionUpdates.resolves({
+        canceled: false,
+        fix: mockFixData,
+        suggestions: [mockSuggestionData1, mockSuggestionData2],
       });
-
-      // Stub findById to return the updated objects (called after transaction)
-      fixEntityCollection.findById.withArgs(fixId).resolves(fix);
-      suggestionCollection.findById.withArgs(suggestion1.getId()).resolves(suggestion1);
-      suggestionCollection.findById.withArgs(suggestion2.getId()).resolves(suggestion2);
 
       const response = await fixesController.rollbackFailedFix(requestContext);
       expect(response).includes({ status: 200 });
 
       const result = await response.json();
-      expect(result.message).to.include('All 2 suggestion(s) marked as SKIPPED');
+      expect(result.message).to.equal('Fix rolled back successfully. All 2 suggestion(s) marked as SKIPPED.');
 
       // Check the wrapped response structure
       expect(result.fix).to.exist;
       expect(result.fix.fix.status).to.equal('ROLLED_BACK');
+      expect(result.fix.fix.id).to.equal(fixId); // Normalized id field
       expect(result.fix.statusCode).to.equal(200);
       expect(result.fix.index).to.equal(0);
-      expect(result.fix.uuid).to.equal(fix.getId());
+      expect(result.fix.uuid).to.equal(fixId);
 
       expect(result.suggestions.updated).to.have.lengthOf(2);
       expect(result.suggestions.updated[0].suggestion.status).to.equal('SKIPPED');
+      // Normalized id field
+      expect(result.suggestions.updated[0].suggestion.id).to.equal(suggestion1.getId());
       expect(result.suggestions.updated[0].statusCode).to.equal(200);
+      expect(result.suggestions.updated[0].index).to.equal(0);
+      expect(result.suggestions.updated[0].uuid).to.equal(suggestion1.getId());
       expect(result.suggestions.updated[1].suggestion.status).to.equal('SKIPPED');
+      // Normalized id field
+      expect(result.suggestions.updated[1].suggestion.id).to.equal(suggestion2.getId());
       expect(result.suggestions.updated[1].statusCode).to.equal(200);
-
-      expect(fix.getStatus()).to.equal('ROLLED_BACK');
-      expect(suggestion1.getStatus()).to.equal('SKIPPED');
-      expect(suggestion2.getStatus()).to.equal('SKIPPED');
+      expect(result.suggestions.updated[1].index).to.equal(1);
+      expect(result.suggestions.updated[1].uuid).to.equal(suggestion2.getId());
     });
 
-    it('responds 400 if not all suggestions are in ERROR status', async () => {
+    it('successfully rolls back a failed fix when fixData uses id instead of fixEntityId', async () => {
       const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
       requestContext.params.fixId = fixId;
 
-      const fix = await createFixWithStatus(fixId, 'FAILED');
-      const errorSuggestion = await createSuggestionWithStatus('ERROR');
-      const fixedSuggestion = await createSuggestionWithStatus('FIXED');
-      const newSuggestion = await createSuggestionWithStatus('NEW');
+      await createFixWithStatus(fixId, 'FAILED');
+      const suggestion1 = await createSuggestionWithStatus('ERROR');
 
-      sandbox.stub(fix, 'getSuggestions').resolves([errorSuggestion, fixedSuggestion, newSuggestion]);
+      // Mock the transaction result with raw data using 'id' instead of 'fixEntityId'
+      const mockFixData = {
+        id: fixId, // Using 'id' instead of 'fixEntityId' to test fallback branch
+        status: 'ROLLED_BACK',
+        opportunityId,
+        type: 'CONTENT_UPDATE',
+        createdAt: '2025-05-19T01:23:45.678Z',
+      };
+      const mockSuggestionData1 = {
+        suggestionId: suggestion1.getId(),
+        status: 'SKIPPED',
+        rank: 10,
+        opportunityId,
+      };
+
+      fixEntityCollection.rollbackFixWithSuggestionUpdates.resolves({
+        canceled: false,
+        fix: mockFixData,
+        suggestions: [mockSuggestionData1],
+      });
 
       const response = await fixesController.rollbackFailedFix(requestContext);
-      expect(response).includes({ status: 400 });
+      expect(response).includes({ status: 200 });
 
       const result = await response.json();
-      expect(result.message).to.include('All suggestions must be in ERROR status to rollback');
-      expect(result.message).to.include('FIXED');
-      expect(result.message).to.include('NEW');
+      expect(result.message).to.equal('Fix rolled back successfully. All 1 suggestion(s) marked as SKIPPED.');
+
+      // Verify that the fallback to 'id' field works correctly
+      expect(result.fix).to.exist;
+      expect(result.fix.fix.status).to.equal('ROLLED_BACK');
+      expect(result.fix.fix.id).to.equal(fixId); // Should use 'id' from fixData
+      expect(result.fix.statusCode).to.equal(200);
+      expect(result.fix.index).to.equal(0);
+      expect(result.fix.uuid).to.equal(fixId); // Should use 'id' as fallback
     });
 
-    it('responds 500 if an error occurs while saving', async () => {
+    it('responds 500 if an error occurs during rollback', async () => {
       const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
       requestContext.params.fixId = fixId;
 
-      const fix = await createFixWithStatus(fixId, 'FAILED');
-      const suggestion = await createSuggestionWithStatus('ERROR');
-
-      sandbox.stub(fix, 'getSuggestions').resolves([suggestion]);
+      await createFixWithStatus(fixId, 'FAILED');
       fixEntityCollection.rollbackFixWithSuggestionUpdates.rejects(new Error('Database connection failed'));
 
       const response = await fixesController.rollbackFailedFix(requestContext);
       expect(response).includes({ status: 500 });
 
       const result = await response.json();
-      expect(result.message).to.include('Error rolling back fix');
+      expect(result.message).to.equal('Error rolling back fix: Database connection failed');
     });
 
     it('responds 400 if transaction is canceled due to condition check failure', async () => {
       const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
       requestContext.params.fixId = fixId;
 
-      const fix = await createFixWithStatus(fixId, 'FAILED');
-      const suggestion = await createSuggestionWithStatus('ERROR');
-
-      sandbox.stub(fix, 'getSuggestions').resolves([suggestion]);
+      await createFixWithStatus(fixId, 'FAILED');
       fixEntityCollection.rollbackFixWithSuggestionUpdates.rejects(
         new Error('Transaction canceled: condition check failed for fix'),
       );

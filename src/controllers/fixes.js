@@ -459,62 +459,42 @@ export class FixesController {
       return badRequest(`Fix cannot be rolled back: current status is '${currentFixStatus}', expected 'FAILED'`);
     }
 
-    // Get all suggestions for this fix
-    const suggestions = await fix.getSuggestions();
-
-    if (!suggestions || suggestions.length === 0) {
-      return badRequest('No suggestions found for this fix');
-    }
-
-    // Filter suggestions that are in ERROR status (eligible for rollback)
-    const errorSuggestions = suggestions.filter((s) => s.getStatus() === 'ERROR');
-
-    // Check if ALL suggestions are in ERROR status
-    if (errorSuggestions.length !== suggestions.length) {
-      const nonErrorStatuses = suggestions
-        .filter((s) => s.getStatus() !== 'ERROR')
-        .map((s) => s.getStatus())
-        .join(', ');
-      return badRequest(
-        `All suggestions must be in ERROR status to rollback. Found suggestions with status: ${nonErrorStatuses}`,
-      );
-    }
-
-    // Build suggestion updates for the transaction
-    const suggestionUpdates = errorSuggestions.map((s) => ({
-      suggestionId: s.getId(),
-    }));
-
     try {
       // Use atomic transact write to update fix and all suggestions together
-      await this.#FixEntity.rollbackFixWithSuggestionUpdates(
+      // The function returns the updated entities directly from the transaction response
+      const result = await this.#FixEntity.rollbackFixWithSuggestionUpdates(
         fixId,
         opportunityId,
-        suggestionUpdates,
+        'SKIPPED', // newSuggestionStatus
       );
 
-      // Fetch the updated fix and suggestions to return
-      const updatedFix = await this.#FixEntity.findById(fixId);
-      const updatedSuggestions = await Promise.all(
-        errorSuggestions.map((s) => this.#Suggestion.findById(s.getId())),
-      );
+      // Use raw transaction data directly - no need to fetch entities
+      // Extract ID values (field names may be fixEntityId/id, suggestionId/id)
+      const fixData = result.fix;
+      const fixIdValue = fixData.fixEntityId;
 
       return ok({
         fix: {
           index: 0,
-          uuid: updatedFix.getId(),
-          fix: FixDto.toJSON(updatedFix),
+          uuid: fixIdValue,
+          fix: {
+            ...fixData,
+            id: fixIdValue, // Override with normalized id field
+          },
           statusCode: 200,
         },
         suggestions: {
-          updated: updatedSuggestions.map((suggestion, index) => ({
+          updated: result.suggestions.map(({ suggestionId, ...suggestionData }, index) => ({
             index,
-            uuid: suggestion.getId(),
-            suggestion: SuggestionDto.toJSON(suggestion),
+            uuid: suggestionId,
+            suggestion: {
+              ...suggestionData,
+              id: suggestionId, // Override with normalized id field
+            },
             statusCode: 200,
           })),
         },
-        message: `Fix rolled back successfully. All ${updatedSuggestions.length} suggestion(s) marked as SKIPPED.`,
+        message: `Fix rolled back successfully. All ${result.suggestions.length} suggestion(s) marked as SKIPPED.`,
       });
     } catch (e) {
       /* c8 ignore next 3 */
