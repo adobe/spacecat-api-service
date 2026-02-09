@@ -377,6 +377,7 @@ describe('getRouteHandlers', () => {
       'POST /consent-banner',
       'POST /llmo/onboard',
       'GET /sites-resolve',
+      'POST /hooks/drs/prompt-generation',
     );
 
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
@@ -407,7 +408,6 @@ describe('getRouteHandlers', () => {
       'PATCH /configurations/latest/jobs/:jobType',
       'POST /hooks/site-detection/cdn/:hookSecret',
       'POST /hooks/site-detection/rum/:hookSecret',
-      'POST /hooks/drs/:hookSecret/prompt-generation',
       'GET /organizations/:organizationId',
       'GET /organizations/:organizationId/brands',
       'GET /organizations/:organizationId/projects',
