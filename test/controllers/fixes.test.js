@@ -1697,31 +1697,69 @@ describe('Fixes Controller', () => {
       const suggestion1 = await createSuggestionWithStatus('ERROR');
       const suggestion2 = await createSuggestionWithStatus('ERROR');
 
-      // Mock the transaction result with raw data (as returned by rollbackFixWithSuggestionUpdates)
-      const mockFixData = {
-        fixEntityId: fixId,
-        status: 'ROLLED_BACK',
-        opportunityId,
-        type: 'CONTENT_UPDATE',
-        createdAt: '2025-05-19T01:23:45.678Z',
+      // Mock the transaction result with model instances
+      // (as returned by rollbackFixWithSuggestionUpdates)
+      const mockFixEntity = {
+        getId: () => fixId,
+        getStatus: () => 'ROLLED_BACK',
+        getOpportunityId: () => opportunityId,
+        getType: () => 'CONTENT_UPDATE',
+        getCreatedAt: () => '2025-05-19T01:23:45.678Z',
+        getUpdatedAt: () => '2025-05-19T01:23:45.678Z',
+        getExecutedBy: () => 'test-user',
+        getExecutedAt: () => '2025-05-19T01:23:45.678Z',
+        getPublishedAt: () => '2025-05-19T01:23:45.678Z',
+        getChangeDetails: () => ({ arbitrary: 'test value' }),
+        getOrigin: () => 'SPACECAT',
+        record: {
+          fixEntityId: fixId,
+          status: 'ROLLED_BACK',
+          opportunityId,
+          type: 'CONTENT_UPDATE',
+          createdAt: '2025-05-19T01:23:45.678Z',
+        },
       };
-      const mockSuggestionData1 = {
-        suggestionId: suggestion1.getId(),
-        status: 'SKIPPED',
-        rank: 10,
-        opportunityId,
+      const mockSuggestion1Model = {
+        getId: () => suggestion1.getId(),
+        getStatus: () => 'SKIPPED',
+        getOpportunityId: () => opportunityId,
+        getType: () => 'CONTENT_UPDATE',
+        getRank: () => 10,
+        getData: () => ({ url: 'https://example.com' }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-05-19T01:23:45.678Z',
+        getUpdatedAt: () => '2025-05-19T01:23:45.678Z',
+        getUpdatedBy: () => 'system',
+        record: {
+          suggestionId: suggestion1.getId(),
+          status: 'SKIPPED',
+          rank: 10,
+          opportunityId,
+        },
       };
-      const mockSuggestionData2 = {
-        suggestionId: suggestion2.getId(),
-        status: 'SKIPPED',
-        rank: 11,
-        opportunityId,
+      const mockSuggestion2Model = {
+        getId: () => suggestion2.getId(),
+        getStatus: () => 'SKIPPED',
+        getOpportunityId: () => opportunityId,
+        getType: () => 'CONTENT_UPDATE',
+        getRank: () => 11,
+        getData: () => ({ url: 'https://example.com' }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-05-19T01:23:45.678Z',
+        getUpdatedAt: () => '2025-05-19T01:23:45.678Z',
+        getUpdatedBy: () => 'system',
+        record: {
+          suggestionId: suggestion2.getId(),
+          status: 'SKIPPED',
+          rank: 11,
+          opportunityId,
+        },
       };
 
       fixEntityCollection.rollbackFixWithSuggestionUpdates.resolves({
         canceled: false,
-        fix: mockFixData,
-        suggestions: [mockSuggestionData1, mockSuggestionData2],
+        fix: mockFixEntity,
+        suggestions: [mockSuggestion1Model, mockSuggestion2Model],
       });
 
       const response = await fixesController.rollbackFailedFix(requestContext);
@@ -1760,26 +1798,52 @@ describe('Fixes Controller', () => {
       await createFixWithStatus(fixId, 'FAILED');
       const suggestion1 = await createSuggestionWithStatus('ERROR');
 
-      // Mock the transaction result with raw data using 'id' instead of 'fixEntityId'
-      // The controller only uses fixEntityId, so when it's missing, fixIdValue will be undefined
-      const mockFixData = {
-        id: fixId, // Using 'id' instead of 'fixEntityId'
-        status: 'ROLLED_BACK',
-        opportunityId,
-        type: 'CONTENT_UPDATE',
-        createdAt: '2025-05-19T01:23:45.678Z',
+      // Mock the transaction result with model instance
+      // The controller uses FixDto.toJSON() which calls getId() method,
+      // so it will always work correctly
+      const mockFixEntity = {
+        getId: () => fixId,
+        getStatus: () => 'ROLLED_BACK',
+        getOpportunityId: () => opportunityId,
+        getType: () => 'CONTENT_UPDATE',
+        getCreatedAt: () => '2025-05-19T01:23:45.678Z',
+        getUpdatedAt: () => '2025-05-19T01:23:45.678Z',
+        getExecutedBy: () => 'test-user',
+        getExecutedAt: () => '2025-05-19T01:23:45.678Z',
+        getPublishedAt: () => '2025-05-19T01:23:45.678Z',
+        getChangeDetails: () => ({ arbitrary: 'test value' }),
+        getOrigin: () => 'SPACECAT',
+        record: {
+          id: fixId, // Using 'id' in record, but getId() returns fixId
+          status: 'ROLLED_BACK',
+          opportunityId,
+          type: 'CONTENT_UPDATE',
+          createdAt: '2025-05-19T01:23:45.678Z',
+        },
       };
-      const mockSuggestionData1 = {
-        suggestionId: suggestion1.getId(),
-        status: 'SKIPPED',
-        rank: 10,
-        opportunityId,
+      const mockSuggestion1Model = {
+        getId: () => suggestion1.getId(),
+        getStatus: () => 'SKIPPED',
+        getOpportunityId: () => opportunityId,
+        getType: () => 'CONTENT_UPDATE',
+        getRank: () => 10,
+        getData: () => ({ url: 'https://example.com' }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-05-19T01:23:45.678Z',
+        getUpdatedAt: () => '2025-05-19T01:23:45.678Z',
+        getUpdatedBy: () => 'system',
+        record: {
+          suggestionId: suggestion1.getId(),
+          status: 'SKIPPED',
+          rank: 10,
+          opportunityId,
+        },
       };
 
       fixEntityCollection.rollbackFixWithSuggestionUpdates.resolves({
         canceled: false,
-        fix: mockFixData,
-        suggestions: [mockSuggestionData1],
+        fix: mockFixEntity,
+        suggestions: [mockSuggestion1Model],
       });
 
       const response = await fixesController.rollbackFailedFix(requestContext);
@@ -1788,14 +1852,14 @@ describe('Fixes Controller', () => {
       const result = await response.json();
       expect(result.message).to.equal('Fix rolled back successfully. All 1 suggestion(s) marked as SKIPPED.');
 
-      // When fixEntityId is missing, fixIdValue will be undefined
-      // The spread operator preserves 'id' from fixData, but then it's overridden with undefined
+      // With FixDto.toJSON(), the id field is always present because it calls fixEntity.getId()
+      // The DTO normalizes the id field regardless of the underlying record structure
       expect(result.fix).to.exist;
       expect(result.fix.fix.status).to.equal('ROLLED_BACK');
-      expect(result.fix.fix.id).to.be.undefined; // Overridden with undefined fixIdValue
+      expect(result.fix.fix.id).to.equal(fixId); // DTO always includes id from getId()
       expect(result.fix.statusCode).to.equal(200);
       expect(result.fix.index).to.equal(0);
-      expect(result.fix.uuid).to.be.undefined; // fixIdValue is undefined
+      expect(result.fix.uuid).to.equal(fixId); // Controller calls fixEntity.getId() directly
     });
 
     it('responds 500 if an error occurs during rollback', async () => {

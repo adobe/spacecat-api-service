@@ -468,29 +468,21 @@ export class FixesController {
         'SKIPPED', // newSuggestionStatus
       );
 
-      // Use raw transaction data directly - no need to fetch entities
-      // Extract ID values (field names may be fixEntityId/id, suggestionId/id)
-      const fixData = result.fix;
-      const fixIdValue = fixData.fixEntityId;
+      // Use model instances with DTOs - consistent with codebase patterns
+      const fixEntity = result.fix;
 
       return ok({
         fix: {
           index: 0,
-          uuid: fixIdValue,
-          fix: {
-            ...fixData,
-            id: fixIdValue, // Override with normalized id field
-          },
+          uuid: fixEntity.getId(),
+          fix: FixDto.toJSON(fixEntity),
           statusCode: 200,
         },
         suggestions: {
-          updated: result.suggestions.map(({ suggestionId, ...suggestionData }, index) => ({
+          updated: result.suggestions.map((suggestion, index) => ({
             index,
-            uuid: suggestionId,
-            suggestion: {
-              ...suggestionData,
-              id: suggestionId, // Override with normalized id field
-            },
+            uuid: suggestion.getId(),
+            suggestion: SuggestionDto.toJSON(suggestion),
             statusCode: 200,
           })),
         },
