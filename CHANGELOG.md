@@ -1,3 +1,10 @@
+## [1.312.3](https://github.com/adobe/spacecat-api-service/compare/v1.312.2...v1.312.3) (2026-02-09)
+
+
+### Bug Fixes
+
+* Slack aggregation keys treated as links ([#1790](https://github.com/adobe/spacecat-api-service/issues/1790)) ([2438561](https://github.com/adobe/spacecat-api-service/commit/2438561e6e4e7da7793cc5edb2244dde629e7a3a))
+
 ## [1.312.2](https://github.com/adobe/spacecat-api-service/compare/v1.312.1...v1.312.2) (2026-02-09)
 
 
