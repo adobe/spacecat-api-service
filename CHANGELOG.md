@@ -1,3 +1,38 @@
+## [1.313.1](https://github.com/adobe/spacecat-api-service/compare/v1.313.0...v1.313.1) (2026-02-10)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.105.0 ([#1794](https://github.com/adobe/spacecat-api-service/issues/1794)) ([cc1bb33](https://github.com/adobe/spacecat-api-service/commit/cc1bb3317d210ff82c350932eb6bc0ebeffc6655))
+
+# [1.313.0](https://github.com/adobe/spacecat-api-service/compare/v1.312.3...v1.313.0) (2026-02-10)
+
+
+### Features
+
+* Add support for ignored prompts in LLMO config ([#1793](https://github.com/adobe/spacecat-api-service/issues/1793)) ([8b14271](https://github.com/adobe/spacecat-api-service/commit/8b14271205de25a3ded94c90236b74715eb9e4b6))
+
+## [1.312.3](https://github.com/adobe/spacecat-api-service/compare/v1.312.2...v1.312.3) (2026-02-09)
+
+
+### Bug Fixes
+
+* Slack aggregation keys treated as links ([#1790](https://github.com/adobe/spacecat-api-service/issues/1790)) ([2438561](https://github.com/adobe/spacecat-api-service/commit/2438561e6e4e7da7793cc5edb2244dde629e7a3a))
+
+## [1.312.2](https://github.com/adobe/spacecat-api-service/compare/v1.312.1...v1.312.2) (2026-02-09)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tokowaka-client to v1.7.6 ([#1788](https://github.com/adobe/spacecat-api-service/issues/1788)) ([6a03422](https://github.com/adobe/spacecat-api-service/commit/6a03422ee7c1a789aa07e1b24dccc38bfde89ce2))
+
+## [1.312.1](https://github.com/adobe/spacecat-api-service/compare/v1.312.0...v1.312.1) (2026-02-09)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1786](https://github.com/adobe/spacecat-api-service/issues/1786)) ([905f87c](https://github.com/adobe/spacecat-api-service/commit/905f87cca047781add2e9b1abc26feb5e6dcb0bd))
+
 # [1.312.0](https://github.com/adobe/spacecat-api-service/compare/v1.311.5...v1.312.0) (2026-02-06)
 
 
