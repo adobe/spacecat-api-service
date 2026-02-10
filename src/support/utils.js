@@ -647,7 +647,6 @@ export async function getAccessToken(context) {
     promiseToken,
     !!context.env?.AUTOFIX_CRYPT_SECRET && !!context.env?.AUTOFIX_CRYPT_SALT,
   );
-  context.log.info('accessToken in exchange of promise token', accessToken);
   return accessToken;
 }
 
