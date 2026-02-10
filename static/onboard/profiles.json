@@ -117,7 +117,8 @@
 			"all-traffic": {},
             "traffic-analysis": {},
 			"user-engagement": {},
-			"cwv-weekly": {}
+			"cwv-weekly": {},
+			"ahref-paid-pages": {}
 		},
 		"config": {
 			"scheduledRun": true

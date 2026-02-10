@@ -323,6 +323,7 @@ export const triggerAuditForSite = async (
  * @param {Site} site - The site object.
  * @param {string} opportunityId - The opportunity ID to process.
  * @param {string} opportunityType - The opportunity type (e.g., 'a11y-assistive').
+ * @param {string|null} aggregationKey - Optional aggregation key to filter suggestions.
  * @param {Object} slackContext - The Slack context object.
  * @param {Object} lambdaContext - The Lambda context object.
  * @return {Promise} - A promise representing the trigger operation.
@@ -331,6 +332,7 @@ export const triggerA11yCodefixForOpportunity = async (
   site,
   opportunityId,
   opportunityType,
+  aggregationKey,
   slackContext,
   lambdaContext,
 ) => sendAuditMessage(
@@ -344,7 +346,7 @@ export const triggerA11yCodefixForOpportunity = async (
     },
   },
   site.getId(),
-  { opportunityId, opportunityType },
+  { opportunityId, opportunityType, aggregationKey },
 );
 
 // todo: prototype - untested

@@ -1,0 +1,370 @@
+# Brand Sentiment Guidelines API Testing
+# =======================================
+# This file contains HTTP requests for testing the Sentiment Guidelines API endpoints.
+# 
+# Prerequisites:
+# 1. Install "REST Client" extension in Cursor/VS Code
+# 2. Set your API key and site ID below
+# 3. Click "Send Request" above any request to execute
+#
+# Environment: Update these variables for your environment
+# - dev: https://spacecat-services--api-service.aem-dev.hlx.page
+# - stage: https://spacecat-services--api-service.aem-stage.hlx.page
+# - prod: https://spacecat-services--api-service.aem.hlx.page
+
+@baseUrl = https://spacecat-services--api-service.aem-dev.hlx.page
+@apiKey = YOUR_API_KEY_HERE
+@siteId = YOUR_SITE_ID_HERE
+
+# =============================================================================
+# TOPICS - List & Create
+# =============================================================================
+
+### List all topics
+GET {{baseUrl}}/sites/{{siteId}}/sentiment/topics
+x-api-key: {{apiKey}}
+
+### List enabled topics only
+GET {{baseUrl}}/sites/{{siteId}}/sentiment/topics?enabled=true
+x-api-key: {{apiKey}}
+
+### List topics with pagination
+GET {{baseUrl}}/sites/{{siteId}}/sentiment/topics?limit=10
+x-api-key: {{apiKey}}
+
+### Create single topic
+POST {{baseUrl}}/sites/{{siteId}}/sentiment/topics
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+[
+  {
+    "name": "2026 Corvette Stingray",
+    "description": "Track sentiment about the latest Corvette model",
+    "subPrompts": [
+      "What do people say about performance?",
+      "How is the design being received?",
+      "Price sentiment?"
+    ],
+    "enabled": true
+  }
+]
+
+### Create multiple topics
+POST {{baseUrl}}/sites/{{siteId}}/sentiment/topics
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+[
+  {
+    "name": "BMW XM 2026",
+    "description": "Track sentiment about BMW XM luxury SUV",
+    "subPrompts": ["Performance feedback?", "Interior quality?"],
+    "enabled": true
+  },
+  {
+    "name": "Mediterranean Cruises",
+    "description": "Monitor cruise line sentiment",
+    "subPrompts": ["Service quality?", "Value for money?"],
+    "enabled": true
+  },
+  {
+    "name": "Electric Vehicle Charging",
+    "description": "EV charging infrastructure sentiment",
+    "enabled": true
+  }
+]
+
+# =============================================================================
+# TOPICS - Get, Update, Delete
+# =============================================================================
+
+# Note: Replace {topicId} with an actual topic ID from the list response
+@topicId = YOUR_TOPIC_ID_HERE
+
+### Get specific topic
+GET {{baseUrl}}/sites/{{siteId}}/sentiment/topics/{{topicId}}
+x-api-key: {{apiKey}}
+
+### Update topic name and description
+PATCH {{baseUrl}}/sites/{{siteId}}/sentiment/topics/{{topicId}}
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+{
+  "name": "Updated Topic Name",
+  "description": "Updated description"
+}
+
+### Disable a topic
+PATCH {{baseUrl}}/sites/{{siteId}}/sentiment/topics/{{topicId}}
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+{
+  "enabled": false
+}
+
+### Enable a topic
+PATCH {{baseUrl}}/sites/{{siteId}}/sentiment/topics/{{topicId}}
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+{
+  "enabled": true
+}
+
+### Delete a topic
+DELETE {{baseUrl}}/sites/{{siteId}}/sentiment/topics/{{topicId}}
+x-api-key: {{apiKey}}
+
+# =============================================================================
+# TOPICS - Sub-Prompts Management
+# =============================================================================
+
+### Add sub-prompts to a topic
+POST {{baseUrl}}/sites/{{siteId}}/sentiment/topics/{{topicId}}/prompts
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+{
+  "prompts": [
+    "What are users saying about reliability?",
+    "How does it compare to competitors?"
+  ]
+}
+
+### Remove sub-prompts from a topic
+DELETE {{baseUrl}}/sites/{{siteId}}/sentiment/topics/{{topicId}}/prompts
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+{
+  "prompts": [
+    "What are users saying about reliability?"
+  ]
+}
+
+# =============================================================================
+# GUIDELINES - List & Create
+# =============================================================================
+
+### List all guidelines
+GET {{baseUrl}}/sites/{{siteId}}/sentiment/guidelines
+x-api-key: {{apiKey}}
+
+### List enabled guidelines only
+GET {{baseUrl}}/sites/{{siteId}}/sentiment/guidelines?enabled=true
+x-api-key: {{apiKey}}
+
+### List guidelines with pagination
+GET {{baseUrl}}/sites/{{siteId}}/sentiment/guidelines?limit=10
+x-api-key: {{apiKey}}
+
+### Create single guideline with audit associations
+POST {{baseUrl}}/sites/{{siteId}}/sentiment/guidelines
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+[
+  {
+    "name": "Product Quality Focus",
+    "instruction": "Focus on sentiment related to product quality, durability, and craftsmanship. Highlight mentions of build quality, materials, and reliability.",
+    "audits": ["wikipedia-analysis", "reddit-analysis"],
+    "enabled": true
+  }
+]
+
+### Create multiple guidelines
+POST {{baseUrl}}/sites/{{siteId}}/sentiment/guidelines
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+[
+  {
+    "name": "Customer Service Sentiment",
+    "instruction": "Analyze sentiment about customer service experiences, support responsiveness, and issue resolution.",
+    "audits": ["reddit-analysis", "twitter-analysis"],
+    "enabled": true
+  },
+  {
+    "name": "Competitor Analysis",
+    "instruction": "Focus on comparative mentions and how the brand is positioned against competitors.",
+    "audits": ["wikipedia-analysis", "news-analysis"],
+    "enabled": true
+  },
+  {
+    "name": "Price Perception",
+    "instruction": "Track sentiment about pricing, value for money, and affordability perceptions.",
+    "audits": ["reddit-analysis"],
+    "enabled": true
+  }
+]
+
+### Create guideline without audit associations
+POST {{baseUrl}}/sites/{{siteId}}/sentiment/guidelines
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+[
+  {
+    "name": "General Sentiment",
+    "instruction": "Capture overall brand sentiment without specific focus areas.",
+    "enabled": true
+  }
+]
+
+# =============================================================================
+# GUIDELINES - Get, Update, Delete
+# =============================================================================
+
+# Note: Replace {guidelineId} with an actual guideline ID from the list response
+@guidelineId = YOUR_GUIDELINE_ID_HERE
+
+### Get specific guideline
+GET {{baseUrl}}/sites/{{siteId}}/sentiment/guidelines/{{guidelineId}}
+x-api-key: {{apiKey}}
+
+### Update guideline instruction
+PATCH {{baseUrl}}/sites/{{siteId}}/sentiment/guidelines/{{guidelineId}}
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+{
+  "instruction": "Updated instruction for sentiment analysis."
+}
+
+### Update guideline name and enable status
+PATCH {{baseUrl}}/sites/{{siteId}}/sentiment/guidelines/{{guidelineId}}
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+{
+  "name": "Updated Guideline Name",
+  "enabled": false
+}
+
+### Delete a guideline
+DELETE {{baseUrl}}/sites/{{siteId}}/sentiment/guidelines/{{guidelineId}}
+x-api-key: {{apiKey}}
+
+# =============================================================================
+# GUIDELINES - Audit Type Management
+# =============================================================================
+
+### Link audit types to a guideline
+POST {{baseUrl}}/sites/{{siteId}}/sentiment/guidelines/{{guidelineId}}/audits
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+{
+  "audits": ["youtube-analysis", "forum-analysis"]
+}
+
+### Unlink audit types from a guideline
+DELETE {{baseUrl}}/sites/{{siteId}}/sentiment/guidelines/{{guidelineId}}/audits
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+{
+  "audits": ["forum-analysis"]
+}
+
+# =============================================================================
+# CONFIG - Combined Endpoint
+# =============================================================================
+
+### Get full sentiment config (all enabled topics + all enabled guidelines)
+GET {{baseUrl}}/sites/{{siteId}}/sentiment/config
+x-api-key: {{apiKey}}
+
+### Get config filtered by audit type (all topics + only guidelines for wikipedia-analysis)
+GET {{baseUrl}}/sites/{{siteId}}/sentiment/config?audit=wikipedia-analysis
+x-api-key: {{apiKey}}
+
+### Get config filtered by audit type (reddit-analysis)
+GET {{baseUrl}}/sites/{{siteId}}/sentiment/config?audit=reddit-analysis
+x-api-key: {{apiKey}}
+
+# =============================================================================
+# ERROR CASES (for testing error handling)
+# =============================================================================
+
+### Invalid site ID
+GET {{baseUrl}}/sites/invalid-uuid/sentiment/topics
+x-api-key: {{apiKey}}
+
+### Missing API key (should return 401)
+GET {{baseUrl}}/sites/{{siteId}}/sentiment/topics
+
+### Non-existent topic
+GET {{baseUrl}}/sites/{{siteId}}/sentiment/topics/00000000-0000-0000-0000-000000000000
+x-api-key: {{apiKey}}
+
+### Create topic with missing name (should fail validation)
+POST {{baseUrl}}/sites/{{siteId}}/sentiment/topics
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+[
+  {
+    "description": "Missing name field"
+  }
+]
+
+### Create guideline with missing instruction (should fail validation)
+POST {{baseUrl}}/sites/{{siteId}}/sentiment/guidelines
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+[
+  {
+    "name": "Missing Instruction"
+  }
+]
+
+### Link invalid audit type (should return 400)
+POST {{baseUrl}}/sites/{{siteId}}/sentiment/guidelines/{{guidelineId}}/audits
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+{
+  "audits": ["invalid-audit-type"]
+}
+
+### Empty array for bulk create (should return 400)
+POST {{baseUrl}}/sites/{{siteId}}/sentiment/topics
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+[]
+
+# =============================================================================
+# WORKFLOW: Complete Test Scenario
+# =============================================================================
+# Run these in order to test a complete workflow:
+#
+# 1. List topics (should be empty or show existing)
+# 2. Create topics (create test data)
+# 3. List topics (verify added)
+# 4. Get specific topic (verify details)
+# 5. Add sub-prompts to topic
+# 6. Update topic (modify)
+# 7. List guidelines (should be empty or show existing)
+# 8. Create guidelines with audit associations
+# 9. Get specific guideline (verify details)
+# 10. Link/unlink audits
+# 11. Get config (verify combined response)
+# 12. Get config with audit filter (verify filtering)
+# 13. Delete topics and guidelines (cleanup)
+
+# =============================================================================
+# VALID AUDIT TYPES
+# =============================================================================
+# The following audit types are valid for guideline associations:
+# - wikipedia-analysis
+# - reddit-analysis
+# - youtube-analysis
+# - twitter-analysis
+# - news-analysis
+# - forum-analysis
