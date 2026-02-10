@@ -60,7 +60,7 @@ function OrganizationsController(ctx, env) {
    * @return {Promise<Response>} Organization response.
    */
   const createOrganization = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
+    if (!accessControlUtil.hasAdminAccess() || !accessControlUtil.isLLMOAdministrator()) {
       return forbidden('Only admins can create new Organizations');
     }
     // check if the organization already exists

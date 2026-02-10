@@ -156,6 +156,7 @@ describe('TopPaidOpportunitiesController', () => {
           authInfo: {
             profile: { email: 'user@example.com' },
             isAdmin: () => false,
+            isReadOnlyAdmin: () => false,
             getType: () => 'jwt',
             getScopes: () => [],
             getOrganizations: () => [],

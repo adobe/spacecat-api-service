@@ -86,7 +86,11 @@ export default class AccessControlUtil {
     if (!this.isAccessTypeJWT() && this.isScopeAdmin()) {
       return true;
     }
-    return this.authInfo.isAdmin();
+    return !!(this.authInfo.isAdmin() || this.authInfo.isReadOnlyAdmin());
+  }
+
+  isReadOnlyAdmin() {
+    return this.authInfo.isReadOnlyAdmin();
   }
 
   isLLMOAdministrator() {

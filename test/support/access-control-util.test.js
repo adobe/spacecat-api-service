@@ -32,6 +32,21 @@ use(chaiAsPromised);
 use(sinonChai);
 
 describe('Access Control Util', () => {
+  // Patch AuthInfo prototype with methods not yet available in node_modules
+  // (will be available once spacecat-shared is published with the new methods)
+  before(() => {
+    if (!AuthInfo.prototype.isReadOnlyAdmin) {
+      AuthInfo.prototype.isReadOnlyAdmin = function isReadOnlyAdmin() {
+        return this.profile?.is_readonly_admin;
+      };
+    }
+    if (!AuthInfo.prototype.isLLMOAdministrator) {
+      AuthInfo.prototype.isLLMOAdministrator = function isLLMOAdministrator() {
+        return this.profile?.is_llmo_administrator;
+      };
+    }
+  });
+
   it('should throw an error if context is not provided', () => {
     expect(() => AccessControlUtil.fromContext()).to.throw('Missing context');
   });
@@ -105,6 +120,7 @@ describe('Access Control Util', () => {
         authInfo: {
           getType: () => 'jwt',
           isAdmin: () => false,
+          isReadOnlyAdmin: () => false,
           hasOrganization: () => true,
           hasScope: () => true,
           getScopes: () => [{ name: 'user' }],
@@ -281,6 +297,7 @@ describe('Access Control Util', () => {
       mockAuthInfo = {
         getType: () => 'jwt',
         isAdmin: () => false,
+        isReadOnlyAdmin: () => false,
         getScopes: () => [],
         hasOrganization: sinon.stub(),
         hasScope: sinon.stub(),
@@ -612,6 +629,95 @@ describe('Access Control Util', () => {
       const accessControl = AccessControlUtil.fromContext(contextWithoutLLMOAdmin);
       expect(accessControl.isLLMOAdministrator()).to.be.false;
     });
+
+    it('should return true for hasAdminAccess when user is a read-only admin', () => {
+      const authInfo = new AuthInfo()
+        .withType('jwt')
+        .withProfile({
+          is_admin: false,
+          is_readonly_admin: true,
+          is_llmo_administrator: false,
+        });
+
+      const readonlyAdminContext = {
+        log: {
+          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
+        pathInfo: {
+          headers: { 'x-product': 'llmo' },
+        },
+        attributes: { authInfo },
+        dataAccess: {
+          Entitlement: {},
+          TrialUser: {},
+          OrganizationIdentityProvider: {},
+        },
+      };
+
+      const accessControl = AccessControlUtil.fromContext(readonlyAdminContext);
+      expect(accessControl.hasAdminAccess()).to.be.true;
+      expect(accessControl.isReadOnlyAdmin()).to.be.true;
+      expect(accessControl.isLLMOAdministrator()).to.be.false;
+    });
+
+    it('should return false for isReadOnlyAdmin when user is a full admin', () => {
+      const authInfo = new AuthInfo()
+        .withType('jwt')
+        .withProfile({
+          is_admin: true,
+          is_readonly_admin: false,
+          is_llmo_administrator: true,
+        });
+
+      const fullAdminContext = {
+        log: {
+          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
+        pathInfo: {
+          headers: { 'x-product': 'llmo' },
+        },
+        attributes: { authInfo },
+        dataAccess: {
+          Entitlement: {},
+          TrialUser: {},
+          OrganizationIdentityProvider: {},
+        },
+      };
+
+      const accessControl = AccessControlUtil.fromContext(fullAdminContext);
+      expect(accessControl.hasAdminAccess()).to.be.true;
+      expect(accessControl.isReadOnlyAdmin()).to.be.false;
+      expect(accessControl.isLLMOAdministrator()).to.be.true;
+    });
+
+    it('should return false for isReadOnlyAdmin when user is a regular user', () => {
+      const authInfo = new AuthInfo()
+        .withType('jwt')
+        .withProfile({
+          is_admin: false,
+          is_readonly_admin: false,
+          is_llmo_administrator: false,
+        });
+
+      const regularUserContext = {
+        log: {
+          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
+        pathInfo: {
+          headers: { 'x-product': 'llmo' },
+        },
+        attributes: { authInfo },
+        dataAccess: {
+          Entitlement: {},
+          TrialUser: {},
+          OrganizationIdentityProvider: {},
+        },
+      };
+
+      const accessControl = AccessControlUtil.fromContext(regularUserContext);
+      expect(accessControl.hasAdminAccess()).to.be.false;
+      expect(accessControl.isReadOnlyAdmin()).to.be.false;
+    });
   });
 
   describe('Entitlement Validation', () => {
@@ -669,6 +775,7 @@ describe('Access Control Util', () => {
       mockAuthInfo = {
         getType: () => 'jwt',
         isAdmin: () => false,
+        isReadOnlyAdmin: () => false,
         getScopes: () => [],
         hasOrganization: () => true,
         hasScope: () => true,
@@ -1058,6 +1165,7 @@ describe('Access Control Util', () => {
           authInfo: {
             getType: () => 'jwt',
             isAdmin: () => false,
+            isReadOnlyAdmin: () => false,
             getScopes: () => [],
             hasOrganization: () => true,
             hasScope: () => true,
@@ -1111,6 +1219,7 @@ describe('Access Control Util', () => {
           authInfo: {
             getType: () => 'jwt',
             isAdmin: () => false,
+            isReadOnlyAdmin: () => false,
             getScopes: () => [],
             hasOrganization: () => true,
             hasScope: () => true,
@@ -1186,6 +1295,7 @@ describe('Access Control Util', () => {
           authInfo: {
             getType: () => 'jwt',
             isAdmin: () => false,
+            isReadOnlyAdmin: () => false,
             getScopes: () => [],
             hasOrganization: () => true,
             hasScope: () => true,
@@ -1357,6 +1467,7 @@ describe('Access Control Util', () => {
           authInfo: {
             getType: () => 'jwt',
             isAdmin: () => true,
+            isReadOnlyAdmin: () => false,
             getScopes: () => [],
             hasOrganization: () => true,
             hasScope: () => true,

@@ -33,6 +33,21 @@ use(chaiAsPromised);
 use(sinonChai);
 
 describe('Organizations Controller', () => {
+  // Patch AuthInfo prototype with methods not yet available in node_modules
+  // (will be available once spacecat-shared is published with the new methods)
+  before(() => {
+    if (!AuthInfo.prototype.isReadOnlyAdmin) {
+      AuthInfo.prototype.isReadOnlyAdmin = function isReadOnlyAdmin() {
+        return this.profile?.is_readonly_admin;
+      };
+    }
+    if (!AuthInfo.prototype.isLLMOAdministrator) {
+      AuthInfo.prototype.isLLMOAdministrator = function isLLMOAdministrator() {
+        return this.profile?.is_llmo_administrator;
+      };
+    }
+  });
+
   const sandbox = sinon.createSandbox();
   const orgId = '9033554c-de8a-44ac-a356-09b51af8cc28';
   const projectId = '550e8400-e29b-41d4-a716-446655440000';
@@ -246,7 +261,7 @@ describe('Organizations Controller', () => {
         authInfo: new AuthInfo()
           .withType('jwt')
           .withScopes([{ name: 'admin' }])
-          .withProfile({ is_admin: true })
+          .withProfile({ is_admin: true, is_llmo_administrator: true })
           .withAuthenticated(true)
         ,
       },
@@ -304,6 +319,26 @@ describe('Organizations Controller', () => {
 
   it('creates an organization for non admin users', async () => {
     context.attributes.authInfo.withProfile({ is_admin: false });
+    mockDataAccess.Organization.create.resolves(organizations[0]);
+    const response = await organizationsController.createOrganization({
+      data: { name: 'Org 1' },
+      ...context,
+    });
+    expect(response.status).to.equal(403);
+
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Only admins can create new Organizations');
+  });
+
+  it('returns forbidden when read-only admin tries to create an organization', async () => {
+    context.attributes.authInfo.withProfile({
+      is_admin: false,
+      is_readonly_admin: true,
+      is_llmo_administrator: false,
+    });
+    // Recreate controller with the updated context
+    organizationsController = OrganizationsController(context, env);
+
     mockDataAccess.Organization.create.resolves(organizations[0]);
     const response = await organizationsController.createOrganization({
       data: { name: 'Org 1' },
