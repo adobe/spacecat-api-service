@@ -60,7 +60,6 @@ describe('getRouteHandlers', () => {
 
   const mockWeeklyDigestController = {
     triggerWeeklyDigests: sinon.stub(),
-    processOrganizationDigest: sinon.stub(),
   };
 
   const mockUrlStoreController = {
@@ -406,7 +405,6 @@ describe('getRouteHandlers', () => {
       'POST /tools/import/jobs',
       'POST /tools/scrape/jobs',
       'POST /tools/weekly-digest/trigger',
-      'POST /tools/weekly-digest/process',
       'POST /consent-banner',
       'POST /llmo/onboard',
       'GET /sites-resolve',
@@ -431,7 +429,6 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['POST /consent-banner']).to.equal(mockConsentBannerController.takeScreenshots);
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
     expect(staticRoutes['POST /tools/weekly-digest/trigger']).to.equal(mockWeeklyDigestController.triggerWeeklyDigests);
-    expect(staticRoutes['POST /tools/weekly-digest/process']).to.equal(mockWeeklyDigestController.processOrganizationDigest);
     expect(staticRoutes['POST /llmo/onboard']).to.equal(mockLlmoController.onboardCustomer);
     expect(staticRoutes['GET /sites-resolve']).to.equal(mockSitesController.resolveSite);
     expect(staticRoutes['GET /trial-users/email-preferences']).to.equal(mockTrialUserController.getEmailPreferences);
