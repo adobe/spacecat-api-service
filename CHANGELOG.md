@@ -1,3 +1,59 @@
+## [1.312.3](https://github.com/adobe/spacecat-api-service/compare/v1.312.2...v1.312.3) (2026-02-09)
+
+
+### Bug Fixes
+
+* Slack aggregation keys treated as links ([#1790](https://github.com/adobe/spacecat-api-service/issues/1790)) ([2438561](https://github.com/adobe/spacecat-api-service/commit/2438561e6e4e7da7793cc5edb2244dde629e7a3a))
+
+## [1.312.2](https://github.com/adobe/spacecat-api-service/compare/v1.312.1...v1.312.2) (2026-02-09)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tokowaka-client to v1.7.6 ([#1788](https://github.com/adobe/spacecat-api-service/issues/1788)) ([6a03422](https://github.com/adobe/spacecat-api-service/commit/6a03422ee7c1a789aa07e1b24dccc38bfde89ce2))
+
+## [1.312.1](https://github.com/adobe/spacecat-api-service/compare/v1.312.0...v1.312.1) (2026-02-09)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1786](https://github.com/adobe/spacecat-api-service/issues/1786)) ([905f87c](https://github.com/adobe/spacecat-api-service/commit/905f87cca047781add2e9b1abc26feb5e6dcb0bd))
+
+# [1.312.0](https://github.com/adobe/spacecat-api-service/compare/v1.311.5...v1.312.0) (2026-02-06)
+
+
+### Features
+
+* enable paid ahref fetch on onboard ([#1785](https://github.com/adobe/spacecat-api-service/issues/1785)) ([5311888](https://github.com/adobe/spacecat-api-service/commit/531188801de5f2abca97065568b86e1322fafa46))
+
+## [1.311.5](https://github.com/adobe/spacecat-api-service/compare/v1.311.4...v1.311.5) (2026-02-06)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tier-client to v1.3.11 ([#1783](https://github.com/adobe/spacecat-api-service/issues/1783)) ([dc50603](https://github.com/adobe/spacecat-api-service/commit/dc506036a9c412df0a16e8cd1f56e3fd37e4316f))
+
+## [1.311.4](https://github.com/adobe/spacecat-api-service/compare/v1.311.3...v1.311.4) (2026-02-06)
+
+
+### Bug Fixes
+
+* remove NEW status restriction from edge-preview ([#1778](https://github.com/adobe/spacecat-api-service/issues/1778)) ([dd82772](https://github.com/adobe/spacecat-api-service/commit/dd82772032ae262579d20336fece456340f30d1c))
+
+## [1.311.3](https://github.com/adobe/spacecat-api-service/compare/v1.311.2...v1.311.3) (2026-02-05)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1780](https://github.com/adobe/spacecat-api-service/issues/1780)) ([44df322](https://github.com/adobe/spacecat-api-service/commit/44df322f234ba3e86938cd311550159eaa6779aa))
+
+## [1.311.2](https://github.com/adobe/spacecat-api-service/compare/v1.311.1...v1.311.2) (2026-02-05)
+
+
+### Bug Fixes
+
+* A11y autofix slack trigger ([#1777](https://github.com/adobe/spacecat-api-service/issues/1777)) ([f523937](https://github.com/adobe/spacecat-api-service/commit/f523937e8220b4365e9c5420deef8c90c6c072b4))
+
 ## [1.311.1](https://github.com/adobe/spacecat-api-service/compare/v1.311.0...v1.311.1) (2026-02-05)
 
 
