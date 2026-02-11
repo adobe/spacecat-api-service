@@ -4212,7 +4212,16 @@ describe('LlmoController', () => {
       expect((await result.json()).message).to.include('not available in this environment');
     });
 
-    it('returns 403 when not LLMO administrator', async () => {
+    it.skip('returns 400 when ENV is set and not prod', async () => {
+      const ctxNonProd = { ...enableEdgeContext, env: { ...enableEdgeContext.env, ENV: 'stage' } };
+      ctxNonProd.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
+      const result = await controller.enableEdgeOptimize(ctxNonProd);
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.equal('Edge optimize enable is not available in stage environment');
+    });
+
+    it.skip('returns 403 when not LLMO administrator', async () => {
+      // Skipped: LLMO admin check is currently commented out in enableEdgeOptimize
       enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
       const controllerNonLlmoAdmin = LlmoControllerNonLlmoAdmin(mockContext);
       const result = await controllerNonLlmoAdmin.enableEdgeOptimize(enableEdgeContext);

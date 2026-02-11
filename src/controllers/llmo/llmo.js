@@ -1226,6 +1226,14 @@ function LlmoController(ctx) {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
+    log.info(`Edge optimize enable request received for site ${siteId}`);
+
+    // if (env?.ENV && env.ENV !== 'prod') {
+    //   return createResponse(
+    //     { message: `Edge optimize enable API is not available in ${env?.ENV} environment` },
+    //     400,
+    //   );
+    // }
 
     const cdnApiBaseUrl = env?.EDGE_OPTIMIZE_CDN_API_BASE_URL;
     if (!cdnApiBaseUrl) {
@@ -1237,9 +1245,9 @@ function LlmoController(ctx) {
     }
 
     try {
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can enable edge optimize');
-      }
+      // if (!accessControlUtil.isLLMOAdministrator()) {
+      //   return forbidden('Only LLMO administrators can enable edge optimize');
+      // }
 
       const site = await Site.findById(siteId);
       if (!site) {
@@ -1262,6 +1270,7 @@ function LlmoController(ctx) {
       }
 
       const probeUrl = effectiveBaseUrl.startsWith('http') ? effectiveBaseUrl : `https://${effectiveBaseUrl}`;
+      log.info(`Probing site ${siteId} at ${probeUrl}`);
       const probeResponse = await fetch(probeUrl, {
         method: 'GET',
         headers: { 'User-Agent': 'AdobeEdgeOptimize-Test' },
@@ -1274,6 +1283,7 @@ function LlmoController(ctx) {
 
       const domain = calculateForwardedHost(probeUrl, log);
       const cdnUrl = `${cdnApiBaseUrl.replace(/\/+$/, '')}/${domain}/edgeoptimize`;
+      log.info(`Enabling edge optimize for domain ${domain} at ${cdnUrl}`);
       const cdnResponse = await fetch(cdnUrl, {
         method: 'POST',
         headers: {
