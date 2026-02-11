@@ -1286,7 +1286,7 @@ function LlmoController(ctx) {
         const body = await cdnResponse.text();
         log.error(`Edge optimize CDN API failed for site ${siteId}, domain ${domain}: ${cdnResponse.status} ${body}`);
         return createResponse(
-          { message: `Failed to enable edge optimize: ${cdnResponse.status} ${body || cdnResponse.statusText}` },
+          { message: `Failed to enable edge optimize. Upstream call failed with status ${cdnResponse.status}` },
           cdnResponse.status >= 500 ? 502 : cdnResponse.status,
         );
       }

@@ -56,6 +56,7 @@ describe('LlmoController', () => {
   let controller;
   let controllerWithAccessDenied;
   let LlmoController;
+  let LlmoControllerNonLlmoAdmin;
   let mockContext;
   let mockSite;
   let mockConfig;
@@ -73,6 +74,7 @@ describe('LlmoController', () => {
   let mockTokowakaClient;
   let readStrategyStub;
   let writeStrategyStub;
+  let getAccessTokenStub;
 
   const mockHttpUtils = {
     ok: (data, headers = {}) => ({
@@ -96,6 +98,10 @@ describe('LlmoController', () => {
       status,
       json: async () => data,
     }),
+    internalServerError: (message) => ({
+      status: 500,
+      json: async () => ({ message }),
+    }),
   };
 
   before(async () => {
@@ -109,6 +115,7 @@ describe('LlmoController', () => {
       updateMetaconfig: sinon.stub(),
       checkEdgeOptimizeStatus: sinon.stub(),
     };
+    getAccessTokenStub = sinon.stub().resolves('fake-ims-token');
 
     // Set up esmock once for all tests
     LlmoController = await esmock('../../../src/controllers/llmo/llmo.js', {
@@ -138,6 +145,10 @@ describe('LlmoController', () => {
           const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
           return uuidRegex.test(uuid);
         },
+        isValidUrl: (url) => typeof url === 'string' && /^https?:\/\//.test(url),
+      },
+      '../../../src/support/utils.js': {
+        getAccessToken: (...args) => getAccessTokenStub(...args),
       },
       '../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
@@ -167,6 +178,16 @@ describe('LlmoController', () => {
         default: {
           createFrom: () => mockTokowakaClient,
         },
+        calculateForwardedHost: (url) => {
+          try {
+            const u = new URL(url.startsWith('http') ? url : `https://${url}`);
+            const h = u.hostname;
+            const dots = (h.match(/\./g) || []).length;
+            return dots === 1 ? `www.${h}` : h;
+          } catch (e) {
+            throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
+          }
+        },
       },
     });
 
@@ -181,6 +202,55 @@ describe('LlmoController', () => {
       },
     });
     controllerWithAccessDenied = LlmoControllerDenied;
+
+    // Create controller with isLLMOAdministrator false for enableEdgeOptimize 403 test
+    const mockAccessControlNonLlmoAdmin = {
+      fromContext() {
+        return {
+          log: mockLog,
+          async hasAccess() { return true; },
+          hasAdminAccess() { return true; },
+          isLLMOAdministrator() { return false; },
+        };
+      },
+    };
+    LlmoControllerNonLlmoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+      '../../../src/controllers/llmo/llmo-config-metadata.js': { updateModifiedByDetails: updateModifiedByDetailsStub },
+      '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      '@adobe/spacecat-shared-utils': {
+        SPACECAT_USER_AGENT: TEST_USER_AGENT,
+        tracingFetch: (...args) => tracingFetchStub(...args),
+        llmoConfig: {
+          defaultConfig: llmoConfig.defaultConfig,
+          readConfig: (...a) => readConfigStub(...a),
+          writeConfig: (...a) => writeConfigStub(...a),
+        },
+        llmoStrategy: {
+          readStrategy: (...a) => readStrategyStub(...a),
+          writeStrategy: (...a) => writeStrategyStub(...a),
+        },
+        schemas: { llmoConfig: { safeParse: (...a) => llmoConfigSchemaStub.safeParse(...a) } },
+        hasText: (s) => typeof s === 'string' && s.trim().length > 0,
+        isObject: (o) => o !== null && typeof o === 'object' && !Array.isArray(o),
+        composeBaseURL: (d) => (d.startsWith('http') ? d : `https://${d}`),
+        isValidUUID: (id) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id),
+        isValidUrl: (url) => typeof url === 'string' && /^https?:\/\//.test(url),
+      },
+      '../../../src/support/utils.js': { getAccessToken: (...a) => getAccessTokenStub(...a) },
+      '../../../src/support/brand-profile-trigger.js': { triggerBrandProfileAgent: (...a) => triggerBrandProfileAgentStub(...a) },
+      '../../../src/support/access-control-util.js': { default: mockAccessControlNonLlmoAdmin },
+      '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+        Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+      },
+      '@adobe/spacecat-shared-tokowaka-client': {
+        default: { createFrom: () => mockTokowakaClient },
+        calculateForwardedHost: (url) => {
+          const u = new URL(url.startsWith('http') ? url : `https://${url}`);
+          const h = u.hostname;
+          return ((h.match(/\./g) || []).length === 1) ? `www.${h}` : h;
+        },
+      },
+    });
   });
 
   beforeEach(async () => {
@@ -4129,18 +4199,136 @@ describe('LlmoController', () => {
       mockConfig.getFetchConfig = sinon.stub().returns({});
     });
 
-    it('should return 503 when EDGE_OPTIMIZE_CDN_API_BASE_URL is not set', async () => {
-      const ctxWithoutCdnUrl = {
-        ...enableEdgeContext,
-        env: { ...enableEdgeContext.env },
-      };
+    it('returns 503 when EDGE_OPTIMIZE_CDN_API_BASE_URL is not set', async () => {
+      const ctxWithoutCdnUrl = { ...enableEdgeContext, env: { ...enableEdgeContext.env } };
       delete ctxWithoutCdnUrl.env.EDGE_OPTIMIZE_CDN_API_BASE_URL;
-
       const result = await controller.enableEdgeOptimize(ctxWithoutCdnUrl);
-
       expect(result.status).to.equal(503);
-      const responseBody = await result.json();
-      expect(responseBody.message).to.include('not available in this environment');
+      expect((await result.json()).message).to.include('not available in this environment');
+    });
+
+    it('returns 403 when not LLMO administrator', async () => {
+      enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
+      const controllerNonLlmoAdmin = LlmoControllerNonLlmoAdmin(mockContext);
+      const result = await controllerNonLlmoAdmin.enableEdgeOptimize(enableEdgeContext);
+      expect(result.status).to.equal(403);
+      expect((await result.json()).message).to.equal('Only LLMO administrators can enable edge optimize');
+    });
+
+    it('returns 404 when site not found', async () => {
+      enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.enableEdgeOptimize(enableEdgeContext);
+      expect(result.status).to.equal(404);
+      expect((await result.json()).message).to.equal('Site not found');
+    });
+
+    it('returns 403 when user does not have access to site', async () => {
+      enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
+      const result = await controllerWithAccessDenied(mockContext)
+        .enableEdgeOptimize(enableEdgeContext);
+      expect(result.status).to.equal(403);
+      expect((await result.json()).message).to.equal('User does not have access to this site');
+    });
+
+    it('returns token error status/message when getAccessToken fails', async () => {
+      enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
+      const err = new Error('Missing promise token');
+      err.status = 400;
+      getAccessTokenStub.rejects(err);
+      const result = await controller.enableEdgeOptimize(enableEdgeContext);
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.include('Missing promise token');
+    });
+
+    it('returns 401 and default message when getAccessToken throws without status and message', async () => {
+      enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
+      getAccessTokenStub.rejects(Object.assign(new Error(), { message: '', status: undefined }));
+      const result = await controller.enableEdgeOptimize(enableEdgeContext);
+      expect(result.status).to.equal(401);
+      expect((await result.json()).message).to.equal('Missing or invalid promise token');
+    });
+
+    it('returns 400 when site probe returns non-200', async () => {
+      enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
+      getAccessTokenStub.resolves('fake-token');
+      tracingFetchStub.onFirstCall().resolves({ ok: false, status: 404 });
+      const result = await controller.enableEdgeOptimize(enableEdgeContext);
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.include('did not return 200');
+    });
+
+    it('returns 502 when CDN API returns 5xx', async () => {
+      enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
+      getAccessTokenStub.resolves('fake-token');
+      tracingFetchStub.onFirstCall().resolves({ ok: true });
+      tracingFetchStub.onSecondCall().resolves({
+        ok: false,
+        status: 503,
+        statusText: 'X',
+        text: () => Promise.resolve(''),
+      });
+      const result = await controller.enableEdgeOptimize(enableEdgeContext);
+      expect(result.status).to.equal(502);
+      expect((await result.json()).message).to.include('Failed to enable edge optimize');
+    });
+
+    it('returns CDN status when CDN API returns 4xx', async () => {
+      enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
+      getAccessTokenStub.resolves('fake-token');
+      tracingFetchStub.onFirstCall().resolves({ ok: true });
+      tracingFetchStub.onSecondCall().resolves({
+        ok: false,
+        status: 400,
+        statusText: 'X',
+        text: () => Promise.resolve(''),
+      });
+      const result = await controller.enableEdgeOptimize(enableEdgeContext);
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.include('Failed to enable edge optimize');
+    });
+
+    it('returns 200 with enabled and domain when probe and CDN succeed', async () => {
+      enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
+      mockSite.getBaseURL.returns('example.com');
+      mockConfig.getFetchConfig.returns({});
+      getAccessTokenStub.resolves('fake-token');
+      tracingFetchStub.onFirstCall().resolves({ ok: true });
+      tracingFetchStub.onSecondCall().resolves({ ok: true });
+      const result = await controller.enableEdgeOptimize(enableEdgeContext);
+      expect(result.status).to.equal(200);
+      expect(await result.json()).to.deep.equal({ enabled: true, domain: 'www.example.com' });
+      expect(tracingFetchStub.firstCall.args[0]).to.equal('https://example.com');
+    });
+
+    it('returns 200 using overrideBaseURL from site config when valid', async () => {
+      enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
+      mockConfig.getFetchConfig.returns({ overrideBaseURL: 'https://override.example.com' });
+      getAccessTokenStub.resolves('fake-token');
+      tracingFetchStub.onFirstCall().resolves({ ok: true });
+      tracingFetchStub.onSecondCall().resolves({ ok: true });
+      const result = await controller.enableEdgeOptimize(enableEdgeContext);
+      expect(result.status).to.equal(200);
+      expect((await result.json()).domain).to.equal('override.example.com');
+    });
+
+    it('returns 500 on unexpected error', async () => {
+      enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
+      mockDataAccess.Site.findById.rejects(new Error('DB connection failed'));
+      const result = await controller.enableEdgeOptimize(enableEdgeContext);
+      expect(result.status).to.equal(500);
+      expect((await result.json()).message).to.include('DB connection failed');
+    });
+
+    it('returns error.status when thrown error has status property', async () => {
+      enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
+      getAccessTokenStub.resolves('fake-token');
+      const err = new Error('Probe failed');
+      err.status = 418;
+      tracingFetchStub.onFirstCall().rejects(err);
+      const result = await controller.enableEdgeOptimize(enableEdgeContext);
+      expect(result.status).to.equal(418);
+      expect((await result.json()).message).to.equal('Probe failed');
     });
   });
 
