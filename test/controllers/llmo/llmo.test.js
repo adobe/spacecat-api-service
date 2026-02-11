@@ -4195,6 +4195,7 @@ describe('LlmoController', () => {
 
     it('returns 401 when getAccessToken fails', async () => {
       enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
+      tracingFetchStub.onFirstCall().resolves({ ok: true });
       getAccessTokenStub.rejects(new Error('Missing promise token'));
       const result = await controller.enableEdgeOptimize(enableEdgeContext);
       expect(result.status).to.equal(401);
@@ -4203,16 +4204,36 @@ describe('LlmoController', () => {
 
     it('returns 401 when getAccessToken throws without status and message', async () => {
       enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
+      tracingFetchStub.onFirstCall().resolves({ ok: true });
       getAccessTokenStub.rejects(Object.assign(new Error(), { message: '', status: undefined }));
       const result = await controller.enableEdgeOptimize(enableEdgeContext);
       expect(result.status).to.equal(401);
       expect((await result.json()).message).to.equal('Authentication failed with upstream IMS service');
     });
 
+    it('returns 400 when site probe returns non-200', async () => {
+      enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
+      getAccessTokenStub.resolves({ access_token: 'fake-token' });
+      tracingFetchStub.onFirstCall().resolves({ ok: false, status: 404 });
+      const result = await controller.enableEdgeOptimize(enableEdgeContext);
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.include('did not return 200');
+    });
+
+    it('returns 400 when site probe fetch throws', async () => {
+      enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
+      getAccessTokenStub.resolves({ access_token: 'fake-token' });
+      tracingFetchStub.onFirstCall().rejects(new Error('Network error'));
+      const result = await controller.enableEdgeOptimize(enableEdgeContext);
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.equal('Error probing site: Network error');
+    });
+
     it('returns 500 when CDN API returns 503', async () => {
       enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
       getAccessTokenStub.resolves({ access_token: 'fake-token' });
-      tracingFetchStub.onFirstCall().resolves({
+      tracingFetchStub.onFirstCall().resolves({ ok: true });
+      tracingFetchStub.onSecondCall().resolves({
         ok: false,
         status: 503,
         statusText: 'X',
@@ -4226,7 +4247,8 @@ describe('LlmoController', () => {
     it('returns Forbidden when CDN API returns 403', async () => {
       enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
       getAccessTokenStub.resolves({ access_token: 'fake-token' });
-      tracingFetchStub.onFirstCall().resolves({
+      tracingFetchStub.onFirstCall().resolves({ ok: true });
+      tracingFetchStub.onSecondCall().resolves({
         ok: false,
         status: 403,
         statusText: 'X',
@@ -4240,7 +4262,8 @@ describe('LlmoController', () => {
     it('returns Unauthorized when CDN API returns 401', async () => {
       enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
       getAccessTokenStub.resolves({ access_token: 'fake-token' });
-      tracingFetchStub.onFirstCall().resolves({
+      tracingFetchStub.onFirstCall().resolves({ ok: true });
+      tracingFetchStub.onSecondCall().resolves({
         ok: false,
         status: 401,
         statusText: 'X',
@@ -4251,16 +4274,17 @@ describe('LlmoController', () => {
       expect((await result.json()).message).to.equal('User is not authorized to update CDN routing');
     });
 
-    it('returns 200 with enabled and domain when CDN succeed', async () => {
+    it('returns 200 with enabled and domain when probe and CDN succeed', async () => {
       enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
       mockSite.getBaseURL.returns('example.com');
       mockConfig.getFetchConfig.returns({});
       getAccessTokenStub.resolves({ access_token: 'fake-token' });
       tracingFetchStub.onFirstCall().resolves({ ok: true });
+      tracingFetchStub.onSecondCall().resolves({ ok: true });
       const result = await controller.enableEdgeOptimize(enableEdgeContext);
       expect(result.status).to.equal(200);
       expect(await result.json()).to.deep.equal({ enabled: true, domain: 'www.example.com' });
-      expect(tracingFetchStub.firstCall.args[0]).to.equal('https://internal-cdn.example.com/www.example.com/edgeoptimize');
+      expect(tracingFetchStub.firstCall.args[0]).to.equal('https://example.com');
     });
 
     it('defaults enabled to true when context.data is undefined', async () => {
@@ -4268,10 +4292,11 @@ describe('LlmoController', () => {
       ctxNoData.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
       getAccessTokenStub.resolves({ access_token: 'fake-token' });
       tracingFetchStub.onFirstCall().resolves({ ok: true });
+      tracingFetchStub.onSecondCall().resolves({ ok: true });
       const result = await controller.enableEdgeOptimize(ctxNoData);
       expect(result.status).to.equal(200);
       expect(await result.json()).to.deep.equal({ enabled: true, domain: 'www.example.com' });
-      expect(tracingFetchStub.firstCall.args[1].body).to.equal(JSON.stringify({ enabled: true }));
+      expect(tracingFetchStub.secondCall.args[1].body).to.equal(JSON.stringify({ enabled: true }));
     });
 
     it('returns 200 using overrideBaseURL from site config when valid', async () => {
@@ -4279,6 +4304,7 @@ describe('LlmoController', () => {
       mockConfig.getFetchConfig.returns({ overrideBaseURL: 'https://override.example.com' });
       getAccessTokenStub.resolves({ access_token: 'fake-token' });
       tracingFetchStub.onFirstCall().resolves({ ok: true });
+      tracingFetchStub.onSecondCall().resolves({ ok: true });
       const result = await controller.enableEdgeOptimize(enableEdgeContext);
       expect(result.status).to.equal(200);
       expect((await result.json()).domain).to.equal('override.example.com');
@@ -4289,18 +4315,20 @@ describe('LlmoController', () => {
       enableEdgeContext.data = { enabled: false };
       getAccessTokenStub.resolves({ access_token: 'fake-token' });
       tracingFetchStub.onFirstCall().resolves({ ok: true });
+      tracingFetchStub.onSecondCall().resolves({ ok: true });
       const result = await controller.enableEdgeOptimize(enableEdgeContext);
       expect(result.status).to.equal(200);
       expect(await result.json()).to.deep.equal({ enabled: false, domain: 'www.example.com' });
-      expect(tracingFetchStub.firstCall.args[1].body).to.equal(JSON.stringify({ enabled: false }));
+      expect(tracingFetchStub.secondCall.args[1].body).to.equal(JSON.stringify({ enabled: false }));
     });
 
     it('returns error.status when thrown error has status property', async () => {
       enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
       getAccessTokenStub.resolves({ access_token: 'fake-token' });
+      tracingFetchStub.onFirstCall().resolves({ ok: true });
       const err = new Error('CDN request failed');
       err.status = 418;
-      tracingFetchStub.onFirstCall().rejects(err);
+      tracingFetchStub.onSecondCall().rejects(err);
       const result = await controller.enableEdgeOptimize(enableEdgeContext);
       expect(result.status).to.equal(418);
       expect((await result.json()).message).to.equal('CDN request failed');
@@ -4309,7 +4337,8 @@ describe('LlmoController', () => {
     it('returns 500 when unexpected error has no status property', async () => {
       enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
       getAccessTokenStub.resolves({ access_token: 'fake-token' });
-      tracingFetchStub.onFirstCall().rejects(new Error('Network error'));
+      tracingFetchStub.onFirstCall().resolves({ ok: true });
+      tracingFetchStub.onSecondCall().rejects(new Error('Network error'));
       const result = await controller.enableEdgeOptimize(enableEdgeContext);
       expect(result.status).to.equal(500);
       expect((await result.json()).message).to.equal('Network error');

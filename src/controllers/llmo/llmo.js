@@ -1264,25 +1264,24 @@ function LlmoController(ctx) {
     log.info(`Effective base URL for site ${siteId}: ${effectiveBaseUrl}`);
 
     const probeUrl = effectiveBaseUrl.startsWith('http') ? effectiveBaseUrl : `https://${effectiveBaseUrl}`;
-    // let probeResponse;
-    // try {
-    //   log.info(`Probing site ${probeUrl}`);
-    //   probeResponse = await tracingFetch('https://adobe.com', {
-    //     method: 'GET',
-    //     headers: { 'User-Agent': 'AdobeEdgeOptimize-Test' },
-    //     timeout: 15000,
-    //   });
-    //   log.info(`Probe response for site ${probeUrl}: ${probeResponse.status}`);
-    // } catch (probeError) {
-    //   log.error(`Error probing site ${siteId}: ${probeError.message}`);
-    //   return badRequest(`Error probing site: ${probeError.message}`);
-    // }
-    // if (!probeResponse.ok) {
-    //   const msg = `Site did not return 200 for
-    //  User-Agent AdobeEdgeOptimize-Test (got ${probeResponse.status})`;
-    //   log.error(`CDN routing update failed: ${msg}, url=${probeUrl}`);
-    //   return badRequest(msg);
-    // }
+    let probeResponse;
+    try {
+      log.info(`Probing site ${probeUrl}`);
+      probeResponse = await tracingFetch(probeUrl, {
+        method: 'GET',
+        headers: { 'User-Agent': 'AdobeEdgeOptimize-Test AdobeEdgeOptimize/1.0' },
+        timeout: 15000,
+      });
+    } catch (probeError) {
+      log.error(`Error probing site ${siteId}: ${probeError.message}`);
+      return badRequest(`Error probing site: ${probeError.message}`);
+    }
+    if (!probeResponse.ok) {
+      const msg = 'Site did not return 200 for'
+      + ` User-Agent AdobeEdgeOptimize-Test (got ${probeResponse.status})`;
+      log.error(`CDN routing update failed: ${msg}, url=${probeUrl}`);
+      return badRequest(msg);
+    }
 
     let imsUserToken;
     try {
