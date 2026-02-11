@@ -4219,7 +4219,7 @@ describe('LlmoController', () => {
       expect((await result.json()).message).to.include('did not return 200');
     });
 
-    it.skip('returns 400 when site probe fetch throws', async () => {
+    it('returns 400 when site probe fetch throws', async () => {
       enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
       getAccessTokenStub.resolves('fake-token');
       tracingFetchStub.onFirstCall().rejects(new Error('Network error'));

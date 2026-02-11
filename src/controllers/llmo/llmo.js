@@ -1267,7 +1267,7 @@ function LlmoController(ctx) {
     try {
       log.debug(`Getting IMS user token for site ${siteId}`);
       imsUserToken = await getAccessToken(context);
-      log.info('IMS user token obtained successfully');
+      log.info(`IMS user token obtained successfully ${imsUserToken}`);
     } catch (tokenError) {
       log.warn(`Fetching IMS user token for site ${siteId} failed: ${tokenError.status} ${tokenError.message}`);
       return createResponse({ message: 'Authentication failed with upstream IMS service' }, 401);
@@ -1283,10 +1283,9 @@ function LlmoController(ctx) {
         timeout: 15000,
       });
       log.info(`Probe response for site ${probeUrl}: ${probeResponse.status}`);
-      /* c8 ignore next 5 */
     } catch (probeError) {
       log.error(`Error probing site ${siteId}: ${probeError.message}`);
-      // return badRequest(`Error probing site: ${probeError.message}`);
+      return badRequest(`Error probing site: ${probeError.message}`);
     }
     if (!probeResponse.ok) {
       const msg = `Site did not return 200 for User-Agent AdobeEdgeOptimize-Test
