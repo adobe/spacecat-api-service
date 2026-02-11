@@ -289,6 +289,22 @@ describe('Sites Controller', () => {
     expect(site).to.have.property('id', SITE_IDS[0]);
   });
 
+  it('creates a site with normalized baseURL when URL needs normalization', async () => {
+    mockDataAccess.Site.findByBaseURL.resolves(null); // No existing site found
+    // Provide URL that needs normalization
+    const response = await sitesController.createSite({ data: { baseURL: 'https://WWW.site1.com/' } });
+
+    // Should check for duplicates with normalized URL
+    expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledOnceWith('https://site1.com');
+
+    // Should create site with normalized URL (context.data.baseURL is overridden)
+    expect(mockDataAccess.Site.create).to.have.been.calledOnce;
+    const createCallArg = mockDataAccess.Site.create.firstCall.args[0];
+    expect(createCallArg).to.have.property('baseURL', 'https://site1.com');
+
+    expect(response.status).to.equal(201);
+  });
+
   it('updates a site', async () => {
     const site = sites[0];
     site.save = sandbox.spy(site.save);

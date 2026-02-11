@@ -122,6 +122,7 @@ function SitesController(ctx, log, env) {
     if (existingSite) {
       return createResponse(SiteDto.toJSON(existingSite), 200);
     }
+    context.data.baseURL = baseURL;
     const site = await Site.create({
       organizationId: env.DEFAULT_ORGANIZATION_ID,
       ...context.data,
