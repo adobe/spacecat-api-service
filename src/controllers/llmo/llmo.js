@@ -1308,9 +1308,15 @@ function LlmoController(ctx) {
       if (!cdnResponse.ok) {
         const body = await cdnResponse.text();
         log.error(`CDN API failed for site ${siteId}, domain ${domain}: ${cdnResponse.status} ${body}`);
+        if (cdnResponse.status === 401 || cdnResponse.status === 403) {
+          return createResponse(
+            { message: 'User is not authorized to update CDN routing' },
+            cdnResponse.status,
+          );
+        }
         return createResponse(
           { message: `Upstream call failed with status ${cdnResponse.status}` },
-          cdnResponse.status >= 500 ? 502 : cdnResponse.status,
+          500,
         );
       }
 

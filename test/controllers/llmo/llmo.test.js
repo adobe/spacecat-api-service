@@ -4228,7 +4228,7 @@ describe('LlmoController', () => {
       expect((await result.json()).message).to.equal('Error probing site: Network error');
     });
 
-    it('returns 502 when CDN API returns 5xx', async () => {
+    it('returns 500 when CDN API returns 503', async () => {
       enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
       getAccessTokenStub.resolves('fake-token');
       tracingFetchStub.onFirstCall().resolves({ ok: true });
@@ -4239,23 +4239,38 @@ describe('LlmoController', () => {
         text: () => Promise.resolve(''),
       });
       const result = await controller.enableEdgeOptimize(enableEdgeContext);
-      expect(result.status).to.equal(502);
-      expect((await result.json()).message).to.include('Upstream call failed with status 503');
+      expect(result.status).to.equal(500);
+      expect((await result.json()).message).to.equal('Upstream call failed with status 503');
     });
 
-    it('returns CDN status when CDN API returns 4xx', async () => {
+    it('returns Forbidden when CDN API returns 403', async () => {
       enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
       getAccessTokenStub.resolves('fake-token');
       tracingFetchStub.onFirstCall().resolves({ ok: true });
       tracingFetchStub.onSecondCall().resolves({
         ok: false,
-        status: 400,
+        status: 403,
         statusText: 'X',
         text: () => Promise.resolve(''),
       });
       const result = await controller.enableEdgeOptimize(enableEdgeContext);
-      expect(result.status).to.equal(400);
-      expect((await result.json()).message).to.include('Upstream call failed with status 400');
+      expect(result.status).to.equal(403);
+      expect((await result.json()).message).to.equal('User is not authorized to update CDN routing');
+    });
+
+    it('returns Unauthorized when CDN API returns 401', async () => {
+      enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
+      getAccessTokenStub.resolves('fake-token');
+      tracingFetchStub.onFirstCall().resolves({ ok: true });
+      tracingFetchStub.onSecondCall().resolves({
+        ok: false,
+        status: 401,
+        statusText: 'X',
+        text: () => Promise.resolve(''),
+      });
+      const result = await controller.enableEdgeOptimize(enableEdgeContext);
+      expect(result.status).to.equal(401);
+      expect((await result.json()).message).to.equal('User is not authorized to update CDN routing');
     });
 
     it('returns 200 with enabled and domain when probe and CDN succeed', async () => {
