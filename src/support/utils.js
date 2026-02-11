@@ -638,6 +638,8 @@ export async function getAccessToken(context) {
   );
 
   const authInfo = context.attributes?.authInfo;
+  const { log } = context;
+  log.info(`Getting access token for authInfo: ${JSON.stringify(authInfo)}`);
   const promiseToken = authInfo.getPromiseToken();
   if (!promiseToken) {
     throw new ErrorWithStatusCode('Missing promise token', STATUS_BAD_REQUEST);
