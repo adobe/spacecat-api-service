@@ -1259,10 +1259,13 @@ function LlmoController(ctx) {
 
       const overrideBaseURL = site.getConfig()?.getFetchConfig?.()?.overrideBaseURL;
       const effectiveBaseUrl = isValidUrl(overrideBaseURL) ? overrideBaseURL : site.getBaseURL();
+      log.info(`Effective base URL for site ${siteId}: ${effectiveBaseUrl}`);
 
       let imsUserToken;
       try {
+        log.info(`Getting IMS user token for site ${siteId}`);
         imsUserToken = await getAccessToken(context);
+        log.info(`IMS user token for site ${siteId}: ${imsUserToken}`);
       } catch (tokenError) {
         log.warn(`Edge optimize enable: token error for site ${siteId}: ${tokenError.message}`);
         const status = tokenError.status || 401;
