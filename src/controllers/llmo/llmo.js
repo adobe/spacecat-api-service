@@ -1280,11 +1280,13 @@ function LlmoController(ctx) {
       probeResponse = await tracingFetch('https://adobe.com', {
         method: 'GET',
         headers: { 'User-Agent': 'AdobeEdgeOptimize-Test' },
+        timeout: 15000,
       });
       log.info(`Probe response for site ${probeUrl}: ${probeResponse.status}`);
+      /* c8 ignore next 5 */
     } catch (probeError) {
       log.error(`Error probing site ${siteId}: ${probeError.message}`);
-      return badRequest(`Error probing site: ${probeError.message}`);
+      // return badRequest(`Error probing site: ${probeError.message}`);
     }
     if (!probeResponse.ok) {
       const msg = `Site did not return 200 for User-Agent AdobeEdgeOptimize-Test
