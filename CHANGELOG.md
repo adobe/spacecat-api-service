@@ -1,3 +1,17 @@
+## [1.313.1](https://github.com/adobe/spacecat-api-service/compare/v1.313.0...v1.313.1) (2026-02-10)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.105.0 ([#1794](https://github.com/adobe/spacecat-api-service/issues/1794)) ([cc1bb33](https://github.com/adobe/spacecat-api-service/commit/cc1bb3317d210ff82c350932eb6bc0ebeffc6655))
+
+# [1.313.0](https://github.com/adobe/spacecat-api-service/compare/v1.312.3...v1.313.0) (2026-02-10)
+
+
+### Features
+
+* Add support for ignored prompts in LLMO config ([#1793](https://github.com/adobe/spacecat-api-service/issues/1793)) ([8b14271](https://github.com/adobe/spacecat-api-service/commit/8b14271205de25a3ded94c90236b74715eb9e4b6))
+
 ## [1.312.3](https://github.com/adobe/spacecat-api-service/compare/v1.312.2...v1.312.3) (2026-02-09)
 
 
