@@ -109,11 +109,6 @@ function SitesController(ctx, log, env) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
-   * Creates a site. The site ID is generated automatically.
-   * @param {object} context - Context of the request.
-   * @return {Promise<Response>} Site response.
-   */
-  /**
    * Creates a new site or returns an existing one if a site with the same baseURL already exists.
    * Implements idempotent-create semantics.
    *
