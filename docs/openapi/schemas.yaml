@@ -4530,6 +4530,98 @@ LlmoConfig:
           description: Array of competitor configurations
           items:
             $ref: '#/LlmoCompetitor'
+    deleted:
+      type: object
+      description: Deleted prompts configuration
+      properties:
+        prompts:
+          type: object
+          description: A record of deleted prompts keyed by UUID
+          additionalProperties:
+            $ref: '#/LlmoDeletedPrompt'
+    ignored:
+      type: object
+      description: Ignored prompts configuration
+      properties:
+        prompts:
+          type: object
+          description: A record of ignored prompts keyed by UUID
+          additionalProperties:
+            $ref: '#/LlmoIgnoredPrompt'
+  additionalProperties: true
+
+LlmoDeletedPrompt:
+  type: object
+  description: A deleted prompt entry in the LLMO configuration
+  required:
+    - prompt
+    - regions
+    - origin
+    - source
+    - topic
+    - category
+  properties:
+    prompt:
+      type: string
+      description: The prompt text
+      minLength: 1
+    regions:
+      type: array
+      description: Array of two-letter region codes
+      items:
+        type: string
+        pattern: '^[a-z][a-z]$'
+    origin:
+      type: string
+      description: The origin of the prompt (human, ai, or custom)
+    source:
+      type: string
+      description: The source of the prompt (config, api, or custom)
+    topic:
+      type: string
+      description: The topic name this prompt belonged to
+      minLength: 1
+    category:
+      type: string
+      description: The category name this prompt belonged to
+      minLength: 1
+    categoryId:
+      type: string
+      format: uuid
+      description: Optional UUID of the category
+    updatedBy:
+      type: string
+      description: The user who last updated this entry
+    updatedAt:
+      type: string
+      description: ISO timestamp of the last update
+  additionalProperties: true
+
+LlmoIgnoredPrompt:
+  type: object
+  description: An ignored prompt entry in the LLMO configuration
+  required:
+    - prompt
+    - region
+    - source
+  properties:
+    prompt:
+      type: string
+      description: The prompt text
+      minLength: 1
+    region:
+      type: string
+      pattern: '^[a-z][a-z]$'
+      description: Two-letter region code
+    source:
+      type: string
+      description: The source of the prompt (gsc or custom)
+    updatedBy:
+      type: string
+      description: The user who last updated this entry
+    updatedAt:
+      type: string
+      description: ISO timestamp of the last update
   additionalProperties: true
 
 LlmoEntity:
