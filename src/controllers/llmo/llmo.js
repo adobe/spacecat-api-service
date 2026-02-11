@@ -1267,7 +1267,7 @@ function LlmoController(ctx) {
     try {
       log.debug(`Getting IMS user token for site ${siteId}`);
       imsUserToken = await getAccessToken(context);
-      log.info(`IMS user token obtained successfully ${imsUserToken}`);
+      log.info(`IMS user token obtained successfully ${JSON.stringify(imsUserToken)}`);
     } catch (tokenError) {
       log.warn(`Fetching IMS user token for site ${siteId} failed: ${tokenError.status} ${tokenError.message}`);
       return createResponse({ message: 'Authentication failed with upstream IMS service' }, 401);
