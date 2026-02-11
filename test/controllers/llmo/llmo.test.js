@@ -4155,7 +4155,7 @@ describe('LlmoController', () => {
     });
 
     it('returns 503 when EDGE_OPTIMIZE_CDN_API_BASE_URL is not set', async () => {
-      const ctxWithoutCdnUrl = { ...enableEdgeContext, env: { ENV: 'dev' } };
+      const ctxWithoutCdnUrl = { ...enableEdgeContext, env: { ENV: 'prod' } };
       const result = await controller.enableEdgeOptimize(ctxWithoutCdnUrl);
       expect(result.status).to.equal(503);
       expect((await result.json()).message).to.include('API is missing mandatory environment variable');
