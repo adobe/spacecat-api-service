@@ -113,21 +113,48 @@ function SitesController(ctx, log, env) {
    * @param {object} context - Context of the request.
    * @return {Promise<Response>} Site response.
    */
+  /**
+   * Creates a new site or returns an existing one if a site with the same baseURL already exists.
+   * Implements idempotent-create semantics.
+   *
+   * Design Decision: Returns HTTP 200 (not 409 Conflict) for duplicates
+   * Rationale:
+   * - Follows idempotent-create pattern: same request yields same result
+   * - Allows safe retries without client-side duplicate detection logic
+   * - 200 indicates "request succeeded, here's the site you asked for"
+   * - 409 would require clients to handle conflict errors and retry with GET
+   * - Common pattern in APIs prioritizing developer experience (e.g., Stripe, GitHub)
+   *
+   * Alternative: If strict REST semantics are preferred, 409 Conflict is also valid.
+   *
+   * @param {object} context - Request context containing site data
+   * @returns {Promise<Response>} HTTP 200 with existing site or 201 with new site
+   */
   const createSite = async (context) => {
     if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can create new sites');
     }
-    const baseURL = composeBaseURL(context.data.baseURL);
-    const existingSite = await Site.findByBaseURL(baseURL);
-    if (existingSite) {
-      return createResponse(SiteDto.toJSON(existingSite), 200);
+    if (!hasText(context.data?.baseURL)) {
+      return badRequest('Base URL required');
     }
-    context.data.baseURL = baseURL;
-    const site = await Site.create({
-      organizationId: env.DEFAULT_ORGANIZATION_ID,
-      ...context.data,
-    });
-    return createResponse(SiteDto.toJSON(site), 201);
+    try {
+      const baseURL = composeBaseURL(context.data.baseURL);
+      const existingSite = await Site.findByBaseURL(baseURL);
+      if (existingSite) {
+        // Idempotent behavior: return existing site with 200 (not 409)
+        log.info(`Site already exists for baseURL: ${baseURL}, returning existing site ${existingSite.getId()}`);
+        return createResponse(SiteDto.toJSON(existingSite), 200);
+      }
+      const site = await Site.create({
+        organizationId: env.DEFAULT_ORGANIZATION_ID,
+        ...context.data,
+        baseURL, // override with normalized value
+      });
+      return createResponse(SiteDto.toJSON(site), 201);
+    } catch (error) {
+      log.error(`Error creating site: ${error.message}`, error);
+      return internalServerError('Failed to create site');
+    }
   };
 
   /**

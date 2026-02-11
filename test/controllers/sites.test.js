@@ -165,6 +165,9 @@ describe('Sites Controller', () => {
         allByDeliveryType: sandbox.stub().resolves(sites),
         allWithLatestAudit: sandbox.stub().resolves(sites),
         create: sandbox.stub().resolves(sites[0]),
+        // NOTE: findByBaseURL defaults to returning sites[0] (existing site).
+        // eslint-disable-next-line max-len
+        // Tests calling createSite should override this with .resolves(null) to test site creation path.
         findByBaseURL: sandbox.stub().resolves(sites[0]),
         findById: sandbox.stub().resolves(sites[0]),
       },
@@ -263,6 +266,39 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Only admins can create new sites');
   });
 
+  it('returns bad request when creating a site without baseURL', async () => {
+    const response = await sitesController.createSite({ data: {} });
+
+    expect(mockDataAccess.Site.findByBaseURL).to.have.not.been.called;
+    expect(mockDataAccess.Site.create).to.have.not.been.called;
+    expect(response.status).to.equal(400);
+
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Base URL required');
+  });
+
+  it('returns bad request when creating a site with null baseURL', async () => {
+    const response = await sitesController.createSite({ data: { baseURL: null } });
+
+    expect(mockDataAccess.Site.findByBaseURL).to.have.not.been.called;
+    expect(mockDataAccess.Site.create).to.have.not.been.called;
+    expect(response.status).to.equal(400);
+
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Base URL required');
+  });
+
+  it('returns bad request when creating a site with empty string baseURL', async () => {
+    const response = await sitesController.createSite({ data: { baseURL: '' } });
+
+    expect(mockDataAccess.Site.findByBaseURL).to.have.not.been.called;
+    expect(mockDataAccess.Site.create).to.have.not.been.called;
+    expect(response.status).to.equal(400);
+
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Base URL required');
+  });
+
   it('returns existing site when creating a site with duplicate baseURL', async () => {
     // findByBaseURL is already stubbed to return sites[0] in beforeEach
     const response = await sitesController.createSite({ data: { baseURL: 'https://site1.com' } });
@@ -303,6 +339,23 @@ describe('Sites Controller', () => {
     expect(createCallArg).to.have.property('baseURL', 'https://site1.com');
 
     expect(response.status).to.equal(201);
+  });
+
+  it('handles database errors when checking for duplicate baseURL', async () => {
+    const dbError = new Error('Database connection failed');
+    mockDataAccess.Site.findByBaseURL.rejects(dbError);
+
+    const response = await sitesController.createSite({ data: { baseURL: 'https://site1.com' } });
+
+    // Should attempt to check for duplicates
+    expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledOnceWith('https://site1.com');
+    // Should not attempt to create site if findByBaseURL throws
+    expect(mockDataAccess.Site.create).to.have.not.been.called;
+    // Should return internal server error
+    expect(response.status).to.equal(500);
+
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Failed to create site');
   });
 
   it('updates a site', async () => {

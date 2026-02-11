@@ -75,7 +75,18 @@ sites:
       - site
     summary: Create a new site
     description: |
-      This endpoint is useful for creating a new site.
+      Creates a new site with the provided details. This endpoint implements idempotent-create semantics:
+      - If a site with the same baseURL already exists (after normalization), returns the existing site with HTTP 200
+      - If no site exists, creates a new site and returns it with HTTP 201
+      
+      The baseURL is normalized before duplicate checking:
+      - Converted to lowercase
+      - www prefix removed
+      - Trailing slashes removed
+      - Port numbers removed
+      - Schema prepended if missing
+      
+      This idempotent behavior allows clients to safely retry site creation requests without creating duplicates.
     operationId: createSite
     requestBody:
       required: true
@@ -84,14 +95,24 @@ sites:
           schema:
             $ref: './schemas.yaml#/SiteCreate'
     responses:
+      '200':
+        description: Site already exists - returning existing site (idempotent behavior)
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/Site'
       '201':
         description: Site created successfully
         content:
           application/json:
             schema:
               $ref: './schemas.yaml#/Site'
+      '400':
+        $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
       '500':
         $ref: './responses.yaml#/500'
     security:
