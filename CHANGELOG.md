@@ -1,3 +1,10 @@
+# [1.314.0](https://github.com/adobe/spacecat-api-service/compare/v1.313.4...v1.314.0) (2026-02-11)
+
+
+### Features
+
+* remove the sitemap audit from the "paid" config ([#1803](https://github.com/adobe/spacecat-api-service/issues/1803)) ([6f22f4f](https://github.com/adobe/spacecat-api-service/commit/6f22f4f9fd77b12b4b455d2335fb8d03512ef283))
+
 ## [1.313.4](https://github.com/adobe/spacecat-api-service/compare/v1.313.3...v1.313.4) (2026-02-11)
 
 
