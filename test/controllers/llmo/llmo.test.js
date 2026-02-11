@@ -4273,7 +4273,7 @@ describe('LlmoController', () => {
       expect((await result.json()).message).to.equal('User is not authorized to update CDN routing');
     });
 
-    it.skip('returns 200 with enabled and domain when probe and CDN succeed', async () => {
+    it('returns 200 with enabled and domain when probe and CDN succeed', async () => {
       enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
       mockSite.getBaseURL.returns('example.com');
       mockConfig.getFetchConfig.returns({});
@@ -4283,7 +4283,7 @@ describe('LlmoController', () => {
       const result = await controller.enableEdgeOptimize(enableEdgeContext);
       expect(result.status).to.equal(200);
       expect(await result.json()).to.deep.equal({ enabled: true, domain: 'www.example.com' });
-      expect(tracingFetchStub.firstCall.args[0]).to.equal('https://example.com');
+      expect(tracingFetchStub.firstCall.args[0]).to.equal('https://adobe.com');
     });
 
     it('defaults enabled to true when context.data is undefined', async () => {

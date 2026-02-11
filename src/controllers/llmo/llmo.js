@@ -1277,7 +1277,7 @@ function LlmoController(ctx) {
     let probeResponse;
     try {
       log.info(`Probing site ${probeUrl}`);
-      probeResponse = await tracingFetch('https://www.adobe.com', {
+      probeResponse = await tracingFetch('https://adobe.com', {
         method: 'GET',
         headers: { 'User-Agent': 'AdobeEdgeOptimize-Test' },
       });
