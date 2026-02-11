@@ -4272,6 +4272,15 @@ describe('LlmoController', () => {
       expect((await result.json()).message).to.include('did not return 200');
     });
 
+    it('returns 400 when site probe fetch throws', async () => {
+      enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
+      getAccessTokenStub.resolves('fake-token');
+      tracingFetchStub.onFirstCall().rejects(new Error('Network error'));
+      const result = await controller.enableEdgeOptimize(enableEdgeContext);
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.equal('Error probing site: Network error');
+    });
+
     it('returns 502 when CDN API returns 5xx', async () => {
       enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
       getAccessTokenStub.resolves('fake-token');
@@ -4337,12 +4346,13 @@ describe('LlmoController', () => {
     it('returns error.status when thrown error has status property', async () => {
       enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
       getAccessTokenStub.resolves('fake-token');
-      const err = new Error('Probe failed');
+      tracingFetchStub.onFirstCall().resolves({ ok: true });
+      const err = new Error('CDN request failed');
       err.status = 418;
-      tracingFetchStub.onFirstCall().rejects(err);
+      tracingFetchStub.onSecondCall().rejects(err);
       const result = await controller.enableEdgeOptimize(enableEdgeContext);
       expect(result.status).to.equal(418);
-      expect((await result.json()).message).to.equal('Probe failed');
+      expect((await result.json()).message).to.equal('CDN request failed');
     });
   });
 

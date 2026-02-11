@@ -1429,7 +1429,7 @@ site-llmo-edge-optimize-config:
     security:
       - ims_key: [ ]
 
-site-llmo-edge-optimize-enable:
+site-llmo-edge-optimize:
   parameters:
     - $ref: './parameters.yaml#/siteId'
   post:

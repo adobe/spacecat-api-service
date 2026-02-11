@@ -1213,7 +1213,7 @@ function LlmoController(ctx) {
   };
 
   /**
-   * POST /sites/{siteId}/llmo/edge-optimize-enable
+   * POST /sites/{siteId}/llmo/edge-optimize
    * Enables edge optimize for the site via the internal CDN API.
    * - Probes the site with User-Agent AdobeEdgeOptimize-Test (must return 200)
    * - Calls internal CDN API to enable edge optimize for the domain
@@ -1273,11 +1273,18 @@ function LlmoController(ctx) {
       }
 
       const probeUrl = effectiveBaseUrl.startsWith('http') ? effectiveBaseUrl : `https://${effectiveBaseUrl}`;
-      log.info(`Probing site ${siteId} at ${probeUrl}`);
-      const probeResponse = await fetch(probeUrl, {
-        method: 'GET',
-        headers: { 'User-Agent': 'AdobeEdgeOptimize-Test' },
-      });
+      let probeResponse;
+      try {
+        log.info(`Probing site ${siteId} at ${probeUrl}`);
+        probeResponse = await fetch(probeUrl, {
+          method: 'GET',
+          headers: { 'User-Agent': 'AdobeEdgeOptimize-Test' },
+        });
+        log.info(`Probe response for site ${siteId}: ${probeResponse.status}`);
+      } catch (probeError) {
+        log.error(`Error probing site ${siteId}: ${probeError.status} ${probeError.message}`);
+        return badRequest(`Error probing site: ${probeError.message}`);
+      }
       if (!probeResponse.ok) {
         const msg = `Site did not return 200 for User-Agent AdobeEdgeOptimize-Test (got ${probeResponse.status})`;
         log.warn(`Edge optimize enable: ${msg}, url=${probeUrl}`);

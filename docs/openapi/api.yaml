@@ -446,8 +446,8 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-config'
   /sites/{siteId}/llmo/edge-optimize-status:
     $ref: './llmo-api.yaml#/llmo-edge-optimize-status'
-  /sites/{siteId}/llmo/edge-optimize-enable:
-    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-enable'
+  /sites/{siteId}/llmo/edge-optimize:
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize'
   /sites/{siteId}/llmo/strategy:
     $ref: './llmo-api.yaml#/llmo-strategy'
   /sites/{siteId}/reports:

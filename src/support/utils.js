@@ -628,7 +628,7 @@ export async function getIMSPromiseToken(context) {
 /**
  * Get the access token from the Promise Token in authInfo of context.
  * @param {object} context - The context of the request.
- * @returns {string} accessToken - The access token.
+ * @returns {Promise<string>} The access token.
  * @throws {ErrorWithStatusCode} - If the promise token is missing.
  */
 export async function getAccessToken(context) {
