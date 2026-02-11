@@ -4112,6 +4112,38 @@ describe('LlmoController', () => {
     });
   });
 
+  describe('enableEdgeOptimize', () => {
+    let enableEdgeContext;
+    const validSiteId = '12345678-1234-4123-8123-123456789012';
+
+    beforeEach(() => {
+      enableEdgeContext = {
+        ...mockContext,
+        params: { siteId: validSiteId },
+        data: {},
+      };
+      mockDataAccess.Site.findById.resetBehavior();
+      mockDataAccess.Site.findById.resolves(mockSite);
+      mockSite.getBaseURL = sinon.stub().returns('https://example.com');
+      mockSite.getConfig = sinon.stub().returns(mockConfig);
+      mockConfig.getFetchConfig = sinon.stub().returns({});
+    });
+
+    it('should return 503 when EDGE_OPTIMIZE_CDN_API_BASE_URL is not set', async () => {
+      const ctxWithoutCdnUrl = {
+        ...enableEdgeContext,
+        env: { ...enableEdgeContext.env },
+      };
+      delete ctxWithoutCdnUrl.env.EDGE_OPTIMIZE_CDN_API_BASE_URL;
+
+      const result = await controller.enableEdgeOptimize(ctxWithoutCdnUrl);
+
+      expect(result.status).to.equal(503);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('not available in this environment');
+    });
+  });
+
   describe('checkEdgeOptimizeStatus', () => {
     let edgeStatusContext;
     const validSiteId = '12345678-1234-4123-8123-123456789012';

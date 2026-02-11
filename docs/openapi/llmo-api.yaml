@@ -1429,6 +1429,68 @@ site-llmo-edge-optimize-config:
     security:
       - ims_key: [ ]
 
+site-llmo-edge-optimize-enable:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    operationId: enableEdgeOptimize
+    summary: Enable edge optimize for a site via internal CDN API
+    description: |
+      Probes the site with User-Agent `AdobeEdgeOptimize-Test` (must return 200), then calls the internal
+      CDN API to enable edge optimize for the domain. The domain is derived from the site base URL
+      (or optional overrideBaseUrl) using the same logic as forwarded-host (e.g. bare domain → www).
+    tags:
+      - llmo
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              overrideBaseUrl:
+                type: string
+                format: uri
+                description: Optional base URL to use instead of site base URL (and for domain resolution)
+    responses:
+      '200':
+        description: Edge optimize enabled successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled, domain]
+              properties:
+                enabled:
+                  type: boolean
+                  example: true
+                domain:
+                  type: string
+                  example: www.example.com
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '502':
+        description: CDN API or token exchange failed
+      '503':
+        description: Not available in this environment (e.g. dev)
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]
+
 llmo-strategy:
   parameters:
     - $ref: './parameters.yaml#/siteId'

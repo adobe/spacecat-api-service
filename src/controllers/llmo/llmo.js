@@ -23,12 +23,14 @@ import {
   llmoStrategy,
   schemas,
   composeBaseURL,
+  isValidUrl,
 } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
-import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
+import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { getAccessToken } from '../../support/utils.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import {
   applyFilters,
@@ -1209,6 +1211,97 @@ function LlmoController(ctx) {
     }
   };
 
+  /**
+   * POST /sites/{siteId}/llmo/edge-optimize-enable
+   * Enables edge optimize for the site via the internal CDN API.
+   * - Probes the site with User-Agent AdobeEdgeOptimize-Test (must return 200)
+   * - Calls internal CDN API to enable edge optimize for the domain
+   * Only available when EDGE_OPTIMIZE_CDN_API_BASE_URL is set (e.g. prod). Disabled in dev.
+   * Requires authInfo profile.promiseToken to exchange for IMS user token.
+   * @param {object} context - Request context
+   * @returns {Promise<Response>}
+   */
+  const enableEdgeOptimize = async (context) => {
+    const { log, dataAccess, env } = context;
+    const { siteId } = context.params;
+    const { Site } = dataAccess;
+
+    const cdnApiBaseUrl = env?.EDGE_OPTIMIZE_CDN_API_BASE_URL;
+    if (!cdnApiBaseUrl) {
+      log.info('Edge optimize enable skipped: EDGE_OPTIMIZE_CDN_API_BASE_URL not set (e.g. dev environment)');
+      return createResponse(
+        { message: 'Edge optimize enable is not available in this environment' },
+        503,
+      );
+    }
+
+    try {
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can enable edge optimize');
+      }
+
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('User does not have access to this site');
+      }
+
+      const overrideBaseURL = site.getConfig()?.getFetchConfig?.()?.overrideBaseURL;
+      const effectiveBaseUrl = isValidUrl(overrideBaseURL) ? overrideBaseURL : site.getBaseURL();
+
+      let imsUserToken;
+      try {
+        imsUserToken = await getAccessToken(context);
+      } catch (tokenError) {
+        log.warn(`Edge optimize enable: token error for site ${siteId}: ${tokenError.message}`);
+        const status = tokenError.status || 401;
+        return createResponse({ message: tokenError.message || 'Missing or invalid promise token' }, status);
+      }
+
+      const probeUrl = effectiveBaseUrl.startsWith('http') ? effectiveBaseUrl : `https://${effectiveBaseUrl}`;
+      const probeResponse = await fetch(probeUrl, {
+        method: 'GET',
+        headers: { 'User-Agent': 'AdobeEdgeOptimize-Test' },
+      });
+      if (!probeResponse.ok) {
+        const msg = `Site did not return 200 for User-Agent AdobeEdgeOptimize-Test (got ${probeResponse.status})`;
+        log.warn(`Edge optimize enable: ${msg}, url=${probeUrl}`);
+        return badRequest(msg);
+      }
+
+      const domain = calculateForwardedHost(probeUrl, log);
+      const cdnUrl = `${cdnApiBaseUrl.replace(/\/+$/, '')}/${domain}/edgeoptimize`;
+      const cdnResponse = await fetch(cdnUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${imsUserToken}`,
+        },
+        body: JSON.stringify({ enabled: true }),
+      });
+
+      if (!cdnResponse.ok) {
+        const body = await cdnResponse.text();
+        log.error(`Edge optimize CDN API failed for site ${siteId}, domain ${domain}: ${cdnResponse.status} ${body}`);
+        return createResponse(
+          { message: `Failed to enable edge optimize: ${cdnResponse.status} ${body || cdnResponse.statusText}` },
+          cdnResponse.status >= 500 ? 502 : cdnResponse.status,
+        );
+      }
+
+      log.info(`Edge optimize enabled for site ${siteId}, domain ${domain}`);
+      return ok({ enabled: true, domain });
+    } catch (error) {
+      log.error(`Edge optimize enable failed for site ${siteId}: ${error.message}`);
+      if (error.status) {
+        return createResponse({ message: error.message }, error.status);
+      }
+      return internalServerError(error.message);
+    }
+  };
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -1234,6 +1327,7 @@ function LlmoController(ctx) {
     getStrategy,
     saveStrategy,
     checkEdgeOptimizeStatus,
+    enableEdgeOptimize,
   };
 }
 
