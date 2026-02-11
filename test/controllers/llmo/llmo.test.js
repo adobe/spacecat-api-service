@@ -265,6 +265,7 @@ describe('LlmoController', () => {
         brandAliases: { total: 0, modified: 0 },
         competitors: { total: 0, modified: 0 },
         deletedPrompts: { total: 0, modified: 0 },
+        ignoredPrompts: { total: 0, modified: 0 },
         categoryUrls: { total: 0 },
       },
     }));
@@ -1514,6 +1515,7 @@ describe('LlmoController', () => {
           brandAliases: { total: 1, modified: 1 },
           competitors: { total: 1, modified: 1 },
           deletedPrompts: { total: 2, modified: 2 },
+          ignoredPrompts: { total: 1, modified: 1 },
           categoryUrls: { total: 2 },
         },
       }));
@@ -1609,6 +1611,7 @@ describe('LlmoController', () => {
           brandAliases: { total: 0, modified: 0 },
           competitors: { total: 0, modified: 0 },
           deletedPrompts: { total: 0, modified: 0 },
+          ignoredPrompts: { total: 0, modified: 0 },
           categoryUrls: { total: 4 },
         },
       }));
@@ -1646,6 +1649,7 @@ describe('LlmoController', () => {
           brandAliases: { total: 0, modified: 0 },
           competitors: { total: 0, modified: 0 },
           deletedPrompts: { total: 0, modified: 0 },
+          ignoredPrompts: { total: 0, modified: 0 },
           categoryUrls: { total: 0 },
         },
       }));
@@ -1687,6 +1691,7 @@ describe('LlmoController', () => {
           brandAliases: { total: 0, modified: 0 },
           competitors: { total: 0, modified: 0 },
           deletedPrompts: { total: 0, modified: 0 },
+          ignoredPrompts: { total: 0, modified: 0 },
           categoryUrls: { total: 0 },
         },
       }));
