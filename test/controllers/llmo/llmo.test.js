@@ -4306,14 +4306,6 @@ describe('LlmoController', () => {
       expect(tracingFetchStub.secondCall.args[1].body).to.equal(JSON.stringify({ enabled: false }));
     });
 
-    it('returns 500 on unexpected error', async () => {
-      enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
-      mockDataAccess.Site.findById.rejects(new Error('DB connection failed'));
-      const result = await controller.enableEdgeOptimize(enableEdgeContext);
-      expect(result.status).to.equal(500);
-      expect((await result.json()).message).to.include('DB connection failed');
-    });
-
     it('returns error.status when thrown error has status property', async () => {
       enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
       getAccessTokenStub.resolves('fake-token');
@@ -4324,6 +4316,16 @@ describe('LlmoController', () => {
       const result = await controller.enableEdgeOptimize(enableEdgeContext);
       expect(result.status).to.equal(418);
       expect((await result.json()).message).to.equal('CDN request failed');
+    });
+
+    it('returns 500 when unexpected error has no status property', async () => {
+      enableEdgeContext.env.EDGE_OPTIMIZE_CDN_API_BASE_URL = 'https://internal-cdn.example.com';
+      getAccessTokenStub.resolves('fake-token');
+      tracingFetchStub.onFirstCall().resolves({ ok: true });
+      tracingFetchStub.onSecondCall().rejects(new Error('Network error'));
+      const result = await controller.enableEdgeOptimize(enableEdgeContext);
+      expect(result.status).to.equal(500);
+      expect((await result.json()).message).to.equal('Network error');
     });
   });
 

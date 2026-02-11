@@ -1434,11 +1434,19 @@ site-llmo-edge-optimize-cdn-routing:
     - $ref: './parameters.yaml#/siteId'
   post:
     operationId: enableEdgeOptimize
-    summary: Enable edge optimize for a site via internal CDN API
+    summary: Update edge optimize CDN routing for a site
     description: |
-      Probes the site with User-Agent `AdobeEdgeOptimize-Test` (must return 200), then calls the internal
-      CDN API to enable edge optimize for the domain. The domain is derived from the site base URL
-      (or optional overrideBaseUrl) using the same logic as forwarded-host (e.g. bare domain → www).
+      Updates edge optimize CDN routing for the site via the internal CDN API. Only available when
+      EDGE_OPTIMIZE_CDN_API_BASE_URL is set and ENV is prod.
+
+      Flow:
+      1. Validates request (enabled must be boolean if provided).
+      2. Probes the site with User-Agent `AdobeEdgeOptimize-Test` (must return 2xx).
+      3. Calls internal CDN API to set routing for the domain. Domain is derived from the site
+         base URL (or overrideBaseURL from site config) using the same logic as forwarded-host
+         (e.g. bare domain → www).
+
+      Requires authInfo profile.promiseToken to exchange for IMS user token.
     tags:
       - llmo
     requestBody:
@@ -1448,13 +1456,15 @@ site-llmo-edge-optimize-cdn-routing:
           schema:
             type: object
             properties:
-              overrideBaseUrl:
-                type: string
-                format: uri
-                description: Optional base URL to use instead of site base URL (and for domain resolution)
+              enabled:
+                type: boolean
+                default: true
+                description: |
+                  Whether to enable (true) or disable (false) edge optimize CDN routing for the domain.
+                  Omitted or true enables; false disables.
     responses:
       '200':
-        description: Edge optimize enabled successfully
+        description: CDN routing updated successfully
         content:
           application/json:
             schema:
@@ -1463,22 +1473,13 @@ site-llmo-edge-optimize-cdn-routing:
               properties:
                 enabled:
                   type: boolean
+                  description: The value that was set (true = enabled, false = disabled)
                   example: true
                 domain:
                   type: string
                   example: www.example.com
       '400':
-        $ref: './responses.yaml#/400'
-      '401':
-        $ref: './responses.yaml#/401'
-      '403':
-        $ref: './responses.yaml#/403'
-      '404':
-        $ref: './responses.yaml#/404'
-      '502':
-        description: CDN API or token exchange failed
-      '503':
-        description: Not available in this environment (e.g. dev)
+        description: Bad request (e.g. non-prod ENV, invalid enabled, probe failed or non-2xx)
         content:
           application/json:
             schema:
@@ -1486,6 +1487,40 @@ site-llmo-edge-optimize-cdn-routing:
               properties:
                 message:
                   type: string
+      '401':
+        description: Authentication failed with upstream IMS service (missing or invalid promise token)
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: Authentication failed with upstream IMS service
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '502':
+        description: Upstream CDN API returned 5xx
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: Upstream call failed with status 503
+      '503':
+        description: API not available (EDGE_OPTIMIZE_CDN_API_BASE_URL not set)
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: API is missing mandatory environment variable
       '500':
         $ref: './responses.yaml#/500'
     security:

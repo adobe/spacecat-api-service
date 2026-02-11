@@ -1250,48 +1250,49 @@ function LlmoController(ctx) {
       return badRequest('enabled field must be a boolean');
     }
 
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    const overrideBaseURL = site.getConfig()?.getFetchConfig?.()?.overrideBaseURL;
+    const effectiveBaseUrl = isValidUrl(overrideBaseURL) ? overrideBaseURL : site.getBaseURL();
+    log.info(`Effective base URL for site ${siteId}: ${effectiveBaseUrl}`);
+
+    let imsUserToken;
     try {
-      const site = await Site.findById(siteId);
-      if (!site) {
-        return notFound('Site not found');
-      }
-      if (!await accessControlUtil.hasAccess(site)) {
-        return forbidden('User does not have access to this site');
-      }
+      log.debug(`Getting IMS user token for site ${siteId}`);
+      imsUserToken = await getAccessToken(context);
+      log.info('IMS user token obtained successfully');
+    } catch (tokenError) {
+      log.warn(`Fetching IMS user token for site ${siteId} failed: ${tokenError.status} ${tokenError.message}`);
+      return createResponse({ message: 'Authentication failed with upstream IMS service' }, 401);
+    }
 
-      const overrideBaseURL = site.getConfig()?.getFetchConfig?.()?.overrideBaseURL;
-      const effectiveBaseUrl = isValidUrl(overrideBaseURL) ? overrideBaseURL : site.getBaseURL();
-      log.info(`Effective base URL for site ${siteId}: ${effectiveBaseUrl}`);
+    const probeUrl = effectiveBaseUrl.startsWith('http') ? effectiveBaseUrl : `https://${effectiveBaseUrl}`;
+    let probeResponse;
+    try {
+      log.info(`Probing site ${probeUrl}`);
+      probeResponse = await tracingFetch(probeUrl, {
+        method: 'GET',
+        headers: { 'User-Agent': 'AdobeEdgeOptimize-Test' },
+      });
+      log.info(`Probe response for site ${probeUrl}: ${probeResponse.status}`);
+    } catch (probeError) {
+      log.error(`Error probing site ${siteId}: ${probeError.message}`);
+      return badRequest(`Error probing site: ${probeError.message}`);
+    }
+    if (!probeResponse.ok) {
+      const msg = `Site did not return 200 for User-Agent AdobeEdgeOptimize-Test (got ${probeResponse.status})`;
+      log.error(`CDN routing update failed: ${msg}, url=${probeUrl}`);
+      return badRequest(msg);
+    }
 
-      let imsUserToken;
-      try {
-        log.debug(`Getting IMS user token for site ${siteId}`);
-        imsUserToken = await getAccessToken(context);
-        log.info(`IMS user token for site ${siteId} obtained successfully`);
-      } catch (tokenError) {
-        log.warn(`Fetching IMS user token for site ${siteId} failed: ${tokenError.status} ${tokenError.message}`);
-        return createResponse({ message: 'Authentication failed with upstream IMS service' }, 401);
-      }
-
-      const probeUrl = effectiveBaseUrl.startsWith('http') ? effectiveBaseUrl : `https://${effectiveBaseUrl}`;
-      let probeResponse;
-      try {
-        log.info(`Probing site ${siteId} at ${probeUrl}`);
-        probeResponse = await tracingFetch(probeUrl, {
-          method: 'GET',
-          headers: { 'User-Agent': 'AdobeEdgeOptimize-Test' },
-        });
-        log.info(`Probe response for site ${siteId}: ${probeResponse.status}`);
-      } catch (probeError) {
-        log.error(`Error probing site ${siteId}: ${probeError.message}`);
-        return badRequest(`Error probing site: ${probeError.message}`);
-      }
-      if (!probeResponse.ok) {
-        const msg = `Site did not return 200 for User-Agent AdobeEdgeOptimize-Test (got ${probeResponse.status})`;
-        log.error(`CDN routing update failed: ${msg}, url=${probeUrl}`);
-        return badRequest(msg);
-      }
-
+    try {
       const domain = calculateForwardedHost(probeUrl, log);
       const cdnUrl = `${cdnApiBaseUrl.replace(/\/+$/, '')}/${domain}/edgeoptimize`;
       log.info(`Calling CDN API for domain ${domain} at ${cdnUrl} with enabled: ${enabled}`);
@@ -1306,17 +1307,17 @@ function LlmoController(ctx) {
 
       if (!cdnResponse.ok) {
         const body = await cdnResponse.text();
-        log.error(`Edge optimize CDN API failed for site ${siteId}, domain ${domain}: ${cdnResponse.status} ${body}`);
+        log.error(`CDN API failed for site ${siteId}, domain ${domain}: ${cdnResponse.status} ${body}`);
         return createResponse(
           { message: `Upstream call failed with status ${cdnResponse.status}` },
           cdnResponse.status >= 500 ? 502 : cdnResponse.status,
         );
       }
 
-      log.info(`Edge optimize routing updated for site ${siteId}, domain ${domain}`);
+      log.info(`Edge optimize CDN routing updated for site ${siteId}, domain ${domain}`);
       return ok({ enabled, domain });
     } catch (error) {
-      log.error(`Edge optimize routing update failed for site ${siteId}: ${error.message}`);
+      log.error(`Edge optimize CDN routing update failed for site ${siteId}: ${error.message}`);
       if (error.status) {
         return createResponse({ message: error.message }, error.status);
       }
