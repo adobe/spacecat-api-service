@@ -1230,7 +1230,7 @@ function LlmoController(ctx) {
     const { enabled = true } = context.data || {};
     log.info(`Edge optimize CDN routing update request received for site ${siteId}`);
 
-    if (env?.ENV && env.ENV !== 'prod') {
+    if (env?.ENV && env.ENV !== 'dev') {
       return createResponse(
         { message: `API is not available in ${env?.ENV} environment` },
         400,

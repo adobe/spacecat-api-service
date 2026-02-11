@@ -4155,7 +4155,7 @@ describe('LlmoController', () => {
     });
 
     it('returns 503 when EDGE_OPTIMIZE_CDN_API_BASE_URL is not set', async () => {
-      const ctxWithoutCdnUrl = { ...enableEdgeContext, env: { ...enableEdgeContext.env, ENV: 'prod' } };
+      const ctxWithoutCdnUrl = { ...enableEdgeContext, env: { ...enableEdgeContext.env, ENV: 'dev' } };
       delete ctxWithoutCdnUrl.env.EDGE_OPTIMIZE_CDN_API_BASE_URL;
       const result = await controller.enableEdgeOptimize(ctxWithoutCdnUrl);
       expect(result.status).to.equal(503);
