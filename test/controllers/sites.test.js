@@ -241,8 +241,10 @@ describe('Sites Controller', () => {
   });
 
   it('creates a site', async () => {
+    mockDataAccess.Site.findByBaseURL.resolves(null); // No existing site found
     const response = await sitesController.createSite({ data: { baseURL: 'https://site1.com' } });
 
+    expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledOnceWith('https://site1.com');
     expect(mockDataAccess.Site.create).to.have.been.calledOnce;
     expect(response.status).to.equal(201);
 
@@ -259,6 +261,32 @@ describe('Sites Controller', () => {
     expect(response.status).to.equal(403);
     const error = await response.json();
     expect(error).to.have.property('message', 'Only admins can create new sites');
+  });
+
+  it('returns existing site when creating a site with duplicate baseURL', async () => {
+    // findByBaseURL is already stubbed to return sites[0] in beforeEach
+    const response = await sitesController.createSite({ data: { baseURL: 'https://site1.com' } });
+
+    expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledOnceWith('https://site1.com');
+    expect(mockDataAccess.Site.create).to.have.not.been.called;
+    expect(response.status).to.equal(200);
+
+    const site = await response.json();
+    expect(site).to.have.property('id', SITE_IDS[0]);
+    expect(site).to.have.property('baseURL', 'https://site1.com');
+  });
+
+  it('normalizes baseURL using composeBaseURL when checking for duplicates', async () => {
+    // Test with URL that needs normalization (www, trailing slash, uppercase)
+    const response = await sitesController.createSite({ data: { baseURL: 'https://WWW.site1.com/' } });
+
+    // composeBaseURL should normalize to 'https://site1.com' (lowercase, no www, no trailing slash)
+    expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledOnceWith('https://site1.com');
+    expect(mockDataAccess.Site.create).to.have.not.been.called;
+    expect(response.status).to.equal(200);
+
+    const site = await response.json();
+    expect(site).to.have.property('id', SITE_IDS[0]);
   });
 
   it('updates a site', async () => {

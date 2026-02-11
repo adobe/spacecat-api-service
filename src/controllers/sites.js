@@ -29,6 +29,7 @@ import {
   isValidUUID,
   deepEqual,
   isNonEmptyObject,
+  composeBaseURL,
 } from '@adobe/spacecat-shared-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
@@ -115,6 +116,11 @@ function SitesController(ctx, log, env) {
   const createSite = async (context) => {
     if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can create new sites');
+    }
+    const baseURL = composeBaseURL(context.data.baseURL);
+    const existingSite = await Site.findByBaseURL(baseURL);
+    if (existingSite) {
+      return createResponse(SiteDto.toJSON(existingSite), 200);
     }
     const site = await Site.create({
       organizationId: env.DEFAULT_ORGANIZATION_ID,
