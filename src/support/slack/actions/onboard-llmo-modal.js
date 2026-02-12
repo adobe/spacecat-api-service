@@ -29,7 +29,7 @@ const GEO_BRAND_PRESENCE_WEEKLY_FREE = 'geo-brand-presence-free';
 const GEO_BRAND_PRESENCE_WEEKLY_PAID = 'geo-brand-presence-paid';
 const GEO_BRAND_PRESENCE_DAILY = 'geo-brand-presence-daily';
 
-const GEO_FREE_SPLIT_COUNT = 18;
+const GEO_FREE_SPLIT_COUNT = 23;
 const GEO_FREE_SPLITS = Array.from(
   { length: GEO_FREE_SPLIT_COUNT },
   (_, i) => `geo-brand-presence-free-${i + 1}`,
