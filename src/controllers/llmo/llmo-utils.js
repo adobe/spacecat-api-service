@@ -18,7 +18,7 @@ export const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--ad
  * build the API URL and request body for that CDN. Add a new key to support another CDN.
  */
 export const EDGE_OPTIMIZE_CDN_STRATEGIES = {
-  fastly: {
+  'AEM Cloud Service Managed CDN (Fastly)': {
     buildUrl: (cdnConfig, domain) => {
       const base = cdnConfig.cdnRoutingUrl.trim().replace(/\/+$/, '');
       return `${base}/${domain}/edgeoptimize`;

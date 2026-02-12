@@ -4143,15 +4143,16 @@ describe('LlmoController', () => {
   describe('enableEdgeOptimize', () => {
     let enableEdgeContext;
     const validSiteId = '12345678-1234-4123-8123-123456789012';
+    const CDN_TYPE_AEM_FASTLY = 'AEM Cloud Service Managed CDN (Fastly)';
     const routingConfigFastly = JSON.stringify({
-      fastly: { cdnRoutingUrl: 'https://internal-cdn.example.com' },
+      [CDN_TYPE_AEM_FASTLY]: { cdnRoutingUrl: 'https://internal-cdn.example.com' },
     });
 
     beforeEach(() => {
       enableEdgeContext = {
         ...mockContext,
         params: { siteId: validSiteId },
-        data: { cdnType: 'fastly' },
+        data: { cdnType: CDN_TYPE_AEM_FASTLY },
       };
       mockDataAccess.Site.findById.resetBehavior();
       mockDataAccess.Site.findById.resolves(mockSite);
@@ -4198,7 +4199,7 @@ describe('LlmoController', () => {
       expect((await result.json()).message).to.include('cdnType must be one of');
     });
 
-    it.skip('returns 400 when ENV is set and not prod', async () => {
+    it.skip('returns 400 when ENV is set and not prod (ENV check currently commented out in controller)', async () => {
       const ctxNonProd = { ...enableEdgeContext, env: { ENV: 'stage', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly } };
       const result = await controller.updateEdgeOptimizeCDNRouting(ctxNonProd);
       expect(result.status).to.equal(400);
@@ -4207,7 +4208,7 @@ describe('LlmoController', () => {
 
     it('returns 400 when enabled is not a boolean', async () => {
       enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      enableEdgeContext.data = { cdnType: 'fastly', enabled: 'true' };
+      enableEdgeContext.data = { cdnType: CDN_TYPE_AEM_FASTLY, enabled: 'true' };
       const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
       expect(result.status).to.equal(400);
       expect((await result.json()).message).to.equal('enabled field must be a boolean');
@@ -4322,13 +4323,13 @@ describe('LlmoController', () => {
       expect(await result.json()).to.deep.equal({
         enabled: true,
         domain: 'www.example.com',
-        cdnType: 'fastly',
+        cdnType: CDN_TYPE_AEM_FASTLY,
       });
       expect(tracingFetchStub.firstCall.args[0]).to.equal('https://example.com');
     });
 
     it('defaults enabled to true when context.data has only cdnType', async () => {
-      const ctxOnlyCdnType = { ...enableEdgeContext, data: { cdnType: 'fastly' } };
+      const ctxOnlyCdnType = { ...enableEdgeContext, data: { cdnType: CDN_TYPE_AEM_FASTLY } };
       ctxOnlyCdnType.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
       getAccessTokenStub.resolves({ access_token: 'fake-token' });
       tracingFetchStub.onFirstCall().resolves({ ok: true });
@@ -4338,7 +4339,7 @@ describe('LlmoController', () => {
       expect(await result.json()).to.deep.equal({
         enabled: true,
         domain: 'www.example.com',
-        cdnType: 'fastly',
+        cdnType: CDN_TYPE_AEM_FASTLY,
       });
       expect(tracingFetchStub.secondCall.args[1].body).to.equal(JSON.stringify({ enabled: true }));
     });
@@ -4356,7 +4357,7 @@ describe('LlmoController', () => {
 
     it('returns 200 with enabled false when data.enabled is false', async () => {
       enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      enableEdgeContext.data = { cdnType: 'fastly', enabled: false };
+      enableEdgeContext.data = { cdnType: CDN_TYPE_AEM_FASTLY, enabled: false };
       getAccessTokenStub.resolves({ access_token: 'fake-token' });
       tracingFetchStub.onFirstCall().resolves({ ok: true });
       tracingFetchStub.onSecondCall().resolves({ ok: true });
@@ -4365,7 +4366,7 @@ describe('LlmoController', () => {
       expect(await result.json()).to.deep.equal({
         enabled: false,
         domain: 'www.example.com',
-        cdnType: 'fastly',
+        cdnType: CDN_TYPE_AEM_FASTLY,
       });
       expect(tracingFetchStub.secondCall.args[1].body).to.equal(JSON.stringify({ enabled: false }));
     });
