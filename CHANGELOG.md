@@ -1,3 +1,10 @@
+# [1.315.0](https://github.com/adobe/spacecat-api-service/compare/v1.314.0...v1.315.0) (2026-02-12)
+
+
+### Features
+
+* add filterByTopOrganicSearchPages parameter for RUM metrics ([#1796](https://github.com/adobe/spacecat-api-service/issues/1796)) ([1728365](https://github.com/adobe/spacecat-api-service/commit/1728365a17f9bc3ac40a57407848282431f0d645))
+
 # [1.314.0](https://github.com/adobe/spacecat-api-service/compare/v1.313.4...v1.314.0) (2026-02-11)
 
 
