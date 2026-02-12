@@ -1,3 +1,10 @@
+# [1.316.0](https://github.com/adobe/spacecat-api-service/compare/v1.315.3...v1.316.0) (2026-02-12)
+
+
+### Features
+
+* split geo-brand-presence-free in onboarding/offboarding ([#1806](https://github.com/adobe/spacecat-api-service/issues/1806)) ([5be03f3](https://github.com/adobe/spacecat-api-service/commit/5be03f3020badd5c1f72716c5c202122302f2461)), closes [adobe/spacecat-audit-worker#1979](https://github.com/adobe/spacecat-audit-worker/issues/1979) [adobe/spacecat-shared#1344](https://github.com/adobe/spacecat-shared/issues/1344)
+
 ## [1.315.3](https://github.com/adobe/spacecat-api-service/compare/v1.315.2...v1.315.3) (2026-02-12)
 
 
