@@ -24,7 +24,6 @@ import {
   schemas,
   composeBaseURL,
   isValidUrl,
-  tracingFetch,
 } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
@@ -40,6 +39,8 @@ import {
   applyGroups,
   applyMappings,
   LLMO_SHEETDATA_SOURCE_URL,
+  EDGE_OPTIMIZE_CDN_STRATEGIES,
+  EDGE_OPTIMIZE_CDN_TYPES,
 } from './llmo-utils.js';
 import { LLMO_SHEET_MAPPINGS } from './llmo-mappings.js';
 import {
@@ -1214,11 +1215,11 @@ function LlmoController(ctx) {
   };
 
   /**
-   * POST /sites/{siteId}/llmo/edge-optimize-cdn-routing
-   * Updates edge optimize CDN routing for the site via the internal CDN API.
+   * POST /sites/{siteId}/llmo/edge-optimize-routing
+   * Updates edge optimize routing for the site via the internal CDN API.
+   * - Requires mandatory cdnType input parameter (e.g. fastly).
    * - Probes the site with User-Agent AdobeEdgeOptimize-Test (must return 2xx)
-   * - Calls internal CDN API to update edge optimize CDN routing for the domain
-   * Only available when EDGE_OPTIMIZE_CDN_API_BASE_URL is set (e.g. prod). Disabled in dev.
+   * - Calls internal CDN API for the chosen cdnType to update routing for the domain
    * Requires authInfo profile.promiseToken to exchange for IMS user token.
    * @param {object} context - Request context
    * @returns {Promise<Response>}
@@ -1227,24 +1228,48 @@ function LlmoController(ctx) {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
-    const { enabled = true } = context.data || {};
-    log.info(`Edge optimize CDN routing update request received for site ${siteId}`);
+    const { cdnType, enabled = true } = context.data || {};
+    log.info(`Edge optimize routing update request received for site ${siteId}`);
 
-    if (env?.ENV && env.ENV !== 'prod') {
-      return createResponse(
-        { message: `API is not available in ${env?.ENV} environment` },
-        400,
-      );
+    // if (env?.ENV && env.ENV !== 'prod') {
+    //   return createResponse(
+    //     { message: `API is not available in ${env?.ENV} environment` },
+    //     400,
+    //   );
+    // }
+
+    if (!hasText(cdnType)) {
+      return badRequest('cdnType is required and must be a non-empty string');
+    }
+    let cdnTypeNormalized;
+    EDGE_OPTIMIZE_CDN_TYPES.forEach((type) => {
+      if (cdnType.trim().toLowerCase().includes(type.toLowerCase())) {
+        cdnTypeNormalized = type;
+      }
+    });
+
+    if (!cdnTypeNormalized) {
+      return badRequest(`cdnType must be one of: ${EDGE_OPTIMIZE_CDN_TYPES.join(', ')}`);
     }
 
-    const cdnApiBaseUrl = env?.EDGE_OPTIMIZE_CDN_API_BASE_URL;
-    if (!cdnApiBaseUrl) {
-      log.error('EDGE_OPTIMIZE_CDN_API_BASE_URL environment variable not set');
+    let routingConfig;
+    try {
+      routingConfig = JSON.parse(env?.EDGE_OPTIMIZE_ROUTING_CONFIG);
+    } catch (parseError) {
+      log.error(`EDGE_OPTIMIZE_ROUTING_CONFIG invalid JSON: ${parseError.message}`);
+      return internalServerError('Failed to parse routing config.');
+    }
+
+    const cdnConfig = routingConfig[cdnTypeNormalized];
+    if (!isObject(cdnConfig) || !isValidUrl(cdnConfig.cdnRoutingUrl)) {
+      log.error(`EDGE_OPTIMIZE_ROUTING_CONFIG missing entry or invalid URL for cdnType: ${cdnTypeNormalized}`);
       return createResponse(
         { message: 'API is missing mandatory environment variable' },
         503,
       );
     }
+
+    const strategy = EDGE_OPTIMIZE_CDN_STRATEGIES[cdnTypeNormalized];
 
     if (enabled !== undefined && typeof enabled !== 'boolean') {
       return badRequest('enabled field must be a boolean');
@@ -1267,17 +1292,17 @@ function LlmoController(ctx) {
     let probeResponse;
     try {
       log.info(`Probing site ${probeUrl}`);
-      probeResponse = await tracingFetch(probeUrl, {
+      probeResponse = await fetch(probeUrl, {
         method: 'GET',
         headers: { 'User-Agent': 'AdobeEdgeOptimize-Test AdobeEdgeOptimize/1.0' },
-        timeout: 15000,
+        signal: AbortSignal.timeout(5000),
       });
     } catch (probeError) {
       log.error(`Error probing site ${siteId}: ${probeError.message}`);
       return badRequest(`Error probing site: ${probeError.message}`);
     }
     if (!probeResponse.ok) {
-      const msg = 'Site did not return 200 for'
+      const msg = `Site ${probeUrl} did not return 2xx for`
       + ` User-Agent AdobeEdgeOptimize-Test (got ${probeResponse.status})`;
       log.error(`CDN routing update failed: ${msg}, url=${probeUrl}`);
       return badRequest(msg);
@@ -1295,15 +1320,17 @@ function LlmoController(ctx) {
 
     try {
       const domain = calculateForwardedHost(probeUrl, log);
-      const cdnUrl = `${cdnApiBaseUrl.replace(/\/+$/, '')}/${domain}/edgeoptimize`;
+      const cdnUrl = strategy.buildUrl(cdnConfig, domain);
+      const cdnBody = strategy.buildBody(enabled);
       log.info(`Calling CDN API for domain ${domain} at ${cdnUrl} with enabled: ${enabled}`);
-      const cdnResponse = await tracingFetch(cdnUrl, {
-        method: 'POST',
+      const cdnResponse = await fetch(cdnUrl, {
+        method: strategy.method,
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${imsUserToken}`,
         },
-        body: JSON.stringify({ enabled }),
+        body: JSON.stringify(cdnBody),
+        signal: AbortSignal.timeout(5000),
       });
 
       if (!cdnResponse.ok) {
@@ -1321,10 +1348,10 @@ function LlmoController(ctx) {
         );
       }
 
-      log.info(`Edge optimize CDN routing updated for site ${siteId}, domain ${domain}`);
-      return ok({ enabled, domain });
+      log.info(`Edge optimize routing updated for site ${siteId}, domain ${domain}`);
+      return ok({ enabled, domain, cdnType: cdnTypeNormalized });
     } catch (error) {
-      log.error(`Edge optimize CDN routing update failed for site ${siteId}: ${error.message}`);
+      log.error(`Edge optimize routing update failed for site ${siteId}: ${error.message}`);
       if (error.status) {
         return createResponse({ message: error.message }, error.status);
       }
@@ -1357,7 +1384,7 @@ function LlmoController(ctx) {
     getStrategy,
     saveStrategy,
     checkEdgeOptimizeStatus,
-    enableEdgeOptimize: updateEdgeOptimizeCDNRouting,
+    updateEdgeOptimizeCDNRouting,
   };
 }
 

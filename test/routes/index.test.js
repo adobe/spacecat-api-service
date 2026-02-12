@@ -271,7 +271,7 @@ describe('getRouteHandlers', () => {
     createOrUpdateEdgeConfig: () => null,
     getEdgeConfig: () => null,
     checkEdgeOptimizeStatus: () => null,
-    enableEdgeOptimize: () => null,
+    updateEdgeOptimizeCDNRouting: () => null,
     getStrategy: () => null,
     saveStrategy: () => null,
   };
@@ -633,7 +633,7 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/edge-optimize-config',
       'GET /sites/:siteId/llmo/edge-optimize-config',
       'GET /sites/:siteId/llmo/edge-optimize-status',
-      'POST /sites/:siteId/llmo/edge-optimize-cdn-routing',
+      'POST /sites/:siteId/llmo/edge-optimize-routing',
       'GET /sites/:siteId/llmo/strategy',
       'PUT /sites/:siteId/llmo/strategy',
       'GET /consent-banner/:jobId',
@@ -859,8 +859,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-config'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-status'].handler).to.equal(mockLlmoController.checkEdgeOptimizeStatus);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-status'].paramNames).to.deep.equal(['siteId']);
-    expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-cdn-routing'].handler).to.equal(mockLlmoController.enableEdgeOptimize);
-    expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-cdn-routing'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-routing'].handler).to.equal(mockLlmoController.updateEdgeOptimizeCDNRouting);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-routing'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy'].handler).to.equal(mockLlmoController.getStrategy);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['PUT /sites/:siteId/llmo/strategy'].handler).to.equal(mockLlmoController.saveStrategy);

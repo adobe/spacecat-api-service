@@ -13,6 +13,23 @@
 // LLMO constants
 export const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
 
+/**
+ * Per-CDN strategies for edge optimize routing. Each key is a cdnType; value defines how to
+ * build the API URL and request body for that CDN. Add a new key to support another CDN.
+ */
+export const EDGE_OPTIMIZE_CDN_STRATEGIES = {
+  fastly: {
+    buildUrl: (cdnConfig, domain) => {
+      const base = cdnConfig.cdnRoutingUrl.trim().replace(/\/+$/, '');
+      return `${base}/${domain}/edgeoptimize`;
+    },
+    buildBody: (enabled) => ({ enabled }),
+    method: 'POST',
+  },
+};
+
+export const EDGE_OPTIMIZE_CDN_TYPES = Object.keys(EDGE_OPTIMIZE_CDN_STRATEGIES);
+
 // Apply filters to data arrays with case-insensitive exact matching
 export const applyFilters = (rawData, filterFields) => {
   const data = { ...rawData };
