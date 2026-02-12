@@ -1,3 +1,52 @@
+# [1.316.0](https://github.com/adobe/spacecat-api-service/compare/v1.315.3...v1.316.0) (2026-02-12)
+
+
+### Features
+
+* split geo-brand-presence-free in onboarding/offboarding ([#1806](https://github.com/adobe/spacecat-api-service/issues/1806)) ([5be03f3](https://github.com/adobe/spacecat-api-service/commit/5be03f3020badd5c1f72716c5c202122302f2461)), closes [adobe/spacecat-audit-worker#1979](https://github.com/adobe/spacecat-audit-worker/issues/1979) [adobe/spacecat-shared#1344](https://github.com/adobe/spacecat-shared/issues/1344)
+
+## [1.315.3](https://github.com/adobe/spacecat-api-service/compare/v1.315.2...v1.315.3) (2026-02-12)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.107.0 ([#1808](https://github.com/adobe/spacecat-api-service/issues/1808)) ([c2f65c7](https://github.com/adobe/spacecat-api-service/commit/c2f65c7c0d77ca2548b9ed444f3b3ee95b10c7b6))
+
+## [1.315.2](https://github.com/adobe/spacecat-api-service/compare/v1.315.1...v1.315.2) (2026-02-12)
+
+
+### Bug Fixes
+
+* version upgradation of spacecat-shared-data-access for enabled removal from edge config ([#1807](https://github.com/adobe/spacecat-api-service/issues/1807)) ([b8a68f7](https://github.com/adobe/spacecat-api-service/commit/b8a68f7182d05783e8089cf8971c6eb8fe6126bb))
+
+## [1.315.1](https://github.com/adobe/spacecat-api-service/compare/v1.315.0...v1.315.1) (2026-02-12)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tokowaka-client to v1.7.7 ([#1805](https://github.com/adobe/spacecat-api-service/issues/1805)) ([6af6088](https://github.com/adobe/spacecat-api-service/commit/6af6088be3415410c5ccc93f19d6157f7c5d6858))
+
+# [1.315.0](https://github.com/adobe/spacecat-api-service/compare/v1.314.0...v1.315.0) (2026-02-12)
+
+
+### Features
+
+* add filterByTopOrganicSearchPages parameter for RUM metrics ([#1796](https://github.com/adobe/spacecat-api-service/issues/1796)) ([1728365](https://github.com/adobe/spacecat-api-service/commit/1728365a17f9bc3ac40a57407848282431f0d645))
+
+# [1.314.0](https://github.com/adobe/spacecat-api-service/compare/v1.313.4...v1.314.0) (2026-02-11)
+
+
+### Features
+
+* remove the sitemap audit from the "paid" config ([#1803](https://github.com/adobe/spacecat-api-service/issues/1803)) ([6f22f4f](https://github.com/adobe/spacecat-api-service/commit/6f22f4f9fd77b12b4b455d2335fb8d03512ef283))
+
+## [1.313.4](https://github.com/adobe/spacecat-api-service/compare/v1.313.3...v1.313.4) (2026-02-11)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.94.0 ([#1802](https://github.com/adobe/spacecat-api-service/issues/1802)) ([370e1fa](https://github.com/adobe/spacecat-api-service/commit/370e1fadf7c0120ae4f1d22b0b7705fc1629f9a1))
+
 ## [1.313.3](https://github.com/adobe/spacecat-api-service/compare/v1.313.2...v1.313.3) (2026-02-11)
 
 
