@@ -884,7 +884,7 @@ export async function removeLlmoConfig(site, config, context) {
     'geo-brand-presence-daily',
     'wikipedia-analysis',
     // geo-brand-presence-free splits
-    ...Array.from({ length: 18 }, (_, i) => `geo-brand-presence-free-${i + 1}`),
+    ...Array.from({ length: 23 }, (_, i) => `geo-brand-presence-free-${i + 1}`),
   ];
 
   // Update configuration to disable audits
