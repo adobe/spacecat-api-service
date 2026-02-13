@@ -1,3 +1,10 @@
+## [1.316.2](https://github.com/adobe/spacecat-api-service/compare/v1.316.1...v1.316.2) (2026-02-13)
+
+
+### Bug Fixes
+
+* bot protection check ([#1668](https://github.com/adobe/spacecat-api-service/issues/1668)) ([adf7495](https://github.com/adobe/spacecat-api-service/commit/adf7495b8ce6b5a05c2e8a886193f7dd2cdeaf5e))
+
 ## [1.316.1](https://github.com/adobe/spacecat-api-service/compare/v1.316.0...v1.316.1) (2026-02-12)
 
 
