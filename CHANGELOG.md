@@ -1,3 +1,10 @@
+## [1.317.1](https://github.com/adobe/spacecat-api-service/compare/v1.317.0...v1.317.1) (2026-02-13)
+
+
+### Bug Fixes
+
+* Bump speacecat-shared-utils to get latest aggregation levels for… ([#1812](https://github.com/adobe/spacecat-api-service/issues/1812)) ([e90fac9](https://github.com/adobe/spacecat-api-service/commit/e90fac98bdb5401baacb515fb0616c8cec6f796f))
+
 # [1.317.0](https://github.com/adobe/spacecat-api-service/compare/v1.316.2...v1.317.0) (2026-02-13)
 
 
