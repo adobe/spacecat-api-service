@@ -1,3 +1,10 @@
+# [1.317.0](https://github.com/adobe/spacecat-api-service/compare/v1.316.2...v1.317.0) (2026-02-13)
+
+
+### Features
+
+* extend geo-brand-presence-free splits from 18 to 23 ([#1810](https://github.com/adobe/spacecat-api-service/issues/1810)) ([e6c1b66](https://github.com/adobe/spacecat-api-service/commit/e6c1b6653871480073e000f91003f3c6c7c2536f)), closes [adobe/spacecat-audit-worker#1981](https://github.com/adobe/spacecat-audit-worker/issues/1981) [adobe/spacecat-shared#1345](https://github.com/adobe/spacecat-shared/issues/1345) [adobe/spacecat-infrastructure#322](https://github.com/adobe/spacecat-infrastructure/issues/322)
+
 ## [1.316.2](https://github.com/adobe/spacecat-api-service/compare/v1.316.1...v1.316.2) (2026-02-13)
 
 
