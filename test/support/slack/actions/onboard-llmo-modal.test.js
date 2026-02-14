@@ -184,43 +184,6 @@ describe('onboard-llmo-modal', () => {
     statusText: 'OK',
   });
 
-  // Helper function to create mocked modules with custom tracingFetch
-  const createMockedModulesWithTracingFetch = async (mockTracingFetch) => {
-    const updatedMockedLLMOOnboarding = await esmock('../../../../src/controllers/llmo/llmo-onboarding.js', {
-      '@adobe/spacecat-shared-data-access/src/models/site/config.js': sharedConfigMock,
-      '@adobe/spacecat-helix-content-sdk': sharedSharepointMock,
-      '@octokit/rest': {
-        Octokit: octokitMock,
-      },
-      '@adobe/spacecat-shared-tier-client': {
-        default: tierClientMock,
-      },
-      '../../../../src/utils/slack/base.js': sharedSlackMock,
-      '@adobe/spacecat-shared-utils': {
-        composeBaseURL: sinon.stub().callsFake((url) => url),
-        tracingFetch: mockTracingFetch,
-      },
-    });
-
-    const testMockedModule = await esmock('../../../../src/support/slack/actions/onboard-llmo-modal.js', {
-      '@adobe/spacecat-shared-data-access/src/models/site/config.js': sharedConfigMock,
-      '@adobe/spacecat-helix-content-sdk': sharedSharepointMock,
-      '@octokit/rest': {
-        Octokit: octokitMock,
-      },
-      '@adobe/spacecat-shared-tier-client': {
-        default: tierClientMock,
-      },
-      '../../../../src/utils/slack/base.js': sharedSlackMock,
-      '../../../../src/controllers/llmo/llmo-onboarding.js': updatedMockedLLMOOnboarding,
-      '../../../../src/support/brand-profile-trigger.js': {
-        triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
-      },
-    });
-
-    return testMockedModule;
-  };
-
   before(async () => {
     sandbox = sinon.createSandbox();
     // Create octokit mock
@@ -880,95 +843,9 @@ describe('onboard-llmo-modal', () => {
       expect(mockTierClient.createEntitlement).to.have.been.calledWith('FREE_TRIAL');
     });
 
-    it('should log warning when HLX_ADMIN_TOKEN is not set', async () => {
-      // Mock data
-      const input = {
-        baseURL: 'https://example.com',
-        brandName: 'Test Brand',
-        imsOrgId: 'ABC123@AdobeOrg',
-        deliveryType: 'aem_edge',
-      };
-
-      // Use default mocks
-      const mockSite = createDefaultMockSite(sandbox);
-      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSite });
-      const slackCtx = createDefaultMockSlackCtx(sandbox);
-
-      // Mock fetch for admin.hlx.page calls
-      global.fetch = createDefaultMockFetch(sandbox);
-
-      // Store original env var
-      const originalToken = process.env.HLX_ADMIN_TOKEN;
-      // Remove the token
-      delete process.env.HLX_ADMIN_TOKEN;
-
-      try {
-        // Execute the function
-        await onboardSite(input, lambdaCtx, slackCtx);
-
-        // Verify that warning was logged
-        expect(lambdaCtx.log.warn).to.have.been.calledWith('LLMO onboarding: HLX_ADMIN_TOKEN is not set');
-      } finally {
-        // Restore original env var
-        if (originalToken !== undefined) {
-          process.env.HLX_ADMIN_TOKEN = originalToken;
-        }
-      }
-    });
-
-    it('should handle fetch error when publishing to admin.hlx.page fails', async () => {
-      // Mock data
-      const input = {
-        baseURL: 'https://example.com',
-        brandName: 'Test Brand',
-        imsOrgId: 'ABC123@AdobeOrg',
-        deliveryType: 'aem_edge',
-      };
-
-      // Use default mocks
-      const mockSite = createDefaultMockSite(sandbox);
-      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSite });
-      const slackCtx = createDefaultMockSlackCtx(sandbox);
-
-      // Mock tracingFetch to throw an error
-      const mockTracingFetch = sandbox.stub().rejects(new Error('Network error'));
-      const testModule = await createMockedModulesWithTracingFetch(mockTracingFetch);
-
-      // Execute the function
-      await testModule.onboardSite(input, lambdaCtx, slackCtx);
-
-      // Verify that error was logged
-      expect(lambdaCtx.log.error).to.have.been.calledWith(sinon.match('Failed to publish via admin.hlx.page: Network error'));
-    });
-
-    it('should handle non-ok response when publishing to admin.hlx.page', async () => {
-      // Mock data
-      const input = {
-        baseURL: 'https://example.com',
-        brandName: 'Test Brand',
-        imsOrgId: 'ABC123@AdobeOrg',
-        deliveryType: 'aem_edge',
-      };
-
-      // Use default mocks
-      const mockSite = createDefaultMockSite(sandbox);
-      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSite });
-      const slackCtx = createDefaultMockSlackCtx(sandbox);
-
-      // Mock tracingFetch to return non-ok response
-      const mockTracingFetch = sandbox.stub().resolves({
-        ok: false,
-        status: 500,
-        statusText: 'Internal Server Error',
-      });
-
-      // Re-mock modules with the failing tracingFetch
-      const testModule = await createMockedModulesWithTracingFetch(mockTracingFetch);
-      await testModule.onboardSite(input, lambdaCtx, slackCtx);
-
-      // Verify that error was logged
-      expect(lambdaCtx.log.error).to.have.been.calledWith(sinon.match('Failed to publish via admin.hlx.page: preview failed: 500 Internal Server Error'));
-    });
+    // Note: Tests for Helix publishing (HLX_ADMIN_TOKEN, admin.hlx.page) removed
+    // because onboarding no longer publishes/previews to Helix during the onboarding flow.
+    // Publishing only happens during cleanup/offboarding.
 
     // In the new architecture, existing SharePoint data folder fails validation
     it('should fail validation when SharePoint data folder already exists', async () => {
