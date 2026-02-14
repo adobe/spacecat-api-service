@@ -37,6 +37,10 @@ tags:
     description: Configuration management operations
   - name: organization
     description: Organization operations
+  - name: brands
+    description: Brand operations
+  - name: customer-config
+    description: Customer configuration operations including brands, categories, topics, and prompts
   - name: trigger
     description: Trigger operations
   - name: hooks
@@ -113,6 +117,14 @@ paths:
     $ref: './organization-api.yaml#/organization'
   /organizations/{organizationId}/brands:
     $ref: './brands-api.yaml#/brands-for-organization'
+  /v2/orgs/{spaceCatId}/llmo-customer-config:
+    $ref: './customer-config-api.yaml#/llmo-customer-config-by-space-cat-id-v2'
+  /v2/orgs/{spaceCatId}/llmo-customer-config-lean:
+    $ref: './customer-config-api.yaml#/llmo-customer-config-lean-by-space-cat-id-v2'
+  /v2/orgs/{spaceCatId}/llmo-topics:
+    $ref: './customer-config-api.yaml#/llmo-topics-by-space-cat-id-v2'
+  /v2/orgs/{spaceCatId}/llmo-prompts:
+    $ref: './customer-config-api.yaml#/llmo-prompts-by-space-cat-id-v2'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:

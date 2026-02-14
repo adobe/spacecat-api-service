@@ -12,9 +12,12 @@
 import { createRequire } from 'module';
 import { resolve } from 'path';
 import { fileURLToPath } from 'url';
+import { config } from 'dotenv';
 import { DevelopmentServer } from '@adobe/helix-universal-devserver';
-
 import { main } from '../../src/index.js';
+
+// Load .env file before starting server
+config();
 
 const require = createRequire(import.meta.url);
 const { version } = require('../../package.json');
@@ -23,22 +26,26 @@ const { version } = require('../../package.json');
 global.__rootdir = resolve(fileURLToPath(import.meta.url), '..', '..', '..');
 
 async function run(args) {
-  process.env.HLX_DEV_SERVER_HOST = 'localhost:3000';
+  const port = process.env.PORT || '3000';
+  process.env.HLX_DEV_SERVER_HOST = `localhost:${port}`;
   process.env.HLX_DEV_SERVER_SCHEME = 'http';
+  // eslint-disable-next-line no-console
+  console.log(`Starting server at http://localhost:${port}...`);
 
   let devServer;
   if (args.includes('--webpack')) {
     // eslint-disable-next-line import/no-unresolved
     devServer = await import(`../../dist/spacecat-services/api-service@${version}-bundle.cjs`)
-      .then((m) => new DevelopmentServer().withAdapter(m.default.lambda));
+      .then((m) => new DevelopmentServer().withAdapter(m.default.lambda).withPort(port));
   } else if (args.includes('--esbuild')) {
     // eslint-disable-next-line import/no-unresolved
     devServer = await import(`../../dist/spacecat-services/api-service@${version}-bundle.mjs`)
-      .then((m) => new DevelopmentServer().withAdapter(m.default.lambda));
+      .then((m) => new DevelopmentServer().withAdapter(m.default.lambda).withPort(port));
   } else {
     devServer = new DevelopmentServer(main);
   }
   await devServer
+    .withPort(port)
     .withHeader('x-forwarded-host', '')
     .init();
   await devServer.start();

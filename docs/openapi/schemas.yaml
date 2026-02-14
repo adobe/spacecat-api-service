@@ -5465,6 +5465,394 @@ PreflightResultItem:
     step:
       type: string
       enum: [identify, suggest]
+# Customer Configuration schemas for brand management
+CustomerConfigCategory:
+  type: object
+  description: A content category (top-level collection)
+  required:
+    - id
+    - name
+    - status
+  properties:
+    id:
+      type: string
+      description: Unique identifier for the category
+      example: "photoshop-photo-editing"
+    name:
+      type: string
+      description: Name of the category
+      example: "Photo Editing"
+    status:
+      type: string
+      description: Status of the category
+      enum: ["active", "deleted"]
+      example: "active"
+    origin:
+      type: string
+      enum: ["ai", "human"]
+      description: Source of the category
+    updatedAt:
+      $ref: '#/DateTime'
+      description: When the category was last updated
+    updatedBy:
+      type: string
+      description: Who last updated the category
+      example: "system"
+CustomerConfigTopic:
+  type: object
+  description: A topic within a category (top-level collection)
+  required:
+    - id
+    - name
+    - status
+    - categoryId
+  properties:
+    id:
+      type: string
+      description: Unique identifier for the topic
+      example: "photoshop-topic-1"
+    name:
+      type: string
+      description: Name of the topic
+      example: "Photo Retouching"
+    status:
+      type: string
+      description: Status of the topic
+      enum: [active, deleted]
+      example: "active"
+    categoryId:
+      type: string
+      description: ID of the category this topic belongs to
+      example: "photoshop-photo-editing"
+CustomerConfigPrompt:
+  type: object
+  description: A search prompt with category and topic ID references
+  required:
+    - id
+    - prompt
+    - regions
+    - categoryId
+    - topicId
+  properties:
+    id:
+      type: string
+      description: Unique identifier for the prompt
+      example: "photoshop-prompt-1"
+    prompt:
+      type: string
+      description: The search query prompt
+      example: "What is the best photo editing software for portraits?"
+    status:
+      type: string
+      enum: ["active", "pending", "deleted"]
+      description: Status of the prompt
+      default: "active"
+    regions:
+      type: array
+      items:
+        type: string
+      description: Regions where this prompt is applicable
+      example: ["us", "gb"]
+    origin:
+      type: string
+      enum: ["ai", "human"]
+      description: Source of the prompt (AI-generated or human-created)
+      default: "human"
+    source:
+      type: string
+      description: The source system or process that created the prompt
+      example: "api"
+      default: "config"
+    updatedAt:
+      $ref: '#/DateTime'
+      description: When the prompt was last updated
+    updatedBy:
+      type: string
+      description: Who last updated the prompt
+      example: "system"
+      default: "system"
+    categoryId:
+      type: string
+      description: ID of the category this prompt belongs to
+      example: "photoshop-photo-editing"
+    topicId:
+      type: string
+      description: ID of the topic this prompt belongs to
+      example: "photoshop-topic-1"
+CustomerConfigUrl:
+  type: object
+  description: A URL associated with a brand
+  required:
+    - value
+  properties:
+    value:
+      type: string
+      format: uri
+      description: The URL
+      example: "https://www.adobe.com/products/photoshop.html"
+    siteId:
+      type: string
+      description: Site ID for this URL (used for backwards compatibility with V1)
+      example: "a1b2c3d4-5678-90ab-cdef-1234567890ab"
+    type:
+      type: string
+      description: Type of URL
+      example: "url"
+    regions:
+      type: array
+      items:
+        type: string
+      description: Regions where this URL is applicable
+      example: ["GL", "US", "GB"]
+CustomerConfigSocialAccount:
+  type: object
+  description: A social media account for a brand
+  required:
+    - platform
+    - url
+    - regions
+  properties:
+    platform:
+      type: string
+      description: Social media platform name
+      example: "twitter"
+    url:
+      type: string
+      format: uri
+      description: URL to the social media account
+      example: "https://x.com/Photoshop"
+    regions:
+      type: array
+      items:
+        type: string
+      description: Regions where this account is relevant
+      example: ["GL"]
+CustomerConfigBrandAlias:
+  type: object
+  description: An alternative name for a brand
+  required:
+    - name
+    - regions
+  properties:
+    name:
+      type: string
+      description: Alternative brand name
+      example: "PS"
+    regions:
+      type: array
+      items:
+        type: string
+      description: Regions where this alias is used
+      example: ["US", "GB"]
+CustomerConfigCompetitor:
+  type: object
+  description: A competitor brand
+  required:
+    - name
+    - url
+    - regions
+  properties:
+    name:
+      type: string
+      description: Competitor brand name
+      example: "Affinity Photo"
+    url:
+      type: string
+      format: uri
+      description: Competitor website URL
+      example: "https://affinity.serif.com/photo"
+    regions:
+      type: array
+      items:
+        type: string
+      description: Regions where this competitor is relevant
+      example: ["US", "GB"]
+CustomerConfigRelatedBrand:
+  type: object
+  description: A related brand (partner, sister brand, etc.)
+  required:
+    - name
+    - url
+    - regions
+  properties:
+    name:
+      type: string
+      description: Related brand name
+      example: "Wacom"
+    url:
+      type: string
+      format: uri
+      description: Related brand website URL
+      example: "https://www.wacom.com"
+    regions:
+      type: array
+      items:
+        type: string
+      description: Regions where this relationship is relevant
+      example: ["GL"]
+CustomerConfigEarnedContent:
+  type: object
+  description: Earned media content source
+  required:
+    - name
+    - type
+    - coverage_scope
+    - url
+    - regions
+  properties:
+    name:
+      type: string
+      description: Name of the media source
+      example: "Wikipedia"
+    type:
+      type: string
+      description: Type of media source
+      example: "encyclopedia"
+    coverage_scope:
+      type: string
+      description: Description of what this source covers
+      example: "product history and feature overview"
+    url:
+      type: string
+      format: uri
+      description: URL to the media source
+      example: "https://en.wikipedia.org/wiki/Adobe_Photoshop"
+    regions:
+      type: array
+      items:
+        type: string
+      description: Regions where this source is relevant
+      example: ["GL"]
+CustomerConfigBrand:
+  type: object
+  description: A brand configuration with all associated metadata
+  required:
+    - id
+    - name
+    - status
+    - region
+  properties:
+    id:
+      type: string
+      description: Unique identifier for the brand
+      example: "pending-adobe-photoshop"
+    v1SiteId:
+      type: string
+      description: Legacy V1 site ID for backwards compatibility
+      example: "a1b2c3d4-5678-90ab-cdef-1234567890ab"
+    name:
+      type: string
+      description: Brand name
+      example: "Adobe Photoshop"
+    status:
+      type: string
+      enum: ["active", "pending", "deleted"]
+      description: Current status of the brand
+    origin:
+      type: string
+      enum: ["ai", "human"]
+      description: How the brand was created
+    region:
+      type: array
+      items:
+        type: string
+      description: Regions where this brand operates
+      example: ["GL", "US", "GB"]
+    description:
+      type: string
+      description: Detailed description of the brand
+      example: "Adobe's flagship image editing software"
+    updatedAt:
+      $ref: '#/DateTime'
+      description: When the brand was last updated
+    updatedBy:
+      type: string
+      description: Who last updated the brand
+      example: "system"
+    vertical:
+      type: string
+      description: Industry vertical for the brand
+      example: "Software & Technology"
+    urls:
+      type: array
+      items:
+        $ref: '#/CustomerConfigUrl'
+      description: URLs associated with the brand
+    socialAccounts:
+      type: array
+      items:
+        $ref: '#/CustomerConfigSocialAccount'
+      description: Social media accounts for the brand
+    brandAliases:
+      type: array
+      items:
+        $ref: '#/CustomerConfigBrandAlias'
+      description: Alternative names for the brand
+    competitors:
+      type: array
+      items:
+        $ref: '#/CustomerConfigCompetitor'
+      description: Competitor brands
+    relatedBrands:
+      type: array
+      items:
+        $ref: '#/CustomerConfigRelatedBrand'
+      description: Related brands
+    earnedContent:
+      type: array
+      items:
+        $ref: '#/CustomerConfigEarnedContent'
+      description: Earned media sources
+    prompts:
+      type: array
+      items:
+        $ref: '#/CustomerConfigPrompt'
+      description: Flat list of all prompts for this brand with category/topic facets
+CustomerConfigCustomer:
+  type: object
+  description: Complete customer configuration including brands and verticals
+  required:
+    - customerName
+    - imsOrgID
+    - brands
+  properties:
+    customerName:
+      type: string
+      description: Name of the customer organization
+      example: "Adobe"
+    imsOrgID:
+      type: string
+      description: Adobe IMS Organization ID
+      example: "1234567890ABCDEF@AdobeOrg"
+    categories:
+      type: array
+      items:
+        $ref: '#/CustomerConfigCategory'
+      description: Top-level collection of categories
+    topics:
+      type: array
+      items:
+        $ref: '#/CustomerConfigTopic'
+      description: Top-level collection of topics
+    brands:
+      type: array
+      items:
+        $ref: '#/CustomerConfigBrand'
+      description: List of brands for this customer
+    availableVerticals:
+      type: array
+      items:
+        type: string
+      description: List of available industry verticals
+      example: ["Software & Technology", "Professional Services"]
+CustomerConfig:
+  type: object
+  description: Top-level customer configuration response
+  required:
+    - customer
+  properties:
+    customer:
+      $ref: '#/CustomerConfigCustomer'
       description: The step of the preflight job when this result was generated
 
 # =============================================================================

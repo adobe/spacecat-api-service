@@ -496,3 +496,139 @@ fix-create-list-response:
       total: 2
       success: 2
       failed: 0
+CustomerConfigAdobe:
+  summary: Adobe customer configuration example
+  description: Complete customer configuration for Adobe with multiple brands
+  value:
+    customer:
+      customerName: "Adobe"
+      imsOrgID: "1234567890ABCDEF@AdobeOrg"
+      brands:
+        - id: "pending-adobe-photoshop"
+          v1SiteId: "a1b2c3d4-5678-90ab-cdef-1234567890ab"
+          name: "Adobe Photoshop"
+          status: "active"
+          origin: "ai"
+          region: ["GL", "US", "GB", "DE", "FR", "JP", "CN"]
+          description: "Adobe's flagship image editing and compositing software used for photography, digital art, and visual design across desktop, web, and mobile."
+          updatedAt: "2026-01-03T09:15:22.000Z"
+          updatedBy: "system"
+          vertical: "Software & Technology"
+          urls:
+            - value: "https://www.adobe.com/products/photoshop.html"
+              regions: ["GL", "US", "GB", "DE", "FR", "JP", "CN"]
+          socialAccounts:
+            - platform: "twitter"
+              url: "https://x.com/Photoshop"
+              regions: ["GL"]
+            - platform: "facebook"
+              url: "https://www.facebook.com/Photoshop/"
+              regions: ["US", "GB"]
+          brandAliases:
+            - name: "Photoshop"
+              regions: ["GL"]
+            - name: "PS"
+              regions: ["US", "GB", "DE", "FR"]
+          competitors:
+            - name: "Affinity Photo"
+              url: "https://affinity.serif.com/photo"
+              regions: ["US", "GB"]
+            - name: "GIMP"
+              url: "https://www.gimp.org"
+              regions: ["GL"]
+          relatedBrands:
+            - name: "Wacom"
+              url: "https://www.wacom.com"
+              regions: ["GL"]
+          earnedContent:
+            - name: "Wikipedia"
+              type: "encyclopedia"
+              coverage_scope: "product history and feature overview"
+              url: "https://en.wikipedia.org/wiki/Adobe_Photoshop"
+              regions: ["GL"]
+          prompts:
+            - id: "photoshop-prompt-1"
+              prompt: "What is the best photo editing software for portraits?"
+              status: "active"
+              regions: ["us", "gb"]
+              origin: "ai"
+              source: "api"
+              updatedAt: "2026-01-03T09:15:22.000Z"
+              updatedBy: "system"
+              category:
+                id: "photoshop-photo-editing"
+                name: "Photo Editing"
+              topic:
+                id: "photoshop-topic-1"
+                name: "Photo Retouching"
+      availableVerticals:
+        - "News & Entertainment"
+        - "Software & Technology"
+        - "Professional Services"
+customer-config-v2-create:
+  description: Example for creating a V2 customer configuration (POST)
+  value:
+    customer:
+      customerName: "Example Org"
+      imsOrgID: "9E1005A551ED61CA0A490D45@AdobeOrg"
+      brands:
+        - id: "test-brand-1"
+          name: "Test Brand"
+          status: "active"
+          origin: "manual"
+          region: ["US"]
+          description: "A test brand for API testing"
+          updatedAt: "2026-02-10T10:00:00.000Z"
+          updatedBy: "api-test"
+          vertical: "Software & Technology"
+          urls:
+            - value: "https://example.com"
+              regions: ["US"]
+          prompts:
+            - id: "test-prompt-1"
+              prompt: "What is this product?"
+              status: "active"
+              regions: ["us"]
+              origin: "manual"
+              source: "api"
+              updatedAt: "2026-02-10T10:00:00.000Z"
+              updatedBy: "api-test"
+              categoryId: "test-category-1"
+              topicId: "test-topic-1"
+      categories:
+        - id: "test-category-1"
+          name: "Test Category"
+          origin: "manual"
+          status: "active"
+      topics:
+        - id: "test-topic-1"
+          name: "Test Topic"
+          categoryId: "test-category-1"
+          status: "active"
+      availableVerticals:
+        - "Software & Technology"
+        - "Professional Services"
+customer-config-v2-patch:
+  description: Example for patching a V2 customer configuration to add a new brand (PATCH)
+  value:
+    customer:
+      brands:
+        - id: "test-brand-new"
+          name: "New Test Brand"
+          status: "active"
+          origin: "manual"
+          region: ["US", "GB"]
+          description: "A brand added via PATCH"
+          vertical: "Software & Technology"
+          urls:
+            - value: "https://newbrand.example.com"
+              regions: ["US", "GB"]
+          prompts:
+            - id: "new-prompt-1"
+              prompt: "What is the new brand about?"
+              status: "active"
+              regions: ["us", "gb"]
+              origin: "manual"
+              source: "api"
+              categoryId: "859b91c5-0420-4f3b-a464-8d6f6ac34f64"
+              topicId: "topic-acrobat-features"
