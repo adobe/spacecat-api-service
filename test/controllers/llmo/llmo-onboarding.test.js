@@ -155,6 +155,7 @@ describe('LLMO Onboarding Functions', () => {
       mockTracingFetch,
       mockConfig,
       mockComposeBaseURL,
+      mockResolveCanonicalUrl,
       mockSharePointClient: sharePointClient,
       mockOctokit,
     } = options;
@@ -184,10 +185,12 @@ describe('LLMO Onboarding Functions', () => {
       deps['@adobe/spacecat-shared-data-access/src/models/site/config.js'] = { Config: mockConfig };
     }
 
-    if (mockTracingFetch || mockComposeBaseURL) {
+    if (mockTracingFetch || mockComposeBaseURL || mockResolveCanonicalUrl) {
       deps['@adobe/spacecat-shared-utils'] = {};
       if (mockTracingFetch) deps['@adobe/spacecat-shared-utils'].tracingFetch = mockTracingFetch;
       if (mockComposeBaseURL) deps['@adobe/spacecat-shared-utils'].composeBaseURL = mockComposeBaseURL;
+      deps['@adobe/spacecat-shared-utils'].resolveCanonicalUrl = mockResolveCanonicalUrl
+        || sinon.stub().callsFake(async (url) => url);
     }
 
     return deps;
@@ -225,6 +228,7 @@ describe('LLMO Onboarding Functions', () => {
       '@adobe/spacecat-shared-utils': {
         composeBaseURL: mockComposeBaseURL,
         tracingFetch: mockTracingFetch,
+        resolveCanonicalUrl: sinon.stub().callsFake(async (url) => url),
       },
     });
   };
@@ -1534,7 +1538,7 @@ describe('LLMO Onboarding Functions', () => {
       restoreSetTimeout(originalSetTimeout);
     });
 
-    it('should set overrideBaseURL when Ahrefs determines it is needed', async () => {
+    it('should set overrideBaseURL when canonical resolution determines it is needed', async () => {
       // Mock organization
       const mockOrganization = {
         getId: sinon.stub().returns('org123'),
@@ -1572,17 +1576,10 @@ describe('LLMO Onboarding Functions', () => {
       mockDataAccess.Site.create.resolves(mockSite);
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
-      // Mock Ahrefs client to return overrideBaseURL
-      const mockAhrefsClient = {
-        getTopPages: sinon.stub(),
-      };
-      // Base URL fails, www variant succeeds
-      mockAhrefsClient.getTopPages
-        .withArgs('https://example.com', 1)
-        .resolves({ result: { pages: [] } });
-      mockAhrefsClient.getTopPages
-        .withArgs('https://www.example.com', 1)
-        .resolves({ result: { pages: [{ url: 'https://www.example.com/page1' }] } });
+      const mockResolveCanonicalUrl = sinon.stub();
+      // Base URL unresolved, www variant resolves.
+      mockResolveCanonicalUrl.withArgs('https://example.com').resolves(null);
+      mockResolveCanonicalUrl.withArgs('https://www.example.com').resolves('https://www.example.com/');
 
       // Use helper functions for common mocks
       const mockConfig = createMockConfig();
@@ -1596,7 +1593,6 @@ describe('LLMO Onboarding Functions', () => {
       );
       const mockOctokit = createMockOctokit();
 
-      // Mock the module with Ahrefs client
       const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
         '../../../src/controllers/llmo/llmo-onboarding.js',
         {
@@ -1605,25 +1601,17 @@ describe('LLMO Onboarding Functions', () => {
             mockTracingFetch,
             mockConfig,
             mockComposeBaseURL,
+            mockResolveCanonicalUrl,
             mockSharePointClient: sharePointClient,
             mockOctokit,
           }),
-          '@adobe/spacecat-shared-ahrefs-client': {
-            default: {
-              createFrom: sinon.stub().returns(mockAhrefsClient),
-            },
-          },
         },
       );
 
       const context = {
         dataAccess: mockDataAccess,
         log: mockLog,
-        env: {
-          ...mockEnv,
-          AHREFS_API_BASE_URL: 'https://api.ahrefs.com',
-          AHREFS_API_KEY: 'test-ahrefs-key',
-        },
+        env: mockEnv,
         sqs: {
           sendMessage: sinon.stub().resolves(),
         },
@@ -1660,7 +1648,7 @@ describe('LLMO Onboarding Functions', () => {
       restoreSetTimeout(originalSetTimeout);
     });
 
-    it('should not set overrideBaseURL when Ahrefs determines it is not needed', async () => {
+    it('should not set overrideBaseURL when canonical resolution determines it is not needed', async () => {
       // Mock organization
       const mockOrganization = {
         getId: sinon.stub().returns('org123'),
@@ -1698,17 +1686,9 @@ describe('LLMO Onboarding Functions', () => {
       mockDataAccess.Site.create.resolves(mockSite);
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
-      // Mock Ahrefs client - both URLs succeed
-      const mockAhrefsClient = {
-        getTopPages: sinon.stub(),
-      };
-      // Both URLs succeed, so no overrideBaseURL should be set
-      mockAhrefsClient.getTopPages
-        .withArgs('https://example.com', 1)
-        .resolves({ result: { pages: [{ url: 'https://example.com/page1' }] } });
-      mockAhrefsClient.getTopPages
-        .withArgs('https://www.example.com', 1)
-        .resolves({ result: { pages: [{ url: 'https://www.example.com/page1' }] } });
+      const mockResolveCanonicalUrl = sinon.stub();
+      mockResolveCanonicalUrl.withArgs('https://example.com').resolves('https://example.com/');
+      mockResolveCanonicalUrl.withArgs('https://www.example.com').resolves('https://www.example.com/');
 
       // Use helper functions for common mocks
       const mockConfig = createMockConfig();
@@ -1722,7 +1702,6 @@ describe('LLMO Onboarding Functions', () => {
       );
       const mockOctokit = createMockOctokit();
 
-      // Mock the module with Ahrefs client
       const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
         '../../../src/controllers/llmo/llmo-onboarding.js',
         {
@@ -1731,25 +1710,17 @@ describe('LLMO Onboarding Functions', () => {
             mockTracingFetch,
             mockConfig,
             mockComposeBaseURL,
+            mockResolveCanonicalUrl,
             mockSharePointClient: sharePointClient,
             mockOctokit,
           }),
-          '@adobe/spacecat-shared-ahrefs-client': {
-            default: {
-              createFrom: sinon.stub().returns(mockAhrefsClient),
-            },
-          },
         },
       );
 
       const context = {
         dataAccess: mockDataAccess,
         log: mockLog,
-        env: {
-          ...mockEnv,
-          AHREFS_API_BASE_URL: 'https://api.ahrefs.com',
-          AHREFS_API_KEY: 'test-ahrefs-key',
-        },
+        env: mockEnv,
         sqs: {
           sendMessage: sinon.stub().resolves(),
         },
@@ -1810,10 +1781,7 @@ describe('LLMO Onboarding Functions', () => {
       mockDataAccess.Site.findByBaseURL.resolves(mockSite); // Existing site
       mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
 
-      // Mock Ahrefs client - should NOT be called since we skip detection
-      const mockAhrefsClient = {
-        getTopPages: sinon.stub(),
-      };
+      const mockResolveCanonicalUrl = sinon.stub();
 
       // Use helper functions for common mocks
       const mockConfig = createMockConfig();
@@ -1827,7 +1795,6 @@ describe('LLMO Onboarding Functions', () => {
       );
       const mockOctokit = createMockOctokit();
 
-      // Mock the module with Ahrefs client
       const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
         '../../../src/controllers/llmo/llmo-onboarding.js',
         {
@@ -1836,25 +1803,17 @@ describe('LLMO Onboarding Functions', () => {
             mockTracingFetch,
             mockConfig,
             mockComposeBaseURL,
+            mockResolveCanonicalUrl,
             mockSharePointClient: sharePointClient,
             mockOctokit,
           }),
-          '@adobe/spacecat-shared-ahrefs-client': {
-            default: {
-              createFrom: sinon.stub().returns(mockAhrefsClient),
-            },
-          },
         },
       );
 
       const context = {
         dataAccess: mockDataAccess,
         log: mockLog,
-        env: {
-          ...mockEnv,
-          AHREFS_API_BASE_URL: 'https://api.ahrefs.com',
-          AHREFS_API_KEY: 'test-ahrefs-key',
-        },
+        env: mockEnv,
         sqs: {
           sendMessage: sinon.stub().resolves(),
         },
@@ -1868,8 +1827,8 @@ describe('LLMO Onboarding Functions', () => {
 
       await performLlmoOnboardingWithMocks(params, context);
 
-      // Verify Ahrefs was NOT called (auto-detection was skipped)
-      expect(mockAhrefsClient.getTopPages).to.not.have.been.called;
+      // Verify canonical resolution was NOT called (auto-detection was skipped)
+      expect(mockResolveCanonicalUrl).to.not.have.been.called;
 
       // Verify updateFetchConfig was NOT called (existing override preserved)
       expect(mockSiteConfig.updateFetchConfig).to.not.have.been.called;
@@ -1978,7 +1937,9 @@ describe('LLMO Onboarding Functions', () => {
           createFrom: sinon.stub().resolves(spClient),
         },
         '@adobe/spacecat-shared-utils': {
+          composeBaseURL: (domain) => `https://${domain}`,
           tracingFetch: mockTracingFetch,
+          resolveCanonicalUrl: sinon.stub().callsFake(async (url) => url),
         },
       });
 
@@ -2427,7 +2388,9 @@ describe('LLMO Onboarding Functions', () => {
       // Mock the module with tracingFetch
       const { unpublishFromAdminHlx } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
         '@adobe/spacecat-shared-utils': {
+          composeBaseURL: (domain) => `https://${domain}`,
           tracingFetch: mockTracingFetch,
+          resolveCanonicalUrl: sinon.stub().callsFake(async (url) => url),
         },
       });
 
@@ -2455,81 +2418,100 @@ describe('LLMO Onboarding Functions', () => {
 
     const testCases = [
       {
-        name: 'should return alternate URL when only alternate succeeds (base without www)',
+        name: 'should return alternate URL when only alternate resolves (base without www)',
         baseURL: 'https://example.com',
         responses: {
-          'https://example.com': [],
-          'https://www.example.com': [{ url: 'https://www.example.com/page1' }],
+          'https://example.com': null,
+          'https://www.example.com': 'https://www.example.com/',
         },
         expected: 'https://www.example.com',
         expectedLog: { level: 'info', pattern: /Setting overrideBaseURL to https:\/\/www\.example\.com/ },
       },
       {
-        name: 'should return alternate URL when only alternate succeeds (base with www)',
+        name: 'should return alternate URL when only alternate resolves (base with www)',
         baseURL: 'https://www.example.com',
         responses: {
-          'https://www.example.com': [],
-          'https://example.com': [{ url: 'https://example.com/page1' }],
+          'https://www.example.com': null,
+          'https://example.com': 'https://example.com/',
         },
         expected: 'https://example.com',
         expectedLog: { level: 'info', pattern: /Setting overrideBaseURL/ },
       },
       {
-        name: 'should return null when both URLs succeed',
+        name: 'should return override when base canonical redirects to www',
         baseURL: 'https://example.com',
         responses: {
-          'https://example.com': [{ url: 'https://example.com/page1' }],
-          'https://www.example.com': [{ url: 'https://www.example.com/page1' }],
+          'https://example.com': 'https://www.example.com/',
         },
-        expected: null,
-        expectedLog: { level: 'debug', pattern: /Both URLs succeeded, no overrideBaseURL needed/ },
+        expected: 'https://www.example.com',
+        expectedLog: { level: 'info', pattern: /base URL canonical resolved to alternate hostname/ },
       },
       {
-        name: 'should return null when only base URL succeeds',
+        name: 'should return null when base resolves without hostname toggle',
         baseURL: 'https://example.com',
         responses: {
-          'https://example.com': [{ url: 'https://example.com/page1' }],
-          'https://www.example.com': [],
+          'https://example.com': 'https://example.com/',
+          'https://www.example.com': 'https://www.example.com/',
         },
         expected: null,
-        expectedLog: { level: 'debug', pattern: /Base URL succeeded, no overrideBaseURL needed/ },
+        expectedLog: { level: 'info', pattern: /Base URL resolved, no overrideBaseURL needed/ },
       },
       {
-        name: 'should return null when both URLs fail',
+        name: 'should return null when base resolves and alternate does not',
         baseURL: 'https://example.com',
         responses: {
-          'https://example.com': [],
-          'https://www.example.com': [],
+          'https://example.com': 'https://example.com/',
+          'https://www.example.com': null,
         },
         expected: null,
-        expectedLog: { level: 'warn', pattern: /Both URLs failed Ahrefs test/ },
+        expectedLog: { level: 'info', pattern: /Base URL resolved, no overrideBaseURL needed/ },
       },
       {
-        name: 'should handle multi-part TLD (.com.au) when only alternate succeeds',
+        name: 'should return null when both URLs fail to resolve',
+        baseURL: 'https://example.com',
+        responses: {
+          'https://example.com': null,
+          'https://www.example.com': null,
+        },
+        expected: null,
+        expectedLog: { level: 'warn', pattern: /Both URLs could not be resolved canonically/ },
+      },
+      {
+        name: 'should return null when alternate resolves but no hostname toggle is detected',
+        baseURL: 'https://example.com',
+        responses: {
+          'https://example.com': null,
+          'https://www.example.com': 'https://example.com/',
+        },
+        expected: null,
+        expectedLog: { level: 'info', pattern: /Alternate URL resolved but no hostname toggle detected/ },
+      },
+      {
+        name: 'should handle multi-part TLD (.com.au) when only alternate resolves',
         baseURL: 'https://example.com.au',
         responses: {
-          'https://example.com.au': [],
-          'https://www.example.com.au': [{ url: 'https://www.example.com.au/page1' }],
+          'https://example.com.au': null,
+          'https://www.example.com.au': 'https://www.example.com.au/',
         },
         expected: 'https://www.example.com.au',
         expectedLog: { level: 'info', pattern: /Setting overrideBaseURL/ },
       },
       {
-        name: 'should handle multi-part TLD (.co.uk) when only alternate succeeds',
+        name: 'should handle multi-part TLD (.co.uk) when only alternate resolves',
         baseURL: 'https://example.co.uk',
         responses: {
-          'https://example.co.uk': [],
-          'https://www.example.co.uk': [{ url: 'https://www.example.co.uk/page1' }],
+          'https://example.co.uk': null,
+          'https://www.example.co.uk': 'https://www.example.co.uk/',
         },
         expected: 'https://www.example.co.uk',
         expectedLog: { level: 'info', pattern: /Setting overrideBaseURL/ },
       },
       {
-        name: 'should handle multi-part TLD with www when only alternate succeeds',
+        name: 'should handle multi-part TLD with www when only alternate resolves',
         baseURL: 'https://www.example.com.au',
         responses: {
-          'https://www.example.com.au': [],
-          'https://example.com.au': [{ url: 'https://example.com.au/page1' }],
+          'https://www.example.com.au': null,
+          'https://example.com.au': 'https://example.com.au/',
         },
         expected: 'https://example.com.au',
         expectedLog: { level: 'info', pattern: /Setting overrideBaseURL/ },
@@ -2548,18 +2530,16 @@ describe('LLMO Onboarding Functions', () => {
       });
     });
 
-    it('should handle Ahrefs API errors gracefully', async () => {
-      const mockAhrefsClient = {
-        getTopPages: sinon.stub().rejects(new Error('Ahrefs API error')),
-      };
+    it('should handle canonical resolution errors gracefully', async () => {
+      const mockResolveCanonicalUrl = sinon.stub().rejects(new Error('Canonical resolution error'));
 
       const { determineOverrideBaseURL } = await esmock(
         '../../../src/controllers/llmo/llmo-onboarding.js',
         {
-          '@adobe/spacecat-shared-ahrefs-client': {
-            default: {
-              createFrom: sinon.stub().returns(mockAhrefsClient),
-            },
+          '@adobe/spacecat-shared-utils': {
+            composeBaseURL: (domain) => `https://${domain}`,
+            tracingFetch: sinon.stub(),
+            resolveCanonicalUrl: mockResolveCanonicalUrl,
           },
         },
       );
@@ -2572,10 +2552,10 @@ describe('LLMO Onboarding Functions', () => {
       const result = await determineOverrideBaseURL('https://example.com', context);
 
       expect(result).to.be.null;
-      expect(mockLog.debug).to.have.been.calledWith(
-        sinon.match(/Ahrefs top pages test.*FAILED/),
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/Error determining overrideBaseURL: Canonical resolution error/),
+        sinon.match.instanceOf(Error),
       );
-      expect(mockLog.warn).to.have.been.calledWith('Both URLs failed Ahrefs test, no overrideBaseURL set');
     });
 
     // Subdomain detection tests
@@ -2596,54 +2576,73 @@ describe('LLMO Onboarding Functions', () => {
 
     subdomainTestCases.forEach(({ name, url }) => {
       it(name, async () => {
-        const { result, mockAhrefsClient } = await testOverrideBaseURL(url, {});
+        const { result, mockCanonicalResolver } = await testOverrideBaseURL(url, {});
 
         expect(result).to.be.null;
         expect(mockLog.info).to.have.been.calledWith(
           `Skipping overrideBaseURL detection for subdomain URL: ${url}`,
         );
-        // Verify Ahrefs was NOT called
-        expect(mockAhrefsClient.getTopPages).to.not.have.been.called;
+        // Verify canonical resolver was NOT called
+        expect(mockCanonicalResolver).to.not.have.been.called;
       });
     });
 
     it('should NOT skip detection for apex domain with multi-part TLD (example.co.uk)', async () => {
-      const { result, mockAhrefsClient } = await testOverrideBaseURL(
+      const { result, mockCanonicalResolver } = await testOverrideBaseURL(
         'https://example.co.uk',
         {
-          'https://example.co.uk': [{ url: 'https://example.co.uk/page1' }],
-          'https://www.example.co.uk': [{ url: 'https://www.example.co.uk/page1' }],
+          'https://example.co.uk': 'https://example.co.uk/',
+          'https://www.example.co.uk': 'https://www.example.co.uk/',
         },
       );
 
       expect(result).to.be.null; // Both succeed, no override needed
-      // Verify Ahrefs WAS called (not skipped)
-      expect(mockAhrefsClient.getTopPages).to.have.been.calledTwice;
-      expect(mockLog.debug).to.have.been.calledWith('Both URLs succeeded, no overrideBaseURL needed');
+      // Verify canonical resolver WAS called for base URL (not skipped)
+      expect(mockCanonicalResolver).to.have.been.calledOnce;
+      expect(mockLog.info).to.have.been.calledWith('Base URL resolved, no overrideBaseURL needed');
     });
 
-    it('should preserve trailing slash consistency when toggling www', async () => {
-      // Test with URL without trailing slash - result should also not have trailing slash
+    it('should preserve base path when alternate URL determines override', async () => {
       const { result: resultNoSlash } = await testOverrideBaseURL(
-        'https://example.com',
+        'https://example.com/path',
         {
-          'https://example.com': [],
-          'https://www.example.com': [{ url: 'https://www.example.com/page1' }],
+          'https://example.com/path': null,
+          'https://www.example.com/path': 'https://www.example.com/',
         },
       );
-      expect(resultNoSlash).to.equal('https://www.example.com');
+      expect(resultNoSlash).to.equal('https://www.example.com/path');
       expect(resultNoSlash.endsWith('/')).to.be.false;
 
-      // Test with URL with trailing slash - result should also have trailing slash
       const { result: resultWithSlash } = await testOverrideBaseURL(
         'https://example.com/',
         {
-          'https://example.com/': [],
-          'https://www.example.com/': [{ url: 'https://www.example.com/page1' }],
+          'https://example.com/': null,
+          'https://www.example.com/': 'https://www.example.com/',
         },
       );
-      expect(resultWithSlash).to.equal('https://www.example.com/');
-      expect(resultWithSlash.endsWith('/')).to.be.true;
+      expect(resultWithSlash).to.equal('https://www.example.com');
+    });
+
+    it('should preserve base path when base canonical URL differs in origin', async () => {
+      const { result } = await testOverrideBaseURL(
+        'https://example.com/de',
+        {
+          'https://example.com/de': 'https://www.example.com/',
+        },
+      );
+
+      expect(result).to.equal('https://www.example.com/de');
+    });
+
+    it('should not set override when canonical changes only path on same hostname', async () => {
+      const { result } = await testOverrideBaseURL(
+        'https://example.com/de',
+        {
+          'https://example.com/de': 'https://example.com/us',
+        },
+      );
+
+      expect(result).to.be.null;
     });
   });
 
