@@ -127,8 +127,10 @@ function TrialUsersController(ctx) {
         return forbidden('Access denied to this organization');
       }
 
-      // Check if trial user already exists with this email
-      const existingTrialUser = await TrialUser.findByEmailId(emailId);
+      // Check if trial user already exists with this email in this organization
+      const existingTrialUsers = await TrialUser.allByEmailId(emailId);
+      const existingTrialUser = existingTrialUsers
+        .find((user) => user.getOrganizationId() === organizationId);
       if (existingTrialUser) {
         return createResponse({ message: `Trial user with this email already exists ${existingTrialUser.getId()}` }, 409);
       }
