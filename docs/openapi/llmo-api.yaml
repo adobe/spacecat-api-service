@@ -1459,8 +1459,10 @@ site-llmo-edge-optimize-routing:
             properties:
               cdnType:
                 type: string
-                enum: [fastly]
-                description: CDN provider; determines which CDN API URL from EDGE_OPTIMIZE_ROUTING_CONFIG is used.
+                enum: [aem-cs-fastly]
+                description: |
+                  CDN / log source type (LOG_SOURCES). Determines which CDN API URL from
+                  EDGE_OPTIMIZE_ROUTING_CONFIG is used. Currently supported for edge optimize: aem-cs-fastly.
               enabled:
                 type: boolean
                 default: true
@@ -1485,7 +1487,7 @@ site-llmo-edge-optimize-routing:
                   example: www.example.com
                 cdnType:
                   type: string
-                  example: fastly
+                  example: aem-cs-fastly
       '400':
         description: Bad request (e.g. non-prod ENV, missing/invalid cdnType, invalid enabled, probe failed or non-2xx)
         content:

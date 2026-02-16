@@ -13,12 +13,23 @@
 // LLMO constants
 export const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
 
-/**
- * Per-CDN strategies for edge optimize routing. Each key is a cdnType; value defines how to
- * build the API URL and request body for that CDN. Add a new key to support another CDN.
- */
+// Supported CDN / log source types. Aligned with auth-service (cdn-logs-infrastructure/common.js).
+export const LOG_SOURCES = {
+  BYOCDN_FASTLY: 'byocdn-fastly',
+  BYOCDN_AKAMAI: 'byocdn-akamai',
+  BYOCDN_CLOUDFRONT: 'byocdn-cloudfront',
+  BYOCDN_CLOUDFLARE: 'byocdn-cloudflare',
+  BYOCDN_IMPERVA: 'byocdn-imperva',
+  BYOCDN_OTHER: 'byocdn-other',
+  AMS_CLOUDFRONT: 'ams-cloudfront',
+  AMS_FRONTDOOR: 'ams-frontdoor',
+  AEM_CS_FASTLY: 'aem-cs-fastly',
+  COMMERCE_FASTLY: 'commerce-fastly',
+};
+
+// Per-CDN strategies for edge optimize routing.
 export const EDGE_OPTIMIZE_CDN_STRATEGIES = {
-  'AEM Cloud Service Managed CDN (Fastly)': {
+  [LOG_SOURCES.AEM_CS_FASTLY]: {
     buildUrl: (cdnConfig, domain) => {
       const base = cdnConfig.cdnRoutingUrl.trim().replace(/\/+$/, '');
       return `${base}/${domain}/edgeoptimize`;

@@ -1,3 +1,31 @@
+# [1.315.0](https://github.com/adobe/spacecat-api-service/compare/v1.314.0...v1.315.0) (2026-02-12)
+
+
+### Features
+
+* add filterByTopOrganicSearchPages parameter for RUM metrics ([#1796](https://github.com/adobe/spacecat-api-service/issues/1796)) ([1728365](https://github.com/adobe/spacecat-api-service/commit/1728365a17f9bc3ac40a57407848282431f0d645))
+
+# [1.314.0](https://github.com/adobe/spacecat-api-service/compare/v1.313.4...v1.314.0) (2026-02-11)
+
+
+### Features
+
+* remove the sitemap audit from the "paid" config ([#1803](https://github.com/adobe/spacecat-api-service/issues/1803)) ([6f22f4f](https://github.com/adobe/spacecat-api-service/commit/6f22f4f9fd77b12b4b455d2335fb8d03512ef283))
+
+## [1.313.4](https://github.com/adobe/spacecat-api-service/compare/v1.313.3...v1.313.4) (2026-02-11)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.94.0 ([#1802](https://github.com/adobe/spacecat-api-service/issues/1802)) ([370e1fa](https://github.com/adobe/spacecat-api-service/commit/370e1fadf7c0120ae4f1d22b0b7705fc1629f9a1))
+
+## [1.313.3](https://github.com/adobe/spacecat-api-service/compare/v1.313.2...v1.313.3) (2026-02-11)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.106.0 ([#1801](https://github.com/adobe/spacecat-api-service/issues/1801)) ([1820bd0](https://github.com/adobe/spacecat-api-service/commit/1820bd04defa7c293f4ea6c63b5ba1a3562b232e))
+
 ## [1.313.2](https://github.com/adobe/spacecat-api-service/compare/v1.313.1...v1.313.2) (2026-02-11)
 
 

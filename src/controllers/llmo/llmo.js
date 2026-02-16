@@ -1241,12 +1241,10 @@ function LlmoController(ctx) {
     if (!hasText(cdnType)) {
       return badRequest('cdnType is required and must be a non-empty string');
     }
-    let cdnTypeNormalized;
-    EDGE_OPTIMIZE_CDN_TYPES.forEach((type) => {
-      if (cdnType.trim().toLowerCase().includes(type.toLowerCase())) {
-        cdnTypeNormalized = type;
-      }
-    });
+    const cdnTypeTrimmed = cdnType.toLowerCase().trim();
+    const cdnTypeNormalized = EDGE_OPTIMIZE_CDN_TYPES.includes(cdnTypeTrimmed)
+      ? cdnTypeTrimmed
+      : null;
 
     if (!cdnTypeNormalized) {
       return badRequest(`cdnType must be one of: ${EDGE_OPTIMIZE_CDN_TYPES.join(', ')}`);
