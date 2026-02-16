@@ -1,3 +1,10 @@
+## [1.318.2](https://github.com/adobe/spacecat-api-service/compare/v1.318.1...v1.318.2) (2026-02-16)
+
+
+### Bug Fixes
+
+* timeout added for edge optimize status ([#1816](https://github.com/adobe/spacecat-api-service/issues/1816)) ([cae7cbb](https://github.com/adobe/spacecat-api-service/commit/cae7cbbe3a4438b1c410c3a10fe03029b5622f0f))
+
 ## [1.318.1](https://github.com/adobe/spacecat-api-service/compare/v1.318.0...v1.318.1) (2026-02-16)
 
 
