@@ -1,3 +1,10 @@
+# [1.318.0](https://github.com/adobe/spacecat-api-service/compare/v1.317.1...v1.318.0) (2026-02-16)
+
+
+### Features
+
+* brandalf ([#1804](https://github.com/adobe/spacecat-api-service/issues/1804)) ([329f055](https://github.com/adobe/spacecat-api-service/commit/329f05532f550b2b65e52d5da36e35a0dea03678))
+
 ## [1.317.1](https://github.com/adobe/spacecat-api-service/compare/v1.317.0...v1.317.1) (2026-02-13)
 
 
