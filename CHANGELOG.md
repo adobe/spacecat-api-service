@@ -1,3 +1,10 @@
+## [1.318.1](https://github.com/adobe/spacecat-api-service/compare/v1.318.0...v1.318.1) (2026-02-16)
+
+
+### Bug Fixes
+
+* scope trial-user-invite duplicate check to current organization ([#1815](https://github.com/adobe/spacecat-api-service/issues/1815)) ([90abdaf](https://github.com/adobe/spacecat-api-service/commit/90abdafc9f84c4976e8c920bef9a97c7937478cb))
+
 # [1.318.0](https://github.com/adobe/spacecat-api-service/compare/v1.317.1...v1.318.0) (2026-02-16)
 
 
