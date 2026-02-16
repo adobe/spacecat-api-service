@@ -1,3 +1,66 @@
+# [1.318.0](https://github.com/adobe/spacecat-api-service/compare/v1.317.1...v1.318.0) (2026-02-16)
+
+
+### Features
+
+* brandalf ([#1804](https://github.com/adobe/spacecat-api-service/issues/1804)) ([329f055](https://github.com/adobe/spacecat-api-service/commit/329f05532f550b2b65e52d5da36e35a0dea03678))
+
+## [1.317.1](https://github.com/adobe/spacecat-api-service/compare/v1.317.0...v1.317.1) (2026-02-13)
+
+
+### Bug Fixes
+
+* Bump speacecat-shared-utils to get latest aggregation levels for… ([#1812](https://github.com/adobe/spacecat-api-service/issues/1812)) ([e90fac9](https://github.com/adobe/spacecat-api-service/commit/e90fac98bdb5401baacb515fb0616c8cec6f796f))
+
+# [1.317.0](https://github.com/adobe/spacecat-api-service/compare/v1.316.2...v1.317.0) (2026-02-13)
+
+
+### Features
+
+* extend geo-brand-presence-free splits from 18 to 23 ([#1810](https://github.com/adobe/spacecat-api-service/issues/1810)) ([e6c1b66](https://github.com/adobe/spacecat-api-service/commit/e6c1b6653871480073e000f91003f3c6c7c2536f)), closes [adobe/spacecat-audit-worker#1981](https://github.com/adobe/spacecat-audit-worker/issues/1981) [adobe/spacecat-shared#1345](https://github.com/adobe/spacecat-shared/issues/1345) [adobe/spacecat-infrastructure#322](https://github.com/adobe/spacecat-infrastructure/issues/322)
+
+## [1.316.2](https://github.com/adobe/spacecat-api-service/compare/v1.316.1...v1.316.2) (2026-02-13)
+
+
+### Bug Fixes
+
+* bot protection check ([#1668](https://github.com/adobe/spacecat-api-service/issues/1668)) ([adf7495](https://github.com/adobe/spacecat-api-service/commit/adf7495b8ce6b5a05c2e8a886193f7dd2cdeaf5e))
+
+## [1.316.1](https://github.com/adobe/spacecat-api-service/compare/v1.316.0...v1.316.1) (2026-02-12)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-utils to v1.96.0 ([#1809](https://github.com/adobe/spacecat-api-service/issues/1809)) ([62edb77](https://github.com/adobe/spacecat-api-service/commit/62edb7768dc88c4d7a03c1c23b21746f25935cdc))
+
+# [1.316.0](https://github.com/adobe/spacecat-api-service/compare/v1.315.3...v1.316.0) (2026-02-12)
+
+
+### Features
+
+* split geo-brand-presence-free in onboarding/offboarding ([#1806](https://github.com/adobe/spacecat-api-service/issues/1806)) ([5be03f3](https://github.com/adobe/spacecat-api-service/commit/5be03f3020badd5c1f72716c5c202122302f2461)), closes [adobe/spacecat-audit-worker#1979](https://github.com/adobe/spacecat-audit-worker/issues/1979) [adobe/spacecat-shared#1344](https://github.com/adobe/spacecat-shared/issues/1344)
+
+## [1.315.3](https://github.com/adobe/spacecat-api-service/compare/v1.315.2...v1.315.3) (2026-02-12)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v2.107.0 ([#1808](https://github.com/adobe/spacecat-api-service/issues/1808)) ([c2f65c7](https://github.com/adobe/spacecat-api-service/commit/c2f65c7c0d77ca2548b9ed444f3b3ee95b10c7b6))
+
+## [1.315.2](https://github.com/adobe/spacecat-api-service/compare/v1.315.1...v1.315.2) (2026-02-12)
+
+
+### Bug Fixes
+
+* version upgradation of spacecat-shared-data-access for enabled removal from edge config ([#1807](https://github.com/adobe/spacecat-api-service/issues/1807)) ([b8a68f7](https://github.com/adobe/spacecat-api-service/commit/b8a68f7182d05783e8089cf8971c6eb8fe6126bb))
+
+## [1.315.1](https://github.com/adobe/spacecat-api-service/compare/v1.315.0...v1.315.1) (2026-02-12)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tokowaka-client to v1.7.7 ([#1805](https://github.com/adobe/spacecat-api-service/issues/1805)) ([6af6088](https://github.com/adobe/spacecat-api-service/commit/6af6088be3415410c5ccc93f19d6157f7c5d6858))
+
 # [1.315.0](https://github.com/adobe/spacecat-api-service/compare/v1.314.0...v1.315.0) (2026-02-12)
 
 

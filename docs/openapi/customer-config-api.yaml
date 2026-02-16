@@ -1,0 +1,459 @@
+llmo-customer-config-by-space-cat-id-v2:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+        example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    - name: status
+      in: query
+      required: false
+      description: Filter by status (active, pending, deleted). Default excludes deleted items.
+      schema:
+        type: string
+        enum: [active, pending, deleted]
+        example: 'active'
+  get:
+    tags:
+      - customer-config
+    summary: Retrieves customer configuration for an organization (v2)
+    description: |
+      This endpoint provides the complete customer configuration including brands, categories, topics, and prompts
+      for the given SpaceCat Organization. Returns 404 if no customer configuration exists.
+      
+      By default, deleted items (categories, topics, prompts) are excluded.
+      Use the `status` query parameter to filter by specific status or include deleted items.
+      
+      The configuration includes:
+      - Brand information and metadata
+      - URLs, social accounts, and brand aliases
+      - Competitors and related brands
+      - Earned media content sources
+      - Top-level categories and topics collections
+      - Prompts with category/topic references
+      - Available industry verticals
+    operationId: getCustomerConfigBySpaceCatIdV2
+    security:
+      - ims_key: [ ]
+      - api_key: [ ]
+    responses:
+      '200':
+        description: Customer configuration retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/CustomerConfig'
+            examples:
+              adobe:
+                $ref: './examples.yaml#/CustomerConfigAdobe'
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        description: Customer configuration not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Customer configuration not found"
+      '500':
+        $ref: './responses.yaml#/500'
+  post:
+    tags:
+      - customer-config
+    summary: Saves customer configuration for an organization (v2)
+    description: |
+      Saves the complete customer configuration for the given SpaceCat Organization to S3.
+      
+      The configuration must include:
+      - customer.customerName
+      - customer.imsOrgID (must match the IMS Org ID in the URL)
+      - customer.brands (array of brands)
+      
+      Note: This does NOT automatically update V1 site-level LLMO configs.
+    operationId: saveCustomerConfigBySpaceCatIdV2
+    security:
+      - ims_key: [ ]
+      - api_key: [ ]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/CustomerConfig'
+          examples:
+            adobe:
+              $ref: './examples.yaml#/CustomerConfigAdobe'
+    responses:
+      '200':
+        description: Customer configuration saved successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Customer configuration saved successfully"
+      '400':
+        description: Bad request - invalid data, IMS Org ID mismatch, or storage not configured
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      '500':
+        $ref: './responses.yaml#/500'
+  patch:
+    tags:
+      - customer-config
+    summary: Patches (merges) customer configuration for an organization (v2)
+    description: |
+      Merges the provided partial configuration with the existing configuration in S3.
+      This allows incremental updates without sending the entire config.
+      
+      - Only the fields provided in the request will be updated
+      - Arrays (brands, categories, topics) are merged by ID
+      - Unchanged items preserve their metadata (updatedBy, updatedAt)
+      - Modified or new items get updated metadata with current user and timestamp
+      
+      Use this endpoint to:
+      - Add new brands without affecting existing ones
+      - Update specific categories or topics
+      - Add prompts to existing brands
+      - Update brand metadata
+      
+      The endpoint tracks and returns statistics about what was modified.
+    operationId: patchCustomerConfigBySpaceCatIdV2
+    security:
+      - ims_key: [ ]
+      - api_key: [ ]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/CustomerConfig'
+          examples:
+            addBrand:
+              summary: Add a new brand
+              value:
+                customer:
+                  brands:
+                    - id: "new-brand"
+                      name: "New Brand"
+                      status: "active"
+                      origin: "manual"
+                      region: ["US"]
+                      description: "A new brand"
+                      vertical: "Software & Technology"
+                      urls:
+                        - value: "https://example.com"
+                          regions: ["US"]
+                      prompts: []
+            updateCategory:
+              summary: Update specific categories
+              value:
+                customer:
+                  categories:
+                    - id: "category-1"
+                      name: "Updated Category Name"
+                      status: "active"
+                      origin: "human"
+    responses:
+      '200':
+        description: Customer configuration updated successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Customer configuration updated successfully"
+                stats:
+                  type: object
+                  properties:
+                    categories:
+                      type: object
+                      properties:
+                        total:
+                          type: integer
+                        modified:
+                          type: integer
+                    topics:
+                      type: object
+                      properties:
+                        total:
+                          type: integer
+                        modified:
+                          type: integer
+                    brands:
+                      type: object
+                      properties:
+                        total:
+                          type: integer
+                        modified:
+                          type: integer
+                    prompts:
+                      type: object
+                      properties:
+                        total:
+                          type: integer
+                        modified:
+                          type: integer
+      '400':
+        description: Bad request - invalid data or storage not configured
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        description: Organization not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      '500':
+        $ref: './responses.yaml#/500'
+
+llmo-customer-config-lean-by-space-cat-id-v2:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+        example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    - name: status
+      in: query
+      required: false
+      description: Filter by status (active, pending, deleted). Default excludes deleted items. Affects brand totals counts.
+      schema:
+        type: string
+        enum: [active, pending, deleted]
+        example: 'active'
+  get:
+    tags:
+      - customer-config
+    summary: Retrieves lean customer configuration (without prompts) for an IMS Org (v2)
+    description: |
+      This endpoint provides the customer configuration without the prompts array in each brand.
+      Useful for getting brand metadata without the potentially large prompts payload.
+      
+      By default, deleted items are excluded from totals counts.
+      Use the `status` query parameter to filter which items are counted.
+      
+      The configuration includes everything except brand.prompts[].
+      Each brand includes totalCategories, totalTopics, and totalPrompts counts.
+    operationId: getCustomerConfigLeanBySpaceCatIdV2
+    security:
+      - ims_key: [ ]
+      - api_key: [ ]
+    responses:
+      '200':
+        description: Lean customer configuration retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/CustomerConfig'
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        description: Customer configuration not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Customer configuration not found"
+      '500':
+        $ref: './responses.yaml#/500'
+
+llmo-topics-by-space-cat-id-v2:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+        example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    - name: brandId
+      in: query
+      required: false
+      description: Filter topics by brand ID (returns only topics used by that brand's prompts)
+      schema:
+        type: string
+        example: 'chevrolet'
+    - name: status
+      in: query
+      required: false
+      description: Filter by status (active, pending, deleted). Default excludes deleted topics.
+      schema:
+        type: string
+        enum: [active, pending, deleted]
+        example: 'active'
+  get:
+    tags:
+      - customer-config
+    summary: Retrieves topics for an IMS Org (v2)
+    description: |
+      Returns the top-level topics collection from the customer configuration.
+      Topics are shared across all brands.
+      
+      By default, deleted topics are excluded.
+      Use the `status` query parameter to filter by specific status or include deleted topics.
+      
+      Optionally filter by `brandId` to return only topics used by that brand's prompts.
+    operationId: getTopicsBySpaceCatIdV2
+    security:
+      - ims_key: [ ]
+      - api_key: [ ]
+    responses:
+      '200':
+        description: Topics retrieved successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                topics:
+                  type: array
+                  items:
+                    $ref: './schemas.yaml#/CustomerConfigTopic'
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        description: Customer configuration not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Customer configuration not found"
+      '500':
+        $ref: './responses.yaml#/500'
+
+llmo-prompts-by-space-cat-id-v2:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+        example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    - name: brandId
+      in: query
+      required: false
+      description: Filter prompts by brand ID
+      schema:
+        type: string
+        example: 'chevrolet'
+    - name: categoryId
+      in: query
+      required: false
+      description: Filter prompts by category ID
+      schema:
+        type: string
+        example: 'product-features'
+    - name: topicId
+      in: query
+      required: false
+      description: Filter prompts by topic ID
+      schema:
+        type: string
+        example: 'performance'
+    - name: status
+      in: query
+      required: false
+      description: Filter by status (active, pending, deleted). Default excludes deleted prompts.
+      schema:
+        type: string
+        enum: [active, pending, deleted]
+        example: 'active'
+  get:
+    tags:
+      - customer-config
+    summary: Retrieves prompts for an IMS Org (v2)
+    description: |
+      Returns all prompts from all brands, enriched with brand, category, and topic information.
+      
+      By default, deleted prompts are excluded.
+      Use the `status` query parameter to filter by specific status or include deleted prompts.
+      
+      Supports optional filtering by brandId, categoryId, and/or topicId query parameters.
+      
+      Each prompt is enriched with:
+      - brandId and brandName
+      - Full category object (id, name, origin)
+      - Full topic object (id, name, categoryId)
+    operationId: getPromptsBySpaceCatIdV2
+    security:
+      - ims_key: [ ]
+      - api_key: [ ]
+    responses:
+      '200':
+        description: Prompts retrieved successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                prompts:
+                  type: array
+                  items:
+                    allOf:
+                      - $ref: './schemas.yaml#/CustomerConfigPrompt'
+                      - type: object
+                        properties:
+                          brandId:
+                            type: string
+                            description: ID of the brand this prompt belongs to
+                          brandName:
+                            type: string
+                            description: Name of the brand this prompt belongs to
+                          category:
+                            $ref: './schemas.yaml#/CustomerConfigCategory'
+                            description: Full category object
+                          topic:
+                            $ref: './schemas.yaml#/CustomerConfigTopic'
+                            description: Full topic object
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        description: Customer configuration not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: "Customer configuration not found"
+      '500':
+        $ref: './responses.yaml#/500'

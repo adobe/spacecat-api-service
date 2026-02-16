@@ -17,6 +17,7 @@ import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 import { S3Client } from '@aws-sdk/client-s3';
 import { llmoConfig } from '@adobe/spacecat-shared-utils';
+import { LOG_SOURCES } from '../../../src/controllers/llmo/llmo-utils.js';
 
 use(sinonChai);
 
@@ -4143,16 +4144,15 @@ describe('LlmoController', () => {
   describe('enableEdgeOptimize', () => {
     let enableEdgeContext;
     const validSiteId = '12345678-1234-4123-8123-123456789012';
-    const CDN_TYPE_AEM_FASTLY = 'AEM Cloud Service Managed CDN (Fastly)';
     const routingConfigFastly = JSON.stringify({
-      [CDN_TYPE_AEM_FASTLY]: { cdnRoutingUrl: 'https://internal-cdn.example.com' },
+      [LOG_SOURCES.AEM_CS_FASTLY]: { cdnRoutingUrl: 'https://internal-cdn.example.com' },
     });
 
     beforeEach(() => {
       enableEdgeContext = {
         ...mockContext,
         params: { siteId: validSiteId },
-        data: { cdnType: CDN_TYPE_AEM_FASTLY },
+        data: { cdnType: LOG_SOURCES.AEM_CS_FASTLY },
       };
       mockDataAccess.Site.findById.resetBehavior();
       mockDataAccess.Site.findById.resolves(mockSite);
@@ -4208,7 +4208,7 @@ describe('LlmoController', () => {
 
     it('returns 400 when enabled is not a boolean', async () => {
       enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      enableEdgeContext.data = { cdnType: CDN_TYPE_AEM_FASTLY, enabled: 'true' };
+      enableEdgeContext.data = { cdnType: LOG_SOURCES.AEM_CS_FASTLY, enabled: 'true' };
       const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
       expect(result.status).to.equal(400);
       expect((await result.json()).message).to.equal('enabled field must be a boolean');
@@ -4323,13 +4323,13 @@ describe('LlmoController', () => {
       expect(await result.json()).to.deep.equal({
         enabled: true,
         domain: 'www.example.com',
-        cdnType: CDN_TYPE_AEM_FASTLY,
+        cdnType: LOG_SOURCES.AEM_CS_FASTLY,
       });
       expect(tracingFetchStub.firstCall.args[0]).to.equal('https://example.com');
     });
 
     it('defaults enabled to true when context.data has only cdnType', async () => {
-      const ctxOnlyCdnType = { ...enableEdgeContext, data: { cdnType: CDN_TYPE_AEM_FASTLY } };
+      const ctxOnlyCdnType = { ...enableEdgeContext, data: { cdnType: LOG_SOURCES.AEM_CS_FASTLY } };
       ctxOnlyCdnType.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
       getAccessTokenStub.resolves({ access_token: 'fake-token' });
       tracingFetchStub.onFirstCall().resolves({ ok: true });
@@ -4339,7 +4339,7 @@ describe('LlmoController', () => {
       expect(await result.json()).to.deep.equal({
         enabled: true,
         domain: 'www.example.com',
-        cdnType: CDN_TYPE_AEM_FASTLY,
+        cdnType: LOG_SOURCES.AEM_CS_FASTLY,
       });
       expect(tracingFetchStub.secondCall.args[1].body).to.equal(JSON.stringify({ enabled: true }));
     });
@@ -4357,7 +4357,7 @@ describe('LlmoController', () => {
 
     it('returns 200 with enabled false when data.enabled is false', async () => {
       enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      enableEdgeContext.data = { cdnType: CDN_TYPE_AEM_FASTLY, enabled: false };
+      enableEdgeContext.data = { cdnType: LOG_SOURCES.AEM_CS_FASTLY, enabled: false };
       getAccessTokenStub.resolves({ access_token: 'fake-token' });
       tracingFetchStub.onFirstCall().resolves({ ok: true });
       tracingFetchStub.onSecondCall().resolves({ ok: true });
@@ -4366,7 +4366,7 @@ describe('LlmoController', () => {
       expect(await result.json()).to.deep.equal({
         enabled: false,
         domain: 'www.example.com',
-        cdnType: CDN_TYPE_AEM_FASTLY,
+        cdnType: LOG_SOURCES.AEM_CS_FASTLY,
       });
       expect(tracingFetchStub.secondCall.args[1].body).to.equal(JSON.stringify({ enabled: false }));
     });
