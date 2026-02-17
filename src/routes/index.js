@@ -155,6 +155,12 @@ export default function getRouteHandlers(
     'DELETE /organizations/:organizationId': organizationsController.removeOrganization,
     'GET /organizations/:organizationId/sites': organizationsController.getSitesForOrganization,
     'GET /organizations/:organizationId/brands': brandsController.getBrandsForOrganization,
+    'GET /v2/orgs/:spaceCatId/llmo-customer-config': brandsController.getCustomerConfig,
+    'GET /v2/orgs/:spaceCatId/llmo-customer-config-lean': brandsController.getCustomerConfigLean,
+    'GET /v2/orgs/:spaceCatId/llmo-topics': brandsController.getTopics,
+    'GET /v2/orgs/:spaceCatId/llmo-prompts': brandsController.getPrompts,
+    'POST /v2/orgs/:spaceCatId/llmo-customer-config': brandsController.saveCustomerConfig,
+    'PATCH /v2/orgs/:spaceCatId/llmo-customer-config': brandsController.patchCustomerConfig,
     'GET /organizations/:organizationId/projects': organizationsController.getProjectsByOrganizationId,
     'GET /organizations/:organizationId/projects/:projectId/sites': organizationsController.getSitesByProjectIdAndOrganizationId,
     'GET /organizations/:organizationId/by-project-name/:projectName/sites': organizationsController.getSitesByProjectNameAndOrganizationId,
@@ -366,6 +372,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/strategy': llmoController.getStrategy,
     'PUT /sites/:siteId/llmo/strategy': llmoController.saveStrategy,
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,
+    'POST /sites/:siteId/llmo/edge-optimize-routing': llmoController.updateEdgeOptimizeCDNRouting,
 
     // Tier Specific Routes
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,

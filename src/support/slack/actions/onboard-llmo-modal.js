@@ -29,6 +29,56 @@ const GEO_BRAND_PRESENCE_WEEKLY_FREE = 'geo-brand-presence-free';
 const GEO_BRAND_PRESENCE_WEEKLY_PAID = 'geo-brand-presence-paid';
 const GEO_BRAND_PRESENCE_DAILY = 'geo-brand-presence-daily';
 
+const GEO_FREE_SPLIT_COUNT = 23;
+const GEO_FREE_SPLITS = Array.from(
+  { length: GEO_FREE_SPLIT_COUNT },
+  (_, i) => `geo-brand-presence-free-${i + 1}`,
+);
+
+/**
+ * Finds the geo-brand-presence-free split with the fewest enabled sites.
+ * @param {object} configuration - Configuration instance
+ * @returns {string} The split audit type to assign (e.g. 'geo-brand-presence-free-1')
+ */
+function findBestFreeSplit(configuration) {
+  let bestSplit = GEO_FREE_SPLITS[0];
+  let minCount = Infinity;
+
+  for (const split of GEO_FREE_SPLITS) {
+    const count = configuration.getEnabledSiteIdsForHandler(split).length;
+    if (count < minCount) {
+      minCount = count;
+      bestSplit = split;
+      if (count === 0) break;
+    }
+  }
+
+  return bestSplit;
+}
+
+/**
+ * Checks if a site is enabled in any geo-brand-presence-free split.
+ * @param {object} configuration - Configuration instance
+ * @param {object} site - Site instance
+ * @returns {boolean}
+ */
+function isAnyFreeSplitEnabled(configuration, site) {
+  return GEO_FREE_SPLITS.some(
+    (split) => configuration.isHandlerEnabledForSite(split, site),
+  );
+}
+
+/**
+ * Disables a site from all geo-brand-presence-free splits.
+ * @param {object} configuration - Configuration instance
+ * @param {object} site - Site instance
+ */
+function disableAllFreeSplits(configuration, site) {
+  for (const split of GEO_FREE_SPLITS) {
+    configuration.disableHandlerForSite(split, site);
+  }
+}
+
 // site isn't on spacecat yet
 async function fullOnboardingModal(body, client, respond, brandURL) {
   const { user } = body;
@@ -393,7 +443,7 @@ export function startLLMOOnboarding(lambdaContext) {
       const isWeeklyFreeEnabled = configuration.isHandlerEnabledForSite(
         GEO_BRAND_PRESENCE_WEEKLY_FREE,
         site,
-      );
+      ) || isAnyFreeSplitEnabled(configuration, site);
       const isWeeklyPaidEnabled = configuration.isHandlerEnabledForSite(
         GEO_BRAND_PRESENCE_WEEKLY_PAID,
         site,
@@ -473,16 +523,21 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
       configuration.enableHandlerForSite(GEO_BRAND_PRESENCE_DAILY, site);
       configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_PAID, site);
       configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_FREE, site);
+      disableAllFreeSplits(configuration, site);
     } else if (brandPresenceCadence === 'weekly-paid') {
       log.info(`Enabling weekly-paid brand presence audit for site ${siteId}`);
       configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_DAILY, site);
       configuration.enableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_PAID, site);
       configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_FREE, site);
+      disableAllFreeSplits(configuration, site);
     } else {
-      log.info(`Enabling weekly-free brand presence audit for site ${siteId}`);
+      const targetSplit = findBestFreeSplit(configuration);
+      log.info(`Enabling weekly-free brand presence audit (split: ${targetSplit}) for site ${siteId}`);
       configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_DAILY, site);
       configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_PAID, site);
-      configuration.enableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_FREE, site);
+      configuration.disableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_FREE, site);
+      disableAllFreeSplits(configuration, site);
+      configuration.enableHandlerForSite(targetSplit, site);
     }
     await configuration.save();
 

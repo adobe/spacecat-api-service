@@ -29,6 +29,8 @@ import {
   isValidUUID,
   deepEqual,
   isNonEmptyObject,
+  canonicalizeUrl,
+  composeBaseURL,
 } from '@adobe/spacecat-shared-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
@@ -55,6 +57,164 @@ const ORGANIC_TRAFFIC = 'organic-traffic';
 const MONTH_DAYS = 30;
 const TOTAL_METRICS = 'totalMetrics';
 const BRAND_PROFILE_AGENT_ID = 'brand-profile';
+
+/**
+ * Filters Ahrefs top pages by site base URL
+ * @param {Array} topPages - Array of SiteTopPage objects
+ * @param {string} siteBaseURL - Site base URL to filter by
+ * @returns {Array} Filtered top pages
+ */
+const filterTopPagesByBaseURL = (topPages, siteBaseURL) => {
+  const normalizedBaseURL = canonicalizeUrl(siteBaseURL, { stripQuery: true });
+
+  return topPages.filter((page) => {
+    const pageUrl = page.getUrl();
+    if (!pageUrl) {
+      return false;
+    }
+
+    const normalizedPageUrl = canonicalizeUrl(pageUrl, { stripQuery: true });
+    return normalizedPageUrl.startsWith(normalizedBaseURL);
+  });
+};
+
+/**
+ * Gets top N pages sorted by traffic from Ahrefs data
+ * @param {Array} topPages - Array of SiteTopPage objects
+ * @param {number} limit - Number of top pages to return
+ * @returns {Map} Map of normalized URL to original URL (maintains traffic-sorted order)
+ */
+const getTopPagesByTraffic = (topPages, limit) => {
+  const sortedTopPages = topPages
+    .sort((a, b) => (b.getTraffic() || 0) - (a.getTraffic() || 0))
+    .slice(0, limit);
+
+  const topPageUrlMap = new Map();
+  sortedTopPages.forEach((page, index) => {
+    const url = page.getUrl();
+    if (url) {
+      const normalizedUrl = canonicalizeUrl(url, { stripQuery: true });
+      if (normalizedUrl && !topPageUrlMap.has(normalizedUrl)) {
+        topPageUrlMap.set(normalizedUrl, { url, rank: index + 1 });
+      }
+    }
+  });
+
+  return topPageUrlMap;
+};
+
+/**
+ * Filters and sorts metrics by top page URLs (maintains Ahrefs traffic order)
+ * @param {Array} metricsData - Array of metric entries
+ * @param {Map} topPageUrlMap - Map of normalized URLs to {url, rank} objects
+ * @returns {Array} Filtered metrics with rank property for later sorting
+ */
+const filterMetricsByTopPages = (metricsData, topPageUrlMap) => {
+  const seenNormalizedUrls = new Set();
+
+  return metricsData
+    .filter((metricEntry) => {
+      if (!metricEntry.url) {
+        return false;
+      }
+      const normalizedMetricUrl = canonicalizeUrl(metricEntry.url, { stripQuery: true });
+      // Only include if this normalized URL matches a top page AND we haven't seen it yet
+      if (normalizedMetricUrl
+        && topPageUrlMap.has(normalizedMetricUrl)
+        && !seenNormalizedUrls.has(normalizedMetricUrl)) {
+        seenNormalizedUrls.add(normalizedMetricUrl);
+        return true;
+      }
+      return false;
+    })
+    .map((metricEntry) => {
+      const normalizedMetricUrl = canonicalizeUrl(metricEntry.url, { stripQuery: true });
+      const { rank } = topPageUrlMap.get(normalizedMetricUrl);
+      return { ...metricEntry, rank };
+    });
+};
+
+/**
+ * Creates placeholder entries for pages without RUM data
+ * @param {Map} topPageUrlMap - Map of normalized URLs to {url, rank} objects
+ * @param {Array} filteredMetrics - Array of metrics that were found
+ * @returns {Array} Array of placeholder entries with rank property for later sorting
+ */
+const createPlaceholdersForMissingPages = (topPageUrlMap, filteredMetrics) => {
+  const foundUrls = new Set(
+    filteredMetrics
+      .map((metric) => canonicalizeUrl(metric.url, { stripQuery: true }))
+      .filter(Boolean),
+  );
+
+  const missingPages = [];
+  topPageUrlMap.forEach(({ url, rank }, normalizedUrl) => {
+    if (!foundUrls.has(normalizedUrl)) {
+      missingPages.push({
+        type: 'url',
+        url,
+        rank,
+        pageviews: null,
+        organic: null,
+        metrics: [],
+      });
+    }
+  });
+
+  return missingPages;
+};
+
+/**
+ * Applies Ahrefs top organic search pages filter to metrics data
+ * @param {Array} metricsData - Original metrics data
+ * @param {number} limit - Number of top pages to include
+ * @param {object} options - Filter options
+ * @param {string} options.siteId - Site ID
+ * @param {object} options.site - Site object
+ * @param {boolean} options.filterByBaseURL - Whether to filter by base URL
+ * @param {string} options.geo - Geographic region (default: 'global')
+ * @param {object} options.dataAccess - Data access object
+ * @param {object} options.log - Logger object
+ * @returns {Promise<Array>} Filtered and sorted metrics data
+ */
+const applyTopOrganicPagesFilter = async (metricsData, limit, options) => {
+  const {
+    siteId, site, filterByBaseURL, geo = 'global', dataAccess, log,
+  } = options;
+
+  const { SiteTopPage } = dataAccess;
+
+  // Fetch Ahrefs pages
+  let topPages = await SiteTopPage.allBySiteIdAndSourceAndGeo(siteId, 'ahrefs', geo);
+
+  if (!topPages || topPages.length === 0) {
+    log.warn(`No Ahrefs top pages found for site ${siteId}, returning empty result`);
+    return [];
+  }
+
+  // Apply base URL filter if requested
+  if (filterByBaseURL) {
+    topPages = filterTopPagesByBaseURL(topPages, site.getBaseURL());
+
+    // If no pages match the base URL after filtering, return empty result
+    if (topPages.length === 0) {
+      log.warn(`No Ahrefs top pages match base URL for site ${siteId}, returning empty result`);
+      return [];
+    }
+  }
+
+  // Filter and combine metrics
+  const topPageUrlMap = getTopPagesByTraffic(topPages, limit);
+  const filteredMetrics = filterMetricsByTopPages(metricsData, topPageUrlMap);
+  const missingPages = createPlaceholdersForMissingPages(topPageUrlMap, filteredMetrics);
+
+  // Combine and sort by Ahrefs traffic rank, then remove rank property
+  const result = [...filteredMetrics, ...missingPages]
+    .sort((a, b) => a.rank - b.rank)
+    .map(({ rank: _, ...entry }) => entry);
+
+  return result;
+};
 
 /**
  * Validates that pageTypes array contains valid regex patterns
@@ -108,19 +268,47 @@ function SitesController(ctx, log, env) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
-   * Creates a site. The site ID is generated automatically.
-   * @param {object} context - Context of the request.
-   * @return {Promise<Response>} Site response.
+   * Creates a new site or returns an existing one if a site with the same baseURL already exists.
+   * Implements idempotent-create semantics.
+   *
+   * Design Decision: Returns HTTP 200 (not 409 Conflict) for duplicates
+   * Rationale:
+   * - Follows idempotent-create pattern: same request yields same result
+   * - Allows safe retries without client-side duplicate detection logic
+   * - 200 indicates "request succeeded, here's the site you asked for"
+   * - 409 would require clients to handle conflict errors and retry with GET
+   * - Common pattern in APIs prioritizing developer experience (e.g., Stripe, GitHub)
+   *
+   * Alternative: If strict REST semantics are preferred, 409 Conflict is also valid.
+   *
+   * @param {object} context - Request context containing site data
+   * @returns {Promise<Response>} HTTP 200 with existing site or 201 with new site
    */
   const createSite = async (context) => {
     if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can create new sites');
     }
-    const site = await Site.create({
-      organizationId: env.DEFAULT_ORGANIZATION_ID,
-      ...context.data,
-    });
-    return createResponse(SiteDto.toJSON(site), 201);
+    if (!hasText(context.data?.baseURL)) {
+      return badRequest('Base URL required');
+    }
+    try {
+      const baseURL = composeBaseURL(context.data.baseURL);
+      const existingSite = await Site.findByBaseURL(baseURL);
+      if (existingSite) {
+        // Idempotent behavior: return existing site with 200 (not 409)
+        log.info(`Site already exists for baseURL: ${baseURL}, returning existing site ${existingSite.getId()}`);
+        return createResponse(SiteDto.toJSON(existingSite), 200);
+      }
+      const site = await Site.create({
+        organizationId: env.DEFAULT_ORGANIZATION_ID,
+        ...context.data,
+        baseURL, // override with normalized value
+      });
+      return createResponse(SiteDto.toJSON(site), 201);
+    } catch (error) {
+      log.error(`Error creating site: ${error.message}`, error);
+      return internalServerError('Failed to create site');
+    }
   };
 
   /**
@@ -519,6 +707,8 @@ function SitesController(ctx, log, env) {
     const source = context.params?.source;
     const filterByTop100PageViews = context.data?.filterByTop100PageViews === 'true';
     const filterByBaseURL = context.data?.filterByBaseURL === 'true';
+    const filterByTopOrganicSearchPages = context.data?.filterByTopOrganicSearchPages;
+    const geo = context.data?.geo || 'global';
     // Key to extract from object response, e.g., 'data' in { label, data: [...] }
     const objectResponseDataKey = context.data?.objectResponseDataKey;
 
@@ -532,6 +722,13 @@ function SitesController(ctx, log, env) {
 
     if (!hasText(source)) {
       return badRequest('source required');
+    }
+
+    if (hasText(filterByTopOrganicSearchPages)) {
+      const limit = parseInt(filterByTopOrganicSearchPages, 10);
+      if (Number.isNaN(limit) || limit < 1) {
+        return badRequest('filterByTopOrganicSearchPages must be a positive integer');
+      }
     }
 
     const site = await Site.findById(siteId);
@@ -584,6 +781,24 @@ function SitesController(ctx, log, env) {
       });
 
       log.info(`Filtered metrics from ${originalCount} to ${metricsData.length} entries based on site baseURL (${normalizedBaseURL})`);
+    }
+
+    // Filter by top N organic search pages from Ahrefs when requested
+    if (filterByTopOrganicSearchPages) {
+      try {
+        const limit = parseInt(filterByTopOrganicSearchPages, 10);
+        metricsData = await applyTopOrganicPagesFilter(metricsData, limit, {
+          siteId,
+          site,
+          filterByBaseURL,
+          geo,
+          dataAccess,
+          log,
+        });
+      } catch (error) {
+        log.error(`Error filtering by top organic search pages for site ${siteId}: ${error.message}`);
+        return internalServerError(error.message);
+      }
     }
 
     // Filter to top 100 pages by pageViews when requested (applied last)

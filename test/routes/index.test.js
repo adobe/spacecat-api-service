@@ -153,6 +153,8 @@ describe('getRouteHandlers', () => {
   const mockBrandsController = {
     getBrandsForOrganization: sinon.stub(),
     getBrandGuidelinesForSite: sinon.stub(),
+    getCustomerConfig: sinon.stub(),
+    saveCustomerConfig: sinon.stub(),
   };
 
   const mockPreflightController = {
@@ -270,6 +272,8 @@ describe('getRouteHandlers', () => {
     getLlmoRationale: () => null,
     createOrUpdateEdgeConfig: () => null,
     getEdgeConfig: () => null,
+    checkEdgeOptimizeStatus: () => null,
+    updateEdgeOptimizeCDNRouting: () => null,
     getStrategy: () => null,
     saveStrategy: () => null,
   };
@@ -438,6 +442,12 @@ describe('getRouteHandlers', () => {
       'POST /hooks/site-detection/rum/:hookSecret',
       'GET /organizations/:organizationId',
       'GET /organizations/:organizationId/brands',
+      'GET /v2/orgs/:spaceCatId/llmo-customer-config',
+      'GET /v2/orgs/:spaceCatId/llmo-customer-config-lean',
+      'GET /v2/orgs/:spaceCatId/llmo-topics',
+      'GET /v2/orgs/:spaceCatId/llmo-prompts',
+      'PATCH /v2/orgs/:spaceCatId/llmo-customer-config',
+      'POST /v2/orgs/:spaceCatId/llmo-customer-config',
       'GET /organizations/:organizationId/projects',
       'GET /organizations/:organizationId/projects/:projectId/sites',
       'GET /organizations/:organizationId/by-project-name/:projectName/sites',
@@ -631,6 +641,7 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/edge-optimize-config',
       'GET /sites/:siteId/llmo/edge-optimize-config',
       'GET /sites/:siteId/llmo/edge-optimize-status',
+      'POST /sites/:siteId/llmo/edge-optimize-routing',
       'GET /sites/:siteId/llmo/strategy',
       'PUT /sites/:siteId/llmo/strategy',
       'GET /consent-banner/:jobId',
@@ -856,6 +867,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-config'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-status'].handler).to.equal(mockLlmoController.checkEdgeOptimizeStatus);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-status'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-routing'].handler).to.equal(mockLlmoController.updateEdgeOptimizeCDNRouting);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-routing'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy'].handler).to.equal(mockLlmoController.getStrategy);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['PUT /sites/:siteId/llmo/strategy'].handler).to.equal(mockLlmoController.saveStrategy);

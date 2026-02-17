@@ -66,6 +66,7 @@ describe('onboard-llmo-modal', () => {
       enableHandlerForSite: sinonSandbox.stub(),
       disableHandlerForSite: sinonSandbox.stub(),
       isHandlerEnabledForSite: sinonSandbox.stub().returns(false),
+      getEnabledSiteIdsForHandler: sinonSandbox.stub().returns([]),
       getQueues: sinonSandbox.stub().returns({ audits: 'audit-queue' }),
       getSlackConfig: sinonSandbox.stub().returns({
         channel: 'test-channel',
@@ -388,7 +389,8 @@ describe('onboard-llmo-modal', () => {
       expect(config.enableHandlerForSite).to.have.been.calledWith('headings', mockSite);
 
       // Verify brand presence cadence configuration (Slack-specific)
-      expect(config.enableHandlerForSite).to.have.been.calledWith('geo-brand-presence-free', mockSite);
+      // With splits, the first empty split (geo-brand-presence-free-1) is chosen
+      expect(config.enableHandlerForSite).to.have.been.calledWith('geo-brand-presence-free-1', mockSite);
       expect(config.disableHandlerForSite).to.have.been.calledWith('geo-brand-presence-daily', mockSite);
       expect(config.disableHandlerForSite).to.have.been.calledWith('geo-brand-presence-paid', mockSite);
 
