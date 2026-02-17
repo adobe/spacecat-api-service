@@ -1230,12 +1230,12 @@ function LlmoController(ctx) {
     const { cdnType, enabled = true, promiseToken } = context.data || {};
     log.info(`Edge optimize routing update request received for site ${siteId}`);
 
-    // if (env?.ENV && env.ENV !== 'prod') {
-    //   return createResponse(
-    //     { message: `API is not available in ${env?.ENV} environment` },
-    //     400,
-    //   );
-    // }
+    if (env?.ENV && env.ENV !== 'prod') {
+      return createResponse(
+        { message: `API is not available in ${env?.ENV} environment` },
+        400,
+      );
+    }
 
     if (!hasText(promiseToken)) {
       return badRequest('promiseToken is required and must be a non-empty string');
