@@ -73,6 +73,24 @@ describe('Suggestion DTO', () => {
         expect(json).to.have.property('updatedAt');
         expect(json).to.have.property('updatedBy');
       });
+
+      it('computes aggregationKey at runtime when not present in data', () => {
+        const suggestion = createMockSuggestion();
+        const data = suggestion.getData();
+        expect(data).to.not.have.property('aggregationKey');
+
+        const json = SuggestionDto.toJSON(suggestion);
+
+        expect(json.data).to.have.property('aggregationKey');
+      });
+
+      it('preserves manually injected aggregationKey from data', () => {
+        const suggestion = createMockSuggestion({ aggregationKey: 'custom-aggregation-key' });
+
+        const json = SuggestionDto.toJSON(suggestion);
+
+        expect(json.data.aggregationKey).to.equal('custom-aggregation-key');
+      });
     });
 
     describe('minimal view', () => {
