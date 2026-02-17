@@ -93,8 +93,6 @@ export const SuggestionDto = {
       };
     }
 
-    // Full view: all fields (default, backward compatible)
-    const aggregationKey = buildAggregationKeyFromSuggestion(data);
     return {
       id: suggestion.getId(),
       opportunityId: suggestion.getOpportunityId(),
@@ -103,7 +101,7 @@ export const SuggestionDto = {
       status: suggestion.getStatus(),
       data: {
         ...data,
-        aggregationKey,
+        ...(data.aggregationKey ?? { aggregationKey: buildAggregationKeyFromSuggestion(data) }),
       },
       kpiDeltas: suggestion.getKpiDeltas(),
       createdAt: suggestion.getCreatedAt(),

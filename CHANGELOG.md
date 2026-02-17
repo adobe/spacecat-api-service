@@ -1,3 +1,24 @@
+# [1.319.0](https://github.com/adobe/spacecat-api-service/compare/v1.318.2...v1.319.0) (2026-02-17)
+
+
+### Features
+
+* A11y issue aggregation ([#1820](https://github.com/adobe/spacecat-api-service/issues/1820)) ([2340f27](https://github.com/adobe/spacecat-api-service/commit/2340f27e18161ea54b43808ad91763a3e6240322))
+
+## [1.318.2](https://github.com/adobe/spacecat-api-service/compare/v1.318.1...v1.318.2) (2026-02-16)
+
+
+### Bug Fixes
+
+* timeout added for edge optimize status ([#1816](https://github.com/adobe/spacecat-api-service/issues/1816)) ([cae7cbb](https://github.com/adobe/spacecat-api-service/commit/cae7cbbe3a4438b1c410c3a10fe03029b5622f0f))
+
+## [1.318.1](https://github.com/adobe/spacecat-api-service/compare/v1.318.0...v1.318.1) (2026-02-16)
+
+
+### Bug Fixes
+
+* scope trial-user-invite duplicate check to current organization ([#1815](https://github.com/adobe/spacecat-api-service/issues/1815)) ([90abdaf](https://github.com/adobe/spacecat-api-service/commit/90abdafc9f84c4976e8c920bef9a97c7937478cb))
+
 # [1.318.0](https://github.com/adobe/spacecat-api-service/compare/v1.317.1...v1.318.0) (2026-02-16)
 
 
