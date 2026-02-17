@@ -28,6 +28,7 @@ import {
 import { ValidationError } from '@adobe/spacecat-shared-data-access';
 import { OpportunityDto } from '../dto/opportunity.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { grantCompleteSuggestionsForOpportunity } from '../support/grant-complete-suggestions.js';
 
 /**
  * Opportunities controller.
@@ -155,6 +156,7 @@ function OpportunitiesController(ctx) {
     if (!oppty || oppty.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
     }
+    await grantCompleteSuggestionsForOpportunity(dataAccess, site, oppty);
     return ok(OpportunityDto.toJSON(oppty));
   };
 

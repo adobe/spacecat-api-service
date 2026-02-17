@@ -20,6 +20,7 @@ import {
 import {
   hasText,
   isArray, isNonEmptyArray,
+  isGranted,
   isNonEmptyObject,
   isObject,
   isInteger,
@@ -77,7 +78,7 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   const {
-    Opportunity, Suggestion, Site, Configuration,
+    Opportunity, Suggestion, Site, Configuration, Entitlement,
   } = dataAccess;
 
   if (!isObject(Opportunity)) {
@@ -89,6 +90,20 @@ function SuggestionsController(ctx, sqs, env) {
   }
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
+
+  /**
+   * When the organization is freemium, returns only suggestions that have been granted (unlocked).
+   * Otherwise returns the same list unchanged.
+   * @param {Object} site - Site model (must have getOrganizationId()).
+   * @param {Array} suggestionEntities - List of suggestion entities.
+   * @returns {Array} Filtered list when freemium, otherwise unchanged.
+   */
+  const filterGrantedIfFreemium = (site, suggestionEntities) => {
+    if (!suggestionEntities || suggestionEntities.length === 0) return suggestionEntities;
+    const organizationId = typeof site?.getOrganizationId === 'function' ? site.getOrganizationId() : undefined;
+    if (!organizationId || !Entitlement?.isFreemium(organizationId)) return suggestionEntities;
+    return suggestionEntities.filter((s) => isGranted(s));
+  };
 
   /**
    * Gets all suggestions for a given site and opportunity
@@ -117,14 +132,14 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     const suggestionEntities = await Suggestion.allByOpportunityId(opptyId);
-    // Check if the opportunity belongs to the site
     if (suggestionEntities.length > 0) {
       const oppty = await suggestionEntities[0].getOpportunity();
       if (!oppty || oppty.getSiteId() !== siteId) {
         return notFound('Opportunity not found');
       }
     }
-    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg));
+    const filtered = filterGrantedIfFreemium(site, suggestionEntities);
+    const suggestions = filtered.map((sugg) => SuggestionDto.toJSON(sugg));
     return ok(suggestions);
   };
 
@@ -170,15 +185,14 @@ function SuggestionsController(ctx, sqs, env) {
       });
     const { data: suggestionEntities = [], cursor: newCursor = null } = results;
 
-    // Check if the opportunity belongs to the site
     if (suggestionEntities.length > 0) {
       const oppty = await suggestionEntities[0].getOpportunity();
       if (!oppty || oppty.getSiteId() !== siteId) {
         return notFound('Opportunity not found');
       }
     }
-
-    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg));
+    const filtered = filterGrantedIfFreemium(site, suggestionEntities);
+    const suggestions = filtered.map((sugg) => SuggestionDto.toJSON(sugg));
 
     return ok({
       suggestions,
@@ -219,14 +233,14 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     const suggestionEntities = await Suggestion.allByOpportunityIdAndStatus(opptyId, status);
-    // Check if the opportunity belongs to the site
     if (suggestionEntities.length > 0) {
       const oppty = await suggestionEntities[0].getOpportunity();
       if (!oppty || oppty.getSiteId() !== siteId) {
         return notFound('Opportunity not found');
       }
     }
-    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg));
+    const filtered = filterGrantedIfFreemium(site, suggestionEntities);
+    const suggestions = filtered.map((sugg) => SuggestionDto.toJSON(sugg));
     return ok(suggestions);
   };
 
@@ -271,14 +285,14 @@ function SuggestionsController(ctx, sqs, env) {
       returnCursor: true,
     });
     const { data: suggestionEntities = [], cursor: newCursor = null } = results;
-    // Check if the opportunity belongs to the site
     if (suggestionEntities.length > 0) {
       const oppty = await suggestionEntities[0].getOpportunity();
       if (!oppty || oppty.getSiteId() !== siteId) {
         return notFound('Opportunity not found');
       }
     }
-    const suggestions = suggestionEntities.map((sugg) => SuggestionDto.toJSON(sugg));
+    const filtered = filterGrantedIfFreemium(site, suggestionEntities);
+    const suggestions = filtered.map((sugg) => SuggestionDto.toJSON(sugg));
     return ok({
       suggestions,
       pagination: {
@@ -327,6 +341,11 @@ function SuggestionsController(ctx, sqs, env) {
     const opportunity = await suggestion.getOpportunity();
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound();
+    }
+    // Freemium: only allow access to granted suggestions
+    const organizationId = typeof site?.getOrganizationId === 'function' ? site.getOrganizationId() : undefined;
+    if (organizationId && Entitlement?.isFreemium(organizationId) && !isGranted(suggestion)) {
+      return notFound('Suggestion not found');
     }
     return ok(SuggestionDto.toJSON(suggestion));
   };
