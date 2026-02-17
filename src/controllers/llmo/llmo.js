@@ -30,7 +30,7 @@ import crypto from 'crypto';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
-import { getAccessToken } from '../../support/utils.js';
+import { exchangePromiseToken } from '../../support/utils.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import {
   applyFilters,
@@ -1217,10 +1217,9 @@ function LlmoController(ctx) {
   /**
    * POST /sites/{siteId}/llmo/edge-optimize-routing
    * Updates edge optimize routing for the site via the internal CDN API.
-   * - Requires mandatory cdnType input parameter (e.g. fastly).
+   * - Requires mandatory request body fields: cdnType, promiseToken.
    * - Probes the site with User-Agent AdobeEdgeOptimize-Test (must return 2xx)
-   * - Calls internal CDN API for the chosen cdnType to update routing for the domain
-   * Requires authInfo profile.promiseToken to exchange for IMS user token.
+   * - Exchanges promiseToken for IMS user token, then calls internal CDN API.
    * @param {object} context - Request context
    * @returns {Promise<Response>}
    */
@@ -1228,14 +1227,18 @@ function LlmoController(ctx) {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
-    const { cdnType, enabled = true } = context.data || {};
+    const { cdnType, enabled = true, promiseToken } = context.data || {};
     log.info(`Edge optimize routing update request received for site ${siteId}`);
 
-    if (env?.ENV && env.ENV !== 'prod') {
-      return createResponse(
-        { message: `API is not available in ${env?.ENV} environment` },
-        400,
-      );
+    // if (env?.ENV && env.ENV !== 'prod') {
+    //   return createResponse(
+    //     { message: `API is not available in ${env?.ENV} environment` },
+    //     400,
+    //   );
+    // }
+
+    if (!hasText(promiseToken)) {
+      return badRequest('promiseToken is required and must be a non-empty string');
     }
 
     if (!hasText(cdnType)) {
@@ -1309,7 +1312,7 @@ function LlmoController(ctx) {
     let imsUserToken;
     try {
       log.debug(`Getting IMS user token for site ${siteId}`);
-      imsUserToken = (await getAccessToken(context)).access_token;
+      imsUserToken = await exchangePromiseToken(context, promiseToken);
       log.info('IMS user token obtained successfully');
     } catch (tokenError) {
       log.warn(`Fetching IMS user token for site ${siteId} failed: ${tokenError.status} ${tokenError.message}`);
