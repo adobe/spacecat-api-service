@@ -1,0 +1,162 @@
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://www.adobe.com/#organization",
+      "name": "Adobe",
+      "url": "https://www.adobe.com",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "https://www.adobe.com/cc-shared/assets/img/product-icons/svg/adobe.svg"
+      },
+      "sameAs": [
+        "https://www.facebook.com/Adobe",
+        "https://x.com/Adobe",
+        "https://www.linkedin.com/company/adobe",
+        "https://www.youtube.com/user/AdobeSystems/Adobe",
+        "https://en.wikipedia.org/wiki/Adobe_Inc."
+      ]
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://www.adobe.com/#website",
+      "name": "Adobe",
+      "url": "https://www.adobe.com",
+      "publisher": {
+        "@id": "https://www.adobe.com/#organization"
+      }
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://www.adobe.com/products/photoshop.html#software",
+      "name": "Adobe Photoshop",
+      "description": "Get better results with new partner AI models in Generative Fill. Upscale images with Topaz Labs. Make seamless composites in a click with Harmonize. And jumpstart your Photoshop process by ideating in Firefly Boards.",
+      "url": "https://www.adobe.com/products/photoshop.html",
+      "applicationCategory": "MultimediaApplication",
+      "operatingSystem": [
+        "Windows",
+        "macOS",
+        "iOS",
+        "Android"
+      ],
+      "availableOnDevice": [
+        "Desktop",
+        "Mobile"
+      ],
+      "publisher": {
+        "@id": "https://www.adobe.com/#organization"
+      },
+      "provider": {
+        "@id": "https://www.adobe.com/#organization"
+      },
+      "sameAs": "https://en.wikipedia.org/wiki/Adobe_Photoshop"
+    },
+    {
+      "@type": "WebPage",
+      "@id": "https://www.adobe.com/products/photoshop/frequency-separation.html#webpage",
+      "url": "https://www.adobe.com/products/photoshop/frequency-separation.html",
+      "name": "How to use frequency separation to retouch photos like a pro.",
+      "description": "Frequency separates color info from the other details of an image. Learn how to use frequency separation to retouch photos like a pro.",
+      "inLanguage": "en-US",
+      "isPartOf": {
+        "@id": "https://www.adobe.com/#website"
+      },
+      "about": {
+        "@id": "https://www.adobe.com/products/photoshop.html#software"
+      }
+    },
+    {
+      "@type": "HowTo",
+      "@id": "https://www.adobe.com/products/photoshop/frequency-separation.html#howto",
+      "name": "How to use frequency separation to retouch photos like a pro",
+      "description": "Frequency separates color info from the other details of an image. Learn how to use frequency separation to retouch photos like a pro.",
+      "url": "https://www.adobe.com/products/photoshop/frequency-separation.html",
+      "inLanguage": "en-US",
+      "author": {
+        "@id": "https://www.adobe.com/#organization"
+      },
+      "publisher": {
+        "@id": "https://www.adobe.com/#organization"
+      },
+      "about": {
+        "@id": "https://www.adobe.com/products/photoshop.html#software"
+      },
+      "tool": "Adobe Photoshop",
+      "isPartOf": {
+        "@id": "https://www.adobe.com/products/photoshop/frequency-separation.html#webpage"
+      },
+      "mainEntityOfPage": {
+        "@id": "https://www.adobe.com/products/photoshop/frequency-separation.html#webpage"
+      },
+      "step": [
+        {
+          "@type": "HowToStep",
+          "position": 1,
+          "name": "Start recording your action",
+          "text": "Select Window › Actions, and click Create New Action in the sidebar that appears. Name your action and select Record, and this will begin the recording for the frequency separation."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 2,
+          "name": "Create duplicate layers",
+          "text": "With your image open, right-click the layer and select Duplicate Layer. Then click the lock icon in your background layer to allow it to be modified. From there, name the top layer 'Skin+Texture' and the bottom layer 'Shadows+Color.'"
+        },
+        {
+          "@type": "HowToStep",
+          "position": 3,
+          "name": "Group the layers",
+          "text": "Combine the layers into a group by selecting both and navigating to Layer › Group Layers."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 4,
+          "name": "Apply Gaussian Blur to Shadows + Color layer",
+          "text": "Select the Shadows + Color layer, use Filter › Blur › Gaussian Blur, set the radius to 5px, and click OK."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 5,
+          "name": "Apply Image to Skin + Texture layer",
+          "text": "Select the 'Skin + Texture' layer. Select Image › Apply Image. Choose Shadows + Color in the Layer selection menu, Subtract in the Blending menu, and set Scale to 2 and Offset to 128. Click OK."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 6,
+          "name": "Set blending mode to Linear Light",
+          "text": "In the Layers panel with Skin + Texture selected, select Linear Light in the Blending modes menu."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 7,
+          "name": "Save the action",
+          "text": "Click the stop icon in the Actions sidebar, and the action will be saved so in the future all you need to do is open an image, click the action, and you'll be ready to work."
+        }
+      ],
+      "mentions": [
+        {
+          "@type": "Thing",
+          "name": "Dodge and Burn Tools",
+          "description": "Tools to control lighting and shadows for fine control over your canvas"
+        },
+        {
+          "@type": "Thing",
+          "name": "Gaussian Blur",
+          "description": "Filter used to blur the low-frequency layer containing shadows and color information"
+        },
+        {
+          "@type": "Thing",
+          "name": "Healing Brush",
+          "description": "Tool useful for retouching after completing frequency separation"
+        },
+        {
+          "@type": "Thing",
+          "name": "Actions",
+          "description": "Photoshop feature that allows you to record a set of operations for complex edits in a single click"
+        }
+      ]
+    }
+  ]
+}
+</script>

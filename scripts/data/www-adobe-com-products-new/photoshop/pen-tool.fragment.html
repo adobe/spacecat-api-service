@@ -1,0 +1,150 @@
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://www.adobe.com/#organization",
+      "name": "Adobe",
+      "url": "https://www.adobe.com",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "https://www.adobe.com/cc-shared/assets/img/product-icons/svg/adobe.svg"
+      },
+      "sameAs": [
+        "https://www.facebook.com/Adobe",
+        "https://x.com/Adobe",
+        "https://www.linkedin.com/company/adobe",
+        "https://www.youtube.com/user/AdobeSystems/Adobe",
+        "https://en.wikipedia.org/wiki/Adobe_Inc."
+      ]
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://www.adobe.com/#website",
+      "name": "Adobe",
+      "url": "https://www.adobe.com",
+      "publisher": {
+        "@id": "https://www.adobe.com/#organization"
+      }
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://www.adobe.com/products/photoshop.html#software",
+      "name": "Adobe Photoshop",
+      "description": "Get better results with new partner AI models in Generative Fill. Upscale images with Topaz Labs. Make seamless composites in a click with Harmonize. And jumpstart your Photoshop process by ideating in Firefly Boards.",
+      "url": "https://www.adobe.com/products/photoshop.html",
+      "applicationCategory": "MultimediaApplication",
+      "operatingSystem": [
+        "Windows",
+        "macOS",
+        "iOS",
+        "Android"
+      ],
+      "availableOnDevice": [
+        "Desktop",
+        "Mobile"
+      ],
+      "publisher": {
+        "@id": "https://www.adobe.com/#organization"
+      },
+      "provider": {
+        "@id": "https://www.adobe.com/#organization"
+      },
+      "sameAs": "https://en.wikipedia.org/wiki/Adobe_Photoshop"
+    },
+    {
+      "@type": "WebPage",
+      "@id": "https://www.adobe.com/products/photoshop/pen-tool.html#webpage",
+      "url": "https://www.adobe.com/products/photoshop/pen-tool.html",
+      "name": "How to use the Pen tool in Photoshop",
+      "description": "Discover the power of the Pen tool in Photoshop and learn how to use the Pen tool for various applications like drawing lines, curves, shapes, and paths.",
+      "inLanguage": "en-US",
+      "isPartOf": {
+        "@id": "https://www.adobe.com/#website"
+      },
+      "about": {
+        "@id": "https://www.adobe.com/products/photoshop.html#software"
+      }
+    },
+    {
+      "@type": "HowTo",
+      "@id": "https://www.adobe.com/products/photoshop/pen-tool.html#howto",
+      "name": "How to use the Pen tool in Photoshop",
+      "description": "Discover the power of the Pen tool in Photoshop and learn how to use the Pen tool for various applications like drawing lines, curves, shapes, and paths.",
+      "url": "https://www.adobe.com/products/photoshop/pen-tool.html",
+      "inLanguage": "en-US",
+      "author": {
+        "@id": "https://www.adobe.com/#organization"
+      },
+      "publisher": {
+        "@id": "https://www.adobe.com/#organization"
+      },
+      "about": {
+        "@id": "https://www.adobe.com/products/photoshop.html#software"
+      },
+      "tool": "Adobe Photoshop",
+      "isPartOf": {
+        "@id": "https://www.adobe.com/products/photoshop/pen-tool.html#webpage"
+      },
+      "mainEntityOfPage": {
+        "@id": "https://www.adobe.com/products/photoshop/pen-tool.html#webpage"
+      },
+      "step": [
+        {
+          "@type": "HowToStep",
+          "position": 1,
+          "name": "Draw shapes made of straight line segments",
+          "text": "Select the Pen tool. Click on where you want your line to begin to place your first anchor point. Click where you want your line to end to place a second anchor point. A straight path will connect them."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 2,
+          "name": "Draw a curved path between two points",
+          "text": "From the Pen Tools menu, select the Curvature tool. Place two anchor points the same way you would with the Standard Pen tool. Click and drag your line path with your mouse to create a curve, which will automatically adjust to maintain smoothness. When you're satisfied with the shape of the curve, let go of the mouse button to place the third anchor point, which will set the curve of your segment."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 3,
+          "name": "Draw freely using your mouse",
+          "text": "From the Pen Tools menu, select the Freeform Pen tool. Click the inverted arrow next to the shape buttons in the Options bar and enter a value between 0.5 and 10.0 pixels in the Curve Fit window. A higher number places fewer anchor points to create a simpler path. Drag the pointer across the image to draw a path the same way you would with a pen or pencil on a sheet of paper. Release the mouse button to create a path."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 4,
+          "name": "Create a shape",
+          "text": "In the Options bar for the Pen tool, select Shape. Double-click the colored rectangle next to the Shape option to bring up a color menu where you can choose the shape's color, make it transparent, give it a gradient or pattern, or create a custom color. Double-click the rectangle beside the Stroke option to choose a color for the shape's outline. Draw your shape line by line by placing anchor points."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 5,
+          "name": "Create a selection with the Pen tool",
+          "text": "Use the Pen tool to trace the outline of the segment you want to select. From the Paths palette, double-click on Work Path, and then name and save the path you've created. To turn your path into a selection, go to the bottom of the Paths palette and find the Load Path as a selection option or press Ctrl+Enter on Windows or Command+Return on Mac."
+        }
+      ],
+      "mentions": [
+        {
+          "@type": "Thing",
+          "name": "Pen tool",
+          "description": "A selection tool used to draw paths, shapes, and make selections in Photoshop"
+        },
+        {
+          "@type": "Thing",
+          "name": "Curvature Pen tool",
+          "description": "A tool used to create and fine-tune smoothly curved paths"
+        },
+        {
+          "@type": "Thing",
+          "name": "Freeform Pen tool",
+          "description": "A tool used to draw freehand with automatically placed anchor points"
+        },
+        {
+          "@type": "Thing",
+          "name": "Anchor points",
+          "description": "Points that determine the dimensions of lines and shapes created with the Pen tool"
+        }
+      ]
+    }
+  ]
+}
+</script>

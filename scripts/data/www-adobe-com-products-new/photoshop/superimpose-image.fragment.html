@@ -1,0 +1,166 @@
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://www.adobe.com/#organization",
+      "name": "Adobe",
+      "url": "https://www.adobe.com",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "https://www.adobe.com/cc-shared/assets/img/product-icons/svg/adobe.svg"
+      },
+      "sameAs": [
+        "https://www.facebook.com/Adobe",
+        "https://x.com/Adobe",
+        "https://www.linkedin.com/company/adobe",
+        "https://www.youtube.com/user/AdobeSystems/Adobe",
+        "https://en.wikipedia.org/wiki/Adobe_Inc."
+      ]
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://www.adobe.com/#website",
+      "name": "Adobe",
+      "url": "https://www.adobe.com",
+      "publisher": {
+        "@id": "https://www.adobe.com/#organization"
+      }
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://www.adobe.com/products/photoshop.html#software",
+      "name": "Adobe Photoshop",
+      "description": "Get better results with new partner AI models in Generative Fill. Upscale images with Topaz Labs. Make seamless composites in a click with Harmonize. And jumpstart your Photoshop process by ideating in Firefly Boards.",
+      "url": "https://www.adobe.com/products/photoshop.html",
+      "applicationCategory": "MultimediaApplication",
+      "operatingSystem": [
+        "Windows",
+        "macOS",
+        "iOS",
+        "Android"
+      ],
+      "availableOnDevice": [
+        "Desktop",
+        "Mobile"
+      ],
+      "publisher": {
+        "@id": "https://www.adobe.com/#organization"
+      },
+      "provider": {
+        "@id": "https://www.adobe.com/#organization"
+      },
+      "sameAs": "https://en.wikipedia.org/wiki/Adobe_Photoshop"
+    },
+    {
+      "@type": "WebPage",
+      "@id": "https://www.adobe.com/products/photoshop/superimpose-image.html#webpage",
+      "url": "https://www.adobe.com/products/photoshop/superimpose-image.html",
+      "name": "How to superimpose images",
+      "description": "By overlaying images, you can combine multiple snapshots into a single work of art. Explore different ways to superimpose images, and start your next project with the photo editing tools in Photoshop.",
+      "inLanguage": "en-US",
+      "isPartOf": {
+        "@id": "https://www.adobe.com/#website"
+      },
+      "about": {
+        "@id": "https://www.adobe.com/products/photoshop.html#software"
+      }
+    },
+    {
+      "@type": "HowTo",
+      "@id": "https://www.adobe.com/products/photoshop/superimpose-image.html#howto",
+      "name": "How to superimpose images",
+      "description": "By overlaying images, you can combine multiple snapshots into a single work of art. Explore different ways to superimpose images, and start your next project with the photo editing tools in Photoshop.",
+      "url": "https://www.adobe.com/products/photoshop/superimpose-image.html",
+      "inLanguage": "en-US",
+      "author": {
+        "@id": "https://www.adobe.com/#organization"
+      },
+      "publisher": {
+        "@id": "https://www.adobe.com/#organization"
+      },
+      "about": {
+        "@id": "https://www.adobe.com/products/photoshop.html#software"
+      },
+      "tool": "Adobe Photoshop",
+      "isPartOf": {
+        "@id": "https://www.adobe.com/products/photoshop/superimpose-image.html#webpage"
+      },
+      "mainEntityOfPage": {
+        "@id": "https://www.adobe.com/products/photoshop/superimpose-image.html#webpage"
+      },
+      "step": [
+        {
+          "@type": "HowToStep",
+          "position": 1,
+          "name": "Organize your images in Photoshop",
+          "text": "Open the two images you want to work with in Photoshop, and organize the layers so the image you want on top is stacked above the background image. The order of layers matters when it comes to compositing and superimposing images."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 2,
+          "name": "Remove the background",
+          "text": "Click Remove Background to automatically remove the background of the top image and generate a new Layer Mask. This hides pixels without deleting them. In Photoshop, you want to work nondestructively — in case you make a mistake, you can come back and restore the image."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 3,
+          "name": "Adjust the mask",
+          "text": "Once Photoshop removes the background, you can tweak and adjust the image to make it look more realistic. Start by editing the edges of the Layer Mask using the Brush tool. By painting on the layer mask with black, white, or different opacities of either, you can create subtle gradients between two images that gently blend them together."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 4,
+          "name": "Add blur to the background",
+          "text": "In typical photos, objects in the background will be slightly out of focus, because the depth of field is shallow and the camera is focusing on the person or subject in the foreground. Recreate this depth of field and give your image a more cohesive look by adding dimension with Gaussian Blur. To add blur, select the background layer, then go to Filter › Blur › Gaussian Blur. From there, you can adjust the intensity of the blur to create a difference in depth."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 5,
+          "name": "Turn it into a Smart Object",
+          "text": "A Smart Object is a container that holds one or more layers. This allows you to apply nondestructive adjustments, distortions, filters, and transformations. In other words, you can always come back and make changes. By making your layers into a smart object, you can treat your combined layers as one image."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 6,
+          "name": "Make the final adjustments",
+          "text": "By treating your multiple layers as one image, you can now adjust the contrast, temperature, and saturation uniformly, giving the final image an even more cohesive appearance. From there, just export it as a PNG or JPG to easily post online or add to your portfolio."
+        }
+      ],
+      "mentions": [
+        {
+          "@type": "Thing",
+          "name": "Layer Mask",
+          "description": "A feature that hides pixels without deleting them for nondestructive editing"
+        },
+        {
+          "@type": "Thing",
+          "name": "Brush tool",
+          "description": "Tool used to edit the edges of Layer Masks and create subtle gradients"
+        },
+        {
+          "@type": "Thing",
+          "name": "Gaussian Blur",
+          "description": "Filter used to add blur and create depth of field effects"
+        },
+        {
+          "@type": "Thing",
+          "name": "Smart Object",
+          "description": "A container that holds layers and allows nondestructive adjustments"
+        },
+        {
+          "@type": "Thing",
+          "name": "Lasso tool",
+          "description": "Selection tool for cutting out objects from backgrounds"
+        },
+        {
+          "@type": "Thing",
+          "name": "Magic Wand tool",
+          "description": "Selection tool for quickly making selections and cutting out objects"
+        }
+      ]
+    }
+  ]
+}
+</script>

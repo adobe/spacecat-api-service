@@ -155,6 +155,22 @@ function hasHtmlDiff(body) {
   return String(orig).trim() !== String(opt).trim();
 }
 
+/**
+ * Extract failure reason from edge-preview response when it returns per-suggestion failures
+ * (suggestions[].message, suggestions[].statusCode) and/or metadata.success/failed.
+ * Returns null if no structured failure info.
+ */
+function getApiFailureReason(body) {
+  if (!body || typeof body !== 'object') return null;
+  const suggestions = body.suggestions;
+  if (!Array.isArray(suggestions)) return null;
+  const failedItems = suggestions.filter((s) => s && (s.statusCode >= 400 || (s.statusCode !== 200 && s.statusCode !== 207)));
+  if (failedItems.length === 0) return null;
+  const messages = [...new Set(failedItems.map((s) => s.message).filter(Boolean))];
+  if (messages.length === 0) return `API reported ${failedItems.length} suggestion failure(s)`;
+  return `API failures: ${messages.join('; ')} (${failedItems.length} suggestion(s))`;
+}
+
 /** Split array into chunks of at most `size`. */
 function chunk(arr, size) {
   const chunks = [];
@@ -168,10 +184,14 @@ function processEdgePreviewResult({ url, suggestionIds, type, opportunityId }, {
   const invocationId = headers['x-invocation-id'] || headers['x-request-id'] || '';
   const okStatus = status === 200 || status === 207;
   const diff = okStatus && body ? hasHtmlDiff(body) : false;
+  const apiFailureReason = getApiFailureReason(body);
 
   if (!okStatus && body) {
     const errSnippet = typeof body === 'object' ? JSON.stringify(body).slice(0, 300) : String(body).slice(0, 300);
     console.log(`  [edge-preview debug] Error body snippet: ${errSnippet}${errSnippet.length >= 300 ? '...' : ''}`);
+  }
+  if (apiFailureReason) {
+    console.log(`  [edge-preview debug] API reported suggestion failures: ${apiFailureReason}`);
   }
   console.log(`  [edge-preview debug] ${url} okStatus=${okStatus} hasHtmlDiff=${diff} => ${okStatus && diff ? 'SUCCESS' : 'FLAGGED'}`);
 
@@ -179,6 +199,9 @@ function processEdgePreviewResult({ url, suggestionIds, type, opportunityId }, {
     results.success.push({ url, opportunityId, type, suggestionIds });
     console.log(`  [${type}] OK ${url} (${suggestionIds.length} suggestion(s))`);
   } else {
+    const reason = !okStatus
+      ? `HTTP ${status}`
+      : (apiFailureReason || 'no difference between originalHtml and optimizedHtml');
     results.failed.push({
       url,
       opportunityId,
@@ -186,13 +209,20 @@ function processEdgePreviewResult({ url, suggestionIds, type, opportunityId }, {
       suggestionIds,
       status,
       invocationId,
-      reason: !okStatus ? `HTTP ${status}` : 'no difference between originalHtml and optimizedHtml',
+      reason,
     });
     console.log(`  [${type}] FLAGGED ${url}`);
     console.log(`    suggestionIds: ${JSON.stringify(suggestionIds)}`);
     console.log(`    X-Invocation-Id: ${invocationId || '(none)'}`);
     if (!okStatus) console.log(`    status: ${status}`);
-    if (okStatus && !diff) console.log(`    reason: no difference between originalHtml and optimizedHtml`);
+    console.log(`    reason: ${reason}`);
+    if (body?.suggestions?.length) {
+      body.suggestions.forEach((s) => {
+        if (s?.statusCode >= 400 || (s?.statusCode !== 200 && s?.statusCode !== 207)) {
+          console.log(`      [suggestion ${s.uuid}] ${s.statusCode}: ${s.message || '(no message)'}`);
+        }
+      });
+    }
   }
 }
 

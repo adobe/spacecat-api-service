@@ -1,0 +1,166 @@
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://www.adobe.com/#organization",
+      "name": "Adobe",
+      "url": "https://www.adobe.com",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "https://www.adobe.com/cc-shared/assets/img/product-icons/svg/adobe.svg"
+      },
+      "sameAs": [
+        "https://www.facebook.com/Adobe",
+        "https://x.com/Adobe",
+        "https://www.linkedin.com/company/adobe",
+        "https://www.youtube.com/user/AdobeSystems/Adobe",
+        "https://en.wikipedia.org/wiki/Adobe_Inc."
+      ]
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://www.adobe.com/#website",
+      "name": "Adobe",
+      "url": "https://www.adobe.com",
+      "publisher": {
+        "@id": "https://www.adobe.com/#organization"
+      }
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://www.adobe.com/products/photoshop.html#software",
+      "name": "Adobe Photoshop",
+      "description": "Get better results with new partner AI models in Generative Fill. Upscale images with Topaz Labs. Make seamless composites in a click with Harmonize. And jumpstart your Photoshop process by ideating in Firefly Boards.",
+      "url": "https://www.adobe.com/products/photoshop.html",
+      "applicationCategory": "MultimediaApplication",
+      "operatingSystem": [
+        "Windows",
+        "macOS",
+        "iOS",
+        "Android"
+      ],
+      "availableOnDevice": [
+        "Desktop",
+        "Mobile"
+      ],
+      "publisher": {
+        "@id": "https://www.adobe.com/#organization"
+      },
+      "provider": {
+        "@id": "https://www.adobe.com/#organization"
+      },
+      "sameAs": "https://en.wikipedia.org/wiki/Adobe_Photoshop"
+    },
+    {
+      "@type": "WebPage",
+      "@id": "https://www.adobe.com/products/photoshop/displacement-map.html#webpage",
+      "url": "https://www.adobe.com/products/photoshop/displacement-map.html",
+      "name": "How to create a displacement map in Adobe Photoshop.",
+      "description": "Learn how to make a displacement map and add graphics, text, or logos that match the texture and contours of your image.",
+      "inLanguage": "en-US",
+      "isPartOf": {
+        "@id": "https://www.adobe.com/#website"
+      },
+      "about": {
+        "@id": "https://www.adobe.com/products/photoshop.html#software"
+      }
+    },
+    {
+      "@type": "HowTo",
+      "@id": "https://www.adobe.com/products/photoshop/displacement-map.html#howto",
+      "name": "How to create a displacement map in Adobe Photoshop",
+      "description": "Learn how to make a displacement map and add graphics, text, or logos that match the texture and contours of your image.",
+      "url": "https://www.adobe.com/products/photoshop/displacement-map.html",
+      "inLanguage": "en-US",
+      "author": {
+        "@id": "https://www.adobe.com/#organization"
+      },
+      "publisher": {
+        "@id": "https://www.adobe.com/#organization"
+      },
+      "about": {
+        "@id": "https://www.adobe.com/products/photoshop.html#software"
+      },
+      "tool": "Adobe Photoshop",
+      "isPartOf": {
+        "@id": "https://www.adobe.com/products/photoshop/displacement-map.html#webpage"
+      },
+      "mainEntityOfPage": {
+        "@id": "https://www.adobe.com/products/photoshop/displacement-map.html#webpage"
+      },
+      "step": [
+        {
+          "@type": "HowToStep",
+          "position": 1,
+          "name": "Open the image in Photoshop",
+          "text": "The image will appear as a background layer."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 2,
+          "name": "Duplicate and save your background image as a new document",
+          "text": "With the background layer thumbnail selected in the Layers panel, go to the top menu and select Layer › Duplicate Layer. In the dialog box that pops up, under Destination, select New. Name the duplicate layer something obvious like 'Displacement Shirt.' Click OK, and the duplicate layer will appear as a new tab. This will be your displacement map. In the new tab, select File › Save As, and save the 'Displacement Shirt' PSD file to your desktop so it's easy to find later."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 3,
+          "name": "Desaturate the layer in the new PSD",
+          "text": "Click Command+Shift+U on Mac (Ctrl+Shift+U on Windows) to make your 'Displacement Shirt' file grayscale. Another way to desaturate is to create a black-and-white adjustment layer by clicking Image › Adjustments › Black & White. If you want to add more contrast to make it easier for your graphics or text to hug the contours, create an adjustment layer. Click Image › Adjustments › Brightness/Contrast and slide the Contrast slider to the right."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 4,
+          "name": "Add text or a logo to your image",
+          "text": "Go back to the original image file. Create a new layer (select Layer › New) and name it. Add your logo or text where you want it. To create new text, select the Type tool, choose your fill color, font, and size, and type where you want to place the text on the shirt. Click the Move tool to put the text in the right spot and rotate it so it matches the angle of the shirt."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 5,
+          "name": "Add your displacement map",
+          "text": "In the top menu, select Filter › Distort › Displace. A dialog box will appear asking if you want to turn the layer into a Smart Object. Click Convert to Smart Object. The Displace dialog box will appear, and you can adjust the horizontal and vertical distortion levels. The default is 10 percent, but you can experiment with higher values to create greater distortion. You can leave the Stretch to Fit and Repeat Edge Pixels options selected. When you click OK, your Finder will pop up. Select the 'Displacement Shirt' file you created in step 2."
+        },
+        {
+          "@type": "HowToStep",
+          "position": 6,
+          "name": "Fine-tune the displacement",
+          "text": "Experiment with different levels of distortion, blend modes (start with Multiply, Overlay, or Soft Light), and opacities until you find the right combination. If your graphic or text has pixelated edges, you can blur them by applying a Gaussian blur to your displacement map. Go back to your displacement map PSD file, click Filter › Blur › Gaussian Blur, and move the slider to the right to eliminate some of the jagged edges. Then reapply the displace filter to see how it looks."
+        }
+      ],
+      "mentions": [
+        {
+          "@type": "Thing",
+          "name": "Layers panel",
+          "description": "Panel used to manage layers in Photoshop"
+        },
+        {
+          "@type": "Thing",
+          "name": "Type tool",
+          "description": "Tool used to add text in Photoshop"
+        },
+        {
+          "@type": "Thing",
+          "name": "Move tool",
+          "description": "Tool used to position elements in Photoshop"
+        },
+        {
+          "@type": "Thing",
+          "name": "Smart Object",
+          "description": "A layer type that preserves an image's source content with all its original characteristics"
+        },
+        {
+          "@type": "Thing",
+          "name": "Gaussian Blur",
+          "description": "A filter that blurs an image or selection to reduce detail and smooth edges"
+        },
+        {
+          "@type": "Thing",
+          "name": "Displace filter",
+          "description": "A distortion filter that shifts pixels based on a displacement map"
+        }
+      ]
+    }
+  ]
+}
+</script>
