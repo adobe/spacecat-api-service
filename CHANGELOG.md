@@ -1,3 +1,10 @@
+# [1.319.0](https://github.com/adobe/spacecat-api-service/compare/v1.318.2...v1.319.0) (2026-02-17)
+
+
+### Features
+
+* A11y issue aggregation ([#1820](https://github.com/adobe/spacecat-api-service/issues/1820)) ([2340f27](https://github.com/adobe/spacecat-api-service/commit/2340f27e18161ea54b43808ad91763a3e6240322))
+
 ## [1.318.2](https://github.com/adobe/spacecat-api-service/compare/v1.318.1...v1.318.2) (2026-02-16)
 
 
