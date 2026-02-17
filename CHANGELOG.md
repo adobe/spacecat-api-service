@@ -1,3 +1,10 @@
+## [1.319.1](https://github.com/adobe/spacecat-api-service/compare/v1.319.0...v1.319.1) (2026-02-17)
+
+
+### Bug Fixes
+
+* edge-optimize API for fastly CDN routing configuration ([#1797](https://github.com/adobe/spacecat-api-service/issues/1797)) ([5f5f228](https://github.com/adobe/spacecat-api-service/commit/5f5f228349bab08ef6cd5398cae770d54ef74df9))
+
 # [1.319.0](https://github.com/adobe/spacecat-api-service/compare/v1.318.2...v1.319.0) (2026-02-17)
 
 
