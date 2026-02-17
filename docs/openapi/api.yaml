@@ -458,6 +458,8 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-config'
   /sites/{siteId}/llmo/edge-optimize-status:
     $ref: './llmo-api.yaml#/llmo-edge-optimize-status'
+  /sites/{siteId}/llmo/edge-optimize-routing:
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-routing'
   /sites/{siteId}/llmo/strategy:
     $ref: './llmo-api.yaml#/llmo-strategy'
   /sites/{siteId}/reports:

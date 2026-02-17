@@ -23,12 +23,14 @@ import {
   llmoStrategy,
   schemas,
   composeBaseURL,
+  isValidUrl,
 } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
-import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
+import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { exchangePromiseToken } from '../../support/utils.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import {
   applyFilters,
@@ -37,6 +39,8 @@ import {
   applyGroups,
   applyMappings,
   LLMO_SHEETDATA_SOURCE_URL,
+  EDGE_OPTIMIZE_CDN_STRATEGIES,
+  EDGE_OPTIMIZE_CDN_TYPES,
 } from './llmo-utils.js';
 import { LLMO_SHEET_MAPPINGS } from './llmo-mappings.js';
 import {
@@ -1210,6 +1214,152 @@ function LlmoController(ctx) {
     }
   };
 
+  /**
+   * POST /sites/{siteId}/llmo/edge-optimize-routing
+   * Updates edge optimize routing for the site via the internal CDN API.
+   * - Requires mandatory request body fields: cdnType, promiseToken.
+   * - Probes the site with User-Agent AdobeEdgeOptimize-Test (must return 2xx)
+   * - Exchanges promiseToken for IMS user token, then calls internal CDN API.
+   * @param {object} context - Request context
+   * @returns {Promise<Response>}
+   */
+  const updateEdgeOptimizeCDNRouting = async (context) => {
+    const { log, dataAccess, env } = context;
+    const { siteId } = context.params;
+    const { Site } = dataAccess;
+    const { cdnType, enabled = true, promiseToken } = context.data || {};
+    log.info(`Edge optimize routing update request received for site ${siteId}`);
+
+    if (env?.ENV && env.ENV !== 'prod') {
+      return createResponse(
+        { message: `API is not available in ${env?.ENV} environment` },
+        400,
+      );
+    }
+
+    if (!hasText(promiseToken)) {
+      return badRequest('promiseToken is required and must be a non-empty string');
+    }
+
+    if (!hasText(cdnType)) {
+      return badRequest('cdnType is required and must be a non-empty string');
+    }
+    const cdnTypeTrimmed = cdnType.toLowerCase().trim();
+    const cdnTypeNormalized = EDGE_OPTIMIZE_CDN_TYPES.includes(cdnTypeTrimmed)
+      ? cdnTypeTrimmed
+      : null;
+
+    if (!cdnTypeNormalized) {
+      return badRequest(`cdnType must be one of: ${EDGE_OPTIMIZE_CDN_TYPES.join(', ')}`);
+    }
+
+    let routingConfig;
+    try {
+      routingConfig = JSON.parse(env?.EDGE_OPTIMIZE_ROUTING_CONFIG);
+    } catch (parseError) {
+      log.error(`EDGE_OPTIMIZE_ROUTING_CONFIG invalid JSON: ${parseError.message}`);
+      return internalServerError('Failed to parse routing config.');
+    }
+
+    const cdnConfig = routingConfig[cdnTypeNormalized];
+    if (!isObject(cdnConfig) || !isValidUrl(cdnConfig.cdnRoutingUrl)) {
+      log.error(`EDGE_OPTIMIZE_ROUTING_CONFIG missing entry or invalid URL for cdnType: ${cdnTypeNormalized}`);
+      return createResponse(
+        { message: 'API is missing mandatory environment variable' },
+        503,
+      );
+    }
+
+    const strategy = EDGE_OPTIMIZE_CDN_STRATEGIES[cdnTypeNormalized];
+
+    if (enabled !== undefined && typeof enabled !== 'boolean') {
+      return badRequest('enabled field must be a boolean');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    const overrideBaseURL = site.getConfig()?.getFetchConfig?.()?.overrideBaseURL;
+    const effectiveBaseUrl = isValidUrl(overrideBaseURL) ? overrideBaseURL : site.getBaseURL();
+    log.info(`Effective base URL for site ${siteId}: ${effectiveBaseUrl}`);
+
+    const probeUrl = effectiveBaseUrl.startsWith('http') ? effectiveBaseUrl : `https://${effectiveBaseUrl}`;
+    let probeResponse;
+    try {
+      log.info(`Probing site ${probeUrl}`);
+      probeResponse = await fetch(probeUrl, {
+        method: 'GET',
+        headers: { 'User-Agent': 'AdobeEdgeOptimize-Test AdobeEdgeOptimize/1.0' },
+        signal: AbortSignal.timeout(5000),
+      });
+    } catch (probeError) {
+      log.error(`Error probing site ${siteId}: ${probeError.message}`);
+      return badRequest(`Error probing site: ${probeError.message}`);
+    }
+    if (!probeResponse.ok) {
+      const msg = `Site ${probeUrl} did not return 2xx for`
+      + ` User-Agent AdobeEdgeOptimize-Test (got ${probeResponse.status})`;
+      log.error(`CDN routing update failed: ${msg}, url=${probeUrl}`);
+      return badRequest(msg);
+    }
+
+    let imsUserToken;
+    try {
+      log.debug(`Getting IMS user token for site ${siteId}`);
+      imsUserToken = await exchangePromiseToken(context, promiseToken);
+      log.info('IMS user token obtained successfully');
+    } catch (tokenError) {
+      log.warn(`Fetching IMS user token for site ${siteId} failed: ${tokenError.status} ${tokenError.message}`);
+      return createResponse({ message: 'Authentication failed with upstream IMS service' }, 401);
+    }
+
+    try {
+      const domain = calculateForwardedHost(probeUrl, log);
+      const cdnUrl = strategy.buildUrl(cdnConfig, domain);
+      const cdnBody = strategy.buildBody(enabled);
+      log.info(`Calling CDN API for domain ${domain} at ${cdnUrl} with enabled: ${enabled}`);
+      const cdnResponse = await fetch(cdnUrl, {
+        method: strategy.method,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${imsUserToken}`,
+        },
+        body: JSON.stringify(cdnBody),
+        signal: AbortSignal.timeout(5000),
+      });
+
+      if (!cdnResponse.ok) {
+        const body = await cdnResponse.text();
+        log.error(`CDN API failed for site ${siteId}, domain ${domain}: ${cdnResponse.status} ${body}`);
+        if (cdnResponse.status === 401 || cdnResponse.status === 403) {
+          return createResponse(
+            { message: 'User is not authorized to update CDN routing' },
+            cdnResponse.status,
+          );
+        }
+        return createResponse(
+          { message: `Upstream call failed with status ${cdnResponse.status}` },
+          500,
+        );
+      }
+
+      log.info(`Edge optimize routing updated for site ${siteId}, domain ${domain}`);
+      return ok({ enabled, domain, cdnType: cdnTypeNormalized });
+    } catch (error) {
+      log.error(`Edge optimize routing update failed for site ${siteId}: ${error.message}`);
+      if (error.status) {
+        return createResponse({ message: error.message }, error.status);
+      }
+      return internalServerError(error.message);
+    }
+  };
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -1235,6 +1385,7 @@ function LlmoController(ctx) {
     getStrategy,
     saveStrategy,
     checkEdgeOptimizeStatus,
+    updateEdgeOptimizeCDNRouting,
   };
 }
 
