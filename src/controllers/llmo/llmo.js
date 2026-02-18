@@ -1244,7 +1244,7 @@ function LlmoController(ctx) {
     const { siteId } = context.params;
     const { Site } = dataAccess;
     const { cdnType, enabled = true } = context.data || {};
-    const promiseToken = (context.request?.headers?.get?.('x-promise-token') ?? '').toString().trim();
+    const promiseToken = context.request?.headers?.get?.('x-promise-token');
     log.info(`Edge optimize routing update request received for site ${siteId}`);
 
     if (env?.ENV && env.ENV !== 'prod') {
