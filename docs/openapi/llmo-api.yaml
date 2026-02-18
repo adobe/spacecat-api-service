@@ -1628,6 +1628,39 @@ llmo-strategy:
     security:
       - api_key: [ ]
 
+llmo-opportunities-reviewed:
+  put:
+    tags:
+      - llmo
+    summary: Mark opportunities as reviewed
+    description: |
+      Marks the LLMO opportunities for a site as reviewed by adding an
+      `opportunitiesReviewed` tag to the site's LLMO configuration.
+      The tag is idempotent — calling this endpoint multiple times will not
+      create duplicate tags.
+    operationId: markOpportunitiesReviewed
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    responses:
+      '200':
+        description: Opportunities marked as reviewed successfully
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: string
+              example:
+                - opportunitiesReviewed
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+    security:
+      - api_key: [ ]
+
 llmo-edge-optimize-status:
   get:
     tags:
