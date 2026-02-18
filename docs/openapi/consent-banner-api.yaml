@@ -18,7 +18,7 @@ consent-banner:
       - Mobile with consent banner visible
       - Mobile with consent banner dismissed/hidden
 
-      The returned jobId can be used with the GET /consent-banner endpoint to retrieve the results.
+      The returned jobId can be used with the GET /consent-banner/{jobId} endpoint to retrieve the results.
     operationId: takeConsentBannerScreenshots
     requestBody:
       required: true
@@ -104,6 +104,10 @@ consent-banner:
                   example: 'Service Unavailable'
       '500':
         $ref: './responses.yaml#/500'
+
+consent-banner-by-jobId:
+  parameters:
+    - $ref: './parameters.yaml#/jobId'
   get:
     tags:
       - consent-banner
@@ -124,14 +128,6 @@ consent-banner:
 
       Additionally provides access to the raw scrape JSON data for further analysis.
     operationId: getConsentBannerScreenshots
-    parameters:
-      - name: jobId
-        in: query
-        required: true
-        description: The ID of the screenshot job to retrieve results for
-        schema:
-          type: string
-        example: 'screenshot-job-12345'
     responses:
       '200':
         description: Screenshot results retrieved successfully
