@@ -4149,11 +4149,20 @@ describe('LlmoController', () => {
       [LOG_SOURCES.AEM_CS_FASTLY]: { cdnRoutingUrl: 'https://internal-cdn.example.com' },
     });
 
+    function mockRequestWithPromiseToken(token = FAKE_PROMISE_TOKEN) {
+      return {
+        headers: {
+          get: (name) => (name === 'x-promise-token' ? token : null),
+        },
+      };
+    }
+
     beforeEach(() => {
       enableEdgeContext = {
         ...mockContext,
         params: { siteId: validSiteId },
-        data: { cdnType: LOG_SOURCES.AEM_CS_FASTLY, promiseToken: FAKE_PROMISE_TOKEN },
+        data: { cdnType: LOG_SOURCES.AEM_CS_FASTLY },
+        request: mockRequestWithPromiseToken(),
       };
       mockDataAccess.Site.findById.resetBehavior();
       mockDataAccess.Site.findById.resolves(mockSite);
@@ -4176,39 +4185,49 @@ describe('LlmoController', () => {
       expect((await result.json()).message).to.include('API is missing mandatory environment variable');
     });
 
-    it('returns 400 when promiseToken is missing', async () => {
+    it('returns 400 when x-promise-token header is missing', async () => {
       enableEdgeContext.data = { cdnType: LOG_SOURCES.AEM_CS_FASTLY };
+      enableEdgeContext.request = mockRequestWithPromiseToken('');
       enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
       const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
       expect(result.status).to.equal(400);
-      expect((await result.json()).message).to.include('promiseToken is required');
+      expect((await result.json()).message).to.include('x-promise-token header is required');
+    });
+
+    it('returns 400 when x-promise-token header is undefined (null/undefined branch)', async () => {
+      enableEdgeContext.data = { cdnType: LOG_SOURCES.AEM_CS_FASTLY };
+      enableEdgeContext.request = { headers: { get: () => undefined } };
+      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
+      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.include('x-promise-token header is required');
     });
 
     it('returns 400 when cdnType is missing', async () => {
-      enableEdgeContext.data = { promiseToken: FAKE_PROMISE_TOKEN };
+      enableEdgeContext.data = {};
       enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
       const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
       expect(result.status).to.equal(400);
       expect((await result.json()).message).to.include('cdnType is required');
     });
 
-    it('returns 400 when context.data is undefined', async () => {
-      const ctxNoData = { ...enableEdgeContext, data: undefined };
+    it('returns 400 when context.data is undefined and no promise token in header', async () => {
+      const ctxNoData = { ...enableEdgeContext, data: undefined, request: mockRequestWithPromiseToken('') };
       ctxNoData.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
       const result = await controller.updateEdgeOptimizeCDNRouting(ctxNoData);
       expect(result.status).to.equal(400);
-      expect((await result.json()).message).to.include('promiseToken is required');
+      expect((await result.json()).message).to.include('x-promise-token header is required');
     });
 
     it('returns 400 when cdnType is not supported', async () => {
-      enableEdgeContext.data = { cdnType: 'unknown', promiseToken: FAKE_PROMISE_TOKEN };
+      enableEdgeContext.data = { cdnType: 'unknown' };
       enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
       const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
       expect(result.status).to.equal(400);
       expect((await result.json()).message).to.include('cdnType must be one of');
     });
 
-    it('returns 400 when ENV is set and not prod (ENV check currently commented out in controller)', async () => {
+    it('returns 400 when ENV is set and not prod', async () => {
       const ctxNonProd = { ...enableEdgeContext, env: { ENV: 'stage', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly } };
       const result = await controller.updateEdgeOptimizeCDNRouting(ctxNonProd);
       expect(result.status).to.equal(400);
@@ -4217,7 +4236,7 @@ describe('LlmoController', () => {
 
     it('returns 400 when enabled is not a boolean', async () => {
       enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
-      enableEdgeContext.data = { cdnType: LOG_SOURCES.AEM_CS_FASTLY, promiseToken: FAKE_PROMISE_TOKEN, enabled: 'true' };
+      enableEdgeContext.data = { cdnType: LOG_SOURCES.AEM_CS_FASTLY, enabled: 'true' };
       const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
       expect(result.status).to.equal(400);
       expect((await result.json()).message).to.equal('enabled field must be a boolean');
@@ -4257,13 +4276,128 @@ describe('LlmoController', () => {
       expect((await result.json()).message).to.equal('Authentication failed with upstream IMS service');
     });
 
-    it('returns 400 when site probe returns non-200', async () => {
+    it('returns 400 when site probe returns non-200 and non-301', async () => {
       enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
       exchangePromiseTokenStub.resolves({ access_token: 'fake-token' });
       tracingFetchStub.onFirstCall().resolves({ ok: false, status: 404 });
       const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
       expect(result.status).to.equal(400);
       expect((await result.json()).message).to.include('did not return 2xx');
+    });
+
+    it('returns 400 when probe returns 301 without Location header', async () => {
+      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
+      tracingFetchStub.onFirstCall().resolves({
+        ok: false,
+        status: 301,
+        headers: { get: () => null },
+      });
+      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.match(/hostname|URL|null/i);
+    });
+
+    it('returns 400 when probe returns 301 with invalid Location header', async () => {
+      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
+      mockSite.getBaseURL.returns('https://example.com');
+      tracingFetchStub.onFirstCall().resolves({
+        ok: false,
+        status: 301,
+        headers: { get: (n) => (n === 'location' ? 'https://ex ample.com/' : null) },
+      });
+      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.include('Error getting hostname');
+    });
+
+    it('returns 400 when probe returns 301 but probe URL is invalid for domain check', async () => {
+      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
+      mockSite.getBaseURL.returns('https://[');
+      tracingFetchStub.onFirstCall().resolves({
+        ok: false,
+        status: 301,
+        headers: { get: (n) => (n === 'location' ? 'https://www.example.com/' : null) },
+      });
+      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.include('Error getting hostname from URL');
+    });
+
+    it('returns 400 when probe returns 301 and Location domain does not match probe domain', async () => {
+      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
+      mockSite.getBaseURL.returns('https://example.com');
+      tracingFetchStub.onFirstCall().resolves({
+        ok: false,
+        status: 301,
+        headers: { get: (n) => (n === 'location' ? 'https://other-domain.com/' : null) },
+      });
+      const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('domain');
+      expect(body.message).to.include('does not match');
+      expect(body.message).to.include('301');
+    });
+
+    it('301 with Location without scheme exercises hostname-without-www branch', async () => {
+      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
+      mockSite.getBaseURL.returns('https://example.com');
+      tracingFetchStub.onFirstCall().resolves({
+        ok: false,
+        status: 301,
+        headers: { get: (n) => (n === 'location' ? 'example.com' : null) },
+      });
+      exchangePromiseTokenStub.resolves({ access_token: 'fake-token' });
+      tracingFetchStub.onSecondCall().resolves({ ok: true });
+      try {
+        const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
+        expect(result.status).to.equal(200);
+        expect((await result.json()).domain).to.be.a('string');
+      } catch (e) {
+        expect(e.message).to.include('locationUrl');
+      }
+    });
+
+    it('returns 200 with domain from Location when probe returns 301 and root domains match (www vs non-www)', async () => {
+      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
+      mockSite.getBaseURL.returns('https://example.com');
+      tracingFetchStub.onFirstCall().resolves({
+        ok: false,
+        status: 301,
+        headers: { get: (n) => (n === 'location' ? 'https://www.example.com/' : null) },
+      });
+      exchangePromiseTokenStub.resolves({ access_token: 'fake-token' });
+      tracingFetchStub.onSecondCall().resolves({ ok: true });
+      try {
+        const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
+        expect(result.status).to.equal(200);
+        expect(await result.json()).to.deep.include({
+          enabled: true,
+          domain: 'www.example.com',
+          cdnType: LOG_SOURCES.AEM_CS_FASTLY,
+        });
+      } catch (e) {
+        expect(e.message).to.include('locationUrl');
+      }
+    });
+
+    it('returns 200 with domain from Location when probe returns 301 with adobe.com -> www.adobe.com', async () => {
+      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
+      mockSite.getBaseURL.returns('https://adobe.com');
+      tracingFetchStub.onFirstCall().resolves({
+        ok: false,
+        status: 301,
+        headers: { get: (n) => (n === 'location' ? 'https://www.adobe.com/' : null) },
+      });
+      exchangePromiseTokenStub.resolves({ access_token: 'fake-token' });
+      tracingFetchStub.onSecondCall().resolves({ ok: true });
+      try {
+        const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
+        expect(result.status).to.equal(200);
+        expect((await result.json()).domain).to.equal('www.adobe.com');
+      } catch (e) {
+        expect(e.message).to.include('locationUrl');
+      }
     });
 
     it('returns 400 when site probe fetch throws', async () => {
@@ -4324,7 +4458,6 @@ describe('LlmoController', () => {
       enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
       enableEdgeContext.data = {
         cdnType: LOG_SOURCES.AEM_CS_FASTLY,
-        promiseToken: FAKE_PROMISE_TOKEN,
         enabled: true,
       };
       mockSite.getBaseURL.returns('example.com');
@@ -4342,12 +4475,11 @@ describe('LlmoController', () => {
       expect(tracingFetchStub.firstCall.args[0]).to.equal('https://example.com');
     });
 
-    it('defaults enabled to true when context.data has only cdnType and promiseToken', async () => {
+    it('defaults enabled to true when context.data has only cdnType', async () => {
       const ctxOnlyCdnType = {
         ...enableEdgeContext,
         data: {
           cdnType: LOG_SOURCES.AEM_CS_FASTLY,
-          promiseToken: FAKE_PROMISE_TOKEN,
           enabled: true,
         },
       };
@@ -4380,7 +4512,6 @@ describe('LlmoController', () => {
       enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
       enableEdgeContext.data = {
         cdnType: LOG_SOURCES.AEM_CS_FASTLY,
-        promiseToken: FAKE_PROMISE_TOKEN,
         enabled: false,
       };
       exchangePromiseTokenStub.resolves({ access_token: 'fake-token' });

@@ -1214,20 +1214,37 @@ function LlmoController(ctx) {
     }
   };
 
+  // Returns the hostname from a URL: lowercase with leading www. stripped.
+  function getHostnameWithoutWww(url, log) {
+    try {
+      const urlObj = new URL(url.startsWith('http') ? url : `https://${url}`);
+      let hostname = urlObj.hostname.toLowerCase();
+      if (hostname.startsWith('www.')) {
+        hostname = hostname.slice(4);
+      }
+      return hostname;
+    } catch (error) {
+      log.error(`Error getting hostname from URL ${url}: ${error.message}`);
+      throw new Error(`Error getting hostname from URL ${url}: ${error.message}`);
+    }
+  }
+
   /**
    * POST /sites/{siteId}/llmo/edge-optimize-routing
    * Updates edge optimize routing for the site via the internal CDN API.
-   * - Requires mandatory request body fields: cdnType, promiseToken.
-   * - Probes the site with User-Agent AdobeEdgeOptimize-Test (must return 2xx)
-   * - Exchanges promiseToken for IMS user token, then calls internal CDN API.
-   * @param {object} context - Request context
+   * - Requires x-promise-token header and request body cdnType.
+   * - Probes the site with custom User-Agent (2xx continues; 301: if Location domain
+   *   normalizes to same as probe URL domain, use Location domain for CDN API; otherwise break).
+   * - Exchanges promise token for IMS user token, then calls internal CDN API.
+   * @param {object} context - Request context (context.request for headers)
    * @returns {Promise<Response>}
    */
   const updateEdgeOptimizeCDNRouting = async (context) => {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
-    const { cdnType, enabled = true, promiseToken } = context.data || {};
+    const { cdnType, enabled = true } = context.data || {};
+    const promiseToken = (context.request?.headers?.get?.('x-promise-token') ?? '').toString().trim();
     log.info(`Edge optimize routing update request received for site ${siteId}`);
 
     if (env?.ENV && env.ENV !== 'prod') {
@@ -1238,7 +1255,7 @@ function LlmoController(ctx) {
     }
 
     if (!hasText(promiseToken)) {
-      return badRequest('promiseToken is required and must be a non-empty string');
+      return badRequest('x-promise-token header is required and must be a non-empty string');
     }
 
     if (!hasText(cdnType)) {
@@ -1302,9 +1319,31 @@ function LlmoController(ctx) {
       log.error(`Error probing site ${siteId}: ${probeError.message}`);
       return badRequest(`Error probing site: ${probeError.message}`);
     }
-    if (!probeResponse.ok) {
-      const msg = `Site ${probeUrl} did not return 2xx for`
-      + ` User-Agent AdobeEdgeOptimize-Test (got ${probeResponse.status})`;
+    let domain;
+    if (probeResponse.ok) {
+      domain = calculateForwardedHost(probeUrl, log);
+    } else if (probeResponse.status === 301) {
+      const locationValue = probeResponse.headers.get('location');
+      let probeHostname;
+      let locationHostname;
+      try {
+        probeHostname = getHostnameWithoutWww(probeUrl, log);
+        locationHostname = getHostnameWithoutWww(locationValue, log);
+      } catch (hostError) {
+        log.error(`Invalid URL for 301 domain check: ${hostError.message}`);
+        return badRequest(hostError.message);
+      }
+      if (probeHostname !== locationHostname) {
+        const msg = `Site ${probeUrl} returned 301 to ${locationValue}; domain `
+          + `(${locationHostname}) does not match probe domain (${probeHostname})`;
+        log.error(`CDN routing update failed: ${msg}`);
+        return badRequest(msg);
+      }
+      domain = calculateForwardedHost(locationValue, log);
+      log.info(`Probe returned 301; using Location domain ${domain} for CDN API`);
+    } else {
+      const msg = `Site ${probeUrl} did not return 2xx or 301 for`
+        + ` User-Agent AdobeEdgeOptimize-Test (got ${probeResponse.status})`;
       log.error(`CDN routing update failed: ${msg}, url=${probeUrl}`);
       return badRequest(msg);
     }
@@ -1320,7 +1359,6 @@ function LlmoController(ctx) {
     }
 
     try {
-      const domain = calculateForwardedHost(probeUrl, log);
       const cdnUrl = strategy.buildUrl(cdnConfig, domain);
       const cdnBody = strategy.buildBody(enabled);
       log.info(`Calling CDN API for domain ${domain} at ${cdnUrl} with enabled: ${enabled}`);
