@@ -77,7 +77,7 @@ describe('Fixes Controller', () => {
       .withArgs({ opportunityId })
       .callsFake((data) => ({ go: async () => ({ data: { ...data, siteId } }) }));
 
-    const entityRegistry = new EntityRegistry({ postgrest: electroService, s3: null }, {}, log);
+    const entityRegistry = new EntityRegistry({ dynamo: electroService, s3: null }, log);
     const dataAccess = entityRegistry.getCollections();
     fixEntityCollection = dataAccess.FixEntity;
     suggestionCollection = dataAccess.Suggestion;
@@ -1469,7 +1469,8 @@ describe('Fixes Controller', () => {
         .withArgs(fixEntityId)
         .resolves(fix);
 
-      removeStub = sandbox.stub(fixEntityCollection, 'removeByIndexKeys').resolves();
+      removeStub = sandbox.stub(electroService.entities.fixEntity, 'remove')
+        .callsFake(() => ({ go: async () => null }));
     });
 
     it('responds 403 if the request does not have authorization/access', async () => {
@@ -1486,7 +1487,7 @@ describe('Fixes Controller', () => {
 
       const response = await fixesController.removeFix(requestContext);
       expect(response).includes({ status: 204 });
-      expect(fixEntityCollection.removeByIndexKeys).calledOnceWith([{ fixEntityId }]);
+      expect(electroService.entities.fixEntity.remove).calledOnceWith({ fixEntityId });
     });
 
     it('responds 404 if the fix does not exist', async () => {
@@ -1520,7 +1521,7 @@ describe('Fixes Controller', () => {
     });
 
     it('responds 500 if the fix cannot be removed', async () => {
-      removeStub.rejects(new Error('Arbitrary Failure'));
+      removeStub.throws(new Error('Arbitrary Failure'));
       requestContext.params.fixId = fixEntityId;
       sandbox.stub(log, 'error'); // silence the error log
       const response = await fixesController.removeFix(requestContext);

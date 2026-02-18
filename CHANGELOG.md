@@ -1,10 +1,3 @@
-# [1.320.0](https://github.com/adobe/spacecat-api-service/compare/v1.319.2...v1.320.0) (2026-02-18)
-
-
-### Features
-
-* add v2/v3 data access runtime switch ([#1827](https://github.com/adobe/spacecat-api-service/issues/1827)) ([2c9da14](https://github.com/adobe/spacecat-api-service/commit/2c9da1490190801065123f7300f8fd817dc9a8f2))
-
 ## [1.319.2](https://github.com/adobe/spacecat-api-service/compare/v1.319.1...v1.319.2) (2026-02-18)
 
 

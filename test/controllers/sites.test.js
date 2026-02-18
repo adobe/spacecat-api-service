@@ -108,8 +108,6 @@ describe('Sites Controller', () => {
       getCollection: stub().returns({
         schema: SiteSchema,
         findById: stub(),
-        applyUpdateWatchers: (record, updates) => ({ record, updates }),
-        updateByKeys: stub().resolves(),
       }),
     },
     SiteSchema,
