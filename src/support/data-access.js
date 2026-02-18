@@ -26,6 +26,11 @@ export default function dataAccess(fn) {
     const { env } = context;
 
     if (env.DATA_SERVICE_PROVIDER === 'postgres') {
+      if (!env.POSTGREST_URL) {
+        throw new Error(
+          'DATA_SERVICE_PROVIDER is set to "postgres" but POSTGREST_URL is not configured',
+        );
+      }
       return dataAccessV3(fn)(request, context);
     }
     return dataAccessV2(fn)(request, context);
