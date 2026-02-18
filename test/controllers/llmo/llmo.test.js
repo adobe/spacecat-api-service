@@ -4633,6 +4633,15 @@ describe('LlmoController', () => {
       expect(mockConfig.state.llmo.tags).to.include('opportunitiesReviewed');
     });
 
+    it('should initialize llmo state when not present', async () => {
+      mockConfig.state.llmo = undefined;
+
+      const result = await controller.markOpportunitiesReviewed(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockConfig.state.llmo.tags).to.include('opportunitiesReviewed');
+    });
+
     it('should not duplicate the tag if already present', async () => {
       mockConfig.state.llmo.tags = ['opportunitiesReviewed'];
 
