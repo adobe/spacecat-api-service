@@ -1304,7 +1304,7 @@ function LlmoController(ctx) {
     }
     if (!probeResponse.ok) {
       const msg = `Site ${probeUrl} did not return 2xx for`
-      + ` User-Agent AdobeEdgeOptimize-Test (got ${probeResponse.status})`;
+        + ` User-Agent AdobeEdgeOptimize-Test (got ${probeResponse.status})`;
       log.error(`CDN routing update failed: ${msg}, url=${probeUrl}`);
       return badRequest(msg);
     }
@@ -1360,6 +1360,34 @@ function LlmoController(ctx) {
     }
   };
 
+  const markOpportunitiesReviewed = async (context) => {
+    const { log } = context;
+
+    try {
+      const { site, config } = await getSiteAndValidateLlmo(context);
+      const OPPORTUNITIES_REVIEWED_TAG = 'opportunitiesReviewed';
+
+      // TODO: spacecat-shared-data-access should have a method to add a tag to the site config
+      // however, changes are frozen until DB migration. In the meantime,
+      // we can use a temporary solution.
+      // config.addLlmoTag(OPPORTUNITIES_REVIEWED_TAG);
+      config.state.llmo = config.state.llmo || {};
+      config.state.llmo.tags = config.state.llmo.tags || [];
+      if (!config.state.llmo.tags.includes(OPPORTUNITIES_REVIEWED_TAG)) {
+        config.state.llmo.tags.push(OPPORTUNITIES_REVIEWED_TAG);
+      }
+
+      await saveSiteConfig(site, config, log, 'marking opportunities as reviewed');
+
+      return ok(config.getLlmoConfig().tags || []);
+    } catch (error) {
+      if (error.message === 'Only users belonging to the organization can view its sites') {
+        return forbidden(error.message);
+      }
+      return badRequest(error.message);
+    }
+  };
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -1386,6 +1414,7 @@ function LlmoController(ctx) {
     saveStrategy,
     checkEdgeOptimizeStatus,
     updateEdgeOptimizeCDNRouting,
+    markOpportunitiesReviewed,
   };
 }
 
