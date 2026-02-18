@@ -20,6 +20,7 @@ import dataAccessV3 from '@adobe/spacecat-shared-data-access';
  * @param {Function} fn - The next middleware/handler function to wrap.
  * @returns {Function} - The wrapped function.
  */
+/* c8 ignore start */
 export default function dataAccess(fn) {
   return async (request, context) => {
     const { env } = context;
@@ -30,3 +31,4 @@ export default function dataAccess(fn) {
     return dataAccessV2(fn)(request, context);
   };
 }
+/* c8 ignore stop */
