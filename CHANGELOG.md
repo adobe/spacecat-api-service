@@ -1,3 +1,10 @@
+## [1.319.2](https://github.com/adobe/spacecat-api-service/compare/v1.319.1...v1.319.2) (2026-02-18)
+
+
+### Bug Fixes
+
+* document jobId as path parameter for GET consent-banner endpoint ([#1825](https://github.com/adobe/spacecat-api-service/issues/1825)) ([e946f6c](https://github.com/adobe/spacecat-api-service/commit/e946f6c54f4c3fddebfaee3c604db60e0ae8dce5))
+
 ## [1.319.1](https://github.com/adobe/spacecat-api-service/compare/v1.319.0...v1.319.1) (2026-02-17)
 
 
