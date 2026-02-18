@@ -632,3 +632,144 @@ customer-config-v2-patch:
               source: "api"
               categoryId: "859b91c5-0420-4f3b-a464-8d6f6ac34f64"
               topicId: "topic-acrobat-features"
+customer-config-v2-patch-update-single-brand:
+  description: Example for updating a single existing brand via PATCH
+  value:
+    customer:
+      brands:
+        - id: "adobe-photoshop"
+          name: "Adobe Photoshop"
+          description: "Updated brand description for Photoshop"
+          vertical: "Software & Technology"
+          status: "active"
+customer-config-v2-patch-add-prompts-to-brand:
+  description: |
+    Example for adding prompts to an existing brand via PATCH.
+    Note: The prompts array replaces the existing array entirely.
+    To add prompts, include existing ones plus new ones.
+  value:
+    customer:
+      brands:
+        - id: "adobe-photoshop"
+          name: "Adobe Photoshop"
+          status: "active"
+          prompts:
+            - id: "photoshop-prompt-new-1"
+              prompt: "What are the new AI features in Photoshop?"
+              status: "active"
+              regions: ["us", "gb"]
+              origin: "human"
+              source: "api"
+              categoryId: "859b91c5-0420-4f3b-a464-8d6f6ac34f64"
+              topicId: "topic-acrobat-features"
+            - id: "photoshop-prompt-new-2"
+              prompt: "How to use neural filters in Photoshop?"
+              status: "active"
+              regions: ["us"]
+              origin: "human"
+              source: "api"
+              categoryId: "859b91c5-0420-4f3b-a464-8d6f6ac34f64"
+              topicId: "topic-acrobat-features"
+customer-config-v2-patch-update-category:
+  description: Example for updating a specific category via PATCH
+  value:
+    customer:
+      categories:
+        - id: "859b91c5-0420-4f3b-a464-8d6f6ac34f64"
+          name: "Product Features - Updated"
+          status: "active"
+          origin: "human"
+customer-config-v2-patch-update-brand-aliases:
+  description: |
+    Example for updating brand aliases via PATCH.
+    Note: The brandAliases array replaces the existing array entirely.
+    To add aliases, include existing ones plus new ones.
+  value:
+    customer:
+      brands:
+        - id: "adobe-photoshop"
+          name: "Adobe Photoshop"
+          status: "active"
+          brandAliases:
+            - name: "Photoshop"
+              regions: ["US", "GB"]
+            - name: "PS"
+              regions: ["US"]
+            - name: "Adobe PS"
+              regions: ["GL"]
+customer-config-v2-patch-update-brand-competitors:
+  description: |
+    Example for updating brand competitors via PATCH.
+    Note: The competitors array replaces the existing array entirely.
+  value:
+    customer:
+      brands:
+        - id: "adobe-photoshop"
+          name: "Adobe Photoshop"
+          status: "active"
+          competitors:
+            - name: "GIMP"
+              url: "https://www.gimp.org"
+              regions: ["GL"]
+            - name: "Affinity Photo"
+              url: "https://affinity.serif.com/photo"
+              regions: ["US", "GB"]
+customer-config-v2-patch-update-brand-urls:
+  description: |
+    Example for updating brand URLs and social accounts via PATCH.
+    Note: Both urls and socialAccounts arrays replace existing arrays entirely.
+  value:
+    customer:
+      brands:
+        - id: "adobe-photoshop"
+          name: "Adobe Photoshop"
+          status: "active"
+          urls:
+            - value: "https://www.adobe.com/products/photoshop.html"
+              regions: ["US", "GB"]
+            - value: "https://www.adobe.com/fr/products/photoshop.html"
+              regions: ["FR"]
+          socialAccounts:
+            - platform: "twitter"
+              url: "https://x.com/Photoshop"
+              regions: ["GL"]
+            - platform: "instagram"
+              url: "https://instagram.com/photoshop"
+              regions: ["GL"]
+customer-config-v2-patch-update-multiple-brand-fields:
+  description: Example for updating multiple brand fields at once via PATCH
+  value:
+    customer:
+      brands:
+        - id: "adobe-photoshop"
+          name: "Adobe Photoshop"
+          status: "active"
+          description: "Industry-leading image editing software with AI-powered tools"
+          vertical: "Software & Technology"
+          region: ["GL", "US", "GB", "FR"]
+          urls:
+            - value: "https://www.adobe.com/products/photoshop.html"
+              regions: ["US", "GB"]
+          brandAliases:
+            - name: "Photoshop"
+              regions: ["GL"]
+            - name: "PS"
+              regions: ["US"]
+          competitors:
+            - name: "GIMP"
+              url: "https://www.gimp.org"
+              regions: ["GL"]
+          socialAccounts:
+            - platform: "twitter"
+              url: "https://x.com/Photoshop"
+              regions: ["GL"]
+          relatedBrands:
+            - name: "Adobe Lightroom"
+              url: "https://www.adobe.com/products/photoshop-lightroom.html"
+              regions: ["GL"]
+          earnedContent:
+            - name: "Wikipedia"
+              type: "encyclopedia"
+              coverage_scope: "product history and features"
+              url: "https://en.wikipedia.org/wiki/Adobe_Photoshop"
+              regions: ["GL"]
