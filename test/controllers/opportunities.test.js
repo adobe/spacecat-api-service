@@ -14,13 +14,15 @@
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
+import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
-import { ValidationError, Site } from '@adobe/spacecat-shared-data-access';
+import { ValidationError } from '@adobe/spacecat-shared-data-access';
 import OpportunitiesController from '../../src/controllers/opportunities.js';
 
 use(chaiAsPromised);
+use(sinonChai);
 
 describe('Opportunities Controller', () => {
   const sandbox = sinon.createSandbox();
@@ -638,7 +640,7 @@ describe('Opportunities Controller', () => {
         id: SITE_ID,
         getOrganization: async () => mockOrg,
       };
-      Object.setPrototypeOf(mockSiteWithOrg, Site.prototype);
+      mockSiteWithOrg.entityName = 'site';
       mockSite.findById.resolves(mockSiteWithOrg);
 
       // Create context with non-admin user without org access
@@ -704,7 +706,7 @@ describe('Opportunities Controller', () => {
           id: SITE_ID,
           getOrganization: async () => mockOrg,
         };
-        Object.setPrototypeOf(mockSiteWithOrg, Site.prototype);
+        mockSiteWithOrg.entityName = 'site';
         mockSite.findById.resolves(mockSiteWithOrg);
 
         // Create context with non-admin user without org access
@@ -772,7 +774,7 @@ describe('Opportunities Controller', () => {
           id: SITE_ID,
           getOrganization: async () => mockOrg,
         };
-        Object.setPrototypeOf(mockSiteWithOrg, Site.prototype);
+        mockSiteWithOrg.entityName = 'site';
         mockSite.findById.resolves(mockSiteWithOrg);
 
         // Create context with non-admin user without org access
@@ -843,7 +845,7 @@ describe('Opportunities Controller', () => {
           id: SITE_ID,
           getOrganization: async () => mockOrg,
         };
-        Object.setPrototypeOf(mockSiteWithOrg, Site.prototype);
+        mockSiteWithOrg.entityName = 'site';
         mockSite.findById.resolves(mockSiteWithOrg);
 
         // Create context with non-admin user without org access
@@ -919,7 +921,7 @@ describe('Opportunities Controller', () => {
           id: SITE_ID,
           getOrganization: async () => mockOrg,
         };
-        Object.setPrototypeOf(mockSiteWithOrg, Site.prototype);
+        mockSiteWithOrg.entityName = 'site';
         mockSite.findById.resolves(mockSiteWithOrg);
 
         // Create context with non-admin user without org access
@@ -993,7 +995,7 @@ describe('Opportunities Controller', () => {
           id: SITE_ID,
           getOrganization: async () => mockOrg,
         };
-        Object.setPrototypeOf(mockSiteWithOrg, Site.prototype);
+        mockSiteWithOrg.entityName = 'site';
         mockSite.findById.resolves(mockSiteWithOrg);
 
         // Create context with non-admin user without org access

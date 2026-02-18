@@ -26,12 +26,14 @@ import {
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 
-import { ValidationError, Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-access';
+import { Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import { SuggestionDto, SUGGESTION_VIEWS } from '../dto/suggestion.js';
 import { FixDto } from '../dto/fix.js';
 import { sendAutofixMessage, getIMSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
+
+const VALIDATION_ERROR_NAME = 'ValidationError';
 
 /**
  * Suggestions controller.
@@ -477,7 +479,7 @@ function SuggestionsController(ctx, sqs, env) {
         return {
           index,
           message: error.message,
-          statusCode: error instanceof ValidationError ? 400 : 500,
+          statusCode: error?.name === VALIDATION_ERROR_NAME ? 400 : 500,
         };
       }
     });
@@ -567,7 +569,7 @@ function SuggestionsController(ctx, sqs, env) {
         return ok(SuggestionDto.toJSON(updatedSuggestion));
       }
     } catch (e) {
-      if (e instanceof ValidationError) {
+      if (e?.name === VALIDATION_ERROR_NAME) {
         return badRequest(e.message);
       }
       return createResponse({ message: 'Error updating suggestion' }, 500);
@@ -744,7 +746,7 @@ function SuggestionsController(ctx, sqs, env) {
         return {
           index,
           message: error.message,
-          statusCode: error instanceof ValidationError ? 400 : 500,
+          statusCode: error?.name === VALIDATION_ERROR_NAME ? 400 : 500,
         };
       }
     });
