@@ -59,17 +59,6 @@ export default function DrsClient(context) {
       throw new Error('DRS client is not configured. Set DRS_API_URL and DRS_API_KEY environment variables.');
     }
 
-    const spacecatApiUrl = env.SPACECAT_API_URL;
-    const callbackApiKey = env.USER_API_KEY;
-
-    if (!callbackApiKey) {
-      log.warn('USER_API_KEY not configured, webhook notifications will not be sent');
-    }
-
-    const webhookUrl = callbackApiKey && spacecatApiUrl
-      ? `${spacecatApiUrl}/hooks/drs/prompt-generation`
-      : undefined;
-
     const payload = {
       provider_id: 'prompt_generation_base_url',
       parameters: {
@@ -88,18 +77,11 @@ export default function DrsClient(context) {
       },
     };
 
-    // Only include webhook config if callback API key is configured
-    if (webhookUrl && callbackApiKey) {
-      payload.webhook_url = webhookUrl;
-      payload.webhook_api_key = callbackApiKey;
-    }
-
     log.info(`Submitting DRS prompt generation job for site ${siteId}`, {
       baseUrl,
       brandName,
       region,
       numPrompts,
-      hasWebhook: Boolean(webhookUrl),
     });
 
     const response = await fetch(`${drsApiUrl}/jobs`, {

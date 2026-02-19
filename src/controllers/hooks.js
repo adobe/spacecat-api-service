@@ -13,7 +13,7 @@
 import wrap from '@adobe/helix-shared-wrap';
 import { Blocks, Elements, Message } from 'slack-block-builder';
 import {
-  accepted, badRequest, internalServerError, notFound, ok,
+  badRequest, internalServerError, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   composeBaseURL,
@@ -33,8 +33,6 @@ import { isHelixSite } from '../support/utils.js';
 import { getHlxConfigMessagePart } from '../utils/slack/base.js';
 
 const CDN_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_CDN';
-const DRS_CALLBACK_API_KEY_NAME = 'USER_API_KEY';
-
 export const BUTTON_LABELS = {
   APPROVE_CUSTOMER: 'As Customer',
   APPROVE_FRIENDS_FAMILY: 'As Friends/Family',
@@ -55,30 +53,6 @@ function hookAuth(fn, opts) {
     return hasText(expectedSecret) && expectedSecret === secretFromPath
       ? fn(context)
       : notFound();
-  };
-}
-
-function apiKeyAuth(fn, opts) {
-  return (context) => {
-    const expectedApiKey = context.env[opts.apiKeyName];
-    const headers = context.pathInfo?.headers || {};
-
-    // Case-insensitive header lookup for x-api-key
-    const providedApiKey = Object.keys(headers)
-      .find((key) => key.toLowerCase() === 'x-api-key');
-    const apiKeyValue = providedApiKey ? headers[providedApiKey] : null;
-
-    if (!hasText(expectedApiKey)) {
-      context.log?.error(`${opts.apiKeyName} environment variable is not configured`);
-      return internalServerError('Webhook authentication not configured');
-    }
-
-    if (!hasText(apiKeyValue) || apiKeyValue !== expectedApiKey) {
-      context.log?.warn('DRS webhook received with invalid or missing API key');
-      return notFound(); // Return 404 to hide endpoint existence
-    }
-
-    return fn(context);
   };
 }
 
@@ -456,73 +430,10 @@ function HooksController(lambdaContext) {
     return ok('CDN site candidate is successfully processed');
   }
 
-  /**
-   * Process DRS prompt generation webhook. This handler receives callbacks from DRS
-   * when prompt generation jobs complete.
-   * @param {object} context - The request context
-   * @returns {Promise<Response>} - HTTP response
-   */
-  async function processDrsPromptGenerationHook(context) {
-    const { log, sqs, env } = context;
-    const {
-      // eslint-disable-next-line camelcase
-      event_type: eventType,
-      // eslint-disable-next-line camelcase
-      job_id: jobId,
-      // eslint-disable-next-line camelcase
-      provider_id: providerId,
-      // eslint-disable-next-line camelcase
-      result_location: resultLocation,
-      metadata,
-    } = context.data;
-
-    // Validate event type
-    if (eventType !== 'JOB_COMPLETED') {
-      log.warn(`DRS webhook received unsupported event type: ${eventType}`);
-      return badRequest('Only JOB_COMPLETED events are supported');
-    }
-
-    // Validate required fields
-    if (!hasText(jobId)) {
-      log.warn('DRS webhook missing job_id');
-      return badRequest('job_id is required');
-    }
-
-    if (!hasText(resultLocation)) {
-      log.warn('DRS webhook missing result_location');
-      return badRequest('result_location is required');
-    }
-
-    if (!metadata?.site_id) {
-      log.warn('DRS webhook missing metadata.site_id');
-      return badRequest('metadata.site_id is required');
-    }
-
-    log.info(`DRS webhook received: job=${jobId}, site=${metadata.site_id}, provider=${providerId}`);
-
-    // Queue for async processing
-    const queueUrl = env.AUDIT_JOBS_QUEUE_URL;
-    await sqs.sendMessage(queueUrl, {
-      type: 'llmo-prompt-import',
-      siteId: metadata.site_id,
-      auditContext: {
-        drsJobId: jobId,
-        resultLocation,
-        providerId,
-        metadata,
-      },
-    });
-
-    log.info(`DRS webhook queued for processing: job=${jobId}`);
-    return accepted({ message: 'Webhook accepted for processing', jobId });
-  }
-
   return {
     processCDNHook: wrap(processCDNHook)
       .with(errorHandler, { type: 'CDN' })
       .with(hookAuth, { secretName: CDN_HOOK_SECRET_NAME }),
-    processDrsPromptGenerationHook: wrap(processDrsPromptGenerationHook)
-      .with(apiKeyAuth, { apiKeyName: DRS_CALLBACK_API_KEY_NAME }),
   };
 }
 

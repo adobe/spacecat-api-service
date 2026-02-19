@@ -407,7 +407,6 @@ describe('getRouteHandlers', () => {
       'POST /consent-banner',
       'POST /llmo/onboard',
       'GET /sites-resolve',
-      'POST /hooks/drs/prompt-generation',
       'GET /trial-users/email-preferences',
       'PATCH /trial-users/email-preferences',
     );

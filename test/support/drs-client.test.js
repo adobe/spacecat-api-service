@@ -39,8 +39,6 @@ describe('DRS Client', () => {
       env: {
         DRS_API_URL: 'https://drs-api.example.com/api/v1',
         DRS_API_KEY: 'test-api-key',
-        USER_API_KEY: 'test-callback-api-key',
-        SPACECAT_API_URL: 'https://spacecat.example.com',
       },
       log: {
         info: sandbox.stub(),
@@ -118,59 +116,9 @@ describe('DRS Client', () => {
       expect(body.parameters.audience).to.equal('general audience');
       expect(body.parameters.region).to.equal('US');
       expect(body.parameters.num_prompts).to.equal(40);
-      expect(body.webhook_url).to.equal('https://spacecat.example.com/hooks/drs/prompt-generation');
-      expect(body.webhook_api_key).to.equal('test-callback-api-key');
+      expect(body.webhook_url).to.be.undefined;
       expect(body.metadata.site_id).to.equal('site-uuid-123');
       expect(body.metadata.imsOrgId).to.equal('org@AdobeOrg');
-    });
-
-    it('includes both webhook_url and webhook_api_key when configured', async () => {
-      const mockResponse = {
-        ok: true,
-        json: sandbox.stub().resolves({ job_id: 'job-abc123' }),
-      };
-      mockFetch.resolves(mockResponse);
-
-      const client = DrsClient(context);
-      await client.submitPromptGenerationJob(jobParams);
-
-      const body = JSON.parse(mockFetch.firstCall.args[1].body);
-      expect(body.webhook_url).to.equal('https://spacecat.example.com/hooks/drs/prompt-generation');
-      expect(body.webhook_api_key).to.equal('test-callback-api-key');
-    });
-
-    it('omits webhook fields when USER_API_KEY is not configured', async () => {
-      delete context.env.USER_API_KEY;
-
-      const mockResponse = {
-        ok: true,
-        json: sandbox.stub().resolves({ job_id: 'job-abc123' }),
-      };
-      mockFetch.resolves(mockResponse);
-
-      const client = DrsClient(context);
-      await client.submitPromptGenerationJob(jobParams);
-
-      const body = JSON.parse(mockFetch.firstCall.args[1].body);
-      expect(body.webhook_url).to.be.undefined;
-      expect(body.webhook_api_key).to.be.undefined;
-      expect(context.log.warn).to.have.been.calledWith('USER_API_KEY not configured, webhook notifications will not be sent');
-    });
-
-    it('omits webhook_url when SPACECAT_API_URL is not configured', async () => {
-      delete context.env.SPACECAT_API_URL;
-
-      const mockResponse = {
-        ok: true,
-        json: sandbox.stub().resolves({ job_id: 'job-abc123' }),
-      };
-      mockFetch.resolves(mockResponse);
-
-      const client = DrsClient(context);
-      await client.submitPromptGenerationJob(jobParams);
-
-      const body = JSON.parse(mockFetch.firstCall.args[1].body);
-      expect(body.webhook_url).to.be.undefined;
     });
 
     it('uses default values for optional parameters', async () => {
