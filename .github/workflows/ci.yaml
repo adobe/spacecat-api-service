@@ -9,6 +9,8 @@ on:
   push:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
+    # pull_request trigger only needed for protect-nyc-config (uses PR API).
+    # All other jobs run on push only — GitHub shows push checks on PRs too.
 
 env:
   CI_BUILD_NUM: ${{ github.run_id }}
@@ -31,6 +33,7 @@ jobs:
         uses: ./.github/actions/protect-nyc-config
 
   build:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Check out
