@@ -168,28 +168,23 @@ function ConsumersController(ctx) {
       }
 
       log.info('Validating TA access token with IMS');
+      let tokenPayload;
       try {
-        await imsClient.validateAccessToken(accessToken);
+        tokenPayload = await imsClient.validateAccessToken(accessToken);
       } catch (e) {
         log.error(`IMS token validation failed: ${e.message}`);
-        throw new ErrorWithStatusCode('Invalid or expired Technical Account access token', STATUS_BAD_REQUEST);
-      }
-
-      log.info('Retrieving TA profile from IMS');
-      let taProfile;
-      try {
-        taProfile = await imsClient.getImsUserProfile(accessToken);
-      } catch (e) {
-        log.error(`IMS profile retrieval failed: ${e.message}`);
-        throw new ErrorWithStatusCode('Failed to retrieve Technical Account profile', STATUS_BAD_REQUEST);
+        throw new ErrorWithStatusCode(
+          'Invalid or expired Technical Account access token',
+          STATUS_BAD_REQUEST,
+        );
       }
 
       const {
         client_id: clientId,
         user_id: technicalAccountId,
         org: imsOrgId,
-      } = taProfile;
-      log.info(`TA profile resolved: clientId=${clientId}, imsOrgId=${imsOrgId}`);
+      } = tokenPayload;
+      log.info(`Token resolved: clientId=${clientId}, imsOrgId=${imsOrgId}`);
 
       if (!hasText(clientId) || !hasText(technicalAccountId) || !hasText(imsOrgId)) {
         throw new ErrorWithStatusCode(

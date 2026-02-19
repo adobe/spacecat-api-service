@@ -73,6 +73,13 @@ describe('ConsumersController', () => {
     };
   }
 
+  const validTokenPayload = {
+    client_id: 'test-client-id',
+    user_id: 'test-ta-id',
+    org: 'test-ims-org@AdobeOrg',
+    type: 'access_token',
+  };
+
   beforeEach(async () => {
     sandbox = sinon.createSandbox();
     mockConsumer = createMockConsumerEntity();
@@ -90,12 +97,7 @@ describe('ConsumersController', () => {
         },
       },
       imsClient: {
-        validateAccessToken: sandbox.stub().resolves({ valid: true }),
-        getImsUserProfile: sandbox.stub().resolves({
-          client_id: 'test-client-id',
-          user_id: 'test-ta-id',
-          org: 'test-ims-org@AdobeOrg',
-        }),
+        validateAccessToken: sandbox.stub().resolves(validTokenPayload),
       },
       attributes: {
         authInfo: {
@@ -388,20 +390,8 @@ describe('ConsumersController', () => {
       expect(response.headers.get('x-error')).to.equal('Invalid or expired Technical Account access token');
     });
 
-    it('returns bad request when profile retrieval fails', async () => {
-      context.imsClient.getImsUserProfile.rejects(new Error('Profile fetch failed'));
-      const controller = ConsumersController(context);
-      const response = await controller.register({
-        ...context,
-        data: validPayload,
-      });
-
-      expect(response.status).to.equal(STATUS_BAD_REQUEST);
-      expect(response.headers.get('x-error')).to.equal('Failed to retrieve Technical Account profile');
-    });
-
-    it('returns bad request when TA profile is missing required fields', async () => {
-      context.imsClient.getImsUserProfile.resolves({
+    it('returns bad request when validated payload is missing required fields', async () => {
+      context.imsClient.validateAccessToken.resolves({
         client_id: 'test-client-id',
         user_id: '',
         org: '',
