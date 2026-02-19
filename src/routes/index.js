@@ -187,6 +187,15 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/audits/latest': auditsController.getAllLatestForSite,
     'GET /sites/:siteId/audits/:auditType': auditsController.getAllForSite,
     'GET /sites/:siteId/audits/:auditType/:auditedAt': sitesController.getAuditForSite,
+
+    // URL Store endpoints (defined before :auditType to ensure static segment match)
+    'GET /sites/:siteId/url-store': urlStoreController.listUrls,
+    'GET /sites/:siteId/url-store/by-audit/:auditType': urlStoreController.listUrlsByAuditType,
+    'GET /sites/:siteId/url-store/:base64Url': urlStoreController.getUrl,
+    'POST /sites/:siteId/url-store': urlStoreController.addUrls,
+    'PATCH /sites/:siteId/url-store': urlStoreController.updateUrls,
+    'DELETE /sites/:siteId/url-store': urlStoreController.deleteUrls,
+
     'PATCH /sites/:siteId/:auditType': auditsController.patchAuditForSite,
     'GET /sites/:siteId/latest-audit/:auditType': auditsController.getLatestForSite,
     'GET /sites/:siteId/experiments': experimentsController.getExperiments,
@@ -293,13 +302,6 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/top-pages/:source/:geo': sitesController.getTopPages,
     'POST /sites/:siteId/graph': sitesController.getGraph,
 
-    // URL Store endpoints
-    'GET /sites/:siteId/url-store': urlStoreController.listUrls,
-    'GET /sites/:siteId/url-store/by-audit/:auditType': urlStoreController.listUrlsByAuditType,
-    'GET /sites/:siteId/url-store/:base64Url': urlStoreController.getUrl,
-    'POST /sites/:siteId/url-store': urlStoreController.addUrls,
-    'PATCH /sites/:siteId/url-store': urlStoreController.updateUrls,
-    'DELETE /sites/:siteId/url-store': urlStoreController.deleteUrls,
     'GET /slack/events': slackController.handleEvent,
     'POST /slack/events': slackController.handleEvent,
     'POST /slack/channels/invite-by-user-id': slackController.inviteUserToChannel,
