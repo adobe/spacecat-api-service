@@ -12,7 +12,12 @@
 
 import { createDataAccess } from '@adobe/spacecat-shared-data-access-v2';
 /* eslint-disable no-await-in-loop, import/no-extraneous-dependencies */
-import { DynamoDBClient, ScanCommand, BatchWriteItemCommand } from '@aws-sdk/client-dynamodb';
+import {
+  CreateTableCommand,
+  DeleteTableCommand,
+  DescribeTableCommand,
+  DynamoDBClient,
+} from '@aws-sdk/client-dynamodb';
 
 import { organizations } from './seed-data/organizations.js';
 import { sites } from './seed-data/sites.js';
@@ -50,32 +55,57 @@ const dataAccess = createDataAccess(
 );
 
 /**
- * Deletes all items from the DynamoDB single table via scan + batch delete.
- * Generic — works regardless of entity types stored in the table.
+ * Drops and recreates the DynamoDB table (much faster than scan + batch delete).
  */
-async function truncate() {
-  let lastKey;
-  do {
-    const result = await client.send(new ScanCommand({
-      TableName: TABLE_NAME,
-      ExclusiveStartKey: lastKey,
-      ProjectionExpression: 'pk, sk',
-    }));
+async function recreateTable() {
+  await client.send(new DeleteTableCommand({ TableName: TABLE_NAME }));
 
-    const items = result.Items || [];
-    for (let i = 0; i < items.length; i += 25) {
-      const batch = items.slice(i, i + 25);
-      await client.send(new BatchWriteItemCommand({
-        RequestItems: {
-          [TABLE_NAME]: batch.map((item) => ({
-            DeleteRequest: { Key: { pk: item.pk, sk: item.sk } },
-          })),
-        },
-      }));
+  // Wait for table to be fully deleted
+  for (let i = 0; i < 30; i += 1) {
+    try {
+      await client.send(new DescribeTableCommand({ TableName: TABLE_NAME }));
+      await new Promise((resolve) => {
+        setTimeout(resolve, 200);
+      });
+    } catch {
+      break; // Table gone
     }
+  }
 
-    lastKey = result.LastEvaluatedKey;
-  } while (lastKey);
+  // Recreate with same schema (pk/sk + 5 GSIs)
+  const gsiAttributes = [];
+  const gsis = [];
+  for (let n = 1; n <= 5; n += 1) {
+    const pk = `gsi${n}pk`;
+    const sk = `gsi${n}sk`;
+    gsiAttributes.push(
+      { AttributeName: pk, AttributeType: 'S' },
+      { AttributeName: sk, AttributeType: 'S' },
+    );
+    gsis.push({
+      IndexName: `spacecat-data-${pk}-${sk}`,
+      KeySchema: [
+        { AttributeName: pk, KeyType: 'HASH' },
+        { AttributeName: sk, KeyType: 'RANGE' },
+      ],
+      Projection: { ProjectionType: 'ALL' },
+    });
+  }
+
+  await client.send(new CreateTableCommand({
+    TableName: TABLE_NAME,
+    KeySchema: [
+      { AttributeName: 'pk', KeyType: 'HASH' },
+      { AttributeName: 'sk', KeyType: 'RANGE' },
+    ],
+    AttributeDefinitions: [
+      { AttributeName: 'pk', AttributeType: 'S' },
+      { AttributeName: 'sk', AttributeType: 'S' },
+      ...gsiAttributes,
+    ],
+    GlobalSecondaryIndexes: gsis,
+    BillingMode: 'PAY_PER_REQUEST',
+  }));
 }
 
 /**
@@ -151,6 +181,6 @@ async function seed() {
  * Called by each test suite in before() for full isolation.
  */
 export async function resetDynamo() {
-  await truncate();
+  await recreateTable();
   await seed();
 }
