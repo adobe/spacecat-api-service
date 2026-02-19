@@ -58,7 +58,6 @@ jobs:
   it-dynamo:
     runs-on: ubuntu-latest
     needs: build
-    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     steps:
       - name: Check out
         uses: actions/checkout@v5
@@ -87,7 +86,6 @@ jobs:
   it-postgres:
     runs-on: ubuntu-latest
     needs: build
-    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     steps:
       - name: Check out
         uses: actions/checkout@v5
@@ -208,7 +206,7 @@ jobs:
 
   branch-deploy:
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build, it-dynamo, it-postgres]
     if: github.event_name == 'push' && github.ref != 'refs/heads/main'
     steps:
       - name: Check out
