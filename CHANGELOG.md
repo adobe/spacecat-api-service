@@ -1,3 +1,10 @@
+## [1.320.2](https://github.com/adobe/spacecat-api-service/compare/v1.320.1...v1.320.2) (2026-02-19)
+
+
+### Bug Fixes
+
+* edge routing api fixes ([#1826](https://github.com/adobe/spacecat-api-service/issues/1826)) ([a8f2da2](https://github.com/adobe/spacecat-api-service/commit/a8f2da26d90b10b941c2dfe39190f44b1055ef41))
+
 ## [1.320.1](https://github.com/adobe/spacecat-api-service/compare/v1.320.0...v1.320.1) (2026-02-19)
 
 
