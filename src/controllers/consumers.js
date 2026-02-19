@@ -38,9 +38,12 @@ const UPDATABLE_STATUSES = Object.values(ConsumerModel.STATUS)
   .filter((s) => s !== ConsumerModel.STATUS.REVOKED);
 
 function createErrorResponse(error) {
-  return createResponse({}, error.status || STATUS_INTERNAL_SERVER_ERROR, {
-    [HEADER_ERROR]: error.message,
-  });
+  const statusCode = error.status || STATUS_INTERNAL_SERVER_ERROR;
+  return createResponse(
+    { message: error.message },
+    statusCode,
+    { [HEADER_ERROR]: error.message },
+  );
 }
 
 /**
@@ -181,11 +184,18 @@ function ConsumersController(ctx) {
 
       log.info(`IMS validateAccessToken response: ${JSON.stringify(tokenPayload)}`);
 
+      if (!tokenPayload?.token) {
+        throw new ErrorWithStatusCode(
+          'IMS validation response does not contain token data',
+          STATUS_BAD_REQUEST,
+        );
+      }
+
       const {
         client_id: clientId,
         user_id: technicalAccountId,
         org: imsOrgId,
-      } = tokenPayload;
+      } = tokenPayload.token;
       log.info(`Token resolved: clientId=${clientId}, imsOrgId=${imsOrgId}`);
 
       if (!hasText(clientId) || !hasText(technicalAccountId) || !hasText(imsOrgId)) {

@@ -74,10 +74,13 @@ describe('ConsumersController', () => {
   }
 
   const validTokenPayload = {
-    client_id: 'test-client-id',
-    user_id: 'test-ta-id',
-    org: 'test-ims-org@AdobeOrg',
-    type: 'access_token',
+    valid: true,
+    token: {
+      client_id: 'test-client-id',
+      user_id: 'test-ta-id',
+      org: 'test-ims-org@AdobeOrg',
+      type: 'access_token',
+    },
   };
 
   beforeEach(async () => {
@@ -387,14 +390,31 @@ describe('ConsumersController', () => {
       });
 
       expect(response.status).to.equal(STATUS_BAD_REQUEST);
-      expect(response.headers.get('x-error')).to.equal('Invalid or expired Technical Account access token');
+      const body = await response.json();
+      expect(body.message).to.equal('Invalid or expired Technical Account access token');
+    });
+
+    it('returns bad request when validation response has no token data', async () => {
+      context.imsClient.validateAccessToken.resolves({ valid: true });
+      const controller = ConsumersController(context);
+      const response = await controller.register({
+        ...context,
+        data: validPayload,
+      });
+
+      expect(response.status).to.equal(STATUS_BAD_REQUEST);
+      const body = await response.json();
+      expect(body.message).to.equal('IMS validation response does not contain token data');
     });
 
     it('returns bad request when validated payload is missing required fields', async () => {
       context.imsClient.validateAccessToken.resolves({
-        client_id: 'test-client-id',
-        user_id: '',
-        org: '',
+        valid: true,
+        token: {
+          client_id: 'test-client-id',
+          user_id: '',
+          org: '',
+        },
       });
       const controller = ConsumersController(context);
       const response = await controller.register({
