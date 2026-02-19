@@ -10,7 +10,7 @@
   },
   "scripts": {
     "start": "nodemon",
-    "test": "c8 --skip-full mocha -i -g 'Post-Deploy' --spec=test/**/*.test.js",
+    "test": "c8 --skip-full mocha -i -g 'Post-Deploy' --spec=test/**/*.test.js --ignore=test/it/**",
     "test:bundle": "HELIX_TEST_BUNDLE_NAME=dist/spacecat-services/api-service@$(npm pkg get version | tr -d \\\")-bundle.mjs mocha --spec=test/index.test.js",
     "test-postdeploy": "mocha -g 'Post-Deploy' --spec=test/**/*.test.js",
     "test-e2e": "mocha --timeout 30s --spec=test/**/*.e2e.js",
