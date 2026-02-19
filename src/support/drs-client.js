@@ -60,10 +60,10 @@ export default function DrsClient(context) {
     }
 
     const spacecatApiUrl = env.SPACECAT_API_URL;
-    const callbackApiKey = env.DRS_CALLBACK_API_KEY;
+    const callbackApiKey = env.USER_API_KEY;
 
     if (!callbackApiKey) {
-      log.warn('DRS_CALLBACK_API_KEY not configured, webhook notifications will not be sent');
+      log.warn('USER_API_KEY not configured, webhook notifications will not be sent');
     }
 
     const webhookUrl = callbackApiKey && spacecatApiUrl

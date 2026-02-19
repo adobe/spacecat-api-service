@@ -764,7 +764,7 @@ describe('Hooks Controller', () => {
     const JOB_ID = 'job-abc123';
 
     beforeEach('set up', () => {
-      context.env.DRS_CALLBACK_API_KEY = DRS_API_KEY;
+      context.env.USER_API_KEY = DRS_API_KEY;
       context.env.AUDIT_JOBS_QUEUE_URL = 'https://sqs.us-east-1.amazonaws.com/123456789/audit-jobs';
       context.sqs = {
         sendMessage: sinon.stub().resolves(),
@@ -776,8 +776,8 @@ describe('Hooks Controller', () => {
       };
     });
 
-    it('returns 500 if DRS_CALLBACK_API_KEY env was not set up', async () => {
-      delete context.env.DRS_CALLBACK_API_KEY;
+    it('returns 500 if USER_API_KEY env was not set up', async () => {
+      delete context.env.USER_API_KEY;
 
       const resp = await hooksController.processDrsPromptGenerationHook(context);
       expect(resp.status).to.equal(500);

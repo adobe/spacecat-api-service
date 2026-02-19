@@ -39,7 +39,7 @@ describe('DRS Client', () => {
       env: {
         DRS_API_URL: 'https://drs-api.example.com/api/v1',
         DRS_API_KEY: 'test-api-key',
-        DRS_CALLBACK_API_KEY: 'test-callback-api-key',
+        USER_API_KEY: 'test-callback-api-key',
         SPACECAT_API_URL: 'https://spacecat.example.com',
       },
       log: {
@@ -139,8 +139,8 @@ describe('DRS Client', () => {
       expect(body.webhook_api_key).to.equal('test-callback-api-key');
     });
 
-    it('omits webhook fields when DRS_CALLBACK_API_KEY is not configured', async () => {
-      delete context.env.DRS_CALLBACK_API_KEY;
+    it('omits webhook fields when USER_API_KEY is not configured', async () => {
+      delete context.env.USER_API_KEY;
 
       const mockResponse = {
         ok: true,
@@ -154,7 +154,7 @@ describe('DRS Client', () => {
       const body = JSON.parse(mockFetch.firstCall.args[1].body);
       expect(body.webhook_url).to.be.undefined;
       expect(body.webhook_api_key).to.be.undefined;
-      expect(context.log.warn).to.have.been.calledWith('DRS_CALLBACK_API_KEY not configured, webhook notifications will not be sent');
+      expect(context.log.warn).to.have.been.calledWith('USER_API_KEY not configured, webhook notifications will not be sent');
     });
 
     it('omits webhook_url when SPACECAT_API_URL is not configured', async () => {

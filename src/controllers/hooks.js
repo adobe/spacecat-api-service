@@ -33,7 +33,7 @@ import { isHelixSite } from '../support/utils.js';
 import { getHlxConfigMessagePart } from '../utils/slack/base.js';
 
 const CDN_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_CDN';
-const DRS_CALLBACK_API_KEY_NAME = 'DRS_CALLBACK_API_KEY';
+const DRS_CALLBACK_API_KEY_NAME = 'USER_API_KEY';
 
 export const BUTTON_LABELS = {
   APPROVE_CUSTOMER: 'As Customer',
