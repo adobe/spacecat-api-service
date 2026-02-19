@@ -236,7 +236,7 @@ describe('Experiments Controller', () => {
         siteId,
         getOrganization: async () => mockOrg,
       };
-      mockSite.entityName = 'site';
+      mockSite.constructor = { ENTITY_NAME: 'Site' };
       mockDataAccess.Site.findById.resolves(mockSite);
 
       // Create context with non-admin user without org access

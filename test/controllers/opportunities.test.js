@@ -640,7 +640,7 @@ describe('Opportunities Controller', () => {
         id: SITE_ID,
         getOrganization: async () => mockOrg,
       };
-      mockSiteWithOrg.entityName = 'site';
+      mockSiteWithOrg.constructor = { ENTITY_NAME: 'Site' };
       mockSite.findById.resolves(mockSiteWithOrg);
 
       // Create context with non-admin user without org access
@@ -706,7 +706,7 @@ describe('Opportunities Controller', () => {
           id: SITE_ID,
           getOrganization: async () => mockOrg,
         };
-        mockSiteWithOrg.entityName = 'site';
+        mockSiteWithOrg.constructor = { ENTITY_NAME: 'Site' };
         mockSite.findById.resolves(mockSiteWithOrg);
 
         // Create context with non-admin user without org access
@@ -774,7 +774,7 @@ describe('Opportunities Controller', () => {
           id: SITE_ID,
           getOrganization: async () => mockOrg,
         };
-        mockSiteWithOrg.entityName = 'site';
+        mockSiteWithOrg.constructor = { ENTITY_NAME: 'Site' };
         mockSite.findById.resolves(mockSiteWithOrg);
 
         // Create context with non-admin user without org access
@@ -845,7 +845,7 @@ describe('Opportunities Controller', () => {
           id: SITE_ID,
           getOrganization: async () => mockOrg,
         };
-        mockSiteWithOrg.entityName = 'site';
+        mockSiteWithOrg.constructor = { ENTITY_NAME: 'Site' };
         mockSite.findById.resolves(mockSiteWithOrg);
 
         // Create context with non-admin user without org access
@@ -921,7 +921,7 @@ describe('Opportunities Controller', () => {
           id: SITE_ID,
           getOrganization: async () => mockOrg,
         };
-        mockSiteWithOrg.entityName = 'site';
+        mockSiteWithOrg.constructor = { ENTITY_NAME: 'Site' };
         mockSite.findById.resolves(mockSiteWithOrg);
 
         // Create context with non-admin user without org access
@@ -995,7 +995,7 @@ describe('Opportunities Controller', () => {
           id: SITE_ID,
           getOrganization: async () => mockOrg,
         };
-        mockSiteWithOrg.entityName = 'site';
+        mockSiteWithOrg.constructor = { ENTITY_NAME: 'Site' };
         mockSite.findById.resolves(mockSiteWithOrg);
 
         // Create context with non-admin user without org access

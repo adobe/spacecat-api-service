@@ -166,7 +166,7 @@ describe('UrlStore Controller', () => {
         siteId,
         getOrganization: async () => mockOrg,
       };
-      mockSite.entityName = 'site';
+      mockSite.constructor = { ENTITY_NAME: 'Site' };
       mockDataAccess.Site.findById.resolves(mockSite);
 
       const restrictedAuthInfo = new AuthInfo()
@@ -366,7 +366,7 @@ describe('UrlStore Controller', () => {
       context.params = { siteId, auditType: 'accessibility' };
       const mockOrg = { getImsOrgId: () => 'test-org-id' };
       const mockSite = { siteId, getOrganization: async () => mockOrg };
-      mockSite.entityName = 'site';
+      mockSite.constructor = { ENTITY_NAME: 'Site' };
       mockDataAccess.Site.findById.resolves(mockSite);
 
       const restrictedAuthInfo = new AuthInfo()
@@ -435,7 +435,7 @@ describe('UrlStore Controller', () => {
       context.params = { siteId, base64Url: 'aHR0cHM6Ly9leGFtcGxlLmNvbS9wYWdlMQ' };
       const mockOrg = { getImsOrgId: () => 'test-org-id' };
       const mockSite = { siteId, getOrganization: async () => mockOrg };
-      mockSite.entityName = 'site';
+      mockSite.constructor = { ENTITY_NAME: 'Site' };
       mockDataAccess.Site.findById.resolves(mockSite);
 
       const restrictedAuthInfo = new AuthInfo()
@@ -556,7 +556,7 @@ describe('UrlStore Controller', () => {
       context.data = [{ url: 'https://example.com/page1', audits: [] }];
       const mockOrg = { getImsOrgId: () => 'test-org-id' };
       const mockSite = { siteId, getOrganization: async () => mockOrg };
-      mockSite.entityName = 'site';
+      mockSite.constructor = { ENTITY_NAME: 'Site' };
       mockDataAccess.Site.findById.resolves(mockSite);
 
       const restrictedAuthInfo = new AuthInfo()
@@ -752,7 +752,7 @@ describe('UrlStore Controller', () => {
       context.data = [{ url: 'https://example.com/page1', audits: [] }];
       const mockOrg = { getImsOrgId: () => 'test-org-id' };
       const mockSite = { siteId, getOrganization: async () => mockOrg };
-      mockSite.entityName = 'site';
+      mockSite.constructor = { ENTITY_NAME: 'Site' };
       mockDataAccess.Site.findById.resolves(mockSite);
 
       const restrictedAuthInfo = new AuthInfo()
@@ -880,7 +880,7 @@ describe('UrlStore Controller', () => {
       context.data = { urls: ['https://example.com/page1'] };
       const mockOrg = { getImsOrgId: () => 'test-org-id' };
       const mockSite = { siteId, getOrganization: async () => mockOrg };
-      mockSite.entityName = 'site';
+      mockSite.constructor = { ENTITY_NAME: 'Site' };
       mockDataAccess.Site.findById.resolves(mockSite);
 
       const restrictedAuthInfo = new AuthInfo()

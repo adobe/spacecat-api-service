@@ -177,7 +177,7 @@ describe('Access Control Util', () => {
     const site = {
       getOrganization: async () => null,
     };
-    site.entityName = 'site';
+    site.constructor = { ENTITY_NAME: 'Site' };
 
     await expect(util.hasAccess(site)).to.be.rejectedWith('Missing organization for site');
   });
@@ -191,13 +191,13 @@ describe('Access Control Util', () => {
         getImsOrgId: () => 'test-org-id',
       }),
     };
-    site.entityName = 'site';
+    site.constructor = { ENTITY_NAME: 'Site' };
 
     // Test with Organization entity
     const org = {
       getImsOrgId: () => 'test-org-id',
     };
-    org.entityName = 'organization';
+    org.constructor = { ENTITY_NAME: 'Organization' };
 
     const siteResult = await util.hasAccess(site);
     const orgResult = await util.hasAccess(org);
@@ -213,7 +213,7 @@ describe('Access Control Util', () => {
     const org = {
       getImsOrgId: () => 'test-org-id',
     };
-    org.entityName = 'organization';
+    org.constructor = { ENTITY_NAME: 'Organization' };
 
     // Mock the authInfo.hasOrganization to return true for test-org-id
     util.authInfo.hasOrganization = sinon.stub().returns(true);
@@ -244,7 +244,7 @@ describe('Access Control Util', () => {
       getImsOrgId: () => 'test-org-id',
       getId: () => 'test-org-id',
     };
-    org.entityName = 'organization';
+    org.constructor = { ENTITY_NAME: 'Organization' };
 
     // Mock the authInfo.hasOrganization to return true for test-org-id
     util.authInfo.hasOrganization = sinon.stub().returns(true);
@@ -317,7 +317,7 @@ describe('Access Control Util', () => {
           getImsOrgId: () => 'test-org-id',
         }),
       };
-      site.entityName = 'site';
+      site.constructor = { ENTITY_NAME: 'Site' };
 
       mockAuthInfo.hasOrganization.returns(true);
       mockAuthInfo.hasScope.returns(true);
@@ -335,7 +335,7 @@ describe('Access Control Util', () => {
           getImsOrgId: () => 'test-org-id',
         }),
       };
-      site.entityName = 'site';
+      site.constructor = { ENTITY_NAME: 'Site' };
 
       mockAuthInfo.hasOrganization.returns(true);
       mockAuthInfo.hasScope.returns(true);
@@ -353,7 +353,7 @@ describe('Access Control Util', () => {
           getImsOrgId: () => 'test-org-id',
         }),
       };
-      site.entityName = 'site';
+      site.constructor = { ENTITY_NAME: 'Site' };
 
       mockAuthInfo.hasOrganization.returns(true);
       mockAuthInfo.hasScope.returns(false);
@@ -371,7 +371,7 @@ describe('Access Control Util', () => {
           getImsOrgId: () => 'test-org-id',
         }),
       };
-      site.entityName = 'site';
+      site.constructor = { ENTITY_NAME: 'Site' };
 
       mockAuthInfo.hasOrganization.returns(false);
       mockAuthInfo.hasScope.returns(false);
@@ -434,7 +434,7 @@ describe('Access Control Util', () => {
           getImsOrgId: () => 'org-2',
         }),
       };
-      site.entityName = 'site';
+      site.constructor = { ENTITY_NAME: 'Site' };
 
       const hasAccess = await accessControl.hasAccess(site);
       expect(hasAccess).to.be.false;
@@ -445,7 +445,7 @@ describe('Access Control Util', () => {
           getImsOrgId: () => 'org-1',
         }),
       };
-      siteFromSameOrg.entityName = 'site';
+      siteFromSameOrg.constructor = { ENTITY_NAME: 'Site' };
 
       const hasAccessToSameOrg = await accessControl.hasAccess(siteFromSameOrg);
       expect(hasAccessToSameOrg).to.be.true;
@@ -489,7 +489,7 @@ describe('Access Control Util', () => {
       const org = {
         getImsOrgId: () => 'org-1',
       };
-      org.entityName = 'organization';
+      org.constructor = { ENTITY_NAME: 'Organization' };
 
       const hasAccess = await accessControl.hasAccess(org);
       expect(hasAccess).to.be.true;
@@ -498,7 +498,7 @@ describe('Access Control Util', () => {
       const differentOrg = {
         getImsOrgId: () => 'org-2',
       };
-      differentOrg.entityName = 'organization';
+      differentOrg.constructor = { ENTITY_NAME: 'Organization' };
 
       const hasAccessToDifferentOrg = await accessControl.hasAccess(differentOrg);
       expect(hasAccessToDifferentOrg).to.be.true;
@@ -540,7 +540,7 @@ describe('Access Control Util', () => {
       const org = {
         getImsOrgId: () => 'org-1',
       };
-      org.entityName = 'organization';
+      org.constructor = { ENTITY_NAME: 'Organization' };
 
       const hasAccess = await accessControl.hasAccess(org);
       expect(hasAccess).to.be.true;
@@ -549,7 +549,7 @@ describe('Access Control Util', () => {
       const differentOrg = {
         getImsOrgId: () => 'org-2',
       };
-      differentOrg.entityName = 'organization';
+      differentOrg.constructor = { ENTITY_NAME: 'Organization' };
 
       const hasAccessToDifferentOrg = await accessControl.hasAccess(differentOrg);
       expect(hasAccessToDifferentOrg).to.be.true;
@@ -635,7 +635,7 @@ describe('Access Control Util', () => {
         getId: () => 'org-123',
         getImsOrgId: () => 'org-123',
       };
-      mockOrg.entityName = 'organization';
+      mockOrg.constructor = { ENTITY_NAME: 'Organization' };
 
       mockEntitlement = {
         findByOrganizationIdAndProductCode: sinon.stub(),
@@ -753,7 +753,7 @@ describe('Access Control Util', () => {
       const mockSite = {
         getId: () => 'site-123',
       };
-      mockSite.entityName = 'site';
+      mockSite.constructor = { ENTITY_NAME: 'Site' };
 
       await expect(util.validateEntitlement(mockOrg, mockSite, 'llmo')).to.not.be.rejected;
     });
@@ -770,7 +770,7 @@ describe('Access Control Util', () => {
       const mockSite = {
         getId: () => 'site-123',
       };
-      mockSite.entityName = 'site';
+      mockSite.constructor = { ENTITY_NAME: 'Site' };
 
       await expect(util.validateEntitlement(mockOrg, mockSite, 'llmo'))
         .to.be.rejectedWith('Missing enrollment for site');
@@ -788,7 +788,7 @@ describe('Access Control Util', () => {
       const mockSite = {
         getId: () => 'site-123',
       };
-      mockSite.entityName = 'site';
+      mockSite.constructor = { ENTITY_NAME: 'Site' };
 
       await expect(util.validateEntitlement(mockOrg, mockSite, 'llmo'))
         .to.be.rejectedWith('Missing enrollment for site');
@@ -806,7 +806,7 @@ describe('Access Control Util', () => {
       const mockSite = {
         getId: () => 'site-123',
       };
-      mockSite.entityName = 'site';
+      mockSite.constructor = { ENTITY_NAME: 'Site' };
 
       await expect(util.validateEntitlement(mockOrg, mockSite, 'llmo'))
         .to.be.rejectedWith('Missing enrollment for site');
@@ -1039,7 +1039,7 @@ describe('Access Control Util', () => {
         getId: () => 'org-123',
         getImsOrgId: () => 'org-123',
       };
-      mockOrgInstance.entityName = 'organization';
+      mockOrgInstance.constructor = { ENTITY_NAME: 'Organization' };
 
       // Set up context with x-product header
       const testContextWithHeader = {
@@ -1091,7 +1091,7 @@ describe('Access Control Util', () => {
         getId: () => 'org-123',
         getImsOrgId: () => 'org-123',
       };
-      mockOrgInstance.entityName = 'organization';
+      mockOrgInstance.constructor = { ENTITY_NAME: 'Organization' };
 
       // Set up context with matching x-product header
       const testContextWithHeader = {
@@ -1205,7 +1205,7 @@ describe('Access Control Util', () => {
         getOrganization: async () => mockOrg,
         getId: () => 'site-123',
       };
-      site.entityName = 'site';
+      site.constructor = { ENTITY_NAME: 'Site' };
 
       const entitlement = {
         getId: () => 'entitlement-123',
@@ -1226,7 +1226,7 @@ describe('Access Control Util', () => {
       const site = {
         getOrganization: async () => mockOrg,
       };
-      site.entityName = 'site';
+      site.constructor = { ENTITY_NAME: 'Site' };
 
       const result = await util.hasAccess(site, '', '');
 
@@ -1239,7 +1239,7 @@ describe('Access Control Util', () => {
         getOrganization: async () => mockOrg,
         getId: () => 'site-123',
       };
-      site.entityName = 'site';
+      site.constructor = { ENTITY_NAME: 'Site' };
 
       mockTierClient.checkValidEntitlement.resolves({});
 
@@ -1251,7 +1251,7 @@ describe('Access Control Util', () => {
         getOrganization: async () => mockOrg,
         getId: () => 'site-123',
       };
-      site.entityName = 'site';
+      site.constructor = { ENTITY_NAME: 'Site' };
 
       const entitlement = {
         getId: () => 'entitlement-123',
@@ -1274,7 +1274,7 @@ describe('Access Control Util', () => {
         getOrganization: async () => mockOrg,
         getId: () => 'site-123',
       };
-      site.entityName = 'site';
+      site.constructor = { ENTITY_NAME: 'Site' };
 
       const entitlement = {
         getId: () => 'entitlement-123',
@@ -1305,7 +1305,7 @@ describe('Access Control Util', () => {
           getImsOrgId: () => 'project-org-id',
         }),
       };
-      project.entityName = 'project';
+      project.constructor = { ENTITY_NAME: 'Project' };
 
       util.authInfo.hasOrganization = sinon.stub().returns(true);
 
@@ -1322,7 +1322,7 @@ describe('Access Control Util', () => {
           getImsOrgId: () => 'project-org-id',
         }),
       };
-      project.entityName = 'project';
+      project.constructor = { ENTITY_NAME: 'Project' };
 
       util.authInfo.hasOrganization = sinon.stub().returns(false);
 

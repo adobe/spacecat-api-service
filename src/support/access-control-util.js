@@ -152,13 +152,13 @@ export default class AccessControlUtil {
     }
 
     let imsOrgId;
-    if (entity.entityName === 'site' || entity.entityName === 'project') {
+    if (entity.constructor.ENTITY_NAME === 'Site' || entity.constructor.ENTITY_NAME === 'Project') {
       const org = await entity.getOrganization();
       if (!isNonEmptyObject(org)) {
         throw new Error('Missing organization for site');
       }
       imsOrgId = org.getImsOrgId();
-    } else if (entity.entityName === 'organization') {
+    } else if (entity.constructor.ENTITY_NAME === 'Organization') {
       imsOrgId = entity.getImsOrgId();
     }
 
@@ -166,10 +166,10 @@ export default class AccessControlUtil {
     if (hasOrgAccess && productCode.length > 0) {
       let org;
       let site;
-      if (entity.entityName === 'site') {
+      if (entity.constructor.ENTITY_NAME === 'Site') {
         site = entity;
         org = await entity.getOrganization();
-      } else if (entity.entityName === 'organization') {
+      } else if (entity.constructor.ENTITY_NAME === 'Organization') {
         org = entity;
       }
       await this.validateEntitlement(org, site, productCode);
