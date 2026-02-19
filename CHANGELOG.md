@@ -1,3 +1,43 @@
+## [1.320.5](https://github.com/adobe/spacecat-api-service/compare/v1.320.4...v1.320.5) (2026-02-19)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1811](https://github.com/adobe/spacecat-api-service/issues/1811)) ([20b3199](https://github.com/adobe/spacecat-api-service/commit/20b3199343cea3b3be6398662f58477dc36fe253))
+
+## [1.320.4](https://github.com/adobe/spacecat-api-service/compare/v1.320.3...v1.320.4) (2026-02-19)
+
+
+### Bug Fixes
+
+* v2/v3 data access runtime switch with instanceof fixes ([#1831](https://github.com/adobe/spacecat-api-service/issues/1831)) ([5181b92](https://github.com/adobe/spacecat-api-service/commit/5181b9232f411057b4d124e6ddaf1f13d503a2c6)), closes [#1828](https://github.com/adobe/spacecat-api-service/issues/1828)
+
+## [1.320.3](https://github.com/adobe/spacecat-api-service/compare/v1.320.2...v1.320.3) (2026-02-19)
+
+
+### Bug Fixes
+
+* **slack:** re-enablement path uses numbered brand-presence-free splits ([#1821](https://github.com/adobe/spacecat-api-service/issues/1821)) ([ca242f9](https://github.com/adobe/spacecat-api-service/commit/ca242f93425ca4ed392ef9ba3adb38857d47aea7))
+
+## [1.320.2](https://github.com/adobe/spacecat-api-service/compare/v1.320.1...v1.320.2) (2026-02-19)
+
+
+### Bug Fixes
+
+* edge routing api fixes ([#1826](https://github.com/adobe/spacecat-api-service/issues/1826)) ([a8f2da2](https://github.com/adobe/spacecat-api-service/commit/a8f2da26d90b10b941c2dfe39190f44b1055ef41))
+
+## [1.320.1](https://github.com/adobe/spacecat-api-service/compare/v1.320.0...v1.320.1) (2026-02-19)
+
+
+### Bug Fixes
+
+* import batch toggle with csv ([#1833](https://github.com/adobe/spacecat-api-service/issues/1833)) ([97ce12b](https://github.com/adobe/spacecat-api-service/commit/97ce12b0a4a2c9b4c25fdf52b97d1ba7621aafcb))
+
+
+### Reverts
+
+* revert v2/v3 data access runtime switch ([#1827](https://github.com/adobe/spacecat-api-service/issues/1827)) ([2f851fd](https://github.com/adobe/spacecat-api-service/commit/2f851fd7e53290a69d6e401ee9130e453d2d5bf8))
+
 ## [1.319.2](https://github.com/adobe/spacecat-api-service/compare/v1.319.1...v1.319.2) (2026-02-18)
 
 
