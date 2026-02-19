@@ -89,6 +89,10 @@ export default class AccessControlUtil {
     return this.authInfo.isAdmin();
   }
 
+  hasS2SAdminAccess() {
+    return this.authInfo.isS2SAdmin();
+  }
+
   isLLMOAdministrator() {
     return this.authInfo.isLLMOAdministrator();
   }
