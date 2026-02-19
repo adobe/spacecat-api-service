@@ -37,6 +37,10 @@ tags:
     description: Configuration management operations
   - name: organization
     description: Organization operations
+  - name: brands
+    description: Brand operations
+  - name: customer-config
+    description: Customer configuration operations including brands, categories, topics, and prompts
   - name: trigger
     description: Trigger operations
   - name: hooks
@@ -69,6 +73,8 @@ tags:
     description: Project management operations
   - name: site urls
     description: Site URL tracking and management operations
+  - name: sentiment
+    description: Brand sentiment analysis topics and guidelines management
 
 paths:
   /audits/latest/{auditType}:
@@ -113,6 +119,14 @@ paths:
     $ref: './organization-api.yaml#/organization'
   /organizations/{organizationId}/brands:
     $ref: './brands-api.yaml#/brands-for-organization'
+  /v2/orgs/{spaceCatId}/llmo-customer-config:
+    $ref: './customer-config-api.yaml#/llmo-customer-config-by-space-cat-id-v2'
+  /v2/orgs/{spaceCatId}/llmo-customer-config-lean:
+    $ref: './customer-config-api.yaml#/llmo-customer-config-lean-by-space-cat-id-v2'
+  /v2/orgs/{spaceCatId}/llmo-topics:
+    $ref: './customer-config-api.yaml#/llmo-topics-by-space-cat-id-v2'
+  /v2/orgs/{spaceCatId}/llmo-prompts:
+    $ref: './customer-config-api.yaml#/llmo-prompts-by-space-cat-id-v2'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:
@@ -164,6 +178,8 @@ paths:
     $ref: './scrape-api.yaml#/get-scrape-urls-by-url-and-processing-type'
   /consent-banner:
     $ref: './consent-banner-api.yaml#/consent-banner'
+  /consent-banner/{jobId}:
+    $ref: './consent-banner-api.yaml#/consent-banner-by-jobId'
   /sites:
     $ref: './sites-api.yaml#/sites'
   /sites-resolve:
@@ -188,6 +204,8 @@ paths:
     $ref: './audits-api.yaml#/audits-for-site'
   /sites/{siteId}/latest-audit/{auditType}:
     $ref: './audit-api.yaml#/latest-audit-for-site'
+  /sites/{siteId}/bot-blocker:
+    $ref: './bot-blocker-api.yaml#/bot-blocker'
   /sites/{siteId}/{auditType}:
     $ref: './audit-api.yaml#/update-handler-type-config-for-site'
   /sites/{siteId}/brand-guidelines:
@@ -226,10 +244,6 @@ paths:
     $ref: './site-enrollments-api.yaml#/site-enrollments-by-site'
   /sites/{siteId}/user-activities:
     $ref: './user-activities-api.yaml#/paths/~1sites~1{siteId}~1user-activities'
-  /sites/{siteId}/key-events:
-    $ref: './key-events-api.yaml#/key-events'
-  /sites/{siteId}/key-events/{keyEventId}:
-    $ref: './key-event-api.yaml#/key-event'
   /sites/{siteId}/scraped-content/{type}:
     $ref: './scrape-api.yaml#/get-scraped-content-list'
   /sites/{siteId}/files:
@@ -446,6 +460,10 @@ paths:
     $ref: './llmo-api.yaml#/llmo-offboard'
   /sites/{siteId}/llmo/edge-optimize-config:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-config'
+  /sites/{siteId}/llmo/edge-optimize-status:
+    $ref: './llmo-api.yaml#/llmo-edge-optimize-status'
+  /sites/{siteId}/llmo/edge-optimize-routing:
+    $ref: './llmo-api.yaml#/site-llmo-edge-optimize-routing'
   /sites/{siteId}/llmo/strategy:
     $ref: './llmo-api.yaml#/llmo-strategy'
   /sites/{siteId}/reports:
@@ -454,6 +472,20 @@ paths:
     $ref: './site-api.yaml#/site-report'
   /sites/{siteId}/graph:
     $ref: './site-api.yaml#/site-graph'
+  /sites/{siteId}/sentiment/topics:
+    $ref: './guidelines-api.yaml#/topics-list'
+  /sites/{siteId}/sentiment/topics/{topicId}:
+    $ref: './guidelines-api.yaml#/topic-by-id'
+  /sites/{siteId}/sentiment/topics/{topicId}/prompts:
+    $ref: './guidelines-api.yaml#/topic-prompts'
+  /sites/{siteId}/sentiment/guidelines:
+    $ref: './guidelines-api.yaml#/guidelines-list'
+  /sites/{siteId}/sentiment/guidelines/{guidelineId}:
+    $ref: './guidelines-api.yaml#/guideline-by-id'
+  /sites/{siteId}/sentiment/guidelines/{guidelineId}/audits:
+    $ref: './guidelines-api.yaml#/guideline-audits'
+  /sites/{siteId}/sentiment/config:
+    $ref: './guidelines-api.yaml#/sentiment-config'
 
 components:
   securitySchemes:

@@ -191,8 +191,39 @@ describe('TopPaidOpportunitiesController', () => {
       expect(opportunities).to.have.lengthOf(1);
     });
 
+    it('does not filter out opportunities with projectedEngagementValue', async () => {
+      const engagementOppty = createOpportunity({
+        id: 'oppty-1',
+        tags: ['paid traffic'],
+        data: {
+          projectedEngagementValue: 5000,
+          projectedTrafficValue: 0,
+          projectedConversionValue: 0,
+        },
+      });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [engagementOppty]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(1);
+      expect(opportunities[0].impact).to.equal(5000);
+    });
+
     it('returns paid media opportunities (with paid media tag)', async () => {
       const paidOppty = createOpportunity({ id: 'oppty-1', tags: ['paid media'] });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [paidOppty]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(1);
+    });
+
+    it('returns paid media opportunities (with paid traffic tag)', async () => {
+      const paidOppty = createOpportunity({ id: 'oppty-1', tags: ['paid traffic'] });
       setupOpportunityMocks(mockContext.dataAccess.Opportunity, [paidOppty]);
 
       const response = await controller.getTopPaidOpportunities({
@@ -226,6 +257,46 @@ describe('TopPaidOpportunitiesController', () => {
       });
       const opportunities = await response.json();
       expect(opportunities).to.have.lengthOf(1);
+    });
+
+    it('includes projectedEngagementValue and impactFieldName in response', async () => {
+      const engagementOppty = createOpportunity({
+        id: 'engagement-1',
+        type: 'high-organic-low-ctr',
+        tags: ['paid traffic'],
+        data: { projectedEngagementValue: 5000 },
+      });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [engagementOppty]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(1);
+      expect(opportunities[0].projectedEngagementValue).to.equal(5000);
+      expect(opportunities[0].impact).to.equal(5000);
+      expect(opportunities[0].impactFieldName).to.equal('projectedEngagementValue');
+    });
+
+    it('prioritizes projectedEngagementValue over other impact fields', async () => {
+      const engagementOppty = createOpportunity({
+        id: 'engagement-1',
+        type: 'high-organic-low-ctr',
+        tags: ['paid traffic'],
+        data: {
+          projectedEngagementValue: 8000,
+          projectedConversionValue: 5000,
+          projectedTrafficValue: 3000,
+        },
+      });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [engagementOppty]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
+      const opportunities = await response.json();
+      expect(opportunities[0].impact).to.equal(8000);
+      expect(opportunities[0].impactFieldName).to.equal('projectedEngagementValue');
     });
 
     it('limits results to top 10 opportunities with max 2 per type', async () => {
@@ -664,6 +735,50 @@ describe('TopPaidOpportunitiesController', () => {
       setupOpportunityMocks(
         mockContext.dataAccess.Opportunity,
         [validFormsOppty, missingBriefFormsOppty],
+      );
+      mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([]);
+      mockAthenaClient.query.resolves([
+        createTrafficData({ url: 'https://example.com/form1', pageviews: '3000' }),
+        createTrafficData({ url: 'https://example.com/form2', pageviews: '5000' }),
+      ]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: { year: 2025, week: 1 },
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(1);
+      expect(opportunities[0].opportunityId).to.equal('forms-1');
+    });
+
+    it('filters out forms opportunities with scrapedStatus = false', async () => {
+      const validFormsOppty = createOpportunity({
+        id: 'forms-1',
+        type: 'high-page-views-low-form-views',
+        data: {
+          projectedConversionValue: 3000,
+          form: 'https://example.com/form1',
+          scrapedStatus: true,
+        },
+      });
+      const unscrapedFormsOppty = createOpportunity({
+        id: 'forms-2',
+        type: 'high-page-views-low-form-views',
+        data: {
+          projectedConversionValue: 5000,
+          form: 'https://example.com/form2',
+          scrapedStatus: false,
+          formDetails: {
+            is_lead_gen: null,
+            industry: null,
+            form_type: null,
+            form_category: null,
+            cpl: null,
+          },
+        },
+      });
+      setupOpportunityMocks(
+        mockContext.dataAccess.Opportunity,
+        [validFormsOppty, unscrapedFormsOppty],
       );
       mockContext.dataAccess.Suggestion.allByOpportunityIdAndStatus.resolves([]);
       mockAthenaClient.query.resolves([

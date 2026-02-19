@@ -46,6 +46,47 @@ BrandProfile:
       type: object
       additionalProperties: true
       description: Free-form metadata bucket for future extensions.
+BotBlockerResult:
+  type: object
+  description: Result of bot blocker detection for a site. Indicates whether the site is crawlable by bots, what type of blocking was detected (if any), and the confidence level of the detection.
+  properties:
+    crawlable:
+      type: boolean
+      description: Whether the site can be crawled by bots
+      example: false
+    type:
+      type: string
+      description: The type of bot blocker detected or infrastructure present
+      enum:
+        - 'cloudflare'
+        - 'imperva'
+        - 'akamai'
+        - 'fastly'
+        - 'cloudfront'
+        - 'cloudflare-allowed'
+        - 'imperva-allowed'
+        - 'akamai-allowed'
+        - 'fastly-allowed'
+        - 'cloudfront-allowed'
+        - 'http2-block'
+        - 'none'
+        - 'unknown'
+      example: 'cloudflare'
+    confidence:
+      type: number
+      format: float
+      minimum: 0
+      maximum: 1
+      description: Confidence level of the detection (0.0 to 1.0). Values >= 0.95 indicate reliable detection. Lower values suggest uncertain situations.
+      example: 0.99
+    reason:
+      type: string
+      description: Optional reason or additional context for the detection result
+      example: 'HTTP 403 Forbidden - access denied'
+  required:
+    - crawlable
+    - type
+    - confidence
 Id:
   type: string
   format: uuid
@@ -1677,54 +1718,6 @@ AnalyticsSiteIntegration:
         $ref: './examples.yaml#/analytics-site-integration-cja-tags'
     - analytics-site-integration-cja-websdk:
         $ref: './examples.yaml#/analytics-site-integration-cja-websdk'
-KeyEventType:
-  type: string
-  enum:
-    - 'performance'
-    - 'seo'
-    - 'content'
-    - 'code'
-    - 'third party'
-    - 'experimentation'
-    - 'network'
-    - 'status change'
-KeyEvent:
-  type: object
-  properties:
-    id:
-      description: The key event ID in uuid format
-      $ref: '#/Id'
-    name:
-      description: Name of the key event
-      type: string
-    type:
-      $ref: '#/KeyEventType'
-    time:
-      description: Time of the key event occurred
-      $ref: '#/DateTime'
-  example:
-    id: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
-    name: 'Multiple 404s detected'
-    type: 'seo'
-    time: '2023-12-15T09:30:00Z'
-KeyEventsList:
-  type: array
-  items:
-    $ref: './schemas.yaml#/KeyEvent'
-KeyEventCreate:
-  type: object
-  required:
-    - name
-    - type
-  properties:
-    name:
-      description: Name of the key event
-      type: string
-    type:
-      $ref: '#/KeyEventType'
-    time:
-      description: Time of the key event occurred (optional). Current time is used when the field is missing
-      $ref: '#/DateTime'
 SiteTopPage:
   type: object
   required:
@@ -3005,6 +2998,147 @@ SuggestionList:
   type: array
   items:
     $ref: '#/Suggestion'
+SuggestionMinimal:
+  type: object
+  description: Minimal suggestion projection containing id, status, timestamps, and URL-related data fields for listing views
+  properties:
+    id:
+      description: UUID of this suggestion
+      $ref: '#/Id'
+    status:
+      description: Status of this suggestion
+      $ref: '#/SuggestionStatus'
+    data:
+      type: object
+      description: URL-related fields extracted from the full data object. Only present if any URL fields exist.
+      properties:
+        url:
+          type: string
+          example: "https://example.com/page"
+        urls:
+          type: array
+          items:
+            type: string
+        urlFrom:
+          type: string
+          example: "https://example.com/source"
+        urlTo:
+          type: string
+          example: "https://example.com/destination"
+        url_from:
+          type: string
+          description: Source URL (snake_case variant for broken backlinks)
+          example: "https://example.com/source"
+        url_to:
+          type: string
+          description: Target URL (snake_case variant for broken backlinks)
+          example: "https://example.com/destination"
+        urlsSuggested:
+          type: array
+          description: Array of suggested URLs
+          items:
+            type: string
+        sitemapUrl:
+          type: string
+          example: "https://example.com/sitemap.xml"
+        pageUrl:
+          type: string
+          example: "https://example.com/page"
+        pattern:
+          type: string
+        link:
+          type: string
+        path:
+          type: string
+        sourceUrl:
+          type: string
+        destinationUrl:
+          type: string
+        recommendations:
+          type: array
+          items:
+            type: object
+        cves:
+          type: array
+          items:
+            type: object
+        findings:
+          type: array
+          items:
+            type: object
+        form:
+          type: object
+        page:
+          type: object
+        accessibility:
+          type: object
+        metrics:
+          type: object
+          description: CWV metrics (mobileMetric, desktopMetric) for calculating totalIssues
+        type:
+          type: string
+          description: Type indicator (e.g., 'url' vs 'group' for CWV)
+        pageviews:
+          type: number
+          description: Page views count for display
+        issues:
+          type: array
+          description: Issues array for Accessibility, ColorContrast, FormNonExperimental (includes occurrences field)
+          items:
+            type: object
+    createdAt:
+      description: UTC timestamp of when the suggestion was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: UTC timestamp of when the suggestion was last updated
+      $ref: '#/DateTime'
+  required:
+    - id
+    - status
+    - createdAt
+    - updatedAt
+SuggestionSummary:
+  type: object
+  description: Summary suggestion projection (superset of minimal, subset of full). Contains minimal data fields plus metadata for table displays.
+  properties:
+    id:
+      description: UUID of this suggestion
+      $ref: '#/Id'
+    status:
+      description: Status of this suggestion
+      $ref: '#/SuggestionStatus'
+    data:
+      type: object
+      description: URL-related fields from minimal view (same as SuggestionMinimal.data). Only present if any URL fields exist.
+    opportunityId:
+      description: UUID of the opportunity this suggestion belongs to
+      $ref: '#/Id'
+    type:
+      $ref: '#/SuggestionType'
+    rank:
+      description: Type-specific numeric rank value (e.g., "domainTraffic" for a broken-backlink) helps sorting
+      type: number
+      example: 45600
+    url:
+      description: URL associated with the suggestion (extracted from data). May be null if no URL found.
+      type: string
+      example: "https://example.com/page"
+    createdAt:
+      description: UTC timestamp of when the suggestion was created
+      $ref: '#/DateTime'
+    updatedAt:
+      description: UTC timestamp of when the suggestion was last updated
+      $ref: '#/DateTime'
+    updatedBy:
+      description: Who last updated this suggestion
+      type: string
+      example: "user@example.com"
+  required:
+    - id
+    - status
+    - opportunityId
+    - type
+    - rank
 PaginationMetadata:
   type: object
   description: Metadata for paginated responses
@@ -4394,6 +4528,7 @@ LlmoConfig:
     - entities
     - categories
     - topics
+    - aiTopics
     - brands
     - competitors
   properties:
@@ -4434,6 +4569,20 @@ LlmoConfig:
               regions: ["us"]
               origin: "human"
               source: "config"
+    aiTopics:
+      type: object
+      description: A record of AI topics with nested AI prompts keyed by UUID
+      additionalProperties:
+        $ref: '#/LlmoTopic'
+      example:
+        "456e7890-e89b-12d3-a456-426614174001":
+          name: "AI/ML"
+          category: "123e4567-e89b-12d3-a456-426614174000"
+          prompts:
+            - prompt: "What are the latest AI trends?"
+              regions: ["us"]
+              origin: "ai"
+              source: "config"
     brands:
       type: object
       description: Brand configuration with aliases
@@ -4456,6 +4605,98 @@ LlmoConfig:
           description: Array of competitor configurations
           items:
             $ref: '#/LlmoCompetitor'
+    deleted:
+      type: object
+      description: Deleted prompts configuration
+      properties:
+        prompts:
+          type: object
+          description: A record of deleted prompts keyed by UUID
+          additionalProperties:
+            $ref: '#/LlmoDeletedPrompt'
+    ignored:
+      type: object
+      description: Ignored prompts configuration
+      properties:
+        prompts:
+          type: object
+          description: A record of ignored prompts keyed by UUID
+          additionalProperties:
+            $ref: '#/LlmoIgnoredPrompt'
+  additionalProperties: true
+
+LlmoDeletedPrompt:
+  type: object
+  description: A deleted prompt entry in the LLMO configuration
+  required:
+    - prompt
+    - regions
+    - origin
+    - source
+    - topic
+    - category
+  properties:
+    prompt:
+      type: string
+      description: The prompt text
+      minLength: 1
+    regions:
+      type: array
+      description: Array of two-letter region codes
+      items:
+        type: string
+        pattern: '^[a-z][a-z]$'
+    origin:
+      type: string
+      description: The origin of the prompt (human, ai, or custom)
+    source:
+      type: string
+      description: The source of the prompt (config, api, or custom)
+    topic:
+      type: string
+      description: The topic name this prompt belonged to
+      minLength: 1
+    category:
+      type: string
+      description: The category name this prompt belonged to
+      minLength: 1
+    categoryId:
+      type: string
+      format: uuid
+      description: Optional UUID of the category
+    updatedBy:
+      type: string
+      description: The user who last updated this entry
+    updatedAt:
+      type: string
+      description: ISO timestamp of the last update
+  additionalProperties: true
+
+LlmoIgnoredPrompt:
+  type: object
+  description: An ignored prompt entry in the LLMO configuration
+  required:
+    - prompt
+    - region
+    - source
+  properties:
+    prompt:
+      type: string
+      description: The prompt text
+      minLength: 1
+    region:
+      type: string
+      pattern: '^[a-z][a-z]$'
+      description: Two-letter region code
+    source:
+      type: string
+      description: The source of the prompt (gsc or custom)
+    updatedBy:
+      type: string
+      description: The user who last updated this entry
+    updatedAt:
+      type: string
+      description: ISO timestamp of the last update
   additionalProperties: true
 
 LlmoEntity:
@@ -5299,4 +5540,667 @@ PreflightResultItem:
     step:
       type: string
       enum: [identify, suggest]
+# Customer Configuration schemas for brand management
+CustomerConfigCategory:
+  type: object
+  description: A content category (top-level collection)
+  required:
+    - id
+    - name
+    - status
+  properties:
+    id:
+      type: string
+      description: Unique identifier for the category
+      example: "photoshop-photo-editing"
+    name:
+      type: string
+      description: Name of the category
+      example: "Photo Editing"
+    status:
+      type: string
+      description: Status of the category
+      enum: ["active", "deleted"]
+      example: "active"
+    origin:
+      type: string
+      enum: ["ai", "human"]
+      description: Source of the category
+    updatedAt:
+      $ref: '#/DateTime'
+      description: When the category was last updated
+    updatedBy:
+      type: string
+      description: Who last updated the category
+      example: "system"
+CustomerConfigTopic:
+  type: object
+  description: A topic within a category (top-level collection)
+  required:
+    - id
+    - name
+    - status
+    - categoryId
+  properties:
+    id:
+      type: string
+      description: Unique identifier for the topic
+      example: "photoshop-topic-1"
+    name:
+      type: string
+      description: Name of the topic
+      example: "Photo Retouching"
+    status:
+      type: string
+      description: Status of the topic
+      enum: [active, deleted]
+      example: "active"
+    categoryId:
+      type: string
+      description: ID of the category this topic belongs to
+      example: "photoshop-photo-editing"
+CustomerConfigPrompt:
+  type: object
+  description: A search prompt with category and topic ID references
+  required:
+    - id
+    - prompt
+    - regions
+    - categoryId
+    - topicId
+  properties:
+    id:
+      type: string
+      description: Unique identifier for the prompt
+      example: "photoshop-prompt-1"
+    prompt:
+      type: string
+      description: The search query prompt
+      example: "What is the best photo editing software for portraits?"
+    status:
+      type: string
+      enum: ["active", "pending", "deleted"]
+      description: Status of the prompt
+      default: "active"
+    regions:
+      type: array
+      items:
+        type: string
+      description: Regions where this prompt is applicable
+      example: ["us", "gb"]
+    origin:
+      type: string
+      enum: ["ai", "human"]
+      description: Source of the prompt (AI-generated or human-created)
+      default: "human"
+    source:
+      type: string
+      description: The source system or process that created the prompt
+      example: "api"
+      default: "config"
+    updatedAt:
+      $ref: '#/DateTime'
+      description: When the prompt was last updated
+    updatedBy:
+      type: string
+      description: Who last updated the prompt
+      example: "system"
+      default: "system"
+    categoryId:
+      type: string
+      description: ID of the category this prompt belongs to
+      example: "photoshop-photo-editing"
+    topicId:
+      type: string
+      description: ID of the topic this prompt belongs to
+      example: "photoshop-topic-1"
+CustomerConfigUrl:
+  type: object
+  description: A URL associated with a brand
+  required:
+    - value
+  properties:
+    value:
+      type: string
+      format: uri
+      description: The URL
+      example: "https://www.adobe.com/products/photoshop.html"
+    siteId:
+      type: string
+      description: Site ID for this URL (used for backwards compatibility with V1)
+      example: "a1b2c3d4-5678-90ab-cdef-1234567890ab"
+    type:
+      type: string
+      description: Type of URL
+      example: "url"
+    regions:
+      type: array
+      items:
+        type: string
+      description: Regions where this URL is applicable
+      example: ["GL", "US", "GB"]
+CustomerConfigSocialAccount:
+  type: object
+  description: A social media account for a brand
+  required:
+    - platform
+    - url
+    - regions
+  properties:
+    platform:
+      type: string
+      description: Social media platform name
+      example: "twitter"
+    url:
+      type: string
+      format: uri
+      description: URL to the social media account
+      example: "https://x.com/Photoshop"
+    regions:
+      type: array
+      items:
+        type: string
+      description: Regions where this account is relevant
+      example: ["GL"]
+CustomerConfigBrandAlias:
+  type: object
+  description: An alternative name for a brand
+  required:
+    - name
+    - regions
+  properties:
+    name:
+      type: string
+      description: Alternative brand name
+      example: "PS"
+    regions:
+      type: array
+      items:
+        type: string
+      description: Regions where this alias is used
+      example: ["US", "GB"]
+CustomerConfigCompetitor:
+  type: object
+  description: A competitor brand
+  required:
+    - name
+    - url
+    - regions
+  properties:
+    name:
+      type: string
+      description: Competitor brand name
+      example: "Affinity Photo"
+    url:
+      type: string
+      format: uri
+      description: Competitor website URL
+      example: "https://affinity.serif.com/photo"
+    regions:
+      type: array
+      items:
+        type: string
+      description: Regions where this competitor is relevant
+      example: ["US", "GB"]
+CustomerConfigRelatedBrand:
+  type: object
+  description: A related brand (partner, sister brand, etc.)
+  required:
+    - name
+    - url
+    - regions
+  properties:
+    name:
+      type: string
+      description: Related brand name
+      example: "Wacom"
+    url:
+      type: string
+      format: uri
+      description: Related brand website URL
+      example: "https://www.wacom.com"
+    regions:
+      type: array
+      items:
+        type: string
+      description: Regions where this relationship is relevant
+      example: ["GL"]
+CustomerConfigEarnedContent:
+  type: object
+  description: Earned media content source
+  required:
+    - name
+    - type
+    - coverage_scope
+    - url
+    - regions
+  properties:
+    name:
+      type: string
+      description: Name of the media source
+      example: "Wikipedia"
+    type:
+      type: string
+      description: Type of media source
+      example: "encyclopedia"
+    coverage_scope:
+      type: string
+      description: Description of what this source covers
+      example: "product history and feature overview"
+    url:
+      type: string
+      format: uri
+      description: URL to the media source
+      example: "https://en.wikipedia.org/wiki/Adobe_Photoshop"
+    regions:
+      type: array
+      items:
+        type: string
+      description: Regions where this source is relevant
+      example: ["GL"]
+CustomerConfigBrand:
+  type: object
+  description: A brand configuration with all associated metadata
+  required:
+    - id
+    - name
+    - status
+    - region
+  properties:
+    id:
+      type: string
+      description: Unique identifier for the brand
+      example: "pending-adobe-photoshop"
+    v1SiteId:
+      type: string
+      description: Legacy V1 site ID for backwards compatibility
+      example: "a1b2c3d4-5678-90ab-cdef-1234567890ab"
+    name:
+      type: string
+      description: Brand name
+      example: "Adobe Photoshop"
+    status:
+      type: string
+      enum: ["active", "pending", "deleted"]
+      description: Current status of the brand
+    origin:
+      type: string
+      enum: ["ai", "human"]
+      description: How the brand was created
+    region:
+      type: array
+      items:
+        type: string
+      description: Regions where this brand operates
+      example: ["GL", "US", "GB"]
+    description:
+      type: string
+      description: Detailed description of the brand
+      example: "Adobe's flagship image editing software"
+    updatedAt:
+      $ref: '#/DateTime'
+      description: When the brand was last updated
+    updatedBy:
+      type: string
+      description: Who last updated the brand
+      example: "system"
+    vertical:
+      type: string
+      description: Industry vertical for the brand
+      example: "Software & Technology"
+    urls:
+      type: array
+      items:
+        $ref: '#/CustomerConfigUrl'
+      description: URLs associated with the brand
+    socialAccounts:
+      type: array
+      items:
+        $ref: '#/CustomerConfigSocialAccount'
+      description: Social media accounts for the brand
+    brandAliases:
+      type: array
+      items:
+        $ref: '#/CustomerConfigBrandAlias'
+      description: Alternative names for the brand
+    competitors:
+      type: array
+      items:
+        $ref: '#/CustomerConfigCompetitor'
+      description: Competitor brands
+    relatedBrands:
+      type: array
+      items:
+        $ref: '#/CustomerConfigRelatedBrand'
+      description: Related brands
+    earnedContent:
+      type: array
+      items:
+        $ref: '#/CustomerConfigEarnedContent'
+      description: Earned media sources
+    prompts:
+      type: array
+      items:
+        $ref: '#/CustomerConfigPrompt'
+      description: Flat list of all prompts for this brand with category/topic facets
+CustomerConfigCustomer:
+  type: object
+  description: Complete customer configuration including brands and verticals
+  required:
+    - customerName
+    - imsOrgID
+    - brands
+  properties:
+    customerName:
+      type: string
+      description: Name of the customer organization
+      example: "Adobe"
+    imsOrgID:
+      type: string
+      description: Adobe IMS Organization ID
+      example: "1234567890ABCDEF@AdobeOrg"
+    categories:
+      type: array
+      items:
+        $ref: '#/CustomerConfigCategory'
+      description: Top-level collection of categories
+    topics:
+      type: array
+      items:
+        $ref: '#/CustomerConfigTopic'
+      description: Top-level collection of topics
+    brands:
+      type: array
+      items:
+        $ref: '#/CustomerConfigBrand'
+      description: List of brands for this customer
+    availableVerticals:
+      type: array
+      items:
+        type: string
+      description: List of available industry verticals
+      example: ["Software & Technology", "Professional Services"]
+CustomerConfig:
+  type: object
+  description: Top-level customer configuration response
+  required:
+    - customer
+  properties:
+    customer:
+      $ref: '#/CustomerConfigCustomer'
       description: The step of the preflight job when this result was generated
+
+# =============================================================================
+# Sentiment Guidelines Schemas
+# =============================================================================
+
+SentimentTopic:
+  type: object
+  description: A sentiment analysis topic defining a subject of interest
+  properties:
+    siteId:
+      type: string
+      format: uuid
+      description: Parent site identifier
+    topicId:
+      type: string
+      format: uuid
+      description: Unique topic identifier
+    name:
+      type: string
+      description: Topic name/subject to analyze
+      example: "2026 Corvette Stingray"
+    description:
+      type: string
+      description: Optional description for context
+    subPrompts:
+      type: array
+      items:
+        type: string
+      description: Additional prompts/questions for deeper analysis
+      example: ["What do people say about performance?", "Price sentiment?"]
+    enabled:
+      type: boolean
+      description: Whether topic is active
+      default: true
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+    createdBy:
+      type: string
+      description: User/service who created
+    updatedBy:
+      type: string
+      description: Last user/service to modify
+
+SentimentTopicInput:
+  type: object
+  required:
+    - name
+  properties:
+    name:
+      type: string
+      description: Topic name/subject to analyze
+      example: "2026 Corvette Stingray"
+    description:
+      type: string
+      description: Optional description for context
+      example: "Track sentiment about the latest Corvette model"
+    subPrompts:
+      type: array
+      items:
+        type: string
+      description: Additional prompts/questions for deeper analysis
+      example: ["What do people say about performance?", "Price sentiment?"]
+    enabled:
+      type: boolean
+      default: true
+      example: true
+
+SentimentTopicUpdate:
+  type: object
+  properties:
+    name:
+      type: string
+    description:
+      type: string
+    subPrompts:
+      type: array
+      items:
+        type: string
+    enabled:
+      type: boolean
+
+SentimentTopicListResponse:
+  type: object
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/SentimentTopic'
+    pagination:
+      type: object
+      properties:
+        limit:
+          type: integer
+        cursor:
+          type: string
+          description: Pagination cursor (absent when no more pages)
+        hasMore:
+          type: boolean
+
+SentimentTopicBulkResponse:
+  type: object
+  properties:
+    metadata:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total number of items in request
+        success:
+          type: integer
+          description: Number of successfully processed items
+        failure:
+          type: integer
+          description: Number of failed items
+    failures:
+      type: array
+      items:
+        type: object
+        properties:
+          name:
+            type: string
+          reason:
+            type: string
+    items:
+      type: array
+      items:
+        $ref: '#/SentimentTopic'
+
+SentimentGuideline:
+  type: object
+  description: A sentiment analysis guideline defining how to analyze topics
+  properties:
+    siteId:
+      type: string
+      format: uuid
+      description: Parent site identifier
+    guidelineId:
+      type: string
+      format: uuid
+      description: Unique guideline identifier
+    name:
+      type: string
+      description: Display name
+      example: "Product Quality Focus"
+    instruction:
+      type: string
+      description: The actual guideline instruction
+      example: "Focus on sentiment related to product quality, durability, and craftsmanship."
+    audits:
+      type: array
+      items:
+        type: string
+      description: Enabled audit types
+      example: ["wikipedia-analysis", "reddit-analysis"]
+    enabled:
+      type: boolean
+      description: Whether guideline is active
+      default: true
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+    createdBy:
+      type: string
+      description: User/service who created
+    updatedBy:
+      type: string
+      description: Last user/service to modify
+
+SentimentGuidelineInput:
+  type: object
+  required:
+    - name
+    - instruction
+  properties:
+    name:
+      type: string
+      description: Display name
+      example: "Product Quality Focus"
+    instruction:
+      type: string
+      description: The actual guideline instruction
+      example: "Focus on sentiment related to product quality, durability, and craftsmanship."
+    audits:
+      type: array
+      items:
+        type: string
+      description: Audit types to associate
+      example: ["wikipedia-analysis", "reddit-analysis"]
+    enabled:
+      type: boolean
+      default: true
+      example: true
+
+SentimentGuidelineUpdate:
+  type: object
+  properties:
+    name:
+      type: string
+    instruction:
+      type: string
+    audits:
+      type: array
+      items:
+        type: string
+    enabled:
+      type: boolean
+
+SentimentGuidelineListResponse:
+  type: object
+  properties:
+    items:
+      type: array
+      items:
+        $ref: '#/SentimentGuideline'
+    pagination:
+      type: object
+      properties:
+        limit:
+          type: integer
+        cursor:
+          type: string
+          description: Pagination cursor (absent when no more pages)
+        hasMore:
+          type: boolean
+
+SentimentGuidelineBulkResponse:
+  type: object
+  properties:
+    metadata:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total number of items in request
+        success:
+          type: integer
+          description: Number of successfully processed items
+        failure:
+          type: integer
+          description: Number of failed items
+    failures:
+      type: array
+      items:
+        type: object
+        properties:
+          name:
+            type: string
+          reason:
+            type: string
+    items:
+      type: array
+      items:
+        $ref: '#/SentimentGuideline'
+
+SentimentConfig:
+  type: object
+  description: Combined sentiment configuration with topics and guidelines
+  properties:
+    topics:
+      type: array
+      items:
+        $ref: '#/SentimentTopic'
+      description: All enabled topics
+    guidelines:
+      type: array
+      items:
+        $ref: '#/SentimentGuideline'
+      description: Guidelines (optionally filtered by audit type)

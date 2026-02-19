@@ -133,6 +133,7 @@ describe('GetLlmoConfigSummaryCommand', () => {
       brands: { aliases: ['alias1'] },
       competitors: { competitors: ['comp1'] },
       deleted: { prompts: { deleted1: {} } },
+      ignored: { prompts: { ignored1: {} } },
       cdnBucketConfig: { cdnProvider: 'cloudflare' },
     };
 
@@ -153,6 +154,7 @@ describe('GetLlmoConfigSummaryCommand', () => {
     expect(lines[0]).to.include('Human Prompts');
     expect(lines[0]).to.include('AI Prompts');
     expect(lines[0]).to.include('Total Prompts');
+    expect(lines[0]).to.include('Ignored Prompts');
     // Data row should have 1 human prompt, 2 AI prompts, 3 total
     expect(lines[1]).to.include(',1,2,3,');
 

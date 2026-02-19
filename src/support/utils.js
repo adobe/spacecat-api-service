@@ -323,6 +323,7 @@ export const triggerAuditForSite = async (
  * @param {Site} site - The site object.
  * @param {string} opportunityId - The opportunity ID to process.
  * @param {string} opportunityType - The opportunity type (e.g., 'a11y-assistive').
+ * @param {string|null} aggregationKey - Optional aggregation key to filter suggestions.
  * @param {Object} slackContext - The Slack context object.
  * @param {Object} lambdaContext - The Lambda context object.
  * @return {Promise} - A promise representing the trigger operation.
@@ -331,6 +332,7 @@ export const triggerA11yCodefixForOpportunity = async (
   site,
   opportunityId,
   opportunityType,
+  aggregationKey,
   slackContext,
   lambdaContext,
 ) => sendAuditMessage(
@@ -344,7 +346,7 @@ export const triggerA11yCodefixForOpportunity = async (
     },
   },
   site.getId(),
-  { opportunityId, opportunityType },
+  { opportunityId, opportunityType, aggregationKey },
 );
 
 // todo: prototype - untested
@@ -621,6 +623,30 @@ export async function getIMSPromiseToken(context) {
     userToken,
     context.env?.AUTOFIX_CRYPT_SECRET && context.env?.AUTOFIX_CRYPT_SALT,
   );
+}
+
+/**
+ * Exchange a promise token for an IMS access token.
+ * @param {object} context - The context of the request.
+ * @param {string} promiseToken - The promise token to exchange (e.g. from request payload).
+ * @returns {Promise<{ access_token: string }>} The access token response.
+ * @throws {ErrorWithStatusCode} - If the promise token is missing.
+ */
+export async function exchangePromiseToken(context, promiseToken) {
+  if (!promiseToken) {
+    throw new ErrorWithStatusCode('Missing promise token', STATUS_BAD_REQUEST);
+  }
+
+  const imsClient = ImsPromiseClient.createFrom(
+    context,
+    ImsPromiseClient.CLIENT_TYPE.CONSUMER,
+  );
+
+  const accessToken = (await imsClient.exchangeToken(
+    promiseToken,
+    !!context.env?.AUTOFIX_CRYPT_SECRET && !!context.env?.AUTOFIX_CRYPT_SALT,
+  )).access_token;
+  return accessToken;
 }
 
 /**
@@ -1297,27 +1323,16 @@ export const filterSitesForProductCode = async (context, organization, sites, pr
   const tierClient = TierClient.createForOrg(context, organization, productCode);
   const { entitlement } = await tierClient.checkValidEntitlement();
 
-  const { log } = context;
-  log.info(`[filterSites] Input: orgId=${organization.getId()}, productCode=${productCode}, sitesCount=${sites.length}`);
-  log.info(`[filterSites] Site IDs: ${sites.map((s) => s.getId()).join(', ')}`);
-  log.info(`[filterSites] Entitlement found: ${entitlement ? entitlement.getId() : 'null'}`);
-
   if (!isNonEmptyObject(entitlement)) {
-    log.info('[filterSites] No entitlement, returning empty array');
     return [];
   }
 
   // Get all enrollments for this entitlement in one query
   const siteEnrollments = await SiteEnrollment.allByEntitlementId(entitlement.getId());
-  log.info(`[filterSites] Enrollments found: ${siteEnrollments.length}`);
-  log.info(`[filterSites] Enrolled siteIds: ${siteEnrollments.map((se) => se.getSiteId()).join(', ')}`);
 
   // Create a Set of enrolled site IDs for efficient lookup
   const enrolledSiteIds = new Set(siteEnrollments.map((se) => se.getSiteId()));
 
   // Filter sites based on enrollment
-  const result = sites.filter((site) => enrolledSiteIds.has(site.getId()));
-  log.info(`[filterSites] Filtered result count: ${result.length}`);
-
-  return result;
+  return sites.filter((site) => enrolledSiteIds.has(site.getId()));
 };

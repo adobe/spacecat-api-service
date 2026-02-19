@@ -27,6 +27,7 @@ import {
   AdobeImsHandler,
   JwtHandler,
 } from '@adobe/spacecat-shared-http-utils';
+import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import { imsClientWrapper } from '@adobe/spacecat-shared-ims-client';
 import {
   elevatedSlackClientWrapper,
@@ -79,10 +80,46 @@ import SandboxAuditController from './controllers/sandbox-audit.js';
 import UrlStoreController from './controllers/url-store.js';
 import PTA2Controller from './controllers/paid/pta2.js';
 import TrafficToolsController from './controllers/paid/traffic-tools.js';
+import BotBlockerController from './controllers/bot-blocker.js';
+import SentimentController from './controllers/sentiment.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const isValidUUIDV4 = (uuid) => uuidRegex.test(uuid);
+
+/**
+ * LOCAL DEVELOPMENT ONLY - CORS middleware wrapper
+ * Adds CORS headers to responses when ENABLE_CORS=true
+ */
+/* c8 ignore start */
+function localCORSWrapper(fn) {
+  return async (request, context) => {
+    const response = await fn(request, context);
+    const { env } = context;
+    const enableCors = env.ENABLE_CORS === 'true';
+
+    if (enableCors) {
+      const allowedOrigins = (env.CORS_ALLOWED_ORIGINS || '').split(',').map((o) => o.trim());
+      const origin = request.headers.get('origin');
+
+      if (origin && allowedOrigins.includes(origin)) {
+        response.headers.set('Access-Control-Allow-Origin', origin);
+        response.headers.set('Access-Control-Allow-Credentials', 'true');
+      }
+
+      response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+      response.headers.set(
+        'Access-Control-Allow-Headers',
+        'Content-Type, Authorization, x-api-key, x-ims-org-id, x-client-type, x-import-api-key, '
+        + 'x-trigger-audits, x-requested-with, origin, accept',
+      );
+      response.headers.set('Access-Control-Max-Age', '86400');
+    }
+
+    return response;
+  };
+}
+/* c8 ignore stop */
 
 /**
  * This is the main function
@@ -91,8 +128,29 @@ const isValidUUIDV4 = (uuid) => uuidRegex.test(uuid);
  * @returns {Response} a response
  */
 async function run(request, context) {
-  const { log, pathInfo } = context;
+  const { log, pathInfo, env } = context;
   const { route, suffix, method } = pathInfo;
+
+  // Add mock authInfo when authentication is skipped
+  /* c8 ignore start */
+  if (env.SKIP_AUTH === 'true' && !context.attributes?.authInfo) {
+    if (!context.attributes) {
+      context.attributes = {};
+    }
+    // Create a mock admin authInfo
+    context.attributes.authInfo = new AuthInfo()
+      .withAuthenticated(true)
+      .withProfile({
+        user_id: 'local-dev-admin',
+        email: 'admin@localhost',
+        is_admin: true,
+        // Empty tenants means hasOrganization will return false, but is_admin bypasses that
+        tenants: [],
+      })
+      .withType('api_key')
+      .withScopes([{ name: 'admin' }]);
+  }
+  /* c8 ignore stop */
 
   if (!hasText(route)) {
     log.info(`Unable to extract path info. Wrong format: ${suffix}`);
@@ -147,6 +205,8 @@ async function run(request, context) {
     const urlStoreController = UrlStoreController(context, log);
     const pta2Controller = PTA2Controller(context, log, context.env);
     const trafficToolsController = TrafficToolsController(context, log, context.env);
+    const botBlockerController = BotBlockerController(context, log);
+    const sentimentController = SentimentController(context, log);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -185,6 +245,8 @@ async function run(request, context) {
       urlStoreController,
       pta2Controller,
       trafficToolsController,
+      botBlockerController,
+      sentimentController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -215,10 +277,12 @@ async function run(request, context) {
 
 const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 
-export const main = wrap(run)
-  .with(authWrapper, {
-    authHandlers: [JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler],
-  })
+const wrappedMain = wrap(run).with(authWrapper, {
+  authHandlers: [JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler],
+});
+
+export const main = wrappedMain
+  .with(localCORSWrapper)
   .with(logWrapper)
   .with(dataAccess)
   .with(bodyData)

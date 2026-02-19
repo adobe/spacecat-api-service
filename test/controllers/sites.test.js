@@ -12,13 +12,11 @@
 
 /* eslint-env mocha */
 
-import { KeyEvent, Organization, Site } from '@adobe/spacecat-shared-data-access';
+import { Organization, Site } from '@adobe/spacecat-shared-data-access';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
-import KeyEventSchema from '@adobe/spacecat-shared-data-access/src/models/key-event/key-event.schema.js';
 import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/models/organization/organization.schema.js';
 import SiteSchema from '@adobe/spacecat-shared-data-access/src/models/site/site.schema.js';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
-import { hasText } from '@adobe/spacecat-shared-utils';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 
 import { use, expect } from 'chai';
@@ -117,36 +115,7 @@ describe('Sites Controller', () => {
     loggerStub,
   ));
 
-  const buildKeyEvents = (siteList) => [{
-    keyEventId: 'k1', siteId: siteList[0].getId(), name: 'some-key-event', type: KeyEvent.KEY_EVENT_TYPES.CODE, time: new Date().toISOString(),
-  },
-  {
-    keyEventId: 'k2', siteId: siteList[0].getId(), name: 'other-key-event', type: KeyEvent.KEY_EVENT_TYPES.SEO, time: new Date().toISOString(),
-  },
-  ].map((keyEvent) => new KeyEvent(
-    {
-      entities: {
-        keyEvent: {
-          model: {
-            indexes: {},
-            schema: {},
-          },
-        },
-      },
-    },
-    {
-      log: loggerStub,
-      getCollection: stub().returns({
-        schema: KeyEventSchema,
-      }),
-    },
-    KeyEventSchema,
-    keyEvent,
-    loggerStub,
-  ));
-
   let sites;
-  let keyEvents;
 
   const siteFunctions = [
     'createSite',
@@ -164,9 +133,6 @@ describe('Sites Controller', () => {
     'updateSite',
     'updateCdnLogsConfig',
     'getTopPages',
-    'createKeyEvent',
-    'getKeyEventsBySiteID',
-    'removeKeyEvent',
     'getSiteMetricsBySource',
     'getPageMetricsBySource',
     'resolveSite',
@@ -180,7 +146,6 @@ describe('Sites Controller', () => {
 
   beforeEach(() => {
     sites = buildSites();
-    keyEvents = buildKeyEvents(sites);
 
     mockDataAccess = {
       Audit: {
@@ -195,16 +160,14 @@ describe('Sites Controller', () => {
           getInvocationId: sandbox.stub().returns('some-invocation-id'),
         }),
       },
-      KeyEvent: {
-        allBySiteId: sandbox.stub().resolves(keyEvents),
-        findById: stub().resolves(keyEvents[0]),
-        create: sandbox.stub().resolves(keyEvents[0]),
-      },
       Site: {
         all: sandbox.stub().resolves(sites),
         allByDeliveryType: sandbox.stub().resolves(sites),
         allWithLatestAudit: sandbox.stub().resolves(sites),
         create: sandbox.stub().resolves(sites[0]),
+        // NOTE: findByBaseURL defaults to returning sites[0] (existing site).
+        // eslint-disable-next-line max-len
+        // Tests calling createSite should override this with .resolves(null) to test site creation path.
         findByBaseURL: sandbox.stub().resolves(sites[0]),
         findById: sandbox.stub().resolves(sites[0]),
       },
@@ -281,8 +244,10 @@ describe('Sites Controller', () => {
   });
 
   it('creates a site', async () => {
+    mockDataAccess.Site.findByBaseURL.resolves(null); // No existing site found
     const response = await sitesController.createSite({ data: { baseURL: 'https://site1.com' } });
 
+    expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledOnceWith('https://site1.com');
     expect(mockDataAccess.Site.create).to.have.been.calledOnce;
     expect(response.status).to.equal(201);
 
@@ -299,6 +264,98 @@ describe('Sites Controller', () => {
     expect(response.status).to.equal(403);
     const error = await response.json();
     expect(error).to.have.property('message', 'Only admins can create new sites');
+  });
+
+  it('returns bad request when creating a site without baseURL', async () => {
+    const response = await sitesController.createSite({ data: {} });
+
+    expect(mockDataAccess.Site.findByBaseURL).to.have.not.been.called;
+    expect(mockDataAccess.Site.create).to.have.not.been.called;
+    expect(response.status).to.equal(400);
+
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Base URL required');
+  });
+
+  it('returns bad request when creating a site with null baseURL', async () => {
+    const response = await sitesController.createSite({ data: { baseURL: null } });
+
+    expect(mockDataAccess.Site.findByBaseURL).to.have.not.been.called;
+    expect(mockDataAccess.Site.create).to.have.not.been.called;
+    expect(response.status).to.equal(400);
+
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Base URL required');
+  });
+
+  it('returns bad request when creating a site with empty string baseURL', async () => {
+    const response = await sitesController.createSite({ data: { baseURL: '' } });
+
+    expect(mockDataAccess.Site.findByBaseURL).to.have.not.been.called;
+    expect(mockDataAccess.Site.create).to.have.not.been.called;
+    expect(response.status).to.equal(400);
+
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Base URL required');
+  });
+
+  it('returns existing site when creating a site with duplicate baseURL', async () => {
+    // findByBaseURL is already stubbed to return sites[0] in beforeEach
+    const response = await sitesController.createSite({ data: { baseURL: 'https://site1.com' } });
+
+    expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledOnceWith('https://site1.com');
+    expect(mockDataAccess.Site.create).to.have.not.been.called;
+    expect(response.status).to.equal(200);
+
+    const site = await response.json();
+    expect(site).to.have.property('id', SITE_IDS[0]);
+    expect(site).to.have.property('baseURL', 'https://site1.com');
+  });
+
+  it('normalizes baseURL using composeBaseURL when checking for duplicates', async () => {
+    // Test with URL that needs normalization (www, trailing slash, uppercase)
+    const response = await sitesController.createSite({ data: { baseURL: 'https://WWW.site1.com/' } });
+
+    // composeBaseURL should normalize to 'https://site1.com' (lowercase, no www, no trailing slash)
+    expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledOnceWith('https://site1.com');
+    expect(mockDataAccess.Site.create).to.have.not.been.called;
+    expect(response.status).to.equal(200);
+
+    const site = await response.json();
+    expect(site).to.have.property('id', SITE_IDS[0]);
+  });
+
+  it('creates a site with normalized baseURL when URL needs normalization', async () => {
+    mockDataAccess.Site.findByBaseURL.resolves(null); // No existing site found
+    // Provide URL that needs normalization
+    const response = await sitesController.createSite({ data: { baseURL: 'https://WWW.site1.com/' } });
+
+    // Should check for duplicates with normalized URL
+    expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledOnceWith('https://site1.com');
+
+    // Should create site with normalized URL (context.data.baseURL is overridden)
+    expect(mockDataAccess.Site.create).to.have.been.calledOnce;
+    const createCallArg = mockDataAccess.Site.create.firstCall.args[0];
+    expect(createCallArg).to.have.property('baseURL', 'https://site1.com');
+
+    expect(response.status).to.equal(201);
+  });
+
+  it('handles database errors when checking for duplicate baseURL', async () => {
+    const dbError = new Error('Database connection failed');
+    mockDataAccess.Site.findByBaseURL.rejects(dbError);
+
+    const response = await sitesController.createSite({ data: { baseURL: 'https://site1.com' } });
+
+    // Should attempt to check for duplicates
+    expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledOnceWith('https://site1.com');
+    // Should not attempt to create site if findByBaseURL throws
+    expect(mockDataAccess.Site.create).to.have.not.been.called;
+    // Should return internal server error
+    expect(response.status).to.equal(500);
+
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Failed to create site');
   });
 
   it('updates a site', async () => {
@@ -1384,160 +1441,6 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'Base URL required');
   });
 
-  it('create key event returns created key event', async () => {
-    const siteId = sites[0].getId();
-    const keyEvent = keyEvents[0];
-
-    mockDataAccess.KeyEvent.create.withArgs({
-      siteId, name: keyEvent.getName(), type: keyEvent.getType(), time: keyEvent.getTime(),
-    }).resolves(keyEvent);
-
-    const resp = await (await sitesController.createKeyEvent({
-      params: { siteId },
-      data: { name: keyEvent.getName(), type: keyEvent.getType(), time: keyEvent.getTime() },
-    })).json();
-
-    expect(mockDataAccess.KeyEvent.create).to.have.been.calledOnce;
-    expect(hasText(resp.id)).to.be.true;
-    expect(resp.name).to.equal(keyEvent.getName());
-    expect(resp.type).to.equal(keyEvent.getType());
-    expect(resp.time).to.equal(keyEvent.getTime());
-  });
-
-  it('create key event returns not found when site does not exist', async () => {
-    const siteId = 'site-id';
-    const keyEvent = keyEvents[0];
-
-    mockDataAccess.Site.findById.resolves(null);
-
-    const result = await sitesController.createKeyEvent({
-      params: { siteId },
-      data: { name: keyEvent.getName(), type: keyEvent.getType(), time: keyEvent.getTime() },
-    });
-    const error = await result.json();
-
-    expect(result.status).to.equal(404);
-    expect(error).to.have.property('message', 'Site not found');
-  });
-
-  it('create key event returns forbidden when site does not exist', async () => {
-    const siteId = 'site-id';
-    const keyEvent = keyEvents[0];
-    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
-    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
-    const result = await sitesController.createKeyEvent({
-      params: { siteId },
-      data: { name: keyEvent.getName(), type: keyEvent.getType(), time: keyEvent.getTime() },
-    });
-    const error = await result.json();
-
-    expect(result.status).to.equal(403);
-    expect(error).to.have.property('message', 'Only users belonging to the organization can create key events');
-  });
-
-  it('get key events returns list of key events', async () => {
-    const site = sites[0];
-    site.getKeyEvents = sandbox.stub().resolves(keyEvents);
-    const siteId = sites[0].getId();
-
-    mockDataAccess.KeyEvent.allBySiteId.withArgs(siteId).resolves(keyEvents);
-
-    const resp = await (await sitesController.getKeyEventsBySiteID({
-      params: { siteId },
-    })).json();
-
-    expect(site.getKeyEvents).to.have.been.calledOnce;
-    expect(resp.length).to.equal(keyEvents.length);
-  });
-
-  it('get key events returns list of key events for non belonging to the organization', async () => {
-    const site = sites[0];
-    site.getKeyEvents = sandbox.stub().resolves(keyEvents);
-    const siteId = sites[0].getId();
-    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
-    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
-
-    const result = await sitesController.getKeyEventsBySiteID({
-      params: { siteId },
-    });
-    const error = await result.json();
-
-    expect(result.status).to.equal(403);
-    expect(error).to.have.property('message', 'Only users belonging to the organization can view its key events');
-  });
-
-  it('get key events returns bad request when siteId is missing', async () => {
-    const result = await sitesController.getKeyEventsBySiteID({
-      params: {},
-    });
-    const error = await result.json();
-
-    expect(result.status).to.equal(400);
-    expect(error).to.have.property('message', 'Site ID required');
-  });
-
-  it('get key events returns not found when site is not found', async () => {
-    const siteId = sites[0].getId();
-    mockDataAccess.Site.findById.resolves(null);
-
-    const result = await sitesController.getKeyEventsBySiteID({
-      params: { siteId },
-    });
-    const error = await result.json();
-
-    expect(result.status).to.equal(404);
-    expect(error).to.have.property('message', 'Site not found');
-  });
-
-  it('remove key events endpoint call', async () => {
-    const keyEvent = keyEvents[0];
-    keyEvent.remove = sinon.stub().resolves();
-    const keyEventId = keyEvent.getId();
-
-    await sitesController.removeKeyEvent({
-      params: { keyEventId },
-    });
-
-    expect(keyEvent.remove).to.have.been.calledOnce;
-  });
-
-  it('remove key events endpoint call for a non-admin user', async () => {
-    context.attributes.authInfo.withProfile({ is_admin: false });
-    const keyEvent = keyEvents[0];
-    keyEvent.remove = sinon.stub().resolves();
-    const keyEventId = keyEvent.getId();
-    const result = await sitesController.removeKeyEvent({
-      params: { keyEventId },
-    });
-    const error = await result.json();
-
-    expect(result.status).to.equal(403);
-    expect(error).to.have.property('message', 'Only admins can remove key events');
-  });
-
-  it('remove key events returns bad request when keyEventId is missing', async () => {
-    const result = await sitesController.removeKeyEvent({
-      params: {},
-    });
-    const error = await result.json();
-
-    expect(result.status).to.equal(400);
-    expect(error).to.have.property('message', 'Key Event ID required');
-  });
-
-  it('remove key events returns not found when key event is not found', async () => {
-    const keyEventId = 'key-event-id';
-    mockDataAccess.KeyEvent.findById.resolves(null);
-
-    const result = await sitesController.removeKeyEvent({
-      params: { keyEventId },
-    });
-    const error = await result.json();
-
-    expect(result.status).to.equal(404);
-    expect(error).to.have.property('message', 'Key Event not found');
-  });
-
   it('get site metrics by source returns list of metrics', async () => {
     const siteId = sites[0].getId();
     const source = 'ahrefs';
@@ -2232,6 +2135,903 @@ describe('Sites Controller', () => {
       expect(response[0].url).to.equal('https://site1.com/book/flights');
       expect(response[1].url).to.equal('https://site1.com/book/hotels');
       expect(response[2].url).to.equal('https://www.site1.com/book/cars');
+    });
+  });
+
+  describe('Metrics filtering by top organic search pages', () => {
+    it('filters metrics by top N organic search pages from Ahrefs', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockMetrics = [
+        { url: 'https://example.com/page1', pageviews: 5000, lcp: 1500 },
+        { url: 'https://example.com/page2', pageviews: 3000, lcp: 2000 },
+        { url: 'https://example.com/page3', pageviews: 4000, lcp: 1800 },
+        { url: 'https://example.com/page4', pageviews: 2000, lcp: 2200 },
+        { url: 'https://example.com/page5', pageviews: 1000, lcp: 1600 },
+      ];
+
+      // Mock top pages from Ahrefs
+      const mockTopPages = [
+        { getUrl: () => 'https://example.com/page1', getTraffic: () => 10000 },
+        { getUrl: () => 'https://example.com/page3', getTraffic: () => 8000 },
+        { getUrl: () => 'https://example.com/page5', getTraffic: () => 6000 },
+        { getUrl: () => 'https://example.com/page6', getTraffic: () => 4000 },
+      ];
+
+      const mockSiteTopPage = {
+        allBySiteIdAndSourceAndGeo: sandbox.stub().resolves(mockTopPages),
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      context.dataAccess.SiteTopPage = mockSiteTopPage;
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTopOrganicSearchPages: '2' },
+      });
+
+      const response = await result.json();
+
+      // Should only include pages that are in top 2 Ahrefs pages (page1, page3)
+      expect(response).to.have.length(2);
+      expect(response.find((m) => m.url === 'https://example.com/page1')).to.exist;
+      expect(response.find((m) => m.url === 'https://example.com/page3')).to.exist;
+      expect(mockSiteTopPage.allBySiteIdAndSourceAndGeo).to.have.been.calledWith(siteId, 'ahrefs', 'global');
+    });
+
+    it('handles URL variations with trailing slashes', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockMetrics = [
+        { url: 'https://example.com/page1/', pageviews: 5000, lcp: 1500 },
+        { url: 'https://example.com/page2', pageviews: 3000, lcp: 2000 },
+      ];
+
+      const mockTopPages = [
+        { getUrl: () => 'https://example.com/page1', getTraffic: () => 10000 },
+        { getUrl: () => 'https://example.com/page2/', getTraffic: () => 8000 },
+      ];
+
+      const mockSiteTopPage = {
+        allBySiteIdAndSourceAndGeo: sandbox.stub().resolves(mockTopPages),
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      context.dataAccess.SiteTopPage = mockSiteTopPage;
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTopOrganicSearchPages: '2' },
+      });
+
+      const response = await result.json();
+
+      // Both pages should match regardless of trailing slash differences
+      expect(response).to.have.length(2);
+    });
+
+    it('handles URL variations with protocol differences (http vs https)', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockMetrics = [
+        { url: 'https://example.com/page1', pageviews: 5000, lcp: 1500 },
+        { url: 'http://example.com/page2', pageviews: 3000, lcp: 2000 },
+        { url: 'https://example.com/page3', pageviews: 4000, lcp: 1800 },
+      ];
+
+      const mockTopPages = [
+        { getUrl: () => 'http://example.com/page1', getTraffic: () => 10000 },
+        { getUrl: () => 'https://example.com/page2', getTraffic: () => 8000 },
+      ];
+
+      const mockSiteTopPage = {
+        allBySiteIdAndSourceAndGeo: sandbox.stub().resolves(mockTopPages),
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      context.dataAccess.SiteTopPage = mockSiteTopPage;
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTopOrganicSearchPages: '2' },
+      });
+
+      const response = await result.json();
+
+      // Should match page1 and page2 regardless of protocol differences
+      expect(response).to.have.length(2);
+      expect(response.find((m) => m.url === 'https://example.com/page1')).to.exist;
+      expect(response.find((m) => m.url === 'http://example.com/page2')).to.exist;
+    });
+
+    it('handles URL variations with www subdomain differences', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockMetrics = [
+        { url: 'https://www.example.com/page1', pageviews: 5000, lcp: 1500 },
+        { url: 'https://example.com/page2', pageviews: 3000, lcp: 2000 },
+        { url: 'https://www2.example.com/page3', pageviews: 4000, lcp: 1800 },
+        { url: 'https://example.com/page4', pageviews: 2000, lcp: 2200 },
+      ];
+
+      const mockTopPages = [
+        { getUrl: () => 'https://example.com/page1', getTraffic: () => 10000 },
+        { getUrl: () => 'https://www.example.com/page2', getTraffic: () => 9000 },
+        { getUrl: () => 'https://example.com/page3', getTraffic: () => 8000 },
+      ];
+
+      const mockSiteTopPage = {
+        allBySiteIdAndSourceAndGeo: sandbox.stub().resolves(mockTopPages),
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      context.dataAccess.SiteTopPage = mockSiteTopPage;
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTopOrganicSearchPages: '3' },
+      });
+
+      const response = await result.json();
+
+      // Should match page1, page2, and page3 regardless of www variants
+      expect(response).to.have.length(3);
+      expect(response.find((m) => m.url === 'https://www.example.com/page1')).to.exist;
+      expect(response.find((m) => m.url === 'https://example.com/page2')).to.exist;
+      expect(response.find((m) => m.url === 'https://www2.example.com/page3')).to.exist;
+    });
+
+    it('handles URL variations with case differences', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockMetrics = [
+        { url: 'https://example.com/Page1', pageviews: 5000, lcp: 1500 },
+        { url: 'https://EXAMPLE.COM/page2', pageviews: 3000, lcp: 2000 },
+        { url: 'https://Example.Com/PAGE3', pageviews: 4000, lcp: 1800 },
+      ];
+
+      const mockTopPages = [
+        { getUrl: () => 'https://Example.com/page1', getTraffic: () => 10000 },
+        { getUrl: () => 'https://example.com/PAGE2', getTraffic: () => 8000 },
+      ];
+
+      const mockSiteTopPage = {
+        allBySiteIdAndSourceAndGeo: sandbox.stub().resolves(mockTopPages),
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      context.dataAccess.SiteTopPage = mockSiteTopPage;
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTopOrganicSearchPages: '2' },
+      });
+
+      const response = await result.json();
+
+      // Should match page1 and page2 regardless of case differences
+      expect(response).to.have.length(2);
+      expect(response.find((m) => m.url === 'https://example.com/Page1')).to.exist;
+      expect(response.find((m) => m.url === 'https://EXAMPLE.COM/page2')).to.exist;
+    });
+
+    it('handles combined URL variations (protocol, www, trailing slash, case)', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockMetrics = [
+        { url: 'https://www.example.com/Page1/', pageviews: 5000, lcp: 1500 },
+        { url: 'http://Example.com/page2', pageviews: 3000, lcp: 2000 },
+        { url: 'https://www2.EXAMPLE.com/page3/', pageviews: 4000, lcp: 1800 },
+      ];
+
+      const mockTopPages = [
+        { getUrl: () => 'http://example.com/page1', getTraffic: () => 10000 },
+        { getUrl: () => 'https://www.example.com/PAGE2/', getTraffic: () => 9000 },
+        { getUrl: () => 'http://www.example.com/Page3', getTraffic: () => 8000 },
+      ];
+
+      const mockSiteTopPage = {
+        allBySiteIdAndSourceAndGeo: sandbox.stub().resolves(mockTopPages),
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      context.dataAccess.SiteTopPage = mockSiteTopPage;
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTopOrganicSearchPages: '3' },
+      });
+
+      const response = await result.json();
+
+      // Should match all 3 pages regardless of combined URL variations
+      expect(response).to.have.length(3);
+    });
+
+    it('deduplicates metrics with same normalized URL to prevent exceeding requested limit', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      // RUM data contains duplicate URLs (with and without trailing slash)
+      const mockMetrics = [
+        { url: 'https://example.com/page1', pageviews: 5000, lcp: 1500 },
+        { url: 'https://example.com/page1/', pageviews: 100, lcp: 1600 }, // Duplicate
+        { url: 'https://example.com/page2', pageviews: 3000, lcp: 2000 },
+        { url: 'https://example.com/page2/', pageviews: 50, lcp: 2100 }, // Duplicate
+        { url: 'https://example.com/page3', pageviews: 2000, lcp: 1800 },
+      ];
+
+      const mockTopPages = [
+        { getUrl: () => 'https://example.com/page1', getTraffic: () => 10000 },
+        { getUrl: () => 'https://example.com/page2', getTraffic: () => 8000 },
+      ];
+
+      const mockSiteTopPage = {
+        allBySiteIdAndSourceAndGeo: sandbox.stub().resolves(mockTopPages),
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      context.dataAccess.SiteTopPage = mockSiteTopPage;
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTopOrganicSearchPages: '2' },
+      });
+
+      const response = await result.json();
+
+      // Should return exactly 2 entries, not 4 (even though 4 URLs match when normalized)
+      expect(response).to.have.length(2);
+      // Should only include the first occurrence of each normalized URL
+      expect(response.find((m) => m.url === 'https://example.com/page1')).to.exist;
+      expect(response.find((m) => m.url === 'https://example.com/page2')).to.exist;
+      // Should not include the duplicate entries
+      expect(response.find((m) => m.url === 'https://example.com/page1/')).to.not.exist;
+      expect(response.find((m) => m.url === 'https://example.com/page2/')).to.not.exist;
+    });
+
+    it('returns error for non-numeric filterByTopOrganicSearchPages value', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const controller = SitesController(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTopOrganicSearchPages: 'invalid' },
+      });
+
+      const error = await result.json();
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'filterByTopOrganicSearchPages must be a positive integer');
+    });
+
+    it('returns error for negative filterByTopOrganicSearchPages value', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const controller = SitesController(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTopOrganicSearchPages: '-1' },
+      });
+
+      const error = await result.json();
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'filterByTopOrganicSearchPages must be a positive integer');
+    });
+
+    it('returns error for zero filterByTopOrganicSearchPages value', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const controller = SitesController(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTopOrganicSearchPages: '0' },
+      });
+
+      const error = await result.json();
+      expect(result.status).to.equal(400);
+      expect(error).to.have.property('message', 'filterByTopOrganicSearchPages must be a positive integer');
+    });
+
+    it('returns empty array when no Ahrefs pages found', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockMetrics = [
+        { url: 'https://example.com/page1', pageviews: 5000, lcp: 1500 },
+        { url: 'https://example.com/page2', pageviews: 3000, lcp: 2000 },
+      ];
+
+      const mockSiteTopPage = {
+        allBySiteIdAndSourceAndGeo: sandbox.stub().resolves([]),
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      context.dataAccess.SiteTopPage = mockSiteTopPage;
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTopOrganicSearchPages: '10' },
+      });
+
+      const response = await result.json();
+
+      // Should return empty array when user requested filtering but no Ahrefs pages exist
+      expect(response).to.have.length(0);
+      expect(loggerStub.warn).to.have.been.called;
+    });
+
+    it('returns internal server error when Ahrefs data fetch fails', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockMetrics = [
+        { url: 'https://example.com/page1', pageviews: 5000, lcp: 1500 },
+      ];
+
+      const mockSiteTopPage = {
+        allBySiteIdAndSourceAndGeo: sandbox.stub().rejects(new Error('Database error')),
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      context.dataAccess.SiteTopPage = mockSiteTopPage;
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTopOrganicSearchPages: '10' },
+      });
+
+      // Should return 500 error when user requested filtering but it fails
+      expect(result.status).to.equal(500);
+      const response = await result.json();
+      expect(response.message).to.include('Database error');
+    });
+
+    it('returns empty array when no Ahrefs pages match base URL filter', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockMetrics = [
+        { url: 'https://site1.com/page1', pageviews: 5000, lcp: 1500 },
+        { url: 'https://site1.com/page2', pageviews: 3000, lcp: 2000 },
+      ];
+
+      // Top pages only have other.com domain, none match site1.com base URL
+      const mockTopPages = [
+        { getUrl: () => 'https://other.com/page1', getTraffic: () => 10000 },
+        { getUrl: () => 'https://other.com/page2', getTraffic: () => 8000 },
+      ];
+
+      const mockSiteTopPage = {
+        allBySiteIdAndSourceAndGeo: sandbox.stub().resolves(mockTopPages),
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      context.dataAccess.SiteTopPage = mockSiteTopPage;
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: {
+          filterByBaseURL: 'true',
+          filterByTopOrganicSearchPages: '10',
+        },
+      });
+
+      const response = await result.json();
+
+      // Should return empty array when no pages match base URL
+      expect(response).to.have.length(0);
+      expect(loggerStub.warn).to.have.been.calledWith(
+        sinon.match(/No Ahrefs top pages match base URL/),
+      );
+    });
+
+    it('combines filterByTopOrganicSearchPages with filterByBaseURL', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockMetrics = [
+        { url: 'https://site1.com/page1', pageviews: 5000, lcp: 1500 },
+        { url: 'https://site1.com/page2', pageviews: 3000, lcp: 2000 },
+        { url: 'https://other.com/page3', pageviews: 4000, lcp: 1800 },
+      ];
+
+      // Top pages include both site1.com and other.com domains
+      // With baseURL filter, only site1.com pages should be considered
+      const mockTopPages = [
+        { getUrl: () => 'https://site1.com/page1', getTraffic: () => 10000 },
+        { getUrl: () => 'https://other.com/page3', getTraffic: () => 8000 }, // Should be filtered out by baseURL
+        { getUrl: () => 'https://site1.com/page2', getTraffic: () => 7000 },
+      ];
+
+      const mockSiteTopPage = {
+        allBySiteIdAndSourceAndGeo: sandbox.stub().resolves(mockTopPages),
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      context.dataAccess.SiteTopPage = mockSiteTopPage;
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: {
+          filterByBaseURL: 'true',
+          filterByTopOrganicSearchPages: '2',
+        },
+      });
+
+      const response = await result.json();
+
+      // Should include page1 and page2 (top 2 from site1.com only)
+      // page3 from other.com is excluded by baseURL filter on top pages
+      expect(response).to.have.length(2);
+      expect(response.find((m) => m.url === 'https://site1.com/page1')).to.exist;
+      expect(response.find((m) => m.url === 'https://site1.com/page2')).to.exist;
+      expect(response.find((m) => m.url === 'https://other.com/page3')).to.not.exist;
+    });
+
+    it('handles null URLs in top pages when combining filterByTopOrganicSearchPages with filterByBaseURL', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockMetrics = [
+        { url: 'https://site1.com/page1', pageviews: 5000, lcp: 1500 },
+        { url: 'https://site1.com/page2', pageviews: 3000, lcp: 2000 },
+      ];
+
+      // Top pages include entries with null/undefined URLs
+      const mockTopPages = [
+        { getUrl: () => 'https://site1.com/page1', getTraffic: () => 10000 },
+        { getUrl: () => null, getTraffic: () => 9000 }, // null URL should be skipped
+        { getUrl: () => 'https://site1.com/page2', getTraffic: () => 8000 },
+        { getUrl: () => undefined, getTraffic: () => 7000 }, // undefined URL should be skipped
+        { getUrl: () => '', getTraffic: () => 6000 }, // empty string URL should be skipped
+      ];
+
+      const mockSiteTopPage = {
+        allBySiteIdAndSourceAndGeo: sandbox.stub().resolves(mockTopPages),
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      context.dataAccess.SiteTopPage = mockSiteTopPage;
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: {
+          filterByBaseURL: 'true',
+          filterByTopOrganicSearchPages: '5',
+        },
+      });
+
+      const response = await result.json();
+
+      // Should only include pages with valid URLs (page1 and page2)
+      // Pages with null/undefined/empty URLs should be filtered out
+      expect(response).to.have.length(2);
+      expect(response.find((m) => m.url === 'https://site1.com/page1')).to.exist;
+      expect(response.find((m) => m.url === 'https://site1.com/page2')).to.exist;
+    });
+
+    it('handles null traffic values in top pages', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockMetrics = [
+        { url: 'https://example.com/page1', pageviews: 5000, lcp: 1500 },
+        { url: 'https://example.com/page2', pageviews: 3000, lcp: 2000 },
+        { url: 'https://example.com/page3', pageviews: 4000, lcp: 1800 },
+      ];
+
+      // Top pages with null/undefined traffic values should be sorted as 0
+      const mockTopPages = [
+        { getUrl: () => 'https://example.com/page1', getTraffic: () => 10000 },
+        { getUrl: () => 'https://example.com/page2', getTraffic: () => null }, // null traffic should be treated as 0
+        { getUrl: () => 'https://example.com/page3', getTraffic: () => undefined }, // undefined traffic should be treated as 0
+      ];
+
+      const mockSiteTopPage = {
+        allBySiteIdAndSourceAndGeo: sandbox.stub().resolves(mockTopPages),
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      context.dataAccess.SiteTopPage = mockSiteTopPage;
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: {
+          filterByTopOrganicSearchPages: '3',
+        },
+      });
+
+      const response = await result.json();
+
+      // All pages should be included, with page1 ranked first
+      expect(response).to.have.length(3);
+      expect(response[0].url).to.equal('https://example.com/page1');
+    });
+
+    it('combines all three filters: baseURL, topOrganicSearchPages, and top100PageViews', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      // Create 150 metrics with varying properties
+      const mockMetrics = Array.from({ length: 150 }, (_, i) => ({
+        url: i < 100 ? `https://site1.com/page${i}` : `https://other.com/page${i}`,
+        pageviews: 1000 - i, // Descending pageviews
+        lcp: 1500 + i,
+      }));
+
+      // Top organic pages include pages 0-19 from site1.com
+      const mockTopPages = Array.from({ length: 20 }, (_, i) => ({
+        getUrl: () => `https://site1.com/page${i}`,
+        getTraffic: () => 10000 - i * 100,
+      }));
+
+      const mockSiteTopPage = {
+        allBySiteIdAndSourceAndGeo: sandbox.stub().resolves(mockTopPages),
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      context.dataAccess.SiteTopPage = mockSiteTopPage;
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: {
+          filterByBaseURL: 'true',
+          filterByTopOrganicSearchPages: '20',
+          filterByTop100PageViews: 'true',
+        },
+      });
+
+      const response = await result.json();
+
+      // Should apply all three filters in order:
+      // 1. baseURL (keeps site1.com pages 0-99)
+      // 2. topOrganicSearchPages (further filters to pages 0-19)
+      // 3. top100PageViews (takes top 20 by pageviews from remaining)
+      expect(response).to.have.length(20);
+      // All should be from site1.com
+      response.forEach((item) => {
+        expect(item.url).to.include('site1.com');
+      });
+      // Should be sorted by pageviews descending
+      response.slice(0, -1).forEach((item, index) => {
+        expect(item.pageviews).to.be.at.least(response[index + 1].pageviews);
+      });
+    });
+
+    it('includes top organic pages without RUM data with null metrics', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      // RUM metrics only has page1 and page3
+      const mockMetrics = [
+        {
+          url: 'https://example.com/page1', pageviews: 5000, lcp: 1500, cls: 0.1,
+        },
+        {
+          url: 'https://example.com/page3', pageviews: 4000, lcp: 1800, cls: 0.15,
+        },
+      ];
+
+      // But top 3 Ahrefs pages include page2 which has no RUM data
+      const mockTopPages = [
+        { getUrl: () => 'https://example.com/page1', getTraffic: () => 10000 },
+        { getUrl: () => 'https://example.com/page2', getTraffic: () => 9000 },
+        { getUrl: () => 'https://example.com/page3', getTraffic: () => 8000 },
+      ];
+
+      const mockSiteTopPage = {
+        allBySiteIdAndSourceAndGeo: sandbox.stub().resolves(mockTopPages),
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      context.dataAccess.SiteTopPage = mockSiteTopPage;
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTopOrganicSearchPages: '3' },
+      });
+
+      const response = await result.json();
+
+      // Should include all 3 pages
+      expect(response).to.have.length(3);
+
+      // Page1 and page3 should have their original data
+      const page1 = response.find((m) => m.url === 'https://example.com/page1');
+      expect(page1).to.exist;
+      expect(page1.pageviews).to.equal(5000);
+      expect(page1.lcp).to.equal(1500);
+
+      const page3 = response.find((m) => m.url === 'https://example.com/page3');
+      expect(page3).to.exist;
+      expect(page3.pageviews).to.equal(4000);
+      expect(page3.lcp).to.equal(1800);
+
+      // Page2 should be included with null metrics (no RUM data)
+      const page2 = response.find((m) => m.url === 'https://example.com/page2');
+      expect(page2).to.exist;
+      expect(page2.type).to.equal('url');
+      expect(page2.pageviews).to.be.null;
+      expect(page2.organic).to.be.null;
+      expect(page2.metrics).to.be.an('array').that.is.empty;
+    });
+
+    it('works with objectResponseDataKey wrapper format', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-last-week';
+
+      const mockMetricsWrapper = {
+        label: 'last-week',
+        startTime: '2026-01-05T12:00:00.000Z',
+        endTime: '2026-01-12T12:00:00.000Z',
+        data: [
+          { url: 'https://example.com/page1', pageviews: 5000, lcp: 1500 },
+          { url: 'https://example.com/page2', pageviews: 3000, lcp: 2000 },
+          { url: 'https://example.com/page3', pageviews: 4000, lcp: 1800 },
+        ],
+      };
+
+      const mockTopPages = [
+        { getUrl: () => 'https://example.com/page1', getTraffic: () => 10000 },
+        { getUrl: () => 'https://example.com/page3', getTraffic: () => 8000 },
+      ];
+
+      const mockSiteTopPage = {
+        allBySiteIdAndSourceAndGeo: sandbox.stub().resolves(mockTopPages),
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetricsWrapper);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      context.dataAccess.SiteTopPage = mockSiteTopPage;
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: {
+          objectResponseDataKey: 'data',
+          filterByTopOrganicSearchPages: '2',
+        },
+      });
+
+      const response = await result.json();
+
+      // Should preserve wrapper format
+      expect(response).to.have.property('label', 'last-week');
+      expect(response).to.have.property('startTime', '2026-01-05T12:00:00.000Z');
+      expect(response).to.have.property('endTime', '2026-01-12T12:00:00.000Z');
+      expect(response).to.have.property('data');
+
+      // Should filter the data array
+      expect(response.data).to.have.length(2);
+      expect(response.data.find((m) => m.url === 'https://example.com/page1')).to.exist;
+      expect(response.data.find((m) => m.url === 'https://example.com/page3')).to.exist;
+    });
+
+    it('handles top pages with null or undefined URLs', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockMetrics = [
+        { url: 'https://example.com/page1', pageviews: 5000, lcp: 1500 },
+        { url: 'https://example.com/page2', pageviews: 3000, lcp: 2000 },
+      ];
+
+      const mockTopPages = [
+        { getUrl: () => 'https://example.com/page1', getTraffic: () => 10000 },
+        { getUrl: () => null, getTraffic: () => 8000 }, // null URL should be skipped
+        { getUrl: () => 'https://example.com/page2', getTraffic: () => 6000 },
+        { getUrl: () => undefined, getTraffic: () => 4000 }, // undefined URL should be skipped
+      ];
+
+      const mockSiteTopPage = {
+        allBySiteIdAndSourceAndGeo: sandbox.stub().resolves(mockTopPages),
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      context.dataAccess.SiteTopPage = mockSiteTopPage;
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTopOrganicSearchPages: '10' },
+      });
+
+      const response = await result.json();
+
+      // Should only include pages with valid URLs (page1 and page2)
+      expect(response).to.have.length(2);
+      expect(response.find((m) => m.url === 'https://example.com/page1')).to.exist;
+      expect(response.find((m) => m.url === 'https://example.com/page2')).to.exist;
+    });
+
+    it('handles metrics with null or undefined URLs', async () => {
+      const siteId = sites[0].getId();
+      const source = 'rum';
+      const metric = 'cwv-hourly-7d-2025-11-02';
+
+      const mockMetrics = [
+        { url: 'https://example.com/page1', pageviews: 5000, lcp: 1500 },
+        { url: null, pageviews: 3000, lcp: 2000 }, // null URL should be skipped
+        { url: 'https://example.com/page2', pageviews: 4000, lcp: 1800 },
+        { pageviews: 2000, lcp: 2200 }, // missing URL property should be skipped
+      ];
+
+      const mockTopPages = [
+        { getUrl: () => 'https://example.com/page1', getTraffic: () => 10000 },
+        { getUrl: () => 'https://example.com/page2', getTraffic: () => 8000 },
+        { getUrl: () => 'https://example.com/page3', getTraffic: () => 6000 },
+      ];
+
+      const mockSiteTopPage = {
+        allBySiteIdAndSourceAndGeo: sandbox.stub().resolves(mockTopPages),
+      };
+
+      const getStoredMetrics = sandbox.stub().resolves(mockMetrics);
+      const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+        '@adobe/spacecat-shared-utils': { getStoredMetrics },
+      });
+
+      context.dataAccess.SiteTopPage = mockSiteTopPage;
+
+      const controller = sitesControllerMock.default(context, loggerStub, context.env);
+      const result = await controller.getSiteMetricsBySource({
+        params: { siteId, source, metric },
+        data: { filterByTopOrganicSearchPages: '3' },
+      });
+
+      const response = await result.json();
+
+      // Should include metrics for top pages, including page3 from top pages
+      expect(response).to.have.length(3);
+      expect(response.find((m) => m.url === 'https://example.com/page1')).to.exist;
+      expect(response.find((m) => m.url === 'https://example.com/page2')).to.exist;
+      expect(response.find((m) => m.url === 'https://example.com/page3')).to.exist;
+    });
+  });
+
+  describe('canonicalizeUrl utility function', () => {
+    let canonicalizeUrl;
+
+    before(async () => {
+      const utilsModule = await import('@adobe/spacecat-shared-utils');
+      canonicalizeUrl = utilsModule.canonicalizeUrl;
+    });
+
+    it('strips query parameters when stripQuery is true', () => {
+      const url = 'https://example.com/page?utm_source=test&utm_medium=email';
+      const result = canonicalizeUrl(url, { stripQuery: true });
+      expect(result).to.equal('example.com/page');
+    });
+
+    it('strips fragments when stripQuery is true', () => {
+      const url = 'https://example.com/page#section';
+      const result = canonicalizeUrl(url, { stripQuery: true });
+      expect(result).to.equal('example.com/page');
+    });
+
+    it('strips both query parameters and fragments when stripQuery is true', () => {
+      const url = 'https://example.com/page?query=value#section';
+      const result = canonicalizeUrl(url, { stripQuery: true });
+      expect(result).to.equal('example.com/page');
+    });
+
+    it('keeps query parameters and fragments when stripQuery is false or omitted', () => {
+      const url = 'https://example.com/page?query=value#section';
+      const resultDefault = canonicalizeUrl(url);
+      const resultFalse = canonicalizeUrl(url, { stripQuery: false });
+      expect(resultDefault).to.equal('example.com/page?query=value#section');
+      expect(resultFalse).to.equal('example.com/page?query=value#section');
     });
   });
 

@@ -21,6 +21,7 @@ import {
   addEntitlementsAction,
   updateOrgAction,
   updateIMSOrgModal,
+  reEnableDefaultsAction,
 } from './onboard-llmo-modal.js';
 import { onboardSiteModal, startOnboarding } from './onboard-modal.js';
 import { preflightConfigModal } from './preflight-config-modal.js';
@@ -57,6 +58,7 @@ const actions = {
   open_add_site_modal: openAddSiteModal,
   add_entitlements_action: addEntitlementsAction,
   update_org_action: updateOrgAction,
+  re_enable_defaults_action: reEnableDefaultsAction,
   open_ensure_entitlement_site_modal: openEnsureEntitlementSiteModal,
   open_ensure_entitlement_imsorg_modal: openEnsureEntitlementImsOrgModal,
   open_revoke_entitlement_site_modal: openRevokeEntitlementSiteModal,
