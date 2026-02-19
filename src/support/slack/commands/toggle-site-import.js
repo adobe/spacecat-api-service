@@ -224,11 +224,7 @@ export default (context) => {
           true,
         );
 
-        if (result.success) {
-          results.successful.push(result.baseURL);
-        } else {
-          results.failed.push({ baseURL, error: result.error });
-        }
+        return result;
       });
 
       const processedResults = await Promise.all(processPromises);
