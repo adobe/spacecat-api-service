@@ -49,7 +49,9 @@ export default (context) => {
       throw new Error('The "enableImport" parameter is required and must be set to "enable" or "disable".');
     }
 
-    if (hasText(importType) === false || importType.length === 0) {
+    // importType can be either a string or an array (when isProfile = true)
+    if ((Array.isArray(importType) && importType.length === 0)
+      || (!Array.isArray(importType) && !hasText(importType))) {
       throw new Error('The import type parameter is required.');
     }
   };
@@ -217,7 +219,7 @@ export default (context) => {
       const processPromises = baseURLs.map(async (baseURL) => {
         const result = await handleSingleURL(
           baseURL,
-          importTypeOrProfile,
+          importTypes,
           enableImport,
           say,
           isEnableImport,

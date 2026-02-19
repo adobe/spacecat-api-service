@@ -198,6 +198,110 @@ describe('ToggleSiteImportCommand', () => {
     ).to.be.true;
   });
 
+  it('should preserve existing imports and other config fields when enabling a new import', async () => {
+    // Create a realistic siteConfig based on actual production data structure
+    const existingImports = [
+      {
+        type: 'organic-traffic',
+        sources: ['ahrefs'],
+        enabled: true,
+        destinations: ['default'],
+      },
+      {
+        type: 'top-pages',
+        sources: ['ahrefs', 'rum'],
+        enabled: true,
+        destinations: ['default'],
+        geo: 'global',
+      },
+    ];
+
+    const fullSiteConfig = {
+      imports: [...existingImports], // Clone the array
+      scheduledRun: false,
+      slack: { },
+      handlers: {},
+      fetchConfig: {
+        overrideBaseURL: 'https://www.example.com',
+      },
+      enableImport: sandbox.stub().callsFake((importType) => {
+        // Simulate the real behavior: add new import to the array
+        fullSiteConfig.imports.push({
+          type: importType,
+          sources: ['ahrefs'],
+          enabled: true,
+          destinations: ['default'],
+        });
+      }),
+      disableImport: sandbox.stub(),
+    };
+
+    const siteWithFullConfig = {
+      getId: () => 'site0',
+      getBaseURL: () => 'https://example.com',
+      getDeliveryType: () => 'aem_edge',
+      getConfig: () => fullSiteConfig,
+      setConfig: sandbox.stub(),
+      save: sandbox.stub(),
+    };
+
+    dataAccessMock.Site.findByBaseURL.withArgs('https://example.com').resolves(siteWithFullConfig);
+
+    const command = ToggleSiteImportCommand(contextMock);
+    const args = ['enable', 'https://example.com', 'ahref-paid-pages'];
+    await command.handleExecution(args, slackContextMock);
+
+    // Verify the new import was enabled
+    expect(
+      fullSiteConfig.enableImport.calledWith('ahref-paid-pages'),
+      'Expected siteConfig.enableImport to be called with "ahref-paid-pages"',
+    ).to.be.true;
+
+    // Verify existing imports are still present (first 2 items unchanged)
+    expect(
+      fullSiteConfig.imports[0],
+      'Expected first existing import to remain unchanged',
+    ).to.deep.equal({
+      type: 'organic-traffic',
+      sources: ['ahrefs'],
+      enabled: true,
+      destinations: ['default'],
+    });
+    expect(
+      fullSiteConfig.imports[1],
+      'Expected second existing import with multiple sources and geo to remain unchanged',
+    ).to.deep.equal({
+      type: 'top-pages',
+      sources: ['ahrefs', 'rum'],
+      enabled: true,
+      destinations: ['default'],
+      geo: 'global',
+    });
+
+    // Verify the new import was added (3rd item)
+    expect(
+      fullSiteConfig.imports[2],
+      'Expected new "ahref-paid-pages" import to be added',
+    ).to.deep.equal({
+      type: 'ahref-paid-pages',
+      sources: ['ahrefs'],
+      enabled: true,
+      destinations: ['default'],
+    });
+
+    // Verify other config fields remain untouched
+    expect(
+      fullSiteConfig.fetchConfig,
+      'Expected fetchConfig to remain unchanged',
+    ).to.deep.equal({ overrideBaseURL: 'https://www.example.com' });
+
+    // Verify site was saved
+    expect(
+      siteWithFullConfig.save.called,
+      'Expected site.save to be called',
+    ).to.be.true;
+  });
+
   describe('Bad Request Errors', () => {
     it('if "enableImport" parameter is missed', async () => {
       const command = ToggleSiteImportCommand(contextMock);
@@ -374,7 +478,8 @@ describe('ToggleSiteImportCommand', () => {
 
       await command.handleExecution(args, slackContextMock);
 
-      expect(siteConfig.enableImport.callCount).to.equal(14);
+      // 2 sites × 2 import types (content, assets) = 4 calls
+      expect(siteConfig.enableImport.callCount).to.equal(4);
       expect(site.save.callCount).to.equal(2);
     });
 
@@ -387,7 +492,8 @@ describe('ToggleSiteImportCommand', () => {
 
       await command.handleExecution(args, slackContextMock);
 
-      expect(siteConfig.disableImport.callCount).to.equal(14);
+      // 2 sites × 2 import types (content, assets) = 4 calls
+      expect(siteConfig.disableImport.callCount).to.equal(4);
       expect(site.save.callCount).to.equal(2);
     });
 
@@ -489,7 +595,8 @@ describe('ToggleSiteImportCommand', () => {
       await command.handleExecution(['enable', 'default'], slackContextMock);
 
       expect(slackContextMock.say.calledWith(sinon.match('Processing profile "default" with 2 import types'))).to.be.true;
-      expect(siteConfig.enableImport.callCount).to.equal(14);
+      // 2 sites × 2 import types (content, assets) = 4 calls
+      expect(siteConfig.enableImport.callCount).to.equal(4);
     });
 
     it('should format profile information correctly in result message', async () => {
