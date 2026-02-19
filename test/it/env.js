@@ -58,6 +58,10 @@ export function buildEnv(mode, publicKeyB64) {
     }),
     S3_SCRAPER_BUCKET: 'dummy-scraper-bucket',
 
+    // JSON configs (eagerly parsed in controller constructors; empty objects are valid)
+    IMPORT_CONFIGURATION: '{}',
+    API_KEY_CONFIGURATION: '{}',
+
     // Other middleware (dummy values, not called by Tier 1 routes)
     AUDIT_JOBS_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/000000000000/dummy-audits',
     S3_CONFIG_BUCKET: 'dummy-config-bucket',
