@@ -18,6 +18,7 @@ import { ConsumerDto } from '../../src/dto/consumer.js';
 describe('ConsumerDto', () => {
   it('converts a consumer entity to JSON', () => {
     const consumer = {
+      getConsumerId: () => 'consumer-789',
       getClientId: () => 'client-123',
       getTechnicalAccountId: () => 'ta-456',
       getImsOrgId: () => 'org@AdobeOrg',
@@ -33,6 +34,7 @@ describe('ConsumerDto', () => {
     const result = ConsumerDto.toJSON(consumer);
 
     expect(result).to.deep.equal({
+      consumerId: 'consumer-789',
       clientId: 'client-123',
       technicalAccountId: 'ta-456',
       imsOrgId: 'org@AdobeOrg',
@@ -48,6 +50,7 @@ describe('ConsumerDto', () => {
 
   it('includes revokedAt when set', () => {
     const consumer = {
+      getConsumerId: () => 'consumer-789',
       getClientId: () => 'client-123',
       getTechnicalAccountId: () => 'ta-456',
       getImsOrgId: () => 'org@AdobeOrg',

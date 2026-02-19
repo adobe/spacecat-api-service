@@ -20,6 +20,7 @@ export const ConsumerDto = {
    * @returns {object} JSON representation of the consumer.
    */
   toJSON: (consumer) => ({
+    consumerId: consumer.getConsumerId(),
     clientId: consumer.getClientId(),
     technicalAccountId: consumer.getTechnicalAccountId(),
     imsOrgId: consumer.getImsOrgId(),

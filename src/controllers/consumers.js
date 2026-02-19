@@ -155,6 +155,7 @@ function ConsumersController(ctx) {
       }
 
       const { accessToken, consumerName, capabilities } = data;
+      log.info(`Register consumer request: consumerName=${consumerName}`);
 
       if (!hasText(accessToken)) {
         throw new ErrorWithStatusCode('accessToken is required', STATUS_BAD_REQUEST);
@@ -166,16 +167,20 @@ function ConsumersController(ctx) {
         throw new ErrorWithStatusCode('capabilities must be a non-empty array', STATUS_BAD_REQUEST);
       }
 
+      log.info('Validating TA access token with IMS');
       try {
         await imsClient.validateAccessToken(accessToken);
       } catch (e) {
+        log.error(`IMS token validation failed: ${e.message}`);
         throw new ErrorWithStatusCode('Invalid or expired Technical Account access token', STATUS_BAD_REQUEST);
       }
 
+      log.info('Retrieving TA profile from IMS');
       let taProfile;
       try {
         taProfile = await imsClient.getImsUserProfile(accessToken);
       } catch (e) {
+        log.error(`IMS profile retrieval failed: ${e.message}`);
         throw new ErrorWithStatusCode('Failed to retrieve Technical Account profile', STATUS_BAD_REQUEST);
       }
 
@@ -184,6 +189,7 @@ function ConsumersController(ctx) {
         user_id: technicalAccountId,
         org: imsOrgId,
       } = taProfile;
+      log.info(`TA profile resolved: clientId=${clientId}, imsOrgId=${imsOrgId}`);
 
       if (!hasText(clientId) || !hasText(technicalAccountId) || !hasText(imsOrgId)) {
         throw new ErrorWithStatusCode(
@@ -194,12 +200,14 @@ function ConsumersController(ctx) {
 
       const existing = await Consumer.findByClientId(clientId);
       if (existing) {
+        log.info(`Consumer with clientId=${clientId} already exists, rejecting`);
         throw new ErrorWithStatusCode(
           `Consumer with clientId ${clientId} is already registered`,
           STATUS_BAD_REQUEST,
         );
       }
 
+      log.info(`Creating consumer: clientId=${clientId}, consumerName=${consumerName}`);
       const consumer = await Consumer.create({
         clientId,
         technicalAccountId,

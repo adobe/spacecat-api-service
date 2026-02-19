@@ -39,6 +39,7 @@ describe('ConsumersController', () => {
 
   function createMockConsumerEntity(overrides = {}) {
     const defaults = {
+      consumerId: 'test-consumer-id',
       clientId: 'test-client-id',
       technicalAccountId: 'test-ta-id',
       imsOrgId: 'test-ims-org@AdobeOrg',
@@ -52,6 +53,7 @@ describe('ConsumersController', () => {
     };
 
     return {
+      getConsumerId: () => defaults.consumerId,
       getClientId: () => defaults.clientId,
       getTechnicalAccountId: () => defaults.technicalAccountId,
       getImsOrgId: () => defaults.imsOrgId,
