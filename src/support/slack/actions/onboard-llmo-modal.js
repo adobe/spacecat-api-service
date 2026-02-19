@@ -965,12 +965,16 @@ export function reEnableDefaultsAction(lambdaContext) {
         GEO_BRAND_PRESENCE_DAILY,
         site,
       );
+      const hasFreeSplitEnabled = isAnyFreeSplitEnabled(configuration, site);
       const hasExistingGeoBrandPresence = isWeeklyFreeEnabled
         || isWeeklyPaidEnabled
-        || isDailyEnabled;
+        || isDailyEnabled
+        || hasFreeSplitEnabled;
 
+      let targetSplit;
       if (!hasExistingGeoBrandPresence) {
-        configuration.enableHandlerForSite(GEO_BRAND_PRESENCE_WEEKLY_FREE, site);
+        targetSplit = findBestFreeSplit(configuration);
+        configuration.enableHandlerForSite(targetSplit, site);
         await configuration.save();
       }
 
@@ -982,7 +986,7 @@ export function reEnableDefaultsAction(lambdaContext) {
 
       const geoBrandPresenceStatus = hasExistingGeoBrandPresence
         ? 'geo-brand-presence (existing configuration preserved)'
-        : 'geo-brand-presence-free';
+        : targetSplit;
 
       await client.chat.postMessage({
         channel: originalChannel,
