@@ -179,6 +179,8 @@ function ConsumersController(ctx) {
         );
       }
 
+      log.info(`IMS validateAccessToken response: ${JSON.stringify(tokenPayload)}`);
+
       const {
         client_id: clientId,
         user_id: technicalAccountId,
