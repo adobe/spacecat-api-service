@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 import {
-  isValidUrl, isNonEmptyArray, hasText, tracingFetch as fetch,
+  isValidUrl, isNonEmptyArray, hasText,
 } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 
@@ -61,10 +61,11 @@ export default (context) => {
    * @returns {Promise<string[]>} A promise that resolves to an array of validated URLs
    * @throws {Error} If the file is empty or contains invalid URLs
    */
-  const validateCSVFile = async (fileContent, botToken) => {
+  const validateCSVFile = async (file, botToken) => {
     const urls = [];
     const invalidUrls = [];
-    const csvData = await parseCSV(fileContent, botToken);
+    // Pass minColumns=1 since we only need the baseURL column
+    const csvData = await parseCSV(file, botToken, 1);
 
     if (!isNonEmptyArray(csvData)) {
       throw new Error('The parsed CSV data is empty.');
@@ -197,22 +198,10 @@ export default (context) => {
 
       const file = files[0];
 
-      const response = await fetch(file.url_private, {
-        headers: {
-          Authorization: `Bearer ${context.env.SLACK_BOT_TOKEN}`,
-        },
-      });
-
-      if (!response.ok) {
-        await say(`${ERROR_MESSAGE_PREFIX}Failed to download the CSV file.`);
-        return;
-      }
-
-      const fileContent = await response.text();
-
       let baseURLs;
       try {
-        baseURLs = await validateCSVFile(fileContent, botToken);
+        // Pass file object directly - parseCSV will download the file
+        baseURLs = await validateCSVFile(file, botToken);
       } catch (error) {
         await say(`${ERROR_MESSAGE_PREFIX}${error.message}`);
         return;

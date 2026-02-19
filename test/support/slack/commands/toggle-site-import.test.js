@@ -340,6 +340,31 @@ describe('ToggleSiteImportCommand', () => {
       }];
     });
 
+    it('should pass file object to parseCSV with minColumns=1', async () => {
+      const args = ['enable', 'content'];
+      const command = ToggleSiteImportCommand(contextMock);
+
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site1.com').resolves({ ...site });
+      dataAccessMock.Site.findByBaseURL.withArgs('https://site2.com').resolves({ ...site });
+
+      await command.handleExecution(args, slackContextMock);
+
+      // Verify parseCSV was called with file object (has url_private), not string content
+      expect(parseCSVStub.calledOnce).to.be.true;
+      const [fileArg, tokenArg, minColumnsArg] = parseCSVStub.firstCall.args;
+
+      // File object should have url_private property (not string content)
+      expect(fileArg).to.be.an('object');
+      expect(fileArg.url_private).to.equal('https://mock-url');
+      expect(fileArg.name).to.equal('sites.csv');
+
+      // Token should be passed
+      expect(tokenArg).to.equal('mock-token');
+
+      // minColumns should be 1 (single column CSV with just baseURLs)
+      expect(minColumnsArg).to.equal(1);
+    });
+
     it('should process CSV file to enable with profile', async () => {
       const args = ['enable', 'default'];
       const command = ToggleSiteImportCommand(contextMock);
@@ -438,14 +463,13 @@ describe('ToggleSiteImportCommand', () => {
     });
 
     it('should handle CSV download failure', async () => {
-      fetchStub.resolves({
-        ok: false,
-      });
+      // parseCSV now handles the download, so simulate it failing
+      parseCSVStub.rejects(new Error('CSV processing failed: Failed to download'));
 
       const command = ToggleSiteImportCommand(contextMock);
       await command.handleExecution(['enable', 'content'], slackContextMock);
 
-      expect(slackContextMock.say.calledWith(sinon.match('Failed to download'))).to.be.true;
+      expect(slackContextMock.say.calledWith(sinon.match('CSV processing failed'))).to.be.true;
     });
   });
 
