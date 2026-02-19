@@ -29,13 +29,14 @@ import {
   notFound,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { ValidationError } from '@adobe/spacecat-shared-data-access';
 import {
   hasText, isArray, isIsoDate, isNonEmptyObject, isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 import AccessControlUtil from '../support/access-control-util.js';
 import { FixDto } from '../dto/fix.js';
 import { SuggestionDto } from '../dto/suggestion.js';
+
+const VALIDATION_ERROR_NAME = 'ValidationError';
 
 /**
  * @typedef {Object} DataAccess
@@ -238,7 +239,7 @@ export class FixesController {
         return {
           index,
           message: error.message,
-          statusCode: error instanceof ValidationError ? /* c8 ignore next */ 400 : 500,
+          statusCode: error?.name === VALIDATION_ERROR_NAME ? /* c8 ignore next */ 400 : 500,
         };
       }
     }));
@@ -328,7 +329,7 @@ export class FixesController {
         index, uuid, fix: FixDto.toJSON(await fix.save()), statusCode: 200,
       };
     } catch (error) {
-      const statusCode = error instanceof ValidationError ? /* c8 ignore next */ 400 : 500;
+      const statusCode = error?.name === VALIDATION_ERROR_NAME ? /* c8 ignore next */ 400 : 500;
       return {
         index, uuid, message: error.message, statusCode,
       };
@@ -402,7 +403,7 @@ export class FixesController {
         return badRequest('No updates provided');
       }
     } catch (e) {
-      return e instanceof ValidationError
+      return e?.name === VALIDATION_ERROR_NAME
         ? /* c8 ignore next */ badRequest(e.message)
         : createResponse({ message: 'Error updating fix' }, 500);
     }
