@@ -46,6 +46,18 @@ export function buildEnv(mode, publicKeyB64) {
     S3_REPORT_BUCKET: 'dummy-report-bucket',
     S3_MYSTIQUE_BUCKET: 'dummy-mystique-bucket',
 
+    // Scrape client (ScrapeClient.createFrom eagerly parses this in constructor)
+    SCRAPE_JOB_CONFIGURATION: JSON.stringify({
+      queues: [],
+      scrapeWorkerQueue: 'https://sqs.us-east-1.amazonaws.com/000000000000/dummy-scrape',
+      s3Bucket: 'dummy-scrape-bucket',
+      options: {},
+      maxUrlsPerJob: 4000,
+      maxUrlsPerMessage: 1000,
+      scrapeQueueUrlPrefix: 'https://sqs.us-east-1.amazonaws.com/000000000000/dummy',
+    }),
+    S3_SCRAPER_BUCKET: 'dummy-scraper-bucket',
+
     // Other middleware (dummy values, not called by Tier 1 routes)
     AUDIT_JOBS_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/000000000000/dummy-audits',
     S3_CONFIG_BUCKET: 'dummy-config-bucket',
