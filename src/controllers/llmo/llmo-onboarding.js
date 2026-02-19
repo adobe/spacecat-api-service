@@ -1088,15 +1088,18 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     await triggerAudits([...BASIC_AUDITS, 'llmo-customer-analysis', 'wikipedia-analysis'], context, site);
 
     // Submit DRS prompt generation job (non-blocking)
-    // Placed after all critical onboarding steps so webhook callbacks
-    // won't arrive for a partially configured site.
     try {
       const drsClient = DrsClient(context);
       if (drsClient.isConfigured()) {
+        // Try to get audience from brand profile, fall back to default
+        const brandProfile = siteConfig.getBrandProfile?.();
+        const audience = brandProfile?.main_profile?.target_audience
+          || `General consumers interested in ${brandName} products and services`;
+
         const drsJob = await drsClient.submitPromptGenerationJob({
           baseUrl: baseURL,
           brandName: brandName.trim(),
-          audience: 'general audience',
+          audience,
           region: 'US',
           numPrompts: 40,
           siteId: site.getId(),
