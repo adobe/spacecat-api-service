@@ -40,9 +40,12 @@ const client = new DynamoDBClient({
   credentials: { accessKeyId: 'dummy', secretAccessKey: 'dummy' },
 });
 
+// Suppress ElectroDB debug logs (every DynamoDB operation is logged via log.debug)
+const quietLog = { ...console, debug: () => {} };
+
 const dataAccess = createDataAccess(
   { tableNameData: TABLE_NAME },
-  console,
+  quietLog,
   client,
 );
 

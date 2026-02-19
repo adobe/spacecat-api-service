@@ -31,6 +31,11 @@ export const ctx = {};
 
 export const mochaHooks = {
   async beforeAll() {
+    // Suppress ElectroDB debug logs (hundreds of thousands of lines per run).
+    // The v2 data-access lib logs every DynamoDB operation via log.debug(),
+    // and the helix dev server maps debug → console.debug with no level filter.
+    console.debug = () => {};
+
     const { publicKeyB64 } = await initAuth();
     const tokens = await createAllTokens();
 
