@@ -1,3 +1,15 @@
+## [1.320.1](https://github.com/adobe/spacecat-api-service/compare/v1.320.0...v1.320.1) (2026-02-19)
+
+
+### Bug Fixes
+
+* import batch toggle with csv ([#1833](https://github.com/adobe/spacecat-api-service/issues/1833)) ([97ce12b](https://github.com/adobe/spacecat-api-service/commit/97ce12b0a4a2c9b4c25fdf52b97d1ba7621aafcb))
+
+
+### Reverts
+
+* revert v2/v3 data access runtime switch ([#1827](https://github.com/adobe/spacecat-api-service/issues/1827)) ([2f851fd](https://github.com/adobe/spacecat-api-service/commit/2f851fd7e53290a69d6e401ee9130e453d2d5bf8))
+
 ## [1.319.2](https://github.com/adobe/spacecat-api-service/compare/v1.319.1...v1.319.2) (2026-02-18)
 
 
