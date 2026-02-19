@@ -75,6 +75,11 @@ jobs:
         env:
           MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN: ${{ secrets.MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN }}
 
+      - name: Silence ElectroDB debug logger (CI perf)
+        run: |
+          sed -i 's/log\.debug(JSON\.stringify(event, null, 4))//' \
+            node_modules/@adobe/spacecat-shared-data-access-v2/src/service/index.js || true
+
       - name: Run DynamoDB Integration Tests
         run: npx mocha --require test/it/dynamo/harness.js --timeout 30000 'test/it/dynamo/**/*.test.js'
 
