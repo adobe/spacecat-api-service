@@ -1,3 +1,10 @@
+## [1.320.4](https://github.com/adobe/spacecat-api-service/compare/v1.320.3...v1.320.4) (2026-02-19)
+
+
+### Bug Fixes
+
+* v2/v3 data access runtime switch with instanceof fixes ([#1831](https://github.com/adobe/spacecat-api-service/issues/1831)) ([5181b92](https://github.com/adobe/spacecat-api-service/commit/5181b9232f411057b4d124e6ddaf1f13d503a2c6)), closes [#1828](https://github.com/adobe/spacecat-api-service/issues/1828)
+
 ## [1.320.3](https://github.com/adobe/spacecat-api-service/compare/v1.320.2...v1.320.3) (2026-02-19)
 
 
