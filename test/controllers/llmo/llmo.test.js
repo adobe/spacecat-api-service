@@ -3990,6 +3990,233 @@ describe('LlmoController', () => {
         sinon.match({ lastModifiedBy: 'tokowaka-edge-optimize-config' }),
       );
     });
+
+    it('should succeed even when Slack notification fails for newly opted site', async () => {
+      // Mock postLlmoAlert to throw an error
+      const postLlmoAlertStubLocal = sinon.stub().rejects(new Error('Slack API error'));
+
+      const newMetaconfig = {
+        siteId: TEST_SITE_ID,
+        apiKeys: ['test-api-key-123'],
+        tokowakaEnabled: true,
+      };
+
+      // Set up to trigger the Slack notification path (isNewlyOpted === true)
+      // This happens when the edge config doesn't have an 'opted' field
+      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({ enabled: true });
+      mockTokowakaClient.fetchMetaconfig.resolves(null);
+      mockTokowakaClient.createMetaconfig.resolves(newMetaconfig);
+
+      const LlmoControllerWithSlackError = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-config-metadata.js': {
+          updateModifiedByDetails: updateModifiedByDetailsStub,
+        },
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: (...args) => tracingFetchStub(...args),
+          llmoConfig: {
+            defaultConfig: llmoConfig.defaultConfig,
+            readConfig: (...args) => readConfigStub(...args),
+            writeConfig: (...args) => writeConfigStub(...args),
+          },
+          llmoStrategy: {
+            readStrategy: (...args) => readStrategyStub(...args),
+            writeStrategy: (...args) => writeStrategyStub(...args),
+          },
+          schemas: {
+            llmoConfig: { safeParse: (...args) => llmoConfigSchemaStub.safeParse(...args) },
+          },
+          hasText: (str) => typeof str === 'string' && str.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
+          composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+          isValidUUID: (uuid) => {
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+            return uuidRegex.test(uuid);
+          },
+          isValidUrl: (url) => typeof url === 'string' && /^https?:\/\//.test(url),
+        },
+        '../../../src/support/utils.js': {
+          exchangePromiseToken: (...args) => exchangePromiseTokenStub(...args),
+          fetchWithTimeout: (...args) => fetchWithTimeoutStub(...args),
+        },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-tokowaka-client': {
+          default: {
+            createFrom: () => mockTokowakaClient,
+          },
+          calculateForwardedHost: (url) => {
+            try {
+              const u = new URL(url.startsWith('http') ? url : `https://${url}`);
+              const h = u.hostname;
+              const dots = (h.match(/\./g) || []).length;
+              return dots === 1 ? `www.${h}` : h;
+            } catch (e) {
+              throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
+            }
+          },
+        },
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: sinon.stub().resolves({ isValid: true }),
+          generateDataFolder: sinon.stub().returns('test-folder'),
+          performLlmoOnboarding: sinon.stub().resolves({}),
+          performLlmoOffboarding: sinon.stub().resolves({}),
+          postLlmoAlert: (...args) => postLlmoAlertStubLocal(...args),
+        },
+        '../../../src/utils/slack/base.js': {
+          postSlackMessage: (...args) => postSlackMessageStub(...args),
+        },
+      });
+
+      const controllerWithSlackError = LlmoControllerWithSlackError({
+        ...mockContext,
+        env: {
+          ...mockEnv,
+          SLACK_LLMO_EDGE_OPTIMIZE_TEAM: 'U123456,U789012',
+        },
+      });
+
+      const result = await controllerWithSlackError.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      // Request should still succeed even though Slack notification failed
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.include(newMetaconfig);
+
+      // Verify postLlmoAlert was called
+      expect(postLlmoAlertStubLocal).to.have.been.calledOnce;
+
+      // Verify error was logged
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/Failed to send Slack notification for site/),
+        sinon.match.instanceOf(Error),
+      );
+    });
+
+    it('should send Slack notification without user mentions when team members are not configured', async () => {
+      // Mock postLlmoAlert to capture the message
+      const postLlmoAlertStubLocal = sinon.stub().resolves();
+
+      const newMetaconfig = {
+        siteId: TEST_SITE_ID,
+        apiKeys: ['test-api-key-123'],
+        tokowakaEnabled: true,
+      };
+
+      // Set up to trigger the Slack notification path (isNewlyOpted === true)
+      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({ enabled: true });
+      mockTokowakaClient.fetchMetaconfig.resolves(null);
+      mockTokowakaClient.createMetaconfig.resolves(newMetaconfig);
+
+      const LlmoControllerWithoutTeam = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-config-metadata.js': {
+          updateModifiedByDetails: updateModifiedByDetailsStub,
+        },
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: (...args) => tracingFetchStub(...args),
+          llmoConfig: {
+            defaultConfig: llmoConfig.defaultConfig,
+            readConfig: (...args) => readConfigStub(...args),
+            writeConfig: (...args) => writeConfigStub(...args),
+          },
+          llmoStrategy: {
+            readStrategy: (...args) => readStrategyStub(...args),
+            writeStrategy: (...args) => writeStrategyStub(...args),
+          },
+          schemas: {
+            llmoConfig: { safeParse: (...args) => llmoConfigSchemaStub.safeParse(...args) },
+          },
+          hasText: (str) => typeof str === 'string' && str.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
+          composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+          isValidUUID: (uuid) => {
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+            return uuidRegex.test(uuid);
+          },
+          isValidUrl: (url) => typeof url === 'string' && /^https?:\/\//.test(url),
+        },
+        '../../../src/support/utils.js': {
+          exchangePromiseToken: (...args) => exchangePromiseTokenStub(...args),
+          fetchWithTimeout: (...args) => fetchWithTimeoutStub(...args),
+        },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-tokowaka-client': {
+          default: {
+            createFrom: () => mockTokowakaClient,
+          },
+          calculateForwardedHost: (url) => {
+            try {
+              const u = new URL(url.startsWith('http') ? url : `https://${url}`);
+              const h = u.hostname;
+              const dots = (h.match(/\./g) || []).length;
+              return dots === 1 ? `www.${h}` : h;
+            } catch (e) {
+              throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
+            }
+          },
+        },
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: sinon.stub().resolves({ isValid: true }),
+          generateDataFolder: sinon.stub().returns('test-folder'),
+          performLlmoOnboarding: sinon.stub().resolves({}),
+          performLlmoOffboarding: sinon.stub().resolves({}),
+          postLlmoAlert: (...args) => postLlmoAlertStubLocal(...args),
+        },
+        '../../../src/utils/slack/base.js': {
+          postSlackMessage: (...args) => postSlackMessageStub(...args),
+        },
+      });
+
+      const contextWithoutTeam = {
+        ...mockContext,
+        env: {
+          ...mockEnv,
+          SLACK_LLMO_EDGE_OPTIMIZE_TEAM: '', // Empty team members
+        },
+      };
+
+      const controllerWithoutTeam = LlmoControllerWithoutTeam(contextWithoutTeam);
+
+      const edgeConfigContextWithoutTeam = {
+        ...edgeConfigContext,
+        env: {
+          ...mockEnv,
+          SLACK_LLMO_EDGE_OPTIMIZE_TEAM: '', // Empty team members
+        },
+      };
+
+      const result = await controllerWithoutTeam.createOrUpdateEdgeConfig(
+        edgeConfigContextWithoutTeam,
+      );
+
+      // Request should succeed
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.include(newMetaconfig);
+
+      // Verify postLlmoAlert was called
+      expect(postLlmoAlertStubLocal).to.have.been.calledOnce;
+
+      // Verify the message does not include "cc:" part when no team members
+      const calledMessage = postLlmoAlertStubLocal.firstCall.args[0];
+      expect(calledMessage).to.include(':gear: Site *<https://www.example.com|https://www.example.com>* has opted for edge optimization');
+      expect(calledMessage).to.not.include('cc:');
+      expect(calledMessage).to.not.include('\n\n');
+    });
   });
 
   describe('getEdgeConfig', () => {
