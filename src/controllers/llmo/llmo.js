@@ -1405,15 +1405,7 @@ function LlmoController(ctx) {
       const { site, config } = await getSiteAndValidateLlmo(context);
       const OPPORTUNITIES_REVIEWED_TAG = 'opportunitiesReviewed';
 
-      // TODO: spacecat-shared-data-access should have a method to add a tag to the site config
-      // however, changes are frozen until DB migration. In the meantime,
-      // we can use a temporary solution.
-      // config.addLlmoTag(OPPORTUNITIES_REVIEWED_TAG);
-      config.state.llmo = config.state.llmo || {};
-      config.state.llmo.tags = config.state.llmo.tags || [];
-      if (!config.state.llmo.tags.includes(OPPORTUNITIES_REVIEWED_TAG)) {
-        config.state.llmo.tags.push(OPPORTUNITIES_REVIEWED_TAG);
-      }
+      config.addLlmoTag(OPPORTUNITIES_REVIEWED_TAG);
 
       await saveSiteConfig(site, config, log, 'marking opportunities as reviewed');
 
