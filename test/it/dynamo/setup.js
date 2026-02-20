@@ -65,11 +65,12 @@ async function waitForReady(maxAttempts = 60, intervalMs = 1000) {
 }
 
 /**
- * Creates the single-table with pk/sk + 5 GSIs.
+ * Builds the CreateTable params for the single-table (pk/sk + 5 GSIs).
+ * Shared between initial setup and seed reset.
  *
- * @param {DynamoDBClient} client
+ * @returns {object} CreateTableCommand input params
  */
-async function createTable(client) {
+export function createTableParams() {
   const gsiAttributes = [];
   const gsis = [];
 
@@ -90,7 +91,7 @@ async function createTable(client) {
     });
   }
 
-  await client.send(new CreateTableCommand({
+  return {
     TableName: TABLE_NAME,
     KeySchema: [
       { AttributeName: 'pk', KeyType: 'HASH' },
@@ -103,7 +104,16 @@ async function createTable(client) {
     ],
     GlobalSecondaryIndexes: gsis,
     BillingMode: 'PAY_PER_REQUEST',
-  }));
+  };
+}
+
+/**
+ * Creates the single-table with pk/sk + 5 GSIs.
+ *
+ * @param {DynamoDBClient} client
+ */
+async function createTable(client) {
+  await client.send(new CreateTableCommand(createTableParams()));
 }
 
 /**

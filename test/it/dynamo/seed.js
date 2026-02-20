@@ -35,6 +35,8 @@ import { sentimentGuidelines } from './seed-data/sentiment-guidelines.js';
 import { auditUrls } from './seed-data/audit-urls.js';
 import { trialUsers } from './seed-data/trial-users.js';
 import { trialUserActivities } from './seed-data/trial-user-activities.js';
+import { FIX_1_ID, SUGG_1_ID } from '../shared/seed-ids.js';
+import { createTableParams } from './setup.js';
 
 const TABLE_NAME = 'spacecat-services-data';
 const ENDPOINT = 'http://127.0.0.1:8000';
@@ -72,40 +74,7 @@ async function recreateTable() {
     }
   }
 
-  // Recreate with same schema (pk/sk + 5 GSIs)
-  const gsiAttributes = [];
-  const gsis = [];
-  for (let n = 1; n <= 5; n += 1) {
-    const pk = `gsi${n}pk`;
-    const sk = `gsi${n}sk`;
-    gsiAttributes.push(
-      { AttributeName: pk, AttributeType: 'S' },
-      { AttributeName: sk, AttributeType: 'S' },
-    );
-    gsis.push({
-      IndexName: `spacecat-data-${pk}-${sk}`,
-      KeySchema: [
-        { AttributeName: pk, KeyType: 'HASH' },
-        { AttributeName: sk, KeyType: 'RANGE' },
-      ],
-      Projection: { ProjectionType: 'ALL' },
-    });
-  }
-
-  await client.send(new CreateTableCommand({
-    TableName: TABLE_NAME,
-    KeySchema: [
-      { AttributeName: 'pk', KeyType: 'HASH' },
-      { AttributeName: 'sk', KeyType: 'RANGE' },
-    ],
-    AttributeDefinitions: [
-      { AttributeName: 'pk', AttributeType: 'S' },
-      { AttributeName: 'sk', AttributeType: 'S' },
-      ...gsiAttributes,
-    ],
-    GlobalSecondaryIndexes: gsis,
-    BillingMode: 'PAY_PER_REQUEST',
-  }));
+  await client.send(new CreateTableCommand(createTableParams()));
 }
 
 /**
@@ -131,9 +100,9 @@ async function seed() {
   for (const fix of fixes) {
     const fixEntity = await dataAccess.FixEntity.create(fix);
     // Link FIX_1 to SUGG_1 via junction
-    if (fix.fixEntityId === 'cc111111-1111-4111-b111-111111111111') {
+    if (fix.fixEntityId === FIX_1_ID) {
       const sugg1 = createdSuggestions.find(
-        (s) => s.getId() === 'bb111111-1111-4111-b111-111111111111',
+        (s) => s.getId() === SUGG_1_ID,
       );
       if (sugg1) {
         await dataAccess.FixEntity.setSuggestionsForFixEntity(

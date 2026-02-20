@@ -146,7 +146,7 @@ export default function organizationTests(getHttpClient, resetData) {
     });
 
     describe('GET /organizations/:organizationId/sites', () => {
-      it('user: returns sites for accessible org (empty without entitlements)', async () => {
+      it('user: returns sites for accessible org (empty — no site enrollments)', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`/organizations/${ORG_1_ID}/sites`);
         expect(res.status).to.equal(200);
