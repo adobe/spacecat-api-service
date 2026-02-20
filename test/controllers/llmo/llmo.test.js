@@ -4032,6 +4032,128 @@ describe('LlmoController', () => {
       expect(slackMessage).to.include('cc: <@U123456789>');
       expect(slackMessage).to.include('<@U234567890>');
     });
+
+    it('should send Slack notification without user mentions when SLACK_LLMO_EDGE_OPTIMIZE_TEAM is not set', async () => {
+      const newMetaconfig = {
+        siteId: TEST_SITE_ID,
+        apiKeys: ['test-api-key-123'],
+        tokowakaEnabled: true,
+        enhancements: true,
+      };
+
+      // No existing opted field
+      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({});
+      mockTokowakaClient.fetchMetaconfig.resolves(null);
+      mockTokowakaClient.createMetaconfig.resolves(newMetaconfig);
+
+      edgeConfigContext.data = {
+        tokowakaEnabled: true,
+        enhancements: true,
+      };
+
+      // Create a context without SLACK_LLMO_EDGE_OPTIMIZE_TEAM
+      const contextNoTeamMentions = {
+        ...edgeConfigContext,
+        env: {
+          ...mockEnv,
+          SLACK_LLMO_EDGE_OPTIMIZE_TEAM: '',
+        },
+      };
+
+      const result = await controller.createOrUpdateEdgeConfig(contextNoTeamMentions);
+
+      expect(result.status).to.equal(200);
+      expect(postSlackMessageStub).to.have.been.calledOnce;
+      const slackMessage = postSlackMessageStub.firstCall.args[1];
+      expect(slackMessage).to.include('has opted for edge optimization');
+      expect(slackMessage).to.include('https://www.example.com');
+      expect(slackMessage).to.not.include('cc:');
+    });
+
+    it('should handle Slack notification errors gracefully and not fail the request', async () => {
+      const newMetaconfig = {
+        siteId: TEST_SITE_ID,
+        apiKeys: ['test-api-key-123'],
+        tokowakaEnabled: true,
+      };
+
+      // No existing opted field
+      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({});
+      mockTokowakaClient.fetchMetaconfig.resolves(null);
+      mockTokowakaClient.createMetaconfig.resolves(newMetaconfig);
+
+      // Make postSlackMessage throw an error
+      postSlackMessageStub.rejects(new Error('Slack API error'));
+
+      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(200);
+      expect(postSlackMessageStub).to.have.been.calledOnce;
+      // Request should succeed even though Slack notification failed
+    });
+
+    it('should use default lastModifiedBy when profile is undefined', async () => {
+      const newMetaconfig = {
+        siteId: TEST_SITE_ID,
+        apiKeys: ['test-api-key-123'],
+        tokowakaEnabled: true,
+      };
+
+      mockTokowakaClient.fetchMetaconfig.resolves(null);
+      mockTokowakaClient.createMetaconfig.resolves(newMetaconfig);
+
+      // Create context without profile
+      const contextWithoutProfile = {
+        ...edgeConfigContext,
+        attributes: {
+          authInfo: {},
+        },
+      };
+
+      const result = await controller.createOrUpdateEdgeConfig(contextWithoutProfile);
+
+      expect(result.status).to.equal(200);
+      expect(mockTokowakaClient.createMetaconfig).to.have.been.calledWith(
+        'https://www.example.com',
+        TEST_SITE_ID,
+        sinon.match({ tokowakaEnabled: true }),
+        sinon.match({ lastModifiedBy: 'tokowaka-edge-optimize-config' }),
+      );
+    });
+
+    it('should use default lastModifiedBy when profile.email is undefined', async () => {
+      const newMetaconfig = {
+        siteId: TEST_SITE_ID,
+        apiKeys: ['test-api-key-123'],
+        tokowakaEnabled: true,
+      };
+
+      mockTokowakaClient.fetchMetaconfig.resolves(null);
+      mockTokowakaClient.createMetaconfig.resolves(newMetaconfig);
+
+      // Create context with profile but without email
+      const contextWithoutEmail = {
+        ...edgeConfigContext,
+        attributes: {
+          authInfo: {
+            profile: {
+              first_name: 'Test',
+              last_name: 'User',
+            },
+          },
+        },
+      };
+
+      const result = await controller.createOrUpdateEdgeConfig(contextWithoutEmail);
+
+      expect(result.status).to.equal(200);
+      expect(mockTokowakaClient.createMetaconfig).to.have.been.calledWith(
+        'https://www.example.com',
+        TEST_SITE_ID,
+        sinon.match({ tokowakaEnabled: true }),
+        sinon.match({ lastModifiedBy: 'tokowaka-edge-optimize-config' }),
+      );
+    });
   });
 
   describe('getEdgeConfig', () => {
