@@ -29,7 +29,6 @@ import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/confi
 import crypto from 'crypto';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
-import { postSlackMessage } from '../../utils/slack/base.js';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { exchangePromiseToken } from '../../support/utils.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
@@ -49,6 +48,7 @@ import {
   generateDataFolder,
   performLlmoOnboarding,
   performLlmoOffboarding,
+  postLlmoAlert,
 } from './llmo-onboarding.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
@@ -1059,25 +1059,19 @@ function LlmoController(ctx) {
       // Send Slack notification only when opted field is being added
       if (isNewlyOpted) {
         try {
-          const slackChannel = env.SLACK_LLMO_ALERTS_CHANNEL_ID;
-          const slackToken = env.SLACK_BOT_TOKEN;
           const llmoTeamUserIds = env.SLACK_LLMO_EDGE_OPTIMIZE_TEAM;
 
-          if (hasText(slackChannel) && hasText(slackToken)) {
-            // Build user mentions from comma-separated user IDs
-            let userMentions = '';
-            if (hasText(llmoTeamUserIds)) {
-              const userIds = llmoTeamUserIds.split(',').map((id) => id.trim()).filter((id) => id);
-              userMentions = userIds.map((userId) => `<@${userId}>`).join(' ');
-            }
-
-            const message = `:gear: Site *<${baseURL}|${baseURL}>* has opted for edge optimization${userMentions ? `\n\ncc: ${userMentions}` : ''}`;
-
-            await postSlackMessage(slackChannel, message, slackToken);
-            log.info(`[edge-optimize-config] Slack notification sent for site ${siteId}`);
-          } else {
-            log.warn('[edge-optimize-config] Slack channel or token not configured, skipping notification');
+          // Build user mentions from comma-separated user IDs
+          let userMentions = '';
+          if (hasText(llmoTeamUserIds)) {
+            const userIds = llmoTeamUserIds.split(',').map((id) => id.trim()).filter((id) => id);
+            userMentions = userIds.map((userId) => `<@${userId}>`).join(' ');
           }
+
+          const message = `:gear: Site *<${baseURL}|${baseURL}>* has opted for edge optimization${userMentions ? `\n\ncc: ${userMentions}` : ''}`;
+
+          await postLlmoAlert(message, context);
+          log.info(`[edge-optimize-config] Slack notification sent for site ${siteId}`);
         } catch (slackError) {
           // Log error but don't fail the request
           log.error(`[edge-optimize-config] Failed to send Slack notification for site ${siteId}:`, slackError);

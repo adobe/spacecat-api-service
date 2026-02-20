@@ -76,6 +76,7 @@ describe('LlmoController', () => {
   let writeStrategyStub;
   let exchangePromiseTokenStub;
   let fetchWithTimeoutStub;
+  let postLlmoAlertStub;
   let postSlackMessageStub;
 
   const mockHttpUtils = {
@@ -108,9 +109,6 @@ describe('LlmoController', () => {
 
   // Common mocks needed for all esmock instances
   const getCommonMocks = () => ({
-    '../../../src/utils/slack/base.js': {
-      postSlackMessage: sinon.stub().resolves(),
-    },
     '@adobe/spacecat-shared-tokowaka-client': {
       default: {
         createFrom: () => ({
@@ -146,8 +144,16 @@ describe('LlmoController', () => {
     };
     exchangePromiseTokenStub = sinon.stub().resolves({ access_token: 'fake-ims-token' });
 
-    // Mock postSlackMessage
+    // Mock postLlmoAlert and postSlackMessage
+    postLlmoAlertStub = sinon.stub().resolves();
     postSlackMessageStub = sinon.stub().resolves();
+
+    // Set up esmock for llmo-onboarding.js first
+    await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
+      '../../../src/utils/slack/base.js': {
+        postSlackMessage: (...args) => postSlackMessageStub(...args),
+      },
+    });
 
     // Set up esmock once for all tests
     LlmoController = await esmock('../../../src/controllers/llmo/llmo.js', {
@@ -223,7 +229,7 @@ describe('LlmoController', () => {
         },
       },
       '../../../src/utils/slack/base.js': {
-        postSlackMessage: postSlackMessageStub,
+        postSlackMessage: (...args) => postSlackMessageStub(...args),
       },
     });
 
@@ -252,7 +258,7 @@ describe('LlmoController', () => {
         },
       },
       '../../../src/utils/slack/base.js': {
-        postSlackMessage: postSlackMessageStub,
+        postSlackMessage: (...args) => postSlackMessageStub(...args),
       },
     });
     controllerWithAccessDenied = LlmoControllerDenied;
@@ -261,6 +267,7 @@ describe('LlmoController', () => {
   beforeEach(async () => {
     triggerBrandProfileAgentStub.resetHistory();
     updateModifiedByDetailsStub.resetHistory();
+    postLlmoAlertStub.resetHistory();
     postSlackMessageStub.resetHistory();
     updateModifiedByDetailsStub.callsFake((config) => ({
       newConfig: config,
@@ -3882,7 +3889,7 @@ describe('LlmoController', () => {
     });
 
     it('should return 403 when user is not LLMO administrator', async () => {
-      const postSlackMessageStubLocal = sinon.stub().resolves();
+      const postLlmoAlertStubLocal = sinon.stub().resolves();
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
@@ -3901,8 +3908,12 @@ describe('LlmoController', () => {
             }
           },
         },
-        '../../../src/utils/slack/base.js': {
-          postSlackMessage: postSlackMessageStubLocal,
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: sinon.stub().resolves({ isValid: true }),
+          generateDataFolder: sinon.stub().returns('test-folder'),
+          performLlmoOnboarding: sinon.stub().resolves({}),
+          performLlmoOffboarding: sinon.stub().resolves({}),
+          postLlmoAlert: (...args) => postLlmoAlertStubLocal(...args),
         },
       });
 
@@ -3914,183 +3925,8 @@ describe('LlmoController', () => {
       expect(responseBody.message).to.equal('Only LLMO administrators can update the edge optimize config');
     });
 
-    it('should send Slack notification when opted field is being added (first time)', async () => {
-      const newMetaconfig = {
-        siteId: TEST_SITE_ID,
-        apiKeys: ['test-api-key-123'],
-        tokowakaEnabled: true,
-      };
-
-      // No existing opted field
-      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({});
-      mockTokowakaClient.fetchMetaconfig.resolves(null);
-      mockTokowakaClient.createMetaconfig.resolves(newMetaconfig);
-
-      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
-
-      expect(result.status).to.equal(200);
-      expect(postSlackMessageStub).to.have.been.calledOnce;
-      expect(postSlackMessageStub.firstCall.args[0]).to.equal('C123456789');
-      expect(postSlackMessageStub.firstCall.args[1]).to.include('has opted for edge optimization');
-      expect(postSlackMessageStub.firstCall.args[2]).to.equal('xoxb-test-token');
-    });
-
-    it('should NOT send Slack notification when opted field already exists', async () => {
-      const existingMetaconfig = {
-        siteId: TEST_SITE_ID,
-        apiKeys: ['existing-api-key'],
-        tokowakaEnabled: false,
-      };
-
-      // Existing opted field
-      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({ opted: 1234567890 });
-      mockTokowakaClient.fetchMetaconfig.resolves(existingMetaconfig);
-      mockTokowakaClient.updateMetaconfig.resolves({
-        ...existingMetaconfig,
-        tokowakaEnabled: true,
-      });
-
-      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
-
-      expect(result.status).to.equal(200);
-      expect(postSlackMessageStub).to.not.have.been.called;
-    });
-
-    it('should send Slack notification when getEdgeOptimizeConfig returns null', async () => {
-      const newMetaconfig = {
-        siteId: TEST_SITE_ID,
-        apiKeys: ['test-api-key-123'],
-        tokowakaEnabled: true,
-      };
-
-      // getEdgeOptimizeConfig returns null (no edge config at all)
-      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns(null);
-      mockTokowakaClient.fetchMetaconfig.resolves(null);
-      mockTokowakaClient.createMetaconfig.resolves(newMetaconfig);
-
-      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
-
-      expect(result.status).to.equal(200);
-      expect(postSlackMessageStub).to.have.been.calledOnce;
-    });
-
-    it('should NOT send Slack notification when Slack channel is not configured', async () => {
-      const newMetaconfig = {
-        siteId: TEST_SITE_ID,
-        apiKeys: ['test-api-key-123'],
-        tokowakaEnabled: true,
-      };
-
-      // No existing opted field, but Slack not configured
-      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({});
-      mockTokowakaClient.fetchMetaconfig.resolves(null);
-      mockTokowakaClient.createMetaconfig.resolves(newMetaconfig);
-
-      // Remove Slack configuration
-      const contextNoSlack = {
-        ...edgeConfigContext,
-        env: {
-          ...mockEnv,
-          SLACK_LLMO_ALERTS_CHANNEL_ID: '',
-        },
-      };
-
-      const result = await controller.createOrUpdateEdgeConfig(contextNoSlack);
-
-      expect(result.status).to.equal(200);
-      expect(postSlackMessageStub).to.not.have.been.called;
-    });
-
-    it('should include site URL and team mentions in Slack notification', async () => {
-      const newMetaconfig = {
-        siteId: TEST_SITE_ID,
-        apiKeys: ['test-api-key-123'],
-        tokowakaEnabled: true,
-        enhancements: true,
-      };
-
-      // No existing opted field
-      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({});
-      mockTokowakaClient.fetchMetaconfig.resolves(null);
-      mockTokowakaClient.createMetaconfig.resolves(newMetaconfig);
-
-      edgeConfigContext.data = {
-        tokowakaEnabled: true,
-        enhancements: true,
-        forceFail: false,
-        patches: { patch1: 'value1' },
-        prerender: { allowList: ['path1', 'path2'] },
-      };
-
-      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
-
-      expect(result.status).to.equal(200);
-      expect(postSlackMessageStub).to.have.been.calledOnce;
-      const slackMessage = postSlackMessageStub.firstCall.args[1];
-      expect(slackMessage).to.include('has opted for edge optimization');
-      expect(slackMessage).to.include('https://www.example.com');
-      expect(slackMessage).to.include('cc: <@U123456789>');
-      expect(slackMessage).to.include('<@U234567890>');
-    });
-
-    it('should send Slack notification without user mentions when SLACK_LLMO_EDGE_OPTIMIZE_TEAM is not set', async () => {
-      const newMetaconfig = {
-        siteId: TEST_SITE_ID,
-        apiKeys: ['test-api-key-123'],
-        tokowakaEnabled: true,
-        enhancements: true,
-      };
-
-      // No existing opted field
-      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({});
-      mockTokowakaClient.fetchMetaconfig.resolves(null);
-      mockTokowakaClient.createMetaconfig.resolves(newMetaconfig);
-
-      edgeConfigContext.data = {
-        tokowakaEnabled: true,
-        enhancements: true,
-      };
-
-      // Create a context without SLACK_LLMO_EDGE_OPTIMIZE_TEAM
-      const contextNoTeamMentions = {
-        ...edgeConfigContext,
-        env: {
-          ...mockEnv,
-          SLACK_LLMO_EDGE_OPTIMIZE_TEAM: '',
-        },
-      };
-
-      const result = await controller.createOrUpdateEdgeConfig(contextNoTeamMentions);
-
-      expect(result.status).to.equal(200);
-      expect(postSlackMessageStub).to.have.been.calledOnce;
-      const slackMessage = postSlackMessageStub.firstCall.args[1];
-      expect(slackMessage).to.include('has opted for edge optimization');
-      expect(slackMessage).to.include('https://www.example.com');
-      expect(slackMessage).to.not.include('cc:');
-    });
-
-    it('should handle Slack notification errors gracefully and not fail the request', async () => {
-      const newMetaconfig = {
-        siteId: TEST_SITE_ID,
-        apiKeys: ['test-api-key-123'],
-        tokowakaEnabled: true,
-      };
-
-      // No existing opted field
-      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({});
-      mockTokowakaClient.fetchMetaconfig.resolves(null);
-      mockTokowakaClient.createMetaconfig.resolves(newMetaconfig);
-
-      // Make postSlackMessage throw an error
-      postSlackMessageStub.rejects(new Error('Slack API error'));
-
-      const result = await controller.createOrUpdateEdgeConfig(edgeConfigContext);
-
-      expect(result.status).to.equal(200);
-      expect(postSlackMessageStub).to.have.been.calledOnce;
-      // Request should succeed even though Slack notification failed
-    });
+    // Note: Slack notification functionality uses postLlmoAlert() from llmo-onboarding.js
+    // Tests for postLlmoAlert can be found in llmo-onboarding.test.js
 
     it('should use default lastModifiedBy when profile is undefined', async () => {
       const newMetaconfig = {
