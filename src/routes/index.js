@@ -207,6 +207,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit/:cursor': suggestionsController.getAllForOpportunityPaged,
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit': suggestionsController.getAllForOpportunityPaged,
     'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix': suggestionsController.autofixSuggestions,
+    'POST /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/auto-fix-test': suggestionsController.testMetaTagsAutofix,
     'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy': suggestionsController.deploySuggestionToEdge,
     'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-rollback': suggestionsController.rollbackSuggestionFromEdge,
     'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-preview': suggestionsController.previewSuggestions,
