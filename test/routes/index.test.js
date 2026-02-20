@@ -153,6 +153,8 @@ describe('getRouteHandlers', () => {
   const mockBrandsController = {
     getBrandsForOrganization: sinon.stub(),
     getBrandGuidelinesForSite: sinon.stub(),
+    getCustomerConfig: sinon.stub(),
+    saveCustomerConfig: sinon.stub(),
   };
 
   const mockPreflightController = {
@@ -270,6 +272,8 @@ describe('getRouteHandlers', () => {
     getLlmoRationale: () => null,
     createOrUpdateEdgeConfig: () => null,
     getEdgeConfig: () => null,
+    checkEdgeOptimizeStatus: () => null,
+    updateEdgeOptimizeCDNRouting: () => null,
     getStrategy: () => null,
     saveStrategy: () => null,
   };
@@ -290,6 +294,8 @@ describe('getRouteHandlers', () => {
   const mockTrialUserController = {
     getByOrganizationID: () => null,
     createTrialUserForEmailInvite: () => null,
+    getEmailPreferences: sinon.stub(),
+    updateEmailPreferences: sinon.stub(),
   };
 
   const mockUserDetailsController = {
@@ -307,6 +313,28 @@ describe('getRouteHandlers', () => {
     getReport: sinon.stub(),
     patchReport: sinon.stub(),
     deleteReport: sinon.stub(),
+  };
+
+  const mockBotBlockerController = {
+    checkBotBlocker: sinon.stub(),
+  };
+
+  const mockSentimentController = {
+    listTopics: sinon.stub(),
+    getTopic: sinon.stub(),
+    createTopics: sinon.stub(),
+    updateTopic: sinon.stub(),
+    deleteTopic: sinon.stub(),
+    addSubPrompts: sinon.stub(),
+    removeSubPrompts: sinon.stub(),
+    linkAudits: sinon.stub(),
+    unlinkAudits: sinon.stub(),
+    listGuidelines: sinon.stub(),
+    getGuideline: sinon.stub(),
+    createGuidelines: sinon.stub(),
+    updateGuideline: sinon.stub(),
+    deleteGuideline: sinon.stub(),
+    getConfig: sinon.stub(),
   };
 
   it('segregates static and dynamic routes', () => {
@@ -347,6 +375,8 @@ describe('getRouteHandlers', () => {
       mockUrlStoreController,
       mockPTA2Controller,
       mockTrafficToolsController,
+      mockBotBlockerController,
+      mockSentimentController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -376,6 +406,8 @@ describe('getRouteHandlers', () => {
       'POST /consent-banner',
       'POST /llmo/onboard',
       'GET /sites-resolve',
+      'GET /trial-users/email-preferences',
+      'PATCH /trial-users/email-preferences',
     );
 
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
@@ -396,6 +428,8 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
     expect(staticRoutes['POST /llmo/onboard']).to.equal(mockLlmoController.onboardCustomer);
     expect(staticRoutes['GET /sites/resolve']).to.equal(mockSitesController.resolveSite);
+    expect(staticRoutes['GET /trial-users/email-preferences']).to.equal(mockTrialUserController.getEmailPreferences);
+    expect(staticRoutes['PATCH /trial-users/email-preferences']).to.equal(mockTrialUserController.updateEmailPreferences);
 
     expect(dynamicRoutes).to.have.all.keys(
       'GET /audits/latest/:auditType',
@@ -408,6 +442,12 @@ describe('getRouteHandlers', () => {
       'POST /hooks/site-detection/rum/:hookSecret',
       'GET /organizations/:organizationId',
       'GET /organizations/:organizationId/brands',
+      'GET /v2/orgs/:spaceCatId/llmo-customer-config',
+      'GET /v2/orgs/:spaceCatId/llmo-customer-config-lean',
+      'GET /v2/orgs/:spaceCatId/llmo-topics',
+      'GET /v2/orgs/:spaceCatId/llmo-prompts',
+      'PATCH /v2/orgs/:spaceCatId/llmo-customer-config',
+      'POST /v2/orgs/:spaceCatId/llmo-customer-config',
       'GET /organizations/:organizationId/projects',
       'GET /organizations/:organizationId/projects/:projectId/sites',
       'GET /organizations/:organizationId/by-project-name/:projectName/sites',
@@ -441,11 +481,9 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/:auditType',
       'GET /sites/:siteId/audits/latest',
       'GET /sites/:siteId/latest-audit/:auditType',
+      'GET /sites/:siteId/bot-blocker',
       'GET /sites/:siteId/latest-metrics',
       'GET /sites/:siteId/experiments',
-      'GET /sites/:siteId/key-events',
-      'POST /sites/:siteId/key-events',
-      'DELETE /sites/:siteId/key-events/:keyEventId',
       'GET /sites/:siteId/metrics/:metric/:source',
       'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl',
       'GET /sites/:siteId/site-enrollments',
@@ -602,6 +640,8 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/offboard',
       'POST /sites/:siteId/llmo/edge-optimize-config',
       'GET /sites/:siteId/llmo/edge-optimize-config',
+      'GET /sites/:siteId/llmo/edge-optimize-status',
+      'POST /sites/:siteId/llmo/edge-optimize-routing',
       'GET /sites/:siteId/llmo/strategy',
       'PUT /sites/:siteId/llmo/strategy',
       'GET /consent-banner/:jobId',
@@ -616,6 +656,22 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/url-store',
       'PATCH /sites/:siteId/url-store',
       'DELETE /sites/:siteId/url-store',
+      // Sentiment routes
+      'GET /sites/:siteId/sentiment/topics',
+      'GET /sites/:siteId/sentiment/topics/:topicId',
+      'POST /sites/:siteId/sentiment/topics',
+      'PATCH /sites/:siteId/sentiment/topics/:topicId',
+      'DELETE /sites/:siteId/sentiment/topics/:topicId',
+      'POST /sites/:siteId/sentiment/topics/:topicId/prompts',
+      'DELETE /sites/:siteId/sentiment/topics/:topicId/prompts',
+      'POST /sites/:siteId/sentiment/guidelines/:guidelineId/audits',
+      'DELETE /sites/:siteId/sentiment/guidelines/:guidelineId/audits',
+      'GET /sites/:siteId/sentiment/guidelines',
+      'GET /sites/:siteId/sentiment/guidelines/:guidelineId',
+      'POST /sites/:siteId/sentiment/guidelines',
+      'PATCH /sites/:siteId/sentiment/guidelines/:guidelineId',
+      'DELETE /sites/:siteId/sentiment/guidelines/:guidelineId',
+      'GET /sites/:siteId/sentiment/config',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
@@ -651,6 +707,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/audits/latest'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/latest-audit/:auditType'].handler).to.equal(mockAuditsController.getLatestForSite);
     expect(dynamicRoutes['GET /sites/:siteId/latest-audit/:auditType'].paramNames).to.deep.equal(['siteId', 'auditType']);
+    expect(dynamicRoutes['GET /sites/:siteId/bot-blocker'].handler).to.equal(mockBotBlockerController.checkBotBlocker);
+    expect(dynamicRoutes['GET /sites/:siteId/bot-blocker'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/experiments'].handler).to.equal(mockExperimentsController.getExperiments);
     expect(dynamicRoutes['DELETE /tools/api-keys/:id'].handler).to.equal(mockApiKeyController.deleteApiKey);
     expect(dynamicRoutes['GET /sites/:siteId/opportunities'].handler).to.equal(mockOpportunitiesController.getAllForSite);
@@ -807,6 +865,10 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-config'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-config'].handler).to.equal(mockLlmoController.getEdgeConfig);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-config'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-status'].handler).to.equal(mockLlmoController.checkEdgeOptimizeStatus);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-status'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-routing'].handler).to.equal(mockLlmoController.updateEdgeOptimizeCDNRouting);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-routing'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy'].handler).to.equal(mockLlmoController.getStrategy);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['PUT /sites/:siteId/llmo/strategy'].handler).to.equal(mockLlmoController.saveStrategy);

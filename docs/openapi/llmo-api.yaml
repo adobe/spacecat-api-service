@@ -664,7 +664,7 @@ llmo-config:
     description: |
       Retrieves the LLMO (Large Language Model Optimizer) configuration for a specific site.
       This endpoint retrieves the configuration directly from S3 storage. The configuration
-      includes entities (categories, topics), brand aliases, and competitor information.
+      includes entities (categories, topics, aiTopics), brand aliases, and competitor information.
       Categories may include optional URLs for content matching.
 
       If a version parameter is provided, the specific version of the configuration will be
@@ -1249,11 +1249,11 @@ llmo-rationale:
     description: |
       Retrieves filtered LLMO rationale data for a specific site. This endpoint fetches topics
       popularity reasoning data from the cached S3 file and applies filtering based on the provided query parameters.
-      
+
       The endpoint requires mandatory 'topic' parameter for filtering, with optional
       'category', 'region', 'origin', and 'popularity' parameters for additional filtering. All text matching is case-insensitive
       and uses partial matching (contains).
-      
+
       The data is sourced from the topics popularity reasoning cache file stored in S3 at:
       `llm_cache/{siteId}/topics_popularity_reasoning_cache.json`
     operationId: getLlmoRationale
@@ -1346,14 +1346,14 @@ site-llmo-edge-optimize-config:
       Create or update edge optimization configuration for an LLMO site
     description: |
       Creates or updates edge optimization configuration for the specified LLMO-enabled site.
-      
+
       **Behavior:**
       - If metaconfig doesn't exist or has no API keys: Generates a unique API key and creates metaconfig in S3
       - If metaconfig exists with API keys: Updates the metaconfig in S3
       - Updates the site's edgeOptimizeConfig.enabled flag in the database
-      
+
       The API key is generated using: SHA256(UUID + domain) encoded as base64url.
-      
+
       **Note:** This endpoint requires LLMO access for the site.
     tags:
       - llmo
@@ -1397,9 +1397,9 @@ site-llmo-edge-optimize-config:
     description: |
       Fetches the existing edge optimization configuration for the specified LLMO-enabled site.
       Returns the metaconfig from S3.
-      
+
       Returns an empty object if no edge config has been created for this site yet.
-      
+
       **Note:** This endpoint requires LLMO access for the site.
     tags:
       - llmo
@@ -1426,6 +1426,119 @@ site-llmo-edge-optimize-config:
         $ref: './responses.yaml#/500'
       '503':
         $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+site-llmo-edge-optimize-routing:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: x-promise-token
+      in: header
+      required: true
+      description: Promise token exchanged for IMS user token to authorize the CDN API call.
+      schema:
+        type: string
+  post:
+    operationId: enableEdgeOptimize
+    summary: Update edge optimize routing for a site
+    description: |
+      Updates edge optimize routing for the site via the internal CDN API. Only available when
+      ENV is prod. The CDN API to call is selected by the required cdnType request body parameter.
+
+      Flow:
+      1. Validates request (x-promise-token header and cdnType required; enabled must be boolean if provided).
+      2. Probes the site with User-Agent `AdobeEdgeOptimize-Test`. If 2xx, flow continues with probe URL domain.
+         If 301, the Location header is checked: the probe URL hostname and the Location URL hostname are compared
+         (lowercased, with leading www. stripped); subdomains are considered, so only the same host is allowed. If they
+         match, the domain from the Location URL is used for the CDN API; otherwise the flow fails. Other non-2xx responses fail.
+      3. Exchanges the promise token for IMS user token, then calls internal CDN API for the chosen cdnType to set routing for the domain.
+
+    tags:
+      - llmo
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [cdnType]
+            properties:
+              cdnType:
+                type: string
+                enum: [aem-cs-fastly]
+                description: |
+                  CDN / log source type (LOG_SOURCES). Determines which CDN API URL from
+                  EDGE_OPTIMIZE_ROUTING_CONFIG is used. Currently supported for edge optimize: aem-cs-fastly.
+              enabled:
+                type: boolean
+                default: true
+                description: |
+                  Whether to enable (true) or disable (false) edge optimize routing for the domain.
+                  Omitted or true enables; false disables.
+    responses:
+      '200':
+        description: Edge optimize routing updated successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled, domain, cdnType]
+              properties:
+                enabled:
+                  type: boolean
+                  description: The value that was set (true = enabled, false = disabled)
+                  example: true
+                domain:
+                  type: string
+                  example: www.example.com
+                cdnType:
+                  type: string
+                  example: aem-cs-fastly
+      '400':
+        description: Bad request (e.g. non-prod ENV, missing/invalid x-promise-token or cdnType, invalid enabled, probe failed, non-2xx/301, or 301 Location domain mismatch)
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      '401':
+        description: Authentication failed with upstream IMS service (missing or invalid promise token)
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: Authentication failed with upstream IMS service
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '502':
+        description: Upstream CDN API returned 5xx
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: Upstream call failed with status 503
+      '503':
+        description: API not available (EDGE_OPTIMIZE_ROUTING_CONFIG not set or invalid, or missing cdnRoutingUrl for cdnType)
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: API is missing mandatory environment variable
+      '500':
+        $ref: './responses.yaml#/500'
     security:
       - ims_key: [ ]
 
@@ -1516,6 +1629,59 @@ llmo-strategy:
         $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+llmo-edge-optimize-status:
+  get:
+    tags:
+      - llmo
+    summary: Check Edge Optimize status for a site path
+    description: |
+      Checks the edge optimization status for a specific path on a site.
+      This endpoint queries the Edge Optimize service to determine whether edge optimization
+      is active and configured for the given path.
+
+      Returns information about:
+      - Whether edge optimization is enabled for the site
+      - Configuration status for the specific path
+      - Any path-specific optimization settings
+    operationId: checkEdgeOptimizeStatus
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+      - name: path
+        in: query
+        description: The path to check optimization status for (defaults to '/')
+        required: false
+        schema:
+          type: string
+          default: '/'
+          example: '/products/index.html'
+    responses:
+      '200':
+        description: Edge optimize status retrieved successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - edgeOptimizeEnabled
+              properties:
+                edgeOptimizeEnabled:
+                  type: boolean
+                  description: Whether Edge Optimize headers were detected in the HTTP response
+              example:
+                edgeOptimizeEnabled: true
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
       '500':
         $ref: './responses.yaml#/500'
     security:

@@ -91,6 +91,7 @@ describe('Trial User Controller', () => {
       findById: sandbox.stub().resolves(mockTrialUser),
       allByOrganizationId: sandbox.stub().resolves(mockTrialUsers),
       findByEmailId: sandbox.stub().resolves(null),
+      allByEmailId: sandbox.stub().resolves([]),
       create: sandbox.stub().resolves(mockTrialUser),
       STATUSES: {
         INVITED: 'INVITED',
@@ -166,6 +167,7 @@ describe('Trial User Controller', () => {
     mockDataAccess.TrialUser.findByOrganizationId = sandbox
       .stub()
       .resolves(mockTrialUsers);
+    mockDataAccess.TrialUser.allByEmailId = sandbox.stub().resolves([]);
     mockDataAccess.Organization.findById = sandbox.stub().resolves(mockOrganization);
 
     // Store reference to the mock instance for test manipulation
@@ -629,8 +631,8 @@ describe('Trial User Controller', () => {
       expect(body.message).to.equal('Access denied to this organization');
     });
 
-    it('should return conflict when trial user already exists', async () => {
-      mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUser);
+    it('should return conflict when trial user already exists in same organization', async () => {
+      mockDataAccess.TrialUser.allByEmailId.resolves([mockTrialUser]);
 
       const context = {
         params: { organizationId },
@@ -653,11 +655,49 @@ describe('Trial User Controller', () => {
       expect(body.message).to.equal(`Trial user with this email already exists ${mockTrialUser.getId()}`);
     });
 
+    it('should not return conflict when trial user exists in different organization', async () => {
+      const trialUserInDifferentOrg = {
+        getId: () => 'trial-user-other-org',
+        getOrganizationId: () => '999e4567-e89b-12d3-a456-426614174999',
+        getExternalUserId: () => 'ext-user-other',
+        getStatus: () => 'INVITED',
+        getProvider: () => 'GOOGLE',
+        getLastSeenAt: () => '2023-01-01T00:00:00Z',
+        getEmailId: () => 'existing@example.com',
+        getFirstName: () => 'Other',
+        getLastName: () => 'User',
+        getMetadata: () => ({ origin: 'INVITED' }),
+        getCreatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedAt: () => '2023-01-01T00:00:00Z',
+        getUpdatedBy: () => 'existing@example.com',
+      };
+
+      mockDataAccess.TrialUser.allByEmailId.resolves([trialUserInDifferentOrg]);
+
+      const context = {
+        params: { organizationId },
+        data: { emailId: 'existing@example.com' },
+        dataAccess: mockDataAccess,
+        log: mockLogger,
+        env: {},
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withProfile({ is_admin: true })
+            .withAuthenticated(true),
+        },
+      };
+
+      const result = await trialUserController.createTrialUserForEmailInvite(context);
+
+      expect(result.status).to.equal(201);
+    });
+
     it('should return internal server error when database operation fails', async () => {
       const dbError = new Error('Database connection failed');
       mockDataAccess.TrialUser.create.rejects(dbError);
-      // Ensure findByEmailId returns null for this test
-      mockDataAccess.TrialUser.findByEmailId.resolves(null);
+      // Ensure allByEmailId returns empty for this test
+      mockDataAccess.TrialUser.allByEmailId.resolves([]);
 
       const context = {
         params: { organizationId },
@@ -768,6 +808,272 @@ describe('Trial User Controller', () => {
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.equal('Some Error Occured while sending email to the user');
+    });
+  });
+
+  describe('getEmailPreferences', () => {
+    it('should return email preferences for authenticated user', async () => {
+      const mockTrialUserWithPrefs = {
+        ...mockTrialUser,
+        getMetadata: () => ({ emailPreferences: { weeklyDigest: false } }),
+      };
+      mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUserWithPrefs);
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('ims')
+            .withProfile({ trial_email: 'test@example.com' })
+            .withAuthenticated(true),
+        },
+      };
+
+      const result = await trialUserController.getEmailPreferences(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.emailPreferences).to.deep.equal({ weeklyDigest: false });
+    });
+
+    it('should return default preferences when metadata is empty', async () => {
+      const mockTrialUserNoPrefs = {
+        ...mockTrialUser,
+        getMetadata: () => ({}),
+      };
+      mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUserNoPrefs);
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('ims')
+            .withProfile({ trial_email: 'test@example.com' })
+            .withAuthenticated(true),
+        },
+      };
+
+      const result = await trialUserController.getEmailPreferences(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.emailPreferences).to.deep.equal({ weeklyDigest: true });
+    });
+
+    it('should handle edge cases for auth and metadata', async () => {
+      // Test unauthorized when authInfo is missing
+      let context = {
+        dataAccess: mockDataAccess,
+        log: mockLogger,
+        attributes: {},
+      };
+      let result = await trialUserController.getEmailPreferences(context);
+      expect(result.status).to.equal(401);
+
+      // Test unauthorized when profile is null
+      context = {
+        dataAccess: mockDataAccess,
+        log: mockLogger,
+        attributes: {
+          authInfo: { getProfile: () => null },
+        },
+      };
+      result = await trialUserController.getEmailPreferences(context);
+      expect(result.status).to.equal(401);
+
+      // Test unauthorized when no email fields
+      context = {
+        dataAccess: mockDataAccess,
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('ims')
+            .withProfile({})
+            .withAuthenticated(true),
+        },
+      };
+      result = await trialUserController.getEmailPreferences(context);
+      expect(result.status).to.equal(401);
+
+      // Test null metadata
+      const mockTrialUserNullMeta = {
+        ...mockTrialUser,
+        getMetadata: () => null,
+      };
+      mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUserNullMeta);
+      context = {
+        dataAccess: mockDataAccess,
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('ims')
+            .withProfile({ trial_email: 'test@example.com' })
+            .withAuthenticated(true),
+        },
+      };
+      result = await trialUserController.getEmailPreferences(context);
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.emailPreferences.weeklyDigest).to.equal(true);
+    });
+
+    it('should return not found when user does not exist', async () => {
+      mockDataAccess.TrialUser.findByEmailId.resolves(null);
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('ims')
+            .withProfile({ trial_email: 'nonexistent@example.com' })
+            .withAuthenticated(true),
+        },
+      };
+
+      const result = await trialUserController.getEmailPreferences(context);
+      expect(result.status).to.equal(404);
+    });
+
+    it('should return internal server error on database failure', async () => {
+      mockDataAccess.TrialUser.findByEmailId.rejects(new Error('Database error'));
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('ims')
+            .withProfile({ trial_email: 'test@example.com' })
+            .withAuthenticated(true),
+        },
+      };
+
+      const result = await trialUserController.getEmailPreferences(context);
+      expect(result.status).to.equal(500);
+    });
+  });
+
+  describe('updateEmailPreferences', () => {
+    it('should update email preferences successfully', async () => {
+      const savedMetadata = {};
+      const mockTrialUserForUpdate = {
+        ...mockTrialUser,
+        getMetadata: () => savedMetadata,
+        setMetadata: (meta) => { Object.assign(savedMetadata, meta); },
+        save: sandbox.stub().resolves(),
+      };
+      mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUserForUpdate);
+
+      const context = {
+        data: { weeklyDigest: false },
+        dataAccess: mockDataAccess,
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('ims')
+            .withProfile({ trial_email: 'test@example.com' })
+            .withAuthenticated(true),
+        },
+      };
+
+      const result = await trialUserController.updateEmailPreferences(context);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.emailPreferences.weeklyDigest).to.equal(false);
+      expect(mockTrialUserForUpdate.save).to.have.been.called;
+    });
+
+    it('should handle validation and error cases', async () => {
+      // Test non-boolean weeklyDigest
+      let context = {
+        data: { weeklyDigest: 'not-a-boolean' },
+        dataAccess: mockDataAccess,
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('ims')
+            .withProfile({ trial_email: 'test@example.com' })
+            .withAuthenticated(true),
+        },
+      };
+      let result = await trialUserController.updateEmailPreferences(context);
+      expect(result.status).to.equal(400);
+
+      // Test unauthorized
+      context = {
+        data: { weeklyDigest: true },
+        dataAccess: mockDataAccess,
+        log: mockLogger,
+        attributes: {},
+      };
+      result = await trialUserController.updateEmailPreferences(context);
+      expect(result.status).to.equal(401);
+
+      // Test not found
+      mockDataAccess.TrialUser.findByEmailId.resolves(null);
+      context = {
+        data: { weeklyDigest: true },
+        dataAccess: mockDataAccess,
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('ims')
+            .withProfile({ trial_email: 'nonexistent@example.com' })
+            .withAuthenticated(true),
+        },
+      };
+      result = await trialUserController.updateEmailPreferences(context);
+      expect(result.status).to.equal(404);
+
+      // Test database error
+      mockDataAccess.TrialUser.findByEmailId.rejects(new Error('DB error'));
+      context = {
+        data: { weeklyDigest: true },
+        dataAccess: mockDataAccess,
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('ims')
+            .withProfile({ trial_email: 'test@example.com' })
+            .withAuthenticated(true),
+        },
+      };
+      result = await trialUserController.updateEmailPreferences(context);
+      expect(result.status).to.equal(500);
+    });
+
+    it('should handle edge cases for data and metadata', async () => {
+      const savedMetadata = {};
+      const mockTrialUserForUpdate = {
+        ...mockTrialUser,
+        getMetadata: () => null, // Test null metadata branch (line 251)
+        setMetadata: (meta) => { Object.assign(savedMetadata, meta); },
+        save: sandbox.stub().resolves(),
+      };
+      mockDataAccess.TrialUser.findByEmailId.resolves(mockTrialUserForUpdate);
+
+      // Test with undefined data (line 237) and undefined weeklyDigest (line 254)
+      const context = {
+        // data is undefined - tests line 237: context.data || {}
+        dataAccess: mockDataAccess,
+        log: mockLogger,
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('ims')
+            .withProfile({ trial_email: 'test@example.com' })
+            .withAuthenticated(true),
+        },
+      };
+
+      const result = await trialUserController.updateEmailPreferences(context);
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      // weeklyDigest defaults to true when not explicitly set
+      expect(body.emailPreferences.weeklyDigest).to.equal(true);
     });
   });
 });

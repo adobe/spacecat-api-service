@@ -12,18 +12,20 @@
 
 /* eslint-env mocha */
 
-import { Experiment, Site } from '@adobe/spacecat-shared-data-access';
+import { Experiment } from '@adobe/spacecat-shared-data-access';
 import ExperimentSchema from '@adobe/spacecat-shared-data-access/src/models/experiment/experiment.schema.js';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
+import sinonChai from 'sinon-chai';
 import sinon, { stub } from 'sinon';
 
 import ExperimentsController from '../../src/controllers/experiments.js';
 import { ExperimentDto } from '../../src/dto/experiment.js';
 
 use(chaiAsPromised);
+use(sinonChai);
 
 const siteId = '3f1c3ab1-9ad0-4231-ac87-8159acf52cb6';
 
@@ -234,7 +236,7 @@ describe('Experiments Controller', () => {
         siteId,
         getOrganization: async () => mockOrg,
       };
-      Object.setPrototypeOf(mockSite, Site.prototype);
+      mockSite.constructor = { ENTITY_NAME: 'Site' };
       mockDataAccess.Site.findById.resolves(mockSite);
 
       // Create context with non-admin user without org access

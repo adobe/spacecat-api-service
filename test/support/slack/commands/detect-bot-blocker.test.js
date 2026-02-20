@@ -21,14 +21,14 @@ use(sinonChai);
 
 describe('DetectBotBlockerCommand', () => {
   let DetectBotBlockerCommand;
-  let detectBotBlockerStub;
+  let checkBotProtectionStub;
   let postErrorMessageStub;
   let extractURLFromSlackInputStub;
   let context;
   let slackContext;
 
   const loadModule = async () => {
-    detectBotBlockerStub = sinon.stub();
+    checkBotProtectionStub = sinon.stub();
     postErrorMessageStub = sinon.stub().resolves();
     extractURLFromSlackInputStub = sinon.stub().callsFake((value) => value);
 
@@ -36,8 +36,8 @@ describe('DetectBotBlockerCommand', () => {
       '../../../../src/support/slack/commands/detect-bot-blocker.js',
       {
         '@adobe/spacecat-shared-utils': {
-          detectBotBlocker: detectBotBlockerStub,
           isValidUrl: (url) => url.startsWith('http'),
+          detectBotBlocker: checkBotProtectionStub,
         },
         '../../../../src/utils/slack/base.js': {
           extractURLFromSlackInput: extractURLFromSlackInputStub,
@@ -54,7 +54,9 @@ describe('DetectBotBlockerCommand', () => {
     context = {
       log: {
         info: sinon.stub(),
+        warn: sinon.stub(),
         error: sinon.stub(),
+        debug: sinon.stub(),
       },
     };
 
@@ -69,7 +71,7 @@ describe('DetectBotBlockerCommand', () => {
     const command = DetectBotBlockerCommand(context);
     await command.handleExecution([], slackContext);
     expect(slackContext.say).to.have.been.calledWithMatch('Usage:');
-    expect(detectBotBlockerStub).to.not.have.been.called;
+    expect(checkBotProtectionStub).to.not.have.been.called;
   });
 
   it('displays usage when the provided URL is invalid', async () => {
@@ -78,11 +80,11 @@ describe('DetectBotBlockerCommand', () => {
     await command.handleExecution(['not-a-url'], slackContext);
     expect(slackContext.say).to.have.been.calledWithMatch('valid URL');
     expect(slackContext.say).to.have.been.calledWithMatch('Usage:');
-    expect(detectBotBlockerStub).to.not.have.been.called;
+    expect(checkBotProtectionStub).to.not.have.been.called;
   });
 
   it('detects Cloudflare bot blocker', async () => {
-    detectBotBlockerStub.resolves({
+    checkBotProtectionStub.resolves({
       crawlable: false,
       type: 'cloudflare',
       confidence: 0.99,
@@ -91,7 +93,7 @@ describe('DetectBotBlockerCommand', () => {
     const command = DetectBotBlockerCommand(context);
     await command.handleExecution(['https://example.com'], slackContext);
 
-    expect(detectBotBlockerStub).to.have.been.calledWith({ baseUrl: 'https://example.com' });
+    expect(checkBotProtectionStub).to.have.been.calledWith({ baseUrl: 'https://example.com' });
     expect(slackContext.say).to.have.been.calledWithMatch(':mag: Checking bot blocker');
     expect(slackContext.say).to.have.been.calledWithMatch('Cloudflare');
     expect(slackContext.say).to.have.been.calledWithMatch('99%');
@@ -99,7 +101,7 @@ describe('DetectBotBlockerCommand', () => {
   });
 
   it('detects Imperva bot blocker', async () => {
-    detectBotBlockerStub.resolves({
+    checkBotProtectionStub.resolves({
       crawlable: false,
       type: 'imperva',
       confidence: 0.99,
@@ -113,7 +115,7 @@ describe('DetectBotBlockerCommand', () => {
   });
 
   it('detects HTTP/2 blocking', async () => {
-    detectBotBlockerStub.resolves({
+    checkBotProtectionStub.resolves({
       crawlable: false,
       type: 'http2-block',
       confidence: 0.95,
@@ -127,7 +129,7 @@ describe('DetectBotBlockerCommand', () => {
   });
 
   it('reports no blocker detected', async () => {
-    detectBotBlockerStub.resolves({
+    checkBotProtectionStub.resolves({
       crawlable: true,
       type: 'none',
       confidence: 1.0,
@@ -142,7 +144,7 @@ describe('DetectBotBlockerCommand', () => {
   });
 
   it('reports unknown status', async () => {
-    detectBotBlockerStub.resolves({
+    checkBotProtectionStub.resolves({
       crawlable: true,
       type: 'unknown',
       confidence: 0.5,
@@ -157,7 +159,7 @@ describe('DetectBotBlockerCommand', () => {
 
   it('handles errors from detectBotBlocker', async () => {
     const error = new Error('Network error');
-    detectBotBlockerStub.rejects(error);
+    checkBotProtectionStub.rejects(error);
 
     const command = DetectBotBlockerCommand(context);
     await command.handleExecution(['https://example.com'], slackContext);
@@ -170,7 +172,7 @@ describe('DetectBotBlockerCommand', () => {
   });
 
   it('uses correct confidence emoji for high confidence', async () => {
-    detectBotBlockerStub.resolves({
+    checkBotProtectionStub.resolves({
       crawlable: false,
       type: 'cloudflare',
       confidence: 0.99,
@@ -183,10 +185,10 @@ describe('DetectBotBlockerCommand', () => {
   });
 
   it('uses correct confidence emoji for medium confidence', async () => {
-    detectBotBlockerStub.resolves({
+    checkBotProtectionStub.resolves({
       crawlable: true,
       type: 'unknown',
-      confidence: 0.5,
+      confidence: 0.75,
     });
 
     const command = DetectBotBlockerCommand(context);
@@ -196,7 +198,7 @@ describe('DetectBotBlockerCommand', () => {
   });
 
   it('uses correct confidence emoji for low confidence', async () => {
-    detectBotBlockerStub.resolves({
+    checkBotProtectionStub.resolves({
       crawlable: true,
       type: 'unknown',
       confidence: 0.3,
@@ -209,7 +211,7 @@ describe('DetectBotBlockerCommand', () => {
   });
 
   it('detects Akamai bot blocker', async () => {
-    detectBotBlockerStub.resolves({
+    checkBotProtectionStub.resolves({
       crawlable: false,
       type: 'akamai',
       confidence: 0.99,
@@ -224,7 +226,7 @@ describe('DetectBotBlockerCommand', () => {
   });
 
   it('detects Fastly bot blocker', async () => {
-    detectBotBlockerStub.resolves({
+    checkBotProtectionStub.resolves({
       crawlable: false,
       type: 'fastly',
       confidence: 0.99,
@@ -239,7 +241,7 @@ describe('DetectBotBlockerCommand', () => {
   });
 
   it('detects CloudFront bot blocker', async () => {
-    detectBotBlockerStub.resolves({
+    checkBotProtectionStub.resolves({
       crawlable: false,
       type: 'cloudfront',
       confidence: 0.99,
@@ -254,7 +256,7 @@ describe('DetectBotBlockerCommand', () => {
   });
 
   it('detects Cloudflare infrastructure (allowed)', async () => {
-    detectBotBlockerStub.resolves({
+    checkBotProtectionStub.resolves({
       crawlable: true,
       type: 'cloudflare-allowed',
       confidence: 1.0,
@@ -269,7 +271,7 @@ describe('DetectBotBlockerCommand', () => {
   });
 
   it('detects Imperva infrastructure (allowed)', async () => {
-    detectBotBlockerStub.resolves({
+    checkBotProtectionStub.resolves({
       crawlable: true,
       type: 'imperva-allowed',
       confidence: 1.0,
@@ -284,7 +286,7 @@ describe('DetectBotBlockerCommand', () => {
   });
 
   it('detects Akamai infrastructure (allowed)', async () => {
-    detectBotBlockerStub.resolves({
+    checkBotProtectionStub.resolves({
       crawlable: true,
       type: 'akamai-allowed',
       confidence: 1.0,
@@ -299,7 +301,7 @@ describe('DetectBotBlockerCommand', () => {
   });
 
   it('detects Fastly infrastructure (allowed)', async () => {
-    detectBotBlockerStub.resolves({
+    checkBotProtectionStub.resolves({
       crawlable: true,
       type: 'fastly-allowed',
       confidence: 1.0,
@@ -314,7 +316,7 @@ describe('DetectBotBlockerCommand', () => {
   });
 
   it('detects CloudFront infrastructure (allowed)', async () => {
-    detectBotBlockerStub.resolves({
+    checkBotProtectionStub.resolves({
       crawlable: true,
       type: 'cloudfront-allowed',
       confidence: 1.0,
@@ -326,5 +328,33 @@ describe('DetectBotBlockerCommand', () => {
     expect(slackContext.say).to.have.been.calledWithMatch('AWS CloudFront (Allowed)');
     expect(slackContext.say).to.have.been.calledWithMatch('100%');
     expect(slackContext.say).to.have.been.calledWithMatch(':white_check_mark:');
+  });
+
+  it('includes reason in output when provided', async () => {
+    checkBotProtectionStub.resolves({
+      crawlable: false,
+      type: 'cloudflare',
+      confidence: 0.99,
+      reason: 'Challenge page detected despite 200 status',
+    });
+
+    const command = DetectBotBlockerCommand(context);
+    await command.handleExecution(['https://example.com'], slackContext);
+
+    expect(slackContext.say).to.have.been.calledWithMatch('Reason:');
+    expect(slackContext.say).to.have.been.calledWithMatch('Challenge page detected despite 200 status');
+  });
+
+  it('handles non-numeric confidence values', async () => {
+    checkBotProtectionStub.resolves({
+      crawlable: true,
+      type: 'none',
+      confidence: null,
+    });
+
+    const command = DetectBotBlockerCommand(context);
+    await command.handleExecution(['https://example.com'], slackContext);
+
+    expect(slackContext.say).to.have.been.calledWithMatch('N/A%');
   });
 });

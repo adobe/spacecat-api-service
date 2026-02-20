@@ -83,6 +83,8 @@ function isStaticRoute(routePattern) {
  * @param {Object} urlStoreController - The URL store controller.
  * @param {Object} pta2Controller - The PTA2 controller.
  * @param {Object} trafficToolsController - The traffic tools controller.
+* @param {Object} botBlockerController - The bot blocker controller.
+ * @param {Object} sentimentController - The sentiment controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -122,6 +124,8 @@ export default function getRouteHandlers(
   urlStoreController,
   pta2Controller,
   trafficToolsController,
+  botBlockerController,
+  sentimentController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -151,6 +155,12 @@ export default function getRouteHandlers(
     'DELETE /organizations/:organizationId': organizationsController.removeOrganization,
     'GET /organizations/:organizationId/sites': organizationsController.getSitesForOrganization,
     'GET /organizations/:organizationId/brands': brandsController.getBrandsForOrganization,
+    'GET /v2/orgs/:spaceCatId/llmo-customer-config': brandsController.getCustomerConfig,
+    'GET /v2/orgs/:spaceCatId/llmo-customer-config-lean': brandsController.getCustomerConfigLean,
+    'GET /v2/orgs/:spaceCatId/llmo-topics': brandsController.getTopics,
+    'GET /v2/orgs/:spaceCatId/llmo-prompts': brandsController.getPrompts,
+    'POST /v2/orgs/:spaceCatId/llmo-customer-config': brandsController.saveCustomerConfig,
+    'PATCH /v2/orgs/:spaceCatId/llmo-customer-config': brandsController.patchCustomerConfig,
     'GET /organizations/:organizationId/projects': organizationsController.getProjectsByOrganizationId,
     'GET /organizations/:organizationId/projects/:projectId/sites': organizationsController.getSitesByProjectIdAndOrganizationId,
     'GET /organizations/:organizationId/by-project-name/:projectName/sites': organizationsController.getSitesByProjectNameAndOrganizationId,
@@ -172,16 +182,23 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId': sitesController.updateSite,
     'PATCH /sites/:siteId/config/cdn-logs': sitesController.updateCdnLogsConfig,
     'DELETE /sites/:siteId': sitesController.removeSite,
+    'GET /sites/:siteId/bot-blocker': botBlockerController.checkBotBlocker,
     'GET /sites/:siteId/audits': auditsController.getAllForSite,
     'GET /sites/:siteId/audits/latest': auditsController.getAllLatestForSite,
     'GET /sites/:siteId/audits/:auditType': auditsController.getAllForSite,
     'GET /sites/:siteId/audits/:auditType/:auditedAt': sitesController.getAuditForSite,
+
+    // URL Store endpoints (defined before :auditType to ensure static segment match)
+    'GET /sites/:siteId/url-store': urlStoreController.listUrls,
+    'GET /sites/:siteId/url-store/by-audit/:auditType': urlStoreController.listUrlsByAuditType,
+    'GET /sites/:siteId/url-store/:base64Url': urlStoreController.getUrl,
+    'POST /sites/:siteId/url-store': urlStoreController.addUrls,
+    'PATCH /sites/:siteId/url-store': urlStoreController.updateUrls,
+    'DELETE /sites/:siteId/url-store': urlStoreController.deleteUrls,
+
     'PATCH /sites/:siteId/:auditType': auditsController.patchAuditForSite,
     'GET /sites/:siteId/latest-audit/:auditType': auditsController.getLatestForSite,
     'GET /sites/:siteId/experiments': experimentsController.getExperiments,
-    'GET /sites/:siteId/key-events': sitesController.getKeyEventsBySiteID,
-    'POST /sites/:siteId/key-events': sitesController.createKeyEvent,
-    'DELETE /sites/:siteId/key-events/:keyEventId': sitesController.removeKeyEvent,
     'GET /sites/:siteId/metrics/:metric/:source': sitesController.getSiteMetricsBySource,
     'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': sitesController.getPageMetricsBySource,
     'GET /sites/:siteId/latest-metrics': sitesController.getLatestSiteMetrics,
@@ -285,13 +302,6 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/top-pages/:source/:geo': sitesController.getTopPages,
     'POST /sites/:siteId/graph': sitesController.getGraph,
 
-    // URL Store endpoints
-    'GET /sites/:siteId/url-store': urlStoreController.listUrls,
-    'GET /sites/:siteId/url-store/by-audit/:auditType': urlStoreController.listUrlsByAuditType,
-    'GET /sites/:siteId/url-store/:base64Url': urlStoreController.getUrl,
-    'POST /sites/:siteId/url-store': urlStoreController.addUrls,
-    'PATCH /sites/:siteId/url-store': urlStoreController.updateUrls,
-    'DELETE /sites/:siteId/url-store': urlStoreController.deleteUrls,
     'GET /slack/events': slackController.handleEvent,
     'POST /slack/events': slackController.handleEvent,
     'POST /slack/channels/invite-by-user-id': slackController.inviteUserToChannel,
@@ -363,6 +373,8 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/edge-optimize-config': llmoController.getEdgeConfig,
     'GET /sites/:siteId/llmo/strategy': llmoController.getStrategy,
     'PUT /sites/:siteId/llmo/strategy': llmoController.saveStrategy,
+    'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,
+    'POST /sites/:siteId/llmo/edge-optimize-routing': llmoController.updateEdgeOptimizeCDNRouting,
 
     // Tier Specific Routes
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,
@@ -372,6 +384,10 @@ export default function getRouteHandlers(
     'GET /organizations/:organizationId/userDetails/:externalUserId': userDetailsController.getUserDetailsByExternalUserId,
     'POST /organizations/:organizationId/userDetails': userDetailsController.getUserDetailsInBulk,
     'POST /organizations/:organizationId/trial-user-invite': trialUserController.createTrialUserForEmailInvite,
+
+    // Trial User Email Preferences (current user)
+    'GET /trial-users/email-preferences': trialUserController.getEmailPreferences,
+    'PATCH /trial-users/email-preferences': trialUserController.updateEmailPreferences,
     'GET /organizations/:organizationId/entitlements': entitlementController.getByOrganizationID,
     'POST /organizations/:organizationId/entitlements': entitlementController.createEntitlement,
 
@@ -386,6 +402,26 @@ export default function getRouteHandlers(
     'DELETE /sites/:siteId/reports/:reportId': reportsController.deleteReport,
 
     'GET /sites-resolve': sitesController.resolveSite,
+
+    // Sentiment Analysis endpoints
+    // Topics
+    'GET /sites/:siteId/sentiment/topics': sentimentController.listTopics,
+    'GET /sites/:siteId/sentiment/topics/:topicId': sentimentController.getTopic,
+    'POST /sites/:siteId/sentiment/topics': sentimentController.createTopics,
+    'PATCH /sites/:siteId/sentiment/topics/:topicId': sentimentController.updateTopic,
+    'DELETE /sites/:siteId/sentiment/topics/:topicId': sentimentController.deleteTopic,
+    'POST /sites/:siteId/sentiment/topics/:topicId/prompts': sentimentController.addSubPrompts,
+    'DELETE /sites/:siteId/sentiment/topics/:topicId/prompts': sentimentController.removeSubPrompts,
+    // Guidelines
+    'GET /sites/:siteId/sentiment/guidelines': sentimentController.listGuidelines,
+    'GET /sites/:siteId/sentiment/guidelines/:guidelineId': sentimentController.getGuideline,
+    'POST /sites/:siteId/sentiment/guidelines': sentimentController.createGuidelines,
+    'PATCH /sites/:siteId/sentiment/guidelines/:guidelineId': sentimentController.updateGuideline,
+    'DELETE /sites/:siteId/sentiment/guidelines/:guidelineId': sentimentController.deleteGuideline,
+    'POST /sites/:siteId/sentiment/guidelines/:guidelineId/audits': sentimentController.linkAudits,
+    'DELETE /sites/:siteId/sentiment/guidelines/:guidelineId/audits': sentimentController.unlinkAudits,
+    // Combined config
+    'GET /sites/:siteId/sentiment/config': sentimentController.getConfig,
   };
 
   // Initialization of static and dynamic routes

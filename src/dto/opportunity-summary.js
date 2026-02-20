@@ -34,7 +34,9 @@ export const OpportunitySummaryDto = {
    *  projectedTrafficLost: number,
    *  projectedTrafficValue: number,
    *  projectedConversionValue: number,
-   *  impact: number
+   *  projectedEngagementValue: number,
+   *  impact: number,
+   *  impactFieldName: string|null
    * }} JSON object.
    */
   toJSON: (opportunity, suggestions = [], paidUrlsData = null, topUrlsLimit = 20) => {
@@ -84,9 +86,23 @@ export const OpportunitySummaryDto = {
     const projectedTrafficLost = opportunityData.projectedTrafficLost || 0;
     const projectedTrafficValue = opportunityData.projectedTrafficValue || 0;
     const projectedConversionValue = opportunityData.projectedConversionValue || 0;
+    const projectedEngagementValue = opportunityData.projectedEngagementValue || 0;
 
-    // Determine impact value (prioritize conversion value over traffic value)
-    const impact = projectedConversionValue || projectedTrafficValue || 0;
+    // Determine impact value and field name
+    // Priority: projectedEngagementValue > projectedConversionValue > projectedTrafficValue
+    let impact = 0;
+    let impactFieldName = null;
+
+    if (projectedEngagementValue > 0) {
+      impact = projectedEngagementValue;
+      impactFieldName = 'projectedEngagementValue';
+    } else if (projectedConversionValue > 0) {
+      impact = projectedConversionValue;
+      impactFieldName = 'projectedConversionValue';
+    } else if (projectedTrafficValue > 0) {
+      impact = projectedTrafficValue;
+      impactFieldName = 'projectedTrafficValue';
+    }
 
     return {
       opportunityId: opportunity.getId(),
@@ -101,7 +117,9 @@ export const OpportunitySummaryDto = {
       projectedTrafficLost,
       projectedTrafficValue,
       projectedConversionValue,
+      projectedEngagementValue,
       impact,
+      impactFieldName,
     };
   },
 };
