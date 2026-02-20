@@ -1968,9 +1968,9 @@ example-com:
       const handler = mockedModule.reEnableDefaultsAction(lambdaCtx);
       await handler({ ack: mockAck, body: mockBody, client: mockClient });
 
-      expect(mockConfig.enableHandlerForSite).to.have.been.calledWith('geo-brand-presence-free', mockSite);
+      expect(mockConfig.enableHandlerForSite).to.have.been.calledWith('geo-brand-presence-free-1', mockSite);
       expect(mockClient.chat.postMessage).to.have.been.calledWith(
-        sinon.match({ text: sinon.match('geo-brand-presence-free') }),
+        sinon.match({ text: sinon.match('geo-brand-presence-free-1') }),
       );
     });
 

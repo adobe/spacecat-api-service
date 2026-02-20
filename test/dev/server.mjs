@@ -26,7 +26,7 @@ const { version } = require('../../package.json');
 global.__rootdir = resolve(fileURLToPath(import.meta.url), '..', '..', '..');
 
 async function run(args) {
-  const port = process.env.PORT || '3000';
+  const port = process.env.PORT || '3002';
   process.env.HLX_DEV_SERVER_HOST = `localhost:${port}`;
   process.env.HLX_DEV_SERVER_SCHEME = 'http';
   // eslint-disable-next-line no-console
