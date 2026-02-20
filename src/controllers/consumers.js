@@ -32,7 +32,6 @@ import { ConsumerDto } from '../dto/consumer.js';
 import AccessControlUtil from '../support/access-control-util.js';
 
 const HEADER_ERROR = 'x-error';
-const SLACK_CHANNEL_ID = 'C0AFRHVRMPT';
 const IMMUTABLE_FIELDS = ['clientId', 'technicalAccountId', 'imsOrgId'];
 const UPDATABLE_STATUSES = Object.values(ConsumerModel.STATUS)
   .filter((s) => s !== ConsumerModel.STATUS.REVOKED);
@@ -80,6 +79,7 @@ function ConsumersController(ctx) {
         ctx,
         SLACK_TARGETS.WORKSPACE_INTERNAL,
       );
+      const SLACK_CHANNEL_ID = ctx.env.S2S_SLACK_CHANNEL_ID;
       await slackClient.postMessage({
         channel: SLACK_CHANNEL_ID,
         text: message,

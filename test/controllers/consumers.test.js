@@ -340,6 +340,7 @@ describe('ConsumersController', () => {
       })).default;
 
       context.dataAccess.Consumer.findByClientId.resolves(null);
+      context.env = { S2S_SLACK_CHANNEL_ID: 'C_DUMMY_CHANNEL_ID' };
       const controller = SlackFailController(context);
       const response = await controller.register({
         ...context,
@@ -347,7 +348,7 @@ describe('ConsumersController', () => {
       });
 
       expect(response.status).to.equal(STATUS_CREATED);
-      expect(context.log.error).to.have.been.calledWithMatch(/Failed to send Slack notification/);
+      expect(context.log.error).to.have.been.calledWithMatch(/^Failed to send Slack notification: .+$/);
     });
 
     it('returns forbidden for non-admin users', async () => {
