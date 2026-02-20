@@ -179,4 +179,31 @@ export default class AccessControlUtil {
     }
     return hasOrgAccess;
   }
+
+  /**
+   * Method to check if the user has access to deploy edge optimize fixes for a site.
+   * @param {any} entity - The entity to check access for.
+   * @returns {boolean} True if the user is part of the organization that owns the site
+   * false otherwise , for admin user as well as for other users.
+   */
+  async canDeployForSite(entity) {
+    if (!isNonEmptyObject(entity)) {
+      throw new Error('Missing entity');
+    }
+    const { authInfo } = this;
+    if (entity.constructor.ENTITY_NAME === 'Site') {
+      const org = await entity.getOrganization();
+      if (!isNonEmptyObject(org)) {
+        throw new Error('Missing organization for site');
+      }
+      const imsOrgId = org.getImsOrgId();
+      const hasOrgAccess = authInfo.hasOrganization(imsOrgId);
+      return hasOrgAccess;
+    } else if (entity.constructor.ENTITY_NAME === 'Organization') {
+      const imsOrgId = entity.getImsOrgId();
+      const hasOrgAccess = authInfo.hasOrganization(imsOrgId);
+      return hasOrgAccess;
+    }
+    return false;
+  }
 }
