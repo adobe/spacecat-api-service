@@ -258,7 +258,17 @@ topic-prompts:
     security:
       - api_key: [ ]
 
-  delete:
+topic-prompts-remove:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: topicId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Topic identifier
+  post:
     tags:
       - site
       - sentiment
@@ -556,7 +566,17 @@ guideline-audits:
     security:
       - api_key: [ ]
 
-  delete:
+guideline-audits-unlink:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: guidelineId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Guideline identifier
+  post:
     tags:
       - site
       - sentiment

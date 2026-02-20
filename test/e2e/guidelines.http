@@ -135,7 +135,7 @@ Content-Type: application/json
 }
 
 ### Remove sub-prompts from a topic
-DELETE {{baseUrl}}/sites/{{siteId}}/sentiment/topics/{{topicId}}/prompts
+POST {{baseUrl}}/sites/{{siteId}}/sentiment/topics/{{topicId}}/prompts/remove
 x-api-key: {{apiKey}}
 Content-Type: application/json
 
@@ -262,7 +262,7 @@ Content-Type: application/json
 }
 
 ### Unlink audit types from a guideline
-DELETE {{baseUrl}}/sites/{{siteId}}/sentiment/guidelines/{{guidelineId}}/audits
+POST {{baseUrl}}/sites/{{siteId}}/sentiment/guidelines/{{guidelineId}}/audits/unlink
 x-api-key: {{apiKey}}
 Content-Type: application/json
 

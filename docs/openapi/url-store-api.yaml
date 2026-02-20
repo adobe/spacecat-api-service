@@ -263,7 +263,10 @@ url-store-get:
     security:
       - api_key: [ ]
 
-  delete:
+url-store-delete:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
     tags:
       - site
       - url store
