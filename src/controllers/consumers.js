@@ -74,19 +74,21 @@ function ConsumersController(ctx) {
   }
 
   async function notifySlack(message) {
-    try {
-      const slackClient = BaseSlackClient.createFrom(
-        ctx,
-        SLACK_TARGETS.WORKSPACE_INTERNAL,
-      );
-      const SLACK_CHANNEL_ID = ctx.env.S2S_SLACK_CHANNEL_ID;
-      await slackClient.postMessage({
-        channel: SLACK_CHANNEL_ID,
-        text: message,
+    await Promise.resolve()
+      .then(() => {
+        const slackClient = BaseSlackClient.createFrom(
+          ctx,
+          SLACK_TARGETS.WORKSPACE_INTERNAL,
+        );
+        const SLACK_CHANNEL_ID = ctx.env.S2S_SLACK_CHANNEL_ID;
+        return slackClient.postMessage({
+          channel: SLACK_CHANNEL_ID,
+          text: message,
+        });
+      })
+      .catch((e) => {
+        log.error(`Failed to send Slack notification: ${e.message}`);
       });
-    } catch (e) {
-      log.error(`Failed to send Slack notification: ${e.message}`);
-    }
   }
 
   /**

@@ -36,6 +36,7 @@ describe('ConsumersController', () => {
   let context;
   let mockConsumer;
   let sandbox;
+  let slackPostMessageStub;
 
   function createMockConsumerEntity(overrides = {}) {
     const defaults = {
@@ -120,10 +121,11 @@ describe('ConsumersController', () => {
       },
     };
 
+    slackPostMessageStub = sandbox.stub().resolves();
     const slackMock = {
       BaseSlackClient: {
         createFrom: () => ({
-          postMessage: sandbox.stub().resolves(),
+          postMessage: slackPostMessageStub,
         }),
       },
       SLACK_TARGETS: { WORKSPACE_INTERNAL: 'workspace_internal' },
@@ -317,38 +319,37 @@ describe('ConsumersController', () => {
       expect(body.status).to.equal('ACTIVE');
     });
 
-    it('succeeds even when Slack notification fails', async () => {
-      const SlackFailController = (await esmock('../../src/controllers/consumers.js', {
-        '../../src/support/access-control-util.js': {
-          default: {
-            fromContext: () => ({
-              hasS2SAdminAccess: () => true,
-            }),
-          },
-        },
-        '@adobe/spacecat-shared-data-access': {
-          Consumer: { STATUS: { ACTIVE: 'ACTIVE', SUSPENDED: 'SUSPENDED', REVOKED: 'REVOKED' } },
-        },
-        '@adobe/spacecat-shared-slack-client': {
-          BaseSlackClient: {
-            createFrom: () => ({
-              postMessage: sandbox.stub().rejects(new Error('Slack is down')),
-            }),
-          },
-          SLACK_TARGETS: { WORKSPACE_INTERNAL: 'workspace_internal' },
-        },
-      })).default;
+    it('succeeds even when Slack notification fails (postMessage rejects)', async () => {
+      const slackError = new Error('Slack is down');
+      slackPostMessageStub.rejects(slackError);
 
       context.dataAccess.Consumer.findByClientId.resolves(null);
       context.env = { S2S_SLACK_CHANNEL_ID: 'C_DUMMY_CHANNEL_ID' };
-      const controller = SlackFailController(context);
+      const controller = ConsumersController(context);
       const response = await controller.register({
         ...context,
         data: validPayload,
       });
 
       expect(response.status).to.equal(STATUS_CREATED);
-      expect(context.log.error).to.have.been.calledWithMatch(/^Failed to send Slack notification: .+$/);
+      expect(context.log.error).to.have.been.calledWith(
+        `Failed to send Slack notification: ${slackError.message}`,
+      );
+    });
+
+    it('succeeds even when Slack notification fails (env missing, catch branch)', async () => {
+      context.dataAccess.Consumer.findByClientId.resolves(null);
+      delete context.env;
+      const controller = ConsumersController(context);
+      const response = await controller.register({
+        ...context,
+        data: validPayload,
+      });
+
+      expect(response.status).to.equal(STATUS_CREATED);
+      expect(context.log.error).to.have.been.calledWithMatch(
+        /^Failed to send Slack notification: .+$/,
+      );
     });
 
     it('returns forbidden for non-admin users', async () => {
