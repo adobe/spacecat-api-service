@@ -21,6 +21,18 @@ npx mocha test/path/to/specific.test.js              # Run single test file
 npx mocha test/path/to/specific.test.js -g "pattern" # Run tests matching pattern
 ```
 
+### Integration Tests
+```bash
+# DynamoDB suite (requires Java 17+)
+npx mocha --require test/it/dynamo/harness.js --timeout 30000 'test/it/dynamo/**/*.test.js'
+
+# PostgreSQL suite (requires Docker + ECR access)
+npx mocha --require test/it/postgres/harness.js --timeout 30000 'test/it/postgres/**/*.test.js'
+
+# Single IT test file
+npx mocha --require test/it/dynamo/harness.js --timeout 30000 test/it/dynamo/sites.test.js
+```
+
 ### Documentation
 ```bash
 npm run docs              # Lint and build OpenAPI documentation
@@ -297,6 +309,7 @@ Tests mirror source structure in `test/`:
 - `test/routes/` - Route matching tests
 - `test/support/` - Utility tests
 - `test/e2e/` - End-to-end tests
+- `test/it/` - Integration tests (DynamoDB v2 + PostgreSQL v3)
 
 ### Standard Test Pattern
 
@@ -352,10 +365,32 @@ describe('Sites Controller', () => {
 - **Esmock**: ES module mocking
 - **Nock**: HTTP request mocking
 
+### Integration Tests (IT)
+
+**Location**: `test/it/` — see [test/it/README.md](test/it/README.md) for full documentation.
+
+Integration tests validate the full API request lifecycle against real database backends — no mocks. Every test runs identically against DynamoDB (v2) and PostgreSQL (v3) to ensure migration parity.
+
+**Architecture**: Shared test factories in `test/it/shared/tests/` are wired to backend-specific harnesses:
+
+```
+shared/tests/sites.js → dynamo/sites.test.js   (uses DynamoDB Local + v2 data access)
+                       → postgres/sites.test.js (uses Docker PostgreSQL + PostgREST)
+```
+
+**Key concepts**:
+- **Seed IDs**: All test data uses canonical UUIDs from `shared/seed-ids.js`
+- **Three auth personas**: `admin` (full access), `user` (ORG_1 only), `trialUser` (trial endpoints)
+- **Data reset**: Each `describe` block calls `before(() => resetData())` to ensure isolation
+- **Backend-specific options**: Use `options` parameter for v3-only features (e.g., `{ skipAsyncJobTests: true }` for DynamoDB)
+- **Seed data format**: DynamoDB uses camelCase, PostgreSQL uses snake_case
+- **v3-only entities**: `AsyncJob` only exists in PostgreSQL — DynamoDB tests skip these
+
 ### Test Requirements
 
-- **Behavior changes must include tests** - mark as Critical if missing
-- Mock external dependencies (databases, HTTP calls, queues)
+- **Behavior changes must include unit tests** - mark as Critical if missing
+- **New or modified endpoints must include integration tests** in `test/it/` — add shared test logic in `shared/tests/`, seed data in both `dynamo/seed-data/` and `postgres/seed-data/`, and wiring files in both backend directories
+- Mock external dependencies (databases, HTTP calls, queues) in unit tests
 - Test access control paths (authorized, forbidden, admin-only)
 - Test DTO transformations
 - Test error handling and validation
@@ -459,8 +494,15 @@ return internalServerError('Internal error occurred');
 7. Add DTO if needed
 8. Add access control checks
 9. Write unit tests in `test/controllers/`
-10. Run `npm run docs:build` to generate documentation
-11. Run `npm test` to verify tests pass
+10. Write integration tests in `test/it/`:
+    - Add seed IDs to `test/it/shared/seed-ids.js`
+    - Add seed data to both `dynamo/seed-data/` (camelCase) and `postgres/seed-data/` (snake_case)
+    - Register seeds in both `dynamo/seed.js` and `postgres/seed.js`
+    - Write shared test factory in `test/it/shared/tests/`
+    - Create wiring files in both `dynamo/` and `postgres/`
+11. Run `npm run docs:build` to generate documentation
+12. Run `npm test` to verify unit tests pass
+13. Run IT suites to verify integration tests pass (see Integration Tests commands above)
 
 ### Adding a Slack Command
 

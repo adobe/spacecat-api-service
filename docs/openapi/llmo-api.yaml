@@ -1432,6 +1432,12 @@ site-llmo-edge-optimize-config:
 site-llmo-edge-optimize-routing:
   parameters:
     - $ref: './parameters.yaml#/siteId'
+    - name: x-promise-token
+      in: header
+      required: true
+      description: Promise token exchanged for IMS user token to authorize the CDN API call.
+      schema:
+        type: string
   post:
     operationId: enableEdgeOptimize
     summary: Update edge optimize routing for a site
@@ -1440,9 +1446,12 @@ site-llmo-edge-optimize-routing:
       ENV is prod. The CDN API to call is selected by the required cdnType request body parameter.
 
       Flow:
-      1. Validates request (promiseToken and cdnType required; enabled must be boolean if provided).
-      2. Probes the site with User-Agent `AdobeEdgeOptimize-Test` (must return 2xx), 5s timeout.
-      3. Exchanges promiseToken for IMS user token, then calls internal CDN API for the chosen cdnType to set routing for the domain.
+      1. Validates request (x-promise-token header and cdnType required; enabled must be boolean if provided).
+      2. Probes the site with User-Agent `AdobeEdgeOptimize-Test`. If 2xx, flow continues with probe URL domain.
+         If 301, the Location header is checked: the probe URL hostname and the Location URL hostname are compared
+         (lowercased, with leading www. stripped); subdomains are considered, so only the same host is allowed. If they
+         match, the domain from the Location URL is used for the CDN API; otherwise the flow fails. Other non-2xx responses fail.
+      3. Exchanges the promise token for IMS user token, then calls internal CDN API for the chosen cdnType to set routing for the domain.
 
     tags:
       - llmo
@@ -1452,11 +1461,8 @@ site-llmo-edge-optimize-routing:
         application/json:
           schema:
             type: object
-            required: [cdnType, promiseToken]
+            required: [cdnType]
             properties:
-              promiseToken:
-                type: string
-                description: Promise token exchanged for IMS user token to authorize the CDN API call.
               cdnType:
                 type: string
                 enum: [aem-cs-fastly]
@@ -1489,7 +1495,7 @@ site-llmo-edge-optimize-routing:
                   type: string
                   example: aem-cs-fastly
       '400':
-        description: Bad request (e.g. non-prod ENV, missing/invalid promiseToken or cdnType, invalid enabled, probe failed or non-2xx)
+        description: Bad request (e.g. non-prod ENV, missing/invalid x-promise-token or cdnType, invalid enabled, probe failed, non-2xx/301, or 301 Location domain mismatch)
         content:
           application/json:
             schema:
