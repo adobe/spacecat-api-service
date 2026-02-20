@@ -200,7 +200,6 @@ function ConsumersController(ctx) {
         throw new ErrorWithStatusCode('capabilities must be a non-empty array', STATUS_BAD_REQUEST);
       }
 
-      log.info('Validating TA access token with IMS');
       let tokenPayload;
       try {
         tokenPayload = await imsClient.validateAccessToken(accessToken);
@@ -211,8 +210,6 @@ function ConsumersController(ctx) {
           STATUS_BAD_REQUEST,
         );
       }
-
-      log.info(`IMS validateAccessToken response: ${JSON.stringify(tokenPayload)}`);
 
       if (!tokenPayload?.token) {
         throw new ErrorWithStatusCode(
@@ -226,8 +223,6 @@ function ConsumersController(ctx) {
         user_id: technicalAccountId,
         org: imsOrgId,
       } = tokenPayload.token;
-      log.info(`Token resolved: clientId=${clientId}, imsOrgId=${imsOrgId}`);
-
       if (!hasText(clientId) || !hasText(technicalAccountId) || !hasText(imsOrgId)) {
         throw new ErrorWithStatusCode(
           'Access token does not contain required Technical Account identity fields',
@@ -244,7 +239,6 @@ function ConsumersController(ctx) {
         );
       }
 
-      log.info(`Creating consumer: clientId=${clientId}, consumerName=${consumerName}`);
       const consumer = await Consumer.create({
         clientId,
         technicalAccountId,
@@ -255,11 +249,12 @@ function ConsumersController(ctx) {
         updatedBy: getUpdatedBy(),
       });
 
-      const registerMsg = 'A new consumer registered:'
-        + ` clientId=${clientId}, consumerName=${consumerName},`
-        + ` imsOrgId=${imsOrgId},`
-        + ` capabilities=[${capabilities.join(', ')}],`
-        + ` by=${getUpdatedBy()}`;
+      const registerMsg = ':new: *New Consumer Registered*\n'
+        + `• *Name:* \`${consumerName}\`\n`
+        + `• *Client ID:* \`${clientId}\`\n`
+        + `• *IMS Org:* \`${imsOrgId}\`\n`
+        + `• *Capabilities:* ${capabilities.map((c) => `\`${c}\``).join(', ')}\n`
+        + `• *Registered by:* \`${getUpdatedBy()}\``;
       log.info(registerMsg);
       await notifySlack(registerMsg);
 
@@ -339,26 +334,29 @@ function ConsumersController(ctx) {
       const changes = [];
 
       if (hasText(data.consumerName)) {
-        changes.push(`consumerName: "${consumer.getConsumerName()}" -> "${data.consumerName}"`);
+        changes.push(`  › *consumerName:* \`${consumer.getConsumerName()}\` → \`${data.consumerName}\``);
         consumer.setConsumerName(data.consumerName);
       }
 
       if (Array.isArray(data.capabilities)) {
-        changes.push(`capabilities: [${consumer.getCapabilities().join(', ')}] -> [${data.capabilities.join(', ')}]`);
+        const oldCaps = consumer.getCapabilities().map((c) => `\`${c}\``).join(', ');
+        const newCaps = data.capabilities.map((c) => `\`${c}\``).join(', ');
+        changes.push(`  › *capabilities:* [${oldCaps}] → [${newCaps}]`);
         consumer.setCapabilities(data.capabilities);
       }
 
       if (hasText(data.status)) {
-        changes.push(`status: "${consumer.getStatus()}" -> "${data.status}"`);
+        changes.push(`  › *status:* \`${consumer.getStatus()}\` → \`${data.status}\``);
         consumer.setStatus(data.status);
       }
 
       consumer.setUpdatedBy(getUpdatedBy());
       await consumer.save();
 
-      const updateMsg = `Consumer updated: consumerId=${consumerId},`
-        + ` changes=[${changes.join('; ')}],`
-        + ` by=${getUpdatedBy()}`;
+      const updateMsg = ':pencil2: *Consumer Updated*\n'
+        + `• *Consumer ID:* \`${consumerId}\`\n`
+        + `• *Changes:*\n${changes.join('\n')}\n`
+        + `• *Updated by:* \`${getUpdatedBy()}\``;
       log.info(updateMsg);
       await notifySlack(updateMsg);
 
@@ -411,8 +409,9 @@ function ConsumersController(ctx) {
 
       await consumer.save();
 
-      const revokeMsg = 'Consumer revoked:'
-        + ` consumerId=${consumerId}, by=${getUpdatedBy()}`;
+      const revokeMsg = ':rotating_light: *Consumer Revoked*\n'
+        + `• *Consumer ID:* \`${consumerId}\`\n`
+        + `• *Revoked by:* \`${getUpdatedBy()}\``;
       log.info(revokeMsg);
       await notifySlack(revokeMsg);
 
