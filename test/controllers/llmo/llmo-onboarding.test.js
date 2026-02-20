@@ -1211,6 +1211,9 @@ describe('LLMO Onboarding Functions', () => {
           enableImport: sinon.stub(),
           getFetchConfig: sinon.stub().returns({}),
           updateFetchConfig: sinon.stub(),
+          getBrandProfile: sinon.stub().returns({
+            main_profile: { target_audience: 'Tech-savvy professionals' },
+          }),
         }),
         setConfig: sinon.stub(),
         save: sinon.stub().resolves(),
@@ -1272,6 +1275,11 @@ describe('LLMO Onboarding Functions', () => {
       };
 
       const result = await performLlmoOnboardingWithMocks(params, context);
+
+      // Verify DRS job was submitted with audience from brand profile
+      expect(mockDrsClient().submitPromptGenerationJob).to.have.been.calledWith(
+        sinon.match({ audience: 'Tech-savvy professionals' }),
+      );
 
       // Verify the result contains expected fields
       expect(result.siteId).to.equal('site123');
