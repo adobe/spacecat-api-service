@@ -428,6 +428,7 @@ export default function getRouteHandlers(
     // Consumer management
     'GET /consumers': consumersController.getAll,
     'GET /consumers/:consumerId': consumersController.getByConsumerId,
+    'GET /consumers/by-client-id/:clientId': consumersController.getByClientId,
     'POST /consumers/register': consumersController.register,
     'PATCH /consumers/:consumerId': consumersController.update,
     'POST /consumers/:consumerId/revoke': consumersController.revoke,

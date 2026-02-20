@@ -124,7 +124,7 @@ function ConsumersController(ctx) {
     }
 
     try {
-      const consumer = await Consumer.findByClientId(consumerId);
+      const consumer = await Consumer.findByConsumerId(consumerId);
       if (!consumer) {
         return notFound(`Consumer with consumerId ${consumerId} not found`);
       }
@@ -132,6 +132,34 @@ function ConsumersController(ctx) {
       return ok(ConsumerDto.toJSON(consumer));
     } catch (error) {
       log.error(`Failed to get consumer ${consumerId}: ${error.message}`);
+      return createErrorResponse(
+        new ErrorWithStatusCode('Failed to retrieve consumer', STATUS_INTERNAL_SERVER_ERROR),
+      );
+    }
+  };
+
+  /**
+   * Returns a single consumer by clientId (IMS OAuth client_id).
+   *
+   * @param {object} context - Request context.
+   * @returns {Promise<Response>} 200 with consumer data or 404 if not found.
+   */
+  const getByClientId = async (context) => {
+    const { clientId } = context.params;
+
+    if (!hasText(clientId)) {
+      return badRequest('clientId is required');
+    }
+
+    try {
+      const consumer = await Consumer.findByClientId(clientId);
+      if (!consumer) {
+        return notFound(`Consumer with clientId ${clientId} not found`);
+      }
+
+      return ok(ConsumerDto.toJSON(consumer));
+    } catch (error) {
+      log.error(`Failed to get consumer by clientId ${clientId}: ${error.message}`);
       return createErrorResponse(
         new ErrorWithStatusCode('Failed to retrieve consumer', STATUS_INTERNAL_SERVER_ERROR),
       );
@@ -294,7 +322,7 @@ function ConsumersController(ctx) {
         );
       }
 
-      const consumer = await Consumer.findByClientId(consumerId);
+      const consumer = await Consumer.findByConsumerId(consumerId);
       if (!consumer) {
         return notFound(`Consumer with consumerId ${consumerId} not found`);
       }
@@ -363,7 +391,7 @@ function ConsumersController(ctx) {
         throw new ErrorWithStatusCode('consumerId is required', STATUS_BAD_REQUEST);
       }
 
-      const consumer = await Consumer.findByClientId(consumerId);
+      const consumer = await Consumer.findByConsumerId(consumerId);
       if (!consumer) {
         return notFound(`Consumer with consumerId ${consumerId} not found`);
       }
@@ -401,6 +429,7 @@ function ConsumersController(ctx) {
   return {
     getAll,
     getByConsumerId,
+    getByClientId,
     register,
     update,
     revoke,

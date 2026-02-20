@@ -96,6 +96,7 @@ describe('ConsumersController', () => {
         Consumer: {
           all: sandbox.stub().resolves([mockConsumer]),
           findByClientId: sandbox.stub().resolves(mockConsumer),
+          findByConsumerId: sandbox.stub().resolves(mockConsumer),
           create: sandbox.stub().resolves(mockConsumer),
         },
       },
@@ -215,7 +216,7 @@ describe('ConsumersController', () => {
     });
 
     it('returns 404 when consumer not found', async () => {
-      context.dataAccess.Consumer.findByClientId.resolves(null);
+      context.dataAccess.Consumer.findByConsumerId.resolves(null);
       const controller = ConsumersController(context);
       const response = await controller.getByConsumerId({
         ...context,
@@ -225,7 +226,7 @@ describe('ConsumersController', () => {
       expect(response.status).to.equal(STATUS_NOT_FOUND);
     });
 
-    it('returns bad request when clientId is empty', async () => {
+    it('returns bad request when consumerId is empty', async () => {
       const controller = ConsumersController(context);
       const response = await controller.getByConsumerId({
         ...context,
@@ -236,11 +237,59 @@ describe('ConsumersController', () => {
     });
 
     it('returns error when data access fails', async () => {
-      context.dataAccess.Consumer.findByClientId.rejects(new Error('DB error'));
+      context.dataAccess.Consumer.findByConsumerId.rejects(new Error('DB error'));
       const controller = ConsumersController(context);
       const response = await controller.getByConsumerId({
         ...context,
         params: { consumerId: 'test-client-id' },
+      });
+
+      expect(response.status).to.equal(STATUS_INTERNAL_SERVER_ERROR);
+    });
+  });
+
+  describe('getByClientId', () => {
+    it('returns consumer by clientId', async () => {
+      const controller = ConsumersController(context);
+      const response = await controller.getByClientId({
+        ...context,
+        params: { clientId: 'test-client-id' },
+      });
+      const body = await response.json();
+
+      expect(response.status).to.equal(STATUS_OK);
+      expect(body.clientId).to.equal('test-client-id');
+      expect(body.technicalAccountId).to.equal('test-ta-id');
+      expect(context.dataAccess.Consumer.findByClientId).to.have.been.calledWith('test-client-id');
+    });
+
+    it('returns 404 when consumer not found', async () => {
+      context.dataAccess.Consumer.findByClientId.resolves(null);
+      const controller = ConsumersController(context);
+      const response = await controller.getByClientId({
+        ...context,
+        params: { clientId: 'unknown-client' },
+      });
+
+      expect(response.status).to.equal(STATUS_NOT_FOUND);
+    });
+
+    it('returns bad request when clientId is empty', async () => {
+      const controller = ConsumersController(context);
+      const response = await controller.getByClientId({
+        ...context,
+        params: { clientId: '' },
+      });
+
+      expect(response.status).to.equal(STATUS_BAD_REQUEST);
+    });
+
+    it('returns error when data access fails', async () => {
+      context.dataAccess.Consumer.findByClientId.rejects(new Error('DB error'));
+      const controller = ConsumersController(context);
+      const response = await controller.getByClientId({
+        ...context,
+        params: { clientId: 'test-client-id' },
       });
 
       expect(response.status).to.equal(STATUS_INTERNAL_SERVER_ERROR);
@@ -545,7 +594,7 @@ describe('ConsumersController', () => {
 
     it('blocks updates on a revoked consumer', async () => {
       const revokedConsumer = createMockConsumerEntity({ status: 'REVOKED' });
-      context.dataAccess.Consumer.findByClientId.resolves(revokedConsumer);
+      context.dataAccess.Consumer.findByConsumerId.resolves(revokedConsumer);
       const controller = ConsumersController(context);
       const response = await controller.update({
         ...context,
@@ -610,7 +659,7 @@ describe('ConsumersController', () => {
     });
 
     it('returns 404 when consumer not found', async () => {
-      context.dataAccess.Consumer.findByClientId.resolves(null);
+      context.dataAccess.Consumer.findByConsumerId.resolves(null);
       const controller = ConsumersController(context);
       const response = await controller.update({
         ...context,
@@ -621,7 +670,7 @@ describe('ConsumersController', () => {
       expect(response.status).to.equal(STATUS_NOT_FOUND);
     });
 
-    it('returns bad request when clientId is empty', async () => {
+    it('returns bad request when consumerId is empty', async () => {
       const controller = ConsumersController(context);
       const response = await controller.update({
         ...context,
@@ -703,7 +752,7 @@ describe('ConsumersController', () => {
 
     it('returns bad request when consumer is already revoked', async () => {
       const revokedConsumer = createMockConsumerEntity({ status: 'REVOKED' });
-      context.dataAccess.Consumer.findByClientId.resolves(revokedConsumer);
+      context.dataAccess.Consumer.findByConsumerId.resolves(revokedConsumer);
       const controller = ConsumersController(context);
       const response = await controller.revoke({
         ...context,
@@ -715,7 +764,7 @@ describe('ConsumersController', () => {
     });
 
     it('returns 404 when consumer not found', async () => {
-      context.dataAccess.Consumer.findByClientId.resolves(null);
+      context.dataAccess.Consumer.findByConsumerId.resolves(null);
       const controller = ConsumersController(context);
       const response = await controller.revoke({
         ...context,
@@ -725,7 +774,7 @@ describe('ConsumersController', () => {
       expect(response.status).to.equal(STATUS_NOT_FOUND);
     });
 
-    it('returns bad request when clientId is empty', async () => {
+    it('returns bad request when consumerId is empty', async () => {
       const controller = ConsumersController(context);
       const response = await controller.revoke({
         ...context,

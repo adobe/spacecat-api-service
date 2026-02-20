@@ -340,6 +340,7 @@ describe('getRouteHandlers', () => {
   const mockConsumersController = {
     getAll: sinon.stub(),
     getByConsumerId: sinon.stub(),
+    getByClientId: sinon.stub(),
     register: sinon.stub(),
     update: sinon.stub(),
     revoke: sinon.stub(),
@@ -684,6 +685,7 @@ describe('getRouteHandlers', () => {
       'DELETE /sites/:siteId/sentiment/guidelines/:guidelineId',
       'GET /sites/:siteId/sentiment/config',
       'GET /consumers/:consumerId',
+      'GET /consumers/by-client-id/:clientId',
       'PATCH /consumers/:consumerId',
       'POST /consumers/:consumerId/revoke',
     );
