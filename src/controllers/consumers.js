@@ -124,7 +124,7 @@ function ConsumersController(ctx) {
     }
 
     try {
-      const consumer = await Consumer.findByConsumerId(consumerId);
+      const consumer = await Consumer.findById(consumerId);
       if (!consumer) {
         return notFound(`Consumer with consumerId ${consumerId} not found`);
       }
@@ -322,7 +322,7 @@ function ConsumersController(ctx) {
         );
       }
 
-      const consumer = await Consumer.findByConsumerId(consumerId);
+      const consumer = await Consumer.findById(consumerId);
       if (!consumer) {
         return notFound(`Consumer with consumerId ${consumerId} not found`);
       }
@@ -391,7 +391,7 @@ function ConsumersController(ctx) {
         throw new ErrorWithStatusCode('consumerId is required', STATUS_BAD_REQUEST);
       }
 
-      const consumer = await Consumer.findByConsumerId(consumerId);
+      const consumer = await Consumer.findById(consumerId);
       if (!consumer) {
         return notFound(`Consumer with consumerId ${consumerId} not found`);
       }

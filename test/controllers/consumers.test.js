@@ -96,7 +96,7 @@ describe('ConsumersController', () => {
         Consumer: {
           all: sandbox.stub().resolves([mockConsumer]),
           findByClientId: sandbox.stub().resolves(mockConsumer),
-          findByConsumerId: sandbox.stub().resolves(mockConsumer),
+          findById: sandbox.stub().resolves(mockConsumer),
           create: sandbox.stub().resolves(mockConsumer),
         },
       },
@@ -216,7 +216,7 @@ describe('ConsumersController', () => {
     });
 
     it('returns 404 when consumer not found', async () => {
-      context.dataAccess.Consumer.findByConsumerId.resolves(null);
+      context.dataAccess.Consumer.findById.resolves(null);
       const controller = ConsumersController(context);
       const response = await controller.getByConsumerId({
         ...context,
@@ -237,7 +237,7 @@ describe('ConsumersController', () => {
     });
 
     it('returns error when data access fails', async () => {
-      context.dataAccess.Consumer.findByConsumerId.rejects(new Error('DB error'));
+      context.dataAccess.Consumer.findById.rejects(new Error('DB error'));
       const controller = ConsumersController(context);
       const response = await controller.getByConsumerId({
         ...context,
@@ -594,7 +594,7 @@ describe('ConsumersController', () => {
 
     it('blocks updates on a revoked consumer', async () => {
       const revokedConsumer = createMockConsumerEntity({ status: 'REVOKED' });
-      context.dataAccess.Consumer.findByConsumerId.resolves(revokedConsumer);
+      context.dataAccess.Consumer.findById.resolves(revokedConsumer);
       const controller = ConsumersController(context);
       const response = await controller.update({
         ...context,
@@ -659,7 +659,7 @@ describe('ConsumersController', () => {
     });
 
     it('returns 404 when consumer not found', async () => {
-      context.dataAccess.Consumer.findByConsumerId.resolves(null);
+      context.dataAccess.Consumer.findById.resolves(null);
       const controller = ConsumersController(context);
       const response = await controller.update({
         ...context,
@@ -752,7 +752,7 @@ describe('ConsumersController', () => {
 
     it('returns bad request when consumer is already revoked', async () => {
       const revokedConsumer = createMockConsumerEntity({ status: 'REVOKED' });
-      context.dataAccess.Consumer.findByConsumerId.resolves(revokedConsumer);
+      context.dataAccess.Consumer.findById.resolves(revokedConsumer);
       const controller = ConsumersController(context);
       const response = await controller.revoke({
         ...context,
@@ -764,7 +764,7 @@ describe('ConsumersController', () => {
     });
 
     it('returns 404 when consumer not found', async () => {
-      context.dataAccess.Consumer.findByConsumerId.resolves(null);
+      context.dataAccess.Consumer.findById.resolves(null);
       const controller = ConsumersController(context);
       const response = await controller.revoke({
         ...context,
