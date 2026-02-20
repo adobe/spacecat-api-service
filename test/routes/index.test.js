@@ -339,7 +339,7 @@ describe('getRouteHandlers', () => {
 
   const mockConsumersController = {
     getAll: sinon.stub(),
-    getByClientId: sinon.stub(),
+    getByConsumerId: sinon.stub(),
     register: sinon.stub(),
     update: sinon.stub(),
     revoke: sinon.stub(),
@@ -683,9 +683,9 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/sentiment/guidelines/:guidelineId',
       'DELETE /sites/:siteId/sentiment/guidelines/:guidelineId',
       'GET /sites/:siteId/sentiment/config',
-      'GET /consumers/:clientId',
-      'PATCH /consumers/:clientId',
-      'POST /consumers/:clientId/revoke',
+      'GET /consumers/:consumerId',
+      'PATCH /consumers/:consumerId',
+      'POST /consumers/:consumerId/revoke',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);

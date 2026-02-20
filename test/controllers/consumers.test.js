@@ -200,12 +200,12 @@ describe('ConsumersController', () => {
     });
   });
 
-  describe('getByClientId', () => {
+  describe('getByConsumerId', () => {
     it('returns consumer by clientId', async () => {
       const controller = ConsumersController(context);
-      const response = await controller.getByClientId({
+      const response = await controller.getByConsumerId({
         ...context,
-        params: { clientId: 'test-client-id' },
+        params: { consumerId: 'test-client-id' },
       });
       const body = await response.json();
 
@@ -217,9 +217,9 @@ describe('ConsumersController', () => {
     it('returns 404 when consumer not found', async () => {
       context.dataAccess.Consumer.findByClientId.resolves(null);
       const controller = ConsumersController(context);
-      const response = await controller.getByClientId({
+      const response = await controller.getByConsumerId({
         ...context,
-        params: { clientId: 'unknown-client' },
+        params: { consumerId: 'unknown-client' },
       });
 
       expect(response.status).to.equal(STATUS_NOT_FOUND);
@@ -227,9 +227,9 @@ describe('ConsumersController', () => {
 
     it('returns bad request when clientId is empty', async () => {
       const controller = ConsumersController(context);
-      const response = await controller.getByClientId({
+      const response = await controller.getByConsumerId({
         ...context,
-        params: { clientId: '' },
+        params: { consumerId: '' },
       });
 
       expect(response.status).to.equal(STATUS_BAD_REQUEST);
@@ -238,9 +238,9 @@ describe('ConsumersController', () => {
     it('returns error when data access fails', async () => {
       context.dataAccess.Consumer.findByClientId.rejects(new Error('DB error'));
       const controller = ConsumersController(context);
-      const response = await controller.getByClientId({
+      const response = await controller.getByConsumerId({
         ...context,
-        params: { clientId: 'test-client-id' },
+        params: { consumerId: 'test-client-id' },
       });
 
       expect(response.status).to.equal(STATUS_INTERNAL_SERVER_ERROR);
@@ -483,7 +483,7 @@ describe('ConsumersController', () => {
       const controller = ConsumersController(context);
       const response = await controller.update({
         ...context,
-        params: { clientId: 'test-client-id' },
+        params: { consumerId: 'test-client-id' },
         data: { consumerName: 'Updated Name' },
       });
       const body = await response.json();
@@ -498,7 +498,7 @@ describe('ConsumersController', () => {
       const controller = ConsumersController(context);
       const response = await controller.update({
         ...context,
-        params: { clientId: 'test-client-id' },
+        params: { consumerId: 'test-client-id' },
         data: { capabilities: ['site:read'] },
       });
 
@@ -510,7 +510,7 @@ describe('ConsumersController', () => {
       const controller = ConsumersController(context);
       const response = await controller.update({
         ...context,
-        params: { clientId: 'test-client-id' },
+        params: { consumerId: 'test-client-id' },
         data: { revokedAt: '2026-12-31T23:59:59.000Z' },
       });
 
@@ -523,7 +523,7 @@ describe('ConsumersController', () => {
       const controller = ConsumersController(context);
       const response = await controller.update({
         ...context,
-        params: { clientId: 'test-client-id' },
+        params: { consumerId: 'test-client-id' },
         data: { status: 'SUSPENDED' },
       });
 
@@ -535,7 +535,7 @@ describe('ConsumersController', () => {
       const controller = ConsumersController(context);
       const response = await controller.update({
         ...context,
-        params: { clientId: 'test-client-id' },
+        params: { consumerId: 'test-client-id' },
         data: { status: 'REVOKED' },
       });
 
@@ -549,7 +549,7 @@ describe('ConsumersController', () => {
       const controller = ConsumersController(context);
       const response = await controller.update({
         ...context,
-        params: { clientId: 'test-client-id' },
+        params: { consumerId: 'test-client-id' },
         data: { consumerName: 'New Name' },
       });
 
@@ -561,7 +561,7 @@ describe('ConsumersController', () => {
       const controller = ConsumersController(context);
       const response = await controller.update({
         ...context,
-        params: { clientId: 'test-client-id' },
+        params: { consumerId: 'test-client-id' },
         data: { clientId: 'new-client-id' },
       });
 
@@ -574,7 +574,7 @@ describe('ConsumersController', () => {
       const controller = ConsumersController(context);
       const response = await controller.update({
         ...context,
-        params: { clientId: 'test-client-id' },
+        params: { consumerId: 'test-client-id' },
         data: { technicalAccountId: 'new-ta-id' },
       });
 
@@ -586,7 +586,7 @@ describe('ConsumersController', () => {
       const controller = ConsumersController(context);
       const response = await controller.update({
         ...context,
-        params: { clientId: 'test-client-id' },
+        params: { consumerId: 'test-client-id' },
         data: { imsOrgId: 'new-org@AdobeOrg' },
       });
 
@@ -598,7 +598,7 @@ describe('ConsumersController', () => {
       const controller = ConsumersController(context);
       const response = await controller.update({
         ...context,
-        params: { clientId: 'test-client-id' },
+        params: { consumerId: 'test-client-id' },
         data: { clientId: 'x', technicalAccountId: 'y', imsOrgId: 'z' },
       });
 
@@ -614,7 +614,7 @@ describe('ConsumersController', () => {
       const controller = ConsumersController(context);
       const response = await controller.update({
         ...context,
-        params: { clientId: 'unknown' },
+        params: { consumerId: 'unknown' },
         data: { consumerName: 'New Name' },
       });
 
@@ -625,19 +625,19 @@ describe('ConsumersController', () => {
       const controller = ConsumersController(context);
       const response = await controller.update({
         ...context,
-        params: { clientId: '' },
+        params: { consumerId: '' },
         data: { consumerName: 'New Name' },
       });
 
       expect(response.status).to.equal(STATUS_BAD_REQUEST);
-      expect(response.headers.get('x-error')).to.equal('clientId is required');
+      expect(response.headers.get('x-error')).to.equal('consumerId is required');
     });
 
     it('returns bad request when body is missing', async () => {
       const controller = ConsumersController(context);
       const response = await controller.update({
         ...context,
-        params: { clientId: 'test-client-id' },
+        params: { consumerId: 'test-client-id' },
         data: null,
       });
 
@@ -665,7 +665,7 @@ describe('ConsumersController', () => {
       const controller = NonAdminController(context);
       const response = await controller.update({
         ...context,
-        params: { clientId: 'test-client-id' },
+        params: { consumerId: 'test-client-id' },
         data: { consumerName: 'New Name' },
       });
 
@@ -677,7 +677,7 @@ describe('ConsumersController', () => {
       const controller = ConsumersController(context);
       const response = await controller.update({
         ...context,
-        params: { clientId: 'test-client-id' },
+        params: { consumerId: 'test-client-id' },
         data: { consumerName: 'New Name' },
       });
 
@@ -690,7 +690,7 @@ describe('ConsumersController', () => {
       const controller = ConsumersController(context);
       const response = await controller.revoke({
         ...context,
-        params: { clientId: 'test-client-id' },
+        params: { consumerId: 'test-client-id' },
       });
       const body = await response.json();
 
@@ -707,7 +707,7 @@ describe('ConsumersController', () => {
       const controller = ConsumersController(context);
       const response = await controller.revoke({
         ...context,
-        params: { clientId: 'test-client-id' },
+        params: { consumerId: 'test-client-id' },
       });
 
       expect(response.status).to.equal(STATUS_BAD_REQUEST);
@@ -719,7 +719,7 @@ describe('ConsumersController', () => {
       const controller = ConsumersController(context);
       const response = await controller.revoke({
         ...context,
-        params: { clientId: 'unknown' },
+        params: { consumerId: 'unknown' },
       });
 
       expect(response.status).to.equal(STATUS_NOT_FOUND);
@@ -729,7 +729,7 @@ describe('ConsumersController', () => {
       const controller = ConsumersController(context);
       const response = await controller.revoke({
         ...context,
-        params: { clientId: '' },
+        params: { consumerId: '' },
       });
 
       expect(response.status).to.equal(STATUS_BAD_REQUEST);
@@ -756,7 +756,7 @@ describe('ConsumersController', () => {
       const controller = NonAdminController(context);
       const response = await controller.revoke({
         ...context,
-        params: { clientId: 'test-client-id' },
+        params: { consumerId: 'test-client-id' },
       });
 
       expect(response.status).to.equal(STATUS_FORBIDDEN);
@@ -767,7 +767,7 @@ describe('ConsumersController', () => {
       const controller = ConsumersController(context);
       const response = await controller.revoke({
         ...context,
-        params: { clientId: 'test-client-id' },
+        params: { consumerId: 'test-client-id' },
       });
 
       expect(response.status).to.equal(STATUS_INTERNAL_SERVER_ERROR);

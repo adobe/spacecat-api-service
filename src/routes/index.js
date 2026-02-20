@@ -427,10 +427,10 @@ export default function getRouteHandlers(
 
     // Consumer management
     'GET /consumers': consumersController.getAll,
-    'GET /consumers/:clientId': consumersController.getByClientId,
+    'GET /consumers/:consumerId': consumersController.getByConsumerId,
     'POST /consumers/register': consumersController.register,
-    'PATCH /consumers/:clientId': consumersController.update,
-    'POST /consumers/:clientId/revoke': consumersController.revoke,
+    'PATCH /consumers/:consumerId': consumersController.update,
+    'POST /consumers/:consumerId/revoke': consumersController.revoke,
   };
 
   // Initialization of static and dynamic routes

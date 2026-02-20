@@ -111,27 +111,27 @@ function ConsumersController(ctx) {
   };
 
   /**
-   * Returns a single consumer by clientId.
+   * Returns a single consumer by consumerId.
    *
    * @param {object} context - Request context.
    * @returns {Promise<Response>} 200 with consumer data or 404 if not found.
    */
-  const getByClientId = async (context) => {
-    const { clientId } = context.params;
+  const getByConsumerId = async (context) => {
+    const { consumerId } = context.params;
 
-    if (!hasText(clientId)) {
-      return badRequest('clientId is required');
+    if (!hasText(consumerId)) {
+      return badRequest('consumerId is required');
     }
 
     try {
-      const consumer = await Consumer.findByClientId(clientId);
+      const consumer = await Consumer.findByClientId(consumerId);
       if (!consumer) {
-        return notFound(`Consumer with clientId ${clientId} not found`);
+        return notFound(`Consumer with consumerId ${consumerId} not found`);
       }
 
       return ok(ConsumerDto.toJSON(consumer));
     } catch (error) {
-      log.error(`Failed to get consumer ${clientId}: ${error.message}`);
+      log.error(`Failed to get consumer ${consumerId}: ${error.message}`);
       return createErrorResponse(
         new ErrorWithStatusCode('Failed to retrieve consumer', STATUS_INTERNAL_SERVER_ERROR),
       );
@@ -260,12 +260,12 @@ function ConsumersController(ctx) {
       return forbidden('Only S2S admins can update consumers');
     }
 
-    const { clientId } = context.params;
+    const { consumerId } = context.params;
     const { data } = context;
 
     try {
-      if (!hasText(clientId)) {
-        throw new ErrorWithStatusCode('clientId is required', STATUS_BAD_REQUEST);
+      if (!hasText(consumerId)) {
+        throw new ErrorWithStatusCode('consumerId is required', STATUS_BAD_REQUEST);
       }
 
       if (!isNonEmptyObject(data)) {
@@ -294,9 +294,9 @@ function ConsumersController(ctx) {
         );
       }
 
-      const consumer = await Consumer.findByClientId(clientId);
+      const consumer = await Consumer.findByClientId(consumerId);
       if (!consumer) {
-        return notFound(`Consumer with clientId ${clientId} not found`);
+        return notFound(`Consumer with consumerId ${consumerId} not found`);
       }
 
       if (consumer.getStatus() === ConsumerModel.STATUS.REVOKED) {
@@ -326,7 +326,7 @@ function ConsumersController(ctx) {
       consumer.setUpdatedBy(getUpdatedBy());
       await consumer.save();
 
-      const updateMsg = `Consumer updated: clientId=${clientId},`
+      const updateMsg = `Consumer updated: consumerId=${consumerId},`
         + ` changes=[${changes.join('; ')}],`
         + ` by=${getUpdatedBy()}`;
       log.info(updateMsg);
@@ -337,7 +337,7 @@ function ConsumersController(ctx) {
       if (error instanceof ErrorWithStatusCode) {
         return createErrorResponse(error);
       }
-      log.error(`Failed to update consumer ${clientId}: ${error.message}`);
+      log.error(`Failed to update consumer ${consumerId}: ${error.message}`);
       return createErrorResponse(
         new ErrorWithStatusCode('Failed to update consumer', STATUS_INTERNAL_SERVER_ERROR),
       );
@@ -345,7 +345,7 @@ function ConsumersController(ctx) {
   };
 
   /**
-   * Revokes a consumer identified by clientId.
+   * Revokes a consumer identified by consumerId.
    * Sets status to REVOKED and records the revocation timestamp.
    *
    * @param {object} context - Request context.
@@ -356,16 +356,16 @@ function ConsumersController(ctx) {
       return forbidden('Only S2S admins can revoke consumers');
     }
 
-    const { clientId } = context.params;
+    const { consumerId } = context.params;
 
     try {
-      if (!hasText(clientId)) {
-        throw new ErrorWithStatusCode('clientId is required', STATUS_BAD_REQUEST);
+      if (!hasText(consumerId)) {
+        throw new ErrorWithStatusCode('consumerId is required', STATUS_BAD_REQUEST);
       }
 
-      const consumer = await Consumer.findByClientId(clientId);
+      const consumer = await Consumer.findByClientId(consumerId);
       if (!consumer) {
-        return notFound(`Consumer with clientId ${clientId} not found`);
+        return notFound(`Consumer with consumerId ${consumerId} not found`);
       }
 
       if (consumer.getStatus() === ConsumerModel.STATUS.REVOKED) {
@@ -382,7 +382,7 @@ function ConsumersController(ctx) {
       await consumer.save();
 
       const revokeMsg = 'Consumer revoked:'
-        + ` clientId=${clientId}, by=${getUpdatedBy()}`;
+        + ` consumerId=${consumerId}, by=${getUpdatedBy()}`;
       log.info(revokeMsg);
       await notifySlack(revokeMsg);
 
@@ -391,7 +391,7 @@ function ConsumersController(ctx) {
       if (error instanceof ErrorWithStatusCode) {
         return createErrorResponse(error);
       }
-      log.error(`Failed to revoke consumer ${clientId}: ${error.message}`);
+      log.error(`Failed to revoke consumer ${consumerId}: ${error.message}`);
       return createErrorResponse(
         new ErrorWithStatusCode('Failed to revoke consumer', STATUS_INTERNAL_SERVER_ERROR),
       );
@@ -400,7 +400,7 @@ function ConsumersController(ctx) {
 
   return {
     getAll,
-    getByClientId,
+    getByConsumerId,
     register,
     update,
     revoke,
