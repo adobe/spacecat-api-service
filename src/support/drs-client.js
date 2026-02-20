@@ -40,7 +40,7 @@ export default function DrsClient(context) {
    * @param {string} params.brandName - The brand name
    * @param {string} params.audience - Target audience description
    * @param {string} [params.region='US'] - Geographic region for prompts
-   * @param {number} [params.numPrompts=40] - Number of prompts to generate
+   * @param {number} [params.numPrompts=42] - Number of prompts to generate
    * @param {string} params.siteId - The SpaceCat site ID
    * @param {string} params.imsOrgId - The Adobe IMS organization ID
    * @returns {Promise<object>} Job submission result with job_id
@@ -51,7 +51,7 @@ export default function DrsClient(context) {
     brandName,
     audience,
     region = 'US',
-    numPrompts = 40,
+    numPrompts = 42,
     siteId,
     imsOrgId,
   }) {
@@ -67,6 +67,7 @@ export default function DrsClient(context) {
         audience,
         region,
         num_prompts: numPrompts,
+        model: 'gpt-5-nano',
       },
       metadata: {
         site_id: siteId,

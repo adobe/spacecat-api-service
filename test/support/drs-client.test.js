@@ -85,7 +85,7 @@ describe('DRS Client', () => {
       brandName: 'TestBrand',
       audience: 'general audience',
       region: 'US',
-      numPrompts: 40,
+      numPrompts: 42,
       siteId: 'site-uuid-123',
       imsOrgId: 'org@AdobeOrg',
     };
@@ -115,7 +115,7 @@ describe('DRS Client', () => {
       expect(body.parameters.brand_name).to.equal('TestBrand');
       expect(body.parameters.audience).to.equal('general audience');
       expect(body.parameters.region).to.equal('US');
-      expect(body.parameters.num_prompts).to.equal(40);
+      expect(body.parameters.num_prompts).to.equal(42);
       expect(body.webhook_url).to.be.undefined;
       expect(body.metadata.site_id).to.equal('site-uuid-123');
       expect(body.metadata.imsOrgId).to.equal('org@AdobeOrg');
@@ -140,7 +140,7 @@ describe('DRS Client', () => {
 
       const body = JSON.parse(mockFetch.firstCall.args[1].body);
       expect(body.parameters.region).to.equal('US');
-      expect(body.parameters.num_prompts).to.equal(40);
+      expect(body.parameters.num_prompts).to.equal(42);
     });
 
     it('throws error when DRS is not configured', async () => {
