@@ -1213,6 +1213,10 @@ function SuggestionsController(ctx, sqs, env) {
       return forbidden('User does not belong to the organization');
     }
 
+    if (!await accessControlUtil.canDeployForSite(site)) {
+      return forbidden('User does not have access to deploy edge optimize fixes for this site');
+    }
+
     const opportunity = await Opportunity.findById(opportunityId);
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
@@ -1622,6 +1626,10 @@ function SuggestionsController(ctx, sqs, env) {
 
     if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('User does not belong to the organization');
+    }
+
+    if (!await accessControlUtil.canDeployForSite(site)) {
+      return forbidden('User does not have access to deploy edge optimize fixes for this site');
     }
 
     const opportunity = await Opportunity.findById(opportunityId);

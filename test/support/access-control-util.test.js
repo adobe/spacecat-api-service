@@ -1333,6 +1333,86 @@ describe('Access Control Util', () => {
     });
   });
 
+  describe('canDeployForSite', () => {
+    it('throws error when entity is missing', async () => {
+      const util = AccessControlUtil.fromContext(context);
+      await expect(util.canDeployForSite(null)).to.be.rejectedWith('Missing entity');
+      await expect(util.canDeployForSite(undefined)).to.be.rejectedWith('Missing entity');
+      await expect(util.canDeployForSite({})).to.be.rejectedWith('Missing entity');
+    });
+
+    it('returns true when user has org access for a Site entity', async () => {
+      const util = AccessControlUtil.fromContext(context);
+      util.authInfo.hasOrganization = sinon.stub().returns(true);
+
+      const site = {
+        getOrganization: async () => ({ getImsOrgId: () => 'org-1' }),
+      };
+      site.constructor = { ENTITY_NAME: 'Site' };
+
+      const result = await util.canDeployForSite(site);
+      expect(result).to.be.true;
+      expect(util.authInfo.hasOrganization).to.have.been.calledWith('org-1');
+    });
+
+    it('returns false when user lacks org access for a Site entity', async () => {
+      const util = AccessControlUtil.fromContext(context);
+      util.authInfo.hasOrganization = sinon.stub().returns(false);
+
+      const site = {
+        getOrganization: async () => ({ getImsOrgId: () => 'org-1' }),
+      };
+      site.constructor = { ENTITY_NAME: 'Site' };
+
+      const result = await util.canDeployForSite(site);
+      expect(result).to.be.false;
+    });
+
+    it('throws error when Site has no organization', async () => {
+      const util = AccessControlUtil.fromContext(context);
+
+      const site = {
+        getOrganization: async () => null,
+      };
+      site.constructor = { ENTITY_NAME: 'Site' };
+
+      await expect(util.canDeployForSite(site)).to.be.rejectedWith('Missing organization for site');
+    });
+
+    it('returns true when user has org access for an Organization entity', async () => {
+      const util = AccessControlUtil.fromContext(context);
+      util.authInfo.hasOrganization = sinon.stub().returns(true);
+
+      const org = { getImsOrgId: () => 'org-1' };
+      org.constructor = { ENTITY_NAME: 'Organization' };
+
+      const result = await util.canDeployForSite(org);
+      expect(result).to.be.true;
+      expect(util.authInfo.hasOrganization).to.have.been.calledWith('org-1');
+    });
+
+    it('returns false when user lacks org access for an Organization entity', async () => {
+      const util = AccessControlUtil.fromContext(context);
+      util.authInfo.hasOrganization = sinon.stub().returns(false);
+
+      const org = { getImsOrgId: () => 'org-1' };
+      org.constructor = { ENTITY_NAME: 'Organization' };
+
+      const result = await util.canDeployForSite(org);
+      expect(result).to.be.false;
+    });
+
+    it('returns false for unknown entity types', async () => {
+      const util = AccessControlUtil.fromContext(context);
+
+      const unknown = { someField: 'value' };
+      unknown.constructor = { ENTITY_NAME: 'Unknown' };
+
+      const result = await util.canDeployForSite(unknown);
+      expect(result).to.be.false;
+    });
+  });
+
   describe('Constructor with dataAccess dependencies', () => {
     it('should initialize dataAccess dependencies correctly', () => {
       const mockEntitlement = {};

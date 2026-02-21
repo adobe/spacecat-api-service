@@ -3562,6 +3562,7 @@ describe('Suggestions Controller', () => {
     beforeEach(() => {
       // Default: allow LLMO administrator access (can be overridden in specific tests)
       sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(true);
+      sandbox.stub(AccessControlUtil.prototype, 'canDeployForSite').resolves(true);
 
       tokowakaSuggestions = [
         {
@@ -3978,6 +3979,25 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(403);
       const body = await response.json();
       expect(body.message).to.equal('User does not belong to the organization');
+    });
+
+    it('should return 403 if user cannot deploy for site', async () => {
+      AccessControlUtil.prototype.canDeployForSite.resolves(false);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.equal('User does not have access to deploy edge optimize fixes for this site');
     });
 
     it('should return 404 if opportunity not found', async () => {
@@ -5005,6 +5025,7 @@ describe('Suggestions Controller', () => {
     beforeEach(() => {
       // Default: allow LLMO administrator access (can be overridden in specific tests)
       sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(true);
+      sandbox.stub(AccessControlUtil.prototype, 'canDeployForSite').resolves(true);
 
       // Mock suggestions with tokowakaDeployed timestamp
       // Mock suggestions with edgeDeployed timestamp
@@ -5502,6 +5523,25 @@ describe('Suggestions Controller', () => {
       expect(failedSuggestion.statusCode).to.equal(400);
       expect(failedSuggestion.message).to.include('invalid configuration');
     });
+
+    it('should return 403 if user cannot deploy for site', async () => {
+      AccessControlUtil.prototype.canDeployForSite.resolves(false);
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.equal('User does not have access to deploy edge optimize fixes for this site');
+    });
   });
 
   describe('rollbackSuggestionFromEdge - domain-wide rollback', () => {
@@ -5513,6 +5553,7 @@ describe('Suggestions Controller', () => {
     beforeEach(() => {
       // Default: allow LLMO administrator access (can be overridden in specific tests)
       sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(true);
+      sandbox.stub(AccessControlUtil.prototype, 'canDeployForSite').resolves(true);
 
       // Create a domain-wide suggestion that has been deployed
       domainWideSuggestion = {
