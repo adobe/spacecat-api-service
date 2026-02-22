@@ -38,6 +38,7 @@ describe('getRouteHandlers', () => {
   };
 
   const mockHooksController = {
+    processDrsPromptGenerationHook: sinon.stub(),
   };
 
   const mockSitesController = {
