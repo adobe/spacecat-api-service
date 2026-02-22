@@ -24,13 +24,23 @@ import {
   isObject,
   isInteger,
   isValidUUID,
+  prependSchema,
+  determineAEMCSPageId,
+  fetch as adobeFetch,
+  getPageVersion,
+  restorePageVersion,
 } from '@adobe/spacecat-shared-utils';
 
 import { Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import { SuggestionDto, SUGGESTION_VIEWS } from '../dto/suggestion.js';
 import { FixDto } from '../dto/fix.js';
-import { sendAutofixMessage, getIMSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
+import {
+  sendAutofixMessage,
+  getIMSPromiseToken,
+  exchangePromiseToken,
+  ErrorWithStatusCode,
+} from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
@@ -942,6 +952,234 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     return createResponse(response, 207);
+  };
+
+  const testMetaTagsAutofix = async (context) => {
+    const { log } = context;
+    const siteId = context.params?.siteId;
+    const opportunityId = context.params?.opportunityId;
+    const suggestionId = context.params?.suggestionId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(opportunityId)) {
+      return badRequest('Opportunity ID required');
+    }
+    if (!isValidUUID(suggestionId)) {
+      return badRequest('Suggestion ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) return notFound('Site not found');
+
+    if (!await accessControlUtil.hasAccess(site, 'auto_fix')) {
+      return forbidden('User does not belong to the organization or does not have sufficient permissions');
+    }
+
+    const opportunity = await Opportunity.findById(opportunityId);
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound('Opportunity not found');
+    }
+
+    const suggestion = await Suggestion.findById(suggestionId);
+    if (!suggestion || suggestion.getOpportunityId() !== opportunityId) {
+      return notFound('Suggestion not found');
+    }
+
+    if (site.getDeliveryType?.() !== 'AEM_CS') {
+      return badRequest('Test autofix is only supported for AEM_CS sites');
+    }
+
+    const deliveryConfig = site.getDeliveryConfig?.() || {};
+    const { authorURL } = deliveryConfig;
+    if (!hasText(authorURL)) {
+      return badRequest('Author URL not found in site delivery config');
+    }
+
+    // Respect same Content API selection behavior as the worker
+    const preferContentApi = String(deliveryConfig?.preferContentApi ?? 'true').toLowerCase() === 'true';
+    const disableForMetaTags = String(deliveryConfig?.disableContentApiForMetaTags ?? 'false').toLowerCase() === 'true';
+    if (!preferContentApi || disableForMetaTags) {
+      return badRequest('Content API is disabled for meta-tags on this site (PSS-only).');
+    }
+
+    const data = suggestion.getData?.() || {};
+    const rawUrl = data?.url;
+    if (!hasText(rawUrl)) {
+      return badRequest('Suggestion is missing required data.url');
+    }
+    const pageURL = prependSchema(rawUrl);
+
+    const newValue = data?.editedSuggestion || data?.aiSuggestion;
+    if (!hasText(newValue)) {
+      return badRequest('Suggestion has no editedSuggestion/aiSuggestion to apply');
+    }
+
+    const tagName = String(data?.tagName || '').toLowerCase();
+    if (!['title', 'description'].includes(tagName)) {
+      return badRequest('Only title/description meta-tags are supported by this test endpoint right now');
+    }
+
+    let promiseTokenResponse;
+    try {
+      promiseTokenResponse = await getIMSPromiseToken(context);
+    } catch (e) {
+      if (e instanceof ErrorWithStatusCode) {
+        return badRequest(e.message);
+      }
+      return createResponse({ message: 'Error getting promise token' }, 500);
+    }
+
+    let accessToken;
+    try {
+      accessToken = await exchangePromiseToken(context, promiseTokenResponse?.promise_token);
+    } catch (e) {
+      if (e instanceof ErrorWithStatusCode) {
+        return badRequest(e.message);
+      }
+      return createResponse({ message: 'Error exchanging promise token' }, 500);
+    }
+
+    const bearerToken = `Bearer ${accessToken}`;
+
+    const pageId = await determineAEMCSPageId(pageURL, authorURL, bearerToken, true, log);
+    if (!hasText(pageId)) {
+      return badRequest(`Unable to resolve pageId for url ${pageURL}. Ensure content-page-id/content-page-ref is present.`);
+    }
+
+    const pageEndpoint = `${authorURL}/adobe/pages/${pageId}`;
+
+    const getPageEtag = async () => {
+      const resp = await adobeFetch(pageEndpoint, {
+        method: 'GET',
+        headers: {
+          Authorization: bearerToken,
+          Accept: 'application/json',
+          'x-aem-affinity-type': 'api',
+        },
+      });
+      if (!resp.ok) {
+        const body = await resp.text();
+        throw new Error(`Failed to fetch page for ETag. Status: ${resp.status} ${resp.statusText}. Response: ${body}`);
+      }
+      const etag = resp.headers.get('etag');
+      if (!etag) {
+        throw new Error('Page response missing ETag header');
+      }
+      return etag;
+    };
+
+    // 1) Create a pre-change version (checkpoint)
+    const versionLabel = `aso-test-meta-${suggestionId}`;
+    const versionDescription = `Backoffice test autofix version for suggestion ${suggestionId}`;
+    const versionCreateEndpoint = `${authorURL}/adobe/pages/${pageId}/versions`;
+    const versionCreateResp = await adobeFetch(versionCreateEndpoint, {
+      method: 'POST',
+      body: JSON.stringify({ label: versionLabel, description: versionDescription }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: bearerToken,
+        Accept: 'application/json',
+        'x-aem-affinity-type': 'api',
+      },
+    });
+
+    if (!versionCreateResp.ok) {
+      const body = await versionCreateResp.text();
+      return createResponse({
+        message: `Failed to create page version. Status: ${versionCreateResp.status} ${versionCreateResp.statusText}. Response: ${body}`,
+      }, 502);
+    }
+
+    const versionData = await versionCreateResp.json();
+    const versionId = versionData?.id;
+    if (!hasText(versionId)) {
+      return createResponse({ message: 'Version creation response missing version id' }, 502);
+    }
+
+    // 2) Apply a Content API patch for title/description
+    const currentEtag = await getPageEtag();
+    const patchPayload = tagName === 'title' ? { title: newValue } : { description: newValue };
+    const patchResp = await adobeFetch(pageEndpoint, {
+      method: 'PATCH',
+      body: JSON.stringify(patchPayload),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: bearerToken,
+        Accept: 'application/json',
+        'If-Match': currentEtag,
+        'x-aem-affinity-type': 'api',
+      },
+    });
+
+    if (!patchResp.ok) {
+      const body = await patchResp.text();
+      return createResponse({
+        message: `Failed to apply Content API patch. Status: ${patchResp.status} ${patchResp.statusText}. Response: ${body}`,
+        pageId,
+        versionId,
+      }, 502);
+    }
+
+    // 3) Restore the pre-change version (page ETag first; fallback to version ETag)
+    const restoreWithFallback = async () => {
+      const pageEtagAfterPatch = await getPageEtag();
+      try {
+        await restorePageVersion(
+          authorURL,
+          pageId,
+          versionId,
+          bearerToken,
+          pageEtagAfterPatch,
+          log,
+        );
+        return { ifMatch: 'page-etag' };
+      } catch (e) {
+        const msg = String(e?.message || e);
+        const isPrecondition = msg.includes('Status: 412') || msg.toLowerCase().includes('precondition');
+        if (!isPrecondition) {
+          throw e;
+        }
+        const { etag: versionEtag } = await getPageVersion(
+          authorURL,
+          pageId,
+          versionId,
+          bearerToken,
+          log,
+        );
+        await restorePageVersion(
+          authorURL,
+          pageId,
+          versionId,
+          bearerToken,
+          versionEtag,
+          log,
+        );
+        return { ifMatch: 'version-etag' };
+      }
+    };
+
+    let restoreMeta;
+    try {
+      restoreMeta = await restoreWithFallback();
+    } catch (e) {
+      return createResponse({
+        message: `Patch applied but failed to restore version ${versionId}. Error: ${e.message}`,
+        pageId,
+        versionId,
+      }, 502);
+    }
+
+    return ok({
+      pageId,
+      versionId,
+      versionLabel,
+      applied: true,
+      restored: true,
+      restoreIfMatch: restoreMeta.ifMatch,
+      tagName,
+    });
   };
 
   const removeSuggestion = async (context) => {
@@ -1941,6 +2179,7 @@ function SuggestionsController(ctx, sqs, env) {
 
   return {
     autofixSuggestions,
+    testMetaTagsAutofix,
     createSuggestions,
     deploySuggestionToEdge,
     rollbackSuggestionFromEdge,
