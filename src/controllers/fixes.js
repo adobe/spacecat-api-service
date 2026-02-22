@@ -35,6 +35,8 @@ import {
 import AccessControlUtil from '../support/access-control-util.js';
 import { FixDto } from '../dto/fix.js';
 import { SuggestionDto } from '../dto/suggestion.js';
+import { resolveDocumentPath } from '../support/document-path-resolver.js';
+import { getImsUserToken } from '../support/utils.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 
@@ -68,12 +70,16 @@ export class FixesController {
   /** @type {AccessControlUtil} */
   #accessControl;
 
+  /** @type {LambdaContext} */
+  #ctx;
+
   /**
    * @param {LambdaContext} ctx
    * @param {AccessControlUtil} [accessControl]
    */
   constructor(ctx, accessControl = new AccessControlUtil(ctx)) {
     const { dataAccess } = ctx;
+    this.#ctx = ctx;
     this.#FixEntity = dataAccess.FixEntity;
     this.#Opportunity = dataAccess.Opportunity;
     this.#Site = dataAccess.Site;
@@ -220,10 +226,26 @@ export class FixesController {
       return context.data ? badRequest('Request body must be an array') : badRequest('No updates provided');
     }
 
+    const log = this.#ctx.log || console;
+
+    // Pre-fetch site and opportunity info for documentPath enrichment of manual fixes
+    const enrichmentCtx = await this.#prepareDocumentPathEnrichment(
+      context.data,
+      siteId,
+      opportunityId,
+      log,
+    );
+
     const FixEntity = this.#FixEntity;
     const fixes = await Promise.all(context.data.map(async (fixData, index) => {
       try {
-        const fixEntity = await FixEntity.create({ ...fixData, opportunityId });
+        const enrichedFixData = await FixesController.#enrichWithDocumentPath(
+          fixData,
+          enrichmentCtx,
+          log,
+        );
+
+        const fixEntity = await FixEntity.create({ ...enrichedFixData, opportunityId });
         if (fixData.suggestionIds) {
           const suggestions = await Promise.all(
             fixData.suggestionIds.map((id) => this.#Suggestion.findById(id)),
@@ -252,6 +274,64 @@ export class FixesController {
         failed: fixes.length - succeeded,
       },
     }, 207);
+  }
+
+  /**
+   * Prepares context for documentPath enrichment by pre-fetching site and opportunity.
+   * Only performs lookups when at least one fix in the batch is a manual fix (origin: 'aso')
+   * that doesn't already have a documentPath.
+   * @returns {Promise<{site: Object, opportunityType: string, bearerToken: string}|null>}
+   */
+  async #prepareDocumentPathEnrichment(fixDataArray, siteId, opportunityId, log) {
+    const needsEnrichment = fixDataArray.some(
+      (fixData) => fixData.origin === 'aso' && !fixData.changeDetails?.documentPath,
+    );
+    if (!needsEnrichment) return null;
+
+    try {
+      const [site, opportunity] = await Promise.all([
+        this.#Site.findById(siteId),
+        this.#Opportunity.findById(opportunityId),
+      ]);
+
+      if (!site || !opportunity) return null;
+
+      const bearerToken = `Bearer ${getImsUserToken(this.#ctx)}`;
+      return {
+        site,
+        opportunityType: opportunity.getType(),
+        bearerToken,
+      };
+    } catch (e) {
+      log.warn(`Could not prepare documentPath enrichment: ${e.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Enriches a fix data object with documentPath when it's a manual fix without one.
+   * Returns the original fixData unchanged if enrichment is not needed or fails.
+   */
+  static async #enrichWithDocumentPath(fixData, enrichmentCtx, log) {
+    if (!enrichmentCtx) return fixData;
+    if (fixData.origin !== 'aso') return fixData;
+    if (fixData.changeDetails?.documentPath) return fixData;
+
+    const { site, opportunityType, bearerToken } = enrichmentCtx;
+    const documentPath = await resolveDocumentPath(
+      site,
+      opportunityType,
+      fixData.changeDetails,
+      bearerToken,
+      log,
+    );
+
+    if (!documentPath) return fixData;
+
+    return {
+      ...fixData,
+      changeDetails: { ...fixData.changeDetails, documentPath },
+    };
   }
 
   /**
