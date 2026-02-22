@@ -48,6 +48,7 @@ import {
   generateDataFolder,
   performLlmoOnboarding,
   performLlmoOffboarding,
+  postLlmoAlert,
 } from './llmo-onboarding.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
@@ -962,7 +963,7 @@ function LlmoController(ctx) {
    * @returns {Promise<Response>} Created/updated edge config
    */
   const createOrUpdateEdgeConfig = async (context) => {
-    const { log, dataAccess } = context;
+    const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { authInfo: { profile } } = context.attributes;
     const { Site } = dataAccess;
@@ -1047,12 +1048,36 @@ function LlmoController(ctx) {
 
       const currentConfig = site.getConfig();
       const existingEdgeConfig = currentConfig.getEdgeOptimizeConfig() || {};
+      const isNewlyOpted = !existingEdgeConfig.opted;
       currentConfig.updateEdgeOptimizeConfig({
         ...existingEdgeConfig,
         opted: existingEdgeConfig.opted ?? Date.now(),
       });
       await saveSiteConfig(site, currentConfig, log, 'updating edge optimize config');
       log.info(`[edge-optimize-config] Updated edge optimize config for site ${siteId} by ${lastModifiedBy}`);
+
+      // Send Slack notification only when opted field is being added
+      if (isNewlyOpted) {
+        try {
+          const llmoTeamUserIds = env.SLACK_LLMO_EDGE_OPTIMIZE_TEAM;
+
+          // Build user mentions from comma-separated user IDs
+          let userMentions = '';
+          if (hasText(llmoTeamUserIds)) {
+            const userIds = llmoTeamUserIds.split(',').map((id) => id.trim()).filter((id) => id);
+            userMentions = userIds.map((userId) => `<@${userId}>`).join(' ');
+          }
+
+          const message = `:gear: Site *<${baseURL}|${baseURL}>* has opted for edge optimization${userMentions ? `\n\ncc: ${userMentions}` : ''}`;
+
+          await postLlmoAlert(message, context);
+          log.info(`[edge-optimize-config] Slack notification sent for site ${siteId}`);
+        } catch (slackError) {
+          // Log error but don't fail the request
+          log.error(`[edge-optimize-config] Failed to send Slack notification for site ${siteId}:`, slackError);
+        }
+      }
+
       return ok({
         ...metaconfig,
       });

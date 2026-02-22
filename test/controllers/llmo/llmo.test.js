@@ -76,6 +76,8 @@ describe('LlmoController', () => {
   let writeStrategyStub;
   let exchangePromiseTokenStub;
   let fetchWithTimeoutStub;
+  let postLlmoAlertStub;
+  let postSlackMessageStub;
 
   const mockHttpUtils = {
     ok: (data, headers = {}) => ({
@@ -105,6 +107,30 @@ describe('LlmoController', () => {
     }),
   };
 
+  // Common mocks needed for all esmock instances
+  const getCommonMocks = () => ({
+    '@adobe/spacecat-shared-tokowaka-client': {
+      default: {
+        createFrom: () => ({
+          fetchMetaconfig: sinon.stub(),
+          createMetaconfig: sinon.stub(),
+          updateMetaconfig: sinon.stub(),
+          checkEdgeOptimizeStatus: sinon.stub(),
+        }),
+      },
+      calculateForwardedHost: (url) => {
+        try {
+          const u = new URL(url.startsWith('http') ? url : `https://${url}`);
+          const h = u.hostname;
+          const dots = (h.match(/\./g) || []).length;
+          return dots === 1 ? `www.${h}` : h;
+        } catch (e) {
+          throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
+        }
+      },
+    },
+  });
+
   before(async () => {
     triggerBrandProfileAgentStub = sinon.stub().resolves('exec-123');
     updateModifiedByDetailsStub = sinon.stub();
@@ -117,6 +143,17 @@ describe('LlmoController', () => {
       checkEdgeOptimizeStatus: sinon.stub(),
     };
     exchangePromiseTokenStub = sinon.stub().resolves({ access_token: 'fake-ims-token' });
+
+    // Mock postLlmoAlert and postSlackMessage
+    postLlmoAlertStub = sinon.stub().resolves();
+    postSlackMessageStub = sinon.stub().resolves();
+
+    // Set up esmock for llmo-onboarding.js first
+    await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
+      '../../../src/utils/slack/base.js': {
+        postSlackMessage: (...args) => postSlackMessageStub(...args),
+      },
+    });
 
     // Set up esmock once for all tests
     LlmoController = await esmock('../../../src/controllers/llmo/llmo.js', {
@@ -191,6 +228,9 @@ describe('LlmoController', () => {
           }
         },
       },
+      '../../../src/utils/slack/base.js': {
+        postSlackMessage: (...args) => postSlackMessageStub(...args),
+      },
     });
 
     // Create controller with access denied for access control tests
@@ -202,6 +242,24 @@ describe('LlmoController', () => {
       '../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
       },
+      '@adobe/spacecat-shared-tokowaka-client': {
+        default: {
+          createFrom: () => mockTokowakaClient,
+        },
+        calculateForwardedHost: (url) => {
+          try {
+            const u = new URL(url.startsWith('http') ? url : `https://${url}`);
+            const h = u.hostname;
+            const dots = (h.match(/\./g) || []).length;
+            return dots === 1 ? `www.${h}` : h;
+          } catch (e) {
+            throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
+          }
+        },
+      },
+      '../../../src/utils/slack/base.js': {
+        postSlackMessage: (...args) => postSlackMessageStub(...args),
+      },
     });
     controllerWithAccessDenied = LlmoControllerDenied;
   });
@@ -209,6 +267,8 @@ describe('LlmoController', () => {
   beforeEach(async () => {
     triggerBrandProfileAgentStub.resetHistory();
     updateModifiedByDetailsStub.resetHistory();
+    postLlmoAlertStub.resetHistory();
+    postSlackMessageStub.resetHistory();
     updateModifiedByDetailsStub.callsFake((config) => ({
       newConfig: config,
       stats: {
@@ -342,6 +402,9 @@ describe('LlmoController', () => {
     mockEnv = {
       LLMO_HLX_API_KEY: TEST_API_KEY,
       AUDIT_JOBS_QUEUE_URL: TEST_QUEUE_URL,
+      SLACK_LLMO_ALERTS_CHANNEL_ID: 'C123456789',
+      SLACK_BOT_TOKEN: 'xoxb-test-token',
+      SLACK_LLMO_EDGE_OPTIMIZE_TEAM: 'U123456789,U234567890,U345678901,U456789012,U567890123,U678901234,U789012345,U890123456,U901234567',
     };
 
     mockContext = {
@@ -1665,6 +1728,7 @@ describe('LlmoController', () => {
         '@adobe/spacecat-shared-utils': {
           isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
         },
+        ...getCommonMocks(),
       });
 
       const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
@@ -1743,6 +1807,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        ...getCommonMocks(),
       });
 
       const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
@@ -1790,6 +1855,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        ...getCommonMocks(),
       });
 
       const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
@@ -1816,6 +1882,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        ...getCommonMocks(),
       });
 
       const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
@@ -1966,6 +2033,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        ...getCommonMocks(),
       });
 
       const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
@@ -2179,6 +2247,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        ...getCommonMocks(),
       });
 
       const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
@@ -2245,6 +2314,7 @@ describe('LlmoController', () => {
         const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
           '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
           '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+          ...getCommonMocks(),
         });
 
         const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
@@ -2367,6 +2437,7 @@ describe('LlmoController', () => {
         '../../../src/support/brand-profile-trigger.js': {
           triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
         },
+        ...getCommonMocks(),
       });
       const testController = LlmoControllerOnboard(mockContext);
 
@@ -2422,6 +2493,7 @@ describe('LlmoController', () => {
             schemas: {},
             composeBaseURL: (domain) => `https://${domain}`,
           },
+          ...getCommonMocks(),
         });
         const testController = LlmoControllerOnboard(mockContext);
 
@@ -2459,6 +2531,7 @@ describe('LlmoController', () => {
         '../../../src/support/brand-profile-trigger.js': {
           triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
         },
+        ...getCommonMocks(),
       });
       const testController = LlmoControllerOnboard(mockContext);
 
@@ -2493,6 +2566,7 @@ describe('LlmoController', () => {
         '../../../src/support/brand-profile-trigger.js': {
           triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
         },
+        ...getCommonMocks(),
       });
       const testController = LlmoControllerOnboard(mockContext);
 
@@ -2531,6 +2605,7 @@ describe('LlmoController', () => {
         '../../../src/support/brand-profile-trigger.js': {
           triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
         },
+        ...getCommonMocks(),
       });
       const testController = LlmoControllerOnboard(mockContext);
 
@@ -2554,6 +2629,7 @@ describe('LlmoController', () => {
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        ...getCommonMocks(),
       });
 
       const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
@@ -2603,6 +2679,7 @@ describe('LlmoController', () => {
         '../../../src/support/brand-profile-trigger.js': {
           triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
         },
+        ...getCommonMocks(),
       });
       const testController = LlmoControllerOffboard(mockContext);
 
@@ -2632,6 +2709,7 @@ describe('LlmoController', () => {
         '../../../src/support/brand-profile-trigger.js': {
           triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
         },
+        ...getCommonMocks(),
       });
       const testController = LlmoControllerOffboard(mockContext);
 
@@ -2656,6 +2734,7 @@ describe('LlmoController', () => {
           queryLlmoFiles: queryLlmoFilesStub,
         },
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        ...getCommonMocks(),
       });
 
       return {
@@ -2692,6 +2771,7 @@ describe('LlmoController', () => {
           queryLlmoFiles: queryLlmoFilesStub,
         },
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        ...getCommonMocks(),
       });
 
       const errorController = LlmoControllerWithCache(mockContext);
@@ -3809,9 +3889,32 @@ describe('LlmoController', () => {
     });
 
     it('should return 403 when user is not LLMO administrator', async () => {
+      const postLlmoAlertStubLocal = sinon.stub().resolves();
       const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
         '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '@adobe/spacecat-shared-tokowaka-client': {
+          default: {
+            createFrom: () => mockTokowakaClient,
+          },
+          calculateForwardedHost: (url) => {
+            try {
+              const u = new URL(url.startsWith('http') ? url : `https://${url}`);
+              const h = u.hostname;
+              const dots = (h.match(/\./g) || []).length;
+              return dots === 1 ? `www.${h}` : h;
+            } catch (e) {
+              throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
+            }
+          },
+        },
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: sinon.stub().resolves({ isValid: true }),
+          generateDataFolder: sinon.stub().returns('test-folder'),
+          performLlmoOnboarding: sinon.stub().resolves({}),
+          performLlmoOffboarding: sinon.stub().resolves({}),
+          postLlmoAlert: (...args) => postLlmoAlertStubLocal(...args),
+        },
       });
 
       const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
@@ -3820,6 +3923,299 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(403);
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('Only LLMO administrators can update the edge optimize config');
+    });
+
+    // Note: Slack notification functionality uses postLlmoAlert() from llmo-onboarding.js
+    // Tests for postLlmoAlert can be found in llmo-onboarding.test.js
+
+    it('should use default lastModifiedBy when profile is undefined', async () => {
+      const newMetaconfig = {
+        siteId: TEST_SITE_ID,
+        apiKeys: ['test-api-key-123'],
+        tokowakaEnabled: true,
+      };
+
+      mockTokowakaClient.fetchMetaconfig.resolves(null);
+      mockTokowakaClient.createMetaconfig.resolves(newMetaconfig);
+
+      // Create context without profile
+      const contextWithoutProfile = {
+        ...edgeConfigContext,
+        attributes: {
+          authInfo: {},
+        },
+      };
+
+      const result = await controller.createOrUpdateEdgeConfig(contextWithoutProfile);
+
+      expect(result.status).to.equal(200);
+      expect(mockTokowakaClient.createMetaconfig).to.have.been.calledWith(
+        'https://www.example.com',
+        TEST_SITE_ID,
+        sinon.match({ tokowakaEnabled: true }),
+        sinon.match({ lastModifiedBy: 'tokowaka-edge-optimize-config' }),
+      );
+    });
+
+    it('should use default lastModifiedBy when profile.email is undefined', async () => {
+      const newMetaconfig = {
+        siteId: TEST_SITE_ID,
+        apiKeys: ['test-api-key-123'],
+        tokowakaEnabled: true,
+      };
+
+      mockTokowakaClient.fetchMetaconfig.resolves(null);
+      mockTokowakaClient.createMetaconfig.resolves(newMetaconfig);
+
+      // Create context with profile but without email
+      const contextWithoutEmail = {
+        ...edgeConfigContext,
+        attributes: {
+          authInfo: {
+            profile: {
+              first_name: 'Test',
+              last_name: 'User',
+            },
+          },
+        },
+      };
+
+      const result = await controller.createOrUpdateEdgeConfig(contextWithoutEmail);
+
+      expect(result.status).to.equal(200);
+      expect(mockTokowakaClient.createMetaconfig).to.have.been.calledWith(
+        'https://www.example.com',
+        TEST_SITE_ID,
+        sinon.match({ tokowakaEnabled: true }),
+        sinon.match({ lastModifiedBy: 'tokowaka-edge-optimize-config' }),
+      );
+    });
+
+    it('should succeed even when Slack notification fails for newly opted site', async () => {
+      // Mock postLlmoAlert to throw an error
+      const postLlmoAlertStubLocal = sinon.stub().rejects(new Error('Slack API error'));
+
+      const newMetaconfig = {
+        siteId: TEST_SITE_ID,
+        apiKeys: ['test-api-key-123'],
+        tokowakaEnabled: true,
+      };
+
+      // Set up to trigger the Slack notification path (isNewlyOpted === true)
+      // This happens when the edge config doesn't have an 'opted' field
+      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({ enabled: true });
+      mockTokowakaClient.fetchMetaconfig.resolves(null);
+      mockTokowakaClient.createMetaconfig.resolves(newMetaconfig);
+
+      const LlmoControllerWithSlackError = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-config-metadata.js': {
+          updateModifiedByDetails: updateModifiedByDetailsStub,
+        },
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: (...args) => tracingFetchStub(...args),
+          llmoConfig: {
+            defaultConfig: llmoConfig.defaultConfig,
+            readConfig: (...args) => readConfigStub(...args),
+            writeConfig: (...args) => writeConfigStub(...args),
+          },
+          llmoStrategy: {
+            readStrategy: (...args) => readStrategyStub(...args),
+            writeStrategy: (...args) => writeStrategyStub(...args),
+          },
+          schemas: {
+            llmoConfig: { safeParse: (...args) => llmoConfigSchemaStub.safeParse(...args) },
+          },
+          hasText: (str) => typeof str === 'string' && str.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
+          composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+          isValidUUID: (uuid) => {
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+            return uuidRegex.test(uuid);
+          },
+          isValidUrl: (url) => typeof url === 'string' && /^https?:\/\//.test(url),
+        },
+        '../../../src/support/utils.js': {
+          exchangePromiseToken: (...args) => exchangePromiseTokenStub(...args),
+          fetchWithTimeout: (...args) => fetchWithTimeoutStub(...args),
+        },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-tokowaka-client': {
+          default: {
+            createFrom: () => mockTokowakaClient,
+          },
+          calculateForwardedHost: (url) => {
+            try {
+              const u = new URL(url.startsWith('http') ? url : `https://${url}`);
+              const h = u.hostname;
+              const dots = (h.match(/\./g) || []).length;
+              return dots === 1 ? `www.${h}` : h;
+            } catch (e) {
+              throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
+            }
+          },
+        },
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: sinon.stub().resolves({ isValid: true }),
+          generateDataFolder: sinon.stub().returns('test-folder'),
+          performLlmoOnboarding: sinon.stub().resolves({}),
+          performLlmoOffboarding: sinon.stub().resolves({}),
+          postLlmoAlert: (...args) => postLlmoAlertStubLocal(...args),
+        },
+        '../../../src/utils/slack/base.js': {
+          postSlackMessage: (...args) => postSlackMessageStub(...args),
+        },
+      });
+
+      const controllerWithSlackError = LlmoControllerWithSlackError({
+        ...mockContext,
+        env: {
+          ...mockEnv,
+          SLACK_LLMO_EDGE_OPTIMIZE_TEAM: 'U123456,U789012',
+        },
+      });
+
+      const result = await controllerWithSlackError.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      // Request should still succeed even though Slack notification failed
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.include(newMetaconfig);
+
+      // Verify postLlmoAlert was called
+      expect(postLlmoAlertStubLocal).to.have.been.calledOnce;
+
+      // Verify error was logged
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/Failed to send Slack notification for site/),
+        sinon.match.instanceOf(Error),
+      );
+    });
+
+    it('should send Slack notification without user mentions when team members are not configured', async () => {
+      // Mock postLlmoAlert to capture the message
+      const postLlmoAlertStubLocal = sinon.stub().resolves();
+
+      const newMetaconfig = {
+        siteId: TEST_SITE_ID,
+        apiKeys: ['test-api-key-123'],
+        tokowakaEnabled: true,
+      };
+
+      // Set up to trigger the Slack notification path (isNewlyOpted === true)
+      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({ enabled: true });
+      mockTokowakaClient.fetchMetaconfig.resolves(null);
+      mockTokowakaClient.createMetaconfig.resolves(newMetaconfig);
+
+      const LlmoControllerWithoutTeam = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-config-metadata.js': {
+          updateModifiedByDetails: updateModifiedByDetailsStub,
+        },
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: (...args) => tracingFetchStub(...args),
+          llmoConfig: {
+            defaultConfig: llmoConfig.defaultConfig,
+            readConfig: (...args) => readConfigStub(...args),
+            writeConfig: (...args) => writeConfigStub(...args),
+          },
+          llmoStrategy: {
+            readStrategy: (...args) => readStrategyStub(...args),
+            writeStrategy: (...args) => writeStrategyStub(...args),
+          },
+          schemas: {
+            llmoConfig: { safeParse: (...args) => llmoConfigSchemaStub.safeParse(...args) },
+          },
+          hasText: (str) => typeof str === 'string' && str.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
+          composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+          isValidUUID: (uuid) => {
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+            return uuidRegex.test(uuid);
+          },
+          isValidUrl: (url) => typeof url === 'string' && /^https?:\/\//.test(url),
+        },
+        '../../../src/support/utils.js': {
+          exchangePromiseToken: (...args) => exchangePromiseTokenStub(...args),
+          fetchWithTimeout: (...args) => fetchWithTimeoutStub(...args),
+        },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-tokowaka-client': {
+          default: {
+            createFrom: () => mockTokowakaClient,
+          },
+          calculateForwardedHost: (url) => {
+            try {
+              const u = new URL(url.startsWith('http') ? url : `https://${url}`);
+              const h = u.hostname;
+              const dots = (h.match(/\./g) || []).length;
+              return dots === 1 ? `www.${h}` : h;
+            } catch (e) {
+              throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
+            }
+          },
+        },
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: sinon.stub().resolves({ isValid: true }),
+          generateDataFolder: sinon.stub().returns('test-folder'),
+          performLlmoOnboarding: sinon.stub().resolves({}),
+          performLlmoOffboarding: sinon.stub().resolves({}),
+          postLlmoAlert: (...args) => postLlmoAlertStubLocal(...args),
+        },
+        '../../../src/utils/slack/base.js': {
+          postSlackMessage: (...args) => postSlackMessageStub(...args),
+        },
+      });
+
+      const contextWithoutTeam = {
+        ...mockContext,
+        env: {
+          ...mockEnv,
+          SLACK_LLMO_EDGE_OPTIMIZE_TEAM: '', // Empty team members
+        },
+      };
+
+      const controllerWithoutTeam = LlmoControllerWithoutTeam(contextWithoutTeam);
+
+      const edgeConfigContextWithoutTeam = {
+        ...edgeConfigContext,
+        env: {
+          ...mockEnv,
+          SLACK_LLMO_EDGE_OPTIMIZE_TEAM: '', // Empty team members
+        },
+      };
+
+      const result = await controllerWithoutTeam.createOrUpdateEdgeConfig(
+        edgeConfigContextWithoutTeam,
+      );
+
+      // Request should succeed
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.include(newMetaconfig);
+
+      // Verify postLlmoAlert was called
+      expect(postLlmoAlertStubLocal).to.have.been.calledOnce;
+
+      // Verify the message does not include "cc:" part when no team members
+      const calledMessage = postLlmoAlertStubLocal.firstCall.args[0];
+      expect(calledMessage).to.include(':gear: Site *<https://www.example.com|https://www.example.com>* has opted for edge optimization');
+      expect(calledMessage).to.not.include('cc:');
+      expect(calledMessage).to.not.include('\n\n');
     });
   });
 
@@ -3892,6 +4288,7 @@ describe('LlmoController', () => {
         '../../../src/support/brand-profile-trigger.js': {
           triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
         },
+        ...getCommonMocks(),
       });
       const nonAdminController = LlmoControllerNonAdmin;
 
@@ -4130,6 +4527,7 @@ describe('LlmoController', () => {
         '@adobe/spacecat-shared-utils': {
           isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
         },
+        ...getCommonMocks(),
       });
 
       const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
