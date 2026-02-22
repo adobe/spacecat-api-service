@@ -483,6 +483,10 @@ return internalServerError('Internal error occurred');
 
 ## Development Workflow
 
+### Conventional Commits
+- This repo uses conventional commits for semantic-release (version bumps) and changelog generation
+- PR title or merge commit must follow the conventional commit style (e.g. `feat:`, `fix:`, `docs:`)
+
 ### Adding a New Endpoint
 
 1. Define OpenAPI spec in `docs/openapi/paths/*.yaml`
