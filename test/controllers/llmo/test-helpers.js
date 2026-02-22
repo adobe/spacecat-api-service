@@ -14,48 +14,50 @@ import esmock from 'esmock';
 import sinon from 'sinon';
 
 /**
- * Creates a mock Ahrefs client with configurable responses
- * @param {Object} responses - Map of URL to response data (array of pages)
- * @returns {Object} Mock Ahrefs client
+ * Creates a mock canonical resolver with configurable responses.
+ * @param {Object} responses - Map of URL to canonical URL (string), null, or Error.
+ * @returns {sinon.SinonStub} Mock canonical resolver.
  */
-export const createMockAhrefsClient = (responses = {}) => {
-  const mockClient = {
-    getTopPages: sinon.stub(),
-  };
+export const createMockCanonicalResolver = (responses = {}) => {
+  const resolver = sinon.stub().resolves(null);
 
-  Object.entries(responses).forEach(([url, pages]) => {
-    mockClient.getTopPages
-      .withArgs(url, 1)
-      .resolves({ result: { pages } });
+  Object.entries(responses).forEach(([url, response]) => {
+    if (response instanceof Error) {
+      resolver.withArgs(url).rejects(response);
+    } else {
+      resolver.withArgs(url).resolves(response);
+    }
   });
 
-  return mockClient;
+  return resolver;
 };
 
 /**
- * Sets up a test for determineOverrideBaseURL with mocked Ahrefs client
- * @param {Object} mockAhrefsClient - Mock Ahrefs client
- * @returns {Promise<Object>} Mocked module
+ * Sets up a test for determineOverrideBaseURL with mocked canonical resolver.
+ * @param {sinon.SinonStub} mockCanonicalResolver - Mock canonical resolver.
+ * @returns {Promise<Object>} Mocked module.
  */
-export const setupDetermineOverrideBaseURLTest = async (mockAhrefsClient) => esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
-  '@adobe/spacecat-shared-ahrefs-client': {
-    default: {
-      createFrom: sinon.stub().returns(mockAhrefsClient),
-    },
+export const setupDetermineOverrideBaseURLTest = async (mockCanonicalResolver) => esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
+  '@adobe/spacecat-shared-utils': {
+    composeBaseURL: (domain) => `https://${domain}`,
+    tracingFetch: sinon.stub(),
+    resolveCanonicalUrl: mockCanonicalResolver,
   },
 });
 
 /**
- * Helper function to test determineOverrideBaseURL with given URL and responses
+ * Helper function to test determineOverrideBaseURL with given URL and responses.
  * @param {string} baseURL - The base URL to test
- * @param {Object} responses - Map of URL to response data (array of pages)
+ * @param {Object} responses - Map of URL to canonical URL (string), null, or Error
  * @param {Object} context - Test context with log and env
- * @returns {Promise<Object>} Object containing result and mockAhrefsClient
+ * @returns {Promise<Object>} Object containing result and mockCanonicalResolver
  */
 export const testDetermineOverrideBaseURL = async (baseURL, responses, context) => {
-  const mockAhrefsClient = createMockAhrefsClient(responses);
-  const { determineOverrideBaseURL } = await setupDetermineOverrideBaseURLTest(mockAhrefsClient);
+  const mockCanonicalResolver = createMockCanonicalResolver(responses);
+  const { determineOverrideBaseURL } = await setupDetermineOverrideBaseURLTest(
+    mockCanonicalResolver,
+  );
   const result = await determineOverrideBaseURL(baseURL, context);
 
-  return { result, mockAhrefsClient };
+  return { result, mockCanonicalResolver };
 };
