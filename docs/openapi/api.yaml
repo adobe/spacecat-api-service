@@ -258,6 +258,8 @@ paths:
     $ref: './url-store-api.yaml#/url-store-by-audit'
   /sites/{siteId}/url-store/{base64Url}:
     $ref: './url-store-api.yaml#/url-store-get'
+  /sites/{siteId}/url-store/delete:
+    $ref: './url-store-api.yaml#/url-store-delete'
   /sites/{siteId}/traffic/paid:
     $ref: './site-paid.yaml#/site-traffic-paid-top-pages'
   /sites/{siteId}/traffic/paid/url-page-type:
@@ -476,12 +478,16 @@ paths:
     $ref: './guidelines-api.yaml#/topic-by-id'
   /sites/{siteId}/sentiment/topics/{topicId}/prompts:
     $ref: './guidelines-api.yaml#/topic-prompts'
+  /sites/{siteId}/sentiment/topics/{topicId}/prompts/remove:
+    $ref: './guidelines-api.yaml#/topic-prompts-remove'
   /sites/{siteId}/sentiment/guidelines:
     $ref: './guidelines-api.yaml#/guidelines-list'
   /sites/{siteId}/sentiment/guidelines/{guidelineId}:
     $ref: './guidelines-api.yaml#/guideline-by-id'
   /sites/{siteId}/sentiment/guidelines/{guidelineId}/audits:
     $ref: './guidelines-api.yaml#/guideline-audits'
+  /sites/{siteId}/sentiment/guidelines/{guidelineId}/audits/unlink:
+    $ref: './guidelines-api.yaml#/guideline-audits-unlink'
   /sites/{siteId}/sentiment/config:
     $ref: './guidelines-api.yaml#/sentiment-config'
 

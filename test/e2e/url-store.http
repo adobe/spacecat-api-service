@@ -194,7 +194,7 @@ Content-Type: application/json
 
 ### Delete single URL
 # Note: Only customer-added URLs (byCustomer: true) can be deleted
-DELETE {{baseUrl}}/sites/{{siteId}}/url-store
+POST {{baseUrl}}/sites/{{siteId}}/url-store/delete
 x-api-key: {{apiKey}}
 Content-Type: application/json
 
@@ -203,7 +203,7 @@ Content-Type: application/json
 }
 
 ### Delete multiple URLs
-DELETE {{baseUrl}}/sites/{{siteId}}/url-store
+POST {{baseUrl}}/sites/{{siteId}}/url-store/delete
 x-api-key: {{apiKey}}
 Content-Type: application/json
 
@@ -255,7 +255,7 @@ Content-Type: application/json
 ]
 
 ### Delete non-existent URL
-DELETE {{baseUrl}}/sites/{{siteId}}/url-store
+POST {{baseUrl}}/sites/{{siteId}}/url-store/delete
 x-api-key: {{apiKey}}
 Content-Type: application/json
 
