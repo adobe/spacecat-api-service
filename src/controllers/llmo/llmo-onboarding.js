@@ -874,6 +874,7 @@ export async function removeLlmoConfig(site, config, context) {
   // LLMO-only audits we can disable safely
   const AUDITS_TO_DISABLE = [
     'llmo-customer-analysis',
+    'page-intent',
     'llm-blocked',
     'llm-error-pages',
     'cdn-logs-analysis',
