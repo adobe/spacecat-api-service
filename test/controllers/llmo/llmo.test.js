@@ -261,6 +261,7 @@ describe('LlmoController', () => {
       updateLlmoCustomerIntent: sinon.stub(),
       updateLlmoCdnlogsFilter: sinon.stub(),
       updateLlmoCdnBucketConfig: sinon.stub(),
+      state: { llmo: mockLlmoConfig },
       getSlackConfig: sinon.stub().returns(null),
       getHandlers: sinon.stub().returns({}),
       getLlmoDataFolder: sinon.stub().returns(TEST_FOLDER),
@@ -4752,6 +4753,53 @@ describe('LlmoController', () => {
       expect(mockLog.error).to.have.been.called;
       const errorCall = mockLog.error.firstCall.args[0];
       expect(errorCall).to.match(/Error checking edge optimize status.*Service error/);
+    });
+  });
+
+  describe('markOpportunitiesReviewed', () => {
+    it('should mark opportunities as reviewed successfully', async () => {
+      const result = await controller.markOpportunitiesReviewed(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockConfig.state.llmo.tags).to.include('opportunitiesReviewed');
+    });
+
+    it('should initialize llmo state when not present', async () => {
+      mockConfig.state.llmo = undefined;
+
+      const result = await controller.markOpportunitiesReviewed(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockConfig.state.llmo.tags).to.include('opportunitiesReviewed');
+    });
+
+    it('should not duplicate the tag if already present', async () => {
+      mockConfig.state.llmo.tags = ['opportunitiesReviewed'];
+
+      const result = await controller.markOpportunitiesReviewed(mockContext);
+
+      expect(result.status).to.equal(200);
+      const tagCount = mockConfig.state.llmo.tags
+        .filter((t) => t === 'opportunitiesReviewed').length;
+      expect(tagCount).to.equal(1);
+    });
+
+    it('should return forbidden when user has no access', async () => {
+      const deniedController = controllerWithAccessDenied(mockContext);
+
+      const result = await deniedController.markOpportunitiesReviewed(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('should return bad request on unexpected error', async () => {
+      mockDataAccess.Site.findById.rejects(new Error('Database connection failed'));
+
+      const result = await controller.markOpportunitiesReviewed(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Database connection failed');
     });
   });
 });
