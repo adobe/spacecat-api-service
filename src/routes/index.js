@@ -85,6 +85,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} trafficToolsController - The traffic tools controller.
 * @param {Object} botBlockerController - The bot blocker controller.
  * @param {Object} sentimentController - The sentiment controller.
+ * @param {Object} consumersController - The consumers controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -126,6 +127,7 @@ export default function getRouteHandlers(
   trafficToolsController,
   botBlockerController,
   sentimentController,
+  consumersController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -422,6 +424,14 @@ export default function getRouteHandlers(
     'DELETE /sites/:siteId/sentiment/guidelines/:guidelineId/audits': sentimentController.unlinkAudits,
     // Combined config
     'GET /sites/:siteId/sentiment/config': sentimentController.getConfig,
+
+    // Consumer management
+    'GET /consumers': consumersController.getAll,
+    'GET /consumers/:consumerId': consumersController.getByConsumerId,
+    'GET /consumers/by-client-id/:clientId': consumersController.getByClientId,
+    'POST /consumers/register': consumersController.register,
+    'PATCH /consumers/:consumerId': consumersController.update,
+    'POST /consumers/:consumerId/revoke': consumersController.revoke,
   };
 
   // Initialization of static and dynamic routes

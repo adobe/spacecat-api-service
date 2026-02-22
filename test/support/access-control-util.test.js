@@ -63,6 +63,29 @@ describe('Access Control Util', () => {
     expect(accessControlUtil.hasAdminAccess()).to.be.true;
   });
 
+  it('should delegate hasS2SAdminAccess to authInfo.isS2SAdmin', () => {
+    const authInfo = new AuthInfo()
+      .withType('jwt')
+      .withProfile({ is_admin: true });
+    authInfo.isS2SAdmin = sinon.stub().returns(true);
+
+    const context = {
+      pathInfo: {
+        headers: { 'x-product': 'llmo' },
+      },
+      attributes: { authInfo },
+      dataAccess: {
+        Entitlement: { findByOrganizationIdAndProductCode: sinon.stub() },
+        TrialUser: {},
+        OrganizationIdentityProvider: {},
+      },
+    };
+
+    const accessControlUtil = AccessControlUtil.fromContext(context);
+    expect(accessControlUtil.hasS2SAdminAccess()).to.be.true;
+    expect(authInfo.isS2SAdmin).to.have.been.calledOnce;
+  });
+
   it('should throw an error if entity is not provided', async () => {
     const context = {
       pathInfo: {
