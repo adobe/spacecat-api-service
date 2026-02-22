@@ -2365,6 +2365,477 @@ describe('Brands Controller', () => {
       expect(result.stats.brands.modified).to.equal(1);
     });
 
+    it('successfully patches a single existing brand without affecting others', async () => {
+      const existingConfig = {
+        customer: {
+          customerName: 'Adobe',
+          imsOrgID: IMS_ORG_ID,
+          brands: [
+            {
+              id: 'brand-1',
+              name: 'Brand One',
+              status: 'active',
+              description: 'Original description',
+              updatedBy: 'old-user@example.com',
+              updatedAt: '2026-01-01T00:00:00.000Z',
+            },
+            {
+              id: 'brand-2',
+              name: 'Brand Two',
+              status: 'active',
+              description: 'Another brand',
+              updatedBy: 'old-user@example.com',
+              updatedAt: '2026-01-01T00:00:00.000Z',
+            },
+          ],
+        },
+      };
+
+      const mockS3Get = sinon.stub().resolves(existingConfig);
+      const mockS3Save = sinon.stub().resolves();
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '@adobe/spacecat-shared-utils': {
+          llmoConfig: {
+            readCustomerConfigV2: mockS3Get,
+            writeCustomerConfigV2: mockS3Save,
+          },
+        },
+      });
+
+      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
+      const response = await controller.patchCustomerConfig({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: {
+          customer: {
+            brands: [
+              {
+                id: 'brand-1',
+                name: 'Brand One',
+                status: 'active',
+                description: 'Updated description',
+              },
+            ],
+          },
+        },
+        s3: {
+          s3Client: {},
+          s3Bucket: 'test-bucket',
+        },
+      });
+
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+
+      // Verify stats show only 1 brand modified
+      expect(result.stats.brands.total).to.equal(1);
+      expect(result.stats.brands.modified).to.equal(1);
+
+      // Verify the saved config has the updated brand
+      const savedConfig = mockS3Save.getCall(0).args[1];
+      expect(savedConfig.customer.brands).to.have.lengthOf(1);
+      expect(savedConfig.customer.brands[0].id).to.equal('brand-1');
+      expect(savedConfig.customer.brands[0].description).to.equal('Updated description');
+    });
+
+    it('successfully adds prompts to an existing brand via patch', async () => {
+      const existingConfig = {
+        customer: {
+          customerName: 'Adobe',
+          imsOrgID: IMS_ORG_ID,
+          brands: [
+            {
+              id: 'brand-1',
+              name: 'Brand One',
+              status: 'active',
+              prompts: [
+                {
+                  id: 'prompt-1',
+                  prompt: 'Existing prompt',
+                  status: 'active',
+                  regions: ['US'],
+                  categoryId: 'cat-1',
+                  topicId: 'topic-1',
+                },
+              ],
+            },
+          ],
+        },
+      };
+
+      const mockS3Get = sinon.stub().resolves(existingConfig);
+      const mockS3Save = sinon.stub().resolves();
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '@adobe/spacecat-shared-utils': {
+          llmoConfig: {
+            readCustomerConfigV2: mockS3Get,
+            writeCustomerConfigV2: mockS3Save,
+          },
+        },
+      });
+
+      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
+      const response = await controller.patchCustomerConfig({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: {
+          customer: {
+            brands: [
+              {
+                id: 'brand-1',
+                name: 'Brand One',
+                status: 'active',
+                prompts: [
+                  {
+                    id: 'prompt-1',
+                    prompt: 'Existing prompt',
+                    status: 'active',
+                    regions: ['US'],
+                    categoryId: 'cat-1',
+                    topicId: 'topic-1',
+                  },
+                  {
+                    id: 'prompt-2',
+                    prompt: 'New prompt added',
+                    status: 'active',
+                    regions: ['US', 'GB'],
+                    categoryId: 'cat-1',
+                    topicId: 'topic-1',
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        s3: {
+          s3Client: {},
+          s3Bucket: 'test-bucket',
+        },
+      });
+
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+
+      // Verify stats show 1 brand unchanged, 1 prompt added
+      expect(result.stats.brands.total).to.equal(1);
+      expect(result.stats.brands.modified).to.equal(0); // Brand metadata unchanged
+      expect(result.stats.prompts.total).to.equal(2);
+      expect(result.stats.prompts.modified).to.equal(1); // Only new prompt
+    });
+
+    it('successfully updates brand aliases via patch', async () => {
+      const existingConfig = {
+        customer: {
+          customerName: 'Adobe',
+          imsOrgID: IMS_ORG_ID,
+          brands: [
+            {
+              id: 'brand-1',
+              name: 'Brand One',
+              status: 'active',
+              brandAliases: [
+                { name: 'Old Alias', regions: ['US'] },
+              ],
+            },
+          ],
+        },
+      };
+
+      const mockS3Get = sinon.stub().resolves(existingConfig);
+      const mockS3Save = sinon.stub().resolves();
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '@adobe/spacecat-shared-utils': {
+          llmoConfig: {
+            readCustomerConfigV2: mockS3Get,
+            writeCustomerConfigV2: mockS3Save,
+          },
+        },
+      });
+
+      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
+      const response = await controller.patchCustomerConfig({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: {
+          customer: {
+            brands: [
+              {
+                id: 'brand-1',
+                name: 'Brand One',
+                status: 'active',
+                brandAliases: [
+                  { name: 'Old Alias', regions: ['US'] },
+                  { name: 'New Alias', regions: ['US', 'GB'] },
+                  { name: 'Another Alias', regions: ['GL'] },
+                ],
+              },
+            ],
+          },
+        },
+        s3: {
+          s3Client: {},
+          s3Bucket: 'test-bucket',
+        },
+      });
+
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+      expect(result.stats.brands.modified).to.equal(1);
+
+      const savedConfig = mockS3Save.getCall(0).args[1];
+      expect(savedConfig.customer.brands[0].brandAliases).to.have.lengthOf(3);
+    });
+
+    it('successfully updates brand competitors via patch', async () => {
+      const existingConfig = {
+        customer: {
+          customerName: 'Adobe',
+          imsOrgID: IMS_ORG_ID,
+          brands: [
+            {
+              id: 'brand-1',
+              name: 'Brand One',
+              status: 'active',
+              competitors: [],
+            },
+          ],
+        },
+      };
+
+      const mockS3Get = sinon.stub().resolves(existingConfig);
+      const mockS3Save = sinon.stub().resolves();
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '@adobe/spacecat-shared-utils': {
+          llmoConfig: {
+            readCustomerConfigV2: mockS3Get,
+            writeCustomerConfigV2: mockS3Save,
+          },
+        },
+      });
+
+      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
+      const response = await controller.patchCustomerConfig({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: {
+          customer: {
+            brands: [
+              {
+                id: 'brand-1',
+                name: 'Brand One',
+                status: 'active',
+                competitors: [
+                  {
+                    name: 'Competitor One',
+                    url: 'https://competitor1.com',
+                    regions: ['US', 'GB'],
+                  },
+                  {
+                    name: 'Competitor Two',
+                    url: 'https://competitor2.com',
+                    regions: ['GL'],
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        s3: {
+          s3Client: {},
+          s3Bucket: 'test-bucket',
+        },
+      });
+
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+      expect(result.stats.brands.modified).to.equal(1);
+
+      const savedConfig = mockS3Save.getCall(0).args[1];
+      expect(savedConfig.customer.brands[0].competitors).to.have.lengthOf(2);
+      expect(savedConfig.customer.brands[0].competitors[0].name).to.equal('Competitor One');
+    });
+
+    it('successfully updates brand URLs and social accounts via patch', async () => {
+      const existingConfig = {
+        customer: {
+          customerName: 'Adobe',
+          imsOrgID: IMS_ORG_ID,
+          brands: [
+            {
+              id: 'brand-1',
+              name: 'Brand One',
+              status: 'active',
+              urls: [],
+              socialAccounts: [],
+            },
+          ],
+        },
+      };
+
+      const mockS3Get = sinon.stub().resolves(existingConfig);
+      const mockS3Save = sinon.stub().resolves();
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '@adobe/spacecat-shared-utils': {
+          llmoConfig: {
+            readCustomerConfigV2: mockS3Get,
+            writeCustomerConfigV2: mockS3Save,
+          },
+        },
+      });
+
+      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
+      const response = await controller.patchCustomerConfig({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: {
+          customer: {
+            brands: [
+              {
+                id: 'brand-1',
+                name: 'Brand One',
+                status: 'active',
+                urls: [
+                  {
+                    value: 'https://brand1.com',
+                    regions: ['US'],
+                  },
+                  {
+                    value: 'https://brand1.fr',
+                    regions: ['FR'],
+                  },
+                ],
+                socialAccounts: [
+                  {
+                    platform: 'twitter',
+                    url: 'https://x.com/brand1',
+                    regions: ['GL'],
+                  },
+                  {
+                    platform: 'instagram',
+                    url: 'https://instagram.com/brand1',
+                    regions: ['GL'],
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        s3: {
+          s3Client: {},
+          s3Bucket: 'test-bucket',
+        },
+      });
+
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+      expect(result.stats.brands.modified).to.equal(1);
+
+      const savedConfig = mockS3Save.getCall(0).args[1];
+      expect(savedConfig.customer.brands[0].urls).to.have.lengthOf(2);
+      expect(savedConfig.customer.brands[0].socialAccounts).to.have.lengthOf(2);
+      expect(savedConfig.customer.brands[0].socialAccounts[0].platform).to.equal('twitter');
+    });
+
+    it('successfully updates multiple brand fields at once via patch', async () => {
+      const existingConfig = {
+        customer: {
+          customerName: 'Adobe',
+          imsOrgID: IMS_ORG_ID,
+          brands: [
+            {
+              id: 'brand-1',
+              name: 'Brand One',
+              status: 'active',
+              description: 'Old description',
+              vertical: 'Old Vertical',
+              region: ['US'],
+              urls: [],
+              brandAliases: [],
+              competitors: [],
+              socialAccounts: [],
+              relatedBrands: [],
+              earnedContent: [],
+            },
+          ],
+        },
+      };
+
+      const mockS3Get = sinon.stub().resolves(existingConfig);
+      const mockS3Save = sinon.stub().resolves();
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '@adobe/spacecat-shared-utils': {
+          llmoConfig: {
+            readCustomerConfigV2: mockS3Get,
+            writeCustomerConfigV2: mockS3Save,
+          },
+        },
+      });
+
+      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
+      const response = await controller.patchCustomerConfig({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: {
+          customer: {
+            brands: [
+              {
+                id: 'brand-1',
+                name: 'Brand One',
+                status: 'active',
+                description: 'Updated comprehensive description',
+                vertical: 'Software & Technology',
+                region: ['GL', 'US', 'GB'],
+                urls: [
+                  { value: 'https://brand1.com', regions: ['US'] },
+                ],
+                brandAliases: [
+                  { name: 'B1', regions: ['US'] },
+                ],
+                competitors: [
+                  { name: 'Competitor', url: 'https://comp.com', regions: ['GL'] },
+                ],
+                socialAccounts: [
+                  { platform: 'twitter', url: 'https://x.com/brand1', regions: ['GL'] },
+                ],
+                relatedBrands: [
+                  { name: 'Related Brand', url: 'https://related.com', regions: ['GL'] },
+                ],
+                earnedContent: [
+                  {
+                    name: 'Wikipedia',
+                    type: 'encyclopedia',
+                    coverage_scope: 'product info',
+                    url: 'https://wikipedia.org',
+                    regions: ['GL'],
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        s3: {
+          s3Client: {},
+          s3Bucket: 'test-bucket',
+        },
+      });
+
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+      expect(result.stats.brands.modified).to.equal(1);
+
+      const savedConfig = mockS3Save.getCall(0).args[1];
+      const savedBrand = savedConfig.customer.brands[0];
+      expect(savedBrand.description).to.equal('Updated comprehensive description');
+      expect(savedBrand.vertical).to.equal('Software & Technology');
+      expect(savedBrand.region).to.deep.equal(['GL', 'US', 'GB']);
+      expect(savedBrand.urls).to.have.lengthOf(1);
+      expect(savedBrand.brandAliases).to.have.lengthOf(1);
+      expect(savedBrand.competitors).to.have.lengthOf(1);
+      expect(savedBrand.socialAccounts).to.have.lengthOf(1);
+      expect(savedBrand.relatedBrands).to.have.lengthOf(1);
+      expect(savedBrand.earnedContent).to.have.lengthOf(1);
+    });
+
     it('returns bad request if organization ID is not provided', async () => {
       const response = await brandsController.patchCustomerConfig({
         ...context,
