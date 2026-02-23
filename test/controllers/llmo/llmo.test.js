@@ -4213,7 +4213,7 @@ describe('LlmoController', () => {
 
       // Verify the message does not include "cc:" part when no team members
       const calledMessage = postLlmoAlertStubLocal.firstCall.args[0];
-      expect(calledMessage).to.include(':gear: Site *<https://www.example.com|https://www.example.com>* has opted for edge optimization');
+      expect(calledMessage).to.include(':gear: Site *<https://www.example.com|https://www.example.com>* (CDN: *aem-cs-fastly*) has opted for edge optimization');
       expect(calledMessage).to.not.include('cc:');
       expect(calledMessage).to.not.include('\n\n');
     });
