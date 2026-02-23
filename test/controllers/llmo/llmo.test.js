@@ -4315,10 +4315,9 @@ describe('LlmoController', () => {
       // Verify postLlmoAlert was called
       expect(postLlmoAlertStubLocal).to.have.been.calledOnce;
 
-      // Verify the message does not include CDN info when cdnProvider is not set
+      // Verify the message includes N/A for CDN when cdnProvider is not set
       const calledMessage = postLlmoAlertStubLocal.firstCall.args[0];
-      expect(calledMessage).to.include(':gear: Site *<https://www.example.com|https://www.example.com>* has opted for edge optimization');
-      expect(calledMessage).to.not.include('(CDN:');
+      expect(calledMessage).to.include(':gear: Site *<https://www.example.com|https://www.example.com>* (CDN: *N/A*) has opted for edge optimization');
     });
   });
 
