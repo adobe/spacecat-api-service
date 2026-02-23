@@ -1,3 +1,10 @@
+# [1.321.0](https://github.com/adobe/spacecat-api-service/compare/v1.320.7...v1.321.0) (2026-02-23)
+
+
+### Features
+
+* **llmo:** add Slack notification for edge optimization opt-in ([#1842](https://github.com/adobe/spacecat-api-service/issues/1842)) ([d95c4f4](https://github.com/adobe/spacecat-api-service/commit/d95c4f4dc902da2543c27ffd4c2ec7b27d1077f7))
+
 ## [1.320.7](https://github.com/adobe/spacecat-api-service/compare/v1.320.6...v1.320.7) (2026-02-23)
 
 
