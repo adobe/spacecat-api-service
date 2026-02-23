@@ -4213,9 +4213,9 @@ describe('LlmoController', () => {
 
       // Verify the message does not include "cc:" part when no team members
       const calledMessage = postLlmoAlertStubLocal.firstCall.args[0];
-      expect(calledMessage).to.include(':gear: Site *<https://www.example.com|https://www.example.com>* (CDN: *aem-cs-fastly*) has opted for edge optimization');
+      expect(calledMessage).to.include(':gear: Site *<https://www.example.com|https://www.example.com>* has opted for edge optimization');
+      expect(calledMessage).to.include('CDN: *aem-cs-fastly*');
       expect(calledMessage).to.not.include('cc:');
-      expect(calledMessage).to.not.include('\n\n');
     });
 
     it('should send Slack notification without CDN info when cdnProvider is not configured', async () => {
@@ -4317,7 +4317,8 @@ describe('LlmoController', () => {
 
       // Verify the message includes N/A for CDN when cdnProvider is not set
       const calledMessage = postLlmoAlertStubLocal.firstCall.args[0];
-      expect(calledMessage).to.include(':gear: Site *<https://www.example.com|https://www.example.com>* (CDN: *N/A*) has opted for edge optimization');
+      expect(calledMessage).to.include(':gear: Site *<https://www.example.com|https://www.example.com>* has opted for edge optimization');
+      expect(calledMessage).to.include('CDN: *N/A*');
     });
   });
 
