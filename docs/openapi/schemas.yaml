@@ -6129,3 +6129,70 @@ SentimentConfig:
       items:
         $ref: '#/SentimentGuideline'
       description: Guidelines (optionally filtered by audit type)
+
+StagingDomainEntry:
+  type: object
+  description: A staging domain linked to a stage site in Spacecat
+  required:
+    - domain
+    - id
+  properties:
+    domain:
+      type: string
+      description: Staging domain (e.g. staging.lovesac.com)
+      example: 'staging.lovesac.com'
+    id:
+      type: string
+      format: uuid
+      description: Spacecat site ID for the stage site
+
+StageDomainsRequest:
+  type: object
+  description: Request body for adding staging domains to a prod LLMO site
+  required:
+    - stagingDomains
+  properties:
+    stagingDomains:
+      type: array
+      items:
+        type: string
+        description: Staging domain (hostname, e.g. staging.lovesac.com)
+      minItems: 1
+      example: ['staging.lovesac.com', 'stage1.lovesac.com']
+
+StageDomainsResponse:
+  type: object
+  description: Response with staging domain to site ID mapping (deprecated in favor of StageConfigsResponse)
+  required:
+    - stagingDomains
+  properties:
+    stagingDomains:
+      type: array
+      items:
+        $ref: '#/StagingDomainEntry'
+      description: Full list of staging domains for the prod site (existing + newly added)
+
+StageConfigsResponse:
+  type: object
+  description: Response with complete S3 metaconfig for each stage site
+  required:
+    - stageConfigs
+  properties:
+    stageConfigs:
+      type: array
+      items:
+        type: object
+        description: Full S3 metaconfig for one stage site (domain, id, plus all Tokowaka S3 metaconfig fields such as apiKeys, tokowakaEnabled, prerender)
+        required:
+          - domain
+          - id
+        properties:
+          domain:
+            type: string
+            description: Staging domain (e.g. staging.lovesac.com)
+          id:
+            type: string
+            format: uuid
+            description: Spacecat site ID for the stage site
+        additionalProperties: true
+      description: Array of complete S3 metaconfig objects for all stage sites in the request

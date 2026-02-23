@@ -272,6 +272,7 @@ describe('getRouteHandlers', () => {
     getLlmoRationale: () => null,
     createOrUpdateEdgeConfig: () => null,
     getEdgeConfig: () => null,
+    createOrUpdateStageEdgeConfig: () => null,
     checkEdgeOptimizeStatus: () => null,
     updateEdgeOptimizeCDNRouting: () => null,
     getStrategy: () => null,
@@ -640,6 +641,7 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/offboard',
       'POST /sites/:siteId/llmo/edge-optimize-config',
       'GET /sites/:siteId/llmo/edge-optimize-config',
+      'POST /sites/:siteId/llmo/edge-optimize-config/stage',
       'GET /sites/:siteId/llmo/edge-optimize-status',
       'POST /sites/:siteId/llmo/edge-optimize-routing',
       'GET /sites/:siteId/llmo/strategy',
@@ -865,6 +867,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-config'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-config'].handler).to.equal(mockLlmoController.getEdgeConfig);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-config'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-config/stage'].handler).to.equal(mockLlmoController.createOrUpdateStageEdgeConfig);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-config/stage'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-status'].handler).to.equal(mockLlmoController.checkEdgeOptimizeStatus);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-status'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-routing'].handler).to.equal(mockLlmoController.updateEdgeOptimizeCDNRouting);
