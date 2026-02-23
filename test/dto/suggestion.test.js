@@ -14,7 +14,8 @@
 
 import { expect } from 'chai';
 
-import { SuggestionDto, SUGGESTION_VIEWS } from '../../src/dto/suggestion.js';
+import { createHash } from 'crypto';
+import { SuggestionDto, SUGGESTION_VIEWS, extractCodePatchMap } from '../../src/dto/suggestion.js';
 
 describe('Suggestion DTO', () => {
   const createMockSuggestion = (dataOverrides = {}) => ({
@@ -32,7 +33,7 @@ describe('Suggestion DTO', () => {
 
   describe('SUGGESTION_VIEWS', () => {
     it('exports valid view options', () => {
-      expect(SUGGESTION_VIEWS).to.deep.equal(['minimal', 'summary', 'full']);
+      expect(SUGGESTION_VIEWS).to.deep.equal(['minimal', 'summary', 'full', 'full-dedupe']);
     });
   });
 
@@ -551,6 +552,109 @@ describe('Suggestion DTO', () => {
           }
         });
       });
+    });
+  });
+
+  describe('extractCodePatchMap', () => {
+    const expectedHash = (content) => createHash('sha256')
+      .update(String(content))
+      .digest('hex')
+      .substring(0, 12);
+
+    it('returns null when no suggestions have patchContent', () => {
+      const suggestions = [
+        { id: '1', data: { url: 'https://example.com' } },
+        { id: '2', data: { info: 'no patch' } },
+      ];
+
+      const result = extractCodePatchMap(suggestions);
+
+      expect(result).to.be.null;
+    });
+
+    it('returns null for empty array', () => {
+      expect(extractCodePatchMap([])).to.be.null;
+    });
+
+    it('returns null when suggestions have no data', () => {
+      const suggestions = [
+        { id: '1' },
+        { id: '2', data: null },
+      ];
+
+      expect(extractCodePatchMap(suggestions)).to.be.null;
+    });
+
+    it('extracts patchContent into map and replaces with hash', () => {
+      const patchA = 'diff --git a/file.js\n- old\n+ new';
+      const suggestions = [
+        { id: '1', data: { url: 'https://example.com', patchContent: patchA } },
+      ];
+
+      const result = extractCodePatchMap(suggestions);
+
+      const hash = expectedHash(patchA);
+      expect(result).to.deep.equal({ [hash]: patchA });
+      expect(suggestions[0].data.patchContent).to.equal(hash);
+    });
+
+    it('deduplicates identical patchContent across suggestions', () => {
+      const sharedPatch = 'diff --git a/shared.js\n- old\n+ new';
+      const uniquePatch = 'diff --git a/unique.js\n- x\n+ y';
+      const suggestions = [
+        { id: '1', data: { patchContent: sharedPatch } },
+        { id: '2', data: { patchContent: uniquePatch } },
+        { id: '3', data: { patchContent: sharedPatch } },
+      ];
+
+      const result = extractCodePatchMap(suggestions);
+
+      expect(Object.keys(result)).to.have.lengthOf(2);
+      const sharedHash = expectedHash(sharedPatch);
+      const uniqueHash = expectedHash(uniquePatch);
+      expect(result[sharedHash]).to.equal(sharedPatch);
+      expect(result[uniqueHash]).to.equal(uniquePatch);
+      expect(suggestions[0].data.patchContent).to.equal(sharedHash);
+      expect(suggestions[1].data.patchContent).to.equal(uniqueHash);
+      expect(suggestions[2].data.patchContent).to.equal(sharedHash);
+    });
+
+    it('handles mix of suggestions with and without patchContent', () => {
+      const patch = 'diff --git a/file.js\n-a\n+b';
+      const suggestions = [
+        { id: '1', data: { url: 'https://example.com' } },
+        { id: '2', data: { patchContent: patch, url: 'https://example.com/page' } },
+        { id: '3', data: { info: 'no patch here' } },
+      ];
+
+      const result = extractCodePatchMap(suggestions);
+
+      const hash = expectedHash(patch);
+      expect(result).to.deep.equal({ [hash]: patch });
+      expect(suggestions[0].data).to.not.have.property('patchContent');
+      expect(suggestions[1].data.patchContent).to.equal(hash);
+      expect(suggestions[2].data).to.not.have.property('patchContent');
+    });
+
+    it('preserves other data fields alongside replaced patchContent', () => {
+      const patch = 'some diff content';
+      const suggestions = [
+        {
+          id: '1',
+          data: {
+            url: 'https://example.com',
+            patchContent: patch,
+            info: 'keep this',
+          },
+        },
+      ];
+
+      extractCodePatchMap(suggestions);
+
+      expect(suggestions[0].data.url).to.equal('https://example.com');
+      expect(suggestions[0].data.info).to.equal('keep this');
+      expect(suggestions[0].data.patchContent).to.be.a('string');
+      expect(suggestions[0].data.patchContent).to.have.lengthOf(12);
     });
   });
 });

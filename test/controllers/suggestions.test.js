@@ -585,7 +585,7 @@ describe('Suggestions Controller', () => {
     });
     expect(response.status).to.equal(400);
     const error = await response.json();
-    expect(error).to.have.property('message', 'Invalid view. Must be one of: minimal, summary, full');
+    expect(error).to.have.property('message', 'Invalid view. Must be one of: minimal, summary, full, full-dedupe');
   });
 
   it('gets all suggestions for an opportunity with minimal view', async () => {
@@ -806,7 +806,7 @@ describe('Suggestions Controller', () => {
     });
     expect(response.status).to.equal(400);
     const error = await response.json();
-    expect(error).to.have.property('message', 'Invalid view. Must be one of: minimal, summary, full');
+    expect(error).to.have.property('message', 'Invalid view. Must be one of: minimal, summary, full, full-dedupe');
   });
 
   it('gets paged suggestions for an opportunity successfully', async () => {
@@ -1067,7 +1067,79 @@ describe('Suggestions Controller', () => {
     });
     expect(response.status).to.equal(400);
     const error = await response.json();
-    expect(error).to.have.property('message', 'Invalid view. Must be one of: minimal, summary, full');
+    expect(error).to.have.property('message', 'Invalid view. Must be one of: minimal, summary, full, full-dedupe');
+  });
+
+  it('getByStatus with full-dedupe view returns object with suggestions and codePatchMap', async () => {
+    const patchContent = 'diff --git a/file.js\n-old\n+new';
+    const suggWithPatch = {
+      ...suggs[0],
+      data: { ...suggs[0].data, patchContent },
+    };
+    mockSuggestion.allByOpportunityIdAndStatus.resolves([mockSuggestionEntity(suggWithPatch)]);
+
+    const response = await suggestionsController.getByStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+      },
+      data: { view: 'full-dedupe' },
+      ...context,
+    });
+
+    expect(response.status).to.equal(200);
+    const body = await response.json();
+    expect(body).to.have.property('suggestions').that.is.an('array');
+    expect(body).to.have.property('codePatchMap').that.is.an('object');
+    const hashKey = body.suggestions[0].data.patchContent;
+    expect(hashKey).to.be.a('string').with.lengthOf(12);
+    expect(body.codePatchMap[hashKey]).to.equal(patchContent);
+  });
+
+  it('getByStatus with full-dedupe view deduplicates identical patches', async () => {
+    const sharedPatch = 'diff --git a/shared.js\n-a\n+b';
+    const uniquePatch = 'diff --git a/unique.js\n-x\n+y';
+    const entities = [
+      mockSuggestionEntity({ ...suggs[0], data: { patchContent: sharedPatch } }),
+      mockSuggestionEntity({ ...suggs[1], data: { patchContent: uniquePatch } }),
+      mockSuggestionEntity({ ...suggs[2], data: { patchContent: sharedPatch } }),
+    ];
+    mockSuggestion.allByOpportunityIdAndStatus.resolves(entities);
+
+    const response = await suggestionsController.getByStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+      },
+      data: { view: 'full-dedupe' },
+      ...context,
+    });
+
+    const body = await response.json();
+    expect(Object.keys(body.codePatchMap)).to.have.lengthOf(2);
+    expect(body.suggestions[0].data.patchContent)
+      .to.equal(body.suggestions[2].data.patchContent);
+  });
+
+  it('getByStatus with full-dedupe view omits codePatchMap when no patches exist', async () => {
+    mockSuggestion.allByOpportunityIdAndStatus.resolves([mockSuggestionEntity(suggs[0])]);
+
+    const response = await suggestionsController.getByStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+      },
+      data: { view: 'full-dedupe' },
+      ...context,
+    });
+
+    expect(response.status).to.equal(200);
+    const body = await response.json();
+    expect(body).to.have.property('suggestions').that.is.an('array');
+    expect(body).to.not.have.property('codePatchMap');
   });
 
   it('gets all suggestions for a site does not exist', async () => {
@@ -1235,7 +1307,71 @@ describe('Suggestions Controller', () => {
     });
     expect(response.status).to.equal(400);
     const error = await response.json();
-    expect(error).to.have.property('message', 'Invalid view. Must be one of: minimal, summary, full');
+    expect(error).to.have.property('message', 'Invalid view. Must be one of: minimal, summary, full, full-dedupe');
+  });
+
+  it('getByStatusPaged with full-dedupe view includes codePatchMap', async () => {
+    const patchContent = 'diff --git a/file.js\n-old\n+new';
+    const suggWithPatch = {
+      ...suggs[0],
+      data: { ...suggs[0].data, patchContent },
+    };
+    mockSuggestion.allByOpportunityIdAndStatus.callsFake((opptyId, status, options) => {
+      if (options) {
+        return Promise.resolve({
+          data: [mockSuggestionEntity(suggWithPatch)],
+          cursor: undefined,
+        });
+      }
+      return Promise.resolve([mockSuggestionEntity(suggWithPatch)]);
+    });
+
+    const response = await suggestionsController.getByStatusPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+      },
+      data: { view: 'full-dedupe' },
+      ...context,
+    });
+
+    expect(response.status).to.equal(200);
+    const body = await response.json();
+    expect(body).to.have.property('suggestions').that.is.an('array');
+    expect(body).to.have.property('pagination');
+    expect(body).to.have.property('codePatchMap').that.is.an('object');
+    const hashKey = body.suggestions[0].data.patchContent;
+    expect(hashKey).to.be.a('string').with.lengthOf(12);
+    expect(body.codePatchMap[hashKey]).to.equal(patchContent);
+  });
+
+  it('getByStatusPaged with full-dedupe view omits codePatchMap when no patches', async () => {
+    mockSuggestion.allByOpportunityIdAndStatus.callsFake((opptyId, status, options) => {
+      if (options) {
+        return Promise.resolve({
+          data: [mockSuggestionEntity(suggs[0])],
+          cursor: undefined,
+        });
+      }
+      return Promise.resolve([mockSuggestionEntity(suggs[0])]);
+    });
+
+    const response = await suggestionsController.getByStatusPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+      },
+      data: { view: 'full-dedupe' },
+      ...context,
+    });
+
+    expect(response.status).to.equal(200);
+    const body = await response.json();
+    expect(body).to.have.property('suggestions');
+    expect(body).to.have.property('pagination');
+    expect(body).to.not.have.property('codePatchMap');
   });
 
   it('gets paged suggestions by status successfully', async () => {
@@ -1524,7 +1660,7 @@ describe('Suggestions Controller', () => {
     });
     expect(response.status).to.equal(400);
     const error = await response.json();
-    expect(error).to.have.property('message', 'Invalid view. Must be one of: minimal, summary, full');
+    expect(error).to.have.property('message', 'Invalid view. Must be one of: minimal, summary, full, full-dedupe');
   });
 
   it('gets suggestion by ID returns not found if suggestion is not found', async () => {

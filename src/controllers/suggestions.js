@@ -28,7 +28,7 @@ import {
 
 import { Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
-import { SuggestionDto, SUGGESTION_VIEWS } from '../dto/suggestion.js';
+import { SuggestionDto, SUGGESTION_VIEWS, extractCodePatchMap } from '../dto/suggestion.js';
 import { FixDto } from '../dto/fix.js';
 import { sendAutofixMessage, getIMSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
@@ -312,9 +312,16 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
+    const dtoView = view === 'full-dedupe' ? 'full' : view;
     const suggestions = suggestionEntities.map(
-      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
+      (sugg) => SuggestionDto.toJSON(sugg, dtoView, opportunity),
     );
+
+    if (view === 'full-dedupe') {
+      const codePatchMap = extractCodePatchMap(suggestions);
+      return ok({ suggestions, ...(codePatchMap && { codePatchMap }) });
+    }
+
     return ok(suggestions);
   };
 
@@ -371,9 +378,11 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
+    const dtoView = view === 'full-dedupe' ? 'full' : view;
     const suggestions = suggestionEntities.map(
-      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
+      (sugg) => SuggestionDto.toJSON(sugg, dtoView, opportunity),
     );
+    const codePatchMap = view === 'full-dedupe' ? extractCodePatchMap(suggestions) : null;
     return ok({
       suggestions,
       pagination: {
@@ -381,6 +390,7 @@ function SuggestionsController(ctx, sqs, env) {
         cursor: newCursor ?? null,
         hasMore: !!newCursor,
       },
+      ...(codePatchMap && { codePatchMap }),
     });
   };
 
