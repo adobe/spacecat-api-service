@@ -1107,125 +1107,6 @@ function LlmoController(ctx) {
   };
 
   /**
-   * POST /sites/{siteId}/llmo/edge-optimize-config/stage
-   * Adds staging domains for edge optimize (stage environment support).
-   * Creates or finds stage sites in Spacecat (same org), creates Tokowaka metaconfig per stage site
-   * with prerender for whole domain, and persists stagingDomains on prod site's edgeOptimizeConfig.
-   * Returns the complete S3 metaconfig for each stage site in an array.
-   * @param {object} context - Request context
-   * @returns {Promise<Response>} 200 with stageConfigs array (full S3 metaconfig per stage)
-   */
-  const createOrUpdateStageEdgeConfig = async (context) => {
-    const { log, dataAccess } = context;
-    const { siteId } = context.params;
-    const { authInfo: { profile } } = context.attributes;
-    const { Site } = dataAccess;
-    const { stagingDomains: rawStagingDomains } = context.data || {};
-
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      return forbidden('Only LLMO administrators can add staging domains');
-    }
-
-    if (!Array.isArray(rawStagingDomains) || rawStagingDomains.length === 0) {
-      return badRequest('stagingDomains must be a non-empty array');
-    }
-
-    const stagingDomains = rawStagingDomains
-      .map((d) => (typeof d === 'string' ? d.trim() : ''))
-      .filter((d) => hasText(d));
-    if (stagingDomains.length === 0) {
-      return badRequest('stagingDomains must contain at least one non-empty domain string');
-    }
-
-    try {
-      const site = await Site.findById(siteId);
-      if (!site) {
-        return notFound('Site not found');
-      }
-      if (!await accessControlUtil.hasAccess(site)) {
-        return forbidden('User does not have access to this site');
-      }
-
-      const prodBaseURL = site.getBaseURL();
-      const prodApex = getApexDomain(prodBaseURL, log);
-      for (const domain of stagingDomains) {
-        const apex = getApexDomain(domain, log);
-        if (apex !== prodApex) {
-          return badRequest(
-            `Staging domain apex (${apex}) does not match prod site apex (${prodApex}) for domain: ${domain}`,
-          );
-        }
-      }
-
-      const tokowakaClient = TokowakaClient.createFrom(context);
-      const lastModifiedBy = profile?.email || 'tokowaka-stage-edge-optimize-config';
-      const organizationId = site.getOrganizationId();
-      const newEntries = [];
-      const stageConfigs = [];
-
-      for (const domain of stagingDomains) {
-        const stageBaseURL = composeBaseURL(domain);
-        let stageSite = await Site.findByBaseURL(stageBaseURL);
-        if (!stageSite) {
-          stageSite = await Site.create({
-            baseURL: stageBaseURL,
-            organizationId,
-          });
-        }
-
-        let metaconfig = await tokowakaClient.fetchMetaconfig(stageBaseURL);
-        if (!metaconfig || !Array.isArray(metaconfig?.apiKeys) || metaconfig.apiKeys.length === 0) {
-          metaconfig = await tokowakaClient.createMetaconfig(
-            stageBaseURL,
-            stageSite.getId(),
-            {
-              tokowakaEnabled: true,
-              prerender: { allowList: ['/*'] },
-            },
-            { lastModifiedBy },
-          );
-        } else {
-          await tokowakaClient.updateMetaconfig(
-            stageBaseURL,
-            stageSite.getId(),
-            { prerender: { allowList: ['/*'] } },
-            { lastModifiedBy },
-          );
-          metaconfig = await tokowakaClient.fetchMetaconfig(stageBaseURL);
-        }
-
-        newEntries.push({ domain, id: stageSite.getId() });
-        stageConfigs.push({
-          domain,
-          id: stageSite.getId(),
-          ...metaconfig,
-        });
-      }
-
-      const currentConfig = site.getConfig();
-      const existingEdgeConfig = currentConfig.getEdgeOptimizeConfig() || {};
-      const existingList = existingEdgeConfig.stagingDomains || [];
-      const byDomain = new Map(existingList.map((e) => [e.domain, e]));
-      for (const entry of newEntries) {
-        byDomain.set(entry.domain, { domain: entry.domain, id: entry.id });
-      }
-      const mergedStagingDomains = [...byDomain.values()];
-
-      currentConfig.updateEdgeOptimizeConfig({
-        ...existingEdgeConfig,
-        stagingDomains: mergedStagingDomains,
-      });
-      await saveSiteConfig(site, currentConfig, log, 'updating edge optimize staging domains');
-      log.info(`[edge-optimize-config/stage] Updated staging domains for site ${siteId}, count=${mergedStagingDomains.length}`);
-
-      return ok({ stageConfigs });
-    } catch (error) {
-      log.error(`Failed to add staging domains for site ${siteId}:`, error);
-      return badRequest(error.message);
-    }
-  };
-
-  /**
    * GET /sites/{siteId}/llmo/strategy
    * Retrieves LLMO strategy data from S3
    * @param {object} context - Request context
@@ -1346,16 +1227,6 @@ function LlmoController(ctx) {
       log.error(`Error getting hostname from URL ${url}: ${error.message}`);
       throw new Error(`Error getting hostname from URL ${url}: ${error.message}`);
     }
-  }
-
-  // Returns the apex (root) domain for comparison, e.g. staging.lovesac.com -> lovesac.com
-  function getApexDomain(urlOrHostname, log) {
-    const hostname = getHostnameWithoutWww(urlOrHostname, log);
-    const parts = hostname.split('.');
-    if (parts.length <= 2) {
-      return hostname;
-    }
-    return parts.slice(-2).join('.');
   }
 
   /**
@@ -1524,6 +1395,135 @@ function LlmoController(ctx) {
         return createResponse({ message: error.message }, error.status);
       }
       return internalServerError(error.message);
+    }
+  };
+
+  // Returns the apex (root) domain for comparison, e.g. staging.lovesac.com -> lovesac.com
+  function getApexDomain(urlOrHostname, log) {
+    const hostname = getHostnameWithoutWww(urlOrHostname, log);
+    const parts = hostname.split('.');
+    if (parts.length <= 2) {
+      return hostname;
+    }
+    return parts.slice(-2).join('.');
+  }
+
+  /**
+   * POST /sites/{siteId}/llmo/edge-optimize-config/stage
+   * Adds staging domains for edge optimize (stage environment support).
+   * Creates or finds stage sites in Spacecat (same org), creates Tokowaka metaconfig per stage site
+   * with prerender for whole domain, and persists stagingDomains on prod site's edgeOptimizeConfig.
+   * Returns the complete S3 metaconfig for each stage site in an array.
+   * @param {object} context - Request context
+   * @returns {Promise<Response>} 200 with stageConfigs array (full S3 metaconfig per stage)
+   */
+  const createOrUpdateStageEdgeConfig = async (context) => {
+    const { log, dataAccess } = context;
+    const { siteId } = context.params;
+    const { authInfo: { profile } } = context.attributes;
+    const { Site } = dataAccess;
+    const { stagingDomains: rawStagingDomains } = context.data || {};
+
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can add staging domains');
+    }
+
+    if (!Array.isArray(rawStagingDomains) || rawStagingDomains.length === 0) {
+      return badRequest('stagingDomains must be a non-empty array');
+    }
+
+    const stagingDomains = rawStagingDomains
+      .map((d) => (typeof d === 'string' ? d.trim() : ''))
+      .filter((d) => hasText(d));
+    if (stagingDomains.length === 0) {
+      return badRequest('stagingDomains must contain at least one non-empty domain string');
+    }
+
+    try {
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('User does not have access to this site');
+      }
+
+      const prodBaseURL = site.getBaseURL();
+      const prodApex = getApexDomain(prodBaseURL, log);
+      for (const domain of stagingDomains) {
+        const apex = getApexDomain(domain, log);
+        if (apex !== prodApex) {
+          return badRequest(
+            `Staging domain apex (${apex}) does not match prod site apex (${prodApex}) for domain: ${domain}`,
+          );
+        }
+      }
+
+      const tokowakaClient = TokowakaClient.createFrom(context);
+      const lastModifiedBy = profile?.email || 'tokowaka-stage-edge-optimize-config';
+      const organizationId = site.getOrganizationId();
+      const newEntries = [];
+      const stageConfigs = [];
+
+      /* eslint-disable no-await-in-loop */
+      for (const domain of stagingDomains) {
+        const stageBaseURL = composeBaseURL(domain);
+        let stageSite = await Site.findByBaseURL(stageBaseURL);
+        if (!stageSite) {
+          stageSite = await Site.create({
+            baseURL: stageBaseURL,
+            organizationId,
+          });
+        }
+
+        let metaconfig = await tokowakaClient.fetchMetaconfig(stageBaseURL);
+        if (!metaconfig || !Array.isArray(metaconfig?.apiKeys) || metaconfig.apiKeys.length === 0) {
+          metaconfig = await tokowakaClient.createMetaconfig(
+            stageBaseURL,
+            stageSite.getId(),
+            {
+              tokowakaEnabled: true,
+              prerender: { allowList: ['/*'] },
+            },
+            { lastModifiedBy },
+          );
+        } else {
+          await tokowakaClient.updateMetaconfig(
+            stageBaseURL,
+            stageSite.getId(),
+            { prerender: { allowList: ['/*'] } },
+            { lastModifiedBy },
+          );
+          metaconfig = await tokowakaClient.fetchMetaconfig(stageBaseURL);
+        }
+
+        newEntries.push({ domain, id: stageSite.getId() });
+        stageConfigs.push({
+          domain,
+          ...metaconfig,
+        });
+      }
+      /* eslint-enable no-await-in-loop */
+
+      const currentConfig = site.getConfig();
+      const existingEdgeConfig = currentConfig.getEdgeOptimizeConfig() || {};
+      const existingList = existingEdgeConfig.stagingDomains || [];
+      const byDomain = new Map(existingList.map((e) => [e.domain, e]));
+      for (const entry of newEntries) {
+        byDomain.set(entry.domain, { domain: entry.domain, id: entry.id });
+      }
+      const mergedStagingDomains = [...byDomain.values()];
+
+      currentConfig.updateEdgeOptimizeConfig({
+        ...existingEdgeConfig,
+        stagingDomains: mergedStagingDomains,
+      });
+      await saveSiteConfig(site, currentConfig, log, 'updating edge optimize staging domains');
+      log.info(`[edge-optimize-config/stage] Updated staging domains for site ${siteId}, count=${mergedStagingDomains.length}`);
+      return ok(stageConfigs);
+    } catch (error) {
+      log.error(`Failed to add staging domains for site ${siteId}:`, error);
+      return badRequest(error.message);
     }
   };
 
