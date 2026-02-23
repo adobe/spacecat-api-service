@@ -4213,8 +4213,9 @@ describe('LlmoController', () => {
 
       // Verify the message does not include "cc:" part when no team members
       const calledMessage = postLlmoAlertStubLocal.firstCall.args[0];
-      expect(calledMessage).to.include(':gear: Site *<https://www.example.com|https://www.example.com>* has opted for edge optimization');
-      expect(calledMessage).to.include('CDN: *aem-cs-fastly*');
+      expect(calledMessage).to.include(':gear: Site has opted for edge optimization');
+      expect(calledMessage).to.include('• Site: https://www.example.com');
+      expect(calledMessage).to.include('• CDN: aem-cs-fastly');
       expect(calledMessage).to.not.include('cc:');
     });
 
@@ -4317,8 +4318,9 @@ describe('LlmoController', () => {
 
       // Verify the message includes N/A for CDN when cdnProvider is not set
       const calledMessage = postLlmoAlertStubLocal.firstCall.args[0];
-      expect(calledMessage).to.include(':gear: Site *<https://www.example.com|https://www.example.com>* has opted for edge optimization');
-      expect(calledMessage).to.include('CDN: *N/A*');
+      expect(calledMessage).to.include(':gear: Site has opted for edge optimization');
+      expect(calledMessage).to.include('• Site: https://www.example.com');
+      expect(calledMessage).to.include('• CDN: N/A');
     });
   });
 
