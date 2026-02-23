@@ -59,7 +59,7 @@ export function generateDataFolder(baseURL, env = 'dev') {
  * @param {object} context - The request context containing env and log
  * @returns {Promise<void>}
  */
-async function postLlmoAlert(message, context) {
+export async function postLlmoAlert(message, context) {
   const { env, log } = context;
   const slackChannel = env.SLACK_LLMO_ALERTS_CHANNEL_ID;
   const slackToken = env.SLACK_BOT_TOKEN;
