@@ -1,3 +1,10 @@
+## [1.320.7](https://github.com/adobe/spacecat-api-service/compare/v1.320.6...v1.320.7) (2026-02-23)
+
+
+### Bug Fixes
+
+* change bulk DELETE endpoints to POST to support request bodies ([#1843](https://github.com/adobe/spacecat-api-service/issues/1843)) ([674ecea](https://github.com/adobe/spacecat-api-service/commit/674eceaa794ec5476aa96cf5f39c336831faf426))
+
 ## [1.320.6](https://github.com/adobe/spacecat-api-service/compare/v1.320.5...v1.320.6) (2026-02-21)
 
 

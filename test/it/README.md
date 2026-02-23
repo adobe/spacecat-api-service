@@ -108,7 +108,7 @@ test/it/
 | Projects | `projects.js` | GET /projects (admin-only) | ~5 |
 | Entitlements | `entitlements.js` | GET /organizations/:id/entitlements | ~4 |
 | Site Enrollments | `site-enrollments.js` | GET /sites/:id/site-enrollments | ~5 |
-| Audit URLs | `audit-urls.js` | GET/POST/PATCH/DELETE /url-store, /by-audit | ~15 |
+| Audit URLs | `audit-urls.js` | GET/POST/PATCH /url-store, POST /url-store/delete, /by-audit | ~15 |
 | Sentiment Topics | `sentiment-topics.js` | GET/POST/PATCH/DELETE /sentiment/topics | ~10 |
 | Sentiment Guidelines | `sentiment-guidelines.js` | GET/POST/PATCH/DELETE /sentiment/guidelines | ~10 |
 | Experiments | `experiments.js` | GET /experiments | ~5 |
