@@ -27,6 +27,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
+import { getDomain } from 'tldts';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
@@ -1398,14 +1399,15 @@ function LlmoController(ctx) {
     }
   };
 
-  // Returns the apex (root) domain for comparison, e.g. staging.lovesac.com -> lovesac.com
-  function getApexDomain(urlOrHostname, log) {
-    const hostname = getHostnameWithoutWww(urlOrHostname, log);
-    const parts = hostname.split('.');
-    if (parts.length <= 2) {
-      return hostname;
-    }
-    return parts.slice(-2).join('.');
+  /**
+   * Check if all URLs in urlList have the same base domain as prodBaseURL.
+   * @param {string[]} urlList the list of URLs/domains to check.
+   * @param {string} prodBaseURL the production base URL to match against.
+   * @returns {boolean} true if all URLs share the same domain as prodBaseURL
+   */
+  function areDomainsSameAsBase(urlList, prodBaseURL) {
+    const prodDomain = getDomain(prodBaseURL);
+    return urlList.every((stageBaseURL) => getDomain(stageBaseURL) === prodDomain);
   }
 
   /**
@@ -1448,15 +1450,8 @@ function LlmoController(ctx) {
         return forbidden('User does not have access to this site');
       }
 
-      const prodBaseURL = site.getBaseURL();
-      const prodApex = getApexDomain(prodBaseURL, log);
-      for (const domain of stagingDomains) {
-        const apex = getApexDomain(domain, log);
-        if (apex !== prodApex) {
-          return badRequest(
-            `Staging domain apex (${apex}) does not match prod site apex (${prodApex}) for domain: ${domain}`,
-          );
-        }
+      if (!areDomainsSameAsBase(stagingDomains, site.getBaseURL())) {
+        return badRequest('Staging domains must belong to the same base domain as the production site');
       }
 
       const tokowakaClient = TokowakaClient.createFrom(context);
