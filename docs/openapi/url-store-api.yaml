@@ -277,6 +277,10 @@ url-store-delete:
       - Maximum 100 URLs per request
       - **Constraint**: Only customer-added URLs (byCustomer: true) can be deleted
       - Returns per-item success/failure information
+      
+      **Note:** This endpoint uses POST instead of DELETE because the operation requires
+      a request body to identify resources, and the body-data middleware does not parse
+      DELETE request bodies. See [ADR-001](../../docs/decisions/001-bulk-delete-via-post.md).
     operationId: deleteUrls
     requestBody:
       required: true
