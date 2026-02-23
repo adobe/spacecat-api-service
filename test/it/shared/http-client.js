@@ -61,7 +61,6 @@ export function createHttpClient(baseUrl, tokens) {
       post: (path, body, extraHeaders) => request('POST', path, body, token, extraHeaders),
       patch: (path, body, extraHeaders) => request('PATCH', path, body, token, extraHeaders),
       delete: (path, extraHeaders) => request('DELETE', path, null, token, extraHeaders),
-      deleteWithBody: (path, body, extraHeaders) => request('DELETE', path, body, token, extraHeaders),
     };
   }
 
