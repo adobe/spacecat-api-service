@@ -1333,12 +1333,12 @@ describe('Access Control Util', () => {
     });
   });
 
-  describe('canDeployForSite', () => {
+  describe('isOwnerOfSite', () => {
     it('throws error when entity is missing', async () => {
       const util = AccessControlUtil.fromContext(context);
-      await expect(util.canDeployForSite(null)).to.be.rejectedWith('Missing entity');
-      await expect(util.canDeployForSite(undefined)).to.be.rejectedWith('Missing entity');
-      await expect(util.canDeployForSite({})).to.be.rejectedWith('Missing entity');
+      await expect(util.isOwnerOfSite(null)).to.be.rejectedWith('Missing entity');
+      await expect(util.isOwnerOfSite(undefined)).to.be.rejectedWith('Missing entity');
+      await expect(util.isOwnerOfSite({})).to.be.rejectedWith('Missing entity');
     });
 
     it('returns true when user has org access for a Site entity', async () => {
@@ -1350,7 +1350,7 @@ describe('Access Control Util', () => {
       };
       site.constructor = { ENTITY_NAME: 'Site' };
 
-      const result = await util.canDeployForSite(site);
+      const result = await util.isOwnerOfSite(site);
       expect(result).to.be.true;
       expect(util.authInfo.hasOrganization).to.have.been.calledWith('org-1');
     });
@@ -1364,7 +1364,7 @@ describe('Access Control Util', () => {
       };
       site.constructor = { ENTITY_NAME: 'Site' };
 
-      const result = await util.canDeployForSite(site);
+      const result = await util.isOwnerOfSite(site);
       expect(result).to.be.false;
     });
 
@@ -1376,7 +1376,7 @@ describe('Access Control Util', () => {
       };
       site.constructor = { ENTITY_NAME: 'Site' };
 
-      await expect(util.canDeployForSite(site)).to.be.rejectedWith('Missing organization for site');
+      await expect(util.isOwnerOfSite(site)).to.be.rejectedWith('Missing organization for site');
     });
 
     it('returns true when user has org access for an Organization entity', async () => {
@@ -1386,7 +1386,7 @@ describe('Access Control Util', () => {
       const org = { getImsOrgId: () => 'org-1' };
       org.constructor = { ENTITY_NAME: 'Organization' };
 
-      const result = await util.canDeployForSite(org);
+      const result = await util.isOwnerOfSite(org);
       expect(result).to.be.true;
       expect(util.authInfo.hasOrganization).to.have.been.calledWith('org-1');
     });
@@ -1398,7 +1398,7 @@ describe('Access Control Util', () => {
       const org = { getImsOrgId: () => 'org-1' };
       org.constructor = { ENTITY_NAME: 'Organization' };
 
-      const result = await util.canDeployForSite(org);
+      const result = await util.isOwnerOfSite(org);
       expect(result).to.be.false;
     });
 
@@ -1408,7 +1408,7 @@ describe('Access Control Util', () => {
       const unknown = { someField: 'value' };
       unknown.constructor = { ENTITY_NAME: 'Unknown' };
 
-      const result = await util.canDeployForSite(unknown);
+      const result = await util.isOwnerOfSite(unknown);
       expect(result).to.be.false;
     });
   });

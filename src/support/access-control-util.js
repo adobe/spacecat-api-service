@@ -181,12 +181,12 @@ export default class AccessControlUtil {
   }
 
   /**
-   * Method to check if the user has access to deploy edge optimize fixes for a site.
+   * Method to check if the user is the owner of a site.
    * @param {any} entity - The entity to check access for.
    * @returns {boolean} True if the user is part of the organization that owns the site
    * false otherwise , for admin user as well as for other users.
    */
-  async canDeployForSite(entity) {
+  async isOwnerOfSite(entity) {
     if (!isNonEmptyObject(entity)) {
       throw new Error('Missing entity');
     }
