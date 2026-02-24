@@ -1,3 +1,10 @@
+## [1.321.2](https://github.com/adobe/spacecat-api-service/compare/v1.321.1...v1.321.2) (2026-02-24)
+
+
+### Bug Fixes
+
+* aggregationKey string spreading produces char index properties ([#1849](https://github.com/adobe/spacecat-api-service/issues/1849)) ([a327ec8](https://github.com/adobe/spacecat-api-service/commit/a327ec809bc5d4a2622bb9834e1d427a8d743bc3))
+
 ## [1.321.1](https://github.com/adobe/spacecat-api-service/compare/v1.321.0...v1.321.1) (2026-02-24)
 
 
