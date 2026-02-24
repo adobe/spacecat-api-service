@@ -1068,11 +1068,7 @@ function LlmoController(ctx) {
             userMentions = userIds.map((userId) => `<@${userId}>`).join(' ');
           }
 
-          // Get CDN provider from LLMO config
-          const llmoConfig = currentConfig.getLlmoConfig();
-          const cdnProvider = llmoConfig?.cdnBucketConfig?.cdnProvider || 'N/A';
-
-          const message = `:gear: Site has opted for edge optimization\n\n• Site: ${baseURL}\n• CDN: ${cdnProvider}${userMentions ? `\n\ncc: ${userMentions}` : ''}`;
+          const message = `:gear: Site has opted for edge optimization\n\n• Site: ${baseURL}${userMentions ? `\n\ncc: ${userMentions}` : ''}`;
 
           await postLlmoAlert(message, context);
           log.info(`[edge-optimize-config] Slack notification sent for site ${siteId}`);
