@@ -274,16 +274,14 @@ export default function sentimentTopicTests(getHttpClient, resetData, options = 
 
     // ── Remove sub-prompts ──
 
-    describe('DELETE /sites/:siteId/sentiment/topics/:topicId/prompts', () => {
+    describe('POST /sites/:siteId/sentiment/topics/:topicId/prompts/remove', () => {
       before(() => resetData());
 
-      // Skipped: bodyData middleware only parses POST/PUT/PATCH — DELETE body is not parsed,
-      // so context.data.prompts is undefined and the controller returns 400
-      it.skip('user: removes sub-prompts', async () => {
+      it('user: removes sub-prompts', async () => {
         const http = getHttpClient();
         // TOPIC_1 has: ['How is build quality?', 'Is the product reliable?']
-        const res = await http.user.deleteWithBody(
-          `/sites/${SITE_1_ID}/sentiment/topics/${TOPIC_1_ID}/prompts`,
+        const res = await http.user.post(
+          `/sites/${SITE_1_ID}/sentiment/topics/${TOPIC_1_ID}/prompts/remove`,
           { prompts: ['How is build quality?'] },
         );
         expect(res.status).to.equal(200);
