@@ -111,11 +111,17 @@ function RunAuditCommand(context) {
   const runAuditForSite = async (baseURL, auditType, auditData, slackContext) => {
     const { say } = slackContext;
 
+    log.info(`[runAuditForSite] invoked: baseURL="${baseURL}", auditType="${auditType}", auditData=${JSON.stringify(auditData)}`);
+
     try {
       const site = await Site.findByBaseURL(baseURL);
+      log.info(`[runAuditForSite] Site.findByBaseURL("${baseURL}") result: ${site ? `found siteId=${site.getId()}` : 'not found'}`);
+
       const configuration = await Configuration.findLatest();
+      log.info(`[runAuditForSite] Configuration.findLatest() result: ${configuration ? 'loaded' : 'null/undefined'}`);
 
       if (!isNonEmptyObject(site)) {
+        log.info(`[runAuditForSite] site not found for baseURL="${baseURL}", posting not-found message`);
         await postSiteNotFoundMessage(say, baseURL);
         return;
       }
@@ -126,15 +132,20 @@ function RunAuditCommand(context) {
           (audit) => configuration.isHandlerEnabledForSite(audit, site),
         );
 
+        log.info(`[runAuditForSite] auditType=all, enabledAudits for site "${baseURL}": [${enabledAudits.join(', ')}]`);
+
         if (!isNonEmptyArray(enabledAudits)) {
+          log.info(`[runAuditForSite] no enabled audits found for site "${baseURL}", aborting`);
           await say(`:warning: No audits configured for site \`${baseURL}\``);
           return;
         }
 
         await Promise.all(
           enabledAudits.map(async (enabledAuditType) => {
+            log.info(`[runAuditForSite] triggering audit type "${enabledAuditType}" for site "${baseURL}"`);
             try {
               await triggerAuditForSite(site, enabledAuditType, undefined, slackContext, context);
+              log.info(`[runAuditForSite] successfully queued audit type "${enabledAuditType}" for site "${baseURL}"`);
             } catch (error) {
               log.error(`Error running audit ${enabledAuditType.id} for site ${baseURL}`, error);
               await postErrorMessage(say, error);
@@ -142,16 +153,25 @@ function RunAuditCommand(context) {
           }),
         );
       } else {
-        if (!configuration.isHandlerEnabledForSite(auditType, site)) {
+        const isHandlerEnabled = configuration.isHandlerEnabledForSite(auditType, site);
+        log.info(`[runAuditForSite] isHandlerEnabledForSite("${auditType}", siteId=${site.getId()}): ${isHandlerEnabled}`);
+
+        if (!isHandlerEnabled) {
           await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
           return;
         }
+
         const handler = configuration.getHandlers()?.[auditType];
+        log.info(`[runAuditForSite] handler config for "${auditType}": ${JSON.stringify(handler)}`);
+
         // Exit early with error if handler has no product codes configured
         if (!isNonEmptyArray(handler?.productCodes)) {
+          log.info(`[runAuditForSite] no productCodes configured for auditType="${auditType}", aborting`);
           await say(`:x: Will not audit site '${baseURL}' because no product codes are configured for audit type '${auditType}'.`);
           return;
         }
+
+        log.info(`[runAuditForSite] checking entitlements for productCodes: [${handler.productCodes.join(', ')}]`);
 
         // Check entitlements for all product codes
         const entitlementChecks = await Promise.all(
@@ -159,6 +179,7 @@ function RunAuditCommand(context) {
             try {
               const tierClient = await TierClient.createForSite(context, site, productCode);
               const tierResult = await tierClient.checkValidEntitlement();
+              log.info(`[runAuditForSite] entitlement check for productCode="${productCode}": entitlement=${tierResult.entitlement}`);
               return tierResult.entitlement || false;
             } catch (error) {
               context.log.error(`Failed to check entitlement for product code ${productCode}:`, error);
@@ -167,13 +188,18 @@ function RunAuditCommand(context) {
           }),
         );
 
+        log.info(`[runAuditForSite] entitlementChecks results: [${entitlementChecks.join(', ')}], anyEntitled=${entitlementChecks.some((v) => v)}`);
+
         // Block audit if site has no entitlement for any of the product codes
         if (!entitlementChecks.some((hasEntitlement) => hasEntitlement)) {
+          log.info(`[runAuditForSite] site "${baseURL}" has no valid entitlement for auditType="${auditType}", aborting`);
           await say(`:x: Will not audit site '${baseURL}' because site is not entitled for this audit.`);
           return;
         }
 
+        log.info(`[runAuditForSite] all checks passed, calling triggerAuditForSite for "${baseURL}", auditType="${auditType}"`);
         await triggerAuditForSite(site, auditType, auditData, slackContext, context);
+        log.info(`[runAuditForSite] triggerAuditForSite completed successfully for "${baseURL}", auditType="${auditType}"`);
       }
     } catch (error) {
       log.error(`Error running audit ${auditType} for site ${baseURL}`, error);
