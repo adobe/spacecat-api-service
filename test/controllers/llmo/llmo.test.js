@@ -326,6 +326,7 @@ describe('LlmoController', () => {
       updateLlmoCustomerIntent: sinon.stub(),
       updateLlmoCdnlogsFilter: sinon.stub(),
       updateLlmoCdnBucketConfig: sinon.stub(),
+      addLlmoTag: sinon.stub(),
       state: { llmo: mockLlmoConfig },
       getSlackConfig: sinon.stub().returns(null),
       getHandlers: sinon.stub().returns({}),
@@ -5175,31 +5176,24 @@ describe('LlmoController', () => {
   });
 
   describe('markOpportunitiesReviewed', () => {
-    it('should mark opportunities as reviewed successfully', async () => {
+    it('should mark opportunities as reviewed and return empty array when no tags', async () => {
       const result = await controller.markOpportunitiesReviewed(mockContext);
 
       expect(result.status).to.equal(200);
-      expect(mockConfig.state.llmo.tags).to.include('opportunitiesReviewed');
+      const body = await result.json();
+      expect(body).to.deep.equal([]);
+      expect(mockConfig.addLlmoTag).to.have.been.calledOnceWith('opportunitiesReviewed');
     });
 
-    it('should initialize llmo state when not present', async () => {
-      mockConfig.state.llmo = undefined;
+    it('should return existing tags after marking reviewed', async () => {
+      mockConfig.getLlmoConfig.returns({ ...mockLlmoConfig, tags: ['opportunitiesReviewed'] });
 
       const result = await controller.markOpportunitiesReviewed(mockContext);
 
       expect(result.status).to.equal(200);
-      expect(mockConfig.state.llmo.tags).to.include('opportunitiesReviewed');
-    });
-
-    it('should not duplicate the tag if already present', async () => {
-      mockConfig.state.llmo.tags = ['opportunitiesReviewed'];
-
-      const result = await controller.markOpportunitiesReviewed(mockContext);
-
-      expect(result.status).to.equal(200);
-      const tagCount = mockConfig.state.llmo.tags
-        .filter((t) => t === 'opportunitiesReviewed').length;
-      expect(tagCount).to.equal(1);
+      const body = await result.json();
+      expect(body).to.deep.equal(['opportunitiesReviewed']);
+      expect(mockConfig.addLlmoTag).to.have.been.calledOnceWith('opportunitiesReviewed');
     });
 
     it('should return forbidden when user has no access', async () => {
