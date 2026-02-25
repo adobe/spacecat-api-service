@@ -73,6 +73,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} trafficController - The traffic controller.
  * @param {FixesController} fixesController - The fixes controller.
  * @param {Object} llmoController - The LLMO controller.
+ * @param {Object} llmoMysticatController - The LLMO Mysticat controller (brand presence APIs).
  * @param {Object} userActivityController - The user activity controller.
  * @param {Object} siteEnrollmentController - The site enrollment controller.
  * @param {Object} trialUserController - The trial user controller.
@@ -114,6 +115,7 @@ export default function getRouteHandlers(
   trafficController,
   fixesController,
   llmoController,
+  llmoMysticatController,
   userActivityController,
   siteEnrollmentController,
   trialUserController,
@@ -375,6 +377,21 @@ export default function getRouteHandlers(
     'PUT /sites/:siteId/llmo/strategy': llmoController.saveStrategy,
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,
     'POST /sites/:siteId/llmo/edge-optimize-routing': llmoController.updateEdgeOptimizeCDNRouting,
+
+    // Brand Presence (GET only, PostgREST/mysticat-data-service)
+    'GET /sites/:siteId/llmo/brand-presence/filter-dimensions': llmoMysticatController.getFilterDimensions,
+    'GET /sites/:siteId/llmo/brand-presence/weeks': llmoMysticatController.getWeeks,
+    'GET /sites/:siteId/llmo/brand-presence/metadata': llmoMysticatController.getMetadata,
+    'GET /sites/:siteId/llmo/brand-presence/stats': llmoMysticatController.getStats,
+    'GET /sites/:siteId/llmo/brand-presence/sentiment-overview': llmoMysticatController.getSentimentOverview,
+    'GET /sites/:siteId/llmo/brand-presence/weekly-trends': llmoMysticatController.getWeeklyTrends,
+    'GET /sites/:siteId/llmo/brand-presence/topics': llmoMysticatController.getTopics,
+    'GET /sites/:siteId/llmo/brand-presence/topics/:topic/prompts': llmoMysticatController.getTopicPrompts,
+    'GET /sites/:siteId/llmo/brand-presence/search': llmoMysticatController.getSearch,
+    'GET /sites/:siteId/llmo/brand-presence/share-of-voice': llmoMysticatController.getShareOfVoice,
+    'GET /sites/:siteId/llmo/brand-presence/competitor-trends': llmoMysticatController.getCompetitorTrends,
+    'GET /sites/:siteId/llmo/brand-presence/prompts': llmoMysticatController.getPrompts,
+    'GET /sites/:siteId/llmo/brand-presence/sources': llmoMysticatController.getSources,
 
     // Tier Specific Routes
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,
