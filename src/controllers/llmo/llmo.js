@@ -1283,7 +1283,7 @@ function LlmoController(ctx) {
     const { Site } = dataAccess;
     const { cdnType, enabled = true } = context.data || {};
     log.info(`Edge optimize routing update request received for site ${siteId}`);
-    console.info(`Headers: ${JSON.stringify(context.request?.headers)}`);
+    console.info(`Headers: ${JSON.stringify(context.pathInfo?.headers)}`);
 
     // if (env?.ENV && env.ENV !== 'prod') {
     //   return createResponse(
