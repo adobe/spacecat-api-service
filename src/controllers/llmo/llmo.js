@@ -1261,7 +1261,6 @@ function LlmoController(ctx) {
   // Get the value of a cookie from the request
   const getCookieValue = (request, name) => {
     const raw = request?.headers?.get?.('cookie') ?? '';
-    console.info(`Headers: ${JSON.stringify(request?.headers)}`);
     for (const part of raw.split(';')) {
       const [key, ...v] = part.trim().split('=');
       if (key === name) return v.join('=').trim();
@@ -1284,6 +1283,7 @@ function LlmoController(ctx) {
     const { Site } = dataAccess;
     const { cdnType, enabled = true } = context.data || {};
     log.info(`Edge optimize routing update request received for site ${siteId}`);
+    console.info(`Headers: ${JSON.stringify(context.request?.headers)}`);
 
     // if (env?.ENV && env.ENV !== 'prod') {
     //   return createResponse(
