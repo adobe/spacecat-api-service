@@ -511,7 +511,12 @@ site-opportunity-suggestions-auto-fix:
   patch:
     operationId: autoFixSiteOpportunitySuggestions
     summary: |
-        Trigger autofix for one or multiple suggestions, and set them to 'In Progress'
+        Trigger autofix for one or multiple suggestions
+    description: |
+      Triggers the autofix worker for the given suggestions. By default, suggestions are
+      transitioned to IN_PROGRESS status before the message is queued. When `action` is set
+      to `"assess"`, suggestions remain in their current status (no IN_PROGRESS transition)
+      and the worker performs a read-only fixability assessment instead.
     tags:
       - opportunity-suggestions
     requestBody:
@@ -525,6 +530,12 @@ site-opportunity-suggestions-auto-fix:
                   type: array
                   items:
                     $ref: './schemas.yaml#/Id'
+                action:
+                  type: string
+                  description: |
+                    Optional action to forward to the autofix worker. When set to `"assess"`,
+                    the suggestion status transition to IN_PROGRESS is skipped and the worker
+                    performs a read-only fixability assessment.
                 customData:
                   description: Additional custom data to forward to the autofix worker
               required:
