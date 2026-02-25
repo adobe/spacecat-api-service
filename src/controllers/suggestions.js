@@ -765,6 +765,10 @@ function SuggestionsController(ctx, sqs, env) {
     };
     return createResponse(fullResponse, 207);
   };
+  /**
+   * @deprecated Use autofixSuggestionsV2 instead, which reads the promise token from
+   * the request cookie rather than creating one from the Authorization header via IMS.
+   */
   const autofixSuggestions = async (context) => {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
@@ -944,6 +948,181 @@ function SuggestionsController(ctx, sqs, env) {
         action,
         customData,
         { url: requestUrl },
+      );
+    }
+
+    return createResponse(response, 207);
+  };
+
+  const autofixSuggestionsV2 = async (context) => {
+    const siteId = context.params?.siteId;
+    const opportunityId = context.params?.opportunityId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    if (!isValidUUID(opportunityId)) {
+      return badRequest('Opportunity ID required');
+    }
+
+    if (!isNonEmptyObject(context.data)) {
+      return badRequest('No updates provided');
+    }
+    const {
+      suggestionIds, variations, action, customData,
+    } = context.data;
+
+    if (!isArray(suggestionIds)) {
+      return badRequest('Request body must be an array of suggestionIds');
+    }
+    if (variations && !isArray(variations)) {
+      return badRequest('variations must be an array');
+    }
+    if (action !== undefined && !hasText(action)) {
+      return badRequest('action cannot be empty');
+    }
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site, 'auto_fix')) {
+      return forbidden('User does not belong to the organization or does not have sufficient permissions');
+    }
+
+    const opportunity = await Opportunity.findById(opportunityId);
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound('Opportunity not found');
+    }
+    const configuration = await Configuration.findLatest();
+    if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-auto-fix`, site)) {
+      return badRequest(`Handler is not enabled for site ${site.getId()} autofix type ${opportunity.getType()}`);
+    }
+    const suggestions = await Suggestion.allByOpportunityId(
+      opportunityId,
+    );
+    const validSuggestions = [];
+    const failedSuggestions = [];
+    suggestions.forEach((suggestion) => {
+      if (suggestionIds.includes(suggestion.getId())) {
+        /* c8 ignore start */
+        if (isDomainWideSuggestion(suggestion)) {
+          failedSuggestions.push({
+            uuid: suggestion.getId(),
+            index: suggestionIds.indexOf(suggestion.getId()),
+            message: 'Domain-wide aggregate suggestions cannot be auto-fixed individually',
+            statusCode: 400,
+          });
+        /* c8 ignore stop */
+        } else if (suggestion.getStatus() === SuggestionModel.STATUSES.NEW) {
+          validSuggestions.push(suggestion);
+        } else {
+          failedSuggestions.push({
+            uuid: suggestion.getId(),
+            index: suggestionIds.indexOf(suggestion.getId()),
+            message: 'Suggestion is not in NEW status',
+            statusCode: 400,
+          });
+        }
+      }
+    });
+
+    let suggestionGroups;
+    if (shouldGroupSuggestionsForAutofix(opportunity.getType())) {
+      const opportunityData = opportunity.getData();
+      const suggestionsByUrl = validSuggestions.reduce((acc, suggestion) => {
+        const data = suggestion.getData();
+        const url = data?.url || data?.recommendations?.[0]?.pageUrl
+          || data?.url_from
+          || data?.urlFrom
+          || opportunityData?.page;
+        if (!url) return acc;
+
+        if (!acc[url]) {
+          acc[url] = [];
+        }
+        acc[url].push(suggestion);
+        return acc;
+      }, {});
+
+      suggestionGroups = Object.entries(suggestionsByUrl).map(([url, groupedSuggestions]) => ({
+        groupedSuggestions,
+        url,
+      }));
+    }
+
+    suggestionIds.forEach((suggestionId, index) => {
+      if (!suggestions.find((s) => s.getId() === suggestionId)) {
+        failedSuggestions.push({
+          uuid: suggestionId,
+          index,
+          message: 'Suggestion not found',
+          statusCode: 404,
+        });
+      }
+    });
+    let succeededSuggestions = [];
+    if (isNonEmptyArray(validSuggestions)) {
+      succeededSuggestions = await Suggestion.bulkUpdateStatus(
+        validSuggestions,
+        SuggestionModel.STATUSES.IN_PROGRESS,
+      );
+    }
+
+    const cookieHeader = context.pathInfo?.headers?.cookie || '';
+    const promiseTokenMatch = cookieHeader.match(/(?:^|;\s*)promise_token=([^;]*)/);
+    const promiseTokenValue = promiseTokenMatch?.[1];
+    if (!hasText(promiseTokenValue)) {
+      return badRequest('Promise token cookie is required');
+    }
+    const promiseTokenResponse = { promise_token: promiseTokenValue };
+
+    const response = {
+      suggestions: [
+        ...succeededSuggestions.map((suggestion) => ({
+          uuid: suggestion.getId(),
+          index: suggestionIds.indexOf(suggestion.getId()),
+          statusCode: 200,
+          suggestion: SuggestionDto.toJSON(suggestion),
+        })),
+        ...failedSuggestions,
+      ],
+      metadata: {
+        total: suggestionIds.length,
+        success: succeededSuggestions.length,
+        failed: failedSuggestions.length,
+      },
+    };
+    response.suggestions.sort((a, b) => a.index - b.index);
+    const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
+
+    if (shouldGroupSuggestionsForAutofix(opportunity.getType())) {
+      await Promise.all(
+        suggestionGroups.map(({ groupedSuggestions, url }) => sendAutofixMessage(
+          sqs,
+          queueUrl,
+          siteId,
+          opportunityId,
+          groupedSuggestions.map((s) => s.getId()),
+          promiseTokenResponse,
+          variations,
+          action,
+          customData,
+          { url },
+        )),
+      );
+    } else {
+      await sendAutofixMessage(
+        sqs,
+        queueUrl,
+        siteId,
+        opportunityId,
+        succeededSuggestions.map((s) => s.getId()),
+        promiseTokenResponse,
+        variations,
+        action,
+        customData,
       );
     }
 
@@ -1955,6 +2134,7 @@ function SuggestionsController(ctx, sqs, env) {
 
   return {
     autofixSuggestions,
+    autofixSuggestionsV2,
     createSuggestions,
     deploySuggestionToEdge,
     rollbackSuggestionFromEdge,

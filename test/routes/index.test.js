@@ -510,6 +510,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit/:cursor',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix',
+      'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix-v2',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-rollback',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-preview',

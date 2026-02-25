@@ -510,9 +510,14 @@ site-opportunity-suggestions-auto-fix:
     - $ref: './parameters.yaml#/opportunityId'
   patch:
     operationId: autoFixSiteOpportunitySuggestions
+    deprecated: true
     summary: |
-        Trigger autofix for one or multiple suggestions
+        Trigger autofix for one or multiple suggestions (deprecated)
     description: |
+      **Deprecated** — use the v2 endpoint (`/sites/{siteId}/opportunities/{opportunityId}/suggestions/auto-fix-v2`)
+      instead, which reads the promise token from the request `promise_token` cookie rather
+      than creating one from the Authorization header via IMS.
+
       Triggers the autofix worker for the given suggestions. By default, suggestions are
       transitioned to IN_PROGRESS status before the message is queued. When `action` is set
       to `"assess"`, suggestions remain in their current status (no IN_PROGRESS transition)
@@ -553,6 +558,64 @@ site-opportunity-suggestions-auto-fix:
             examples:
               broken-backlinks-suggestions-status-update-response:
                 $ref: './examples.yaml#/broken-backlinks-suggestions-status-update-response'
+    security:
+      - ims_key: [ ]
+
+site-opportunity-suggestions-auto-fix-v2:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+  patch:
+    operationId: autoFixSiteOpportunitySuggestionsV2
+    summary: |
+        Trigger autofix for one or multiple suggestions (v2)
+    description: |
+      Triggers the autofix worker for the given suggestions. The promise token is read from
+      the `promise_token` cookie on the request instead of being created from the Authorization
+      header via IMS (as in v1). Returns 400 if the cookie is missing or empty.
+
+      By default, suggestions are transitioned to IN_PROGRESS status before the message is
+      queued. When `action` is set to `"assess"`, suggestions remain in their current status
+      (no IN_PROGRESS transition) and the worker performs a read-only fixability assessment
+      instead.
+    tags:
+      - opportunity-suggestions
+    requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                suggestionIds:
+                  type: array
+                  items:
+                    $ref: './schemas.yaml#/Id'
+                action:
+                  type: string
+                  description: |
+                    Optional action to forward to the autofix worker. When set to `"assess"`,
+                    the suggestion status transition to IN_PROGRESS is skipped and the worker
+                    performs a read-only fixability assessment.
+                customData:
+                  description: Additional custom data to forward to the autofix worker
+              required:
+                - suggestionIds
+
+    responses:
+      '207':
+        description: |
+          A list of suggestions that are sent to autofix,
+          or the status code and error message for the ones failed.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SuggestionStatusUpdateListResponse'
+            examples:
+              broken-backlinks-suggestions-status-update-response:
+                $ref: './examples.yaml#/broken-backlinks-suggestions-status-update-response'
+      '400':
+        description: Promise token cookie is missing or empty.
     security:
       - ims_key: [ ]
 
