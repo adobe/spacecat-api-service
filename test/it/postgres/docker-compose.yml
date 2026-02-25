@@ -1,0 +1,47 @@
+# Docker Compose for IT tests — PostgreSQL + PostgREST (mysticat-data-service)
+# Migrations are baked into the data-service image.
+#
+# ECR access required for the data-service image:
+#   - CI: secrets.AWS_ECR_PULL_ROLE_ARN
+#   - Local: aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 682033462621.dkr.ecr.us-east-1.amazonaws.com
+
+name: spacecat-api-service-it
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: spacecat-it-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: mysticat
+    ports:
+      - "${IT_POSTGRES_PORT:-55432}:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  data-service:
+    image: 682033462621.dkr.ecr.us-east-1.amazonaws.com/mysticat-data-service:v1.11.0
+    container_name: spacecat-it-data-service
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      LOCAL_DEV: "true"
+      DATABASE_URL: postgres://postgres:postgres@db:5432/mysticat?sslmode=disable
+      PGRST_DB_URI: postgres://postgrest_authenticator:postgrest@db:5432/mysticat
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_ANON_ROLE: postgrest_anon
+      PGRST_DB_EXTRA_SEARCH_PATH: ""
+      PGRST_LOG_LEVEL: warn
+      PGRST_ADMIN_SERVER_PORT: 3001
+      PGRST_OPENAPI_SERVER_PROXY_URI: "http://localhost:${IT_POSTGREST_PORT:-3300}"
+    command: ["sh", "-c", "dbmate -d db/migrations up && exec postgrest"]
+    ports:
+      - "${IT_POSTGREST_PORT:-3300}:3000"
+      - "${IT_POSTGREST_ADMIN_PORT:-3301}:3001"

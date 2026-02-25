@@ -395,11 +395,10 @@ describe('LLMO Onboarding Functions', () => {
     });
 
     it('should return isValid false when site is mission critical for ASO', async () => {
-      // Import the ASO_CRITICAL_SITES constant first
-      const { ASO_CRITICAL_SITES } = await import('../../../src/controllers/llmo/llmo-onboarding.js');
+      // Use a hardcoded critical site ID to test the validation logic
+      const criticalSiteId = 'mission-critical-site-123';
 
-      // Create mock existing site with an ID from ASO_CRITICAL_SITES
-      const criticalSiteId = ASO_CRITICAL_SITES[0];
+      // Create mock existing site with a critical site ID
       const existingSite = {
         getId: sinon.stub().returns(criticalSiteId),
         getOrganizationId: sinon.stub().returns('some-org-id'),
@@ -423,34 +422,43 @@ describe('LLMO Onboarding Functions', () => {
       };
 
       // Import the function with mocked dependencies
-      const { validateSiteNotOnboarded } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
+      const { validateSiteNotOnboarded, ASO_CRITICAL_SITES } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {
         '@adobe/spacecat-helix-content-sdk': {
           createFrom: sinon.stub().resolves(mockSharePointClient),
         },
       });
 
-      // Test parameters
-      const baseURL = 'https://critical-site.com';
-      const imsOrgId = 'test-tenant-id@AdobeOrg';
-      const dataFolder = 'dev/critical-site-com';
+      // Temporarily add the critical site ID to the array after import
+      const originalLength = ASO_CRITICAL_SITES.length;
+      ASO_CRITICAL_SITES.push(criticalSiteId);
 
-      // Call the function
-      const result = await validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, context);
+      try {
+        // Test parameters
+        const baseURL = 'https://critical-site.com';
+        const imsOrgId = 'test-tenant-id@AdobeOrg';
+        const dataFolder = 'dev/critical-site-com';
 
-      // Verify result
-      expect(result).to.deep.equal({
-        isValid: false,
-        error: 'Site https://critical-site.com is mission critical for ASO.',
-      });
+        // Call the function
+        const result = await validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, context);
 
-      // Verify checks were performed
-      expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith(baseURL);
-      expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledWith(imsOrgId);
-      expect(existingSite.getId).to.have.been.called;
-      // The check happens early, so organization.getId and existingSite.getOrganizationId
-      // should NOT be called (we return before those comparisons)
-      expect(organization.getId).to.not.have.been.called;
-      expect(existingSite.getOrganizationId).to.not.have.been.called;
+        // Verify result
+        expect(result).to.deep.equal({
+          isValid: false,
+          error: 'Site https://critical-site.com is mission critical for ASO.',
+        });
+
+        // Verify checks were performed
+        expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith(baseURL);
+        expect(mockDataAccess.Organization.findByImsOrgId).to.have.been.calledWith(imsOrgId);
+        expect(existingSite.getId).to.have.been.called;
+        // The check happens early, so organization.getId and existingSite.getOrganizationId
+        // should NOT be called (we return before those comparisons)
+        expect(organization.getId).to.not.have.been.called;
+        expect(existingSite.getOrganizationId).to.not.have.been.called;
+      } finally {
+        // Restore the original ASO_CRITICAL_SITES array
+        ASO_CRITICAL_SITES.length = originalLength;
+      }
     });
 
     it('should return isValid false when site exists and is assigned to different organization', async () => {
@@ -2636,6 +2644,47 @@ describe('LLMO Onboarding Functions', () => {
       );
       expect(resultWithSlash).to.equal('https://www.example.com/');
       expect(resultWithSlash.endsWith('/')).to.be.true;
+    });
+  });
+
+  describe('enableAudits failure handling', () => {
+    it('should log warning, call say, continue processing, and still save when an audit fails', async () => {
+      const { enableAudits } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+      const mockSite = { getId: () => 'site123' };
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub().callsFake((audit) => {
+          if (audit === 'fail') throw new Error('fail error');
+        }),
+        save: sinon.stub().resolves(),
+      };
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+      const mockSay = sinon.stub();
+
+      await enableAudits(mockSite, { dataAccess: mockDataAccess, log: mockLog }, ['ok', 'fail'], mockSay);
+
+      expect(mockLog.warn).to.have.been.calledWith(sinon.match(/Failed to enable audit 'fail'/));
+      expect(mockSay).to.have.been.calledWith(sinon.match(/:warning:.*fail/));
+      expect(mockConfiguration.enableHandlerForSite).to.have.been.calledTwice;
+      expect(mockConfiguration.save).to.have.been.calledOnce;
+    });
+  });
+
+  describe('enableImports failure handling', () => {
+    it('should log warning, call say, and continue processing when an import fails', async () => {
+      const { enableImports } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
+      const mockSiteConfig = {
+        getImports: () => [],
+        enableImport: sinon.stub().callsFake((type) => {
+          if (type === 'fail') throw new Error('fail error');
+        }),
+      };
+      const mockSay = sinon.stub();
+
+      await enableImports(mockSiteConfig, [{ type: 'ok' }, { type: 'fail' }], mockLog, mockSay);
+
+      expect(mockLog.warn).to.have.been.calledWith(sinon.match(/Failed to enable import 'fail'/));
+      expect(mockSay).to.have.been.calledWith(sinon.match(/:warning:.*fail/));
+      expect(mockSiteConfig.enableImport).to.have.been.calledTwice;
     });
   });
 });

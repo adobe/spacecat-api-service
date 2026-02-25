@@ -10,11 +10,12 @@
  * governing permissions and limitations under the License.
  */
 
-import { isValidUrl } from '@adobe/spacecat-shared-utils';
+import { isValidUrl, detectBotBlocker } from '@adobe/spacecat-shared-utils';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import { onboardSingleSite as sharedOnboardSingleSite } from '../../utils.js';
 import { triggerBrandProfileAgent } from '../../brand-profile-trigger.js';
 import { loadProfileConfig } from '../../../utils/slack/base.js';
+import { formatBotProtectionSlackMessage } from './commons.js';
 
 export const AEM_CS_HOST = /^author-p(\d+)-e(\d+)/i;
 
@@ -691,6 +692,24 @@ export function onboardSiteModal(lambdaContext) {
         text: `:gear: Starting onboarding for site ${siteUrl}...`,
         thread_ts: responseThreadTs,
       });
+
+      const botProtectionResult = await detectBotBlocker({ baseUrl: siteUrl });
+
+      // Send warning if bot protection is detected
+      if (!botProtectionResult.crawlable) {
+        log.warn(`Bot protection detected for ${siteUrl} - audits may fail`, botProtectionResult);
+
+        const botProtectionMessage = formatBotProtectionSlackMessage({
+          siteUrl,
+          botProtection: botProtectionResult,
+        });
+
+        await client.chat.postMessage({
+          channel: responseChannel,
+          text: botProtectionMessage,
+          thread_ts: responseThreadTs,
+        });
+      }
 
       const reportLine = await onboardSingleSiteFromModal(
         siteUrl,

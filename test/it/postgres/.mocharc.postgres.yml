@@ -1,0 +1,4 @@
+timeout: 120000
+exit: true
+require: test/it/postgres/harness.js
+spec: test/it/postgres/*.test.js

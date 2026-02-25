@@ -25,9 +25,10 @@ import {
   arrayEquals,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
-import { ValidationError } from '@adobe/spacecat-shared-data-access';
 import { OpportunityDto } from '../dto/opportunity.js';
 import AccessControlUtil from '../support/access-control-util.js';
+
+const VALIDATION_ERROR_NAME = 'ValidationError';
 
 /**
  * Opportunities controller.
@@ -64,7 +65,7 @@ function OpportunitiesController(ctx) {
    * @returns a response
    */
   function handleDataAccessError(e, message) {
-    if (e instanceof ValidationError) {
+    if (e?.name === VALIDATION_ERROR_NAME) {
       return badRequest(e.message);
     }
     return createResponse({ message }, 500);

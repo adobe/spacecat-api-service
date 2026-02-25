@@ -92,6 +92,7 @@ function GetLlmoConfigSummaryCommand(context) {
     const brandAliases = config.brands?.aliases?.length || 0;
     const competitors = config.competitors?.competitors?.length || 0;
     const deletedPrompts = Object.keys(config.deleted?.prompts || {}).length;
+    const ignoredPrompts = Object.keys(config.ignored?.prompts || {}).length;
     const cdnProvider = config.cdnBucketConfig?.cdnProvider || 'N/A';
 
     return {
@@ -103,6 +104,7 @@ function GetLlmoConfigSummaryCommand(context) {
       brandAliases,
       competitors,
       deletedPrompts,
+      ignoredPrompts,
       cdnProvider,
     };
   };
@@ -198,6 +200,7 @@ function GetLlmoConfigSummaryCommand(context) {
           { id: 'brandAliases', title: 'Brand Aliases' },
           { id: 'competitors', title: 'Competitors' },
           { id: 'deletedPrompts', title: 'Deleted Prompts' },
+          { id: 'ignoredPrompts', title: 'Ignored Prompts' },
           { id: 'cdnProvider', title: 'CDN Provider' },
         ],
       });

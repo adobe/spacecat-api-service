@@ -48,3 +48,41 @@ export function composeReply(opts) {
     replace_original: true,
   };
 }
+
+/**
+ * Formats bot protection details for Slack notifications
+ * @param {Object} options - Options
+ * @param {string} options.siteUrl - Site URL
+ * @param {Object} options.botProtection - Bot protection details
+ * @returns {string} Formatted Slack message
+ */
+export function formatBotProtectionSlackMessage({
+  siteUrl,
+  botProtection,
+}) {
+  const isBlocked = botProtection.crawlable === false;
+  const emoji = isBlocked ? ':warning:' : ':information_source:';
+  const title = isBlocked ? 'Bot Protection Detected' : 'Bot Protection Infrastructure Detected';
+
+  let message = `${emoji} *${title}*\n\n`
+    + `*Site:* ${siteUrl}\n`
+    + `*Protection Type:* ${botProtection.type}\n`
+    + `*Confidence:* ${(botProtection.confidence * 100).toFixed(0)}%\n`;
+
+  if (isBlocked) {
+    message += '\n'
+      + '*Status:*\n'
+      + '• Initial detection suggests bot protection is active\n'
+      + '• Onboarding will proceed with browser-based scraping\n'
+      + '• Additional details may be provided if bot protection is encountered during scraping\n';
+  } else {
+    // Site is accessible - just informational
+    message += '\n'
+      + '*Status:*\n'
+      + '• Bot protection infrastructure is present\n'
+      + '• SpaceCat can currently access the site\n'
+      + '• No action needed at this time\n';
+  }
+
+  return message;
+}

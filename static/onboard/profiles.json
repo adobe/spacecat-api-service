@@ -38,7 +38,8 @@
 		"imports": {
 			"organic-traffic" : {},
 			"top-pages" : {},
-			"all-traffic": {}
+			"all-traffic": {},
+            "traffic-analysis": {}
 		},
 		"config": {
 			"scheduledRun": false
@@ -78,7 +79,8 @@
 			"organic-keywords" :{},
 			"all-traffic": {},
 			"user-engagement": {},
-			"cwv-weekly": {}
+			"cwv-weekly": {},
+            "traffic-analysis": {}
 		},
 		"config": {
 			"scheduledRun": false
@@ -92,7 +94,6 @@
 			"broken-internal-links": {},
 			"experimentation-opportunities": {},
 			"meta-tags": {},
-			"sitemap": {},
 			"redirect-chains": {},
 			"cwv": {},
 			"alt-text": {},
@@ -113,8 +114,10 @@
 			"top-pages" : {},
 			"organic-keywords" :{},
 			"all-traffic": {},
+            "traffic-analysis": {},
 			"user-engagement": {},
-			"cwv-weekly": {}
+			"cwv-weekly": {},
+			"ahref-paid-pages": {}
 		},
 		"config": {
 			"scheduledRun": true

@@ -146,10 +146,10 @@ describe('LlmoOnboardCommand', () => {
       expect(sectionBlock.text.text).to.include('Site Already Onboarded');
       expect(sectionBlock.text.text).to.include('Test Brand');
 
-      // Check for the actions block with two buttons
+      // Check for the actions block with three buttons
       const actionsBlock = message.blocks.find((block) => block.type === 'actions');
       expect(actionsBlock).to.exist;
-      expect(actionsBlock.elements).to.have.length(2);
+      expect(actionsBlock.elements).to.have.length(3);
 
       const addEntitlementsButton = actionsBlock.elements[0];
       expect(addEntitlementsButton.type).to.equal('button');
@@ -161,6 +161,12 @@ describe('LlmoOnboardCommand', () => {
       expect(updateOrgButton.type).to.equal('button');
       expect(updateOrgButton.text.text).to.equal('Update IMS Org');
       expect(updateOrgButton.action_id).to.equal('update_org_action');
+
+      // Check for the re-enable defaults button
+      const reEnableButton = actionsBlock.elements[2];
+      expect(reEnableButton.type).to.equal('button');
+      expect(reEnableButton.text.text).to.equal('Re-enable Defaults');
+      expect(reEnableButton.action_id).to.equal('re_enable_defaults_action');
 
       // Check that button values contain the necessary metadata
       const addEntitlementsValue = JSON.parse(addEntitlementsButton.value);

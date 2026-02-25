@@ -278,9 +278,49 @@ describe('OpportunitySummaryDto', () => {
       const result = OpportunitySummaryDto.toJSON(opportunity, []);
 
       expect(result.impact).to.equal(5000);
+      expect(result.impactFieldName).to.equal('projectedConversionValue');
     });
 
-    it('sets impact to 0 when no values are present', () => {
+    it('uses projectedEngagementValue when present and sets impactFieldName', () => {
+      const opportunity = {
+        getId: () => 'oppty-1',
+        getTitle: () => 'Test Opportunity',
+        getDescription: () => 'Test Description',
+        getType: () => 'high-organic-low-ctr',
+        getStatus: () => 'NEW',
+        getData: () => ({
+          projectedEngagementValue: 7000,
+          projectedConversionValue: 5000,
+          projectedTrafficValue: 3000,
+        }),
+      };
+
+      const result = OpportunitySummaryDto.toJSON(opportunity, []);
+
+      expect(result.impact).to.equal(7000);
+      expect(result.impactFieldName).to.equal('projectedEngagementValue');
+      expect(result.projectedEngagementValue).to.equal(7000);
+    });
+
+    it('uses projectedTrafficValue when only traffic value is present', () => {
+      const opportunity = {
+        getId: () => 'oppty-1',
+        getTitle: () => 'Test Opportunity',
+        getDescription: () => 'Test Description',
+        getType: () => 'cwv',
+        getStatus: () => 'NEW',
+        getData: () => ({
+          projectedTrafficValue: 3000,
+        }),
+      };
+
+      const result = OpportunitySummaryDto.toJSON(opportunity, []);
+
+      expect(result.impact).to.equal(3000);
+      expect(result.impactFieldName).to.equal('projectedTrafficValue');
+    });
+
+    it('sets impact to 0 and impactFieldName to null when no values are present', () => {
       const opportunity = {
         getId: () => 'oppty-1',
         getTitle: () => 'Test Opportunity',
@@ -293,6 +333,7 @@ describe('OpportunitySummaryDto', () => {
       const result = OpportunitySummaryDto.toJSON(opportunity, []);
 
       expect(result.impact).to.equal(0);
+      expect(result.impactFieldName).to.be.null;
     });
   });
 });

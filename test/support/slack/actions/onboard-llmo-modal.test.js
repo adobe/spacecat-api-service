@@ -66,6 +66,7 @@ describe('onboard-llmo-modal', () => {
       enableHandlerForSite: sinonSandbox.stub(),
       disableHandlerForSite: sinonSandbox.stub(),
       isHandlerEnabledForSite: sinonSandbox.stub().returns(false),
+      getEnabledSiteIdsForHandler: sinonSandbox.stub().returns([]),
       getQueues: sinonSandbox.stub().returns({ audits: 'audit-queue' }),
       getSlackConfig: sinonSandbox.stub().returns({
         channel: 'test-channel',
@@ -425,7 +426,8 @@ describe('onboard-llmo-modal', () => {
       expect(config.enableHandlerForSite).to.have.been.calledWith('headings', mockSite);
 
       // Verify brand presence cadence configuration (Slack-specific)
-      expect(config.enableHandlerForSite).to.have.been.calledWith('geo-brand-presence-free', mockSite);
+      // With splits, the first empty split (geo-brand-presence-free-1) is chosen
+      expect(config.enableHandlerForSite).to.have.been.calledWith('geo-brand-presence-free-1', mockSite);
       expect(config.disableHandlerForSite).to.have.been.calledWith('geo-brand-presence-daily', mockSite);
       expect(config.disableHandlerForSite).to.have.been.calledWith('geo-brand-presence-paid', mockSite);
 
@@ -1925,6 +1927,112 @@ example-com:
         text: ':x: Site not found. Please try again.',
         thread_ts: 'thread123',
       });
+    });
+  });
+
+  describe('reEnableDefaultsAction', () => {
+    let mockBody;
+    let mockAck;
+    let mockClient;
+
+    beforeEach(() => {
+      mockBody = {
+        user: { id: 'user123', name: 'Test User' },
+        channel: { id: 'channel123' },
+        message: { ts: 'message123' },
+        actions: [{
+          value: JSON.stringify({
+            brandURL: 'https://example.com',
+            siteId: 'site123',
+            existingBrand: 'Test Brand',
+            originalChannel: 'channel123',
+            originalThreadTs: 'thread123',
+          }),
+        }],
+      };
+      mockAck = sandbox.stub();
+      mockClient = {
+        chat: { postMessage: sandbox.stub(), update: sandbox.stub().resolves() },
+        views: { update: sandbox.stub().resolves() },
+      };
+    });
+
+    it('should enable geo-brand-presence-free when no variant is enabled', async () => {
+      const mockSite = createDefaultMockSite(sandbox);
+      const mockSiteModel = createDefaultMockSiteModel(sandbox, mockSite);
+      mockSiteModel.findById.resolves(mockSite);
+
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSiteModel });
+      const mockConfig = await lambdaCtx.dataAccess.Configuration.findLatest();
+
+      const handler = mockedModule.reEnableDefaultsAction(lambdaCtx);
+      await handler({ ack: mockAck, body: mockBody, client: mockClient });
+
+      expect(mockConfig.enableHandlerForSite).to.have.been.calledWith('geo-brand-presence-free-1', mockSite);
+      expect(mockClient.chat.postMessage).to.have.been.calledWith(
+        sinon.match({ text: sinon.match('geo-brand-presence-free-1') }),
+      );
+    });
+
+    it('should preserve existing geo-brand-presence configuration', async () => {
+      const mockSite = createDefaultMockSite(sandbox);
+      const mockSiteModel = createDefaultMockSiteModel(sandbox, mockSite);
+      mockSiteModel.findById.resolves(mockSite);
+
+      const mockConfig = {
+        save: sandbox.stub().resolves(),
+        enableHandlerForSite: sandbox.stub(),
+        disableHandlerForSite: sandbox.stub(),
+        isHandlerEnabledForSite: sandbox.stub().callsFake((h) => h === 'geo-brand-presence-daily'),
+        getQueues: sandbox.stub().returns({ audits: 'audit-queue' }),
+        getSlackConfig: sandbox.stub().returns({ channel: 'test-channel', token: 'test-token' }),
+      };
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, {
+        mockSiteModel,
+        mockConfiguration: { findLatest: sandbox.stub().resolves(mockConfig) },
+      });
+
+      const handler = mockedModule.reEnableDefaultsAction(lambdaCtx);
+      await handler({ ack: mockAck, body: mockBody, client: mockClient });
+
+      const geoCalls = mockConfig.enableHandlerForSite.getCalls()
+        .filter((c) => c.args[0].startsWith('geo-brand-presence'));
+      expect(geoCalls).to.have.lengthOf(0);
+      expect(mockClient.chat.postMessage).to.have.been.calledWith(
+        sinon.match({ text: sinon.match('existing configuration preserved') }),
+      );
+    });
+
+    it('should handle site not found', async () => {
+      const mockSiteModel = createDefaultMockSiteModel(sandbox);
+      mockSiteModel.findById.resolves(null);
+
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSiteModel });
+      const handler = mockedModule.reEnableDefaultsAction(lambdaCtx);
+      await handler({ ack: mockAck, body: mockBody, client: mockClient });
+
+      expect(mockClient.chat.postMessage).to.have.been.calledWith({
+        channel: 'channel123',
+        text: ':x: Site not found. Please try again.',
+        thread_ts: 'thread123',
+      });
+    });
+
+    it('should handle errors gracefully', async () => {
+      const mockSiteModel = createDefaultMockSiteModel(sandbox);
+      mockSiteModel.findById.rejects(new Error('Database error'));
+
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSiteModel });
+      const handler = mockedModule.reEnableDefaultsAction(lambdaCtx);
+      await handler({ ack: mockAck, body: mockBody, client: mockClient });
+
+      expect(lambdaCtx.log.error).to.have.been.calledWith(
+        'Error re-enabling defaults:',
+        sinon.match.instanceOf(Error),
+      );
+      expect(mockClient.chat.postMessage).to.have.been.calledWith(
+        sinon.match({ text: sinon.match(':x: Error re-enabling defaults:') }),
+      );
     });
   });
 

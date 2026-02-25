@@ -1,0 +1,81 @@
+[
+  {
+    "path": "/homepage",
+    "trf_type": "paid",
+    "consent": "show",
+    "pageviews": "50000",
+    "bounce_rate": "0.35",
+    "pct_pageviews": "0.25",
+    "click_rate": "0.45",
+    "engagement_rate": "0.65",
+    "p70_lcp": "2500",
+    "p70_cls": "0.05",
+    "p70_inp": "150"
+  },
+  {
+    "path": "/homepage",
+    "trf_type": "paid",
+    "consent": "hidden",
+    "pageviews": "50000",
+    "bounce_rate": "0.25",
+    "pct_pageviews": "0.25",
+    "click_rate": "0.55",
+    "engagement_rate": "0.75",
+    "p70_lcp": "2400",
+    "p70_cls": "0.04",
+    "p70_inp": "140"
+  },
+  {
+    "path": "/products",
+    "trf_type": "organic",
+    "consent": "show",
+    "pageviews": "30000",
+    "bounce_rate": "0.40",
+    "pct_pageviews": "0.15",
+    "click_rate": "0.35",
+    "engagement_rate": "0.60",
+    "p70_lcp": "3000",
+    "p70_cls": "0.08",
+    "p70_inp": "200"
+  },
+  {
+    "path": "/products",
+    "trf_type": "organic",
+    "consent": "hidden",
+    "pageviews": "30000",
+    "bounce_rate": "0.30",
+    "pct_pageviews": "0.15",
+    "click_rate": "0.45",
+    "engagement_rate": "0.70",
+    "p70_lcp": "2900",
+    "p70_cls": "0.07",
+    "p70_inp": "190"
+  },
+  {
+    "path": "/about",
+    "trf_type": "earned",
+    "consent": "show",
+    "pageviews": "10000",
+    "bounce_rate": "0.30",
+    "pct_pageviews": "0.05",
+    "click_rate": "0.40",
+    "engagement_rate": "0.70",
+    "p70_lcp": "2200",
+    "p70_cls": "0.03",
+    "p70_inp": "120"
+  },
+  {
+    "path": "/about",
+    "trf_type": "earned",
+    "consent": "hidden",
+    "pageviews": "10000",
+    "bounce_rate": "0.30",
+    "pct_pageviews": "0.05",
+    "click_rate": "0.40",
+    "engagement_rate": "0.70",
+    "p70_lcp": "2200",
+    "p70_cls": "0.03",
+    "p70_inp": "120"
+  }
+]
+

@@ -55,9 +55,6 @@ describe('approveSiteCandidate', () => {
 
     context = {
       dataAccess: {
-        KeyEvent: {
-          create: sinon.stub(),
-        },
         Site: {
           create: sinon.stub(),
           findByBaseURL: sinon.stub(),
@@ -138,7 +135,6 @@ describe('approveSiteCandidate', () => {
     expect(siteCandidate.setStatus).to.have.been.calledWith('APPROVED');
     expect(siteCandidate.setUpdatedBy).to.have.been.calledWith('approvers-username');
     expect(siteCandidate.save).to.have.been.calledOnce;
-    expect(context.dataAccess.KeyEvent.create).to.have.been.called;
     expect(respondMock).to.have.been.calledWith(expectedApprovedReply);
     expect(slackClient.postMessage).to.have.been.calledWith(expectedAnnouncedMessage);
   });
@@ -179,7 +175,6 @@ describe('approveSiteCandidate', () => {
     expect(site.setDeliveryType).to.have.been.calledWith('aem_edge');
     expect(site.setHlxConfig).to.have.been.calledWith(hlxConfig);
     expect(site.save).to.have.been.calledOnce;
-    expect(context.dataAccess.KeyEvent.create).to.have.been.called;
     expect(slackClient.postMessage).to.have.been.called; // the announcement
   });
 

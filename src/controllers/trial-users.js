@@ -18,6 +18,7 @@ import {
   createResponse,
   created,
   internalServerError,
+  unauthorized,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   hasText,
@@ -126,8 +127,10 @@ function TrialUsersController(ctx) {
         return forbidden('Access denied to this organization');
       }
 
-      // Check if trial user already exists with this email
-      const existingTrialUser = await TrialUser.findByEmailId(emailId);
+      // Check if trial user already exists with this email in this organization
+      const existingTrialUsers = await TrialUser.allByEmailId(emailId);
+      const existingTrialUser = existingTrialUsers
+        .find((user) => user.getOrganizationId() === organizationId);
       if (existingTrialUser) {
         return createResponse({ message: `Trial user with this email already exists ${existingTrialUser.getId()}` }, 409);
       }
@@ -170,9 +173,107 @@ function TrialUsersController(ctx) {
     }
   };
 
+  /**
+   * Gets the email address of the currently authenticated user.
+   * Tries multiple sources: trial_email, preferred_username, email.
+   *
+   * @param {Object} context - Request context
+   * @returns {string|null} Email address or null if not found
+   */
+  const getCurrentUserEmail = (context) => {
+    const authInfo = context.attributes?.authInfo;
+    if (!authInfo) return null;
+
+    const profile = authInfo.getProfile?.();
+    if (!profile) return null;
+
+    // Try multiple fields that might contain the email
+    return profile.trial_email || profile.preferred_username || profile.email || null;
+  };
+
+  /**
+   * Gets email preferences for the currently authenticated user.
+   *
+   * @param {Object} context - Request context
+   * @returns {Promise<Response>} Email preferences response
+   */
+  const getEmailPreferences = async (context) => {
+    const email = getCurrentUserEmail(context);
+    if (!email) {
+      return unauthorized('Unable to identify current user');
+    }
+
+    try {
+      const trialUser = await TrialUser.findByEmailId(email);
+      if (!trialUser) {
+        return notFound('Trial user not found');
+      }
+
+      const metadata = trialUser.getMetadata() || {};
+      const emailPreferences = metadata.emailPreferences || {};
+
+      // Default to opted-in if not set
+      return ok({
+        emailPreferences: {
+          weeklyDigest: emailPreferences.weeklyDigest !== false,
+        },
+      });
+    } catch (e) {
+      context.log.error(`Error getting email preferences for ${email}: ${e.message}`);
+      return internalServerError(e.message);
+    }
+  };
+
+  /**
+   * Updates email preferences for the currently authenticated user.
+   *
+   * @param {Object} context - Request context
+   * @returns {Promise<Response>} Updated email preferences response
+   */
+  const updateEmailPreferences = async (context) => {
+    const email = getCurrentUserEmail(context);
+    if (!email) {
+      return unauthorized('Unable to identify current user');
+    }
+
+    const { weeklyDigest } = context.data || {};
+
+    // Validate that weeklyDigest is a boolean if provided
+    if (weeklyDigest !== undefined && typeof weeklyDigest !== 'boolean') {
+      return badRequest('weeklyDigest must be a boolean');
+    }
+
+    try {
+      const trialUser = await TrialUser.findByEmailId(email);
+      if (!trialUser) {
+        return notFound('Trial user not found');
+      }
+
+      // Update email preferences in metadata
+      const metadata = trialUser.getMetadata() || {};
+      metadata.emailPreferences = {
+        ...(metadata.emailPreferences || {}),
+        ...(weeklyDigest !== undefined ? { weeklyDigest } : {}),
+      };
+      trialUser.setMetadata(metadata);
+      await trialUser.save();
+
+      return ok({
+        emailPreferences: {
+          weeklyDigest: metadata.emailPreferences.weeklyDigest !== false,
+        },
+      });
+    } catch (e) {
+      context.log.error(`Error updating email preferences for ${email}: ${e.message}`);
+      return internalServerError(e.message);
+    }
+  };
+
   return {
     getByOrganizationID,
     createTrialUserForEmailInvite,
+    getEmailPreferences,
+    updateEmailPreferences,
   };
 }
 

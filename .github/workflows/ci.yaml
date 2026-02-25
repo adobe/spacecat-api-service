@@ -8,15 +8,27 @@ permissions:
 on:
   push:
   pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
+    types: [opened, synchronize, ready_for_review, reopened, edited]
 
 env:
   CI_BUILD_NUM: ${{ github.run_id }}
   CI_BRANCH: ${{ github.ref_name }}
   HLX_AWS_REGION: ${{ secrets.AWS_REGION }}
 jobs:
-  protect-nyc-config:
+  validate-pr-title:
     if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Validate PR title
+        uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  protect-nyc-config:
+    if: github.event_name == 'pull_request' && github.event.action != 'edited'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -31,6 +43,7 @@ jobs:
         uses: ./.github/actions/protect-nyc-config
 
   build:
+    if: github.event_name == 'push' || github.event.action != 'edited'
     runs-on: ubuntu-latest
     steps:
       - name: Check out
@@ -39,6 +52,8 @@ jobs:
           persist-credentials: 'false'
       - name: Setup Node & NPM
         uses: ./.github/actions/setup-node-npm
+        env:
+          MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN: ${{ secrets.MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN }}
 
       - name: Lint, Test, Coverage Upload
         uses: ./.github/actions/lint-test-coverage
@@ -68,6 +83,8 @@ jobs:
 
       - name: Setup Node & NPM
         uses: ./.github/actions/setup-node-npm
+        env:
+          MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN: ${{ secrets.MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN }}
 
       - name: Configure AWS for PROD
         uses: ./.github/actions/configure-aws
@@ -94,6 +111,8 @@ jobs:
 
       - name: Setup Node & NPM
         uses: ./.github/actions/setup-node-npm
+        env:
+          MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN: ${{ secrets.MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN }}
 
       - name: Configure AWS for STAGE
         uses: ./.github/actions/configure-aws
@@ -118,6 +137,8 @@ jobs:
 
       - name: Setup Node & NPM
         uses: ./.github/actions/setup-node-npm
+        env:
+          MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN: ${{ secrets.MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN }}
 
       - name: Configure AWS for DEV
         uses: ./.github/actions/configure-aws
@@ -154,6 +175,8 @@ jobs:
 
       - name: Setup Node & NPM
         uses: ./.github/actions/setup-node-npm
+        env:
+          MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN: ${{ secrets.MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN }}
 
       - name: Configure AWS
         uses: ./.github/actions/configure-aws

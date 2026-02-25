@@ -195,10 +195,27 @@ site-opportunity-suggestions:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/opportunityId'
+    - $ref: './parameters.yaml#/suggestionView'
+    - $ref: './parameters.yaml#/suggestionStatus'
   get:
     operationId: getSiteOpportunitySuggestions
     summary: |
       Retrieve a list of all suggestions for a specific opportunity
+    description: |
+      Returns all suggestions (non-paginated) with optional field projection and status filtering.
+      
+      **Field Projection:**
+      - `view=minimal` - Returns id, status, timestamps (createdAt, updatedAt), and URL-related data fields (lightest)
+      - `view=summary` - Returns minimal fields plus metadata (opportunityId, type, rank, updatedBy)
+      - `view=full` - Returns all fields including complete data object (default)
+      
+      **Status Filtering:**
+      - Single status: `status=NEW`
+      - Multiple statuses: `status=NEW,APPROVED,IN_PROGRESS`
+      - Valid values: NEW, APPROVED, SKIPPED, FIXED, ERROR, IN_PROGRESS, OUTDATED, PENDING_VALIDATION
+      - Returns 400 Bad Request for invalid status values
+      
+      **Note:** For paginated results, use the `/paged` endpoints. Status filtering is only available on this non-paginated endpoint or the dedicated `/by-status` endpoints.
     tags:
       - opportunity-suggestions
     responses:
@@ -260,10 +277,13 @@ site-opportunity-suggestions-by-status:
       required: true
       schema:
         type: string
+    - $ref: './parameters.yaml#/suggestionView'
   get:
     operationId: getSiteOpportunitySuggestionsByStatus
     summary: |
       Retrieve suggestions for a specific opportunity filtered by status
+    description: |
+      Returns suggestions filtered by status with optional field projection using the view parameter.
     tags:
       - opportunity-suggestions
     responses:
@@ -293,12 +313,15 @@ site-opportunity-suggestions-paged:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/opportunityId'
     - $ref: './parameters.yaml#/limit'
+    - $ref: './parameters.yaml#/suggestionView'
   get:
     operationId: getSiteOpportunitySuggestionsPaged
     summary: |
       Retrieve a paginated list of suggestions for a specific opportunity
     description: |
       Returns suggestions in pages with pagination metadata. Use the cursor from the response to fetch subsequent pages.
+      Supports field projection using the view parameter to reduce response size.
+      Note: For status filtering, use the non-paginated endpoint or the by-status endpoints.
     tags:
       - opportunity-suggestions
     responses:
@@ -329,12 +352,15 @@ site-opportunity-suggestions-paged-with-cursor:
     - $ref: './parameters.yaml#/opportunityId'
     - $ref: './parameters.yaml#/limit'
     - $ref: './parameters.yaml#/cursor'
+    - $ref: './parameters.yaml#/suggestionView'
   get:
     operationId: getSiteOpportunitySuggestionsPagedWithCursor
     summary: |
       Retrieve a paginated list of suggestions for a specific opportunity using a cursor
     description: |
       Returns suggestions in pages with pagination metadata. Provide the cursor from a previous response to fetch the next page.
+      Supports field projection using the view parameter to reduce response size.
+      Note: For status filtering, use the non-paginated endpoint or the by-status endpoints.
     tags:
       - opportunity-suggestions
     responses:
@@ -369,12 +395,14 @@ site-opportunity-suggestions-by-status-paged:
       schema:
         type: string
     - $ref: './parameters.yaml#/limit'
+    - $ref: './parameters.yaml#/suggestionView'
   get:
     operationId: getSiteOpportunitySuggestionsByStatusPaged
     summary: |
       Retrieve a paginated list of suggestions for a specific opportunity filtered by status
     description: |
       Returns suggestions filtered by status in pages with pagination metadata. Use the cursor from the response to fetch subsequent pages.
+      Supports field projection using the view parameter to reduce response size.
     tags:
       - opportunity-suggestions
     responses:
@@ -410,12 +438,14 @@ site-opportunity-suggestions-by-status-paged-with-cursor:
         type: string
     - $ref: './parameters.yaml#/limit'
     - $ref: './parameters.yaml#/cursor'
+    - $ref: './parameters.yaml#/suggestionView'
   get:
     operationId: getSiteOpportunitySuggestionsByStatusPagedWithCursor
     summary: |
       Retrieve a paginated list of suggestions for a specific opportunity filtered by status using a cursor
     description: |
       Returns suggestions filtered by status in pages with pagination metadata. Provide the cursor from a previous response to fetch the next page.
+      Supports field projection using the view parameter to reduce response size.
     tags:
       - opportunity-suggestions
     responses:
@@ -520,10 +550,13 @@ site-opportunity-suggestion:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/opportunityId'
     - $ref: './parameters.yaml#/suggestionId'
+    - $ref: './parameters.yaml#/suggestionView'
   get:
     operationId: getSiteOpportunitySuggestion
     summary: |
       Retrieve details of a specific suggestion
+    description: |
+      Returns a single suggestion with optional field projection using the view parameter.
     tags:
       - opportunity-suggestions
     responses:

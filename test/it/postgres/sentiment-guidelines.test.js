@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 Adobe. All rights reserved.
+ * Copyright 2025 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License. You may obtain a copy
  * of the License at http://www.apache.org/licenses/LICENSE-2.0
@@ -10,22 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
-export const KeyEventDto = {
+import { ctx } from './harness.js';
+import { resetPostgres } from './seed.js';
+import sentimentGuidelineTests from '../shared/tests/sentiment-guidelines.js';
 
-  /**
-   * Converts a key event object into a JSON object.
-   * @param {Readonly<KeyEvent>} keyEvent - KeyEvent object.
-   * @returns {{
-   * id: string,
-   * name: string,
-   * type: string,
-   * time: string,
-   * }}
-   */
-  toJSON: (keyEvent) => ({
-    id: keyEvent.getId(),
-    name: keyEvent.getName(),
-    type: keyEvent.getType(),
-    time: keyEvent.getTime(),
-  }),
-};
+sentimentGuidelineTests(() => ctx.httpClient, resetPostgres);

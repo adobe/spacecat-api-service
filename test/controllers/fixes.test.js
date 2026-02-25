@@ -23,7 +23,7 @@ import EntityRegistry from '@adobe/spacecat-shared-data-access/src/models/base/e
 import * as electrodb from 'electrodb';
 import * as crypto from 'crypto';
 
-import { FixEntity, Suggestion, ValidationError } from '@adobe/spacecat-shared-data-access';
+import { FixEntity, Suggestion } from '@adobe/spacecat-shared-data-access';
 import AccessControlUtil from '../../src/support/access-control-util.js';
 import { FixesController } from '../../src/controllers/fixes.js';
 import { FixDto } from '../../src/dto/fix.js';
@@ -77,7 +77,7 @@ describe('Fixes Controller', () => {
       .withArgs({ opportunityId })
       .callsFake((data) => ({ go: async () => ({ data: { ...data, siteId } }) }));
 
-    const entityRegistry = new EntityRegistry({ dynamo: electroService, s3: null }, log);
+    const entityRegistry = new EntityRegistry({ postgrest: electroService, s3: null }, {}, log);
     const dataAccess = entityRegistry.getCollections();
     fixEntityCollection = dataAccess.FixEntity;
     suggestionCollection = dataAccess.Suggestion;
@@ -591,6 +591,14 @@ describe('Fixes Controller', () => {
         suggestionCollection.create({ opportunityId }),
         suggestionCollection.create({ opportunityId }),
       ]);
+      // Add getOpportunity method to mock suggestions
+      const mockOpportunity = {
+        getSiteId: () => siteId,
+        getType: () => 'test-opportunity-type',
+      };
+      suggestions.forEach((s) => {
+        s.getOpportunity = () => mockOpportunity;
+      });
       suggestionCollection.batchGetByKeys.resolves({
         data: suggestions,
         unprocessed: [],
@@ -601,7 +609,7 @@ describe('Fixes Controller', () => {
       })));
       const response = await fixesController.getAllSuggestionsForFix(requestContext);
       expect(response).includes({ status: 200 });
-      expect(await response.json()).deep.equals(suggestions.map(SuggestionDto.toJSON));
+      expect(await response.json()).deep.equals(suggestions.map((s) => SuggestionDto.toJSON(s)));
     });
 
     it('responds 404 if the fix does not exist', async () => {
@@ -1462,8 +1470,7 @@ describe('Fixes Controller', () => {
         .withArgs(fixEntityId)
         .resolves(fix);
 
-      removeStub = sandbox.stub(electroService.entities.fixEntity, 'remove')
-        .callsFake(() => ({ go: async () => null }));
+      removeStub = sandbox.stub(fixEntityCollection, 'removeByIndexKeys').resolves();
     });
 
     it('responds 403 if the request does not have authorization/access', async () => {
@@ -1480,7 +1487,7 @@ describe('Fixes Controller', () => {
 
       const response = await fixesController.removeFix(requestContext);
       expect(response).includes({ status: 204 });
-      expect(electroService.entities.fixEntity.remove).calledOnceWith({ fixEntityId });
+      expect(fixEntityCollection.removeByIndexKeys).calledOnceWith([{ fixEntityId }]);
     });
 
     it('responds 404 if the fix does not exist', async () => {
@@ -1514,7 +1521,7 @@ describe('Fixes Controller', () => {
     });
 
     it('responds 500 if the fix cannot be removed', async () => {
-      removeStub.throws(new Error('Arbitrary Failure'));
+      removeStub.rejects(new Error('Arbitrary Failure'));
       requestContext.params.fixId = fixEntityId;
       sandbox.stub(log, 'error'); // silence the error log
       const response = await fixesController.removeFix(requestContext);
@@ -1679,9 +1686,9 @@ describe('Fixes Controller', () => {
       requestContext.params.fixId = fixId;
 
       await createFixWithStatus(fixId, 'FAILED');
-      fixEntityCollection.rollbackFixWithSuggestionUpdates.rejects(
-        new ValidationError('No suggestions found for the fix entity'),
-      );
+      const validationError = new Error('No suggestions found for the fix entity');
+      validationError.name = 'ValidationError';
+      fixEntityCollection.rollbackFixWithSuggestionUpdates.rejects(validationError);
 
       const response = await fixesController.rollbackFailedFix(requestContext);
       expect(response).includes({ status: 400 });

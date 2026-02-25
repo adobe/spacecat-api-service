@@ -12,11 +12,13 @@
 
 /* eslint-env mocha */
 
-import { expect } from 'chai';
+import { expect, use } from 'chai';
+import sinonChai from 'sinon-chai';
 import nock from 'nock';
 import sinon from 'sinon';
-
 import AddRepoCommand from '../../../../src/support/slack/commands/add-repo.js';
+
+use(sinonChai);
 
 describe('AddRepoCommand', () => {
   let context;

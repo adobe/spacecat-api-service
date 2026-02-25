@@ -124,6 +124,7 @@ export const updateModifiedByDetails = (updates, oldConfig, userId) => {
   const oldBrandsAliases = oldConfig?.brands?.aliases || [];
   const oldCompetitors = oldConfig?.competitors?.competitors || [];
   const oldDeletedPrompts = oldConfig?.deleted?.prompts || {};
+  const oldIgnoredPrompts = oldConfig?.ignored?.prompts || {};
 
   const stats = {
     categories: { total: 0, modified: 0 },
@@ -133,6 +134,7 @@ export const updateModifiedByDetails = (updates, oldConfig, userId) => {
     brandAliases: { total: 0, modified: 0 },
     competitors: { total: 0, modified: 0 },
     deletedPrompts: { total: 0, modified: 0 },
+    ignoredPrompts: { total: 0, modified: 0 },
     categoryUrls: { total: 0 },
   };
 
@@ -288,6 +290,23 @@ export const updateModifiedByDetails = (updates, oldConfig, userId) => {
         prompt.updatedBy = userId;
         prompt.updatedAt = timestamp;
         stats.deletedPrompts.modified += 1;
+      }
+    });
+  }
+
+  // 6. Ignored Prompts
+  if (newConfig.ignored && newConfig.ignored.prompts) {
+    Object.entries(newConfig.ignored.prompts).forEach(([id, prompt]) => {
+      stats.ignoredPrompts.total += 1;
+      const oldPrompt = oldIgnoredPrompts[id];
+
+      if (oldPrompt) {
+        if (oldPrompt.updatedBy) prompt.updatedBy = oldPrompt.updatedBy;
+        if (oldPrompt.updatedAt) prompt.updatedAt = oldPrompt.updatedAt;
+      } else {
+        prompt.updatedBy = userId;
+        prompt.updatedAt = timestamp;
+        stats.ignoredPrompts.modified += 1;
       }
     });
   }

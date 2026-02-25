@@ -708,7 +708,8 @@ describe('UpdateSitesAuditsCommand', () => {
     let loadProfileConfigStub;
     let ToggleSiteAuditCommandWithProfile;
 
-    beforeEach(async () => {
+    beforeEach(async function () {
+      this.timeout(5000); // Increase timeout for esmock
       loadProfileConfigStub = sinon.stub().returns({
         audits: {
           cwv: {},
