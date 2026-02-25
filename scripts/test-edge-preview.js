@@ -38,7 +38,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const env = "prod"
 config({ path: path.join(__dirname, `../.env-${env}`) });
 
-const ELIGIBLE_OPPORTUNITY_TYPES = ['readability', 'summarization', 'headings', 'faqs'];
+const ELIGIBLE_OPPORTUNITY_TYPES = ['readability', 'summarization', 'headings', 'faqs', 'generic-autofix-edge'];
 const ELIGIBLE_SUGGESTION_STATUSES = ['NEW', 'PENDING_VALIDATION'];
 const EDGE_PREVIEW_BATCH_SIZE = 10;
 
