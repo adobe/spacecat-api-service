@@ -1280,12 +1280,12 @@ function LlmoController(ctx) {
       return forbidden('Only LLMO administrators can update edge optimize routing');
     }
 
-    // if (env?.ENV && env.ENV !== 'prod') {
-    //   return createResponse(
-    //     { message: `API is not available in ${env?.ENV} environment` },
-    //     400,
-    //   );
-    // }
+    if (env?.ENV && env.ENV !== 'prod') {
+      return createResponse(
+        { message: `API is not available in ${env?.ENV} environment` },
+        400,
+      );
+    }
 
     if (!hasText(promiseToken)) {
       return badRequest('x-promise-token header is required and must be a non-empty string');
