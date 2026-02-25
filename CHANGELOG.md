@@ -1,3 +1,24 @@
+## [1.322.1](https://github.com/adobe/spacecat-api-service/compare/v1.322.0...v1.322.1) (2026-02-25)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tokowaka-client to v1.9.0 ([#1855](https://github.com/adobe/spacecat-api-service/issues/1855)) ([8a7afde](https://github.com/adobe/spacecat-api-service/commit/8a7afdeaa544031c9b4f91145429a965052c2b48))
+
+# [1.322.0](https://github.com/adobe/spacecat-api-service/compare/v1.321.2...v1.322.0) (2026-02-24)
+
+
+### Features
+
+* update for alt-text autofix assessment action handling ([#1852](https://github.com/adobe/spacecat-api-service/issues/1852)) ([2c23e2e](https://github.com/adobe/spacecat-api-service/commit/2c23e2e2b3f89ead7ece0844258fbbe75544152e))
+
+## [1.321.2](https://github.com/adobe/spacecat-api-service/compare/v1.321.1...v1.321.2) (2026-02-24)
+
+
+### Bug Fixes
+
+* aggregationKey string spreading produces char index properties ([#1849](https://github.com/adobe/spacecat-api-service/issues/1849)) ([a327ec8](https://github.com/adobe/spacecat-api-service/commit/a327ec809bc5d4a2622bb9834e1d427a8d743bc3))
+
 ## [1.321.1](https://github.com/adobe/spacecat-api-service/compare/v1.321.0...v1.321.1) (2026-02-24)
 
 

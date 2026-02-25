@@ -782,8 +782,9 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('No updates provided');
     }
     const {
-      suggestionIds, variations, action, customData,
+      suggestionIds, variations, action, customData, url: requestUrl,
     } = context.data;
+    const isAssessAction = action === 'assess';
 
     if (!isArray(suggestionIds)) {
       return badRequest('Request body must be an array of suggestionIds');
@@ -877,10 +878,14 @@ function SuggestionsController(ctx, sqs, env) {
     });
     let succeededSuggestions = [];
     if (isNonEmptyArray(validSuggestions)) {
-      succeededSuggestions = await Suggestion.bulkUpdateStatus(
-        validSuggestions,
-        SuggestionModel.STATUSES.IN_PROGRESS,
-      );
+      if (isAssessAction) {
+        succeededSuggestions = validSuggestions;
+      } else {
+        succeededSuggestions = await Suggestion.bulkUpdateStatus(
+          validSuggestions,
+          SuggestionModel.STATUSES.IN_PROGRESS,
+        );
+      }
     }
 
     let promiseTokenResponse;
@@ -938,6 +943,7 @@ function SuggestionsController(ctx, sqs, env) {
         variations,
         action,
         customData,
+        { url: requestUrl },
       );
     }
 
