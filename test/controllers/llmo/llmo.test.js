@@ -73,6 +73,7 @@ describe('LlmoController', () => {
   let mockTokowakaClient;
   let readStrategyStub;
   let writeStrategyStub;
+  let notifyStrategyChangesStub;
 
   const mockHttpUtils = {
     ok: (data, headers = {}) => ({
@@ -141,6 +142,9 @@ describe('LlmoController', () => {
       },
       '../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+      },
+      '../../../src/support/opportunity-workspace-notifications.js': {
+        notifyStrategyChanges: (...args) => notifyStrategyChangesStub(...args),
       },
       '../../../src/support/access-control-util.js': {
         default: {
@@ -274,6 +278,7 @@ describe('LlmoController', () => {
       setConfig: sinon.stub(),
       save: sinon.stub().resolves(),
       getOrganization: sinon.stub().resolves(mockOrganization),
+      getBaseURL: sinon.stub().returns('https://www.example.com'),
     };
 
     // Reset mockTokowakaClient
@@ -362,6 +367,9 @@ describe('LlmoController', () => {
     writeConfigStub = sinon.stub();
     readStrategyStub = sinon.stub();
     writeStrategyStub = sinon.stub();
+    notifyStrategyChangesStub = sinon.stub().resolves({
+      sent: 0, failed: 0, skipped: 0, changes: 0,
+    });
     llmoConfigSchemaStub = {
       safeParse: sinon.stub().returns({ success: true, data: {} }),
     };
@@ -4000,13 +4008,35 @@ describe('LlmoController', () => {
           name: 'Performance Optimization',
           status: 'pending',
           url: 'https://example.com/products',
-          opportunities: [{ opportunityId: 'opp-1', status: 'pending' }],
+          opportunities: [{ opportunityId: 'opp-1', status: 'pending', assignee: 'user@example.com' }],
+          createdBy: 'owner@example.com',
+        },
+      ],
+    };
+
+    const prevStrategyData = {
+      opportunities: [
+        { id: 'opp-1', name: 'Improve page speed', category: 'Performance' },
+      ],
+      strategies: [
+        {
+          id: 'strategy-1',
+          name: 'Performance Optimization',
+          status: 'new',
+          url: 'https://example.com/products',
+          opportunities: [{ opportunityId: 'opp-1', status: 'new', assignee: 'user@example.com' }],
+          createdBy: 'owner@example.com',
         },
       ],
     };
 
     beforeEach(() => {
       writeStrategyStub.resolves({ version: 'v1' });
+      readStrategyStub.resolves({ data: null, exists: false });
+      notifyStrategyChangesStub.resetHistory();
+      notifyStrategyChangesStub.resolves({
+        sent: 0, failed: 0, skipped: 0, changes: 0,
+      });
       mockContext.data = testStrategyData;
     });
 
@@ -4022,6 +4052,95 @@ describe('LlmoController', () => {
         s3Client,
         { s3Bucket: TEST_BUCKET },
       );
+    });
+
+    it('should read previous strategy before writing', async () => {
+      readStrategyStub.resolves({ data: prevStrategyData, exists: true });
+
+      const result = await controller.saveStrategy(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(readStrategyStub).to.have.been.calledWith(
+        TEST_SITE_ID,
+        s3Client,
+        { s3Bucket: TEST_BUCKET },
+      );
+    });
+
+    it('should call notifyStrategyChanges with prev and next data', async () => {
+      readStrategyStub.resolves({ data: prevStrategyData, exists: true });
+
+      await controller.saveStrategy(mockContext);
+
+      // Wait for the fire-and-forget promise
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+
+      expect(notifyStrategyChangesStub).to.have.been.calledOnce;
+      const [ctx, params] = notifyStrategyChangesStub.firstCall.args;
+      expect(ctx).to.equal(mockContext);
+      expect(params.prevData).to.deep.equal(prevStrategyData);
+      expect(params.nextData).to.deep.equal(testStrategyData);
+      expect(params.siteId).to.equal(TEST_SITE_ID);
+      expect(params.siteBaseUrl).to.equal('https://www.example.com');
+    });
+
+    it('should pass null prevData when previous strategy does not exist', async () => {
+      readStrategyStub.resolves({ data: null, exists: false });
+
+      await controller.saveStrategy(mockContext);
+
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+
+      expect(notifyStrategyChangesStub).to.have.been.calledOnce;
+      const [, params] = notifyStrategyChangesStub.firstCall.args;
+      expect(params.prevData).to.be.null;
+    });
+
+    it('should pass null prevData when readStrategy fails', async () => {
+      readStrategyStub.rejects(new Error('S3 read error'));
+
+      const result = await controller.saveStrategy(mockContext);
+
+      expect(result.status).to.equal(200);
+
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+
+      expect(notifyStrategyChangesStub).to.have.been.calledOnce;
+      const [, params] = notifyStrategyChangesStub.firstCall.args;
+      expect(params.prevData).to.be.null;
+      expect(mockLog.warn).to.have.been.calledWith(
+        sinon.match(/Could not read previous strategy/),
+      );
+    });
+
+    it('should still return 200 when notification fails', async () => {
+      readStrategyStub.resolves({ data: prevStrategyData, exists: true });
+      notifyStrategyChangesStub.rejects(new Error('Email service down'));
+
+      const result = await controller.saveStrategy(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ version: 'v1' });
+    });
+
+    it('should extract changedBy from auth profile email', async () => {
+      readStrategyStub.resolves({ data: prevStrategyData, exists: true });
+
+      await controller.saveStrategy(mockContext);
+
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+
+      const [, params] = notifyStrategyChangesStub.firstCall.args;
+      expect(params.changedBy).to.be.a('string');
     });
 
     it('should return bad request when payload is not an object', async () => {

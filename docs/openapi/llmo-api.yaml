@@ -1489,6 +1489,11 @@ llmo-strategy:
       This operation completely overwrites the existing strategy with the provided payload.
       The payload can be any valid JSON object - no schema validation is performed.
       The strategy is stored in S3 at `workspace/llmo/{siteId}/strategy.json`.
+
+      When status changes are detected (either at the strategy level or at the
+      opportunity level), email notifications are sent to the relevant assignees
+      and the strategy owner. Notification delivery is fire-and-forget and does
+      not affect the response.
     operationId: saveStrategy
     requestBody:
       required: true

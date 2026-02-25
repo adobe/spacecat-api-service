@@ -48,6 +48,7 @@ import {
 import { queryLlmoFiles } from './llmo-query-handler.js';
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
+import { notifyStrategyChanges } from '../../support/opportunity-workspace-notifications.js';
 
 const { readConfig, writeConfig } = llmo;
 const { readStrategy, writeStrategy } = llmoStrategy;
@@ -1139,12 +1140,15 @@ function LlmoController(ctx) {
 
   /**
    * PUT /sites/{siteId}/llmo/strategy
-   * Saves LLMO strategy data to S3
+   * Saves LLMO strategy data to S3.
+   * Status changes trigger email notifications (when enabled).
    * @param {object} context - Request context
    * @returns {Promise<Response>} Version of the saved strategy
    */
   const saveStrategy = async (context) => {
-    const { log, s3, data } = context;
+    const {
+      log, s3, data, dataAccess,
+    } = context;
     const { siteId } = context.params;
 
     try {
@@ -1160,12 +1164,45 @@ function LlmoController(ctx) {
         return badRequest('LLMO strategy storage is not configured for this environment');
       }
 
+      // Read previous strategy for diff (best-effort, null if not found)
+      let prevData = null;
+      try {
+        const prev = await readStrategy(siteId, s3.s3Client, { s3Bucket: s3.s3Bucket });
+        if (prev.exists) {
+          prevData = prev.data;
+        }
+      } catch (readError) {
+        log.warn(`Could not read previous strategy for site ${siteId} (notifications will be skipped): ${readError.message}`);
+      }
+
       log.info(`Writing LLMO strategy to S3 for siteId: ${siteId}`);
       const { version } = await writeStrategy(siteId, data, s3.s3Client, {
         s3Bucket: s3.s3Bucket,
       });
 
       log.info(`Successfully saved LLMO strategy for siteId: ${siteId}, version: ${version}`);
+
+      // Fire-and-forget: send email notifications for status changes
+      const changedBy = context.attributes?.authInfo?.getProfile?.()?.email || 'system';
+      let siteBaseUrl = '';
+      if (dataAccess?.Site) {
+        const site = await dataAccess.Site.findById(siteId);
+        siteBaseUrl = site?.getBaseURL?.() || '';
+      }
+      notifyStrategyChanges(context, {
+        prevData,
+        nextData: data,
+        siteId,
+        siteBaseUrl,
+        changedBy,
+      }).then((summary) => {
+        if (summary.changes > 0) {
+          log.info(`Strategy notification summary for site ${siteId}: ${JSON.stringify(summary)}`);
+        }
+      }).catch((err) => {
+        log.error(`Strategy notification error for site ${siteId}: ${err.message}`);
+      });
+
       return ok({ version });
     } catch (error) {
       log.error(`Error saving llmo strategy for siteId: ${siteId}, error: ${error.message}`);
