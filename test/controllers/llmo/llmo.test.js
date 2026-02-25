@@ -44,12 +44,14 @@ const createMockResponse = (data, ok = true, status = 200) => ({
 });
 
 // eslint-disable-next-line max-len
-const createMockAccessControlUtil = (accessResult, hasAdminAccessResult = true, isLLMOAdministratorResult = true) => ({
+// eslint-disable-next-line max-len
+const createMockAccessControlUtil = (accessResult, hasAdminAccessResult = true, isLLMOAdministratorResult = true, isOwnerOfSiteResult = accessResult) => ({
   fromContext: (context) => ({
     log: context.log,
     hasAccess: async () => accessResult,
     hasAdminAccess: () => hasAdminAccessResult,
     isLLMOAdministrator: () => isLLMOAdministratorResult,
+    isOwnerOfSite: async () => isOwnerOfSiteResult,
   }),
 });
 
@@ -204,6 +206,9 @@ describe('LlmoController', () => {
                 return true;
               },
               isLLMOAdministrator() {
+                return true;
+              },
+              async isOwnerOfSite() {
                 return true;
               },
             };
@@ -3776,6 +3781,21 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.include('S3 connection failed');
+    });
+
+    it('should return 403 when user is not owner of site', async () => {
+      const LlmoControllerNotOwner = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        ...getCommonMocks(),
+      });
+
+      const controllerNotOwner = LlmoControllerNotOwner(mockContext);
+      const result = await controllerNotOwner.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('User does not own this site');
     });
 
     it('should create edge config when getEdgeOptimizeConfig returns null', async () => {

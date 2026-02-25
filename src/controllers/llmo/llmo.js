@@ -1009,6 +1009,10 @@ function LlmoController(ctx) {
         return forbidden('User does not have access to this site');
       }
 
+      if (!await accessControlUtil.isOwnerOfSite(site)) {
+        return forbidden('User does not own this site');
+      }
+
       const baseURL = site.getBaseURL();
       const tokowakaClient = TokowakaClient.createFrom(context);
 
