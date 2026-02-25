@@ -215,11 +215,11 @@ export function detectStatusChanges(prevData, nextData, log) {
 export async function sendStatusChangeNotifications(context, {
   changes, siteBaseUrl,
 }) {
-  const { env, log, dataAccess } = context;
+  const { log, dataAccess } = context;
   const summary = { sent: 0, failed: 0, skipped: 0 };
 
-  const oppTemplateName = env.EMAIL_LLMO_OPPORTUNITY_STATUS_UPDATE_TEMPLATE;
-  const stratTemplateName = env.EMAIL_LLMO_STRATEGY_UPDATE_TEMPLATE;
+  const oppTemplateName = 'llmo_opportunity_status_update';
+  const stratTemplateName = 'llmo_strategy_update';
 
   const hostname = extractHostnameFromBaseURL(siteBaseUrl || '');
   const strategyUrl = hostname
@@ -234,74 +234,69 @@ export async function sendStatusChangeNotifications(context, {
       const isOpportunity = change.type === 'opportunity';
       const templateName = isOpportunity ? oppTemplateName : stratTemplateName;
 
-      if (!templateName) {
-        log.warn(`No email template configured for ${change.type} status change, skipping`);
-        summary.skipped += 1;
-      } else {
-        const createdBy = change.createdBy || '';
-        if (!createdBy) {
-          log.warn(`Strategy owner (createdBy) is unknown for strategy ${change.strategyId}`);
-        }
+      const createdBy = change.createdBy || '';
+      if (!createdBy) {
+        log.warn(`Strategy owner (createdBy) is unknown for strategy ${change.strategyId}`);
+      }
 
-        const strategyOwnerName = createdBy
-          // eslint-disable-next-line no-await-in-loop
-          ? await resolveUserName(dataAccess, createdBy)
-          : '';
-        const strategyOwnerEmail = createdBy;
+      const strategyOwnerName = createdBy
+        // eslint-disable-next-line no-await-in-loop
+        ? await resolveUserName(dataAccess, createdBy)
+        : '';
+      const strategyOwnerEmail = createdBy;
 
-        const assigneeEmail = isOpportunity ? (change.assignee || '') : '';
-        const assigneeName = assigneeEmail
-          // eslint-disable-next-line no-await-in-loop
-          ? await resolveUserName(dataAccess, assigneeEmail)
-          : '';
+      const assigneeEmail = isOpportunity ? (change.assignee || '') : '';
+      const assigneeName = assigneeEmail
+        // eslint-disable-next-line no-await-in-loop
+        ? await resolveUserName(dataAccess, assigneeEmail)
+        : '';
 
-        for (const recipient of change.recipients) {
-          // eslint-disable-next-line no-await-in-loop
-          const recipientName = await resolveUserName(dataAccess, recipient);
+      for (const recipient of change.recipients) {
+        // eslint-disable-next-line no-await-in-loop
+        const recipientName = await resolveUserName(dataAccess, recipient);
 
-          const templateData = isOpportunity
-            ? {
-              recipient_name: recipientName,
-              recipient_email: recipient,
-              assignee_name: assigneeName,
-              assignee_email: assigneeEmail,
-              strategy_owner_name: strategyOwnerName,
-              strategy_owner_email: strategyOwnerEmail,
-              opportunity_name: change.opportunityName || '',
-              opportunity_status: change.statusAfter,
-              strategy_name: change.strategyName,
-              strategy_url: strategyUrl,
-            }
-            : {
-              recipient_name: recipientName,
-              recipient_email: recipient,
-              strategy_name: change.strategyName,
-              strategy_status: change.statusAfter,
-              strategy_url: strategyUrl,
-              strategy_owner_name: strategyOwnerName,
-              strategy_owner_email: strategyOwnerEmail,
-              opportunity_list: JSON.stringify(change.opportunityNames || []),
-            };
-
-          try {
-            // eslint-disable-next-line no-await-in-loop
-            const result = await sendEmail(context, {
-              recipients: [recipient],
-              templateName,
-              templateData,
-            });
-
-            if (result.success) {
-              summary.sent += 1;
-              log.info(`Sent ${change.type} status change email to ${recipient} for ${change.strategyId}`);
-            } else {
-              summary.failed += 1;
-              log.error(`Failed to send ${change.type} status change email to ${recipient}: ${result.error}`);
-            }
-          } catch (error) {
-            summary.failed += 1;
-            log.error(`Error sending ${change.type} status change email to ${recipient}: ${error.message}`);
+        const templateData = isOpportunity
+          ? {
+            recipient_name: recipientName,
+            recipient_email: recipient,
+            assignee_name: assigneeName,
+            assignee_email: assigneeEmail,
+            strategy_owner_name: strategyOwnerName,
+            strategy_owner_email: strategyOwnerEmail,
+            opportunity_name: change.opportunityName || '',
+            opportunity_status: change.statusAfter,
+            strategy_name: change.strategyName,
+            strategy_url: strategyUrl,
           }
+          : {
+            recipient_name: recipientName,
+            recipient_email: recipient,
+            strategy_name: change.strategyName,
+            strategy_status: change.statusAfter,
+            strategy_url: strategyUrl,
+            strategy_owner_name: strategyOwnerName,
+            strategy_owner_email: strategyOwnerEmail,
+            opportunity_list: JSON.stringify(change.opportunityNames || []),
+          };
+
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const result = await sendEmail(context, {
+            recipients: [recipient],
+            templateName,
+            templateData,
+          });
+
+          if (result.success) {
+            summary.sent += 1;
+            log.info(`Sent ${change.type} status change email to ${recipient} for ${change.strategyId}`);
+          } else {
+            summary.failed += 1;
+            log.error(`Failed to send ${change.type} status change email to ${recipient}: ${result.error}`);
+          }
+        } catch (error) {
+          summary.failed += 1;
+          log.error(`Error sending ${change.type} status change email to ${recipient}: ${error.message}`);
         }
       }
     }

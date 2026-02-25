@@ -57,10 +57,6 @@ describe('opportunity-workspace-notifications', () => {
     };
 
     mockContext = {
-      env: {
-        EMAIL_LLMO_OPPORTUNITY_STATUS_UPDATE_TEMPLATE: 'llmo_opportunity_status_update',
-        EMAIL_LLMO_STRATEGY_UPDATE_TEMPLATE: 'llmo_strategy_update',
-      },
       log: mockLog,
       dataAccess: {
         TrialUser: {
@@ -496,27 +492,6 @@ describe('opportunity-workspace-notifications', () => {
       expect(emailOptions.templateData.strategy_url).to.equal('');
     });
 
-    it('should skip when template is not configured', async () => {
-      delete mockContext.env.EMAIL_LLMO_OPPORTUNITY_STATUS_UPDATE_TEMPLATE;
-
-      const changes = [{
-        type: 'opportunity',
-        strategyId: 's1',
-        strategyName: 'Strategy 1',
-        opportunityId: 'o1',
-        opportunityName: 'Opp 1',
-        statusBefore: 'new',
-        statusAfter: 'done',
-        recipients: ['user@test.com'],
-      }];
-
-      const summary = await sendStatusChangeNotifications(mockContext, {
-        changes, siteId: 'site-1', siteBaseUrl: '', changedBy: 'admin@test.com',
-      });
-
-      expect(summary.skipped).to.equal(1);
-    });
-
     it('should send opportunity status change email', async () => {
       const changes = [{
         type: 'opportunity',
@@ -928,8 +903,17 @@ describe('opportunity-workspace-notifications', () => {
     });
 
     it('should not throw when an unexpected error occurs', async () => {
+      const faultyContext = {
+        ...mockContext,
+        log: {
+          info: sinon.stub().throws(new Error('Simulated failure')),
+          warn: sinon.stub(),
+          error: sinon.stub(),
+        },
+      };
+
       const result = await notifyStrategyChanges(
-        { ...mockContext, env: null },
+        faultyContext,
         {
           prevData: {
             strategies: [{
@@ -948,6 +932,7 @@ describe('opportunity-workspace-notifications', () => {
 
       expect(result.changes).to.equal(0);
       expect(result.sent).to.equal(0);
+      expect(faultyContext.log.error).to.have.been.calledOnce;
     });
 
     it('should skip notifications when prevData is null (first save)', async () => {
