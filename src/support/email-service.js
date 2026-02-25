@@ -56,16 +56,17 @@ function buildTemplateEmailPayload(toList, templateData) {
  * @returns {Promise<string>} The access token string.
  */
 async function getEmailServiceToken(context) {
-  const { env, log } = context;
+  const { env } = context;
 
-  const imsClient = new ImsClient({
-    imsHost: env.IMS_HOST,
-    clientId: env.EMAIL_IMS_CLIENT_ID,
-    clientCode: env.EMAIL_IMS_CLIENT_CODE,
-    clientSecret: env.EMAIL_IMS_CLIENT_SECRET,
-    scope: env.EMAIL_IMS_SCOPE,
-  }, log);
+  const emailEnv = {
+    ...env,
+    IMS_CLIENT_ID: env.EMAIL_IMS_CLIENT_ID,
+    IMS_CLIENT_SECRET: env.EMAIL_IMS_CLIENT_SECRET,
+    IMS_CLIENT_CODE: env.EMAIL_IMS_CLIENT_CODE,
+    IMS_SCOPE: env.EMAIL_IMS_SCOPE,
+  };
 
+  const imsClient = ImsClient.createFrom({ ...context, env: emailEnv });
   const tokenPayload = await imsClient.getServiceAccessToken();
   return tokenPayload.access_token;
 }

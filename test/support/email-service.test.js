@@ -31,7 +31,9 @@ describe('email-service', () => {
     imsClientInstance = {
       getServiceAccessToken: sinon.stub().resolves({ access_token: 'test-token' }),
     };
-    ImsClientStub = sinon.stub().returns(imsClientInstance);
+    ImsClientStub = {
+      createFrom: sinon.stub().returns(imsClientInstance),
+    };
 
     const emailService = await esmock('../../src/support/email-service.js', {
       '@adobe/spacecat-shared-ims-client': {
@@ -45,7 +47,7 @@ describe('email-service', () => {
   });
 
   beforeEach(() => {
-    ImsClientStub.resetHistory();
+    ImsClientStub.createFrom.resetHistory();
     imsClientInstance.getServiceAccessToken.reset();
     imsClientInstance.getServiceAccessToken.resolves({ access_token: 'test-token' });
 
@@ -162,12 +164,13 @@ describe('email-service', () => {
         templateName: 'test-template',
       });
 
-      expect(ImsClientStub).to.have.been.calledOnce;
-      const ctorArgs = ImsClientStub.firstCall.args[0];
-      expect(ctorArgs.clientId).to.equal('client-id');
-      expect(ctorArgs.clientCode).to.equal('client-code');
-      expect(ctorArgs.clientSecret).to.equal('client-secret');
-      expect(ctorArgs.scope).to.equal('email-scope');
+      expect(ImsClientStub.createFrom).to.have.been.calledOnce;
+      const ctxArg = ImsClientStub.createFrom.firstCall.args[0];
+      expect(ctxArg.env.IMS_CLIENT_ID).to.equal('client-id');
+      expect(ctxArg.env.IMS_CLIENT_CODE).to.equal('client-code');
+      expect(ctxArg.env.IMS_CLIENT_SECRET).to.equal('client-secret');
+      expect(ctxArg.env.IMS_SCOPE).to.equal('email-scope');
+      expect(ctxArg.env.IMS_HOST).to.equal('https://ims.example.com');
     });
 
     it('should return error when no recipients provided', async () => {
