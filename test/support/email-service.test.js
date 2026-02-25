@@ -45,7 +45,6 @@ describe('email-service', () => {
   });
 
   beforeEach(() => {
-    fetchStub = sinon.stub(globalThis, 'fetch');
     ImsClientStub.resetHistory();
     imsClientInstance.getServiceAccessToken.reset();
     imsClientInstance.getServiceAccessToken.resolves({ access_token: 'test-token' });
@@ -122,6 +121,18 @@ describe('email-service', () => {
   });
 
   describe('sendEmail', () => {
+    let originalFetch;
+
+    beforeEach(() => {
+      originalFetch = globalThis.fetch;
+      fetchStub = sinon.stub();
+      globalThis.fetch = fetchStub;
+    });
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch;
+    });
+
     it('should send email successfully', async () => {
       fetchStub.resolves({ status: 200, text: async () => 'OK' });
 

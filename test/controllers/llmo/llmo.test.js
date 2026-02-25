@@ -4527,6 +4527,23 @@ describe('LlmoController', () => {
       expect(params.siteBaseUrl).to.equal('https://www.example.com');
     });
 
+    it('should log strategy notification summary when changes > 0', async () => {
+      readStrategyStub.resolves({ data: prevStrategyData, exists: true });
+      notifyStrategyChangesStub.resolves({
+        sent: 1, failed: 0, skipped: 0, changes: 1,
+      });
+
+      await controller.saveStrategy(mockContext);
+
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+
+      expect(mockLog.info).to.have.been.calledWith(
+        sinon.match(/Strategy notification summary for site .*: .*"changes":1/),
+      );
+    });
+
     it('should pass null prevData when previous strategy does not exist', async () => {
       readStrategyStub.resolves({ data: null, exists: false });
 
@@ -4582,6 +4599,34 @@ describe('LlmoController', () => {
 
       const [, params] = notifyStrategyChangesStub.firstCall.args;
       expect(params.changedBy).to.be.a('string');
+    });
+
+    it('should use system as changedBy when auth profile has no email', async () => {
+      mockContext.attributes.authInfo.getProfile = () => ({});
+      readStrategyStub.resolves({ data: prevStrategyData, exists: true });
+
+      await controller.saveStrategy(mockContext);
+
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+
+      const [, params] = notifyStrategyChangesStub.firstCall.args;
+      expect(params.changedBy).to.equal('system');
+    });
+
+    it('should use empty siteBaseUrl when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      readStrategyStub.resolves({ data: prevStrategyData, exists: true });
+
+      await controller.saveStrategy(mockContext);
+
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+
+      const [, params] = notifyStrategyChangesStub.firstCall.args;
+      expect(params.siteBaseUrl).to.equal('');
     });
 
     it('should return bad request when payload is not an object', async () => {

@@ -93,6 +93,11 @@ describe('opportunity-workspace-notifications', () => {
       expect(changes).to.be.an('array').that.is.empty;
     });
 
+    it('should handle data without strategies property', () => {
+      const changes = detectStatusChanges({}, {}, mockLog);
+      expect(changes).to.be.an('array').that.is.empty;
+    });
+
     it('should return empty array when no statuses changed', () => {
       const data = {
         strategies: [{
@@ -319,6 +324,81 @@ describe('opportunity-workspace-notifications', () => {
       expect(changes[0].recipients).to.include('owner@test.com');
     });
 
+    it('should use empty assignee when opportunity has no assignee', () => {
+      const prev = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [{ opportunityId: 'o1', status: 'new' }],
+          createdBy: 'owner@test.com',
+        }],
+      };
+      const next = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [{ opportunityId: 'o1', status: 'done' }],
+          createdBy: 'owner@test.com',
+        }],
+      };
+
+      const changes = detectStatusChanges(prev, next, mockLog);
+      expect(changes).to.have.lengthOf(1);
+      expect(changes[0].assignee).to.equal('');
+    });
+
+    it('should handle strategy change when opportunities is undefined', () => {
+      const prev = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          createdBy: 'owner@test.com',
+        }],
+      };
+      const next = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'done',
+          createdBy: 'owner@test.com',
+        }],
+      };
+
+      const changes = detectStatusChanges(prev, next, mockLog);
+      expect(changes).to.have.lengthOf(1);
+      expect(changes[0].type).to.equal('strategy');
+      expect(changes[0].recipients).to.include('owner@test.com');
+      expect(changes[0].opportunityNames).to.deep.equal([]);
+    });
+
+    it('should use empty createdBy when strategy has no owner', () => {
+      const prev = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [{ opportunityId: 'o1', status: 'new', assignee: 'user@test.com' }],
+        }],
+      };
+      const next = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'done',
+          opportunities: [{ opportunityId: 'o1', status: 'new', assignee: 'user@test.com' }],
+        }],
+      };
+
+      const changes = detectStatusChanges(prev, next, mockLog);
+      expect(changes).to.have.lengthOf(1);
+      expect(changes[0].type).to.equal('strategy');
+      expect(changes[0].createdBy).to.equal('');
+      expect(changes[0].recipients).to.include('user@test.com');
+    });
+
     it('should include opportunityNames for strategy status change', () => {
       const prev = {
         strategies: [{
@@ -391,6 +471,29 @@ describe('opportunity-workspace-notifications', () => {
 
       expect(summary.skipped).to.equal(1);
       expect(sendEmailStub).to.not.have.been.called;
+    });
+
+    it('should handle unparseable siteBaseUrl gracefully', async () => {
+      const changes = [{
+        type: 'opportunity',
+        strategyId: 's1',
+        strategyName: 'Strategy 1',
+        opportunityId: 'o1',
+        opportunityName: 'Opp 1',
+        statusBefore: 'new',
+        statusAfter: 'completed',
+        recipients: ['user@test.com'],
+        createdBy: 'owner@test.com',
+        assignee: 'user@test.com',
+      }];
+
+      const summary = await sendStatusChangeNotifications(mockContext, {
+        changes, siteId: 'site-1', siteBaseUrl: 'http://', changedBy: 'admin@test.com',
+      });
+
+      expect(summary.sent).to.equal(1);
+      const [, emailOptions] = sendEmailStub.firstCall.args;
+      expect(emailOptions.templateData.strategy_url).to.equal('');
     });
 
     it('should skip when template is not configured', async () => {
@@ -570,6 +673,169 @@ describe('opportunity-workspace-notifications', () => {
       const [, emailOptions] = sendEmailStub.firstCall.args;
       expect(emailOptions.templateData.strategy_owner_name).to.equal('');
       expect(emailOptions.templateData.strategy_owner_email).to.equal('');
+    });
+
+    it('should log strategy fallback in skip warning for strategy change with no recipients', async () => {
+      const changes = [{
+        type: 'strategy',
+        strategyId: 's1',
+        strategyName: 'Strategy 1',
+        statusBefore: 'new',
+        statusAfter: 'done',
+        recipients: [],
+      }];
+
+      const summary = await sendStatusChangeNotifications(mockContext, {
+        changes, siteBaseUrl: '',
+      });
+
+      expect(summary.skipped).to.equal(1);
+      expect(mockLog.warn).to.have.been.calledWith(sinon.match('s1/strategy'));
+    });
+
+    it('should handle opportunity change with missing assignee and opportunityName', async () => {
+      const changes = [{
+        type: 'opportunity',
+        strategyId: 's1',
+        strategyName: 'Strategy 1',
+        opportunityId: 'o1',
+        statusBefore: 'new',
+        statusAfter: 'done',
+        recipients: ['user@test.com'],
+        createdBy: 'owner@test.com',
+      }];
+
+      const summary = await sendStatusChangeNotifications(mockContext, {
+        changes, siteBaseUrl: 'https://www.example.com',
+      });
+
+      expect(summary.sent).to.equal(1);
+      const [, emailOptions] = sendEmailStub.firstCall.args;
+      expect(emailOptions.templateData.assignee_name).to.equal('');
+      expect(emailOptions.templateData.assignee_email).to.equal('');
+      expect(emailOptions.templateData.opportunity_name).to.equal('');
+    });
+
+    it('should handle strategy change with missing opportunityNames', async () => {
+      const changes = [{
+        type: 'strategy',
+        strategyId: 's1',
+        strategyName: 'Strategy 1',
+        statusBefore: 'new',
+        statusAfter: 'done',
+        recipients: ['user@test.com'],
+        createdBy: 'owner@test.com',
+      }];
+
+      const summary = await sendStatusChangeNotifications(mockContext, {
+        changes, siteBaseUrl: 'https://www.example.com',
+      });
+
+      expect(summary.sent).to.equal(1);
+      const [, emailOptions] = sendEmailStub.firstCall.args;
+      expect(emailOptions.templateData.opportunity_list).to.equal('[]');
+    });
+
+    it('should fall back to email when dataAccess has no TrialUser', async () => {
+      delete mockContext.dataAccess.TrialUser;
+
+      const changes = [{
+        type: 'opportunity',
+        strategyId: 's1',
+        strategyName: 'Strategy 1',
+        opportunityId: 'o1',
+        opportunityName: 'Opp 1',
+        statusBefore: 'new',
+        statusAfter: 'done',
+        recipients: ['user@test.com'],
+        createdBy: 'owner@test.com',
+        assignee: 'user@test.com',
+      }];
+
+      const summary = await sendStatusChangeNotifications(mockContext, {
+        changes, siteBaseUrl: 'https://www.example.com',
+      });
+
+      expect(summary.sent).to.equal(1);
+      const [, emailOptions] = sendEmailStub.firstCall.args;
+      expect(emailOptions.templateData.recipient_name).to.equal('user@test.com');
+      expect(emailOptions.templateData.strategy_owner_name).to.equal('owner@test.com');
+    });
+
+    it('should fall back to email when user names are empty', async () => {
+      mockContext.dataAccess.TrialUser.findByEmailId.resolves({
+        getFirstName: () => null,
+        getLastName: () => null,
+      });
+
+      const changes = [{
+        type: 'opportunity',
+        strategyId: 's1',
+        strategyName: 'Strategy 1',
+        opportunityId: 'o1',
+        opportunityName: 'Opp 1',
+        statusBefore: 'new',
+        statusAfter: 'done',
+        recipients: ['user@test.com'],
+        createdBy: 'owner@test.com',
+        assignee: 'user@test.com',
+      }];
+
+      const summary = await sendStatusChangeNotifications(mockContext, {
+        changes, siteBaseUrl: 'https://www.example.com',
+      });
+
+      expect(summary.sent).to.equal(1);
+      const [, emailOptions] = sendEmailStub.firstCall.args;
+      expect(emailOptions.templateData.recipient_name).to.equal('user@test.com');
+    });
+
+    it('should fall back to email when TrialUser lookup throws', async () => {
+      mockContext.dataAccess.TrialUser.findByEmailId.rejects(new Error('DB error'));
+
+      const changes = [{
+        type: 'opportunity',
+        strategyId: 's1',
+        strategyName: 'Strategy 1',
+        opportunityId: 'o1',
+        opportunityName: 'Opp 1',
+        statusBefore: 'new',
+        statusAfter: 'done',
+        recipients: ['user@test.com'],
+        createdBy: 'owner@test.com',
+        assignee: 'user@test.com',
+      }];
+
+      const summary = await sendStatusChangeNotifications(mockContext, {
+        changes, siteBaseUrl: 'https://www.example.com',
+      });
+
+      expect(summary.sent).to.equal(1);
+      const [, emailOptions] = sendEmailStub.firstCall.args;
+      expect(emailOptions.templateData.recipient_name).to.equal('user@test.com');
+    });
+
+    it('should resolve strategy_url when siteBaseUrl has no http prefix', async () => {
+      const changes = [{
+        type: 'opportunity',
+        strategyId: 's1',
+        strategyName: 'Strategy 1',
+        opportunityId: 'o1',
+        opportunityName: 'Opp 1',
+        statusBefore: 'new',
+        statusAfter: 'done',
+        recipients: ['user@test.com'],
+        createdBy: 'owner@test.com',
+        assignee: 'user@test.com',
+      }];
+
+      const summary = await sendStatusChangeNotifications(mockContext, {
+        changes, siteBaseUrl: 'www.example.com',
+      });
+
+      expect(summary.sent).to.equal(1);
+      const [, emailOptions] = sendEmailStub.firstCall.args;
+      expect(emailOptions.templateData.strategy_url).to.equal('https://llmo.now/www.example.com/insights/opportunity-workspace');
     });
 
     it('should fall back to email when TrialUser.findByEmailId returns null', async () => {

@@ -36,7 +36,7 @@ import { sendEmail } from './email-service.js';
  * @returns {Promise<string>} Display name or email.
  */
 async function resolveUserName(dataAccess, email) {
-  if (!email || !dataAccess?.TrialUser) return email || '';
+  if (!dataAccess?.TrialUser) return email;
   try {
     const user = await dataAccess.TrialUser.findByEmailId(email);
     if (user) {
@@ -54,10 +54,10 @@ async function resolveUserName(dataAccess, email) {
  * @returns {string} Hostname or empty string.
  */
 function extractHostnameFromBaseURL(baseUrl) {
-  if (!baseUrl || typeof baseUrl !== 'string') return '';
+  if (!baseUrl) return '';
   try {
     const url = new URL(baseUrl.startsWith('http') ? baseUrl : `https://${baseUrl}`);
-    return url.hostname || '';
+    return url.hostname;
   } catch {
     return '';
   }
@@ -168,7 +168,7 @@ export function detectStatusChanges(prevData, nextData, log) {
       }
 
       // Check opportunity-level status changes
-      const prevOpps = prevOppIndex.get(nextStrategy.id) || new Map();
+      const prevOpps = prevOppIndex.get(nextStrategy.id);
       for (const nextOpp of nextStrategy.opportunities || []) {
         const prevOpp = prevOpps.get(nextOpp.opportunityId);
         if (!prevOpp) {
@@ -239,7 +239,7 @@ export async function sendStatusChangeNotifications(context, {
         summary.skipped += 1;
       } else {
         const createdBy = change.createdBy || '';
-        if (!createdBy && (change.recipients.length > 0 || isOpportunity)) {
+        if (!createdBy) {
           log.warn(`Strategy owner (createdBy) is unknown for strategy ${change.strategyId}`);
         }
 
