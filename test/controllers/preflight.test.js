@@ -20,9 +20,6 @@ import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
-import esmock from 'esmock';
-
-import * as utils from '../../src/support/utils.js';
 import PreflightController from '../../src/controllers/preflight.js';
 
 // Make fetch available globally
@@ -506,39 +503,26 @@ describe('Preflight Controller', () => {
       expect(mockJob.remove).to.have.been.calledOnce;
     });
 
-    it('creates a preflight job with crosswalk authoring type and includes promise token', async () => {
+    it('creates a preflight job with crosswalk authoring type and reads promise token from cookie', async () => {
       const aemCsSite = {
         getId: () => 'test-site-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS_CW,
       };
       mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
 
-      const mockPromiseToken = { promise_token: 'test-token', expires_in: 3600, token_type: 'Bearer' };
-      const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
-        '../../src/support/utils.js': {
-          ...utils,
-          getIMSPromiseToken: async () => mockPromiseToken,
-          ErrorWithStatusCode: utils.ErrorWithStatusCode,
-        },
-      });
-
-      const preflightControllerWithMock = PreflightControllerWithMock(
-        { dataAccess: mockDataAccess, sqs: mockSqs },
-        loggerStub,
-        {
-          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
-          AWS_ENV: 'prod',
-        },
-      );
-
       const context = {
         data: {
           urls: ['https://example.com/test.html'],
           step: 'identify',
         },
+        pathInfo: {
+          headers: {
+            cookie: 'promiseToken=encrypted-promise-token-value; other=abc',
+          },
+        },
       };
 
-      const response = await preflightControllerWithMock.createPreflightJob(context);
+      const response = await preflightController.createPreflightJob(context);
       expect(response.status).to.equal(202);
       expect(mockSqs.sendMessage).to.have.been.calledWith(
         'https://sqs.test.amazonaws.com/audit-queue',
@@ -546,86 +530,60 @@ describe('Preflight Controller', () => {
           jobId,
           siteId: mockSite.getId(),
           type: 'preflight',
-          promiseToken: mockPromiseToken,
+          promiseToken: 'encrypted-promise-token-value',
         },
       );
     });
 
-    it('handles promise token error for AEM_CS site', async () => {
+    it('returns 400 when promiseToken cookie is missing for AEM_CS site', async () => {
       const aemCsSite = {
         getId: () => 'test-site-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
       };
       mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
 
-      const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
-        '../../src/support/utils.js': {
-          ...utils,
-          getIMSPromiseToken: async () => { throw new utils.ErrorWithStatusCode('Missing Authorization header', 400); },
-          ErrorWithStatusCode: utils.ErrorWithStatusCode,
-        },
-      });
-
-      const preflightControllerWithMock = PreflightControllerWithMock(
-        { dataAccess: mockDataAccess, sqs: mockSqs },
-        loggerStub,
-        {
-          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
-          AWS_ENV: 'prod',
-        },
-      );
-
       const context = {
         data: {
           urls: ['https://example.com/test.html'],
           step: 'identify',
         },
+        pathInfo: {
+          headers: {},
+        },
       };
 
-      const response = await preflightControllerWithMock.createPreflightJob(context);
+      const response = await preflightController.createPreflightJob(context);
       expect(response.status).to.equal(400);
       const result = await response.json();
       expect(result).to.deep.equal({
-        message: 'Missing Authorization header',
+        message: 'Missing promiseToken cookie',
       });
     });
 
-    it('handles promise token error for AEM_CS site with generic error', async () => {
+    it('returns 400 when promiseToken cookie is empty for AEM_CS site', async () => {
       const aemCsSite = {
         getId: () => 'test-site-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
       };
       mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
 
-      const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
-        '../../src/support/utils.js': {
-          ...utils,
-          getIMSPromiseToken: async () => { throw new Error('Generic error'); },
-          ErrorWithStatusCode: utils.ErrorWithStatusCode,
-        },
-      });
-
-      const preflightControllerWithMock = PreflightControllerWithMock(
-        { dataAccess: mockDataAccess, sqs: mockSqs },
-        loggerStub,
-        {
-          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
-          AWS_ENV: 'prod',
-        },
-      );
-
       const context = {
         data: {
           urls: ['https://example.com/test.html'],
           step: 'identify',
         },
+        pathInfo: {
+          headers: {
+            cookie: 'promiseToken=; other=abc',
+          },
+        },
       };
 
-      const response = await preflightControllerWithMock.createPreflightJob(context);
-      expect(response.status).to.equal(500);
+      const response = await preflightController.createPreflightJob(context);
+      expect(response.status).to.equal(400);
       const result = await response.json();
       expect(result).to.deep.equal({
-        message: 'Error getting promise token',
+        message: 'Missing promiseToken cookie',
       });
     });
   });

@@ -11,16 +11,36 @@
  */
 
 import {
-  isNonEmptyObject, isValidUUID, isValidUrl, isNonEmptyArray,
+  isNonEmptyObject, isValidUUID, isValidUrl, isNonEmptyArray, hasText,
 } from '@adobe/spacecat-shared-utils';
 import {
   badRequest, internalServerError, notFound, ok, accepted,
 } from '@adobe/spacecat-shared-http-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
-import { getIMSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
+import { ErrorWithStatusCode } from '../support/utils.js';
 
 export const AUDIT_STEP_IDENTIFY = 'identify';
 export const AUDIT_STEP_SUGGEST = 'suggest';
+
+/**
+ * Extracts the promiseToken value from the request's Cookie header.
+ * The cookie is set by the /auth/promise endpoint and sent by the browser
+ * with credentials: 'include'.
+ * @param {Object} context - The request context
+ * @returns {string} The promise token value
+ * @throws {ErrorWithStatusCode} If the cookie is missing
+ */
+function getPromiseTokenFromCookie(context) {
+  const cookieHeader = context.pathInfo?.headers?.cookie || '';
+  const match = cookieHeader.split(';')
+    .map((c) => c.trim())
+    .find((c) => c.startsWith('promiseToken='));
+  const token = match ? match.substring('promiseToken='.length) : '';
+  if (!hasText(token)) {
+    throw new ErrorWithStatusCode('Missing promiseToken cookie', 400);
+  }
+  return token;
+}
 
 /**
  * Creates a preflight controller instance
@@ -132,12 +152,12 @@ function PreflightController(ctx, log, env) {
         enableAuthentication = true;
       }
 
-      let promiseTokenResponse;
+      let promiseTokenValue;
       if (promiseBasedTypes.includes(site.getAuthoringType())) {
         try {
-          promiseTokenResponse = await getIMSPromiseToken(context);
+          promiseTokenValue = getPromiseTokenFromCookie(context);
         } catch (e) {
-          log.error(`Failed to get promise token: ${e.message}`);
+          log.error(`Failed to get promise token from cookie: ${e.message}`);
           if (e instanceof ErrorWithStatusCode) {
             return badRequest(e.message);
           }
@@ -168,7 +188,7 @@ function PreflightController(ctx, log, env) {
           type: 'preflight',
         };
         if (promiseBasedTypes.includes(site.getAuthoringType())) {
-          sqsMessage.promiseToken = promiseTokenResponse;
+          sqsMessage.promiseToken = promiseTokenValue;
         }
         await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, sqsMessage);
       } catch (error) {
