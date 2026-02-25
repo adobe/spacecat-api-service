@@ -29,12 +29,6 @@ preflight-jobs:
                 type: string
                 enum: [identify, suggest]
                 description: The audit step to be performed
-              checks:
-                type: array
-                items:
-                  type: string
-                  enum: [accessibility, body-size, canonical, h1-count, headings, links, lorem-ipsum, metatags, readability]
-                description: Optional array of specific checks to run. If not provided, all checks will be run.
             required:
               - urls
               - step

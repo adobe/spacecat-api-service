@@ -12,9 +12,8 @@
 
 import wrap from '@adobe/helix-shared-wrap';
 import { helixStatus } from '@adobe/helix-status';
-import secrets from '@adobe/helix-shared-secrets';
+import vaultSecrets from '@adobe/spacecat-shared-vault-secrets';
 import bodyData from '@adobe/helix-shared-body-data';
-import dataAccess from '@adobe/spacecat-shared-data-access';
 import {
   badRequest,
   internalServerError,
@@ -33,8 +32,9 @@ import {
   elevatedSlackClientWrapper,
   SLACK_TARGETS,
 } from '@adobe/spacecat-shared-slack-client';
-import { hasText, resolveSecretsName, logWrapper } from '@adobe/spacecat-shared-utils';
+import { hasText, logWrapper } from '@adobe/spacecat-shared-utils';
 
+import dataAccess from './support/data-access.js';
 import sqs from './support/sqs.js';
 import getRouteHandlers from './routes/index.js';
 import matchPath, { sanitizePath } from './utils/route-utils.js';
@@ -292,5 +292,5 @@ export const main = wrappedMain
   .with(s3ClientWrapper)
   .with(imsClientWrapper)
   .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
-  .with(secrets, { name: resolveSecretsName })
+  .with(vaultSecrets)
   .with(helixStatus);

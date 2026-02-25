@@ -626,6 +626,30 @@ export async function getIMSPromiseToken(context) {
 }
 
 /**
+ * Exchange a promise token for an IMS access token.
+ * @param {object} context - The context of the request.
+ * @param {string} promiseToken - The promise token to exchange (e.g. from request payload).
+ * @returns {Promise<{ access_token: string }>} The access token response.
+ * @throws {ErrorWithStatusCode} - If the promise token is missing.
+ */
+export async function exchangePromiseToken(context, promiseToken) {
+  if (!promiseToken) {
+    throw new ErrorWithStatusCode('Missing promise token', STATUS_BAD_REQUEST);
+  }
+
+  const imsClient = ImsPromiseClient.createFrom(
+    context,
+    ImsPromiseClient.CLIENT_TYPE.CONSUMER,
+  );
+
+  const accessToken = (await imsClient.exchangeToken(
+    promiseToken,
+    !!context.env?.AUTOFIX_CRYPT_SECRET && !!context.env?.AUTOFIX_CRYPT_SALT,
+  )).access_token;
+  return accessToken;
+}
+
+/**
  * Build an S3 prefix for site content files.
  * @param {string} type - The type of content (e.g., 'scrapes', 'imports', 'accessibility').
  * @param {string} siteId - The site ID.

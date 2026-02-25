@@ -65,6 +65,10 @@ and the actual handler must return HTTP **501** with a clear JSON message:
 - Set strict limits on bulk POST/PUT/PATCH/DELETE request sizes
 - Response format: `{ "metadata": { "total": N, "success": N, "failure": N }, "failures": [...], "items": [...] }`
 - Specify atomicity behavior and per-item error reporting
+- Bulk deletion endpoints that require a request body **must use POST** with an action suffix
+  (e.g., `/delete`, `/remove`, `/unlink`) because the body-data middleware does not parse
+  DELETE request bodies. Single-resource deletions using path parameters should continue to
+  use the DELETE method. See [ADR-001](docs/decisions/001-bulk-delete-via-post.md).
 
 ### Parameters
 - For URLs passed as path parameters, use {base64Url} and encode as URL-safe base64 without padding (RFC 4648 §5) to avoid +/= issues in paths

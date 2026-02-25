@@ -272,6 +272,8 @@ describe('getRouteHandlers', () => {
     getLlmoRationale: () => null,
     createOrUpdateEdgeConfig: () => null,
     getEdgeConfig: () => null,
+    checkEdgeOptimizeStatus: () => null,
+    updateEdgeOptimizeCDNRouting: () => null,
     getStrategy: () => null,
     saveStrategy: () => null,
   };
@@ -639,6 +641,7 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/edge-optimize-config',
       'GET /sites/:siteId/llmo/edge-optimize-config',
       'GET /sites/:siteId/llmo/edge-optimize-status',
+      'POST /sites/:siteId/llmo/edge-optimize-routing',
       'GET /sites/:siteId/llmo/strategy',
       'PUT /sites/:siteId/llmo/strategy',
       'GET /consent-banner/:jobId',
@@ -652,7 +655,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/url-store/:base64Url',
       'POST /sites/:siteId/url-store',
       'PATCH /sites/:siteId/url-store',
-      'DELETE /sites/:siteId/url-store',
+      'POST /sites/:siteId/url-store/delete',
       // Sentiment routes
       'GET /sites/:siteId/sentiment/topics',
       'GET /sites/:siteId/sentiment/topics/:topicId',
@@ -660,9 +663,9 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/sentiment/topics/:topicId',
       'DELETE /sites/:siteId/sentiment/topics/:topicId',
       'POST /sites/:siteId/sentiment/topics/:topicId/prompts',
-      'DELETE /sites/:siteId/sentiment/topics/:topicId/prompts',
+      'POST /sites/:siteId/sentiment/topics/:topicId/prompts/remove',
       'POST /sites/:siteId/sentiment/guidelines/:guidelineId/audits',
-      'DELETE /sites/:siteId/sentiment/guidelines/:guidelineId/audits',
+      'POST /sites/:siteId/sentiment/guidelines/:guidelineId/audits/unlink',
       'GET /sites/:siteId/sentiment/guidelines',
       'GET /sites/:siteId/sentiment/guidelines/:guidelineId',
       'POST /sites/:siteId/sentiment/guidelines',
@@ -864,6 +867,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-config'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-status'].handler).to.equal(mockLlmoController.checkEdgeOptimizeStatus);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-status'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-routing'].handler).to.equal(mockLlmoController.updateEdgeOptimizeCDNRouting);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-routing'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy'].handler).to.equal(mockLlmoController.getStrategy);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['PUT /sites/:siteId/llmo/strategy'].handler).to.equal(mockLlmoController.saveStrategy);
@@ -906,7 +911,7 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['POST /sites/:siteId/url-store'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['PATCH /sites/:siteId/url-store'].handler).to.equal(mockUrlStoreController.updateUrls);
     expect(dynamicRoutes['PATCH /sites/:siteId/url-store'].paramNames).to.deep.equal(['siteId']);
-    expect(dynamicRoutes['DELETE /sites/:siteId/url-store'].handler).to.equal(mockUrlStoreController.deleteUrls);
-    expect(dynamicRoutes['DELETE /sites/:siteId/url-store'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['POST /sites/:siteId/url-store/delete'].handler).to.equal(mockUrlStoreController.deleteUrls);
+    expect(dynamicRoutes['POST /sites/:siteId/url-store/delete'].paramNames).to.deep.equal(['siteId']);
   });
 });
