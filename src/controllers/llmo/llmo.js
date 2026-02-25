@@ -1268,6 +1268,15 @@ function LlmoController(ctx) {
     return null;
   };
 
+  /* POST /sites/{siteId}/llmo/edge-optimize-routing
+   * Updates edge optimize routing for the site via the internal CDN API.
+   * - Requires promiseToken cookie (value = token) and request body cdnType.
+   * - Probes the site with custom User-Agent (2xx continues; 301: if Location domain
+   *   normalizes to same as probe URL domain, use Location domain for CDN API; otherwise break).
+   * - Exchanges promise token for IMS user token, then calls internal CDN API.
+   * @param {object} context - Request context (context.request for headers)
+   * @returns {Promise<Response>}
+   */
   const updateEdgeOptimizeCDNRouting = async (context) => {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
