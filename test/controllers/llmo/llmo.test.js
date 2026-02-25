@@ -3875,8 +3875,8 @@ describe('LlmoController', () => {
       expect(mockTokowakaClient.createMetaconfig).to.have.been.calledWith(
         'https://staging.lovesac.com',
         STAGE_SITE_ID,
-        sinon.match({ tokowakaEnabled: true, prerender: { allowList: ['/*'] } }),
-        sinon.match({ lastModifiedBy: 'admin@example.com' }),
+        sinon.match({ tokowakaEnabled: true }),
+        sinon.match({ lastModifiedBy: 'admin@example.com', isStageDomain: true }),
       );
       expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(
         sinon.match({ stagingDomains: sinon.match.array }),
@@ -3898,8 +3898,8 @@ describe('LlmoController', () => {
       expect(mockTokowakaClient.updateMetaconfig).to.have.been.calledWith(
         'https://staging.lovesac.com',
         STAGE_SITE_ID,
-        sinon.match({ prerender: { allowList: ['/*'] } }),
-        sinon.match.object,
+        {},
+        sinon.match({ lastModifiedBy: sinon.match.string, isStageDomain: true }),
       );
       const responseBody = await result.json();
       expect(responseBody.stageConfigs).to.have.length(1);

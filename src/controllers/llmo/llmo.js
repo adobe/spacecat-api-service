@@ -1478,16 +1478,15 @@ function LlmoController(ctx) {
             stageSite.getId(),
             {
               tokowakaEnabled: true,
-              prerender: { allowList: ['/*'] },
             },
-            { lastModifiedBy },
+            { lastModifiedBy, isStageDomain: true },
           );
         } else {
           await tokowakaClient.updateMetaconfig(
             stageBaseURL,
             stageSite.getId(),
-            { prerender: { allowList: ['/*'] } },
-            { lastModifiedBy },
+            {},
+            { lastModifiedBy, isStageDomain: true },
           );
           metaconfig = await tokowakaClient.fetchMetaconfig(stageBaseURL);
         }
