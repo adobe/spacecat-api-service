@@ -1,3 +1,10 @@
+## [1.322.2](https://github.com/adobe/spacecat-api-service/compare/v1.322.1...v1.322.2) (2026-02-25)
+
+
+### Bug Fixes
+
+* if and only if org member should be able to deploy fix at edge ([#1844](https://github.com/adobe/spacecat-api-service/issues/1844)) ([67dcb8d](https://github.com/adobe/spacecat-api-service/commit/67dcb8d12ed5b94c7032c73c25cb252a7d83f7bc))
+
 ## [1.322.1](https://github.com/adobe/spacecat-api-service/compare/v1.322.0...v1.322.1) (2026-02-25)
 
 
