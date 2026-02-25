@@ -1431,15 +1431,21 @@ function LlmoController(ctx) {
     const { log } = context;
 
     try {
+      log.info('checking if user has access to site');
       const { site, config } = await getSiteAndValidateLlmo(context);
       const OPPORTUNITIES_REVIEWED_TAG = 'opportunitiesReviewed';
 
+      log.info(`Marking opportunities as reviewed for site ${site.getId()}`);
       config.addLlmoTag(OPPORTUNITIES_REVIEWED_TAG);
 
+      log.info('saving site config');
       await saveSiteConfig(site, config, log, 'marking opportunities as reviewed');
 
+      log.info('returning ok');
       return ok(config.getLlmoConfig().tags || []);
     } catch (error) {
+      log.error(`Error marking opportunities as reviewed: ${error.message}`);
+
       if (error.message === 'Only users belonging to the organization can view its sites') {
         return forbidden(error.message);
       }
