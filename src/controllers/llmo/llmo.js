@@ -1276,6 +1276,10 @@ function LlmoController(ctx) {
     const promiseToken = context.pathInfo?.headers?.['x-promise-token'];
     log.info(`Edge optimize routing update request received for site ${siteId}`);
 
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can update edge optimize routing');
+    }
+
     // if (env?.ENV && env.ENV !== 'prod') {
     //   return createResponse(
     //     { message: `API is not available in ${env?.ENV} environment` },

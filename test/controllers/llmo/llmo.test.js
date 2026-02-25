@@ -4672,6 +4672,21 @@ describe('LlmoController', () => {
       expect((await result.json()).message).to.equal('User does not have access to this site');
     });
 
+    it('returns 403 when user is not LLMO administrator', async () => {
+      const LlmoControllerNoLLMOAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': {
+          default: createMockAccessControlUtil(true, true, false),
+        },
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        ...getCommonMocks(),
+      });
+      const controllerNoLLMOAdmin = LlmoControllerNoLLMOAdmin(mockContext);
+      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
+      const result = await controllerNoLLMOAdmin.updateEdgeOptimizeCDNRouting(enableEdgeContext);
+      expect(result.status).to.equal(403);
+      expect((await result.json()).message).to.equal('Only LLMO administrators can update edge optimize routing');
+    });
+
     it('returns 401 when exchangePromiseToken fails', async () => {
       enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
       tracingFetchStub.onFirstCall().resolves({ ok: true });
