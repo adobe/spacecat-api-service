@@ -169,7 +169,7 @@ describe('email-service', () => {
       expect(ctxArg.env.IMS_CLIENT_ID).to.equal('client-id');
       expect(ctxArg.env.IMS_CLIENT_CODE).to.equal('client-code');
       expect(ctxArg.env.IMS_CLIENT_SECRET).to.equal('client-secret');
-      expect(ctxArg.env.IMS_SCOPE).to.equal('email-scope');
+      expect(ctxArg.env.IMS_SCOPE).to.equal('APO.ST(llmo).SC(email)');
       expect(ctxArg.env.IMS_HOST).to.equal('https://ims.example.com');
     });
 

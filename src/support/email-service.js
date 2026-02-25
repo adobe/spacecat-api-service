@@ -63,7 +63,7 @@ async function getEmailServiceToken(context) {
     IMS_CLIENT_ID: env.EMAIL_IMS_CLIENT_ID,
     IMS_CLIENT_SECRET: env.EMAIL_IMS_CLIENT_SECRET,
     IMS_CLIENT_CODE: env.EMAIL_IMS_CLIENT_CODE,
-    IMS_SCOPE: env.EMAIL_IMS_SCOPE,
+    IMS_SCOPE: 'APO.ST(llmo).SC(email)',
   };
 
   const imsClient = ImsClient.createFrom({ ...context, env: emailEnv });
