@@ -4568,9 +4568,7 @@ describe('LlmoController', () => {
     });
 
     function mockHeadersWithPromiseToken(token = FAKE_PROMISE_TOKEN) {
-      return {
-        get: (name) => (name === 'x-promise-token' ? token : null),
-      };
+      return { 'x-promise-token': token };
     }
 
     beforeEach(() => {
@@ -4612,7 +4610,7 @@ describe('LlmoController', () => {
 
     it('returns 400 when x-promise-token header is undefined (null/undefined branch)', async () => {
       enableEdgeContext.data = { cdnType: LOG_SOURCES.AEM_CS_FASTLY };
-      enableEdgeContext.pathInfo = { headers: { get: () => undefined } };
+      enableEdgeContext.pathInfo = { headers: {} };
       enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
       const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
       expect(result.status).to.equal(400);
