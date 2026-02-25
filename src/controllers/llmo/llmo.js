@@ -1436,7 +1436,7 @@ function LlmoController(ctx) {
       const OPPORTUNITIES_REVIEWED_TAG = 'opportunitiesReviewed';
 
       log.info(`[markOpportunitiesReviewed] Marking opportunities as reviewed for site ${site.getId()}`);
-      log.info(`[markOpportunitiesReviewed] config type: ${typeof config}, constructor: ${config?.constructor?.name}, has addLlmoTag: ${typeof config?.addLlmoTag}, own keys: [${Object.keys(config || {}).filter((k) => typeof config[k] === 'function').join(', ')}]`);
+      log.info(`[markOpportunitiesReviewed] config type: ${typeof config}, constructor: ${config?.constructor?.name}, has addLlmoTag: ${typeof config?.addLlmoTag}, own keys: [${Object.keys(config).filter((k) => typeof config[k] === 'function').join(', ')}]`);
       config.addLlmoTag(OPPORTUNITIES_REVIEWED_TAG);
 
       log.info('[markOpportunitiesReviewed] saving site config');
