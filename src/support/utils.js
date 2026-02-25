@@ -761,6 +761,7 @@ export const createProject = async (
   }
 };
 
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const AEM_CS_PUBLISH_HOST_PATTERN = /^publish-p(\d+)-e(\d+)\.adobeaemcloud\.(com|net)$/i;
 const EDS_HOST_PATTERN = /^([a-z0-9-]+)--([a-z0-9-]+)--([a-z0-9-]+)\.aem\.live$/i;
 
@@ -789,7 +790,7 @@ export const autoResolveAuthorUrl = async (site, context) => {
     const domainkey = await rumApiClient.retrieveDomainkey(domain);
 
     // Fetch bundles for yesterday
-    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const yesterday = new Date(Date.now() - ONE_DAY_MS);
     const year = yesterday.getUTCFullYear();
     const month = (yesterday.getUTCMonth() + 1).toString().padStart(2, '0');
     const day = yesterday.getUTCDate().toString().padStart(2, '0');
