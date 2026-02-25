@@ -1431,20 +1431,21 @@ function LlmoController(ctx) {
     const { log } = context;
 
     try {
-      log.info('checking if user has access to site');
+      log.info('[markOpportunitiesReviewed] checking if user has access to site');
       const { site, config } = await getSiteAndValidateLlmo(context);
       const OPPORTUNITIES_REVIEWED_TAG = 'opportunitiesReviewed';
 
-      log.info(`Marking opportunities as reviewed for site ${site.getId()}`);
+      log.info(`[markOpportunitiesReviewed] Marking opportunities as reviewed for site ${site.getId()}`);
+      log.info(`[markOpportunitiesReviewed] config type: ${typeof config}, constructor: ${config?.constructor?.name}, has addLlmoTag: ${typeof config?.addLlmoTag}, own keys: [${Object.keys(config || {}).filter((k) => typeof config[k] === 'function').join(', ')}]`);
       config.addLlmoTag(OPPORTUNITIES_REVIEWED_TAG);
 
-      log.info('saving site config');
+      log.info('[markOpportunitiesReviewed] saving site config');
       await saveSiteConfig(site, config, log, 'marking opportunities as reviewed');
 
-      log.info('returning ok');
+      log.info('[markOpportunitiesReviewed] returning ok');
       return ok(config.getLlmoConfig().tags || []);
     } catch (error) {
-      log.error(`Error marking opportunities as reviewed: ${error.message}`);
+      log.error(`[markOpportunitiesReviewed] Error marking opportunities as reviewed: ${error.message}`);
 
       if (error.message === 'Only users belonging to the organization can view its sites') {
         return forbidden(error.message);
