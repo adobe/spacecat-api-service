@@ -56,7 +56,16 @@ function buildTemplateEmailPayload(toList, templateData) {
  * @returns {Promise<string>} The access token string.
  */
 async function getEmailServiceToken(context) {
-  const { env } = context;
+  const { env, log } = context;
+
+  log.info('[email-service] Acquiring email service IMS token', {
+    hasEmailClientId: !!env.EMAIL_IMS_CLIENT_ID,
+    hasEmailClientSecret: !!env.EMAIL_IMS_CLIENT_SECRET,
+    hasEmailClientCode: !!env.EMAIL_IMS_CLIENT_CODE,
+    emailImsScope: env.EMAIL_IMS_SCOPE,
+    imsHost: env.IMS_HOST,
+    hardcodedScope: 'APO.ST(llmo).SC(email)',
+  });
 
   const emailEnv = {
     ...env,
@@ -67,8 +76,19 @@ async function getEmailServiceToken(context) {
   };
 
   const imsClient = ImsClient.createFrom({ ...context, env: emailEnv });
-  const tokenPayload = await imsClient.getServiceAccessToken();
-  return tokenPayload.access_token;
+
+  try {
+    const tokenPayload = await imsClient.getServiceAccessToken();
+    log.info('[email-service] IMS token acquired successfully', {
+      tokenPrefix: tokenPayload.access_token?.substring(0, 10),
+      expiresIn: tokenPayload.expires_in,
+      tokenType: tokenPayload.token_type,
+    });
+    return tokenPayload.access_token;
+  } catch (error) {
+    log.error('[email-service] Failed to acquire IMS token', { error: error.message });
+    throw error;
+  }
 }
 
 /**
@@ -109,6 +129,14 @@ export async function sendEmail(context, {
     const emailPayload = buildTemplateEmailPayload(recipients, templateData);
     const url = `${postOfficeEndpoint}/po-server/message?templateName=${encodeURIComponent(templateName)}&locale=${encodeURIComponent(locale)}`;
 
+    log.info('[email-service] Sending email via Post Office', {
+      url,
+      templateName,
+      locale,
+      recipientCount: recipients.length,
+      tokenPrefix: accessToken?.substring(0, 10),
+    });
+
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -126,6 +154,13 @@ export async function sendEmail(context, {
       const responseText = await response.text().catch(() => '(unable to read response body)');
       result.error = `Post Office returned ${response.status}: ${responseText}`;
       log.error(`Email send failed for template ${templateName}: ${result.error}`);
+      if (response.status === 403) {
+        log.warn('[email-service] 403 Forbidden - possible scope/template mismatch', {
+          templateName,
+          hint: 'Verify EMAIL_IMS_CLIENT_CODE was issued with APO scope matching the template team. '
+            + 'Note: getServiceAccessToken (v4) does NOT send IMS_SCOPE; scope is embedded in the authorization code.',
+        });
+      }
     }
   } catch (error) {
     result.error = error.message;
