@@ -13,8 +13,11 @@
 /* eslint-env mocha */
 import { expect } from 'chai';
 import sinon from 'sinon';
+import nock from 'nock';
 
-import { createProject, deriveProjectName } from '../../src/support/utils.js';
+import {
+  createProject, deriveProjectName, autoResolveAuthorUrl, updateCodeConfig,
+} from '../../src/support/utils.js';
 
 describe('utils', () => {
   describe('deriveProjectName', () => {
@@ -150,6 +153,283 @@ describe('utils', () => {
       await expect(createProject(context, slackContext, 'https://fr.example.com/', 'org123')).to.be.rejectedWith('Failed to create project');
       expect(context.log.error).to.have.been.calledWith('Error creating project: Failed to create project');
       expect(slackContext.say).to.have.been.calledWith(':x: Error creating project: Failed to create project');
+    });
+  });
+
+  describe('autoResolveAuthorUrl', () => {
+    let sandbox;
+    let context;
+    let rumApiClientStub;
+    let site;
+
+    // Build yesterday's date path for nock URL matching
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const datePath = `${yesterday.getUTCFullYear()}/${(yesterday.getUTCMonth() + 1).toString().padStart(2, '0')}/${yesterday.getUTCDate().toString().padStart(2, '0')}`;
+
+    beforeEach(() => {
+      sandbox = sinon.createSandbox();
+
+      rumApiClientStub = {
+        retrieveDomainkey: sandbox.stub(),
+      };
+
+      context = {
+        log: {
+          info: sandbox.stub(),
+          warn: sandbox.stub(),
+          error: sandbox.stub(),
+          debug: sandbox.stub(),
+        },
+        env: {
+          RUM_ADMIN_KEY: 'test-admin-key',
+        },
+        rumApiClient: rumApiClientStub,
+      };
+
+      site = {
+        getBaseURL: sandbox.stub().returns('https://www.example.com'),
+        getConfig: sandbox.stub().returns({
+          getFetchConfig: sandbox.stub().returns(null),
+        }),
+      };
+    });
+
+    afterEach(() => {
+      sandbox.restore();
+      nock.cleanAll();
+    });
+
+    it('returns resolved author URL when RUM bundle has an AEM CS publish host', async () => {
+      rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
+
+      nock('https://bundles.aem.page')
+        .get(`/bundles/example.com/${datePath}`)
+        .query({ domainkey: 'test-domainkey' })
+        .reply(200, {
+          rumBundles: [
+            {
+              id: '123',
+              host: 'publish-p12345-e67890.adobeaemcloud.com',
+              url: 'https://www.example.com/page1',
+            },
+          ],
+        });
+
+      const result = await autoResolveAuthorUrl(site, context);
+
+      expect(result).to.deep.equal({
+        authorURL: 'https://author-p12345-e67890.adobeaemcloud.com',
+        programId: '12345',
+        environmentId: '67890',
+      });
+      expect(context.log.info).to.have.been.calledWith(
+        'Auto-resolved author URL from RUM bundle host: https://author-p12345-e67890.adobeaemcloud.com',
+      );
+    });
+
+    it('uses overrideBaseURL from fetchConfig when available', async () => {
+      site.getConfig.returns({
+        getFetchConfig: sandbox.stub().returns({
+          overrideBaseURL: 'https://custom.example.com',
+        }),
+      });
+      rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
+
+      nock('https://bundles.aem.page')
+        .get(`/bundles/custom.example.com/${datePath}`)
+        .query({ domainkey: 'test-domainkey' })
+        .reply(200, {
+          rumBundles: [
+            {
+              id: '123',
+              host: 'publish-p111-e222.adobeaemcloud.com',
+              url: 'https://custom.example.com/page1',
+            },
+          ],
+        });
+
+      const result = await autoResolveAuthorUrl(site, context);
+
+      expect(result).to.deep.equal({
+        authorURL: 'https://author-p111-e222.adobeaemcloud.com',
+        programId: '111',
+        environmentId: '222',
+      });
+    });
+
+    it('returns null when host is not an AEM CS publish host', async () => {
+      rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
+
+      nock('https://bundles.aem.page')
+        .get(`/bundles/example.com/${datePath}`)
+        .query({ domainkey: 'test-domainkey' })
+        .reply(200, {
+          rumBundles: [
+            {
+              id: '123',
+              host: 'main--mysite--org.aem.live',
+              url: 'https://www.example.com/page1',
+            },
+          ],
+        });
+
+      const result = await autoResolveAuthorUrl(site, context);
+
+      expect(result).to.be.null;
+      expect(context.log.info).to.have.been.calledWithMatch(/is not an AEM CS publish host/);
+    });
+
+    it('returns null when no RUM bundles are returned', async () => {
+      rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
+
+      nock('https://bundles.aem.page')
+        .get(`/bundles/example.com/${datePath}`)
+        .query({ domainkey: 'test-domainkey' })
+        .reply(200, { rumBundles: [] });
+
+      const result = await autoResolveAuthorUrl(site, context);
+
+      expect(result).to.be.null;
+      expect(context.log.info).to.have.been.calledWithMatch(/No RUM bundles found/);
+    });
+
+    it('returns null when fetch fails', async () => {
+      rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
+
+      nock('https://bundles.aem.page')
+        .get(`/bundles/example.com/${datePath}`)
+        .query({ domainkey: 'test-domainkey' })
+        .reply(404);
+
+      const result = await autoResolveAuthorUrl(site, context);
+
+      expect(result).to.be.null;
+      expect(context.log.warn).to.have.been.calledWithMatch(/Failed to fetch RUM bundles/);
+    });
+
+    it('returns null when wwwUrlResolver fails', async () => {
+      rumApiClientStub.retrieveDomainkey.rejects(new Error('No domainkey'));
+
+      const result = await autoResolveAuthorUrl(site, context);
+
+      expect(result).to.be.null;
+      expect(context.log.warn).to.have.been.calledWithMatch(/Auto-resolve author URL failed/);
+    });
+
+    it('returns null when first bundle host is undefined', async () => {
+      rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
+
+      nock('https://bundles.aem.page')
+        .get(`/bundles/example.com/${datePath}`)
+        .query({ domainkey: 'test-domainkey' })
+        .reply(200, {
+          rumBundles: [
+            {
+              id: '1',
+              host: undefined,
+              url: 'https://www.example.com/page1',
+            },
+          ],
+        });
+
+      const result = await autoResolveAuthorUrl(site, context);
+
+      expect(result).to.be.null;
+      expect(context.log.info).to.have.been.calledWithMatch(/is not an AEM CS publish host/);
+    });
+  });
+
+  describe('updateCodeConfig', () => {
+    let sandbox;
+    let log;
+    let slackContext;
+    let site;
+
+    beforeEach(() => {
+      sandbox = sinon.createSandbox();
+
+      log = {
+        info: sandbox.stub(),
+        warn: sandbox.stub(),
+        error: sandbox.stub(),
+        debug: sandbox.stub(),
+      };
+
+      slackContext = {
+        say: sandbox.stub(),
+      };
+
+      site = {
+        getBaseURL: sandbox.stub().returns('https://www.example.com'),
+        getDeliveryConfig: sandbox.stub(),
+        getCode: sandbox.stub(),
+        setCode: sandbox.stub(),
+      };
+    });
+
+    afterEach(() => {
+      sandbox.restore();
+    });
+
+    it('sets code config when authorURL matches EDS pattern', async () => {
+      site.getDeliveryConfig.returns({
+        authorURL: 'https://main--maidenform--hanes-brands.aem.live',
+      });
+      site.getCode.returns({});
+
+      await updateCodeConfig(site, slackContext, log);
+
+      expect(site.setCode).to.have.been.calledWith({
+        type: 'github',
+        owner: 'hanes-brands',
+        repo: 'maidenform',
+        ref: 'main',
+        url: 'https://github.com/hanes-brands/maidenform',
+      });
+      expect(log.info).to.have.been.calledWithMatch(/Auto-resolved code config from authorURL/);
+      expect(slackContext.say).to.have.been.calledWithMatch(/Auto-resolved code config/);
+    });
+
+    it('skips when authorURL is missing', async () => {
+      site.getDeliveryConfig.returns({});
+
+      await updateCodeConfig(site, slackContext, log);
+
+      expect(site.setCode).not.to.have.been.called;
+      expect(log.debug).to.have.been.calledWithMatch(/has no authorURL/);
+    });
+
+    it('skips when code config already has owner and repo', async () => {
+      site.getDeliveryConfig.returns({
+        authorURL: 'https://main--maidenform--hanes-brands.aem.live',
+      });
+      site.getCode.returns({ owner: 'existing-owner', repo: 'existing-repo' });
+
+      await updateCodeConfig(site, slackContext, log);
+
+      expect(site.setCode).not.to.have.been.called;
+      expect(log.debug).to.have.been.calledWithMatch(/already has code config/);
+    });
+
+    it('logs debug when authorURL does not match any supported pattern', async () => {
+      site.getDeliveryConfig.returns({
+        authorURL: 'https://author-p12345-e67890.adobeaemcloud.com',
+      });
+      site.getCode.returns({});
+
+      await updateCodeConfig(site, slackContext, log);
+
+      expect(site.setCode).not.to.have.been.called;
+      expect(log.debug).to.have.been.calledWithMatch(/does not match a supported pattern/);
+    });
+
+    it('skips when deliveryConfig is null', async () => {
+      site.getDeliveryConfig.returns(null);
+
+      await updateCodeConfig(site, slackContext, log);
+
+      expect(site.setCode).not.to.have.been.called;
+      expect(log.debug).to.have.been.calledWithMatch(/has no authorURL/);
     });
   });
 });
