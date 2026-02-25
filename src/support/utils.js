@@ -814,13 +814,15 @@ export const autoResolveAuthorUrl = async (site, context) => {
     const match = host?.match(AEM_CS_PUBLISH_HOST_PATTERN);
     if (!match) {
       log.info(`RUM bundle host '${host}' for ${domain} is not an AEM CS publish host, skipping author URL resolution`);
-      return null;
+      return { host };
     }
 
     const [, programId, environmentId] = match;
     const authorURL = `https://author-p${programId}-e${environmentId}.adobeaemcloud.com`;
     log.info(`Auto-resolved author URL from RUM bundle host: ${authorURL}`);
-    return { authorURL, programId, environmentId };
+    return {
+      authorURL, programId, environmentId, host,
+    };
   } catch (error) {
     log.warn(`Auto-resolve author URL failed for ${baseURL}: ${error.message}`);
     return null;
@@ -828,25 +830,21 @@ export const autoResolveAuthorUrl = async (site, context) => {
 };
 
 /**
- * Updates the code config on a site based on its deliveryConfig authorURL.
+ * Updates the code config on a site based on a given host.
  * Currently supports EDS pattern (ref--repo--owner.aem.live) only.
  * AEM CS pattern support will be added later.
  *
+ * The caller is responsible for resolving the host to check
+ * (e.g. deliveryConfig.authorURL hostname or RUM bundle host).
  * Does not save the site — caller is responsible for saving to avoid multiple saves.
  *
  * @param {Object} site - The site object.
+ * @param {string} host - The host to check for pattern matching.
  * @param {Object} slackContext - The Slack context object with say function.
  * @param {Object} log - The logger.
  */
-export const updateCodeConfig = async (site, slackContext, log) => {
+export const updateCodeConfig = async (site, host, slackContext, log) => {
   const { say } = slackContext;
-  const deliveryConfig = site.getDeliveryConfig() || {};
-  const { authorURL } = deliveryConfig;
-
-  if (!authorURL) {
-    log.debug(`Site ${site.getBaseURL()} has no authorURL in deliveryConfig, skipping code config resolution`);
-    return;
-  }
 
   const existingCode = site.getCode() || {};
   if (existingCode.owner && existingCode.repo) {
@@ -854,9 +852,13 @@ export const updateCodeConfig = async (site, slackContext, log) => {
     return;
   }
 
+  if (!host) {
+    log.debug(`Site ${site.getBaseURL()} has no host to resolve code config from, skipping`);
+    return;
+  }
+
   // Try EDS pattern: ref--repo--owner.aem.live
-  const { hostname } = new URL(authorURL);
-  const edsMatch = hostname.match(EDS_HOST_PATTERN);
+  const edsMatch = host.match(EDS_HOST_PATTERN);
   if (edsMatch) {
     const [, ref, repo, owner] = edsMatch;
     const code = {
@@ -867,13 +869,13 @@ export const updateCodeConfig = async (site, slackContext, log) => {
       url: `https://github.com/${owner}/${repo}`,
     };
     site.setCode(code);
-    log.info(`Auto-resolved code config from authorURL: owner=${owner}, repo=${repo}, ref=${ref}`);
+    log.info(`Auto-resolved code config from host '${host}': owner=${owner}, repo=${repo}, ref=${ref}`);
     await say(`:white_check_mark: Auto-resolved code config: owner=${owner}, repo=${repo}, ref=${ref}`);
     return;
   }
 
   // TODO: Add AEM CS pattern code config resolution here
-  log.debug(`authorURL '${authorURL}' does not match a supported pattern for code config resolution`);
+  log.debug(`Host '${host}' does not match a supported pattern for code config resolution`);
 };
 
 /**
@@ -955,17 +957,26 @@ const createSiteAndOrganization = async (
   }
 
   // Set deliveryConfig and authoringType if provided (will be saved later with other site data)
+  let domainServingHost;
   if (deliveryConfig && Object.keys(deliveryConfig).length > 0) {
     site.setDeliveryConfig(deliveryConfig);
     if (authoringType) {
       site.setAuthoringType(authoringType);
+    }
+    // Extract hostname from user-provided authorURL for code config resolution
+    if (deliveryConfig.authorURL) {
+      try {
+        domainServingHost = new URL(deliveryConfig.authorURL).hostname;
+      } catch {
+        log.debug(`Invalid authorURL '${deliveryConfig.authorURL}' in deliveryConfig`);
+      }
     }
     await say(':white_check_mark: DeliveryConfig is added/updated to site configuration');
   } else {
     // Auto-resolve author URL from RUM bundles if deliveryConfig was not provided
     const resolvedConfig = await autoResolveAuthorUrl(site, context);
 
-    if (resolvedConfig) {
+    if (resolvedConfig?.authorURL) {
       const existingConfig = site.getDeliveryConfig() || {};
       const { authorURL, programId, environmentId } = resolvedConfig;
 
@@ -993,10 +1004,12 @@ const createSiteAndOrganization = async (
         await say(`:white_check_mark: Auto-resolved deliveryConfig from RUM data: authorURL=${authorURL}, programId=${programId}, environmentId=${environmentId}`);
       }
     }
+    // Use RUM bundle host for code config (covers both AEM CS and EDS hosts)
+    domainServingHost = resolvedConfig?.host;
   }
 
-  // Resolve code config from authorURL (works for both user-provided and auto-resolved)
-  await updateCodeConfig(site, slackContext, log);
+  // Resolve code config from host (works for both user-provided and auto-resolved)
+  await updateCodeConfig(site, domainServingHost, slackContext, log);
 
   Object.assign(reportLine, localReportLine);
   return { site, organizationId };

@@ -11,13 +11,18 @@
  */
 
 /* eslint-env mocha */
-import { expect } from 'chai';
+import { use, expect } from 'chai';
+import chaiAsPromised from 'chai-as-promised';
+import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import nock from 'nock';
 
 import {
   createProject, deriveProjectName, autoResolveAuthorUrl, updateCodeConfig,
 } from '../../src/support/utils.js';
+
+use(chaiAsPromised);
+use(sinonChai);
 
 describe('utils', () => {
   describe('deriveProjectName', () => {
@@ -221,6 +226,7 @@ describe('utils', () => {
         authorURL: 'https://author-p12345-e67890.adobeaemcloud.com',
         programId: '12345',
         environmentId: '67890',
+        host: 'publish-p12345-e67890.adobeaemcloud.com',
       });
       expect(context.log.info).to.have.been.calledWith(
         'Auto-resolved author URL from RUM bundle host: https://author-p12345-e67890.adobeaemcloud.com',
@@ -254,10 +260,11 @@ describe('utils', () => {
         authorURL: 'https://author-p111-e222.adobeaemcloud.com',
         programId: '111',
         environmentId: '222',
+        host: 'publish-p111-e222.adobeaemcloud.com',
       });
     });
 
-    it('returns null when host is not an AEM CS publish host', async () => {
+    it('returns host only when host is not an AEM CS publish host', async () => {
       rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
 
       nock('https://bundles.aem.page')
@@ -275,7 +282,7 @@ describe('utils', () => {
 
       const result = await autoResolveAuthorUrl(site, context);
 
-      expect(result).to.be.null;
+      expect(result).to.deep.equal({ host: 'main--mysite--org.aem.live' });
       expect(context.log.info).to.have.been.calledWithMatch(/is not an AEM CS publish host/);
     });
 
@@ -316,7 +323,7 @@ describe('utils', () => {
       expect(context.log.warn).to.have.been.calledWithMatch(/Auto-resolve author URL failed/);
     });
 
-    it('returns null when first bundle host is undefined', async () => {
+    it('returns host object when first bundle host is undefined', async () => {
       rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
 
       nock('https://bundles.aem.page')
@@ -326,7 +333,6 @@ describe('utils', () => {
           rumBundles: [
             {
               id: '1',
-              host: undefined,
               url: 'https://www.example.com/page1',
             },
           ],
@@ -334,7 +340,7 @@ describe('utils', () => {
 
       const result = await autoResolveAuthorUrl(site, context);
 
-      expect(result).to.be.null;
+      expect(result).to.deep.equal({ host: undefined });
       expect(context.log.info).to.have.been.calledWithMatch(/is not an AEM CS publish host/);
     });
   });
@@ -361,7 +367,6 @@ describe('utils', () => {
 
       site = {
         getBaseURL: sandbox.stub().returns('https://www.example.com'),
-        getDeliveryConfig: sandbox.stub(),
         getCode: sandbox.stub(),
         setCode: sandbox.stub(),
       };
@@ -371,13 +376,10 @@ describe('utils', () => {
       sandbox.restore();
     });
 
-    it('sets code config when authorURL matches EDS pattern', async () => {
-      site.getDeliveryConfig.returns({
-        authorURL: 'https://main--maidenform--hanes-brands.aem.live',
-      });
+    it('sets code config when host matches EDS pattern', async () => {
       site.getCode.returns({});
 
-      await updateCodeConfig(site, slackContext, log);
+      await updateCodeConfig(site, 'main--maidenform--hanes-brands.aem.live', slackContext, log);
 
       expect(site.setCode).to.have.been.calledWith({
         type: 'github',
@@ -386,50 +388,53 @@ describe('utils', () => {
         ref: 'main',
         url: 'https://github.com/hanes-brands/maidenform',
       });
-      expect(log.info).to.have.been.calledWithMatch(/Auto-resolved code config from authorURL/);
+      expect(log.info).to.have.been.calledWithMatch(/Auto-resolved code config from host/);
       expect(slackContext.say).to.have.been.calledWithMatch(/Auto-resolved code config/);
     });
 
-    it('skips when authorURL is missing', async () => {
-      site.getDeliveryConfig.returns({});
-
-      await updateCodeConfig(site, slackContext, log);
-
-      expect(site.setCode).not.to.have.been.called;
-      expect(log.debug).to.have.been.calledWithMatch(/has no authorURL/);
-    });
-
-    it('skips when code config already has owner and repo', async () => {
-      site.getDeliveryConfig.returns({
-        authorURL: 'https://main--maidenform--hanes-brands.aem.live',
-      });
-      site.getCode.returns({ owner: 'existing-owner', repo: 'existing-repo' });
-
-      await updateCodeConfig(site, slackContext, log);
-
-      expect(site.setCode).not.to.have.been.called;
-      expect(log.debug).to.have.been.calledWithMatch(/already has code config/);
-    });
-
-    it('logs debug when authorURL does not match any supported pattern', async () => {
-      site.getDeliveryConfig.returns({
-        authorURL: 'https://author-p12345-e67890.adobeaemcloud.com',
-      });
+    it('skips when host is not provided', async () => {
       site.getCode.returns({});
 
-      await updateCodeConfig(site, slackContext, log);
+      await updateCodeConfig(site, undefined, slackContext, log);
+
+      expect(site.setCode).not.to.have.been.called;
+      expect(log.debug).to.have.been.calledWithMatch(/has no host to resolve code config from/);
+    });
+
+    it('skips when host is null', async () => {
+      site.getCode.returns({});
+
+      await updateCodeConfig(site, null, slackContext, log);
+
+      expect(site.setCode).not.to.have.been.called;
+      expect(log.debug).to.have.been.calledWithMatch(/has no host to resolve code config from/);
+    });
+
+    it('skips when host does not match any supported pattern', async () => {
+      site.getCode.returns({});
+
+      await updateCodeConfig(site, 'some-random-host.example.com', slackContext, log);
 
       expect(site.setCode).not.to.have.been.called;
       expect(log.debug).to.have.been.calledWithMatch(/does not match a supported pattern/);
     });
 
-    it('skips when deliveryConfig is null', async () => {
-      site.getDeliveryConfig.returns(null);
+    it('skips when code config already has owner and repo', async () => {
+      site.getCode.returns({ owner: 'existing-owner', repo: 'existing-repo' });
 
-      await updateCodeConfig(site, slackContext, log);
+      await updateCodeConfig(site, 'main--maidenform--hanes-brands.aem.live', slackContext, log);
 
       expect(site.setCode).not.to.have.been.called;
-      expect(log.debug).to.have.been.calledWithMatch(/has no authorURL/);
+      expect(log.debug).to.have.been.calledWithMatch(/already has code config/);
+    });
+
+    it('logs debug when AEM CS host does not match EDS pattern', async () => {
+      site.getCode.returns({});
+
+      await updateCodeConfig(site, 'author-p12345-e67890.adobeaemcloud.com', slackContext, log);
+
+      expect(site.setCode).not.to.have.been.called;
+      expect(log.debug).to.have.been.calledWithMatch(/does not match a supported pattern/);
     });
   });
 });
