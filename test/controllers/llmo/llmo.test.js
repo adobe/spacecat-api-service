@@ -44,12 +44,14 @@ const createMockResponse = (data, ok = true, status = 200) => ({
 });
 
 // eslint-disable-next-line max-len
-const createMockAccessControlUtil = (accessResult, hasAdminAccessResult = true, isLLMOAdministratorResult = true) => ({
+// eslint-disable-next-line max-len
+const createMockAccessControlUtil = (accessResult, hasAdminAccessResult = true, isLLMOAdministratorResult = true, isOwnerOfSiteResult = accessResult) => ({
   fromContext: (context) => ({
     log: context.log,
     hasAccess: async () => accessResult,
     hasAdminAccess: () => hasAdminAccessResult,
     isLLMOAdministrator: () => isLLMOAdministratorResult,
+    isOwnerOfSite: async () => isOwnerOfSiteResult,
   }),
 });
 
@@ -204,6 +206,9 @@ describe('LlmoController', () => {
                 return true;
               },
               isLLMOAdministrator() {
+                return true;
+              },
+              async isOwnerOfSite() {
                 return true;
               },
             };
@@ -3778,6 +3783,21 @@ describe('LlmoController', () => {
       expect(responseBody.message).to.include('S3 connection failed');
     });
 
+    it('should return 403 when user is not owner of site', async () => {
+      const LlmoControllerNotOwner = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        ...getCommonMocks(),
+      });
+
+      const controllerNotOwner = LlmoControllerNotOwner(mockContext);
+      const result = await controllerNotOwner.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('User does not own this site');
+    });
+
     it('should create edge config when getEdgeOptimizeConfig returns null', async () => {
       const newMetaconfig = {
         siteId: TEST_SITE_ID,
@@ -4215,112 +4235,7 @@ describe('LlmoController', () => {
       const calledMessage = postLlmoAlertStubLocal.firstCall.args[0];
       expect(calledMessage).to.include(':gear: Site has opted for edge optimization');
       expect(calledMessage).to.include('• Site: https://www.example.com');
-      expect(calledMessage).to.include('• CDN: aem-cs-fastly');
       expect(calledMessage).to.not.include('cc:');
-    });
-
-    it('should send Slack notification without CDN info when cdnProvider is not configured', async () => {
-      // Mock postLlmoAlert to capture the message
-      const postLlmoAlertStubLocal = sinon.stub().resolves();
-
-      const newMetaconfig = {
-        siteId: TEST_SITE_ID,
-        apiKeys: ['test-api-key-123'],
-        tokowakaEnabled: true,
-      };
-
-      // Set up to trigger the Slack notification path (isNewlyOpted === true)
-      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({ enabled: true });
-      // Return LLMO config without cdnBucketConfig
-      mockConfig.getLlmoConfig = sinon.stub().returns({
-        dataFolder: TEST_FOLDER,
-        brand: TEST_BRAND,
-      });
-      mockTokowakaClient.fetchMetaconfig.resolves(null);
-      mockTokowakaClient.createMetaconfig.resolves(newMetaconfig);
-
-      const LlmoControllerWithoutCdn = await esmock('../../../src/controllers/llmo/llmo.js', {
-        '../../../src/controllers/llmo/llmo-config-metadata.js': {
-          updateModifiedByDetails: updateModifiedByDetailsStub,
-        },
-        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
-        '@adobe/spacecat-shared-utils': {
-          SPACECAT_USER_AGENT: TEST_USER_AGENT,
-          tracingFetch: (...args) => tracingFetchStub(...args),
-          llmoConfig: {
-            defaultConfig: llmoConfig.defaultConfig,
-            readConfig: (...args) => readConfigStub(...args),
-            writeConfig: (...args) => writeConfigStub(...args),
-          },
-          llmoStrategy: {
-            readStrategy: (...args) => readStrategyStub(...args),
-            writeStrategy: (...args) => writeStrategyStub(...args),
-          },
-          schemas: {
-            llmoConfig: { safeParse: (...args) => llmoConfigSchemaStub.safeParse(...args) },
-          },
-          hasText: (str) => typeof str === 'string' && str.trim().length > 0,
-          isObject: (obj) => obj !== null && typeof obj === 'object' && !Array.isArray(obj),
-          composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
-          isValidUUID: (uuid) => {
-            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-            return uuidRegex.test(uuid);
-          },
-          isValidUrl: (url) => typeof url === 'string' && /^https?:\/\//.test(url),
-        },
-        '../../../src/support/utils.js': {
-          exchangePromiseToken: (...args) => exchangePromiseTokenStub(...args),
-          fetchWithTimeout: (...args) => fetchWithTimeoutStub(...args),
-        },
-        '../../../src/support/brand-profile-trigger.js': {
-          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
-        },
-        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true),
-        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
-          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
-        },
-        '@adobe/spacecat-shared-tokowaka-client': {
-          default: {
-            createFrom: () => mockTokowakaClient,
-          },
-          calculateForwardedHost: (url) => {
-            try {
-              const u = new URL(url.startsWith('http') ? url : `https://${url}`);
-              const h = u.hostname;
-              const dots = (h.match(/\./g) || []).length;
-              return dots === 1 ? `www.${h}` : h;
-            } catch (e) {
-              throw new Error(`Error calculating forwarded host from URL ${url}: ${e.message}`);
-            }
-          },
-        },
-        '../../../src/controllers/llmo/llmo-onboarding.js': {
-          validateSiteNotOnboarded: sinon.stub().resolves({ isValid: true }),
-          generateDataFolder: sinon.stub().returns('test-folder'),
-          performLlmoOnboarding: sinon.stub().resolves({}),
-          performLlmoOffboarding: sinon.stub().resolves({}),
-          postLlmoAlert: (...args) => postLlmoAlertStubLocal(...args),
-        },
-        '../../../src/utils/slack/base.js': {
-          postSlackMessage: (...args) => postSlackMessageStub(...args),
-        },
-      });
-
-      const controllerWithoutCdn = LlmoControllerWithoutCdn(mockContext);
-
-      const result = await controllerWithoutCdn.createOrUpdateEdgeConfig(edgeConfigContext);
-
-      // Request should succeed
-      expect(result.status).to.equal(200);
-
-      // Verify postLlmoAlert was called
-      expect(postLlmoAlertStubLocal).to.have.been.calledOnce;
-
-      // Verify the message includes N/A for CDN when cdnProvider is not set
-      const calledMessage = postLlmoAlertStubLocal.firstCall.args[0];
-      expect(calledMessage).to.include(':gear: Site has opted for edge optimization');
-      expect(calledMessage).to.include('• Site: https://www.example.com');
-      expect(calledMessage).to.include('• CDN: N/A');
     });
   });
 

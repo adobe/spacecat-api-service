@@ -94,6 +94,8 @@ export const SuggestionDto = {
       };
     }
 
+    const aggregationKey = data.aggregationKey || buildAggregationKeyFromSuggestion(data);
+
     return {
       id: suggestion.getId(),
       opportunityId: suggestion.getOpportunityId(),
@@ -102,7 +104,7 @@ export const SuggestionDto = {
       status: suggestion.getStatus(),
       data: {
         ...data,
-        ...(data.aggregationKey ?? { aggregationKey: buildAggregationKeyFromSuggestion(data) }),
+        ...(aggregationKey && { aggregationKey }),
       },
       kpiDeltas: suggestion.getKpiDeltas(),
       createdAt: suggestion.getCreatedAt(),
