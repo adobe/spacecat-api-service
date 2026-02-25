@@ -250,14 +250,12 @@ export default function auditUrlTests(getHttpClient, resetData) {
 
     // ── Delete URLs ──
 
-    describe('DELETE /sites/:siteId/url-store', () => {
+    describe('POST /sites/:siteId/url-store/delete', () => {
       before(() => resetData());
 
-      // Skipped: bodyData middleware only parses POST/PUT/PATCH — DELETE body is not parsed,
-      // so context.data.urls is undefined and the controller returns 400 instead of processing
-      it.skip('user: deletes customer-added URL', async () => {
+      it('user: deletes customer-added URL', async () => {
         const http = getHttpClient();
-        const res = await http.user.deleteWithBody(`/sites/${SITE_1_ID}/url-store`, {
+        const res = await http.user.post(`/sites/${SITE_1_ID}/url-store/delete`, {
           urls: [AUDIT_URL_2],
         });
         expect(res.status).to.equal(200);
@@ -266,10 +264,9 @@ export default function auditUrlTests(getHttpClient, resetData) {
         expect(res.body.metadata.failure).to.equal(0);
       });
 
-      // Skipped: DELETE body not parsed (see above)
-      it.skip('user: fails to delete system-added URL', async () => {
+      it('user: fails to delete system-added URL', async () => {
         const http = getHttpClient();
-        const res = await http.user.deleteWithBody(`/sites/${SITE_1_ID}/url-store`, {
+        const res = await http.user.post(`/sites/${SITE_1_ID}/url-store/delete`, {
           urls: [AUDIT_URL_3], // byCustomer=false
         });
         expect(res.status).to.equal(200);
@@ -279,10 +276,9 @@ export default function auditUrlTests(getHttpClient, resetData) {
         expect(res.body.failures).to.have.lengthOf(1);
       });
 
-      // Skipped: DELETE body not parsed (see above)
-      it.skip('user: returns 403 for denied site', async () => {
+      it('user: returns 403 for denied site', async () => {
         const http = getHttpClient();
-        const res = await http.user.deleteWithBody(`/sites/${SITE_3_ID}/url-store`, {
+        const res = await http.user.post(`/sites/${SITE_3_ID}/url-store/delete`, {
           urls: ['https://example.com'],
         });
         expect(res.status).to.equal(403);
@@ -290,7 +286,7 @@ export default function auditUrlTests(getHttpClient, resetData) {
 
       it('user: returns 400 for non-array body', async () => {
         const http = getHttpClient();
-        const res = await http.user.deleteWithBody(`/sites/${SITE_1_ID}/url-store`, {
+        const res = await http.user.post(`/sites/${SITE_1_ID}/url-store/delete`, {
           urls: 'not-an-array',
         });
         expect(res.status).to.equal(400);
@@ -298,7 +294,7 @@ export default function auditUrlTests(getHttpClient, resetData) {
 
       it('user: returns 400 for empty array', async () => {
         const http = getHttpClient();
-        const res = await http.user.deleteWithBody(`/sites/${SITE_1_ID}/url-store`, {
+        const res = await http.user.post(`/sites/${SITE_1_ID}/url-store/delete`, {
           urls: [],
         });
         expect(res.status).to.equal(400);

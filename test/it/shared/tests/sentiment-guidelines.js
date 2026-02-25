@@ -272,16 +272,14 @@ export default function sentimentGuidelineTests(getHttpClient, resetData, option
 
     // ── Unlink audits ──
 
-    describe('DELETE /sites/:siteId/sentiment/guidelines/:guidelineId/audits', () => {
+    describe('POST /sites/:siteId/sentiment/guidelines/:guidelineId/audits/unlink', () => {
       before(() => resetData());
 
-      // Skipped: bodyData middleware only parses POST/PUT/PATCH — DELETE body is not parsed,
-      // so context.data.audits is undefined and the controller returns 400
-      it.skip('user: unlinks audit types', async () => {
+      it('user: unlinks audit types', async () => {
         const http = getHttpClient();
         // GUIDELINE_1 has audits: ['wikipedia-analysis', 'reddit-analysis']
-        const res = await http.user.deleteWithBody(
-          `/sites/${SITE_1_ID}/sentiment/guidelines/${GUIDELINE_1_ID}/audits`,
+        const res = await http.user.post(
+          `/sites/${SITE_1_ID}/sentiment/guidelines/${GUIDELINE_1_ID}/audits/unlink`,
           { audits: ['reddit-analysis'] },
         );
         expect(res.status).to.equal(200);
