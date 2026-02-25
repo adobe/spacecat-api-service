@@ -4570,7 +4570,10 @@ describe('LlmoController', () => {
     function mockRequestWithPromiseToken(token = FAKE_PROMISE_TOKEN) {
       return {
         headers: {
-          get: (name) => (name === 'x-promise-token' ? token : null),
+          get: (name) => {
+            if (name !== 'cookie') return null;
+            return token ? `promiseToken=${token}` : '';
+          },
         },
       };
     }
@@ -4603,22 +4606,22 @@ describe('LlmoController', () => {
       expect((await result.json()).message).to.include('API is missing mandatory environment variable');
     });
 
-    it('returns 400 when x-promise-token header is missing', async () => {
+    it('returns 400 when promiseToken cookie is missing', async () => {
       enableEdgeContext.data = { cdnType: LOG_SOURCES.AEM_CS_FASTLY };
       enableEdgeContext.request = mockRequestWithPromiseToken('');
       enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
       const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
       expect(result.status).to.equal(400);
-      expect((await result.json()).message).to.include('x-promise-token header is required');
+      expect((await result.json()).message).to.include('promiseToken cookie is required');
     });
 
-    it('returns 400 when x-promise-token header is undefined (null/undefined branch)', async () => {
+    it('returns 400 when promiseToken cookie is undefined (no cookie header)', async () => {
       enableEdgeContext.data = { cdnType: LOG_SOURCES.AEM_CS_FASTLY };
       enableEdgeContext.request = { headers: { get: () => undefined } };
       enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
       const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
       expect(result.status).to.equal(400);
-      expect((await result.json()).message).to.include('x-promise-token header is required');
+      expect((await result.json()).message).to.include('promiseToken cookie is required');
     });
 
     it('returns 400 when cdnType is missing', async () => {
@@ -4629,12 +4632,12 @@ describe('LlmoController', () => {
       expect((await result.json()).message).to.include('cdnType is required');
     });
 
-    it('returns 400 when context.data is undefined and no promise token in header', async () => {
+    it('returns 400 when context.data is undefined and no promiseToken cookie', async () => {
       const ctxNoData = { ...enableEdgeContext, data: undefined, request: mockRequestWithPromiseToken('') };
       ctxNoData.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
       const result = await controller.updateEdgeOptimizeCDNRouting(ctxNoData);
       expect(result.status).to.equal(400);
-      expect((await result.json()).message).to.include('x-promise-token header is required');
+      expect((await result.json()).message).to.include('promiseToken cookie is required');
     });
 
     it('returns 400 when cdnType is not supported', async () => {

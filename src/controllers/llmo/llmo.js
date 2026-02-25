@@ -1258,22 +1258,21 @@ function LlmoController(ctx) {
     }
   }
 
-  /**
-   * POST /sites/{siteId}/llmo/edge-optimize-routing
-   * Updates edge optimize routing for the site via the internal CDN API.
-   * - Requires x-promise-token header and request body cdnType.
-   * - Probes the site with custom User-Agent (2xx continues; 301: if Location domain
-   *   normalizes to same as probe URL domain, use Location domain for CDN API; otherwise break).
-   * - Exchanges promise token for IMS user token, then calls internal CDN API.
-   * @param {object} context - Request context (context.request for headers)
-   * @returns {Promise<Response>}
-   */
+  // Get the value of a cookie from the request
+  const getCookieValue = (request, name) => {
+    const raw = request?.headers?.get?.('cookie') ?? '';
+    for (const part of raw.split(';')) {
+      const [key, ...v] = part.trim().split('=');
+      if (key === name) return v.join('=').trim();
+    }
+    return null;
+  };
+
   const updateEdgeOptimizeCDNRouting = async (context) => {
     const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { Site } = dataAccess;
     const { cdnType, enabled = true } = context.data || {};
-    const promiseToken = context.request?.headers?.get?.('x-promise-token');
     log.info(`Edge optimize routing update request received for site ${siteId}`);
 
     if (env?.ENV && env.ENV !== 'prod') {
@@ -1283,8 +1282,9 @@ function LlmoController(ctx) {
       );
     }
 
+    const promiseToken = getCookieValue(context.request, 'promiseToken');
     if (!hasText(promiseToken)) {
-      return badRequest('x-promise-token header is required and must be a non-empty string');
+      return badRequest('promiseToken cookie is required and must be a non-empty string');
     }
 
     if (!hasText(cdnType)) {

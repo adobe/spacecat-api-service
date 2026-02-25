@@ -1432,10 +1432,10 @@ site-llmo-edge-optimize-config:
 site-llmo-edge-optimize-routing:
   parameters:
     - $ref: './parameters.yaml#/siteId'
-    - name: x-promise-token
-      in: header
+    - name: promiseToken
+      in: cookie
       required: true
-      description: Promise token exchanged for IMS user token to authorize the CDN API call.
+      description: Promise token (cookie value) exchanged for IMS user token to authorize the CDN API call.
       schema:
         type: string
   post:
@@ -1446,7 +1446,7 @@ site-llmo-edge-optimize-routing:
       ENV is prod. The CDN API to call is selected by the required cdnType request body parameter.
 
       Flow:
-      1. Validates request (x-promise-token header and cdnType required; enabled must be boolean if provided).
+      1. Validates request (promiseToken cookie and cdnType required; enabled must be boolean if provided).
       2. Probes the site with User-Agent `AdobeEdgeOptimize-Test`. If 2xx, flow continues with probe URL domain.
          If 301, the Location header is checked: the probe URL hostname and the Location URL hostname are compared
          (lowercased, with leading www. stripped); subdomains are considered, so only the same host is allowed. If they
@@ -1495,7 +1495,7 @@ site-llmo-edge-optimize-routing:
                   type: string
                   example: aem-cs-fastly
       '400':
-        description: Bad request (e.g. non-prod ENV, missing/invalid x-promise-token or cdnType, invalid enabled, probe failed, non-2xx/301, or 301 Location domain mismatch)
+        description: Bad request (e.g. non-prod ENV, missing/invalid promiseToken cookie or cdnType, invalid enabled, probe failed, non-2xx/301, or 301 Location domain mismatch)
         content:
           application/json:
             schema:
