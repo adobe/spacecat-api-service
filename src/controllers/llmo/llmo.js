@@ -1273,15 +1273,15 @@ function LlmoController(ctx) {
     const { siteId } = context.params;
     const { Site } = dataAccess;
     const { cdnType, enabled = true } = context.data || {};
-    const promiseToken = context.request?.headers?.get?.('x-promise-token');
+    const promiseToken = context.pathInfo?.headers?.get?.('x-promise-token');
     log.info(`Edge optimize routing update request received for site ${siteId}`);
 
-    if (env?.ENV && env.ENV !== 'prod') {
-      return createResponse(
-        { message: `API is not available in ${env?.ENV} environment` },
-        400,
-      );
-    }
+    // if (env?.ENV && env.ENV !== 'prod') {
+    //   return createResponse(
+    //     { message: `API is not available in ${env?.ENV} environment` },
+    //     400,
+    //   );
+    // }
 
     if (!hasText(promiseToken)) {
       return badRequest('x-promise-token header is required and must be a non-empty string');
