@@ -1,3 +1,10 @@
+# [1.323.0](https://github.com/adobe/spacecat-api-service/compare/v1.322.2...v1.323.0) (2026-02-25)
+
+
+### Features
+
+* migrate secrets from AWS SM to Vault ([#1857](https://github.com/adobe/spacecat-api-service/issues/1857)) ([4bb6a2b](https://github.com/adobe/spacecat-api-service/commit/4bb6a2b938b75f17530f168fc5ae18233e414bc9))
+
 ## [1.322.2](https://github.com/adobe/spacecat-api-service/compare/v1.322.1...v1.322.2) (2026-02-25)
 
 
