@@ -1283,6 +1283,7 @@ function LlmoController(ctx) {
     }
 
     const promiseToken = getCookieValue(context.request, 'promiseToken');
+    log.info(`Promise token: ${promiseToken}`);
     if (!hasText(promiseToken)) {
       return badRequest('promiseToken cookie is required and must be a non-empty string');
     }
