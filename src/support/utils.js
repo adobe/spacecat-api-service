@@ -761,7 +761,7 @@ export const createProject = async (
   }
 };
 
-const AEM_CS_PUBLISH_HOST_PATTERN = /^publish-p(\d+)-e(\d+)\.adobeaemcloud\.com$/i;
+const AEM_CS_PUBLISH_HOST_PATTERN = /^publish-p(\d+)-e(\d+)\.adobeaemcloud\.(com|net)$/i;
 const EDS_HOST_PATTERN = /^([a-z0-9-]+)--([a-z0-9-]+)--([a-z0-9-]+)\.aem\.live$/i;
 
 /**
@@ -913,7 +913,7 @@ const createSiteAndOrganization = async (
   if (site) {
     const siteOrgId = site.getOrganizationId();
     organizationId = siteOrgId; // Set organizationId for existing sites
-    const message = `:information_source: Site ${baseURL} already exists. Organization ID: ${siteOrgId}`;
+    const message = `:information_source: Site ${baseURL} already exists. Organization ID: ${siteOrgId}.`;
     await say(message);
   } else {
     // Check if the organization with IMS Org ID already exists; create if it doesn't

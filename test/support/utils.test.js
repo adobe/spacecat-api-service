@@ -233,6 +233,32 @@ describe('utils', () => {
       );
     });
 
+    it('returns resolved author URL when RUM bundle has an AEM CS .net publish host', async () => {
+      rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
+
+      nock('https://bundles.aem.page')
+        .get(`/bundles/example.com/${datePath}`)
+        .query({ domainkey: 'test-domainkey' })
+        .reply(200, {
+          rumBundles: [
+            {
+              id: '123',
+              host: 'publish-p106488-e1080713.adobeaemcloud.net',
+              url: 'https://www.example.com/page1',
+            },
+          ],
+        });
+
+      const result = await autoResolveAuthorUrl(site, context);
+
+      expect(result).to.deep.equal({
+        authorURL: 'https://author-p106488-e1080713.adobeaemcloud.com',
+        programId: '106488',
+        environmentId: '1080713',
+        host: 'publish-p106488-e1080713.adobeaemcloud.net',
+      });
+    });
+
     it('uses overrideBaseURL from fetchConfig when available', async () => {
       site.getConfig.returns({
         getFetchConfig: sandbox.stub().returns({
