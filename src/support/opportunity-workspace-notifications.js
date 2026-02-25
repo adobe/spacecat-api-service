@@ -40,9 +40,12 @@ async function resolveUserName(dataAccess, email) {
   try {
     const user = await dataAccess.TrialUser.findByEmailId(email);
     if (user) {
-      const first = user.getFirstName() || '';
-      const last = user.getLastName() || '';
-      return `${first} ${last}`.trim() || email;
+      const first = user.getFirstName();
+      const last = user.getLastName();
+      const cleanFirst = (first && first !== '-') ? first : '';
+      const cleanLast = (last && last !== '-') ? last : '';
+      const fullName = `${cleanFirst} ${cleanLast}`.trim();
+      return fullName || email;
     }
   } catch { /* best-effort */ }
   return email;
@@ -134,20 +137,56 @@ function filterValidEmails(candidates, log) {
  */
 export function detectStatusChanges(prevData, nextData, log) {
   const changes = [];
+  if (!nextData) return changes;
 
-  if (!prevData || !nextData) return changes;
+  // When prevData is null (first save), use empty structure as baseline
+  const effectivePrevData = prevData || { strategies: [] };
 
-  const prevStrategyIndex = buildStrategyIndex(prevData);
-  const prevOppIndex = buildOpportunityIndex(prevData);
+  const prevStrategyIndex = buildStrategyIndex(effectivePrevData);
+  const prevOppIndex = buildOpportunityIndex(effectivePrevData);
 
   for (const nextStrategy of nextData.strategies || []) {
     const prevStrategy = prevStrategyIndex.get(nextStrategy.id);
+
     if (!prevStrategy) {
-      // Skip new strategies that didn't exist before
+      // New strategy (first save or newly added) -- treat current status as a change
+      const candidateEmails = [
+        ...(nextStrategy.opportunities || []).map((o) => o.assignee),
+        nextStrategy.createdBy,
+      ];
+      const opportunityNames = (nextStrategy.opportunities || [])
+        .map((o) => o.name || o.opportunityId);
+
+      changes.push({
+        type: 'strategy',
+        strategyId: nextStrategy.id,
+        strategyName: nextStrategy.name,
+        statusBefore: '',
+        statusAfter: nextStrategy.status,
+        recipients: filterValidEmails(candidateEmails, log),
+        createdBy: nextStrategy.createdBy || '',
+        opportunityNames,
+      });
+
+      // Also emit changes for each opportunity in the new strategy
+      for (const opp of nextStrategy.opportunities || []) {
+        const oppCandidates = [opp.assignee, nextStrategy.createdBy];
+        changes.push({
+          type: 'opportunity',
+          strategyId: nextStrategy.id,
+          strategyName: nextStrategy.name,
+          opportunityId: opp.opportunityId,
+          opportunityName: opp.name || opp.opportunityId,
+          statusBefore: '',
+          statusAfter: opp.status,
+          recipients: filterValidEmails(oppCandidates, log),
+          createdBy: nextStrategy.createdBy || '',
+          assignee: opp.assignee || '',
+        });
+      }
     } else {
-      // Check strategy-level status change
+      // Existing strategy -- check strategy-level status change
       if (prevStrategy.status !== nextStrategy.status) {
-        // Recipients: all opportunity assignees + strategy owner, deduped
         const candidateEmails = [
           ...(nextStrategy.opportunities || []).map((o) => o.assignee),
           nextStrategy.createdBy,
@@ -170,11 +209,10 @@ export function detectStatusChanges(prevData, nextData, log) {
       // Check opportunity-level status changes
       const prevOpps = prevOppIndex.get(nextStrategy.id);
       for (const nextOpp of nextStrategy.opportunities || []) {
-        const prevOpp = prevOpps.get(nextOpp.opportunityId);
+        const prevOpp = prevOpps?.get(nextOpp.opportunityId);
         if (!prevOpp) {
-          // Skip new opportunities that didn't exist before
+          // Skip new opportunities that didn't exist before (only for existing strategies)
         } else if (prevOpp.status !== nextOpp.status) {
-          // Recipients: assignee + strategy owner, deduped
           const candidateEmails = [
             nextOpp.assignee,
             nextStrategy.createdBy,

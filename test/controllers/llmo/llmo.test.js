@@ -4486,7 +4486,10 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
-      expect(responseBody).to.deep.equal({ version: 'v1' });
+      expect(responseBody.version).to.equal('v1');
+      expect(responseBody.notifications).to.deep.equal({
+        sent: 0, failed: 0, skipped: 0, changes: 0,
+      });
       expect(writeStrategyStub).to.have.been.calledWith(
         TEST_SITE_ID,
         testStrategyData,
@@ -4513,11 +4516,6 @@ describe('LlmoController', () => {
 
       await controller.saveStrategy(mockContext);
 
-      // Wait for the fire-and-forget promise
-      await new Promise((resolve) => {
-        setTimeout(resolve, 50);
-      });
-
       expect(notifyStrategyChangesStub).to.have.been.calledOnce;
       const [ctx, params] = notifyStrategyChangesStub.firstCall.args;
       expect(ctx).to.equal(mockContext);
@@ -4533,12 +4531,13 @@ describe('LlmoController', () => {
         sent: 1, failed: 0, skipped: 0, changes: 1,
       });
 
-      await controller.saveStrategy(mockContext);
+      const result = await controller.saveStrategy(mockContext);
 
-      await new Promise((resolve) => {
-        setTimeout(resolve, 50);
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.notifications).to.deep.equal({
+        sent: 1, failed: 0, skipped: 0, changes: 1,
       });
-
       expect(mockLog.info).to.have.been.calledWith(
         sinon.match(/Strategy notification summary for site .*: .*"changes":1/),
       );
@@ -4548,10 +4547,6 @@ describe('LlmoController', () => {
       readStrategyStub.resolves({ data: null, exists: false });
 
       await controller.saveStrategy(mockContext);
-
-      await new Promise((resolve) => {
-        setTimeout(resolve, 50);
-      });
 
       expect(notifyStrategyChangesStub).to.have.been.calledOnce;
       const [, params] = notifyStrategyChangesStub.firstCall.args;
@@ -4564,10 +4559,6 @@ describe('LlmoController', () => {
       const result = await controller.saveStrategy(mockContext);
 
       expect(result.status).to.equal(200);
-
-      await new Promise((resolve) => {
-        setTimeout(resolve, 50);
-      });
 
       expect(notifyStrategyChangesStub).to.have.been.calledOnce;
       const [, params] = notifyStrategyChangesStub.firstCall.args;
@@ -4585,17 +4576,16 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
-      expect(responseBody).to.deep.equal({ version: 'v1' });
+      expect(responseBody.version).to.equal('v1');
+      expect(responseBody.notifications).to.deep.equal({
+        sent: 0, failed: 0, skipped: 0, changes: 0,
+      });
     });
 
     it('should extract changedBy from auth profile email', async () => {
       readStrategyStub.resolves({ data: prevStrategyData, exists: true });
 
       await controller.saveStrategy(mockContext);
-
-      await new Promise((resolve) => {
-        setTimeout(resolve, 50);
-      });
 
       const [, params] = notifyStrategyChangesStub.firstCall.args;
       expect(params.changedBy).to.be.a('string');
@@ -4607,10 +4597,6 @@ describe('LlmoController', () => {
 
       await controller.saveStrategy(mockContext);
 
-      await new Promise((resolve) => {
-        setTimeout(resolve, 50);
-      });
-
       const [, params] = notifyStrategyChangesStub.firstCall.args;
       expect(params.changedBy).to.equal('system');
     });
@@ -4620,10 +4606,6 @@ describe('LlmoController', () => {
       readStrategyStub.resolves({ data: prevStrategyData, exists: true });
 
       await controller.saveStrategy(mockContext);
-
-      await new Promise((resolve) => {
-        setTimeout(resolve, 50);
-      });
 
       const [, params] = notifyStrategyChangesStub.firstCall.args;
       expect(params.siteBaseUrl).to.equal('');

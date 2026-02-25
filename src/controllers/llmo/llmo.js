@@ -1215,28 +1215,32 @@ function LlmoController(ctx) {
 
       log.info(`Successfully saved LLMO strategy for siteId: ${siteId}, version: ${version}`);
 
-      // Fire-and-forget: send email notifications for status changes
+      // Await notifications and include summary in response for debugging
       const changedBy = context.attributes?.authInfo?.getProfile?.()?.email || 'system';
       let siteBaseUrl = '';
       if (dataAccess?.Site) {
         const site = await dataAccess.Site.findById(siteId);
         siteBaseUrl = site?.getBaseURL?.() || '';
       }
-      notifyStrategyChanges(context, {
-        prevData,
-        nextData: data,
-        siteId,
-        siteBaseUrl,
-        changedBy,
-      }).then((summary) => {
-        if (summary.changes > 0) {
-          log.info(`Strategy notification summary for site ${siteId}: ${JSON.stringify(summary)}`);
+      let notificationSummary = {
+        sent: 0, failed: 0, skipped: 0, changes: 0,
+      };
+      try {
+        notificationSummary = await notifyStrategyChanges(context, {
+          prevData,
+          nextData: data,
+          siteId,
+          siteBaseUrl,
+          changedBy,
+        });
+        if (notificationSummary.changes > 0) {
+          log.info(`Strategy notification summary for site ${siteId}: ${JSON.stringify(notificationSummary)}`);
         }
-      }).catch((err) => {
+      } catch (err) {
         log.error(`Strategy notification error for site ${siteId}: ${err.message}`);
-      });
+      }
 
-      return ok({ version });
+      return ok({ version, notifications: notificationSummary });
     } catch (error) {
       log.error(`Error saving llmo strategy for siteId: ${siteId}, error: ${error.message}`);
       return badRequest(error.message);

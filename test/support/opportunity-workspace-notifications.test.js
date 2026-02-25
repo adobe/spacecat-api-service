@@ -79,9 +79,131 @@ describe('opportunity-workspace-notifications', () => {
   });
 
   describe('detectStatusChanges', () => {
-    it('should return empty array when prevData is null', () => {
+    it('should return empty array when prevData is null and nextData has no strategies', () => {
       const changes = detectStatusChanges(null, { strategies: [] }, mockLog);
       expect(changes).to.be.an('array').that.is.empty;
+    });
+
+    it('should detect strategy changes when prevData is null (first save)', () => {
+      const nextData = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [{ opportunityId: 'o1', status: 'new', assignee: 'user@test.com' }],
+          createdBy: 'owner@test.com',
+        }],
+      };
+      const changes = detectStatusChanges(null, nextData, mockLog);
+      expect(changes).to.have.lengthOf(2); // 1 strategy + 1 opportunity
+      expect(changes[0].type).to.equal('strategy');
+      expect(changes[0].statusBefore).to.equal('');
+      expect(changes[0].statusAfter).to.equal('new');
+      expect(changes[1].type).to.equal('opportunity');
+      expect(changes[1].statusBefore).to.equal('');
+      expect(changes[1].statusAfter).to.equal('new');
+    });
+
+    it('should detect opportunity changes when prevData is null (first save)', () => {
+      const nextData = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'in_progress',
+          opportunities: [
+            { opportunityId: 'o1', status: 'completed', assignee: 'user@test.com' },
+            { opportunityId: 'o2', status: 'new', assignee: 'other@test.com' },
+          ],
+          createdBy: 'owner@test.com',
+        }],
+      };
+      const changes = detectStatusChanges(null, nextData, mockLog);
+      expect(changes).to.have.lengthOf(3); // 1 strategy + 2 opportunities
+      expect(changes[0].type).to.equal('strategy');
+      expect(changes[1].type).to.equal('opportunity');
+      expect(changes[1].opportunityId).to.equal('o1');
+      expect(changes[1].statusAfter).to.equal('completed');
+      expect(changes[2].type).to.equal('opportunity');
+      expect(changes[2].opportunityId).to.equal('o2');
+      expect(changes[2].statusAfter).to.equal('new');
+    });
+
+    it('should handle new strategy with undefined opportunities (first save)', () => {
+      const nextData = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          createdBy: 'owner@test.com',
+        }],
+      };
+      const changes = detectStatusChanges(null, nextData, mockLog);
+      expect(changes).to.have.lengthOf(1);
+      expect(changes[0].type).to.equal('strategy');
+      expect(changes[0].statusBefore).to.equal('');
+      expect(changes[0].statusAfter).to.equal('new');
+      expect(changes[0].opportunityNames).to.deep.equal([]);
+    });
+
+    it('should handle new strategy with null opportunities (first save)', () => {
+      const nextData = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: null,
+          createdBy: 'owner@test.com',
+        }],
+      };
+      const changes = detectStatusChanges(null, nextData, mockLog);
+      expect(changes).to.have.lengthOf(1);
+      expect(changes[0].type).to.equal('strategy');
+      expect(changes[0].opportunityNames).to.deep.equal([]);
+    });
+
+    it('should use opportunityId when opportunity has no name (new strategy)', () => {
+      const nextData = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [{ opportunityId: 'o1', status: 'new', assignee: 'user@test.com' }],
+          createdBy: 'owner@test.com',
+        }],
+      };
+      const changes = detectStatusChanges(null, nextData, mockLog);
+      expect(changes).to.have.lengthOf(2);
+      expect(changes[1].opportunityName).to.equal('o1');
+    });
+
+    it('should use empty assignee when new strategy opportunity has no assignee', () => {
+      const nextData = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [{ opportunityId: 'o1', name: 'Opp 1', status: 'new' }],
+          createdBy: 'owner@test.com',
+        }],
+      };
+      const changes = detectStatusChanges(null, nextData, mockLog);
+      expect(changes).to.have.lengthOf(2);
+      expect(changes[1].assignee).to.equal('');
+    });
+
+    it('should use empty createdBy when new strategy has no owner', () => {
+      const nextData = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [{ opportunityId: 'o1', status: 'new', assignee: 'user@test.com' }],
+        }],
+      };
+      const changes = detectStatusChanges(null, nextData, mockLog);
+      expect(changes).to.have.lengthOf(2);
+      expect(changes[0].createdBy).to.equal('');
+      expect(changes[1].createdBy).to.equal('');
     });
 
     it('should return empty array when nextData is null', () => {
@@ -246,7 +368,7 @@ describe('opportunity-workspace-notifications', () => {
       expect(mockLog.warn).to.have.been.calledWith(sinon.match(/Skipping invalid email/));
     });
 
-    it('should skip strategies that do not exist in prevData', () => {
+    it('should detect changes for new strategies that do not exist in prevData', () => {
       const prev = {
         strategies: [],
       };
@@ -261,7 +383,10 @@ describe('opportunity-workspace-notifications', () => {
       };
 
       const changes = detectStatusChanges(prev, next, mockLog);
-      expect(changes).to.be.empty;
+      expect(changes).to.have.lengthOf(1);
+      expect(changes[0].type).to.equal('strategy');
+      expect(changes[0].statusBefore).to.equal('');
+      expect(changes[0].statusAfter).to.equal('new');
     });
 
     it('should skip opportunities that do not exist in prevData', () => {
@@ -765,6 +890,35 @@ describe('opportunity-workspace-notifications', () => {
       expect(emailOptions.templateData.recipient_name).to.equal('user@test.com');
     });
 
+    it('should fall back to email when TrialUser has placeholder "-" as first/last name', async () => {
+      mockContext.dataAccess.TrialUser.findByEmailId.resolves({
+        getFirstName: () => '-',
+        getLastName: () => '-',
+      });
+
+      const changes = [{
+        type: 'opportunity',
+        strategyId: 's1',
+        strategyName: 'Strategy 1',
+        opportunityId: 'o1',
+        opportunityName: 'Opp 1',
+        statusBefore: 'new',
+        statusAfter: 'done',
+        recipients: ['user@test.com'],
+        createdBy: 'owner@test.com',
+        assignee: 'user@test.com',
+      }];
+
+      const summary = await sendStatusChangeNotifications(mockContext, {
+        changes, siteBaseUrl: 'https://www.example.com',
+      });
+
+      expect(summary.sent).to.equal(1);
+      const [, emailOptions] = sendEmailStub.firstCall.args;
+      expect(emailOptions.templateData.recipient_name).to.equal('user@test.com');
+      expect(emailOptions.templateData.assignee_name).to.equal('user@test.com');
+    });
+
     it('should fall back to email when TrialUser lookup throws', async () => {
       mockContext.dataAccess.TrialUser.findByEmailId.rejects(new Error('DB error'));
 
@@ -935,12 +1089,16 @@ describe('opportunity-workspace-notifications', () => {
       expect(faultyContext.log.error).to.have.been.calledOnce;
     });
 
-    it('should skip notifications when prevData is null (first save)', async () => {
+    it('should detect changes and send notifications when prevData is null (first save)', async () => {
       const result = await notifyStrategyChanges(mockContext, {
         prevData: null,
         nextData: {
           strategies: [{
-            id: 's1', status: 'new', opportunities: [],
+            id: 's1',
+            name: 'Strategy 1',
+            status: 'new',
+            opportunities: [{ opportunityId: 'o1', status: 'new', assignee: 'user@test.com' }],
+            createdBy: 'owner@test.com',
           }],
         },
         siteId: 'site-1',
@@ -948,8 +1106,8 @@ describe('opportunity-workspace-notifications', () => {
         changedBy: 'admin@test.com',
       });
 
-      expect(result.changes).to.equal(0);
-      expect(sendEmailStub).to.not.have.been.called;
+      expect(result.changes).to.be.greaterThan(0);
+      expect(sendEmailStub).to.have.been.called;
     });
   });
 });
