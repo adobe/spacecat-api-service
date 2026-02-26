@@ -1,3 +1,10 @@
+## [1.323.2](https://github.com/adobe/spacecat-api-service/compare/v1.323.1...v1.323.2) (2026-02-25)
+
+
+### Bug Fixes
+
+* bump shared deps for temporal series bugfix ([#1864](https://github.com/adobe/spacecat-api-service/issues/1864)) ([8b34ec3](https://github.com/adobe/spacecat-api-service/commit/8b34ec3cffde8f2b989e3a01b85eeb561edefdb6))
+
 ## [1.323.1](https://github.com/adobe/spacecat-api-service/compare/v1.323.0...v1.323.1) (2026-02-25)
 
 
