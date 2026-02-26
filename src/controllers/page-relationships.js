@@ -71,7 +71,8 @@ function PageRelationshipsController(ctx) {
       });
     }
 
-    const authorURL = site.getDeliveryConfig()?.authorURL;
+    const deliveryConfig = site.getDeliveryConfig();
+    const authorURL = deliveryConfig?.authorURL;
     if (!hasText(authorURL)) {
       return createResponse({
         supported: false,
@@ -104,7 +105,6 @@ function PageRelationshipsController(ctx) {
       });
     }
 
-    const metaTagPropertyMap = site.getDeliveryConfig()?.metaTagPropertyMap || {};
     const pageUrls = pages.map((p) => p.pageUrl.trim());
 
     const resolved = await resolvePageIds(
@@ -125,13 +125,16 @@ function PageRelationshipsController(ctx) {
         const errKey = pageSpec.key ?? r.url;
         errors[errKey] = { error: r.error || 'Could not resolve page' };
       } else {
-        const checkPath = buildCheckPath(pageSpec.suggestionType, metaTagPropertyMap);
+        const hasExplicitCheckPath = Object.prototype.hasOwnProperty.call(pageSpec, 'checkPath');
+        const checkPath = hasExplicitCheckPath
+          ? pageSpec.checkPath
+          : buildCheckPath(pageSpec.suggestionType, deliveryConfig);
         const key = pageSpec.key ?? `${r.url}:${pageSpec.suggestionType ?? ''}`;
         items.push({
           key,
           pageId: r.pageId,
           include: ['upstream'],
-          ...(checkPath && { checkPath }),
+          ...(hasText(checkPath) && { checkPath }),
         });
       }
     }
