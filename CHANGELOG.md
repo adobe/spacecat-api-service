@@ -1,3 +1,10 @@
+# [1.324.0](https://github.com/adobe/spacecat-api-service/compare/v1.323.2...v1.324.0) (2026-02-26)
+
+
+### Features
+
+* auto-resolve author URL and code config from RUM bundles during onboarding ([#1856](https://github.com/adobe/spacecat-api-service/issues/1856)) ([36a164b](https://github.com/adobe/spacecat-api-service/commit/36a164beac32801f966f3d818c080f620804b85f))
+
 ## [1.323.2](https://github.com/adobe/spacecat-api-service/compare/v1.323.1...v1.323.2) (2026-02-25)
 
 
