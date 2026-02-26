@@ -358,6 +358,10 @@ describe('getRouteHandlers', () => {
     getStatus: sinon.stub(),
   };
 
+  const mockPageRelationshipsController = {
+    search: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -401,6 +405,7 @@ describe('getRouteHandlers', () => {
       mockSentimentController,
       mockConsumersController,
       mockPlgOnboardingController,
+      mockPageRelationshipsController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -555,6 +560,7 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
       'DELETE /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes',
+      'POST /sites/:siteId/page-relationships/search',
       'GET /sites/:siteId/scraped-content/:type',
       'GET /sites/:siteId/top-pages',
       'GET /sites/:siteId/top-pages/:source',
@@ -764,6 +770,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId'].paramNames).to.deep.equal(['siteId', 'opportunityId']);
     expect(dynamicRoutes['POST /sites/:siteId/opportunities'].handler).to.equal(mockOpportunitiesController.createOpportunity);
     expect(dynamicRoutes['POST /sites/:siteId/opportunities'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['POST /sites/:siteId/page-relationships/search'].handler).to.equal(mockPageRelationshipsController.search);
+    expect(dynamicRoutes['POST /sites/:siteId/page-relationships/search'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['PATCH /sites/:siteId/opportunities/:opportunityId'].handler).to.equal(mockOpportunitiesController.patchOpportunity);
     expect(dynamicRoutes['PATCH /sites/:siteId/opportunities/:opportunityId'].paramNames).to.deep.equal(['siteId', 'opportunityId']);
     expect(dynamicRoutes['DELETE /sites/:siteId/opportunities/:opportunityId'].handler).to.equal(mockOpportunitiesController.removeOpportunity);

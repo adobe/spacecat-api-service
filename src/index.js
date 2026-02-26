@@ -87,6 +87,7 @@ import BotBlockerController from './controllers/bot-blocker.js';
 import SentimentController from './controllers/sentiment.js';
 import ConsumersController from './controllers/consumers.js';
 import routeRequiredCapabilities from './routes/required-capabilities.js';
+import PageRelationshipsController from './controllers/page-relationships.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -215,6 +216,7 @@ async function run(request, context) {
     const sentimentController = SentimentController(context, log);
     const consumersController = ConsumersController(context);
     const plgOnboardingController = PlgOnboardingController(context);
+    const pageRelationshipsController = PageRelationshipsController(context);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -258,6 +260,7 @@ async function run(request, context) {
       sentimentController,
       consumersController,
       plgOnboardingController,
+      pageRelationshipsController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);

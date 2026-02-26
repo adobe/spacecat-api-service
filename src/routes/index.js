@@ -88,6 +88,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} sentimentController - The sentiment controller.
  * @param {Object} consumersController - The consumers controller.
  * @param {Object} plgOnboardingController - The PLG onboarding controller.
+ * @param {Object} pageRelationshipsController - The page relationships controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -132,6 +133,7 @@ export default function getRouteHandlers(
   sentimentController,
   consumersController,
   plgOnboardingController,
+  pageRelationshipsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -423,6 +425,9 @@ export default function getRouteHandlers(
     'DELETE /sites/:siteId/reports/:reportId': reportsController.deleteReport,
 
     'GET /sites-resolve': sitesController.resolveSite,
+
+    // Page relationships (AEM upstream chain for list-time fix target display)
+    'POST /sites/:siteId/page-relationships/search': pageRelationshipsController.search,
 
     // Sentiment Analysis endpoints
     // Topics
