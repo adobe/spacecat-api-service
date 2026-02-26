@@ -4427,6 +4427,52 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody.message).to.include('Database connection failed');
     });
+
+    it('should return 400 when context.data is undefined', async () => {
+      stageConfigContext.data = undefined;
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('non-empty array');
+    });
+
+    it('should filter out non-string values from stagingDomains array', async () => {
+      stageConfigContext.data = { stagingDomains: ['staging.lovesac.com', 123, { domain: 'test' }, null, undefined] };
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.stageConfigs).to.have.length(1);
+      expect(responseBody.stageConfigs[0].domain).to.equal('staging.lovesac.com');
+    });
+
+    it('should use default lastModifiedBy when profile.email is missing', async () => {
+      stageConfigContext.attributes.authInfo = { profile: {} };
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockTokowakaClient.createMetaconfig).to.have.been.calledWith(
+        sinon.match.string,
+        sinon.match.string,
+        sinon.match.object,
+        sinon.match({ lastModifiedBy: 'tokowaka-stage-edge-optimize-config' }),
+      );
+    });
+
+    it('should handle when getEdgeOptimizeConfig returns null', async () => {
+      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns(null);
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.stageConfigs).to.have.length(1);
+      expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.called;
+    });
   });
 
   describe('getEdgeConfig', () => {
