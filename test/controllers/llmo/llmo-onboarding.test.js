@@ -1286,8 +1286,26 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('llmo-customer-analysis', mockSite);
       expect(mockConfiguration.save).to.have.been.called;
 
-      // Verify tracingFetch was called for publishing
-      expect(mockTracingFetch).to.have.been.called;
+      // Verify llmo-customer-analysis is triggered directly from onboarding
+      expect(context.sqs.sendMessage).to.have.been.calledWith(
+        'audit-queue',
+        sinon.match({ type: 'llmo-customer-analysis' }),
+      );
+      // Verify async publish trigger is enqueued
+      expect(context.sqs.sendMessage).to.have.been.calledWith(
+        'audit-queue',
+        sinon.match({
+          type: 'trigger:llmo-onboarding-publish',
+          siteId: 'site123',
+          auditContext: sinon.match({
+            dataFolder: 'dev/example-com',
+          }),
+        }),
+      );
+      expect(context.sqs.sendMessage).to.have.been.calledWith(
+        'audit-queue',
+        sinon.match({ type: 'wikipedia-analysis' }),
+      );
 
       // Verify logging
       expect(mockLog.info).to.have.been.calledWith('Starting LLMO onboarding for IMS org ABC123@AdobeOrg, baseURL https://example.com, brand Test Brand');
@@ -1394,6 +1412,87 @@ describe('LLMO Onboarding Functions', () => {
       restoreSetTimeout(originalSetTimeout);
     });
 
+    it('should swallow async publish enqueue failures and still complete onboarding', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns({
+          updateLlmoBrand: sinon.stub(),
+          updateLlmoDataFolder: sinon.stub(),
+          getImports: sinon.stub().returns([]),
+          enableImport: sinon.stub(),
+          getFetchConfig: sinon.stub().returns({}),
+          updateFetchConfig: sinon.stub(),
+        }),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      const originalSetTimeout = mockSetTimeoutImmediate();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        createCommonEsmockDependencies({
+          mockTierClient,
+          mockTracingFetch,
+          mockConfig,
+          mockComposeBaseURL,
+          mockSharePointClient: sharePointClient,
+          mockOctokit,
+        }),
+      );
+
+      const sendMessage = sinon.stub().callsFake(async (queue, message) => {
+        if (message.type === 'trigger:llmo-onboarding-publish') {
+          throw new Error('queue unavailable');
+        }
+        return Promise.resolve();
+      });
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: { sendMessage },
+      };
+
+      const result = await performLlmoOnboardingWithMocks({
+        domain: 'example.com',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      }, context);
+
+      expect(result.siteId).to.equal('site123');
+      expect(mockLog.warn).to.have.been.calledWith(
+        sinon.match(/Failed to enqueue trigger:llmo-onboarding-publish/),
+      );
+
+      restoreSetTimeout(originalSetTimeout);
+    });
+
     it('should call cleanup functions when site.save() throws an error', async () => {
       // Mock organization
       const mockOrganization = {
@@ -1433,21 +1532,17 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
 
-      // Create mock fetch that handles both publish and bulk unpublish flows
+      // Create mock fetch that handles bulk unpublish flows
       const mockTracingFetch = sinon.stub();
-      // Publish preview
-      mockTracingFetch.onCall(0).resolves({ ok: true, status: 200, statusText: 'OK' });
-      // Publish live
-      mockTracingFetch.onCall(1).resolves({ ok: true, status: 200, statusText: 'OK' });
       // Bulk status job start
-      mockTracingFetch.onCall(2).resolves({
+      mockTracingFetch.onCall(0).resolves({
         ok: true,
         status: 200,
         statusText: 'OK',
         json: async () => ({ name: 'job-test-123' }),
       });
       // Job polling
-      mockTracingFetch.onCall(3).resolves({
+      mockTracingFetch.onCall(1).resolves({
         ok: true,
         status: 200,
         statusText: 'OK',
@@ -1460,14 +1555,14 @@ describe('LLMO Onboarding Functions', () => {
         }),
       });
       // Bulk unpublish (live)
-      mockTracingFetch.onCall(4).resolves({
+      mockTracingFetch.onCall(2).resolves({
         ok: true,
         status: 200,
         statusText: 'OK',
         json: async () => ({ name: 'unpublish-job-123' }),
       });
       // Bulk un-preview
-      mockTracingFetch.onCall(5).resolves({
+      mockTracingFetch.onCall(3).resolves({
         ok: true,
         status: 200,
         statusText: 'OK',
@@ -1524,7 +1619,7 @@ describe('LLMO Onboarding Functions', () => {
       // Verify deleteSharePointFolder was called (which deletes folder and unpublishes)
       expect(mockSharePointFolderLocal.exists).to.have.been.called;
       expect(mockSharePointFolderLocal.delete).to.have.been.called;
-      expect(mockTracingFetch).to.have.callCount(6);
+      expect(mockTracingFetch).to.have.callCount(4);
 
       // Verify revokeEnrollment was called
       const tierClient = mockTierClient.createForSite.returnValues[0];
