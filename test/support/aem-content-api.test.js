@@ -16,12 +16,11 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
+import esmock from 'esmock';
 
-import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import {
   isAEMAuthoredSite,
   buildCheckPath,
-  resolvePageIds,
   fetchRelationships,
 } from '../../src/support/aem-content-api.js';
 
@@ -54,19 +53,19 @@ describe('AEM Content API support', () => {
 
   describe('isAEMAuthoredSite', () => {
     it('returns true for aem_cs', () => {
-      expect(isAEMAuthoredSite(SiteModel.DELIVERY_TYPES.AEM_CS)).to.be.true;
+      expect(isAEMAuthoredSite('aem_cs')).to.be.true;
     });
 
     it('returns true for aem_ams', () => {
-      expect(isAEMAuthoredSite(SiteModel.DELIVERY_TYPES.AEM_AMS)).to.be.true;
+      expect(isAEMAuthoredSite('aem_ams')).to.be.true;
     });
 
     it('returns false for aem_edge', () => {
-      expect(isAEMAuthoredSite(SiteModel.DELIVERY_TYPES.AEM_EDGE)).to.be.false;
+      expect(isAEMAuthoredSite('aem_edge')).to.be.false;
     });
 
     it('returns false for other', () => {
-      expect(isAEMAuthoredSite(SiteModel.DELIVERY_TYPES.OTHER)).to.be.false;
+      expect(isAEMAuthoredSite('other')).to.be.false;
     });
 
     it('returns falsy for null', () => {
@@ -83,25 +82,34 @@ describe('AEM Content API support', () => {
   });
 
   describe('buildCheckPath', () => {
-    it('returns /properties/jcr:title for Missing Title when metaTagPropertyMap is empty', () => {
-      expect(buildCheckPath('Missing Title', {})).to.equal('/properties/jcr:title');
+    it('matches title-related issues to jcr:title by default', () => {
+      expect(buildCheckPath('Missing title', {})).to.equal('/properties/jcr:title');
+      expect(buildCheckPath('Title too short', {})).to.equal('/properties/jcr:title');
+      expect(buildCheckPath('Invalid title', {})).to.equal('/properties/jcr:title');
+      expect(buildCheckPath('Duplicate title', {})).to.equal('/properties/jcr:title');
+      expect(buildCheckPath('Missing title tag', {})).to.equal('/properties/jcr:title');
     });
 
-    it('returns custom title property for Missing Title when metaTagPropertyMap.title is set', () => {
-      expect(buildCheckPath('Missing Title', { title: 'myTitle' })).to.equal('/properties/myTitle');
+    it('matches description-related issues to jcr:description by default', () => {
+      expect(buildCheckPath('Missing description', {})).to.equal('/properties/jcr:description');
+      expect(buildCheckPath('Missing meta description', {})).to.equal('/properties/jcr:description');
+      expect(buildCheckPath('Description too long', {})).to.equal('/properties/jcr:description');
     });
 
-    it('returns /properties/jcr:description for Missing Description when metaTagPropertyMap is empty', () => {
-      expect(buildCheckPath('Missing Description', {})).to.equal('/properties/jcr:description');
+    it('uses custom metaTagPropertyMap title when provided', () => {
+      const config = { metaTagPropertyMap: { title: 'myTitle' } };
+      expect(buildCheckPath('Missing title', config)).to.equal('/properties/myTitle');
+      expect(buildCheckPath('Title too short', config)).to.equal('/properties/myTitle');
     });
 
-    it('returns custom description property for Missing Description when metaTagPropertyMap.description is set', () => {
-      expect(buildCheckPath('Missing Description', { description: 'myDesc' })).to.equal('/properties/myDesc');
+    it('uses custom metaTagPropertyMap description when provided', () => {
+      const config = { metaTagPropertyMap: { description: 'myDesc' } };
+      expect(buildCheckPath('Missing meta description', config)).to.equal('/properties/myDesc');
     });
 
-    it('returns undefined for alt-text or other suggestion types', () => {
+    it('returns undefined for non-metatag issues', () => {
       expect(buildCheckPath('Missing Alt Text')).to.be.undefined;
-      expect(buildCheckPath('Other Type')).to.be.undefined;
+      expect(buildCheckPath('Broken link')).to.be.undefined;
       expect(buildCheckPath('')).to.be.undefined;
     });
 
@@ -109,12 +117,39 @@ describe('AEM Content API support', () => {
       expect(buildCheckPath(undefined)).to.be.undefined;
     });
 
-    it('uses default jcr:title when metaTagPropertyMap is undefined', () => {
-      expect(buildCheckPath('Missing Title', undefined)).to.equal('/properties/jcr:title');
+    it('is case-insensitive', () => {
+      expect(buildCheckPath('MISSING TITLE', {})).to.equal('/properties/jcr:title');
+      expect(buildCheckPath('missing meta description', {})).to.equal('/properties/jcr:description');
+    });
+
+    it('uses defaults when deliveryConfig is undefined', () => {
+      expect(buildCheckPath('Missing title', undefined)).to.equal('/properties/jcr:title');
+      expect(buildCheckPath('Missing description', undefined)).to.equal('/properties/jcr:description');
+    });
+
+    it('does not apply metaTagPropertyMap to non-metatag suggestions', () => {
+      const config = { metaTagPropertyMap: { 'alt text': 'dam:altText' } };
+      expect(buildCheckPath('Missing Alt Text', config)).to.be.undefined;
     });
   });
 
   describe('resolvePageIds', () => {
+    let resolvePageIds;
+    let determineAEMCSPageIdStub;
+
+    beforeEach(async () => {
+      determineAEMCSPageIdStub = sandbox.stub();
+      ({ resolvePageIds } = await esmock(
+        '../../src/support/aem-content-api.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            DELIVERY_TYPES: { AEM_CS: 'aem_cs', AEM_AMS: 'aem_ams' },
+            determineAEMCSPageId: determineAEMCSPageIdStub,
+          },
+        },
+      ));
+    });
+
     it('returns invalid pageUrl error for empty or non-string entries', async () => {
       const result = await resolvePageIds(
         'https://example.com',
@@ -128,15 +163,11 @@ describe('AEM Content API support', () => {
         { url: undefined, error: 'Invalid pageUrl' },
         { url: '   ', error: 'Invalid pageUrl' },
       ]);
-      expect(fetchStub).to.not.have.been.called;
+      expect(determineAEMCSPageIdStub).to.not.have.been.called;
     });
 
-    it('returns pageId when HTML contains content-page-id meta', async () => {
-      const html = '<meta name="content-page-id" content="pg-123-abc" />';
-      fetchStub.resolves({
-        ok: true,
-        text: () => Promise.resolve(html),
-      });
+    it('returns pageId when shared utility resolves successfully', async () => {
+      determineAEMCSPageIdStub.resolves('pg-123-abc');
 
       const result = await resolvePageIds(
         'https://example.com',
@@ -148,20 +179,19 @@ describe('AEM Content API support', () => {
 
       expect(result).to.have.lengthOf(1);
       expect(result[0]).to.deep.equal({ url: '/us/en/page1', pageId: 'pg-123-abc' });
-      expect(global.fetch).to.have.been.calledOnceWith(
+      expect(determineAEMCSPageIdStub).to.have.been.calledOnceWith(
         'https://example.com/us/en/page1',
-        { method: 'GET', redirect: 'follow' },
+        'https://author.example.com',
+        'Bearer token',
+        true,
+        log,
       );
     });
 
-    it('accepts pageUrl without leading slash and builds full URL', async () => {
-      const html = '<meta name="content-page-id" content="pg-456" />';
-      fetchStub.resolves({
-        ok: true,
-        text: () => Promise.resolve(html),
-      });
+    it('constructs full URL with slash for paths without leading slash', async () => {
+      determineAEMCSPageIdStub.resolves('pg-456');
 
-      const result = await resolvePageIds(
+      await resolvePageIds(
         'https://example.com',
         'https://author.example.com',
         ['us/en/page2'],
@@ -169,19 +199,17 @@ describe('AEM Content API support', () => {
         log,
       );
 
-      expect(result[0].pageId).to.equal('pg-456');
-      expect(global.fetch).to.have.been.calledWith(
+      expect(determineAEMCSPageIdStub).to.have.been.calledWith(
         'https://example.com/us/en/page2',
-        { method: 'GET', redirect: 'follow' },
+        sinon.match.any,
+        sinon.match.any,
+        sinon.match.any,
+        sinon.match.any,
       );
     });
 
     it('strips trailing slash from siteBaseURL', async () => {
-      const html = '<meta name="content-page-id" content="pg-x" />';
-      fetchStub.resolves({
-        ok: true,
-        text: () => Promise.resolve(html),
-      });
+      determineAEMCSPageIdStub.resolves('pg-x');
 
       await resolvePageIds(
         'https://example.com/',
@@ -191,17 +219,17 @@ describe('AEM Content API support', () => {
         log,
       );
 
-      expect(global.fetch).to.have.been.calledWith(
+      expect(determineAEMCSPageIdStub).to.have.been.calledWith(
         'https://example.com/page',
+        sinon.match.any,
+        sinon.match.any,
+        sinon.match.any,
         sinon.match.any,
       );
     });
 
-    it('returns error when HTTP response is not ok', async () => {
-      fetchStub.resolves({
-        ok: false,
-        status: 404,
-      });
+    it('returns error when shared utility returns null', async () => {
+      determineAEMCSPageIdStub.resolves(null);
 
       const result = await resolvePageIds(
         'https://example.com',
@@ -212,132 +240,12 @@ describe('AEM Content API support', () => {
       );
 
       expect(result).to.have.lengthOf(1);
-      expect(result[0]).to.deep.equal({ url: '/us/en/page1', error: 'HTTP 404' });
+      expect(result[0].url).to.equal('/us/en/page1');
+      expect(result[0].error).to.equal('Could not determine page ID');
     });
 
-    it('returns error when HTML has no content-page-id or content-page-ref', async () => {
-      fetchStub.resolves({
-        ok: true,
-        text: () => Promise.resolve('<html><body>no meta</body></html>'),
-      });
-
-      const result = await resolvePageIds(
-        'https://example.com',
-        'https://author.example.com',
-        ['/page'],
-        'token',
-        log,
-      );
-
-      expect(result[0].error).to.equal('No content-page-id or content-page-ref');
-    });
-
-    it('resolves via content-page-ref when content-page-id is absent', async () => {
-      const html = '<meta name="content-page-ref" content="aem:path:/content/site/en/page" />';
-      fetchStub
-        .onFirstCall()
-        .resolves({
-          ok: true,
-          text: () => Promise.resolve(html),
-        })
-        .onSecondCall()
-        .resolves({
-          ok: true,
-          json: () => Promise.resolve({ pageId: 'pg-from-ref' }),
-        });
-
-      const result = await resolvePageIds(
-        'https://example.com',
-        'https://author.example.com',
-        ['/page'],
-        'token',
-        log,
-      );
-
-      expect(result[0]).to.deep.equal({ url: '/page', pageId: 'pg-from-ref' });
-      expect(global.fetch).to.have.been.calledTwice;
-      const resolveCall = global.fetch.secondCall;
-      expect(resolveCall.args[0]).to.include('/adobe/pages/resolve');
-      expect(resolveCall.args[0]).to.include('pageRef=');
-      expect(resolveCall.args[1].headers.Authorization).to.equal('Bearer token');
-    });
-
-    it('returns resolve failed when content-page-ref resolve API is not ok', async () => {
-      const html = '<meta name="content-page-ref" content="aem:path:/content/site/en/page" />';
-      fetchStub
-        .onFirstCall()
-        .resolves({
-          ok: true,
-          text: () => Promise.resolve(html),
-        })
-        .onSecondCall()
-        .resolves({
-          ok: false,
-          status: 404,
-        });
-
-      const result = await resolvePageIds(
-        'https://example.com',
-        'https://author.example.com',
-        ['/page'],
-        'token',
-        log,
-      );
-
-      expect(result[0]).to.deep.equal({ url: '/page', error: 'Resolve failed' });
-      expect(log.warn).to.have.been.calledWith('Resolve API returned 404 for pageRef');
-    });
-
-    it('returns resolve failed when content-page-ref resolve API throws', async () => {
-      const html = '<meta name="content-page-ref" content="aem:path:/content/site/en/page" />';
-      fetchStub
-        .onFirstCall()
-        .resolves({
-          ok: true,
-          text: () => Promise.resolve(html),
-        })
-        .onSecondCall()
-        .rejects(new Error('Resolve failure'));
-
-      const result = await resolvePageIds(
-        'https://example.com',
-        'https://author.example.com',
-        ['/page'],
-        'token',
-        log,
-      );
-
-      expect(result[0]).to.deep.equal({ url: '/page', error: 'Resolve failed' });
-      expect(log.warn).to.have.been.calledWith('Resolve API error: Resolve failure');
-    });
-
-    it('returns resolve failed when content-page-ref resolve response has no pageId', async () => {
-      const html = '<meta name="content-page-ref" content="aem:path:/content/site/en/page" />';
-      fetchStub
-        .onFirstCall()
-        .resolves({
-          ok: true,
-          text: () => Promise.resolve(html),
-        })
-        .onSecondCall()
-        .resolves({
-          ok: true,
-          json: () => Promise.resolve({}),
-        });
-
-      const result = await resolvePageIds(
-        'https://example.com',
-        'https://author.example.com',
-        ['/page'],
-        'token',
-        log,
-      );
-
-      expect(result[0]).to.deep.equal({ url: '/page', error: 'Resolve failed' });
-    });
-
-    it('returns error when fetch throws', async () => {
-      fetchStub.rejects(new Error('Network error'));
+    it('returns error when shared utility throws', async () => {
+      determineAEMCSPageIdStub.rejects(new Error('Network error'));
 
       const result = await resolvePageIds(
         'https://example.com',
@@ -348,7 +256,29 @@ describe('AEM Content API support', () => {
       );
 
       expect(result[0].error).to.equal('Network error');
-      expect(log.warn).to.have.been.calledWith(sinon.match(/resolvePageIds failed/));
+      expect(log.warn).to.have.been.calledWith(
+        sinon.match(/resolvePageIds failed/),
+      );
+    });
+
+    it('resolves multiple pages in batch', async () => {
+      determineAEMCSPageIdStub.onFirstCall().resolves('pg-1');
+      determineAEMCSPageIdStub.onSecondCall().resolves(null);
+      determineAEMCSPageIdStub.onThirdCall()
+        .rejects(new Error('fail'));
+
+      const result = await resolvePageIds(
+        'https://example.com',
+        'https://author.example.com',
+        ['/page1', '/page2', '/page3'],
+        'token',
+        log,
+      );
+
+      expect(result).to.have.lengthOf(3);
+      expect(result[0]).to.deep.equal({ url: '/page1', pageId: 'pg-1' });
+      expect(result[1].error).to.equal('Could not determine page ID');
+      expect(result[2].error).to.equal('fail');
     });
   });
 
