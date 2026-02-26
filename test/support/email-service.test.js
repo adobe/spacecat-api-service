@@ -29,7 +29,7 @@ describe('email-service', () => {
 
   before(async () => {
     imsClientInstance = {
-      getServiceAccessTokenV3: sinon.stub().resolves({ access_token: 'test-token' }),
+      getServiceAccessToken: sinon.stub().resolves({ access_token: 'test-token' }),
     };
     ImsClientStub = {
       createFrom: sinon.stub().returns(imsClientInstance),
@@ -48,16 +48,16 @@ describe('email-service', () => {
 
   beforeEach(() => {
     ImsClientStub.createFrom.resetHistory();
-    imsClientInstance.getServiceAccessTokenV3.reset();
-    imsClientInstance.getServiceAccessTokenV3.resolves({ access_token: 'test-token' });
+    imsClientInstance.getServiceAccessToken.reset();
+    imsClientInstance.getServiceAccessToken.resolves({ access_token: 'test-token' });
 
     mockContext = {
       env: {
         IMS_HOST: 'https://ims.example.com',
-        EMAIL_IMS_CLIENT_ID: 'client-id',
-        EMAIL_IMS_CLIENT_CODE: 'client-code',
-        EMAIL_IMS_CLIENT_SECRET: 'client-secret',
-        EMAIL_IMS_SCOPE: 'email-scope',
+        LLMO_EMAIL_IMS_CLIENT_ID: 'client-id',
+        LLMO_EMAIL_IMS_CLIENT_CODE: 'client-code',
+        LLMO_EMAIL_IMS_CLIENT_SECRET: 'client-secret',
+        LLMO_EMAIL_IMS_SCOPE: 'email-scope',
         ADOBE_POSTOFFICE_ENDPOINT: 'https://postoffice.example.com',
       },
       log: {
@@ -169,7 +169,7 @@ describe('email-service', () => {
       expect(ctxArg.env.IMS_CLIENT_ID).to.equal('client-id');
       expect(ctxArg.env.IMS_CLIENT_CODE).to.equal('client-code');
       expect(ctxArg.env.IMS_CLIENT_SECRET).to.equal('client-secret');
-      expect(ctxArg.env.IMS_SCOPE).to.equal('APO.ST(llmo).SC(email)');
+      expect(ctxArg.env.IMS_SCOPE).to.equal('email-scope');
       expect(ctxArg.env.IMS_HOST).to.equal('https://ims.example.com');
     });
 
@@ -227,7 +227,7 @@ describe('email-service', () => {
     });
 
     it('should handle IMS token failure gracefully', async () => {
-      imsClientInstance.getServiceAccessTokenV3.rejects(new Error('IMS unavailable'));
+      imsClientInstance.getServiceAccessToken.rejects(new Error('IMS unavailable'));
 
       const result = await sendEmail(mockContext, {
         recipients: ['test@example.com'],

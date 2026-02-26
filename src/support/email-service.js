@@ -58,28 +58,27 @@ function buildTemplateEmailPayload(toList, templateData) {
 async function getEmailServiceToken(context) {
   const { env, log } = context;
 
-  log.info('[email-service] Acquiring email service IMS token (v3 client_credentials)', {
-    emailClientId: env.EMAIL_IMS_CLIENT_ID,
-    emailClientSecret: env.EMAIL_IMS_CLIENT_SECRET,
-    emailClientCode: env.EMAIL_IMS_CLIENT_CODE,
-    emailImsScope: env.EMAIL_IMS_SCOPE,
+  log.info('[email-service] Acquiring email service IMS token', {
+    emailClientId: env.LLMO_EMAIL_IMS_CLIENT_ID,
+    emailClientSecret: env.LLMO_EMAIL_IMS_CLIENT_SECRET,
+    emailClientCode: env.LLMO_EMAIL_IMS_CLIENT_CODE,
+    emailImsScope: env.LLMO_EMAIL_IMS_SCOPE,
     imsHost: env.IMS_HOST,
-    hardcodedScope: 'APO.ST(llmo).SC(email)',
   });
 
   const emailEnv = {
     ...env,
-    IMS_CLIENT_ID: env.EMAIL_IMS_CLIENT_ID,
-    IMS_CLIENT_SECRET: env.EMAIL_IMS_CLIENT_SECRET,
-    IMS_CLIENT_CODE: env.EMAIL_IMS_CLIENT_CODE,
-    IMS_SCOPE: 'APO.ST(llmo).SC(email)',
+    IMS_CLIENT_ID: env.LLMO_EMAIL_IMS_CLIENT_ID,
+    IMS_CLIENT_SECRET: env.LLMO_EMAIL_IMS_CLIENT_SECRET,
+    IMS_CLIENT_CODE: env.LLMO_EMAIL_IMS_CLIENT_CODE,
+    IMS_SCOPE: env.LLMO_EMAIL_IMS_SCOPE,
   };
 
   const imsClient = ImsClient.createFrom({ ...context, env: emailEnv });
 
   try {
-    const tokenPayload = await imsClient.getServiceAccessTokenV3();
-    log.info('[email-service] IMS v3 token acquired successfully', {
+    const tokenPayload = await imsClient.getServiceAccessToken();
+    log.info('[email-service] IMS token acquired successfully', {
       tokenPrefix: tokenPayload.access_token?.substring(0, 10),
       expiresIn: tokenPayload.expires_in,
       tokenType: tokenPayload.token_type,
@@ -157,7 +156,8 @@ export async function sendEmail(context, {
       if (response.status === 403) {
         log.warn('[email-service] 403 Forbidden - possible scope/template mismatch', {
           templateName,
-          hint: 'Verify EMAIL_IMS_CLIENT_ID/SECRET is registered for client_credentials and IMS_SCOPE (APO.ST(llmo).SC(email)) matches the template team.',
+          hint: 'Verify EMAIL_IMS_CLIENT_CODE was issued with APO scope matching the template team. '
+            + 'Note: getServiceAccessToken (v4) does NOT send IMS_SCOPE; scope is embedded in the authorization code.',
         });
       }
     }
