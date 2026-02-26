@@ -1084,8 +1084,9 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     site.setConfig(Config.toDynamoItem(siteConfig));
     await site.save();
 
-    // Trigger audits
-    await triggerAudits([...BASIC_AUDITS, 'llmo-customer-analysis', 'wikipedia-analysis'], context, site);
+    // Trigger audits (llmo-customer-analysis is NOT triggered here; it will be triggered
+    // after the DRS prompt generation job completes, via SNS → audit-worker. LLMO-1819)
+    await triggerAudits([...BASIC_AUDITS, 'wikipedia-analysis'], context, site);
 
     // Submit DRS prompt generation job (non-blocking)
     try {

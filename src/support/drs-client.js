@@ -61,6 +61,7 @@ export default function DrsClient(context) {
 
     const payload = {
       provider_id: 'prompt_generation_base_url',
+      source: 'onboarding',
       parameters: {
         base_url: baseUrl,
         brand_name: brandName,
@@ -68,13 +69,13 @@ export default function DrsClient(context) {
         region,
         num_prompts: numPrompts,
         model: 'gpt-5-nano',
-      },
-      metadata: {
-        site_id: siteId,
-        imsOrgId,
-        base_url: baseUrl,
-        brand: brandName,
-        region,
+        metadata: {
+          site_id: siteId,
+          imsOrgId,
+          base_url: baseUrl,
+          brand: brandName,
+          region,
+        },
       },
     };
 

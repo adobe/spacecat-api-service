@@ -111,14 +111,15 @@ describe('DRS Client', () => {
 
       const body = JSON.parse(options.body);
       expect(body.provider_id).to.equal('prompt_generation_base_url');
+      expect(body.source).to.equal('onboarding');
       expect(body.parameters.base_url).to.equal('https://example.com');
       expect(body.parameters.brand_name).to.equal('TestBrand');
       expect(body.parameters.audience).to.equal('general audience');
       expect(body.parameters.region).to.equal('US');
       expect(body.parameters.num_prompts).to.equal(42);
       expect(body.webhook_url).to.be.undefined;
-      expect(body.metadata.site_id).to.equal('site-uuid-123');
-      expect(body.metadata.imsOrgId).to.equal('org@AdobeOrg');
+      expect(body.parameters.metadata.site_id).to.equal('site-uuid-123');
+      expect(body.parameters.metadata.imsOrgId).to.equal('org@AdobeOrg');
     });
 
     it('uses default values for optional parameters', async () => {
