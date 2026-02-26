@@ -6162,7 +6162,7 @@ StageDomainsRequest:
 
 StageDomainsResponse:
   type: object
-  description: Response with staging domain to site ID mapping (deprecated in favor of StageConfigsResponse)
+  description: Response with staging domain to site ID mapping
   required:
     - stagingDomains
   properties:
