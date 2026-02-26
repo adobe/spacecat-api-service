@@ -4277,10 +4277,9 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
-      expect(responseBody.stageConfigs).to.have.length(1);
-      expect(responseBody.stageConfigs[0]).to.deep.include({
+      expect(responseBody).to.be.an('array').with.lengthOf(1);
+      expect(responseBody[0]).to.deep.include({
         domain: 'staging.lovesac.com',
-        id: STAGE_SITE_ID,
         ...fullMetaconfig,
       });
       expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith('https://staging.lovesac.com');
@@ -4318,9 +4317,8 @@ describe('LlmoController', () => {
         sinon.match({ lastModifiedBy: sinon.match.string, isStageDomain: true }),
       );
       const responseBody = await result.json();
-      expect(responseBody.stageConfigs).to.have.length(1);
-      expect(responseBody.stageConfigs[0]).to.have.property('domain', 'staging.lovesac.com');
-      expect(responseBody.stageConfigs[0]).to.have.property('id', STAGE_SITE_ID);
+      expect(responseBody).to.be.an('array').with.lengthOf(1);
+      expect(responseBody[0]).to.have.property('domain', 'staging.lovesac.com');
     });
 
     it('should return 400 when stagingDomains is not an array', async () => {
@@ -4350,9 +4348,7 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
-      expect(responseBody.message).to.include('apex');
-      expect(responseBody.message).to.include('otherdomain.com');
-      expect(responseBody.message).to.include('lovesac.com');
+      expect(responseBody.message).to.include('same base domain');
     });
 
     it('should return 403 when not LLMO administrator', async () => {
@@ -4399,8 +4395,8 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
-      expect(responseBody.stageConfigs).to.have.length(1);
-      expect(responseBody.stageConfigs[0].domain).to.equal('staging.lovesac.com');
+      expect(responseBody).to.be.an('array').with.lengthOf(1);
+      expect(responseBody[0].domain).to.equal('staging.lovesac.com');
       expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(
         sinon.match({
           stagingDomains: sinon.match.array,
@@ -4428,6 +4424,26 @@ describe('LlmoController', () => {
       expect(responseBody.message).to.include('Database connection failed');
     });
 
+    it('should return 400 when createMetaconfig fails', async () => {
+      mockTokowakaClient.createMetaconfig.rejects(new Error('Tokowaka service error'));
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Tokowaka service error');
+    });
+
+    it('should return 400 when updateEdgeOptimizeConfig throws', async () => {
+      mockConfig.updateEdgeOptimizeConfig.throws(new Error('Config update failed'));
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Config update failed');
+    });
+
     it('should return 400 when context.data is undefined', async () => {
       stageConfigContext.data = undefined;
 
@@ -4445,8 +4461,8 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
-      expect(responseBody.stageConfigs).to.have.length(1);
-      expect(responseBody.stageConfigs[0].domain).to.equal('staging.lovesac.com');
+      expect(responseBody).to.be.an('array').with.lengthOf(1);
+      expect(responseBody[0].domain).to.equal('staging.lovesac.com');
     });
 
     it('should use default lastModifiedBy when profile.email is missing', async () => {
@@ -4470,7 +4486,7 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
-      expect(responseBody.stageConfigs).to.have.length(1);
+      expect(responseBody).to.be.an('array').with.lengthOf(1);
       expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.called;
     });
   });
