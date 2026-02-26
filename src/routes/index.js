@@ -427,9 +427,6 @@ export default function getRouteHandlers(
 
     'GET /sites-resolve': sitesController.resolveSite,
 
-    // Page relationships (AEM upstream chain for list-time fix target display)
-    'POST /sites/:siteId/page-relationships/search': pageRelationshipsController.search,
-
     // Sentiment Analysis endpoints
     // Topics
     'GET /sites/:siteId/sentiment/topics': sentimentController.listTopics,

@@ -69,7 +69,7 @@ describe('Page Relationships Controller', () => {
 
     mockOpportunity = {
       getSiteId: sandbox.stub().returns(SITE_ID),
-      getType: sandbox.stub().returns('invalid-or-missing-metadata'),
+      getType: sandbox.stub().returns('meta-tags'),
     };
 
     mockDataAccess = {
@@ -118,376 +118,9 @@ describe('Page Relationships Controller', () => {
       expect(() => PageRelationshipsController({ log })).to.throw('Data access required');
     });
 
-    it('returns controller with search function', () => {
+    it('returns controller with getForOpportunity function', () => {
       const controller = PageRelationshipsController(controllerContext);
-      expect(controller).to.have.property('search').that.is.a('function');
       expect(controller).to.have.property('getForOpportunity').that.is.a('function');
-    });
-  });
-
-  describe('search', () => {
-    it('returns 400 for invalid siteId', async () => {
-      const controller = PageRelationshipsController(controllerContext);
-      requestContext.params.siteId = SITE_ID_INVALID;
-
-      const response = await controller.search(requestContext);
-      const body = await response.json();
-
-      expect(response.status).to.equal(400);
-      expect(body.message).to.equal('Site ID required');
-      expect(mockDataAccess.Site.findById).to.not.have.been.called;
-    });
-
-    it('returns 404 when site is not found', async () => {
-      mockDataAccess.Site.findById.resolves(null);
-      const controller = PageRelationshipsController(controllerContext);
-
-      const response = await controller.search(requestContext);
-      const body = await response.json();
-
-      expect(response.status).to.equal(404);
-      expect(body.message).to.equal('Site not found');
-      expect(mockDataAccess.Site.findById).to.have.been.calledOnceWith(SITE_ID);
-    });
-
-    it('returns 403 when user does not have access', async () => {
-      AccessControlUtil.fromContext.returns({ hasAccess: sandbox.stub().resolves(false) });
-      const controller = PageRelationshipsController(controllerContext);
-
-      const response = await controller.search(requestContext);
-      const body = await response.json();
-
-      expect(response.status).to.equal(403);
-      expect(body.message).to.equal('Only users belonging to the organization can access this site');
-    });
-
-    it('returns supported: false when delivery type is not AEM-authored', async () => {
-      isAEMAuthoredSiteStub.returns(false);
-      const controller = PageRelationshipsController(controllerContext);
-
-      const response = await controller.search(requestContext);
-      const body = await response.json();
-
-      expect(response.status).to.equal(200);
-      expect(body.supported).to.equal(false);
-      expect(body.relationships).to.deep.equal({});
-      expect(body.errors).to.deep.equal({});
-      expect(resolvePageIdsStub).to.not.have.been.called;
-    });
-
-    it('returns supported: false when authorURL is missing', async () => {
-      isAEMAuthoredSiteStub.returns(true);
-      mockSite.getDeliveryConfig.returns({});
-
-      const controller = PageRelationshipsController(controllerContext);
-
-      const response = await controller.search(requestContext);
-      const body = await response.json();
-
-      expect(response.status).to.equal(200);
-      expect(body.supported).to.equal(false);
-      expect(body.relationships).to.deep.equal({});
-      expect(body.errors).to.deep.equal({});
-      expect(resolvePageIdsStub).to.not.have.been.called;
-    });
-
-    it('returns 400 when pages is missing or empty', async () => {
-      isAEMAuthoredSiteStub.returns(true);
-      const controller = PageRelationshipsController(controllerContext);
-
-      requestContext.data = {};
-      const response1 = await controller.search(requestContext);
-      const body1 = await response1.json();
-      expect(response1.status).to.equal(400);
-      expect(body1.message).to.include('pages array required');
-
-      requestContext.data = { pages: [] };
-      const response2 = await controller.search(requestContext);
-      const body2 = await response2.json();
-      expect(response2.status).to.equal(400);
-      expect(body2.message).to.include('pages array required');
-    });
-
-    it('returns 400 when pages entry has missing pageUrl', async () => {
-      isAEMAuthoredSiteStub.returns(true);
-      requestContext.data = { pages: [{}] };
-      const controller = PageRelationshipsController(controllerContext);
-
-      const response = await controller.search(requestContext);
-      const body = await response.json();
-
-      expect(response.status).to.equal(400);
-      expect(body.message).to.equal('Each page must include a non-empty pageUrl');
-      expect(resolvePageIdsStub).to.not.have.been.called;
-    });
-
-    it('returns 400 when pages exceeds max size', async () => {
-      isAEMAuthoredSiteStub.returns(true);
-      requestContext.data = {
-        pages: Array(51).fill({ pageUrl: '/p', suggestionType: 'x' }),
-      };
-      const controller = PageRelationshipsController(controllerContext);
-
-      const response = await controller.search(requestContext);
-      const body = await response.json();
-
-      expect(response.status).to.equal(400);
-      expect(body.message).to.include('max 50');
-    });
-
-    it('returns 400 when Authorization header is missing', async () => {
-      isAEMAuthoredSiteStub.returns(true);
-      requestContext.pathInfo = { headers: {} };
-      const controller = PageRelationshipsController(controllerContext);
-
-      const response = await controller.search(requestContext);
-      const body = await response.json();
-
-      expect(response.status).to.equal(400);
-      expect(body.message).to.equal('Missing Authorization header');
-    });
-
-    it('returns supported: true with _config error when site has no baseURL', async () => {
-      isAEMAuthoredSiteStub.returns(true);
-      mockSite.getBaseURL.returns('');
-      resolvePageIdsStub.resolves([{ url: '/us/en/page1', pageId: 'pg1' }]);
-
-      const controller = PageRelationshipsController(controllerContext);
-
-      const response = await controller.search(requestContext);
-      const body = await response.json();
-
-      expect(response.status).to.equal(200);
-      expect(body.supported).to.equal(true);
-      expect(body.errors).to.have.property('_config');
-      // eslint-disable-next-line dot-notation -- _config needs bracket notation
-      expect(body.errors['_config'].error).to.equal('Site has no baseURL');
-    });
-
-    it('returns supported: true with relationships when resolve and fetch succeed', async () => {
-      isAEMAuthoredSiteStub.returns(true);
-      resolvePageIdsStub.resolves([{ url: '/us/en/page1', pageId: 'pg-123' }]);
-      const resultKey = '/us/en/page1:Missing Title';
-      fetchRelationshipsStub.resolves({
-        results: {
-          [resultKey]: {
-            pageId: 'pg-123',
-            upstream: { chain: [{ relation: 'liveCopyOf', pageId: 'pg-blueprint', pagePath: '/content/blueprint/en/page1' }] },
-          },
-        },
-        errors: {},
-      });
-
-      const controller = PageRelationshipsController(controllerContext);
-
-      const response = await controller.search(requestContext);
-      const body = await response.json();
-
-      expect(response.status).to.equal(200);
-      expect(body.supported).to.equal(true);
-      expect(body.relationships).to.have.property(resultKey);
-      expect(body.relationships[resultKey].upstream.chain).to.have.lengthOf(1);
-      expect(body.errors).to.deep.equal({});
-
-      expect(resolvePageIdsStub).to.have.been.calledOnce;
-      expect(resolvePageIdsStub.firstCall.args[0]).to.equal('https://example.com');
-      expect(resolvePageIdsStub.firstCall.args[1]).to.equal('https://author.example.com');
-      expect(resolvePageIdsStub.firstCall.args[2]).to.deep.equal(['/us/en/page1']);
-      expect(resolvePageIdsStub.firstCall.args[3]).to.equal('test-ims-token');
-
-      expect(fetchRelationshipsStub).to.have.been.calledOnce;
-      expect(fetchRelationshipsStub.firstCall.args[0]).to.equal('https://author.example.com');
-      expect(fetchRelationshipsStub.firstCall.args[1]).to.have.lengthOf(1);
-      expect(fetchRelationshipsStub.firstCall.args[1][0]).to.include({ key: resultKey, pageId: 'pg-123' });
-      expect(fetchRelationshipsStub.firstCall.args[1][0].include).to.deep.equal(['upstream']);
-      expect(fetchRelationshipsStub.firstCall.args[2]).to.equal('test-ims-token');
-    });
-
-    it('merges resolve errors and AEM API errors in response', async () => {
-      isAEMAuthoredSiteStub.returns(true);
-      resolvePageIdsStub.resolves([
-        { url: '/us/en/page1', pageId: 'pg-123' },
-        { url: '/us/en/page2', error: 'HTTP 404' },
-      ]);
-      fetchRelationshipsStub.resolves({
-        results: {
-          '/us/en/page1:': { pageId: 'pg-123', upstream: { chain: [] } },
-        },
-        errors: {
-          '/us/en/page1:': { error: 'NOT_FOUND' },
-        },
-      });
-
-      requestContext.data = {
-        pages: [
-          { pageUrl: '/us/en/page1' },
-          { pageUrl: '/us/en/page2' },
-        ],
-      };
-
-      const controller = PageRelationshipsController(controllerContext);
-
-      const response = await controller.search(requestContext);
-      const body = await response.json();
-
-      expect(response.status).to.equal(200);
-      expect(body.supported).to.equal(true);
-      expect(body.errors).to.include.keys('/us/en/page2');
-      expect(body.errors['/us/en/page2'].error).to.equal('HTTP 404');
-      expect(body.errors['/us/en/page1:'].error).to.equal('NOT_FOUND');
-    });
-
-    it('calls buildCheckPath with suggestionType and delivery config', async () => {
-      isAEMAuthoredSiteStub.returns(true);
-      buildCheckPathStub.returns('/properties/jcr:title');
-      const deliveryConfig = { authorURL: 'https://author.example.com', metaTagPropertyMap: { title: 'jcr:title' } };
-      mockSite.getDeliveryConfig.returns(deliveryConfig);
-      resolvePageIdsStub.resolves([{ url: '/us/en/page1', pageId: 'pg-123' }]);
-      fetchRelationshipsStub.resolves({ results: { k1: { upstream: { chain: [] } } }, errors: {} });
-
-      const controller = PageRelationshipsController(controllerContext);
-
-      await controller.search(requestContext);
-
-      expect(buildCheckPathStub).to.have.been.calledWith('Missing Title', deliveryConfig);
-      expect(fetchRelationshipsStub.firstCall.args[1][0].checkPath).to.equal('/properties/jcr:title');
-    });
-
-    it('does not include checkPath when derived checkPath is an empty string', async () => {
-      isAEMAuthoredSiteStub.returns(true);
-      buildCheckPathStub.returns('');
-      resolvePageIdsStub.resolves([{ url: '/us/en/page1', pageId: 'pg-123' }]);
-      fetchRelationshipsStub.resolves({ results: {}, errors: {} });
-
-      const controller = PageRelationshipsController(controllerContext);
-
-      await controller.search(requestContext);
-
-      expect(fetchRelationshipsStub.firstCall.args[1][0]).to.not.have.property('checkPath');
-    });
-
-    it('uses checkPath from page spec when provided instead of deriving it', async () => {
-      isAEMAuthoredSiteStub.returns(true);
-      resolvePageIdsStub.resolves([{ url: '/us/en/page1', pageId: 'pg-123' }]);
-      fetchRelationshipsStub.resolves({ results: {}, errors: {} });
-      requestContext.data = {
-        pages: [{
-          pageUrl: '/us/en/page1',
-          suggestionType: 'Missing Title',
-          checkPath: '/properties/custom-prop',
-        }],
-      };
-
-      const controller = PageRelationshipsController(controllerContext);
-
-      await controller.search(requestContext);
-
-      expect(buildCheckPathStub).to.not.have.been.called;
-      expect(fetchRelationshipsStub.firstCall.args[1][0].checkPath).to.equal('/properties/custom-prop');
-    });
-
-    it('does not derive checkPath when an explicit empty checkPath is provided', async () => {
-      isAEMAuthoredSiteStub.returns(true);
-      resolvePageIdsStub.resolves([{ url: '/us/en/page1', pageId: 'pg-123' }]);
-      fetchRelationshipsStub.resolves({ results: {}, errors: {} });
-      requestContext.data = {
-        pages: [{
-          pageUrl: '/us/en/page1',
-          suggestionType: 'Missing Title',
-          checkPath: '',
-        }],
-      };
-
-      const controller = PageRelationshipsController(controllerContext);
-
-      await controller.search(requestContext);
-
-      expect(buildCheckPathStub).to.not.have.been.called;
-      expect(fetchRelationshipsStub.firstCall.args[1][0]).to.not.have.property('checkPath');
-    });
-
-    it('uses page key from request when provided', async () => {
-      isAEMAuthoredSiteStub.returns(true);
-      buildCheckPathStub.returns(undefined);
-      resolvePageIdsStub.resolves([{ url: '/us/en/page1', pageId: 'pg-123' }]);
-      fetchRelationshipsStub.resolves({ results: { 'page-1': { upstream: { chain: [] } } }, errors: {} });
-      requestContext.data = {
-        pages: [{ key: 'page-1', pageUrl: '/us/en/page1', suggestionType: 'Missing Title' }],
-      };
-
-      const controller = PageRelationshipsController(controllerContext);
-
-      await controller.search(requestContext);
-
-      expect(fetchRelationshipsStub.firstCall.args[1][0].key).to.equal('page-1');
-    });
-
-    it('passes delivery config without metaTagPropertyMap when config has no map', async () => {
-      isAEMAuthoredSiteStub.returns(true);
-      buildCheckPathStub.returns(undefined);
-      const deliveryConfig = { authorURL: 'https://author.example.com' };
-      mockSite.getDeliveryConfig.returns(deliveryConfig);
-      resolvePageIdsStub.resolves([{ url: '/us/en/page1', pageId: 'pg-123' }]);
-      fetchRelationshipsStub.resolves({ results: { k1: { upstream: { chain: [] } } }, errors: {} });
-      const controller = PageRelationshipsController(controllerContext);
-
-      await controller.search(requestContext);
-
-      expect(buildCheckPathStub).to.have.been.calledWith('Missing Title', deliveryConfig);
-    });
-
-    it('returns supported: true with empty relationships when all pages fail to resolve', async () => {
-      isAEMAuthoredSiteStub.returns(true);
-      resolvePageIdsStub.resolves([
-        { url: '/us/en/page1', error: 'No content-page-id or content-page-ref' },
-      ]);
-
-      const controller = PageRelationshipsController(controllerContext);
-
-      const response = await controller.search(requestContext);
-      const body = await response.json();
-
-      expect(response.status).to.equal(200);
-      expect(body.supported).to.equal(true);
-      expect(body.relationships).to.deep.equal({});
-      expect(body.errors).to.have.property('/us/en/page1');
-      expect(fetchRelationshipsStub).to.not.have.been.called;
-    });
-
-    it('uses default resolve error message when resolve result has no pageId and no error', async () => {
-      isAEMAuthoredSiteStub.returns(true);
-      resolvePageIdsStub.resolves([{ url: '/us/en/page1' }]);
-
-      const controller = PageRelationshipsController(controllerContext);
-
-      const response = await controller.search(requestContext);
-      const body = await response.json();
-
-      expect(response.status).to.equal(200);
-      expect(body.errors['/us/en/page1'].error).to.equal('Could not resolve page');
-      expect(fetchRelationshipsStub).to.not.have.been.called;
-    });
-
-    it('uses resolved url as error key when resolved item has no page spec match', async () => {
-      isAEMAuthoredSiteStub.returns(true);
-      resolvePageIdsStub.resolves([
-        { url: '/us/en/page1', pageId: 'pg-123' },
-        { url: '/us/en/page2', error: 'HTTP 404' },
-      ]);
-      fetchRelationshipsStub.resolves({
-        results: { '/us/en/page1:Missing Title': { pageId: 'pg-123', upstream: { chain: [] } } },
-        errors: {},
-      });
-      requestContext.data = {
-        pages: [{ pageUrl: '/us/en/page1', suggestionType: 'Missing Title' }],
-      };
-      const controller = PageRelationshipsController(controllerContext);
-
-      const response = await controller.search(requestContext);
-      const body = await response.json();
-
-      expect(response.status).to.equal(200);
-      expect(body.errors['/us/en/page2'].error).to.equal('HTTP 404');
     });
   });
 
@@ -521,6 +154,30 @@ describe('Page Relationships Controller', () => {
       expect(mockDataAccess.Site.findById).to.not.have.been.called;
     });
 
+    it('returns 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const controller = PageRelationshipsController(controllerContext);
+
+      const response = await controller.getForOpportunity(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(404);
+      expect(body.message).to.equal('Site not found');
+      expect(mockDataAccess.Opportunity.findById).to.not.have.been.called;
+    });
+
+    it('returns 403 when user does not have access to the site', async () => {
+      AccessControlUtil.fromContext.returns({ hasAccess: sandbox.stub().resolves(false) });
+      const controller = PageRelationshipsController(controllerContext);
+
+      const response = await controller.getForOpportunity(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(403);
+      expect(body.message).to.equal('Only users belonging to the organization can access this site');
+      expect(mockDataAccess.Opportunity.findById).to.not.have.been.called;
+    });
+
     it('returns 404 when opportunity is not found', async () => {
       isAEMAuthoredSiteStub.returns(true);
       mockDataAccess.Opportunity.findById.resolves(null);
@@ -545,6 +202,44 @@ describe('Page Relationships Controller', () => {
       expect(response.status).to.equal(404);
       expect(body.message).to.equal('Opportunity not found');
       expect(mockDataAccess.Suggestion.allByOpportunityId).to.not.have.been.called;
+    });
+
+    it('returns supported: false for unsupported opportunity type', async () => {
+      isAEMAuthoredSiteStub.returns(true);
+      mockOpportunity.getType.returns('broken-backlinks');
+      const controller = PageRelationshipsController(controllerContext);
+
+      const response = await controller.getForOpportunity(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.supported).to.equal(false);
+      expect(body.relationships).to.deep.equal({});
+      expect(body.errors).to.have.property('_opportunity');
+      const { _opportunity: unsupportedTypeError } = body.errors;
+      expect(unsupportedTypeError.error).to.equal('Unsupported opportunity type: broken-backlinks');
+      expect(mockDataAccess.Suggestion.allByOpportunityId).to.not.have.been.called;
+      expect(resolvePageIdsStub).to.not.have.been.called;
+      expect(fetchRelationshipsStub).to.not.have.been.called;
+    });
+
+    it('returns supported: false with unknown type when opportunity type is missing', async () => {
+      isAEMAuthoredSiteStub.returns(true);
+      mockOpportunity.getType.returns(undefined);
+      const controller = PageRelationshipsController(controllerContext);
+
+      const response = await controller.getForOpportunity(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.supported).to.equal(false);
+      expect(body.relationships).to.deep.equal({});
+      expect(body.errors).to.have.property('_opportunity');
+      const { _opportunity: unknownTypeError } = body.errors;
+      expect(unknownTypeError.error).to.equal('Unsupported opportunity type: unknown');
+      expect(mockDataAccess.Suggestion.allByOpportunityId).to.not.have.been.called;
+      expect(resolvePageIdsStub).to.not.have.been.called;
+      expect(fetchRelationshipsStub).to.not.have.been.called;
     });
 
     it('returns 400 when Authorization header is missing', async () => {
@@ -573,6 +268,23 @@ describe('Page Relationships Controller', () => {
       expect(resolvePageIdsStub).to.not.have.been.called;
     });
 
+    it('returns supported: false when authorURL is missing', async () => {
+      isAEMAuthoredSiteStub.returns(true);
+      mockSite.getDeliveryConfig.returns({});
+      const controller = PageRelationshipsController(controllerContext);
+
+      const response = await controller.getForOpportunity(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.supported).to.equal(false);
+      expect(body.relationships).to.deep.equal({});
+      expect(body.errors).to.deep.equal({});
+      expect(mockDataAccess.Suggestion.allByOpportunityId).to.not.have.been.called;
+      expect(resolvePageIdsStub).to.not.have.been.called;
+      expect(fetchRelationshipsStub).to.not.have.been.called;
+    });
+
     it('returns empty relationships when opportunity has no suggestions', async () => {
       isAEMAuthoredSiteStub.returns(true);
       mockDataAccess.Suggestion.allByOpportunityId.resolves([]);
@@ -586,6 +298,141 @@ describe('Page Relationships Controller', () => {
       expect(body.relationships).to.deep.equal({});
       expect(body.errors).to.deep.equal({});
       expect(resolvePageIdsStub).to.not.have.been.called;
+      expect(fetchRelationshipsStub).to.not.have.been.called;
+    });
+
+    it('returns _config error when site has no baseURL', async () => {
+      isAEMAuthoredSiteStub.returns(true);
+      mockSite.getBaseURL.returns('');
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([
+        createSuggestion({
+          pageUrl: '/us/en/page1',
+          suggestionType: 'Missing Title',
+        }),
+      ]);
+      const controller = PageRelationshipsController(controllerContext);
+
+      const response = await controller.getForOpportunity(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.supported).to.equal(true);
+      expect(body.relationships).to.deep.equal({});
+      expect(body.errors).to.have.property('_config');
+      // eslint-disable-next-line dot-notation -- _config needs bracket notation
+      expect(body.errors['_config'].error).to.equal('Site has no baseURL');
+      expect(resolvePageIdsStub).to.not.have.been.called;
+      expect(fetchRelationshipsStub).to.not.have.been.called;
+    });
+
+    it('returns empty relationships when suggestions payload is not an array', async () => {
+      isAEMAuthoredSiteStub.returns(true);
+      mockDataAccess.Suggestion.allByOpportunityId.resolves({ suggestions: [] });
+      const controller = PageRelationshipsController(controllerContext);
+
+      const response = await controller.getForOpportunity(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.supported).to.equal(true);
+      expect(body.relationships).to.deep.equal({});
+      expect(body.errors).to.deep.equal({});
+      expect(resolvePageIdsStub).to.not.have.been.called;
+      expect(fetchRelationshipsStub).to.not.have.been.called;
+    });
+
+    it('skips suggestion entries that do not implement getData', async () => {
+      isAEMAuthoredSiteStub.returns(true);
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([
+        null,
+        {},
+        createSuggestion({
+          pageUrl: '/us/en/page1',
+          suggestionType: 'Missing Title',
+        }),
+      ]);
+      resolvePageIdsStub.resolves([{ url: '/us/en/page1', pageId: 'pg-1' }]);
+      fetchRelationshipsStub.resolves({
+        results: {
+          '/us/en/page1:Missing Title': { pageId: 'pg-1', upstream: { chain: [] } },
+        },
+        errors: {},
+      });
+      const controller = PageRelationshipsController(controllerContext);
+
+      const response = await controller.getForOpportunity(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(resolvePageIdsStub.firstCall.args[2]).to.deep.equal(['/us/en/page1']);
+      expect(fetchRelationshipsStub.firstCall.args[1]).to.have.lengthOf(1);
+      expect(body.relationships).to.have.property('/us/en/page1:Missing Title');
+    });
+
+    it('returns resolve error details when a page cannot be resolved', async () => {
+      isAEMAuthoredSiteStub.returns(true);
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([
+        createSuggestion({
+          pageUrl: '/us/en/page1',
+          suggestionType: 'Missing Title',
+        }),
+      ]);
+      resolvePageIdsStub.resolves([
+        { url: '/us/en/page1', error: 'HTTP 404' },
+      ]);
+      const controller = PageRelationshipsController(controllerContext);
+
+      const response = await controller.getForOpportunity(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.supported).to.equal(true);
+      expect(body.relationships).to.deep.equal({});
+      expect(body.errors['/us/en/page1'].error).to.equal('HTTP 404');
+      expect(fetchRelationshipsStub).to.not.have.been.called;
+    });
+
+    it('returns default resolve error when no pageId and no resolve error are returned', async () => {
+      isAEMAuthoredSiteStub.returns(true);
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([
+        createSuggestion({
+          pageUrl: '/us/en/page1',
+          suggestionType: 'Missing Title',
+        }),
+      ]);
+      resolvePageIdsStub.resolves([
+        { url: '/us/en/page1' },
+      ]);
+      const controller = PageRelationshipsController(controllerContext);
+
+      const response = await controller.getForOpportunity(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.supported).to.equal(true);
+      expect(body.relationships).to.deep.equal({});
+      expect(body.errors['/us/en/page1'].error).to.equal('Could not resolve page');
+      expect(fetchRelationshipsStub).to.not.have.been.called;
+    });
+
+    it('returns default resolve error when resolver returns fewer entries than requested pages', async () => {
+      isAEMAuthoredSiteStub.returns(true);
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([
+        createSuggestion({
+          pageUrl: '/us/en/page1',
+          suggestionType: 'Missing Title',
+        }),
+      ]);
+      resolvePageIdsStub.resolves([]);
+      const controller = PageRelationshipsController(controllerContext);
+
+      const response = await controller.getForOpportunity(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body.supported).to.equal(true);
+      expect(body.relationships).to.deep.equal({});
+      expect(body.errors['/us/en/page1'].error).to.equal('Could not resolve page');
       expect(fetchRelationshipsStub).to.not.have.been.called;
     });
 
@@ -627,6 +474,37 @@ describe('Page Relationships Controller', () => {
       expect(body.relationships).to.have.property('/us/en/page2:Missing Description');
     });
 
+    it('includes derived checkPath when buildCheckPath returns a non-empty value', async () => {
+      isAEMAuthoredSiteStub.returns(true);
+      buildCheckPathStub.returns('/properties/jcr:title');
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([
+        createSuggestion({
+          pageUrl: '/us/en/page1',
+          suggestionType: 'Missing Title',
+        }),
+      ]);
+      resolvePageIdsStub.resolves([
+        { url: '/us/en/page1', pageId: 'pg-1' },
+      ]);
+      fetchRelationshipsStub.callsFake(async (authorURL, items) => ({
+        results: {
+          [items[0].key]: {
+            pageId: items[0].pageId,
+            upstream: { chain: [] },
+          },
+        },
+        errors: {},
+      }));
+      const controller = PageRelationshipsController(controllerContext);
+
+      const response = await controller.getForOpportunity(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(fetchRelationshipsStub.firstCall.args[1][0].checkPath).to.equal('/properties/jcr:title');
+      expect(body.relationships).to.have.property('/us/en/page1:Missing Title');
+    });
+
     it('uses normalized path key when suggestion URL is absolute', async () => {
       isAEMAuthoredSiteStub.returns(true);
       mockDataAccess.Suggestion.allByOpportunityId.resolves([
@@ -658,6 +536,108 @@ describe('Page Relationships Controller', () => {
       expect(body.relationships).to.have.property('/us/en/page1:Missing Title');
     });
 
+    it('keeps absolute URL for lookup when suggestion host differs from site host', async () => {
+      isAEMAuthoredSiteStub.returns(true);
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([
+        createSuggestion({
+          pageUrl: 'https://external.example.com/us/en/page1',
+          suggestionType: 'Missing Title',
+        }),
+      ]);
+      resolvePageIdsStub.resolves([
+        { url: 'https://external.example.com/us/en/page1', pageId: 'pg-1' },
+      ]);
+      fetchRelationshipsStub.callsFake(async (authorURL, items) => ({
+        results: {
+          [items[0].key]: {
+            pageId: items[0].pageId,
+            upstream: { chain: [] },
+          },
+        },
+        errors: {},
+      }));
+      const controller = PageRelationshipsController(controllerContext);
+
+      const response = await controller.getForOpportunity(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(resolvePageIdsStub.firstCall.args[2]).to.deep.equal(['https://external.example.com/us/en/page1']);
+      expect(fetchRelationshipsStub.firstCall.args[1][0].key)
+        .to.equal('https://external.example.com/us/en/page1:Missing Title');
+      expect(body.relationships).to.have.property('https://external.example.com/us/en/page1:Missing Title');
+    });
+
+    it('keeps absolute URL when normalization cannot parse site base URL', async () => {
+      isAEMAuthoredSiteStub.returns(true);
+      mockSite.getBaseURL.returns('invalid-site-url');
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([
+        createSuggestion({
+          pageUrl: 'https://example.com/us/en/page1',
+          suggestionType: 'Missing Title',
+        }),
+      ]);
+      resolvePageIdsStub.resolves([
+        { url: 'https://example.com/us/en/page1', pageId: 'pg-1' },
+      ]);
+      fetchRelationshipsStub.callsFake(async (authorURL, items) => ({
+        results: {
+          [items[0].key]: {
+            pageId: items[0].pageId,
+            upstream: { chain: [] },
+          },
+        },
+        errors: {},
+      }));
+      const controller = PageRelationshipsController(controllerContext);
+
+      const response = await controller.getForOpportunity(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(resolvePageIdsStub.firstCall.args[2]).to.deep.equal(['https://example.com/us/en/page1']);
+      expect(fetchRelationshipsStub.firstCall.args[1][0].key)
+        .to.equal('https://example.com/us/en/page1:Missing Title');
+      expect(body.relationships).to.have.property('https://example.com/us/en/page1:Missing Title');
+    });
+
+    it('falls back to root path when normalized absolute URL has empty pathname', async () => {
+      isAEMAuthoredSiteStub.returns(true);
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([
+        createSuggestion({
+          pageUrl: 'https://example.com',
+          suggestionType: 'Missing Title',
+        }),
+      ]);
+      sandbox.replace(globalThis, 'URL', class URLMock {
+        constructor(value) {
+          this.host = 'example.com';
+          this.pathname = value === 'https://example.com' ? '' : '/';
+        }
+      });
+      resolvePageIdsStub.resolves([
+        { url: '/', pageId: 'pg-root' },
+      ]);
+      fetchRelationshipsStub.callsFake(async (authorURL, items) => ({
+        results: {
+          [items[0].key]: {
+            pageId: items[0].pageId,
+            upstream: { chain: [] },
+          },
+        },
+        errors: {},
+      }));
+      const controller = PageRelationshipsController(controllerContext);
+
+      const response = await controller.getForOpportunity(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(resolvePageIdsStub.firstCall.args[2]).to.deep.equal(['/']);
+      expect(fetchRelationshipsStub.firstCall.args[1][0].key).to.equal('/:Missing Title');
+      expect(body.relationships).to.have.property('/:Missing Title');
+    });
+
     it('does not derive suggestion type from title or opportunity type', async () => {
       isAEMAuthoredSiteStub.returns(true);
       mockDataAccess.Suggestion.allByOpportunityId.resolves([
@@ -687,40 +667,6 @@ describe('Page Relationships Controller', () => {
       expect(response.status).to.equal(200);
       expect(fetchRelationshipsStub.firstCall.args[1][0].key).to.equal('/us/en/page1:');
       expect(body.relationships).to.have.property('/us/en/page1:');
-    });
-
-    it('uses url_to/urlTo for broken-link opportunities and ignores url_from/urlFrom', async () => {
-      isAEMAuthoredSiteStub.returns(true);
-      mockOpportunity.getType.returns('broken-backlinks');
-      mockDataAccess.Suggestion.allByOpportunityId.resolves([
-        createSuggestion({
-          url_from: '/us/en/referrer-page-a',
-          urlFrom: '/us/en/referrer-page-b',
-          url_to: '/us/en/page-with-issue',
-          urlTo: '/us/en/page-with-issue-camel',
-          suggestionType: 'Missing Title',
-        }),
-      ]);
-      resolvePageIdsStub.resolves([
-        { url: '/us/en/page-with-issue', pageId: 'pg-1' },
-        { url: '/us/en/page-with-issue-camel', pageId: 'pg-2' },
-      ]);
-      fetchRelationshipsStub.resolves({
-        results: {
-          '/us/en/page-with-issue:Missing Title': { pageId: 'pg-1', upstream: { chain: [] } },
-          '/us/en/page-with-issue-camel:Missing Title': { pageId: 'pg-2', upstream: { chain: [] } },
-        },
-        errors: {},
-      });
-      const controller = PageRelationshipsController(controllerContext);
-
-      const response = await controller.getForOpportunity(requestContext);
-      const body = await response.json();
-
-      expect(response.status).to.equal(200);
-      expect(resolvePageIdsStub.firstCall.args[2]).to.deep.equal(['/us/en/page-with-issue', '/us/en/page-with-issue-camel']);
-      expect(body.relationships).to.have.property('/us/en/page-with-issue:Missing Title');
-      expect(body.relationships).to.have.property('/us/en/page-with-issue-camel:Missing Title');
     });
 
     it('deduplicates suggestions by normalized pageUrl + suggestionType', async () => {
