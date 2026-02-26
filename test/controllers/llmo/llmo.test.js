@@ -4407,6 +4407,26 @@ describe('LlmoController', () => {
         }),
       );
     });
+
+    it('should return 400 when stagingDomains contains only empty/whitespace strings', async () => {
+      stageConfigContext.data = { stagingDomains: ['  ', '', '   \t  '] };
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('at least one non-empty domain string');
+    });
+
+    it('should return 400 when an error occurs during site creation', async () => {
+      mockDataAccess.Site.create.rejects(new Error('Database connection failed'));
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Database connection failed');
+    });
   });
 
   describe('getEdgeConfig', () => {
