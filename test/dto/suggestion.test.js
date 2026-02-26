@@ -50,7 +50,6 @@ describe('Suggestion DTO', () => {
         expect(json).to.have.property('status', 'NEW');
         expect(json).to.have.property('data');
         expect(json.data).to.have.property('url', 'https://example.com/page');
-        expect(json.data).to.have.property('aggregationKey');
         expect(json).to.have.property('kpiDeltas');
         expect(json).to.have.property('createdAt', '2025-01-01T00:00:00.000Z');
         expect(json).to.have.property('updatedAt', '2025-01-02T00:00:00.000Z');
@@ -74,14 +73,14 @@ describe('Suggestion DTO', () => {
         expect(json).to.have.property('updatedBy');
       });
 
-      it('computes aggregationKey at runtime when not present in data', () => {
+      it('omits aggregationKey when not present in data and computed value is falsy', () => {
         const suggestion = createMockSuggestion();
         const data = suggestion.getData();
         expect(data).to.not.have.property('aggregationKey');
 
         const json = SuggestionDto.toJSON(suggestion);
 
-        expect(json.data).to.have.property('aggregationKey');
+        expect(json.data).to.not.have.property('aggregationKey');
       });
 
       it('preserves manually injected aggregationKey from data', () => {

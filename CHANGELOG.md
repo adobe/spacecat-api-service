@@ -1,3 +1,66 @@
+## [1.323.2](https://github.com/adobe/spacecat-api-service/compare/v1.323.1...v1.323.2) (2026-02-25)
+
+
+### Bug Fixes
+
+* bump shared deps for temporal series bugfix ([#1864](https://github.com/adobe/spacecat-api-service/issues/1864)) ([8b34ec3](https://github.com/adobe/spacecat-api-service/commit/8b34ec3cffde8f2b989e3a01b85eeb561edefdb6))
+
+## [1.323.1](https://github.com/adobe/spacecat-api-service/compare/v1.323.0...v1.323.1) (2026-02-25)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1860](https://github.com/adobe/spacecat-api-service/issues/1860)) ([2d44abe](https://github.com/adobe/spacecat-api-service/commit/2d44abe0deb1380ece2995ab84c7507a93c92e80))
+
+# [1.323.0](https://github.com/adobe/spacecat-api-service/compare/v1.322.2...v1.323.0) (2026-02-25)
+
+
+### Features
+
+* migrate secrets from AWS SM to Vault ([#1857](https://github.com/adobe/spacecat-api-service/issues/1857)) ([4bb6a2b](https://github.com/adobe/spacecat-api-service/commit/4bb6a2b938b75f17530f168fc5ae18233e414bc9))
+
+## [1.322.2](https://github.com/adobe/spacecat-api-service/compare/v1.322.1...v1.322.2) (2026-02-25)
+
+
+### Bug Fixes
+
+* if and only if org member should be able to deploy fix at edge ([#1844](https://github.com/adobe/spacecat-api-service/issues/1844)) ([67dcb8d](https://github.com/adobe/spacecat-api-service/commit/67dcb8d12ed5b94c7032c73c25cb252a7d83f7bc))
+
+## [1.322.1](https://github.com/adobe/spacecat-api-service/compare/v1.322.0...v1.322.1) (2026-02-25)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-tokowaka-client to v1.9.0 ([#1855](https://github.com/adobe/spacecat-api-service/issues/1855)) ([8a7afde](https://github.com/adobe/spacecat-api-service/commit/8a7afdeaa544031c9b4f91145429a965052c2b48))
+
+# [1.322.0](https://github.com/adobe/spacecat-api-service/compare/v1.321.2...v1.322.0) (2026-02-24)
+
+
+### Features
+
+* update for alt-text autofix assessment action handling ([#1852](https://github.com/adobe/spacecat-api-service/issues/1852)) ([2c23e2e](https://github.com/adobe/spacecat-api-service/commit/2c23e2e2b3f89ead7ece0844258fbbe75544152e))
+
+## [1.321.2](https://github.com/adobe/spacecat-api-service/compare/v1.321.1...v1.321.2) (2026-02-24)
+
+
+### Bug Fixes
+
+* aggregationKey string spreading produces char index properties ([#1849](https://github.com/adobe/spacecat-api-service/issues/1849)) ([a327ec8](https://github.com/adobe/spacecat-api-service/commit/a327ec809bc5d4a2622bb9834e1d427a8d743bc3))
+
+## [1.321.1](https://github.com/adobe/spacecat-api-service/compare/v1.321.0...v1.321.1) (2026-02-24)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#1631](https://github.com/adobe/spacecat-api-service/issues/1631)) ([c712962](https://github.com/adobe/spacecat-api-service/commit/c712962254f5ae971dfc752efe145a58c000985d))
+
+# [1.321.0](https://github.com/adobe/spacecat-api-service/compare/v1.320.7...v1.321.0) (2026-02-23)
+
+
+### Features
+
+* **llmo:** add Slack notification for edge optimization opt-in ([#1842](https://github.com/adobe/spacecat-api-service/issues/1842)) ([d95c4f4](https://github.com/adobe/spacecat-api-service/commit/d95c4f4dc902da2543c27ffd4c2ec7b27d1077f7))
+
 ## [1.320.7](https://github.com/adobe/spacecat-api-service/compare/v1.320.6...v1.320.7) (2026-02-23)
 
 
