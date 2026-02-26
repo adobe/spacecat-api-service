@@ -321,10 +321,11 @@ describe('Page Relationships Controller', () => {
       expect(body.errors['/us/en/page1:'].error).to.equal('NOT_FOUND');
     });
 
-    it('calls buildCheckPath with suggestionType and metaTagPropertyMap', async () => {
+    it('calls buildCheckPath with suggestionType and delivery config', async () => {
       isAEMAuthoredSiteStub.returns(true);
       buildCheckPathStub.returns('/properties/jcr:title');
-      mockSite.getDeliveryConfig.returns({ authorURL: 'https://author.example.com', metaTagPropertyMap: { title: 'jcr:title' } });
+      const deliveryConfig = { authorURL: 'https://author.example.com', metaTagPropertyMap: { title: 'jcr:title' } };
+      mockSite.getDeliveryConfig.returns(deliveryConfig);
       resolvePageIdsStub.resolves([{ url: '/us/en/page1', pageId: 'pg-123' }]);
       fetchRelationshipsStub.resolves({ results: { k1: { upstream: { chain: [] } } }, errors: {} });
 
@@ -332,8 +333,48 @@ describe('Page Relationships Controller', () => {
 
       await controller.search(requestContext);
 
-      expect(buildCheckPathStub).to.have.been.calledWith('Missing Title', { title: 'jcr:title' });
+      expect(buildCheckPathStub).to.have.been.calledWith('Missing Title', deliveryConfig);
       expect(fetchRelationshipsStub.firstCall.args[1][0].checkPath).to.equal('/properties/jcr:title');
+    });
+
+    it('uses checkPath from page spec when provided instead of deriving it', async () => {
+      isAEMAuthoredSiteStub.returns(true);
+      resolvePageIdsStub.resolves([{ url: '/us/en/page1', pageId: 'pg-123' }]);
+      fetchRelationshipsStub.resolves({ results: {}, errors: {} });
+      requestContext.data = {
+        pages: [{
+          pageUrl: '/us/en/page1',
+          suggestionType: 'Missing Title',
+          checkPath: '/properties/custom-prop',
+        }],
+      };
+
+      const controller = PageRelationshipsController(controllerContext);
+
+      await controller.search(requestContext);
+
+      expect(buildCheckPathStub).to.not.have.been.called;
+      expect(fetchRelationshipsStub.firstCall.args[1][0].checkPath).to.equal('/properties/custom-prop');
+    });
+
+    it('does not derive checkPath when an explicit empty checkPath is provided', async () => {
+      isAEMAuthoredSiteStub.returns(true);
+      resolvePageIdsStub.resolves([{ url: '/us/en/page1', pageId: 'pg-123' }]);
+      fetchRelationshipsStub.resolves({ results: {}, errors: {} });
+      requestContext.data = {
+        pages: [{
+          pageUrl: '/us/en/page1',
+          suggestionType: 'Missing Title',
+          checkPath: '',
+        }],
+      };
+
+      const controller = PageRelationshipsController(controllerContext);
+
+      await controller.search(requestContext);
+
+      expect(buildCheckPathStub).to.not.have.been.called;
+      expect(fetchRelationshipsStub.firstCall.args[1][0]).to.not.have.property('checkPath');
     });
 
     it('uses page key from request when provided', async () => {
@@ -352,17 +393,18 @@ describe('Page Relationships Controller', () => {
       expect(fetchRelationshipsStub.firstCall.args[1][0].key).to.equal('page-1');
     });
 
-    it('passes empty metaTagPropertyMap when delivery config has no map', async () => {
+    it('passes delivery config without metaTagPropertyMap when config has no map', async () => {
       isAEMAuthoredSiteStub.returns(true);
       buildCheckPathStub.returns(undefined);
-      mockSite.getDeliveryConfig.returns({ authorURL: 'https://author.example.com' });
+      const deliveryConfig = { authorURL: 'https://author.example.com' };
+      mockSite.getDeliveryConfig.returns(deliveryConfig);
       resolvePageIdsStub.resolves([{ url: '/us/en/page1', pageId: 'pg-123' }]);
       fetchRelationshipsStub.resolves({ results: { k1: { upstream: { chain: [] } } }, errors: {} });
       const controller = PageRelationshipsController(controllerContext);
 
       await controller.search(requestContext);
 
-      expect(buildCheckPathStub).to.have.been.calledWith('Missing Title', {});
+      expect(buildCheckPathStub).to.have.been.calledWith('Missing Title', deliveryConfig);
     });
 
     it('returns supported: true with empty relationships when all pages fail to resolve', async () => {

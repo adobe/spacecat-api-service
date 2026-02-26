@@ -10,44 +10,15 @@
  * governing permissions and limitations under the License.
  */
 
-import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import {
+  DELIVERY_TYPES,
+  determineAEMCSPageId,
+} from '@adobe/spacecat-shared-utils';
 
-const AEM_DELIVERY_TYPES = [
-  SiteModel.DELIVERY_TYPES.AEM_CS,
-  SiteModel.DELIVERY_TYPES.AEM_AMS,
+const AEM_AUTHORED_TYPES = [
+  DELIVERY_TYPES.AEM_CS,
+  DELIVERY_TYPES.AEM_AMS,
 ];
-
-function getContentPageIdFromHtml(html) {
-  const m = html.match(/<meta\s+name=["']content-page-id["']\s+content=["']([^"']+)["']/i)
-    || html.match(/<meta\s+content=["']([^"']+)["']\s+name=["']content-page-id["']/i);
-  return m ? m[1].trim() : null;
-}
-
-function getContentPageRefFromHtml(html) {
-  const m = html.match(/<meta\s+name=["']content-page-ref["']\s+content=["']([^"']+)["']/i)
-    || html.match(/<meta\s+content=["']([^"']+)["']\s+name=["']content-page-ref["']/i);
-  return m ? m[1].trim() : null;
-}
-
-async function resolvePageRef(authorURL, pageRef, imsToken, log) {
-  const base = authorURL.replace(/\/$/, '');
-  const url = `${base}/adobe/pages/resolve?pageRef=${encodeURIComponent(pageRef)}`;
-  try {
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${imsToken}` },
-    });
-    if (!res.ok) {
-      log.warn(`Resolve API returned ${res.status} for pageRef`);
-      return null;
-    }
-    const data = await res.json();
-    return data?.pageId || null;
-  } catch (e) {
-    log.warn(`Resolve API error: ${e.message}`);
-    return null;
-  }
-}
 
 /**
  * Whether the delivery type supports AEM Content API (page relationships, resolve).
@@ -55,57 +26,49 @@ async function resolvePageRef(authorURL, pageRef, imsToken, log) {
  * @returns {boolean}
  */
 export function isAEMAuthoredSite(deliveryType) {
-  return deliveryType && AEM_DELIVERY_TYPES.includes(deliveryType);
+  return deliveryType && AEM_AUTHORED_TYPES.includes(deliveryType);
 }
 
 /**
- * Resolve page URLs to AEM page IDs: fetch published page HTML, read content-page-id or
- * content-page-ref meta, and resolve via AEM Content API if needed.
- * @param {string} siteBaseURL - Published site base URL (e.g. https://example.com).
- * @param {string} authorURL - AEM author URL (e.g. https://author-xxx.adobeaemcloud.com).
+ * Resolve page URLs to AEM page IDs using the shared determineAEMCSPageId
+ * utility (fetches HTML, reads content-page-ref / content-page-id meta,
+ * resolves via AEM Content API when needed).
+ * @param {string} siteBaseURL - Published site base URL.
+ * @param {string} authorURL - AEM author URL.
  * @param {string[]} pageUrls - Page paths (e.g. /us/en/products).
- * @param {string} imsToken - Bearer token for AEM.
+ * @param {string} imsToken - Bearer token (without "Bearer " prefix).
  * @param {object} log - Logger.
  * @returns {Promise<Array<{ url: string, pageId?: string, error?: string }>>}
  */
 export async function resolvePageIds(siteBaseURL, authorURL, pageUrls, imsToken, log) {
   const base = siteBaseURL.replace(/\/$/, '');
+  const bearerToken = `Bearer ${imsToken}`;
   const out = [];
 
   for (const pageUrl of pageUrls) {
-    const normalizedPageUrl = typeof pageUrl === 'string' ? pageUrl.trim() : '';
-    if (!normalizedPageUrl) {
+    const normalized = typeof pageUrl === 'string' ? pageUrl.trim() : '';
+    if (!normalized) {
       out.push({ url: pageUrl, error: 'Invalid pageUrl' });
     } else {
-      const fullUrl = `${base}${normalizedPageUrl.startsWith('/') ? normalizedPageUrl : `/${normalizedPageUrl}`}`;
+      const slash = normalized.startsWith('/') ? '' : '/';
+      const fullUrl = `${base}${slash}${normalized}`;
       try {
-        /* eslint-disable-next-line no-await-in-loop -- sequential fetch per page */
-        const res = await fetch(fullUrl, { method: 'GET', redirect: 'follow' });
-        if (!res.ok) {
-          out.push({ url: normalizedPageUrl, error: `HTTP ${res.status}` });
+        /* eslint-disable-next-line no-await-in-loop -- sequential per page */
+        const pageId = await determineAEMCSPageId(
+          fullUrl,
+          authorURL,
+          bearerToken,
+          true,
+          log,
+        );
+        if (pageId) {
+          out.push({ url: normalized, pageId });
         } else {
-          /* eslint-disable-next-line no-await-in-loop -- sequential fetch per page */
-          const html = await res.text();
-          const pageId = getContentPageIdFromHtml(html);
-          const pageRef = getContentPageRefFromHtml(html);
-
-          if (pageId) {
-            out.push({ url: normalizedPageUrl, pageId });
-          } else if (pageRef) {
-            /* eslint-disable-next-line no-await-in-loop -- sequential resolve per page */
-            const resolved = await resolvePageRef(authorURL, pageRef, imsToken, log);
-            if (resolved) {
-              out.push({ url: normalizedPageUrl, pageId: resolved });
-            } else {
-              out.push({ url: normalizedPageUrl, error: 'Resolve failed' });
-            }
-          } else {
-            out.push({ url: normalizedPageUrl, error: 'No content-page-id or content-page-ref' });
-          }
+          out.push({ url: normalized, error: 'Could not determine page ID' });
         }
       } catch (e) {
-        log.warn(`resolvePageIds failed for ${normalizedPageUrl}: ${e.message}`);
-        out.push({ url: normalizedPageUrl, error: e.message });
+        log.warn(`resolvePageIds failed for ${normalized}: ${e.message}`);
+        out.push({ url: normalized, error: e.message });
       }
     }
   }
@@ -155,20 +118,32 @@ export async function fetchRelationships(authorURL, items, imsToken, log) {
   }
 }
 
+const METATAG_PATTERNS = [
+  { regex: /\btitle\b/i, property: 'title', defaultJcr: 'jcr:title' },
+  { regex: /\bdescription\b/i, property: 'description', defaultJcr: 'jcr:description' },
+];
+
 /**
- * Build checkPath for relationship API from suggestion type and metaTagPropertyMap.
- * Returns undefined for alt-text and other types where property-level check is not possible.
- * @param {string} [suggestionType] - e.g. "Missing Title", "Missing Description".
- * @param {object} [metaTagPropertyMap] - deliveryConfig.metaTagPropertyMap.
+ * Build checkPath for relationship API from suggestion type and delivery config.
+ * Detects which metatag property the suggestion targets (title / description)
+ * by matching keywords in the issue string, then resolves to a JCR property
+ * path via metaTagPropertyMap or known defaults. Returns undefined when the
+ * suggestion does not target a known metatag property.
+ * @param {string} [suggestionType] - Issue string, e.g. "Missing title",
+ *   "Title too short", "Missing meta description", "Duplicate title".
+ * @param {object} [deliveryConfig] - Site delivery config.
  * @returns {string|undefined}
  */
-export function buildCheckPath(suggestionType, metaTagPropertyMap = {}) {
-  switch (suggestionType) {
-    case 'Missing Title':
-      return `/properties/${metaTagPropertyMap.title || 'jcr:title'}`;
-    case 'Missing Description':
-      return `/properties/${metaTagPropertyMap.description || 'jcr:description'}`;
-    default:
-      return undefined;
+export function buildCheckPath(suggestionType, deliveryConfig = {}) {
+  if (!suggestionType) return undefined;
+
+  for (const { regex, property, defaultJcr } of METATAG_PATTERNS) {
+    if (regex.test(suggestionType)) {
+      const { metaTagPropertyMap = {} } = deliveryConfig;
+      const jcrProperty = metaTagPropertyMap[property] || defaultJcr;
+      return `/properties/${jcrProperty}`;
+    }
   }
+
+  return undefined;
 }
