@@ -29,7 +29,7 @@ describe('email-service', () => {
 
   before(async () => {
     imsClientInstance = {
-      getServiceAccessToken: sinon.stub().resolves({ access_token: 'test-token' }),
+      getServiceAccessTokenV3: sinon.stub().resolves({ access_token: 'test-token' }),
     };
     ImsClientStub = {
       createFrom: sinon.stub().returns(imsClientInstance),
@@ -48,8 +48,8 @@ describe('email-service', () => {
 
   beforeEach(() => {
     ImsClientStub.createFrom.resetHistory();
-    imsClientInstance.getServiceAccessToken.reset();
-    imsClientInstance.getServiceAccessToken.resolves({ access_token: 'test-token' });
+    imsClientInstance.getServiceAccessTokenV3.reset();
+    imsClientInstance.getServiceAccessTokenV3.resolves({ access_token: 'test-token' });
 
     mockContext = {
       env: {
@@ -227,7 +227,7 @@ describe('email-service', () => {
     });
 
     it('should handle IMS token failure gracefully', async () => {
-      imsClientInstance.getServiceAccessToken.rejects(new Error('IMS unavailable'));
+      imsClientInstance.getServiceAccessTokenV3.rejects(new Error('IMS unavailable'));
 
       const result = await sendEmail(mockContext, {
         recipients: ['test@example.com'],
