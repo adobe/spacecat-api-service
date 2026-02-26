@@ -19,7 +19,7 @@
  * edge-preview endpoint is called via the LLMO API. Reports success when HTML changed, or flags
  * URL + suggestion IDs + X-Invocation-Id when response is non-200 or originalHtml === optimizedHtml.
  *
- * Usage: node scripts/test-edge-preview.js <siteId>
+ * Usage: node scripts/test-edge-preview.js <siteId> | <siteId1>,<siteId2>,...
  *
  * Environment:
  *   DYNAMO_TABLE_NAME_DATA, S3_CONFIG_BUCKET, AWS_REGION - for data access (see create-generic-autofix-suggestions.js)
@@ -40,7 +40,7 @@ config({ path: path.join(__dirname, `../.env-${env}`) });
 
 const ELIGIBLE_OPPORTUNITY_TYPES = ['readability', 'summarization', 'headings', 'faqs', 'generic-autofix-edge'];
 const ELIGIBLE_SUGGESTION_STATUSES = ['NEW', 'PENDING_VALIDATION'];
-const EDGE_PREVIEW_BATCH_SIZE = 10;
+const EDGE_PREVIEW_BATCH_SIZE = 15;
 
 const API_BASE_URL = process.env.LLMO_API_BASE_URL || `https://llmo.experiencecloud.live/api/${env === "prod" ? "v1" : "ci"}`;
 const API_KEY = process.env.LLMO_EDGE_PREVIEW_API_KEY;
@@ -196,13 +196,14 @@ function processEdgePreviewResult({ url, suggestionIds, type, opportunityId }, {
   console.log(`  [edge-preview debug] ${url} okStatus=${okStatus} hasHtmlDiff=${diff} => ${okStatus && diff ? 'SUCCESS' : 'FLAGGED'}`);
 
   if (okStatus && diff) {
-    results.success.push({ url, opportunityId, type, suggestionIds });
+    results.success.push({ siteId: results._currentSiteId, url, opportunityId, type, suggestionIds });
     console.log(`  [${type}] OK ${url} (${suggestionIds.length} suggestion(s))`);
   } else {
     const reason = !okStatus
       ? `HTTP ${status}`
       : (apiFailureReason || 'no difference between originalHtml and optimizedHtml');
     results.failed.push({
+      siteId: results._currentSiteId,
       url,
       opportunityId,
       type,
@@ -227,10 +228,15 @@ function processEdgePreviewResult({ url, suggestionIds, type, opportunityId }, {
 }
 
 async function main() {
-  const siteId = process.argv[2];
-  if (!siteId) {
-    console.error('Usage: node scripts/test-edge-preview.js <siteId>');
+  const siteIdsInput = process.argv[2];
+  if (!siteIdsInput) {
+    console.error('Usage: node scripts/test-edge-preview.js <siteId> | <siteId1>,<siteId2>,...');
     console.error('Set LLMO_EDGE_PREVIEW_API_KEY (and optionally LLMO_API_BASE_URL). Use .env-dev for data access.');
+    process.exit(1);
+  }
+  const siteIds = siteIdsInput.split(',').map((s) => s.trim()).filter(Boolean);
+  if (siteIds.length === 0) {
+    console.error('At least one site ID is required.');
     process.exit(1);
   }
   if (!API_KEY) {
@@ -238,7 +244,7 @@ async function main() {
     process.exit(1);
   }
 
-  console.log(`Site: ${siteId}`);
+  console.log(`Sites: ${siteIds.length} (${siteIds.join(', ')})`);
   console.log(`Edge-preview API: ${API_BASE_URL}`);
   console.log('Eligible opportunity types:', ELIGIBLE_OPPORTUNITY_TYPES.join(', '));
   console.log('');
@@ -246,77 +252,107 @@ async function main() {
   const dataAccessInstance = await initializeDataAccess();
   const { Site, Opportunity } = dataAccessInstance;
 
-  const site = await Site.findById(siteId);
-  if (!site) {
-    throw new Error(`Site with ID ${siteId} not found`);
-  }
-  console.log(`Site found: ${site.getBaseURL()}`);
-
-  const allOpportunities = await Opportunity.allBySiteId(siteId);
-  const opportunities = allOpportunities.filter((opp) => {
-    const type = opp.getType?.();
-    return type && ELIGIBLE_OPPORTUNITY_TYPES.includes(type);
-  });
-  console.log(`Found ${opportunities.length} eligible opportunities.`);
-
   const results = { success: [], failed: [] };
+  const siteIdToUrl = new Map();
 
-  for (const opportunity of opportunities) {
-    const opportunityId = opportunity.getId();
-    const type = opportunity.getType();
-    const suggestions = await opportunity.getSuggestions();
-    if (suggestions.length === 0) {
-      console.log(`  [${type}] ${opportunityId}: no suggestions, skipping.`);
+  for (const siteId of siteIds) {
+    results._currentSiteId = siteId;
+    console.log(`--- Site: ${siteId} ---`);
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      console.error(`  Site with ID ${siteId} not found, skipping.`);
       continue;
     }
+    const baseUrl = site.getBaseURL();
+    siteIdToUrl.set(siteId, baseUrl);
+    console.log(`  Site found: ${baseUrl}`);
 
-    const byUrl = groupSuggestionIdsByUrl(suggestions, type);
-    if (byUrl.size === 0) {
-      console.log(`  [${type}] ${opportunityId}: no suggestions with URL, skipping.`);
-      continue;
-    }
+    const allOpportunities = await Opportunity.allBySiteId(siteId);
+    const opportunities = allOpportunities.filter((opp) => {
+      const type = opp.getType?.();
+      return type && ELIGIBLE_OPPORTUNITY_TYPES.includes(type);
+    });
+    console.log(`  Found ${opportunities.length} eligible opportunities.`);
 
-    const entries = Array.from(byUrl.entries());
-    const batches = chunk(entries, EDGE_PREVIEW_BATCH_SIZE);
-    for (const batch of batches) {
-      const batchResults = await Promise.all(
-        batch.map(([url, suggestionIds]) =>
-          callEdgePreview(siteId, opportunityId, suggestionIds).then((res) => ({
-            url,
-            suggestionIds,
-            ...res,
-          }))
-        )
-      );
-      for (const { url, suggestionIds, status, headers, body } of batchResults) {
-        processEdgePreviewResult(
-          { url, suggestionIds, type, opportunityId },
-          { status, headers, body },
-          results
+    for (const opportunity of opportunities) {
+      const opportunityId = opportunity.getId();
+      const type = opportunity.getType();
+      const suggestions = await opportunity.getSuggestions();
+      if (suggestions.length === 0) {
+        console.log(`  [${type}] ${opportunityId}: no suggestions, skipping.`);
+        continue;
+      }
+
+      const byUrl = groupSuggestionIdsByUrl(suggestions, type);
+      if (byUrl.size === 0) {
+        console.log(`  [${type}] ${opportunityId}: no suggestions with URL, skipping.`);
+        continue;
+      }
+
+      const entries = Array.from(byUrl.entries());
+      const batches = chunk(entries, EDGE_PREVIEW_BATCH_SIZE);
+      for (const batch of batches) {
+        const batchResults = await Promise.all(
+          batch.map(([url, suggestionIds]) =>
+            callEdgePreview(siteId, opportunityId, suggestionIds).then((res) => ({
+              url,
+              suggestionIds,
+              ...res,
+            }))
+          )
         );
+        for (const { url, suggestionIds, status, headers, body } of batchResults) {
+          processEdgePreviewResult(
+            { url, suggestionIds, type, opportunityId },
+            { status, headers, body },
+            results
+          );
+        }
       }
     }
+    console.log('');
   }
 
-  console.log('');
+  delete results._currentSiteId;
+
+  const bySite = new Map();
+  for (const siteId of siteIds) {
+    bySite.set(siteId, { success: 0, failed: 0 });
+  }
+  for (const r of results.success) {
+    if (r.siteId && bySite.has(r.siteId)) bySite.get(r.siteId).success += 1;
+  }
+  for (const r of results.failed) {
+    if (r.siteId && bySite.has(r.siteId)) bySite.get(r.siteId).failed += 1;
+  }
+
   console.log('--- Summary ---');
+  console.log(`Sites processed: ${siteIds.length}`);
   console.log(`Success: ${results.success.length}`);
   console.log(`Flagged: ${results.failed.length}`);
+  console.log('');
+  console.log('--- Per-site summary ---');
+  for (const siteId of siteIds) {
+    const { success, failed } = bySite.get(siteId);
+    const label = siteIdToUrl.get(siteId) ?? siteId;
+    console.log(`  ${label}: success ${success}, failed ${failed}`);
+  }
   if (results.failed.length > 0) {
     console.log('');
     console.log('Flagged URLs:');
-    results.failed.forEach((f) => {
-      console.log(`  ${f.url}`);
-      console.log(`    opportunityId: ${f.opportunityId} (${f.type})`);
-      console.log(`    suggestionIds: ${JSON.stringify(f.suggestionIds)}`);
-      console.log(`    X-Invocation-Id: ${f.invocationId || '(none)'}`);
-      console.log(`    reason: ${f.reason}`);
-    });
-    console.log('');
-    console.log('--- Problematic (X-Invocation-Id, opportunity type, URL) ---');
-    results.failed.forEach((f) => {
-      console.log(`${f.invocationId || '(none)'}\t${f.type}\t${f.url}`);
-    });
+    // results.failed.forEach((f) => {
+    //   console.log(`  [${f.siteId}] ${f.url}`);
+    //   console.log(`    opportunityId: ${f.opportunityId} (${f.type})`);
+    //   console.log(`    suggestionIds: ${JSON.stringify(f.suggestionIds)}`);
+    //   console.log(`    X-Invocation-Id: ${f.invocationId || '(none)'}`);
+    //   console.log(`    reason: ${f.reason}`);
+    // });
+    // console.log('');
+    // console.log('--- Problematic (X-Invocation-Id, opportunity type, siteId, URL) ---');
+    // results.failed.forEach((f) => {
+    //   console.log(`${f.invocationId || '(none)'}\t${f.type}\t${f.siteId}\t${f.url}`);
+    // });
   }
 }
 
