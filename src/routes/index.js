@@ -217,6 +217,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/opportunities/top-paid': topPaidOpportunitiesController.getTopPaidOpportunities,
     'GET /sites/:siteId/opportunities/by-status/:status': opportunitiesController.getByStatus,
     'GET /sites/:siteId/opportunities/:opportunityId': opportunitiesController.getByID,
+    'GET /sites/:siteId/opportunities/:opportunityId/page-relationships': pageRelationshipsController.getForOpportunity,
     'POST /sites/:siteId/opportunities': opportunitiesController.createOpportunity,
     'PATCH /sites/:siteId/opportunities/:opportunityId': opportunitiesController.patchOpportunity,
     'DELETE /sites/:siteId/opportunities/:opportunityId': opportunitiesController.removeOpportunity,

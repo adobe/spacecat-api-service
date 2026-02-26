@@ -360,6 +360,7 @@ describe('getRouteHandlers', () => {
 
   const mockPageRelationshipsController = {
     search: sinon.stub(),
+    getForOpportunity: sinon.stub(),
   };
 
   it('segregates static and dynamic routes', () => {
@@ -540,6 +541,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/opportunities/top-paid',
       'GET /sites/:siteId/opportunities/by-status/:status',
       'GET /sites/:siteId/opportunities/:opportunityId',
+      'GET /sites/:siteId/opportunities/:opportunityId/page-relationships',
       'POST /sites/:siteId/opportunities',
       'PATCH /sites/:siteId/opportunities/:opportunityId',
       'DELETE /sites/:siteId/opportunities/:opportunityId',
@@ -772,6 +774,10 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['POST /sites/:siteId/opportunities'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['POST /sites/:siteId/page-relationships/search'].handler).to.equal(mockPageRelationshipsController.search);
     expect(dynamicRoutes['POST /sites/:siteId/page-relationships/search'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/page-relationships'].handler)
+      .to.equal(mockPageRelationshipsController.getForOpportunity);
+    expect(dynamicRoutes['GET /sites/:siteId/opportunities/:opportunityId/page-relationships'].paramNames)
+      .to.deep.equal(['siteId', 'opportunityId']);
     expect(dynamicRoutes['PATCH /sites/:siteId/opportunities/:opportunityId'].handler).to.equal(mockOpportunitiesController.patchOpportunity);
     expect(dynamicRoutes['PATCH /sites/:siteId/opportunities/:opportunityId'].paramNames).to.deep.equal(['siteId', 'opportunityId']);
     expect(dynamicRoutes['DELETE /sites/:siteId/opportunities/:opportunityId'].handler).to.equal(mockOpportunitiesController.removeOpportunity);
