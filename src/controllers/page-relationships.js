@@ -12,9 +12,7 @@
 
 import {
   hasText,
-  isNonEmptyArray,
   isValidUUID,
-  OPPORTUNITY_TYPES,
 } from '@adobe/spacecat-shared-utils';
 import {
   badRequest,
@@ -32,6 +30,7 @@ import {
 } from '../support/aem-content-api.js';
 
 const MAX_PAGES = 50;
+const SUPPORTED_OPPORTUNITY_TYPES = new Set(['meta-tags', 'alt-text']);
 const EMPTY_RELATIONSHIPS_RESPONSE = {
   supported: false,
   relationships: {},
@@ -55,14 +54,10 @@ function getSuggestionType(suggestion) {
   return hasText(rawType) ? rawType.trim() : '';
 }
 
-function getSuggestionPageUrls(suggestion, opportunityType = '') {
+function getSuggestionPageUrls(suggestion) {
   const data = suggestion?.getData?.() || {};
   const urls = new Set();
-  const directUrlValues = (
-    opportunityType === OPPORTUNITY_TYPES.BROKEN_BACKLINKS
-    || opportunityType === OPPORTUNITY_TYPES.BROKEN_INTERNAL_LINKS
-  ) ? [data.url_to, data.urlTo]
-    : [data.url, data.pageUrl];
+  const directUrlValues = [data.url, data.pageUrl];
 
   directUrlValues.forEach((value) => {
     if (hasText(value)) {
@@ -102,12 +97,12 @@ function normalizePageUrlForLookup(pageUrl, siteBaseURL) {
 }
 
 function extractPagesFromSuggestions(suggestions, options = {}) {
-  const { opportunityType = '', siteBaseURL = '' } = options;
+  const { siteBaseURL = '' } = options;
   const uniquePages = new Map();
   const suggestionList = Array.isArray(suggestions) ? suggestions : [];
   suggestionList.forEach((suggestion) => {
     const suggestionType = getSuggestionType(suggestion);
-    const pageUrls = getSuggestionPageUrls(suggestion, opportunityType);
+    const pageUrls = getSuggestionPageUrls(suggestion);
     pageUrls.forEach((pageUrl) => {
       const normalizedPageUrl = normalizePageUrlForLookup(pageUrl, siteBaseURL);
       const dedupeKey = `${normalizedPageUrl}:${suggestionType}`;
@@ -123,7 +118,7 @@ function extractPagesFromSuggestions(suggestions, options = {}) {
  * Page relationships controller: proxy to AEM Content API for upstream relationship data.
  * Used for list-time enrichment (metatags/alt-text) so the UI can show fix targets.
  * @param {object} ctx - Context with dataAccess, log.
- * @returns {object} Controller with search and getForOpportunity.
+ * @returns {object} Controller with getForOpportunity.
  */
 function PageRelationshipsController(ctx) {
   const { dataAccess, log } = ctx;
@@ -157,7 +152,7 @@ function PageRelationshipsController(ctx) {
   }
 
   async function lookupRelationships(site, pages, imsToken, options = {}) {
-    const { deliveryConfig, authorURL, chunked = false } = options;
+    const { deliveryConfig, authorURL } = options;
     const baseURL = site.getBaseURL();
     if (!hasText(baseURL)) {
       return {
@@ -168,7 +163,7 @@ function PageRelationshipsController(ctx) {
 
     const allRelationships = {};
     const allErrors = {};
-    const pageChunks = chunked ? chunkPages(pages, MAX_PAGES) : [pages];
+    const pageChunks = chunkPages(pages, MAX_PAGES);
 
     for (const pageBatch of pageChunks) {
       const normalizedBatch = pageBatch.map((pageSpec) => ({
@@ -188,25 +183,23 @@ function PageRelationshipsController(ctx) {
       const items = [];
       const resolveErrors = {};
 
-      for (let i = 0; i < resolved.length; i += 1) {
-        const r = resolved[i];
-        const pageSpec = normalizedBatch[i] || {};
-        const responseUrl = pageSpec.normalizedPageUrl || r.url;
+      for (let i = 0; i < normalizedBatch.length; i += 1) {
+        const pageSpec = normalizedBatch[i];
+        const r = resolved[i] || {};
+        const responseUrl = pageSpec.normalizedPageUrl;
         if (r.error || !r.pageId) {
-          const errKey = pageSpec.key ?? responseUrl;
-          resolveErrors[errKey] = { error: r.error || 'Could not resolve page' };
+          resolveErrors[responseUrl] = { error: r.error || 'Could not resolve page' };
         } else {
-          const hasExplicitCheckPath = Object.prototype.hasOwnProperty.call(pageSpec, 'checkPath');
-          const checkPath = hasExplicitCheckPath
-            ? pageSpec.checkPath
-            : buildCheckPath(pageSpec.suggestionType, deliveryConfig);
-          const key = pageSpec.key ?? `${responseUrl}:${pageSpec.suggestionType ?? ''}`;
-          items.push({
-            key,
+          const checkPath = buildCheckPath(pageSpec.suggestionType, deliveryConfig);
+          const item = {
+            key: `${responseUrl}:${pageSpec.suggestionType}`,
             pageId: r.pageId,
             include: ['upstream'],
-            ...(hasText(checkPath) && { checkPath }),
-          });
+          };
+          if (hasText(checkPath)) {
+            item.checkPath = checkPath;
+          }
+          items.push(item);
         }
       }
 
@@ -224,60 +217,6 @@ function PageRelationshipsController(ctx) {
       relationships: allRelationships,
       errors: allErrors,
     };
-  }
-
-  /**
-   * POST /sites/:siteId/page-relationships/search
-   * Body: { pages: [ { pageUrl, suggestionType }, ... ] }
-   * Returns { supported, relationships, errors }.
-   */
-  async function search(context) {
-    const siteId = context.params?.siteId;
-    if (!isValidUUID(siteId)) {
-      return badRequest('Site ID required');
-    }
-
-    const site = await dataAccess.Site.findById(siteId);
-    if (!site) {
-      return notFound('Site not found');
-    }
-
-    if (!await accessControlUtil.hasAccess(site)) {
-      return forbidden('Only users belonging to the organization can access this site');
-    }
-
-    const supportState = getSupportState(site);
-    if (!supportState.supported) {
-      return createResponse(EMPTY_RELATIONSHIPS_RESPONSE);
-    }
-    const { deliveryConfig, authorURL } = supportState;
-
-    const pages = context.data?.pages;
-    if (!isNonEmptyArray(pages) || pages.length > MAX_PAGES) {
-      return badRequest(`pages array required (max ${MAX_PAGES} items)`);
-    }
-    if (pages.some((page) => !page || !hasText(page.pageUrl))) {
-      return badRequest('Each page must include a non-empty pageUrl');
-    }
-
-    let imsToken;
-    try {
-      imsToken = getImsUserToken(context);
-    } catch (e) {
-      return badRequest('Missing Authorization header');
-    }
-
-    const { relationships, errors } = await lookupRelationships(site, pages, imsToken, {
-      deliveryConfig,
-      authorURL,
-      chunked: false,
-    });
-
-    return createResponse({
-      supported: true,
-      relationships,
-      errors,
-    });
   }
 
   /**
@@ -308,6 +247,19 @@ function PageRelationshipsController(ctx) {
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
     }
+    const opportunityType = opportunity.getType?.();
+    if (!SUPPORTED_OPPORTUNITY_TYPES.has(opportunityType)) {
+      log.warn(`Unsupported opportunity type for page relationships: ${opportunityType || 'unknown'} (opportunityId=${opportunityId})`);
+      return createResponse({
+        supported: false,
+        relationships: {},
+        errors: {
+          _opportunity: {
+            error: `Unsupported opportunity type: ${opportunityType || 'unknown'}`,
+          },
+        },
+      });
+    }
 
     const supportState = getSupportState(site);
     if (!supportState.supported) {
@@ -317,7 +269,6 @@ function PageRelationshipsController(ctx) {
 
     const suggestions = await dataAccess.Suggestion.allByOpportunityId(opportunityId);
     const pages = extractPagesFromSuggestions(suggestions, {
-      opportunityType: opportunity.getType?.(),
       siteBaseURL: site.getBaseURL(),
     });
 
@@ -331,7 +282,6 @@ function PageRelationshipsController(ctx) {
     const { relationships, errors } = await lookupRelationships(site, pages, imsToken, {
       deliveryConfig,
       authorURL,
-      chunked: true,
     });
 
     return createResponse({
@@ -341,7 +291,7 @@ function PageRelationshipsController(ctx) {
     });
   }
 
-  return { search, getForOpportunity };
+  return { getForOpportunity };
 }
 
 export default PageRelationshipsController;
