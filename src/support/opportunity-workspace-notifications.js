@@ -15,7 +15,7 @@ import { sendEmail } from './email-service.js';
 
 /**
  * @typedef {Object} StatusChange
- * @property {string} type - 'opportunity' or 'strategy'
+ * @property {string} type - 'opportunity', 'strategy', or 'assignment'
  * @property {string} strategyId
  * @property {string} strategyName
  * @property {string} [opportunityId]
@@ -24,8 +24,10 @@ import { sendEmail } from './email-service.js';
  * @property {string} statusAfter
  * @property {string[]} recipients - deduplicated valid email addresses
  * @property {string} [createdBy] - strategy owner email (optional)
- * @property {string} [assignee] - opportunity assignee email (opportunity changes only)
+ * @property {string} [assignee] - opportunity assignee email (opportunity/assignment changes only)
  * @property {string[]} [opportunityNames] - opportunity names for strategy changes
+ * @property {string} [assigneeBefore] - previous assignee (assignment changes only)
+ * @property {string} [assigneeAfter] - new assignee (assignment changes only)
  */
 
 /**
@@ -206,30 +208,62 @@ export function detectStatusChanges(prevData, nextData, log) {
         });
       }
 
-      // Check opportunity-level status changes
+      // Check opportunity-level status changes and assignment changes
       const prevOpps = prevOppIndex.get(nextStrategy.id);
       for (const nextOpp of nextStrategy.opportunities || []) {
         const prevOpp = prevOpps?.get(nextOpp.opportunityId);
         if (!prevOpp) {
-          // Skip new opportunities that didn't exist before (only for existing strategies)
-        } else if (prevOpp.status !== nextOpp.status) {
-          const candidateEmails = [
-            nextOpp.assignee,
-            nextStrategy.createdBy,
-          ];
+          // New opportunity added to existing strategy with assignee -> emit assignment change
+          if (nextOpp.assignee) {
+            changes.push({
+              type: 'assignment',
+              strategyId: nextStrategy.id,
+              strategyName: nextStrategy.name,
+              opportunityId: nextOpp.opportunityId,
+              opportunityName: nextOpp.name || nextOpp.opportunityId,
+              assigneeBefore: '',
+              assigneeAfter: nextOpp.assignee,
+              recipients: filterValidEmails([nextOpp.assignee, nextStrategy.createdBy], log),
+              createdBy: nextStrategy.createdBy || '',
+              assignee: nextOpp.assignee,
+            });
+          }
+          // Skip status change for new opportunities (no prev status)
+        } else {
+          if (prevOpp.status !== nextOpp.status) {
+            const candidateEmails = [
+              nextOpp.assignee,
+              nextStrategy.createdBy,
+            ];
 
-          changes.push({
-            type: 'opportunity',
-            strategyId: nextStrategy.id,
-            strategyName: nextStrategy.name,
-            opportunityId: nextOpp.opportunityId,
-            opportunityName: nextOpp.name || nextOpp.opportunityId,
-            statusBefore: prevOpp.status,
-            statusAfter: nextOpp.status,
-            recipients: filterValidEmails(candidateEmails, log),
-            createdBy: nextStrategy.createdBy || '',
-            assignee: nextOpp.assignee || '',
-          });
+            changes.push({
+              type: 'opportunity',
+              strategyId: nextStrategy.id,
+              strategyName: nextStrategy.name,
+              opportunityId: nextOpp.opportunityId,
+              opportunityName: nextOpp.name || nextOpp.opportunityId,
+              statusBefore: prevOpp.status,
+              statusAfter: nextOpp.status,
+              recipients: filterValidEmails(candidateEmails, log),
+              createdBy: nextStrategy.createdBy || '',
+              assignee: nextOpp.assignee || '',
+            });
+          }
+          // Assignee changed (empty->user or user->user); assignee removed -> no assignment change
+          if (prevOpp.assignee !== nextOpp.assignee && nextOpp.assignee) {
+            changes.push({
+              type: 'assignment',
+              strategyId: nextStrategy.id,
+              strategyName: nextStrategy.name,
+              opportunityId: nextOpp.opportunityId,
+              opportunityName: nextOpp.name || nextOpp.opportunityId,
+              assigneeBefore: prevOpp.assignee || '',
+              assigneeAfter: nextOpp.assignee,
+              recipients: filterValidEmails([nextOpp.assignee, nextStrategy.createdBy], log),
+              createdBy: nextStrategy.createdBy || '',
+              assignee: nextOpp.assignee,
+            });
+          }
         }
       }
     }
@@ -258,6 +292,7 @@ export async function sendStatusChangeNotifications(context, {
 
   const oppTemplateName = 'llmo_opportunity_status_update';
   const stratTemplateName = 'llmo_strategy_update';
+  const assignTemplateName = 'llmo_opportunity_assignment';
 
   const hostname = extractHostnameFromBaseURL(siteBaseUrl || '');
   const strategyUrl = hostname
@@ -270,7 +305,10 @@ export async function sendStatusChangeNotifications(context, {
       summary.skipped += 1;
     } else {
       const isOpportunity = change.type === 'opportunity';
-      const templateName = isOpportunity ? oppTemplateName : stratTemplateName;
+      const isAssignment = change.type === 'assignment';
+      let templateName = stratTemplateName;
+      if (isAssignment) templateName = assignTemplateName;
+      else if (isOpportunity) templateName = oppTemplateName;
 
       const createdBy = change.createdBy || '';
       if (!createdBy) {
@@ -283,7 +321,7 @@ export async function sendStatusChangeNotifications(context, {
         : '';
       const strategyOwnerEmail = createdBy;
 
-      const assigneeEmail = isOpportunity ? (change.assignee || '') : '';
+      const assigneeEmail = (isOpportunity || isAssignment) ? (change.assignee || '') : '';
       const assigneeName = assigneeEmail
         // eslint-disable-next-line no-await-in-loop
         ? await resolveUserName(dataAccess, assigneeEmail)
@@ -293,8 +331,21 @@ export async function sendStatusChangeNotifications(context, {
         // eslint-disable-next-line no-await-in-loop
         const recipientName = await resolveUserName(dataAccess, recipient);
 
-        const templateData = isOpportunity
-          ? {
+        let templateData;
+        if (isAssignment) {
+          templateData = {
+            recipient_name: recipientName,
+            recipient_email: recipient,
+            assignee_name: assigneeName,
+            assignee_email: assigneeEmail,
+            strategy_owner_name: strategyOwnerName,
+            strategy_owner_email: strategyOwnerEmail,
+            opportunity_name: change.opportunityName || '',
+            strategy_name: change.strategyName,
+            strategy_url: strategyUrl,
+          };
+        } else if (isOpportunity) {
+          templateData = {
             recipient_name: recipientName,
             recipient_email: recipient,
             assignee_name: assigneeName,
@@ -305,8 +356,9 @@ export async function sendStatusChangeNotifications(context, {
             opportunity_status: change.statusAfter,
             strategy_name: change.strategyName,
             strategy_url: strategyUrl,
-          }
-          : {
+          };
+        } else {
+          templateData = {
             recipient_name: recipientName,
             recipient_email: recipient,
             strategy_name: change.strategyName,
@@ -316,6 +368,7 @@ export async function sendStatusChangeNotifications(context, {
             strategy_owner_email: strategyOwnerEmail,
             opportunity_list: JSON.stringify(change.opportunityNames || []),
           };
+        }
 
         try {
           // eslint-disable-next-line no-await-in-loop

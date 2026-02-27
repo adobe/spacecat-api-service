@@ -153,13 +153,6 @@ export async function sendEmail(context, {
       const responseText = await response.text().catch(() => '(unable to read response body)');
       result.error = `Post Office returned ${response.status}: ${responseText}`;
       log.error(`Email send failed for template ${templateName}: ${result.error}`);
-      if (response.status === 403) {
-        log.warn('[email-service] 403 Forbidden - possible scope/template mismatch', {
-          templateName,
-          hint: 'Verify EMAIL_IMS_CLIENT_CODE was issued with APO scope matching the template team. '
-            + 'Note: getServiceAccessToken (v4) does NOT send IMS_SCOPE; scope is embedded in the authorization code.',
-        });
-      }
     }
   } catch (error) {
     result.error = error.message;

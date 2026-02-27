@@ -389,7 +389,7 @@ describe('opportunity-workspace-notifications', () => {
       expect(changes[0].statusAfter).to.equal('new');
     });
 
-    it('should skip opportunities that do not exist in prevData', () => {
+    it('should emit assignment change when new opportunity added to existing strategy with assignee', () => {
       const prev = {
         strategies: [{
           id: 's1',
@@ -404,13 +404,169 @@ describe('opportunity-workspace-notifications', () => {
           id: 's1',
           name: 'Strategy 1',
           status: 'new',
-          opportunities: [{ opportunityId: 'o-new', status: 'new', assignee: 'user@test.com' }],
+          opportunities: [{
+            opportunityId: 'o-new', name: 'New Opp', status: 'new', assignee: 'user@test.com',
+          }],
+          createdBy: 'owner@test.com',
+        }],
+      };
+
+      const changes = detectStatusChanges(prev, next, mockLog);
+      expect(changes).to.have.lengthOf(1);
+      expect(changes[0].type).to.equal('assignment');
+      expect(changes[0].strategyId).to.equal('s1');
+      expect(changes[0].opportunityId).to.equal('o-new');
+      expect(changes[0].opportunityName).to.equal('New Opp');
+      expect(changes[0].assigneeBefore).to.equal('');
+      expect(changes[0].assigneeAfter).to.equal('user@test.com');
+      expect(changes[0].recipients).to.include('user@test.com');
+      expect(changes[0].recipients).to.include('owner@test.com');
+    });
+
+    it('should not emit assignment change when new opportunity added without assignee', () => {
+      const prev = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [],
+          createdBy: 'owner@test.com',
+        }],
+      };
+      const next = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [{ opportunityId: 'o-new', status: 'new' }],
           createdBy: 'owner@test.com',
         }],
       };
 
       const changes = detectStatusChanges(prev, next, mockLog);
       expect(changes).to.be.empty;
+    });
+
+    it('should emit assignment change when assignee changes from empty to user', () => {
+      const prev = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [{ opportunityId: 'o1', name: 'Opp 1', status: 'new' }],
+          createdBy: 'owner@test.com',
+        }],
+      };
+      const next = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [{
+            opportunityId: 'o1', name: 'Opp 1', status: 'new', assignee: 'user@test.com',
+          }],
+          createdBy: 'owner@test.com',
+        }],
+      };
+
+      const changes = detectStatusChanges(prev, next, mockLog);
+      expect(changes).to.have.lengthOf(1);
+      expect(changes[0].type).to.equal('assignment');
+      expect(changes[0].assigneeBefore).to.equal('');
+      expect(changes[0].assigneeAfter).to.equal('user@test.com');
+    });
+
+    it('should emit assignment change when assignee changes from one user to another', () => {
+      const prev = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [{
+            opportunityId: 'o1', name: 'Opp 1', status: 'new', assignee: 'user1@test.com',
+          }],
+          createdBy: 'owner@test.com',
+        }],
+      };
+      const next = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [{
+            opportunityId: 'o1', name: 'Opp 1', status: 'new', assignee: 'user2@test.com',
+          }],
+          createdBy: 'owner@test.com',
+        }],
+      };
+
+      const changes = detectStatusChanges(prev, next, mockLog);
+      expect(changes).to.have.lengthOf(1);
+      expect(changes[0].type).to.equal('assignment');
+      expect(changes[0].assigneeBefore).to.equal('user1@test.com');
+      expect(changes[0].assigneeAfter).to.equal('user2@test.com');
+    });
+
+    it('should not emit assignment change when assignee is removed', () => {
+      const prev = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [{
+            opportunityId: 'o1', name: 'Opp 1', status: 'new', assignee: 'user@test.com',
+          }],
+          createdBy: 'owner@test.com',
+        }],
+      };
+      const next = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [{ opportunityId: 'o1', name: 'Opp 1', status: 'new' }],
+          createdBy: 'owner@test.com',
+        }],
+      };
+
+      const changes = detectStatusChanges(prev, next, mockLog);
+      expect(changes).to.be.empty;
+    });
+
+    it('should emit both status and assignment changes when both change', () => {
+      const prev = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [{
+            opportunityId: 'o1', name: 'Opp 1', status: 'new', assignee: 'user1@test.com',
+          }],
+          createdBy: 'owner@test.com',
+        }],
+      };
+      const next = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [{
+            opportunityId: 'o1', name: 'Opp 1', status: 'completed', assignee: 'user2@test.com',
+          }],
+          createdBy: 'owner@test.com',
+        }],
+      };
+
+      const changes = detectStatusChanges(prev, next, mockLog);
+      expect(changes).to.have.lengthOf(2);
+      const statusChange = changes.find((c) => c.type === 'opportunity');
+      const assignmentChange = changes.find((c) => c.type === 'assignment');
+      expect(statusChange).to.exist;
+      expect(assignmentChange).to.exist;
+      expect(statusChange.statusBefore).to.equal('new');
+      expect(statusChange.statusAfter).to.equal('completed');
+      expect(assignmentChange.assigneeBefore).to.equal('user1@test.com');
+      expect(assignmentChange.assigneeAfter).to.equal('user2@test.com');
     });
 
     it('should collect all assignees for strategy status change', () => {
@@ -651,6 +807,86 @@ describe('opportunity-workspace-notifications', () => {
       expect(emailOptions.templateData.opportunity_status).to.equal('completed');
       expect(emailOptions.templateData.strategy_name).to.equal('Strategy 1');
       expect(emailOptions.templateData.strategy_url).to.equal('https://llmo.now/www.example.com/insights/opportunity-workspace');
+    });
+
+    it('should send assignment change email with llmo_opportunity_assignment template', async () => {
+      const changes = [{
+        type: 'assignment',
+        strategyId: 's1',
+        strategyName: 'Strategy 1',
+        opportunityId: 'o1',
+        opportunityName: 'Opp 1',
+        assigneeBefore: '',
+        assigneeAfter: 'user@test.com',
+        recipients: ['user@test.com'],
+        createdBy: 'owner@test.com',
+        assignee: 'user@test.com',
+      }];
+
+      const summary = await sendStatusChangeNotifications(mockContext, {
+        changes, siteId: 'site-1', siteBaseUrl: 'https://www.example.com', changedBy: 'admin@test.com',
+      });
+
+      expect(summary.sent).to.equal(1);
+      expect(sendEmailStub).to.have.been.calledOnce;
+      const [, emailOptions] = sendEmailStub.firstCall.args;
+      expect(emailOptions.templateName).to.equal('llmo_opportunity_assignment');
+      expect(emailOptions.recipients).to.deep.equal(['user@test.com']);
+    });
+
+    it('should include correct template data for assignment change', async () => {
+      const changes = [{
+        type: 'assignment',
+        strategyId: 's1',
+        strategyName: 'Strategy 1',
+        opportunityId: 'o1',
+        opportunityName: 'Opp 1',
+        assigneeBefore: 'user1@test.com',
+        assigneeAfter: 'user2@test.com',
+        recipients: ['user2@test.com'],
+        createdBy: 'owner@test.com',
+        assignee: 'user2@test.com',
+      }];
+
+      await sendStatusChangeNotifications(mockContext, {
+        changes, siteId: 'site-1', siteBaseUrl: 'https://www.example.com',
+      });
+
+      const [, emailOptions] = sendEmailStub.firstCall.args;
+      expect(emailOptions.templateData.recipient_name).to.equal('User Two');
+      expect(emailOptions.templateData.recipient_email).to.equal('user2@test.com');
+      expect(emailOptions.templateData.assignee_name).to.equal('User Two');
+      expect(emailOptions.templateData.assignee_email).to.equal('user2@test.com');
+      expect(emailOptions.templateData.strategy_owner_name).to.equal('Owner Smith');
+      expect(emailOptions.templateData.strategy_owner_email).to.equal('owner@test.com');
+      expect(emailOptions.templateData.opportunity_name).to.equal('Opp 1');
+      expect(emailOptions.templateData.strategy_name).to.equal('Strategy 1');
+      expect(emailOptions.templateData.strategy_url).to.equal('https://llmo.now/www.example.com/insights/opportunity-workspace');
+    });
+
+    it('should use empty strategy_owner fields for assignment change when createdBy is missing', async () => {
+      const changes = [{
+        type: 'assignment',
+        strategyId: 's1',
+        strategyName: 'Strategy 1',
+        opportunityId: 'o1',
+        opportunityName: 'Opp 1',
+        assigneeBefore: '',
+        assigneeAfter: 'user@test.com',
+        recipients: ['user@test.com'],
+        createdBy: '',
+        assignee: 'user@test.com',
+      }];
+
+      const summary = await sendStatusChangeNotifications(mockContext, {
+        changes, siteId: 'site-1', siteBaseUrl: '', changedBy: 'admin@test.com',
+      });
+
+      expect(summary.sent).to.equal(1);
+      expect(mockLog.warn).to.have.been.calledWith(sinon.match(/Strategy owner.*unknown/));
+      const [, emailOptions] = sendEmailStub.firstCall.args;
+      expect(emailOptions.templateData.strategy_owner_name).to.equal('');
+      expect(emailOptions.templateData.strategy_owner_email).to.equal('');
     });
 
     it('should send strategy status change email', async () => {
