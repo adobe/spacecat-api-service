@@ -21,7 +21,7 @@ import {
   notFound,
 } from '@adobe/spacecat-shared-http-utils';
 import AccessControlUtil from '../support/access-control-util.js';
-import { getImsUserToken, ErrorWithStatusCode } from '../support/utils.js';
+import { getIMSPromiseToken, exchangePromiseToken, ErrorWithStatusCode } from '../support/utils.js';
 import {
   isAEMAuthoredSite,
   resolvePageIds,
@@ -274,7 +274,8 @@ function PageRelationshipsController(ctx) {
 
     let imsToken;
     try {
-      imsToken = getImsUserToken(context);
+      const promiseTokenResponse = await getIMSPromiseToken(context);
+      imsToken = await exchangePromiseToken(context, promiseTokenResponse.promise_token);
     } catch (e) {
       if (e instanceof ErrorWithStatusCode) {
         return badRequest(e.message);
