@@ -27,7 +27,7 @@ import { OrganizationDto } from '../dto/organization.js';
 import { ProjectDto } from '../dto/project.js';
 import { SiteDto } from '../dto/site.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { filterSitesForProductCode } from '../support/utils.js';
+// import { filterSitesForProductCode } from '../support/utils.js';
 /**
  * Organizations controller. Provides methods to create, read, update and delete organizations.
  * @param {object} ctx - Context of the request.
@@ -199,14 +199,14 @@ function OrganizationsController(ctx, env) {
 
     const sites = await Site.allByOrganizationId(organizationId);
 
-    const filteredSites = await filterSitesForProductCode(
-      context,
-      organization,
-      sites,
-      productCode,
-    );
+    // const filteredSites = await filterSitesForProductCode(
+    //   context,
+    //   organization,
+    //   sites,
+    //   productCode,
+    // );
 
-    return ok(filteredSites.map((site) => SiteDto.toJSON(site)));
+    return ok(sites.map((site) => SiteDto.toJSON(site)));
   };
 
   /**
