@@ -37,6 +37,7 @@ describe('Page Relationships Controller', () => {
   let fetchRelationshipsStub;
   let isAEMAuthoredSiteStub;
   let buildCheckPathStub;
+  let resolveAemAccessTokenStub;
 
   let mockDataAccess;
   let mockSite;
@@ -57,6 +58,7 @@ describe('Page Relationships Controller', () => {
     fetchRelationshipsStub = sandbox.stub();
     isAEMAuthoredSiteStub = sandbox.stub();
     buildCheckPathStub = sandbox.stub();
+    resolveAemAccessTokenStub = sandbox.stub().resolves('test-ims-token');
 
     mockSite = {
       getDeliveryType: sandbox.stub().returns('aem_cs'),
@@ -105,6 +107,9 @@ describe('Page Relationships Controller', () => {
         resolvePageIds: resolvePageIdsStub,
         fetchRelationships: fetchRelationshipsStub,
         buildCheckPath: buildCheckPathStub,
+      },
+      '../../src/support/utils.js': {
+        resolveAemAccessToken: (...args) => resolveAemAccessTokenStub(...args),
       },
     })).default;
   });
@@ -242,9 +247,9 @@ describe('Page Relationships Controller', () => {
       expect(fetchRelationshipsStub).to.not.have.been.called;
     });
 
-    it('returns 400 when Authorization header is missing', async () => {
+    it('returns 400 when AEM token cannot be resolved', async () => {
       isAEMAuthoredSiteStub.returns(true);
-      requestContext.pathInfo = { headers: {} };
+      resolveAemAccessTokenStub.rejects(Object.assign(new Error('Missing Authorization header'), { status: 400 }));
       const controller = PageRelationshipsController(controllerContext);
 
       const response = await controller.getForOpportunity(requestContext);
@@ -252,6 +257,66 @@ describe('Page Relationships Controller', () => {
 
       expect(response.status).to.equal(400);
       expect(body.message).to.equal('Missing Authorization header');
+    });
+
+    it('returns default 400 message when AEM token error has no message', async () => {
+      isAEMAuthoredSiteStub.returns(true);
+      resolveAemAccessTokenStub.rejects(Object.assign(new Error(), { message: '', status: 400 }));
+      const controller = PageRelationshipsController(controllerContext);
+
+      const response = await controller.getForOpportunity(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(400);
+      expect(body.message).to.equal('Missing Authorization header');
+    });
+
+    it('returns 401 when AEM token exchange fails', async () => {
+      isAEMAuthoredSiteStub.returns(true);
+      resolveAemAccessTokenStub.rejects(Object.assign(new Error('Authentication failed with upstream IMS service'), { status: 401 }));
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([
+        createSuggestion({
+          pageUrl: '/us/en/page1',
+          suggestionType: 'Missing Title',
+        }),
+      ]);
+      const controller = PageRelationshipsController(controllerContext);
+
+      const response = await controller.getForOpportunity(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(401);
+      expect(body.message).to.equal('Authentication failed with upstream IMS service');
+      expect(resolvePageIdsStub).to.not.have.been.called;
+      expect(fetchRelationshipsStub).to.not.have.been.called;
+    });
+
+    it('uses resolved AEM token for relationship lookup', async () => {
+      isAEMAuthoredSiteStub.returns(true);
+      mockDataAccess.Suggestion.allByOpportunityId.resolves([
+        createSuggestion({
+          pageUrl: '/us/en/page1',
+          suggestionType: 'Missing Title',
+        }),
+      ]);
+      resolvePageIdsStub.resolves([
+        { url: '/us/en/page1', pageId: 'pg-1' },
+      ]);
+      fetchRelationshipsStub.resolves({
+        results: {
+          '/us/en/page1:Missing Title': { pageId: 'pg-1', upstream: { chain: [] } },
+        },
+        errors: {},
+      });
+      const controller = PageRelationshipsController(controllerContext);
+
+      const response = await controller.getForOpportunity(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(resolveAemAccessTokenStub).to.have.been.calledOnceWithExactly(requestContext);
+      expect(resolvePageIdsStub.firstCall.args[3]).to.equal('test-ims-token');
+      expect(body.relationships).to.have.property('/us/en/page1:Missing Title');
     });
 
     it('returns supported: false when site is not AEM-authored', async () => {
