@@ -19,6 +19,7 @@ import { composeBaseURL, tracingFetch as fetch, isNonEmptyArray } from '@adobe/s
 import AhrefsAPIClient from '@adobe/spacecat-shared-ahrefs-client';
 import { parse as parseDomain } from 'tldts';
 import { postSlackMessage } from '../../utils/slack/base.js';
+import DrsClient from '../../support/drs-client.js';
 
 // LLMO Constants
 const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
@@ -1056,8 +1057,37 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     site.setConfig(Config.toDynamoItem(siteConfig));
     await site.save();
 
-    // Trigger audits
-    await triggerAudits([...BASIC_AUDITS, 'llmo-customer-analysis', 'wikipedia-analysis'], context, site);
+    // Trigger audits (llmo-customer-analysis is NOT triggered here; it will be triggered
+    // after the DRS prompt generation job completes, via SNS → audit-worker. LLMO-1819)
+    await triggerAudits([...BASIC_AUDITS, 'wikipedia-analysis'], context, site);
+
+    // Submit DRS prompt generation job (non-blocking)
+    try {
+      const drsClient = DrsClient(context);
+      if (drsClient.isConfigured()) {
+        // Try to get audience from brand profile, fall back to default
+        const brandProfile = siteConfig.getBrandProfile?.();
+        const audience = brandProfile?.main_profile?.target_audience
+          || `General consumers interested in ${brandName} products and services`;
+
+        const drsJob = await drsClient.submitPromptGenerationJob({
+          baseUrl: baseURL,
+          brandName: brandName.trim(),
+          audience,
+          region: 'US',
+          numPrompts: 42,
+          siteId: site.getId(),
+          imsOrgId,
+        });
+        log.info(`Started DRS prompt generation: job=${drsJob.job_id}`);
+        say(`:robot_face: Started DRS prompt generation job: ${drsJob.job_id}`);
+      } else {
+        log.debug('DRS client not configured, skipping prompt generation');
+      }
+    } catch (drsError) {
+      log.error(`Failed to start DRS prompt generation: ${drsError.message}`);
+      say(':warning: Failed to start DRS prompt generation (will need manual trigger)');
+    }
 
     return {
       site,
