@@ -38,7 +38,8 @@ describe('Page Relationships Controller', () => {
   let fetchRelationshipsStub;
   let isAEMAuthoredSiteStub;
   let buildCheckPathStub;
-  let getImsUserTokenStub;
+  let getIMSPromiseTokenStub;
+  let exchangePromiseTokenStub;
 
   let mockDataAccess;
   let mockSite;
@@ -59,7 +60,12 @@ describe('Page Relationships Controller', () => {
     fetchRelationshipsStub = sandbox.stub();
     isAEMAuthoredSiteStub = sandbox.stub();
     buildCheckPathStub = sandbox.stub();
-    getImsUserTokenStub = sandbox.stub().returns('test-ims-token');
+    getIMSPromiseTokenStub = sandbox.stub().resolves({
+      promise_token: 'test-promise-token',
+      expires_in: 60,
+      token_type: 'bearer',
+    });
+    exchangePromiseTokenStub = sandbox.stub().resolves('test-ims-token');
 
     mockSite = {
       getDeliveryType: sandbox.stub().returns('aem_cs'),
@@ -110,7 +116,8 @@ describe('Page Relationships Controller', () => {
         buildCheckPath: buildCheckPathStub,
       },
       '../../src/support/utils.js': {
-        getImsUserToken: (...args) => getImsUserTokenStub(...args),
+        getIMSPromiseToken: (...args) => getIMSPromiseTokenStub(...args),
+        exchangePromiseToken: (...args) => exchangePromiseTokenStub(...args),
         ErrorWithStatusCode,
       },
     })).default;
@@ -251,7 +258,7 @@ describe('Page Relationships Controller', () => {
 
     it('returns 400 when Authorization header is missing', async () => {
       isAEMAuthoredSiteStub.returns(true);
-      getImsUserTokenStub.throws(new ErrorWithStatusCode('Missing Authorization header', 400));
+      getIMSPromiseTokenStub.rejects(new ErrorWithStatusCode('Missing Authorization header', 400));
       const controller = PageRelationshipsController(controllerContext);
 
       const response = await controller.getForOpportunity(requestContext);
@@ -264,7 +271,7 @@ describe('Page Relationships Controller', () => {
 
     it('returns 400 with default message when non-ErrorWithStatusCode is thrown', async () => {
       isAEMAuthoredSiteStub.returns(true);
-      getImsUserTokenStub.throws(new Error('unexpected'));
+      getIMSPromiseTokenStub.rejects(new Error('unexpected'));
       const controller = PageRelationshipsController(controllerContext);
 
       const response = await controller.getForOpportunity(requestContext);
@@ -275,7 +282,7 @@ describe('Page Relationships Controller', () => {
       expect(resolvePageIdsStub).to.not.have.been.called;
     });
 
-    it('passes user IMS token to relationship lookup', async () => {
+    it('passes AEM access token (from promise-token exchange) to relationship lookup', async () => {
       isAEMAuthoredSiteStub.returns(true);
       mockDataAccess.Suggestion.allByOpportunityId.resolves([
         createSuggestion({
@@ -298,7 +305,11 @@ describe('Page Relationships Controller', () => {
       const body = await response.json();
 
       expect(response.status).to.equal(200);
-      expect(getImsUserTokenStub).to.have.been.calledOnceWithExactly(requestContext);
+      expect(getIMSPromiseTokenStub).to.have.been.calledOnceWithExactly(requestContext);
+      expect(exchangePromiseTokenStub).to.have.been.calledOnceWithExactly(
+        requestContext,
+        'test-promise-token',
+      );
       expect(resolvePageIdsStub.firstCall.args[3]).to.equal('test-ims-token');
       expect(body.relationships).to.have.property('/us/en/page1:Missing Title');
     });
