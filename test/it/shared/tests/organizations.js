@@ -57,7 +57,9 @@ export default function organizationTests(getHttpClient, resetData) {
         const sorted = sortById(res.body);
         sorted.forEach((org) => expectOrgDto(org));
         expect(sorted[0].id).to.equal(ORG_1_ID);
+        expect(sorted[0].imsOrgId).to.equal(ORG_1_IMS_ORG_ID);
         expect(sorted[1].id).to.equal(ORG_2_ID);
+        expect(sorted[1].imsOrgId).to.equal(ORG_2_IMS_ORG_ID);
       });
 
       it('user: returns 403', async () => {
@@ -94,6 +96,7 @@ export default function organizationTests(getHttpClient, resetData) {
         expect(res.status).to.equal(200);
         expectOrgDto(res.body);
         expect(res.body.id).to.equal(ORG_1_ID);
+        expect(res.body.imsOrgId).to.equal(ORG_1_IMS_ORG_ID);
       });
 
       it('user: returns 403 for denied org', async () => {
@@ -129,7 +132,9 @@ export default function organizationTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.user.get(`/organizations/by-ims-org-id/${ORG_1_IMS_ORG_ID}`);
         expect(res.status).to.equal(200);
+        expectOrgDto(res.body);
         expect(res.body.id).to.equal(ORG_1_ID);
+        expect(res.body.imsOrgId).to.equal(ORG_1_IMS_ORG_ID);
       });
 
       it('user: returns 403 for denied IMS org ID', async () => {
