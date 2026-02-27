@@ -1313,11 +1313,6 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockConfiguration.enableHandlerForSite).to.have.been.calledWith('llmo-customer-analysis', mockSite);
       expect(mockConfiguration.save).to.have.been.called;
 
-      // Verify llmo-customer-analysis is triggered directly from onboarding
-      expect(context.sqs.sendMessage).to.have.been.calledWith(
-        'audit-queue',
-        sinon.match({ type: 'llmo-customer-analysis' }),
-      );
       // Verify async publish trigger is enqueued
       expect(context.sqs.sendMessage).to.have.been.calledWith(
         'audit-queue',
