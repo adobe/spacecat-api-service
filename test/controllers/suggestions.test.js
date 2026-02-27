@@ -2157,6 +2157,231 @@ describe('Suggestions Controller', () => {
     expect(error.message).to.include('Invalid skipReason');
   });
 
+  it('patches a suggestion updates skipReason/skipDetail when already SKIPPED', async () => {
+    // First set the suggestion to SKIPPED
+    suggs[0].status = 'SKIPPED';
+    suggs[0].skipReason = 'no_reason';
+    suggs[0].skipDetail = null;
+
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'SKIPPED',
+        skipReason: 'too_risky',
+        skipDetail: 'Changed my mind',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(suggs[0].skipReason).to.equal('too_risky');
+    expect(suggs[0].skipDetail).to.equal('Changed my mind');
+  });
+
+  it('patches a suggestion updates only skipReason when already SKIPPED without providing skipDetail', async () => {
+    suggs[0].status = 'SKIPPED';
+    suggs[0].skipReason = 'no_reason';
+    suggs[0].skipDetail = 'old detail';
+
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'SKIPPED',
+        skipReason: 'too_risky',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(suggs[0].skipReason).to.equal('too_risky');
+    expect(suggs[0].skipDetail).to.be.null;
+  });
+
+  it('patches a suggestion updates only skipDetail when already SKIPPED without providing skipReason', async () => {
+    suggs[0].status = 'SKIPPED';
+    suggs[0].skipReason = 'no_reason';
+    suggs[0].skipDetail = null;
+
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'SKIPPED',
+        skipDetail: 'Only updating detail',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(suggs[0].skipReason).to.be.null;
+    expect(suggs[0].skipDetail).to.equal('Only updating detail');
+  });
+
+  it('patches a suggestion skips setting skip fields when already SKIPPED and setSkipReason unavailable', async () => {
+    suggs[0].status = 'SKIPPED';
+    const entity = mockSuggestionEntity(suggs[0]);
+    delete entity.setSkipReason;
+    delete entity.setSkipDetail;
+    mockSuggestion.findById.callsFake((id) => {
+      if (id === SUGGESTION_IDS[0]) return Promise.resolve(entity);
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'SKIPPED',
+        skipReason: 'other',
+      },
+      ...context,
+    });
+    // No updates since setSkipReason is unavailable and status hasn't changed
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error.message).to.include('No updates provided');
+    // Restore
+    mockSuggestion.findById.callsFake((id) => {
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+  });
+
+  it('patches a suggestion returns 400 for invalid skipReason when already SKIPPED and updating skip fields', async () => {
+    suggs[0].status = 'SKIPPED';
+    suggs[0].skipReason = 'no_reason';
+
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'SKIPPED',
+        skipReason: 'invalid_reason',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error.message).to.include('Invalid skipReason');
+  });
+
+  it('patches a suggestion to SKIPPED without providing skipReason or skipDetail', async () => {
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'SKIPPED',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(suggs[0].status).to.equal('SKIPPED');
+    expect(suggs[0].skipReason).to.be.null;
+    expect(suggs[0].skipDetail).to.be.null;
+  });
+
+  it('patches a suggestion changes from SKIPPED to APPROVED without setSkipReason on model', async () => {
+    suggs[0].status = 'SKIPPED';
+    const entity = mockSuggestionEntity(suggs[0]);
+    delete entity.setSkipReason;
+    delete entity.setSkipDetail;
+    mockSuggestion.findById.callsFake((id) => {
+      if (id === SUGGESTION_IDS[0]) return Promise.resolve(entity);
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'APPROVED',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(suggs[0].status).to.equal('APPROVED');
+    // Restore
+    mockSuggestion.findById.callsFake((id) => {
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+  });
+
+  it('patches a suggestion to SKIPPED gracefully when setSkipReason is not available', async () => {
+    const entity = mockSuggestionEntity(suggs[0]);
+    delete entity.setSkipReason;
+    delete entity.setSkipDetail;
+    mockSuggestion.findById.callsFake((id) => {
+      if (id === SUGGESTION_IDS[0]) return Promise.resolve(entity);
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'SKIPPED',
+        skipReason: 'too_risky',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(suggs[0].status).to.equal('SKIPPED');
+    // Restore findById
+    mockSuggestion.findById.callsFake((id) => {
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+  });
+
+  it('patches a suggestion clears skip fields when changing from SKIPPED to another status', async () => {
+    suggs[0].status = 'SKIPPED';
+    suggs[0].skipReason = 'too_risky';
+    suggs[0].skipDetail = 'Some detail';
+
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'APPROVED',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(suggs[0].status).to.equal('APPROVED');
+    expect(suggs[0].skipReason).to.be.null;
+    expect(suggs[0].skipDetail).to.be.null;
+  });
+
   it('patches a suggestion returns 400 when skipDetail exceeds 500 chars and status is SKIPPED', async () => {
     const response = await suggestionsController.patchSuggestion({
       params: {
@@ -2447,6 +2672,216 @@ describe('Suggestions Controller', () => {
     });
     expect(response.status).to.equal(207);
     expect((await response.json()).metadata.success).to.equal(1);
+  });
+
+  it('bulk patches suggestion status clears skip fields when changing from SKIPPED to another status', async () => {
+    suggs[0].status = 'SKIPPED';
+    suggs[0].skipReason = 'too_risky';
+    suggs[0].skipDetail = 'Some detail';
+
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [
+        { id: SUGGESTION_IDS[0], status: 'APPROVED' },
+      ],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.success).to.equal(1);
+    expect(suggs[0].status).to.equal('APPROVED');
+    expect(suggs[0].skipReason).to.be.null;
+    expect(suggs[0].skipDetail).to.be.null;
+  });
+
+  it('bulk patches suggestion status to SKIPPED without skipReason or skipDetail', async () => {
+    suggs[0].status = 'NEW';
+    suggs[0].skipReason = undefined;
+    suggs[0].skipDetail = undefined;
+
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [
+        { id: SUGGESTION_IDS[0], status: 'SKIPPED' },
+      ],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.success).to.equal(1);
+    expect(suggs[0].status).to.equal('SKIPPED');
+    expect(suggs[0].skipReason).to.be.null;
+    expect(suggs[0].skipDetail).to.be.null;
+  });
+
+  it('bulk patches suggestion status changes from SKIPPED to APPROVED without setSkipReason on model', async () => {
+    suggs[0].status = 'SKIPPED';
+    const entity = mockSuggestionEntity(suggs[0]);
+    delete entity.setSkipReason;
+    delete entity.setSkipDetail;
+    mockSuggestion.findById.callsFake((id) => {
+      if (id === SUGGESTION_IDS[0]) return Promise.resolve(entity);
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [
+        { id: SUGGESTION_IDS[0], status: 'APPROVED' },
+      ],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.success).to.equal(1);
+    expect(suggs[0].status).to.equal('APPROVED');
+    // Restore
+    mockSuggestion.findById.callsFake((id) => {
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+  });
+
+  it('bulk patches suggestion status handles SKIPPED without setSkipReason on model', async () => {
+    suggs[0].status = 'NEW';
+    const entity = mockSuggestionEntity(suggs[0]);
+    delete entity.setSkipReason;
+    delete entity.setSkipDetail;
+    mockSuggestion.findById.callsFake((id) => {
+      if (id === SUGGESTION_IDS[0]) return Promise.resolve(entity);
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [
+        { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'too_risky' },
+      ],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.success).to.equal(1);
+    expect(suggs[0].status).to.equal('SKIPPED');
+    // Restore
+    mockSuggestion.findById.callsFake((id) => {
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+  });
+
+  it('bulk patches suggestion status updates only skipReason when already SKIPPED without providing skipDetail', async () => {
+    suggs[0].status = 'SKIPPED';
+    suggs[0].skipReason = 'no_reason';
+    suggs[0].skipDetail = 'old detail';
+
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [
+        { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'other' },
+      ],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.success).to.equal(1);
+    expect(suggs[0].skipReason).to.equal('other');
+    expect(suggs[0].skipDetail).to.be.null;
+  });
+
+  it('bulk patches suggestion status updates only skipDetail when already SKIPPED without providing skipReason', async () => {
+    suggs[0].status = 'SKIPPED';
+    suggs[0].skipReason = 'no_reason';
+    suggs[0].skipDetail = null;
+
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [
+        { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipDetail: 'Only detail' },
+      ],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.success).to.equal(1);
+    expect(suggs[0].skipReason).to.be.null;
+    expect(suggs[0].skipDetail).to.equal('Only detail');
+  });
+
+  it('bulk patches suggestion status returns no updates when already SKIPPED without setSkipReason and updating skip fields', async () => {
+    suggs[0].status = 'SKIPPED';
+    const entity = mockSuggestionEntity(suggs[0]);
+    delete entity.setSkipReason;
+    delete entity.setSkipDetail;
+    mockSuggestion.findById.callsFake((id) => {
+      if (id === SUGGESTION_IDS[0]) return Promise.resolve(entity);
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [
+        { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'other' },
+      ],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.failed).to.equal(1);
+    expect(bulkPatchResponse.suggestions[0].statusCode).to.equal(400);
+    expect(bulkPatchResponse.suggestions[0].message).to.include('No updates provided');
+    // Restore
+    mockSuggestion.findById.callsFake((id) => {
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+  });
+
+  it('bulk patches suggestion status updates skipReason/skipDetail when already SKIPPED', async () => {
+    suggs[0].status = 'SKIPPED';
+    suggs[0].skipReason = 'no_reason';
+    suggs[0].skipDetail = null;
+
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [
+        { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'other', skipDetail: 'Updated reason' },
+      ],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.success).to.equal(1);
+    expect(bulkPatchResponse.suggestions[0].statusCode).to.equal(200);
+    expect(suggs[0].skipReason).to.equal('other');
+    expect(suggs[0].skipDetail).to.equal('Updated reason');
   });
 
   it('bulk patches suggestion status returns 400 for invalid skipReason when status is SKIPPED', async () => {

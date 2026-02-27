@@ -13,6 +13,7 @@
 /* eslint-env mocha */
 
 import { expect } from 'chai';
+import esmock from 'esmock';
 
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../../src/dto/suggestion.js';
 
@@ -45,6 +46,25 @@ describe('Suggestion DTO', () => {
       expect(SUGGESTION_SKIP_REASONS).to.include('too_risky');
       expect(SUGGESTION_SKIP_REASONS).to.include('no_reason');
       expect(SUGGESTION_SKIP_REASONS).to.include('other');
+    });
+
+    it('falls back to hardcoded values when Suggestion.SKIP_REASONS is falsy', async () => {
+      const { SUGGESTION_SKIP_REASONS: fallback } = await esmock('../../src/dto/suggestion.js', {
+        '@adobe/spacecat-shared-data-access': {
+          Suggestion: {
+            SKIP_REASONS: null,
+            getProjection: () => ({ fields: [] }),
+            FIELD_TRANSFORMERS: {},
+          },
+        },
+      });
+      expect(fallback).to.deep.equal([
+        'already_implemented',
+        'inaccurate_or_incomplete',
+        'too_risky',
+        'no_reason',
+        'other',
+      ]);
     });
   });
 
