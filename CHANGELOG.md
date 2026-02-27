@@ -1,3 +1,38 @@
+## [1.324.1](https://github.com/adobe/spacecat-api-service/compare/v1.324.0...v1.324.1) (2026-02-26)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1862](https://github.com/adobe/spacecat-api-service/issues/1862)) ([051f780](https://github.com/adobe/spacecat-api-service/commit/051f7802b80c0d063022af281f334b36deb6108a))
+
+# [1.324.0](https://github.com/adobe/spacecat-api-service/compare/v1.323.2...v1.324.0) (2026-02-26)
+
+
+### Features
+
+* auto-resolve author URL and code config from RUM bundles during onboarding ([#1856](https://github.com/adobe/spacecat-api-service/issues/1856)) ([36a164b](https://github.com/adobe/spacecat-api-service/commit/36a164beac32801f966f3d818c080f620804b85f))
+
+## [1.323.2](https://github.com/adobe/spacecat-api-service/compare/v1.323.1...v1.323.2) (2026-02-25)
+
+
+### Bug Fixes
+
+* bump shared deps for temporal series bugfix ([#1864](https://github.com/adobe/spacecat-api-service/issues/1864)) ([8b34ec3](https://github.com/adobe/spacecat-api-service/commit/8b34ec3cffde8f2b989e3a01b85eeb561edefdb6))
+
+## [1.323.1](https://github.com/adobe/spacecat-api-service/compare/v1.323.0...v1.323.1) (2026-02-25)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1860](https://github.com/adobe/spacecat-api-service/issues/1860)) ([2d44abe](https://github.com/adobe/spacecat-api-service/commit/2d44abe0deb1380ece2995ab84c7507a93c92e80))
+
+# [1.323.0](https://github.com/adobe/spacecat-api-service/compare/v1.322.2...v1.323.0) (2026-02-25)
+
+
+### Features
+
+* migrate secrets from AWS SM to Vault ([#1857](https://github.com/adobe/spacecat-api-service/issues/1857)) ([4bb6a2b](https://github.com/adobe/spacecat-api-service/commit/4bb6a2b938b75f17530f168fc5ae18233e414bc9))
+
 ## [1.322.2](https://github.com/adobe/spacecat-api-service/compare/v1.322.1...v1.322.2) (2026-02-25)
 
 
