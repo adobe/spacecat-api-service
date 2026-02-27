@@ -1,3 +1,24 @@
+## [1.324.2](https://github.com/adobe/spacecat-api-service/compare/v1.324.1...v1.324.2) (2026-02-27)
+
+
+### Bug Fixes
+
+* move llmo onboarding publish trigger off request path ([#1870](https://github.com/adobe/spacecat-api-service/issues/1870)) ([f9a94be](https://github.com/adobe/spacecat-api-service/commit/f9a94be67041432dba5cee83fe226b3938fcc7ff))
+
+## [1.324.1](https://github.com/adobe/spacecat-api-service/compare/v1.324.0...v1.324.1) (2026-02-26)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1862](https://github.com/adobe/spacecat-api-service/issues/1862)) ([051f780](https://github.com/adobe/spacecat-api-service/commit/051f7802b80c0d063022af281f334b36deb6108a))
+
+# [1.324.0](https://github.com/adobe/spacecat-api-service/compare/v1.323.2...v1.324.0) (2026-02-26)
+
+
+### Features
+
+* auto-resolve author URL and code config from RUM bundles during onboarding ([#1856](https://github.com/adobe/spacecat-api-service/issues/1856)) ([36a164b](https://github.com/adobe/spacecat-api-service/commit/36a164beac32801f966f3d818c080f620804b85f))
+
 ## [1.323.2](https://github.com/adobe/spacecat-api-service/compare/v1.323.1...v1.323.2) (2026-02-25)
 
 
