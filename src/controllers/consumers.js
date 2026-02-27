@@ -30,8 +30,10 @@ import {
 import { ErrorWithStatusCode } from '../support/utils.js';
 import { ConsumerDto } from '../dto/consumer.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { escapeSlackMrkdwn } from '../utils/slack/format.js';
 
 const HEADER_ERROR = 'x-error';
+const IMS_TA_TOKEN_HEADER = 'x-ta-access-token';
 const IMMUTABLE_FIELDS = ['clientId', 'technicalAccountId', 'imsOrgId'];
 const UPDATABLE_STATUSES = Object.values(ConsumerModel.STATUS)
   .filter((s) => s !== ConsumerModel.STATUS.REVOKED);
@@ -70,25 +72,32 @@ function ConsumersController(ctx) {
 
   function getUpdatedBy() {
     const profile = authInfo.getProfile();
-    return profile?.email || 'system';
+    const email = profile?.email;
+    if (!hasText(email)) {
+      log.warn('Auth profile lacks email; using updatedBy fallback for audit trail');
+      return 'system';
+    }
+    return email;
   }
 
   async function notifySlack(message) {
-    await Promise.resolve()
-      .then(() => {
-        const slackClient = BaseSlackClient.createFrom(
-          ctx,
-          SLACK_TARGETS.WORKSPACE_INTERNAL,
-        );
-        const SLACK_CHANNEL_ID = ctx.env.S2S_SLACK_CHANNEL_ID;
-        return slackClient.postMessage({
-          channel: SLACK_CHANNEL_ID,
-          text: message,
-        });
-      })
-      .catch((e) => {
-        log.error(`Failed to send Slack notification: ${e.message}`);
+    const channelId = ctx.env?.S2S_SLACK_CHANNEL_ID;
+    if (!hasText(channelId)) {
+      log.warn('S2S_SLACK_CHANNEL_ID is not configured; skipping Slack notification');
+      return;
+    }
+    try {
+      const slackClient = BaseSlackClient.createFrom(
+        ctx,
+        SLACK_TARGETS.WORKSPACE_INTERNAL,
+      );
+      await slackClient.postMessage({
+        channel: channelId,
+        text: message,
       });
+    } catch (e) {
+      log.error(`Failed to send Slack notification: ${e.message}`);
+    }
   }
 
   /**
@@ -119,6 +128,10 @@ function ConsumersController(ctx) {
    * @returns {Promise<Response>} 200 with consumer data or 404 if not found.
    */
   const getByConsumerId = async (context) => {
+    if (!accessControlUtil.hasS2SAdminAccess()) {
+      return forbidden('Only S2S admins can view consumers');
+    }
+
     const { consumerId } = context.params;
 
     if (!hasText(consumerId)) {
@@ -128,7 +141,7 @@ function ConsumersController(ctx) {
     try {
       const consumer = await Consumer.findById(consumerId);
       if (!consumer) {
-        return notFound(`Consumer with consumerId ${consumerId} not found`);
+        return notFound('Consumer not found');
       }
 
       return ok(ConsumerDto.toJSON(consumer));
@@ -147,6 +160,10 @@ function ConsumersController(ctx) {
    * @returns {Promise<Response>} 200 with consumer data or 404 if not found.
    */
   const getByClientId = async (context) => {
+    if (!accessControlUtil.hasS2SAdminAccess()) {
+      return forbidden('Only S2S admins can view consumers');
+    }
+
     const { clientId } = context.params;
 
     if (!hasText(clientId)) {
@@ -156,7 +173,7 @@ function ConsumersController(ctx) {
     try {
       const consumer = await Consumer.findByClientId(clientId);
       if (!consumer) {
-        return notFound(`Consumer with clientId ${clientId} not found`);
+        return notFound('Consumer not found');
       }
 
       return ok(ConsumerDto.toJSON(consumer));
@@ -171,6 +188,13 @@ function ConsumersController(ctx) {
   /**
    * Registers a new consumer by validating the provided IMS access token
    * and extracting the Technical Account identity (clientId, technicalAccountId, imsOrgId).
+   * The access token must be provided via the x-ta-access-token header (avoids body logging).
+   *
+   * Known limitation: TOCTOU race — a concurrent request could register the same clientId
+   * between the duplicate check and the create. The data layer also performs this check
+   * but has no database-level unique constraint on clientId. A unique constraint on
+   * clientId in the data layer would be the proper guard. Until then, duplicate creation
+   * is possible under concurrent registration of the same clientId.
    *
    * @param {object} context - Request context.
    * @returns {Promise<Response>} 201 with the newly registered consumer.
@@ -187,17 +211,36 @@ function ConsumersController(ctx) {
         throw new ErrorWithStatusCode('Request body is required', STATUS_BAD_REQUEST);
       }
 
-      const { accessToken, consumerName, capabilities } = data;
+      const headers = context.pathInfo?.headers || {};
+      const accessToken = headers[IMS_TA_TOKEN_HEADER];
+      const { consumerName, capabilities } = data;
       log.info(`Register consumer request: consumerName=${consumerName}`);
 
       if (!hasText(accessToken)) {
-        throw new ErrorWithStatusCode('accessToken is required', STATUS_BAD_REQUEST);
+        throw new ErrorWithStatusCode(
+          'Technical Account access token is required. Provide it via the x-ta-access-token header.',
+          STATUS_BAD_REQUEST,
+        );
       }
       if (!hasText(consumerName)) {
         throw new ErrorWithStatusCode('consumerName is required', STATUS_BAD_REQUEST);
       }
       if (!Array.isArray(capabilities) || capabilities.length === 0) {
         throw new ErrorWithStatusCode('capabilities must be a non-empty array', STATUS_BAD_REQUEST);
+      }
+
+      const invalidElement = capabilities.find((c) => typeof c !== 'string' || !hasText(c));
+      if (invalidElement !== undefined) {
+        throw new ErrorWithStatusCode(
+          'All capability elements must be non-empty strings in entity:operation format (e.g. site:read)',
+          STATUS_BAD_REQUEST,
+        );
+      }
+
+      try {
+        Consumer.validateCapabilities(capabilities);
+      } catch (validationErr) {
+        throw new ErrorWithStatusCode(validationErr.message, STATUS_BAD_REQUEST);
       }
 
       let tokenPayload;
@@ -249,12 +292,17 @@ function ConsumersController(ctx) {
         updatedBy: getUpdatedBy(),
       });
 
+      const safeName = escapeSlackMrkdwn(consumerName);
+      const safeClientId = escapeSlackMrkdwn(clientId);
+      const safeImsOrgId = escapeSlackMrkdwn(imsOrgId);
+      const safeCapabilities = capabilities.map((c) => `\`${escapeSlackMrkdwn(c)}\``).join(', ');
+      const safeUpdatedBy = escapeSlackMrkdwn(getUpdatedBy());
       const registerMsg = ':new: *New Consumer Registered*\n'
-        + `• *Name:* \`${consumerName}\`\n`
-        + `• *Client ID:* \`${clientId}\`\n`
-        + `• *IMS Org:* \`${imsOrgId}\`\n`
-        + `• *Capabilities:* ${capabilities.map((c) => `\`${c}\``).join(', ')}\n`
-        + `• *Registered by:* \`${getUpdatedBy()}\``;
+        + `• *Name:* \`${safeName}\`\n`
+        + `• *Client ID:* \`${safeClientId}\`\n`
+        + `• *IMS Org:* \`${safeImsOrgId}\`\n`
+        + `• *Capabilities:* ${safeCapabilities}\n`
+        + `• *Registered by:* \`${safeUpdatedBy}\``;
       log.info(registerMsg);
       await notifySlack(registerMsg);
 
@@ -262,6 +310,9 @@ function ConsumersController(ctx) {
     } catch (error) {
       if (error instanceof ErrorWithStatusCode) {
         return createErrorResponse(error);
+      }
+      if (error?.name === 'ValidationError') {
+        return badRequest(error.message);
       }
       log.error(`Failed to register consumer: ${error.message}`);
       return createErrorResponse(
@@ -321,7 +372,7 @@ function ConsumersController(ctx) {
 
       const consumer = await Consumer.findById(consumerId);
       if (!consumer) {
-        return notFound(`Consumer with consumerId ${consumerId} not found`);
+        return notFound('Consumer not found');
       }
 
       if (consumer.getStatus() === ConsumerModel.STATUS.REVOKED) {
@@ -334,29 +385,50 @@ function ConsumersController(ctx) {
       const changes = [];
 
       if (hasText(data.consumerName)) {
-        changes.push(`  › *consumerName:* \`${consumer.getConsumerName()}\` → \`${data.consumerName}\``);
+        const safeOld = escapeSlackMrkdwn(consumer.getConsumerName());
+        const safeNew = escapeSlackMrkdwn(data.consumerName);
+        changes.push(`  › *consumerName:* \`${safeOld}\` → \`${safeNew}\``);
         consumer.setConsumerName(data.consumerName);
       }
 
       if (Array.isArray(data.capabilities)) {
-        const oldCaps = consumer.getCapabilities().map((c) => `\`${c}\``).join(', ');
-        const newCaps = data.capabilities.map((c) => `\`${c}\``).join(', ');
+        if (data.capabilities.length === 0) {
+          throw new ErrorWithStatusCode('capabilities must be a non-empty array', STATUS_BAD_REQUEST);
+        }
+        const invalidElement = data.capabilities.find((c) => typeof c !== 'string' || !hasText(c));
+        if (invalidElement !== undefined) {
+          throw new ErrorWithStatusCode(
+            'All capability elements must be non-empty strings in entity:operation format (e.g. site:read)',
+            STATUS_BAD_REQUEST,
+          );
+        }
+        try {
+          Consumer.validateCapabilities(data.capabilities);
+        } catch (validationErr) {
+          throw new ErrorWithStatusCode(validationErr.message, STATUS_BAD_REQUEST);
+        }
+        const oldCaps = consumer.getCapabilities().map((c) => `\`${escapeSlackMrkdwn(c)}\``).join(', ');
+        const newCaps = data.capabilities.map((c) => `\`${escapeSlackMrkdwn(c)}\``).join(', ');
         changes.push(`  › *capabilities:* [${oldCaps}] → [${newCaps}]`);
         consumer.setCapabilities(data.capabilities);
       }
 
       if (hasText(data.status)) {
-        changes.push(`  › *status:* \`${consumer.getStatus()}\` → \`${data.status}\``);
+        const safeOld = escapeSlackMrkdwn(consumer.getStatus());
+        const safeNew = escapeSlackMrkdwn(data.status);
+        changes.push(`  › *status:* \`${safeOld}\` → \`${safeNew}\``);
         consumer.setStatus(data.status);
       }
 
       consumer.setUpdatedBy(getUpdatedBy());
       await consumer.save();
 
+      const safeConsumerId = escapeSlackMrkdwn(consumerId);
+      const safeUpdatedBy = escapeSlackMrkdwn(getUpdatedBy());
       const updateMsg = ':pencil2: *Consumer Updated*\n'
-        + `• *Consumer ID:* \`${consumerId}\`\n`
+        + `• *Consumer ID:* \`${safeConsumerId}\`\n`
         + `• *Changes:*\n${changes.join('\n')}\n`
-        + `• *Updated by:* \`${getUpdatedBy()}\``;
+        + `• *Updated by:* \`${safeUpdatedBy}\``;
       log.info(updateMsg);
       await notifySlack(updateMsg);
 
@@ -364,6 +436,9 @@ function ConsumersController(ctx) {
     } catch (error) {
       if (error instanceof ErrorWithStatusCode) {
         return createErrorResponse(error);
+      }
+      if (error?.name === 'ValidationError') {
+        return badRequest(error.message);
       }
       log.error(`Failed to update consumer ${consumerId}: ${error.message}`);
       return createErrorResponse(
@@ -393,7 +468,7 @@ function ConsumersController(ctx) {
 
       const consumer = await Consumer.findById(consumerId);
       if (!consumer) {
-        return notFound(`Consumer with consumerId ${consumerId} not found`);
+        return notFound('Consumer not found');
       }
 
       if (consumer.getStatus() === ConsumerModel.STATUS.REVOKED) {
@@ -409,9 +484,11 @@ function ConsumersController(ctx) {
 
       await consumer.save();
 
+      const safeConsumerId = escapeSlackMrkdwn(consumerId);
+      const safeRevokedBy = escapeSlackMrkdwn(getUpdatedBy());
       const revokeMsg = ':rotating_light: *Consumer Revoked*\n'
-        + `• *Consumer ID:* \`${consumerId}\`\n`
-        + `• *Revoked by:* \`${getUpdatedBy()}\``;
+        + `• *Consumer ID:* \`${safeConsumerId}\`\n`
+        + `• *Revoked by:* \`${safeRevokedBy}\``;
       log.info(revokeMsg);
       await notifySlack(revokeMsg);
 

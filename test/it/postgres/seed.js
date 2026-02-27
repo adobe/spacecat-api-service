@@ -30,6 +30,7 @@ import { auditUrls } from './seed-data/audit-urls.js';
 import { trialUsers } from './seed-data/trial-users.js';
 import { trialUserActivities } from './seed-data/trial-user-activities.js';
 import { asyncJobs } from './seed-data/async-jobs.js';
+import { consumers } from './seed-data/consumers.js';
 
 const POSTGREST_PORT = process.env.IT_POSTGREST_PORT || '3300';
 const POSTGREST_URL = `http://localhost:${POSTGREST_PORT}`;
@@ -90,6 +91,7 @@ async function seed() {
   await insertRows('trial_users', trialUsers);
   await insertRows('trial_user_activities', trialUserActivities);
   await insertRows('async_jobs', asyncJobs);
+  await insertRows('consumers', consumers);
 }
 
 /**

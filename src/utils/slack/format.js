@@ -117,6 +117,28 @@ function formatSize(bytes) {
   return `${kilobytes.toFixed(decimals)} ${suffixes[index]}`;
 }
 
+/**
+ * Escapes Slack mrkdwn special characters to prevent injection.
+ * Characters *, _, `, ~, <, > can trigger formatting (bold, italic, code, etc.).
+ * Use before interpolating user-controlled values into Slack messages.
+ *
+ * @param {string} value - Raw string (e.g. consumerName, capabilities).
+ * @returns {string} Escaped string safe for mrkdwn interpolation.
+ */
+function escapeSlackMrkdwn(value) {
+  if (value == null) {
+    return '';
+  }
+  return String(value)
+    .replace(/\\/g, '\\\\')
+    .replace(/\*/g, '\\*')
+    .replace(/_/g, '\\_')
+    .replace(/`/g, '\\`')
+    .replace(/~/g, '\\~')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 function formatLighthouseError(runtimeError) {
   const { code, message } = runtimeError;
   const errorConfig = PSI_ERROR_MAP[code] || { messageFormat: 'Unknown error', pattern: null };
@@ -139,6 +161,7 @@ function formatLighthouseError(runtimeError) {
 
 export {
   addEllipsis,
+  escapeSlackMrkdwn,
   formatDate,
   formatLighthouseError,
   formatScore,

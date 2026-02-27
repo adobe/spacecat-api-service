@@ -92,6 +92,12 @@ describe('ConsumersController', () => {
       log: {
         error: sandbox.stub(),
         info: sandbox.stub(),
+        warn: sandbox.stub(),
+      },
+      pathInfo: {
+        headers: {
+          'x-ta-access-token': 'valid-ta-token',
+        },
       },
       dataAccess: {
         Consumer: {
@@ -99,6 +105,7 @@ describe('ConsumersController', () => {
           findByClientId: sandbox.stub().resolves(mockConsumer),
           findById: sandbox.stub().resolves(mockConsumer),
           create: sandbox.stub().resolves(mockConsumer),
+          validateCapabilities: sandbox.stub(),
         },
       },
       imsClient: {
@@ -217,6 +224,33 @@ describe('ConsumersController', () => {
       expect(body.technicalAccountId).to.equal('test-ta-id');
     });
 
+    it('returns forbidden for non-admin users', async () => {
+      const NonAdminController = (await esmock('../../src/controllers/consumers.js', {
+        '../../src/support/access-control-util.js': {
+          default: {
+            fromContext: () => ({
+              hasS2SAdminAccess: () => false,
+            }),
+          },
+        },
+        '@adobe/spacecat-shared-data-access': {
+          Consumer: { STATUS: { ACTIVE: 'ACTIVE', SUSPENDED: 'SUSPENDED', REVOKED: 'REVOKED' } },
+        },
+        '@adobe/spacecat-shared-slack-client': {
+          BaseSlackClient: { createFrom: () => ({ postMessage: () => {} }) },
+          SLACK_TARGETS: { WORKSPACE_INTERNAL: 'workspace_internal' },
+        },
+      })).default;
+
+      const controller = NonAdminController(context);
+      const response = await controller.getByConsumerId({
+        ...context,
+        params: { consumerId: 'test-consumer-id' },
+      });
+
+      expect(response.status).to.equal(STATUS_FORBIDDEN);
+    });
+
     it('returns 404 when consumer not found', async () => {
       context.dataAccess.Consumer.findById.resolves(null);
       const controller = ConsumersController(context);
@@ -265,6 +299,33 @@ describe('ConsumersController', () => {
       expect(context.dataAccess.Consumer.findByClientId).to.have.been.calledWith('test-client-id');
     });
 
+    it('returns forbidden for non-admin users', async () => {
+      const NonAdminController = (await esmock('../../src/controllers/consumers.js', {
+        '../../src/support/access-control-util.js': {
+          default: {
+            fromContext: () => ({
+              hasS2SAdminAccess: () => false,
+            }),
+          },
+        },
+        '@adobe/spacecat-shared-data-access': {
+          Consumer: { STATUS: { ACTIVE: 'ACTIVE', SUSPENDED: 'SUSPENDED', REVOKED: 'REVOKED' } },
+        },
+        '@adobe/spacecat-shared-slack-client': {
+          BaseSlackClient: { createFrom: () => ({ postMessage: () => {} }) },
+          SLACK_TARGETS: { WORKSPACE_INTERNAL: 'workspace_internal' },
+        },
+      })).default;
+
+      const controller = NonAdminController(context);
+      const response = await controller.getByClientId({
+        ...context,
+        params: { clientId: 'test-client-id' },
+      });
+
+      expect(response.status).to.equal(STATUS_FORBIDDEN);
+    });
+
     it('returns 404 when consumer not found', async () => {
       context.dataAccess.Consumer.findByClientId.resolves(null);
       const controller = ConsumersController(context);
@@ -300,7 +361,6 @@ describe('ConsumersController', () => {
 
   describe('register', () => {
     const validPayload = {
-      accessToken: 'valid-ta-token',
       consumerName: 'Sites Internal Integration',
       capabilities: ['site:read', 'site:write'],
     };
@@ -317,6 +377,30 @@ describe('ConsumersController', () => {
       expect(response.status).to.equal(STATUS_CREATED);
       expect(body.clientId).to.equal('test-client-id');
       expect(body.status).to.equal('ACTIVE');
+    });
+
+    it('escapes mrkdwn special characters in Slack notification to prevent injection', async () => {
+      context.dataAccess.Consumer.findByClientId.resolves(null);
+      context.env = { S2S_SLACK_CHANNEL_ID: 'C_DUMMY_CHANNEL_ID' };
+      context.pathInfo.headers['x-ta-access-token'] = 'valid-ta-token';
+      const maliciousPayload = {
+        consumerName: 'Evil `name` *bold* _italic_',
+        capabilities: ['site:read', 'cap`inject'],
+      };
+      const controller = ConsumersController(context);
+      await controller.register({
+        ...context,
+        data: maliciousPayload,
+      });
+
+      expect(slackPostMessageStub).to.have.been.calledOnce;
+      const [postMessageArg] = slackPostMessageStub.firstCall.args;
+      const slackMessage = postMessageArg?.text ?? postMessageArg;
+      expect(slackMessage).to.include('\\`name\\`');
+      expect(slackMessage).to.include('\\*bold\\*');
+      expect(slackMessage).to.include('\\_italic\\_');
+      expect(slackMessage).to.include('cap\\`inject');
+      expect(slackMessage).not.to.include('**');
     });
 
     it('succeeds even when Slack notification fails (postMessage rejects)', async () => {
@@ -337,7 +421,7 @@ describe('ConsumersController', () => {
       );
     });
 
-    it('succeeds even when Slack notification fails (env missing, catch branch)', async () => {
+    it('succeeds and skips Slack when S2S_SLACK_CHANNEL_ID is not configured', async () => {
       context.dataAccess.Consumer.findByClientId.resolves(null);
       delete context.env;
       const controller = ConsumersController(context);
@@ -347,9 +431,10 @@ describe('ConsumersController', () => {
       });
 
       expect(response.status).to.equal(STATUS_CREATED);
-      expect(context.log.error).to.have.been.calledWithMatch(
-        /^Failed to send Slack notification: .+$/,
+      expect(context.log.warn).to.have.been.calledWith(
+        'S2S_SLACK_CHANNEL_ID is not configured; skipping Slack notification',
       );
+      expect(slackPostMessageStub).not.to.have.been.called;
     });
 
     it('returns forbidden for non-admin users', async () => {
@@ -389,15 +474,34 @@ describe('ConsumersController', () => {
       expect(response.status).to.equal(STATUS_BAD_REQUEST);
     });
 
-    it('returns bad request when accessToken is missing', async () => {
-      const controller = ConsumersController(context);
-      const response = await controller.register({
+    it('returns bad request when access token header is missing', async () => {
+      const contextWithoutHeader = {
         ...context,
-        data: { ...validPayload, accessToken: '' },
+        pathInfo: { headers: {} },
+      };
+      const controller = ConsumersController(contextWithoutHeader);
+      const response = await controller.register({
+        ...contextWithoutHeader,
+        data: validPayload,
       });
 
       expect(response.status).to.equal(STATUS_BAD_REQUEST);
-      expect(response.headers.get('x-error')).to.equal('accessToken is required');
+      expect(response.headers.get('x-error')).to.include('x-ta-access-token header');
+    });
+
+    it('returns bad request when pathInfo is missing (access token not available)', async () => {
+      const contextWithoutPathInfo = {
+        ...context,
+        pathInfo: undefined,
+      };
+      const controller = ConsumersController(contextWithoutPathInfo);
+      const response = await controller.register({
+        ...contextWithoutPathInfo,
+        data: validPayload,
+      });
+
+      expect(response.status).to.equal(STATUS_BAD_REQUEST);
+      expect(response.headers.get('x-error')).to.include('x-ta-access-token header');
     });
 
     it('returns bad request when consumerName is missing', async () => {
@@ -430,6 +534,35 @@ describe('ConsumersController', () => {
       });
 
       expect(response.status).to.equal(STATUS_BAD_REQUEST);
+      expect(response.headers.get('x-error')).to.equal('capabilities must be a non-empty array');
+    });
+
+    it('returns bad request when capability elements are not non-empty strings', async () => {
+      context.dataAccess.Consumer.findByClientId.resolves(null);
+      const controller = ConsumersController(context);
+      const response = await controller.register({
+        ...context,
+        data: { ...validPayload, capabilities: [null, 123, {}, ''] },
+      });
+
+      expect(response.status).to.equal(STATUS_BAD_REQUEST);
+      expect(response.headers.get('x-error')).to.include('non-empty strings');
+      expect(context.dataAccess.Consumer.create).not.to.have.been.called;
+    });
+
+    it('returns bad request when capabilities fail entity:operation validation', async () => {
+      context.dataAccess.Consumer.findByClientId.resolves(null);
+      context.dataAccess.Consumer.validateCapabilities
+        .throws(new Error('Invalid capabilities: [evil:admin, site:destroy]'));
+      const controller = ConsumersController(context);
+      const response = await controller.register({
+        ...context,
+        data: { ...validPayload, capabilities: ['site:read', 'evil:admin', 'site:destroy'] },
+      });
+
+      expect(response.status).to.equal(STATUS_BAD_REQUEST);
+      expect(response.headers.get('x-error')).to.include('Invalid capabilities');
+      expect(context.dataAccess.Consumer.create).not.to.have.been.called;
     });
 
     it('returns bad request when access token validation fails', async () => {
@@ -488,6 +621,21 @@ describe('ConsumersController', () => {
       expect(response.headers.get('x-error')).to.include('already registered');
     });
 
+    it('returns bad request when create throws ValidationError from data layer', async () => {
+      context.dataAccess.Consumer.findByClientId.resolves(null);
+      const validationErr = new Error('The imsOrgId "x@AdobeOrg" is not in the list of allowed IMS Org IDs');
+      validationErr.name = 'ValidationError';
+      context.dataAccess.Consumer.create.rejects(validationErr);
+      const controller = ConsumersController(context);
+      const response = await controller.register({
+        ...context,
+        data: validPayload,
+      });
+
+      expect(response.status).to.equal(STATUS_BAD_REQUEST);
+      expect(response.headers.get('x-error')).to.include('imsOrgId');
+    });
+
     it('returns error when create fails unexpectedly', async () => {
       context.dataAccess.Consumer.findByClientId.resolves(null);
       context.dataAccess.Consumer.create.rejects(new Error('Unexpected DB error'));
@@ -500,7 +648,7 @@ describe('ConsumersController', () => {
       expect(response.status).to.equal(STATUS_INTERNAL_SERVER_ERROR);
     });
 
-    it('falls back to system when profile has no email', async () => {
+    it('falls back to system when profile has no email and logs warning', async () => {
       context.dataAccess.Consumer.findByClientId.resolves(null);
       context.attributes.authInfo.getProfile = () => ({});
       const controller = ConsumersController(context);
@@ -513,6 +661,9 @@ describe('ConsumersController', () => {
       expect(context.dataAccess.Consumer.create).to.have.been.calledWithMatch({
         updatedBy: 'system',
       });
+      expect(context.log.warn).to.have.been.calledWith(
+        'Auth profile lacks email; using updatedBy fallback for audit trail',
+      );
     });
 
     it('defaults to 500 when ErrorWithStatusCode has no status', async () => {
@@ -555,6 +706,47 @@ describe('ConsumersController', () => {
 
       expect(response.status).to.equal(STATUS_OK);
       expect(mockConsumer.setCapabilities).to.have.been.calledWith(['site:read']);
+    });
+
+    it('returns bad request when update capabilities is empty array', async () => {
+      const controller = ConsumersController(context);
+      const response = await controller.update({
+        ...context,
+        params: { consumerId: 'test-client-id' },
+        data: { capabilities: [] },
+      });
+
+      expect(response.status).to.equal(STATUS_BAD_REQUEST);
+      expect(response.headers.get('x-error')).to.equal('capabilities must be a non-empty array');
+      expect(mockConsumer.save).not.to.have.been.called;
+    });
+
+    it('returns bad request when update capabilities contain non-string elements', async () => {
+      const controller = ConsumersController(context);
+      const response = await controller.update({
+        ...context,
+        params: { consumerId: 'test-client-id' },
+        data: { capabilities: ['site:read', null, 123] },
+      });
+
+      expect(response.status).to.equal(STATUS_BAD_REQUEST);
+      expect(response.headers.get('x-error')).to.include('non-empty strings');
+      expect(mockConsumer.save).not.to.have.been.called;
+    });
+
+    it('returns bad request when update capabilities fail entity:operation validation', async () => {
+      context.dataAccess.Consumer.validateCapabilities
+        .throws(new Error('Invalid capabilities: [unknown:admin]'));
+      const controller = ConsumersController(context);
+      const response = await controller.update({
+        ...context,
+        params: { consumerId: 'test-client-id' },
+        data: { capabilities: ['site:read', 'unknown:admin'] },
+      });
+
+      expect(response.status).to.equal(STATUS_BAD_REQUEST);
+      expect(response.headers.get('x-error')).to.include('Invalid capabilities');
+      expect(mockConsumer.save).not.to.have.been.called;
     });
 
     it('rejects revokedAt in update payload', async () => {
@@ -693,6 +885,21 @@ describe('ConsumersController', () => {
       });
 
       expect(response.status).to.equal(STATUS_BAD_REQUEST);
+    });
+
+    it('returns bad request when save throws ValidationError from data layer', async () => {
+      const validationErr = new Error('Invalid capabilities: [unknown:admin]');
+      validationErr.name = 'ValidationError';
+      mockConsumer.save.rejects(validationErr);
+      const controller = ConsumersController(context);
+      const response = await controller.update({
+        ...context,
+        params: { consumerId: 'test-client-id' },
+        data: { consumerName: 'New Name' },
+      });
+
+      expect(response.status).to.equal(STATUS_BAD_REQUEST);
+      expect(response.headers.get('x-error')).to.include('Invalid capabilities');
     });
 
     it('returns forbidden for non-admin users', async () => {
