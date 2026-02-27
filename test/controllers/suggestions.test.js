@@ -140,6 +140,18 @@ describe('Suggestions Controller', () => {
     setUpdatedBy(value) {
       suggData.updatedBy = value;
     },
+    getSkipReason() {
+      return suggData.skipReason;
+    },
+    setSkipReason(value) {
+      suggData.skipReason = value;
+    },
+    getSkipDetail() {
+      return suggData.skipDetail;
+    },
+    setSkipDetail(value) {
+      suggData.skipDetail = value;
+    },
     remove: removeStub,
   });
 
@@ -238,6 +250,8 @@ describe('Suggestions Controller', () => {
         },
         updatedBy: 'test@test.com',
         updatedAt: new Date(),
+        skipReason: undefined,
+        skipDetail: undefined,
       },
       {
         id: SUGGESTION_IDS[1],
@@ -2105,6 +2119,63 @@ describe('Suggestions Controller', () => {
     expect(error).to.have.property('message', 'Error updating suggestion');
   });
 
+  it('patches a suggestion with status SKIPPED and skipReason/skipDetail', async () => {
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'SKIPPED',
+        skipReason: 'already_implemented',
+        skipDetail: 'Fix was applied manually',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(suggs[0].status).to.equal('SKIPPED');
+    expect(suggs[0].skipReason).to.equal('already_implemented');
+    expect(suggs[0].skipDetail).to.equal('Fix was applied manually');
+  });
+
+  it('patches a suggestion returns 400 for invalid skipReason when status is SKIPPED', async () => {
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'SKIPPED',
+        skipReason: 'invalid_reason',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error.message).to.include('Invalid skipReason');
+  });
+
+  it('patches a suggestion returns 400 when skipDetail exceeds 500 chars and status is SKIPPED', async () => {
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'SKIPPED',
+        skipReason: 'other',
+        skipDetail: 'x'.repeat(501),
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error.message).to.include('500');
+  });
+
   it('bulk patches suggestion status 2 successes', async () => {
     const response = await suggestionsController.patchSuggestionsStatus({
       params: {
@@ -2343,6 +2414,57 @@ describe('Suggestions Controller', () => {
     expect(bulkPatchResponse.suggestions[1].suggestion).to.not.exist;
     expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'No updates provided');
     expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'No updates provided');
+  });
+
+  it('bulk patches suggestion status with skipReason and skipDetail when status is SKIPPED', async () => {
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [
+        { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'too_risky', skipDetail: 'Low confidence' },
+      ],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.success).to.equal(1);
+    expect(bulkPatchResponse.suggestions[0].statusCode).to.equal(200);
+    expect(suggs[0].status).to.equal('SKIPPED');
+    expect(suggs[0].skipReason).to.equal('too_risky');
+    expect(suggs[0].skipDetail).to.equal('Low confidence');
+  });
+
+  it('bulk patches suggestion status accepts only id and status (non-breaking)', async () => {
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [{ id: SUGGESTION_IDS[0], status: 'SKIPPED' }],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    expect((await response.json()).metadata.success).to.equal(1);
+  });
+
+  it('bulk patches suggestion status returns 400 for invalid skipReason when status is SKIPPED', async () => {
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [
+        { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'invalid_reason' },
+      ],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.failed).to.equal(1);
+    expect(bulkPatchResponse.suggestions[0].statusCode).to.equal(400);
+    expect(bulkPatchResponse.suggestions[0].message).to.include('Invalid skipReason');
   });
 
   it('bulk patches suggestion status fails if validation error in set status', async () => {

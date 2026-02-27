@@ -2858,6 +2858,15 @@ SuggestionStatus:
     - 'PENDING_VALIDATION'
     - 'REJECTED'
   example: 'NEW'
+SuggestionSkipReason:
+  description: Reason for skipping a suggestion when status is SKIPPED
+  type: string
+  enum:
+    - already_implemented
+    - inaccurate_or_incomplete
+    - too_risky
+    - no_reason
+    - other
 SuggestionType:
   description: |
     Type of suggestion:
@@ -2904,6 +2913,13 @@ Suggestion:
     status:
       description: Status of this suggestion; status reflects overall fix execution, flagged here for optimization
       $ref: '#/SuggestionStatus'
+    skipReason:
+      description: Reason for skipping when status is SKIPPED
+      $ref: '#/SuggestionSkipReason'
+    skipDetail:
+      description: Optional detail for skip reason, max 500 characters
+      type: string
+      maxLength: 500
     createdAt:
       description: UTC timestamp of when the suggestion was created
       $ref: '#/DateTime'
@@ -2933,6 +2949,13 @@ SuggestionMinimal:
     status:
       description: Status of this suggestion
       $ref: '#/SuggestionStatus'
+    skipReason:
+      description: Reason for skipping when status is SKIPPED
+      $ref: '#/SuggestionSkipReason'
+    skipDetail:
+      description: Optional detail for skip reason, max 500 characters
+      type: string
+      maxLength: 500
     data:
       type: object
       description: URL-related fields extracted from the full data object. Only present if any URL fields exist.
@@ -3214,6 +3237,16 @@ SuggestionUpdate:
       oneOf:
         - $ref: '#/BrokenBacklinksKpiDeltas'
         - $ref: '#/BrokenInternalLinksKpiDeltas'
+    status:
+      description: Status of this suggestion; when set to SKIPPED, skipReason and skipDetail may be provided
+      $ref: '#/SuggestionStatus'
+    skipReason:
+      description: Reason for skipping when status is SKIPPED; required when status is SKIPPED if provided
+      $ref: '#/SuggestionSkipReason'
+    skipDetail:
+      description: Optional detail for skip reason, max 500 characters
+      type: string
+      maxLength: 500
 SuggestionStatusUpdate:
   type: array
   items:
@@ -3226,6 +3259,13 @@ SuggestionStatusUpdate:
       status:
         description: Status of this suggestion; status reflects overall fix execution, flagged here for optimization
         $ref: '#/SuggestionStatus'
+      skipReason:
+        description: Reason for skipping when status is SKIPPED
+        $ref: '#/SuggestionSkipReason'
+      skipDetail:
+        description: Optional detail for skip reason, max 500 characters
+        type: string
+        maxLength: 500
     required:
       - id
       - status

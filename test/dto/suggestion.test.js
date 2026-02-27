@@ -14,25 +14,37 @@
 
 import { expect } from 'chai';
 
-import { SuggestionDto, SUGGESTION_VIEWS } from '../../src/dto/suggestion.js';
+import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../../src/dto/suggestion.js';
 
 describe('Suggestion DTO', () => {
-  const createMockSuggestion = (dataOverrides = {}) => ({
+  const createMockSuggestion = (dataOverrides = {}, suggestionOverrides = {}) => ({
     getId: () => 'suggestion-id-123',
     getOpportunityId: () => 'opportunity-id-456',
     getType: () => 'CONTENT_UPDATE',
     getRank: () => 42,
-    getStatus: () => 'NEW',
+    getStatus: () => suggestionOverrides.status ?? 'NEW',
     getData: () => ({ url: 'https://example.com/page', content: 'test', ...dataOverrides }),
     getKpiDeltas: () => ({ improvement: 10 }),
     getCreatedAt: () => '2025-01-01T00:00:00.000Z',
     getUpdatedAt: () => '2025-01-02T00:00:00.000Z',
     getUpdatedBy: () => 'system',
+    getSkipReason: suggestionOverrides.getSkipReason ?? (() => undefined),
+    getSkipDetail: suggestionOverrides.getSkipDetail ?? (() => undefined),
   });
 
   describe('SUGGESTION_VIEWS', () => {
     it('exports valid view options', () => {
       expect(SUGGESTION_VIEWS).to.deep.equal(['minimal', 'summary', 'full']);
+    });
+  });
+
+  describe('SUGGESTION_SKIP_REASONS', () => {
+    it('exports valid skip reason enum values', () => {
+      expect(SUGGESTION_SKIP_REASONS).to.include('already_implemented');
+      expect(SUGGESTION_SKIP_REASONS).to.include('inaccurate_or_incomplete');
+      expect(SUGGESTION_SKIP_REASONS).to.include('too_risky');
+      expect(SUGGESTION_SKIP_REASONS).to.include('no_reason');
+      expect(SUGGESTION_SKIP_REASONS).to.include('other');
     });
   });
 
@@ -71,6 +83,31 @@ describe('Suggestion DTO', () => {
         expect(json).to.have.property('createdAt');
         expect(json).to.have.property('updatedAt');
         expect(json).to.have.property('updatedBy');
+      });
+
+      it('includes skipReason and skipDetail when present (SKIPPED suggestion)', () => {
+        const suggestion = createMockSuggestion(
+          {},
+          {
+            status: 'SKIPPED',
+            getSkipReason: () => 'already_implemented',
+            getSkipDetail: () => 'Fix was applied manually',
+          },
+        );
+
+        const json = SuggestionDto.toJSON(suggestion);
+
+        expect(json).to.have.property('skipReason', 'already_implemented');
+        expect(json).to.have.property('skipDetail', 'Fix was applied manually');
+      });
+
+      it('omits skipReason and skipDetail when not present', () => {
+        const suggestion = createMockSuggestion();
+
+        const json = SuggestionDto.toJSON(suggestion);
+
+        expect(json).to.not.have.property('skipReason');
+        expect(json).to.not.have.property('skipDetail');
       });
 
       it('omits aggregationKey when not present in data and computed value is falsy', () => {
@@ -302,6 +339,22 @@ describe('Suggestion DTO', () => {
         });
       });
 
+      it('includes skipReason and skipDetail in minimal view when present', () => {
+        const suggestion = createMockSuggestion(
+          {},
+          {
+            status: 'SKIPPED',
+            getSkipReason: () => 'too_risky',
+            getSkipDetail: () => 'Low confidence',
+          },
+        );
+
+        const json = SuggestionDto.toJSON(suggestion, 'minimal');
+
+        expect(json).to.have.property('skipReason', 'too_risky');
+        expect(json).to.have.property('skipDetail', 'Low confidence');
+      });
+
       describe('accessibility-specific filtering', () => {
         const createMockOpportunity = (type) => ({
           getType: () => type,
@@ -495,6 +548,22 @@ describe('Suggestion DTO', () => {
 
         expect(json).to.not.have.property('url'); // No URL extraction anymore
         expect(json).to.not.have.property('data'); // No data when getData returns null
+      });
+
+      it('includes skipReason and skipDetail in summary view when present', () => {
+        const suggestion = createMockSuggestion(
+          {},
+          {
+            status: 'SKIPPED',
+            getSkipReason: () => 'inaccurate_or_incomplete',
+            getSkipDetail: () => 'Data was outdated',
+          },
+        );
+
+        const json = SuggestionDto.toJSON(suggestion, 'summary');
+
+        expect(json).to.have.property('skipReason', 'inaccurate_or_incomplete');
+        expect(json).to.have.property('skipDetail', 'Data was outdated');
       });
 
       describe('accessibility-specific filtering', () => {

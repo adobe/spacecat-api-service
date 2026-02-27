@@ -150,6 +150,8 @@ broken-backlinks-suggestions-status-update:
       status: 'APPROVED'
     - id: '945e4567-f543-12d3-a456-426614174010'
       status: 'SKIPPED'
+      skipReason: 'already_implemented'
+      skipDetail: 'Fix was applied manually last week'
 broken-backlinks-suggestions-status-update-response:
   description: Example for broken backlinks suggestions status update response
   value:
