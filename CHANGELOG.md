@@ -1,3 +1,15 @@
+# [1.325.0](https://github.com/adobe/spacecat-api-service/compare/v1.324.2...v1.325.0) (2026-02-27)
+
+
+### Bug Fixes
+
+* remove stale llmo-customer-analysis trigger assertion and revert deploy-dev label ([#1876](https://github.com/adobe/spacecat-api-service/issues/1876)) ([2921e30](https://github.com/adobe/spacecat-api-service/commit/2921e30be216fef4af3762cffa9c8ecd25368aa4)), closes [#1781](https://github.com/adobe/spacecat-api-service/issues/1781) [#1781](https://github.com/adobe/spacecat-api-service/issues/1781)
+
+
+### Features
+
+* trigger DRS prompt generation during LLMO onboarding ([#1781](https://github.com/adobe/spacecat-api-service/issues/1781)) ([7ebc38f](https://github.com/adobe/spacecat-api-service/commit/7ebc38f95e24d886ca8ae8cbdc41e8a750479777))
+
 ## [1.324.2](https://github.com/adobe/spacecat-api-service/compare/v1.324.1...v1.324.2) (2026-02-27)
 
 
