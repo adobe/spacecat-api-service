@@ -280,7 +280,7 @@ function PageRelationshipsController(ctx) {
       if (e instanceof ErrorWithStatusCode) {
         return badRequest(e.message);
       }
-      return badRequest('Missing Authorization header');
+      return badRequest('Missing Authorization header - 2');
     }
 
     const { relationships, errors } = await lookupRelationships(site, pages, imsToken, {
