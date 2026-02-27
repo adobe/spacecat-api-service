@@ -223,6 +223,7 @@ export function detectStatusChanges(prevData, nextData, log) {
               opportunityName: nextOpp.name || nextOpp.opportunityId,
               assigneeBefore: '',
               assigneeAfter: nextOpp.assignee,
+              statusAfter: nextOpp.status,
               recipients: filterValidEmails([nextOpp.assignee, nextStrategy.createdBy], log),
               createdBy: nextStrategy.createdBy || '',
               assignee: nextOpp.assignee,
@@ -259,6 +260,7 @@ export function detectStatusChanges(prevData, nextData, log) {
               opportunityName: nextOpp.name || nextOpp.opportunityId,
               assigneeBefore: prevOpp.assignee || '',
               assigneeAfter: nextOpp.assignee,
+              statusAfter: nextOpp.status,
               recipients: filterValidEmails([nextOpp.assignee, nextStrategy.createdBy], log),
               createdBy: nextStrategy.createdBy || '',
               assignee: nextOpp.assignee,
@@ -292,7 +294,6 @@ export async function sendStatusChangeNotifications(context, {
 
   const oppTemplateName = 'llmo_opportunity_status_update';
   const stratTemplateName = 'llmo_strategy_update';
-  const assignTemplateName = 'llmo_opportunity_assignment';
 
   const hostname = extractHostnameFromBaseURL(siteBaseUrl || '');
   const strategyUrl = hostname
@@ -306,9 +307,7 @@ export async function sendStatusChangeNotifications(context, {
     } else {
       const isOpportunity = change.type === 'opportunity';
       const isAssignment = change.type === 'assignment';
-      let templateName = stratTemplateName;
-      if (isAssignment) templateName = assignTemplateName;
-      else if (isOpportunity) templateName = oppTemplateName;
+      const templateName = (isOpportunity || isAssignment) ? oppTemplateName : stratTemplateName;
 
       const createdBy = change.createdBy || '';
       if (!createdBy) {
@@ -332,19 +331,7 @@ export async function sendStatusChangeNotifications(context, {
         const recipientName = await resolveUserName(dataAccess, recipient);
 
         let templateData;
-        if (isAssignment) {
-          templateData = {
-            recipient_name: recipientName,
-            recipient_email: recipient,
-            assignee_name: assigneeName,
-            assignee_email: assigneeEmail,
-            strategy_owner_name: strategyOwnerName,
-            strategy_owner_email: strategyOwnerEmail,
-            opportunity_name: change.opportunityName || '',
-            strategy_name: change.strategyName,
-            strategy_url: strategyUrl,
-          };
-        } else if (isOpportunity) {
+        if (isOpportunity || isAssignment) {
           templateData = {
             recipient_name: recipientName,
             recipient_email: recipient,

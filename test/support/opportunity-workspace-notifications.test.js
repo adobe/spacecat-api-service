@@ -419,6 +419,7 @@ describe('opportunity-workspace-notifications', () => {
       expect(changes[0].opportunityName).to.equal('New Opp');
       expect(changes[0].assigneeBefore).to.equal('');
       expect(changes[0].assigneeAfter).to.equal('user@test.com');
+      expect(changes[0].statusAfter).to.equal('new');
       expect(changes[0].recipients).to.include('user@test.com');
       expect(changes[0].recipients).to.include('owner@test.com');
     });
@@ -474,6 +475,7 @@ describe('opportunity-workspace-notifications', () => {
       expect(changes[0].type).to.equal('assignment');
       expect(changes[0].assigneeBefore).to.equal('');
       expect(changes[0].assigneeAfter).to.equal('user@test.com');
+      expect(changes[0].statusAfter).to.equal('new');
     });
 
     it('should emit assignment change when assignee changes from one user to another', () => {
@@ -505,6 +507,7 @@ describe('opportunity-workspace-notifications', () => {
       expect(changes[0].type).to.equal('assignment');
       expect(changes[0].assigneeBefore).to.equal('user1@test.com');
       expect(changes[0].assigneeAfter).to.equal('user2@test.com');
+      expect(changes[0].statusAfter).to.equal('new');
     });
 
     it('should not emit assignment change when assignee is removed', () => {
@@ -567,6 +570,7 @@ describe('opportunity-workspace-notifications', () => {
       expect(statusChange.statusAfter).to.equal('completed');
       expect(assignmentChange.assigneeBefore).to.equal('user1@test.com');
       expect(assignmentChange.assigneeAfter).to.equal('user2@test.com');
+      expect(assignmentChange.statusAfter).to.equal('completed');
     });
 
     it('should collect all assignees for strategy status change', () => {
@@ -809,7 +813,7 @@ describe('opportunity-workspace-notifications', () => {
       expect(emailOptions.templateData.strategy_url).to.equal('https://llmo.now/www.example.com/insights/opportunity-workspace');
     });
 
-    it('should send assignment change email with llmo_opportunity_assignment template', async () => {
+    it('should send assignment change email with llmo_opportunity_status_update template', async () => {
       const changes = [{
         type: 'assignment',
         strategyId: 's1',
@@ -818,6 +822,7 @@ describe('opportunity-workspace-notifications', () => {
         opportunityName: 'Opp 1',
         assigneeBefore: '',
         assigneeAfter: 'user@test.com',
+        statusAfter: 'new',
         recipients: ['user@test.com'],
         createdBy: 'owner@test.com',
         assignee: 'user@test.com',
@@ -830,7 +835,7 @@ describe('opportunity-workspace-notifications', () => {
       expect(summary.sent).to.equal(1);
       expect(sendEmailStub).to.have.been.calledOnce;
       const [, emailOptions] = sendEmailStub.firstCall.args;
-      expect(emailOptions.templateName).to.equal('llmo_opportunity_assignment');
+      expect(emailOptions.templateName).to.equal('llmo_opportunity_status_update');
       expect(emailOptions.recipients).to.deep.equal(['user@test.com']);
     });
 
@@ -843,6 +848,7 @@ describe('opportunity-workspace-notifications', () => {
         opportunityName: 'Opp 1',
         assigneeBefore: 'user1@test.com',
         assigneeAfter: 'user2@test.com',
+        statusAfter: 'in_progress',
         recipients: ['user2@test.com'],
         createdBy: 'owner@test.com',
         assignee: 'user2@test.com',
@@ -860,6 +866,7 @@ describe('opportunity-workspace-notifications', () => {
       expect(emailOptions.templateData.strategy_owner_name).to.equal('Owner Smith');
       expect(emailOptions.templateData.strategy_owner_email).to.equal('owner@test.com');
       expect(emailOptions.templateData.opportunity_name).to.equal('Opp 1');
+      expect(emailOptions.templateData.opportunity_status).to.equal('in_progress');
       expect(emailOptions.templateData.strategy_name).to.equal('Strategy 1');
       expect(emailOptions.templateData.strategy_url).to.equal('https://llmo.now/www.example.com/insights/opportunity-workspace');
     });
@@ -873,6 +880,7 @@ describe('opportunity-workspace-notifications', () => {
         opportunityName: 'Opp 1',
         assigneeBefore: '',
         assigneeAfter: 'user@test.com',
+        statusAfter: 'new',
         recipients: ['user@test.com'],
         createdBy: '',
         assignee: 'user@test.com',
