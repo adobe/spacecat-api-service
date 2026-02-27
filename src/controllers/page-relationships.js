@@ -22,7 +22,9 @@ import {
 } from '@adobe/spacecat-shared-http-utils';
 import AccessControlUtil from '../support/access-control-util.js';
 import {
-  resolveAemAccessToken,
+  getIMSPromiseToken,
+  exchangePromiseToken,
+  ErrorWithStatusCode,
 } from '../support/utils.js';
 import {
   isAEMAuthoredSite,
@@ -276,13 +278,14 @@ function PageRelationshipsController(ctx) {
 
     let imsToken;
     try {
-      imsToken = await resolveAemAccessToken(context);
+      const promiseTokenResponse = await getIMSPromiseToken(context);
+      imsToken = await exchangePromiseToken(context, promiseTokenResponse.promise_token);
     } catch (e) {
-      if (e?.status === 401) {
-        log.warn(`Failed to resolve AEM access token for opportunity ${opportunityId}: ${e.message}`);
-        return createResponse({ message: 'Authentication failed with upstream IMS service' }, 401);
+      if (e instanceof ErrorWithStatusCode) {
+        return badRequest(e.message);
       }
-      return badRequest(e?.message || 'Missing Authorization header');
+      log.warn(`Failed to resolve AEM access token for opportunity ${opportunityId}: ${e.message}`);
+      return createResponse({ message: 'Authentication failed with upstream IMS service' }, 401);
     }
 
     const { relationships, errors } = await lookupRelationships(site, pages, imsToken, {
