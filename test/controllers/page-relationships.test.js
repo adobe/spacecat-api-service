@@ -269,7 +269,7 @@ describe('Page Relationships Controller', () => {
       expect(resolvePageIdsStub).to.not.have.been.called;
     });
 
-    it('returns 400 with default message when non-ErrorWithStatusCode is thrown', async () => {
+    it('returns 400 with IMS token problem message when non-ErrorWithStatusCode is thrown', async () => {
       isAEMAuthoredSiteStub.returns(true);
       getIMSPromiseTokenStub.rejects(new Error('unexpected'));
       const controller = PageRelationshipsController(controllerContext);
@@ -278,7 +278,20 @@ describe('Page Relationships Controller', () => {
       const body = await response.json();
 
       expect(response.status).to.equal(400);
-      expect(body.message).to.equal('Missing Authorization header');
+      expect(body.message).to.equal('Problem getting IMS token: unexpected');
+      expect(resolvePageIdsStub).to.not.have.been.called;
+    });
+
+    it('returns 400 with Unknown error when thrown error has no message', async () => {
+      isAEMAuthoredSiteStub.returns(true);
+      getIMSPromiseTokenStub.rejects(Object.assign(new Error(), { message: '' }));
+      const controller = PageRelationshipsController(controllerContext);
+
+      const response = await controller.getForOpportunity(requestContext);
+      const body = await response.json();
+
+      expect(response.status).to.equal(400);
+      expect(body.message).to.equal('Problem getting IMS token: Unknown error');
       expect(resolvePageIdsStub).to.not.have.been.called;
     });
 
