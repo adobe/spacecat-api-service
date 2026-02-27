@@ -1,3 +1,10 @@
+# [1.326.0](https://github.com/adobe/spacecat-api-service/compare/v1.325.1...v1.326.0) (2026-02-27)
+
+
+### Features
+
+* add slack for redirects ([#1830](https://github.com/adobe/spacecat-api-service/issues/1830)) ([2c3d2a5](https://github.com/adobe/spacecat-api-service/commit/2c3d2a57f2ee0f3e5f9b655e799bcb1600422d03))
+
 ## [1.325.1](https://github.com/adobe/spacecat-api-service/compare/v1.325.0...v1.325.1) (2026-02-27)
 
 
