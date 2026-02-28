@@ -12,6 +12,7 @@
 
 import {
   hasText,
+  isNonEmptyArray,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 import {
@@ -19,6 +20,7 @@ import {
   createResponse,
   forbidden,
   notFound,
+  internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import AccessControlUtil from '../support/access-control-util.js';
 import { getIMSPromiseToken, exchangePromiseToken, ErrorWithStatusCode } from '../support/utils.js';
@@ -30,7 +32,6 @@ import {
 } from '../support/aem-content-api.js';
 
 const MAX_PAGES = 50;
-const SUPPORTED_OPPORTUNITY_TYPES = new Set(['meta-tags', 'alt-text']);
 const EMPTY_RELATIONSHIPS_RESPONSE = {
   supported: false,
   relationships: {},
@@ -43,39 +44,6 @@ function chunkPages(pages, chunkSize) {
     chunks.push(pages.slice(i, i + chunkSize));
   }
   return chunks;
-}
-
-function getSuggestionType(suggestion) {
-  const data = suggestion?.getData?.() || {};
-  const rawType = [
-    data.suggestionType,
-    data.issue,
-  ].find((value) => hasText(value));
-  return hasText(rawType) ? rawType.trim() : '';
-}
-
-function getSuggestionPageUrls(suggestion) {
-  const data = suggestion?.getData?.() || {};
-  const urls = new Set();
-  const directUrlValues = [data.url, data.pageUrl];
-
-  directUrlValues.forEach((value) => {
-    if (hasText(value)) {
-      urls.add(value.trim());
-    }
-  });
-
-  const { recommendations } = data;
-  if (Array.isArray(recommendations)) {
-    recommendations.forEach((recommendation) => {
-      const recommendationUrl = recommendation?.pageUrl;
-      if (hasText(recommendationUrl)) {
-        urls.add(recommendationUrl.trim());
-      }
-    });
-  }
-
-  return Array.from(urls);
 }
 
 function normalizePageUrlForLookup(pageUrl, siteBaseURL) {
@@ -96,29 +64,80 @@ function normalizePageUrlForLookup(pageUrl, siteBaseURL) {
   }
 }
 
-function extractPagesFromSuggestions(suggestions, options = {}) {
-  const { siteBaseURL = '' } = options;
-  const uniquePages = new Map();
-  const suggestionList = Array.isArray(suggestions) ? suggestions : [];
-  suggestionList.forEach((suggestion) => {
-    const suggestionType = getSuggestionType(suggestion);
-    const pageUrls = getSuggestionPageUrls(suggestion);
-    pageUrls.forEach((pageUrl) => {
-      const normalizedPageUrl = normalizePageUrlForLookup(pageUrl, siteBaseURL);
-      const dedupeKey = `${normalizedPageUrl}:${suggestionType}`;
-      if (!uniquePages.has(dedupeKey)) {
-        uniquePages.set(dedupeKey, { pageUrl: normalizedPageUrl, suggestionType });
+function getStatusFromError(error) {
+  if (Number.isInteger(error?.statusCode)) {
+    return error.statusCode;
+  }
+  if (Number.isInteger(error?.status)) {
+    return error.status;
+  }
+  return null;
+}
+
+function getSourceType(value) {
+  if (!hasText(value)) {
+    return null;
+  }
+  return String(value).trim();
+}
+
+function mapRelationship(rawRelationship) {
+  let rawChain = [];
+  if (Array.isArray(rawRelationship?.upstream?.chain)) {
+    rawChain = rawRelationship.upstream.chain;
+  } else if (Array.isArray(rawRelationship?.chain)) {
+    rawChain = rawRelationship.chain;
+  }
+
+  const relationshipSourceType = getSourceType(rawRelationship?.metadata?.sourceType);
+
+  const chain = rawChain
+    .map((edge) => {
+      const pageId = [
+        edge?.pageId,
+        edge?.id,
+        edge?.page?.pageId,
+        edge?.page?.id,
+      ].find(hasText)?.trim();
+      const pagePath = [
+        edge?.pagePath,
+        edge?.path,
+        typeof edge?.page === 'string' ? edge.page : undefined,
+        edge?.page?.pagePath,
+        edge?.page?.path,
+      ].find(hasText)?.trim();
+      if (!pageId || !pagePath) {
+        return null;
       }
-    });
-  });
-  return Array.from(uniquePages.values());
+      const sourceType = getSourceType(edge?.sourceType || edge?.relation || edge?.type)
+        || relationshipSourceType
+        || null;
+      const chainItem = {
+        pageId,
+        pagePath,
+      };
+      if (sourceType) {
+        chainItem.metadata = { sourceType };
+      }
+      return chainItem;
+    })
+    .filter(Boolean);
+
+  const relationship = {
+    chain,
+  };
+  if (hasText(rawRelationship?.pageId)) {
+    relationship.pageId = rawRelationship.pageId.trim();
+  }
+
+  return relationship;
 }
 
 /**
  * Page relationships controller: proxy to AEM Content API for upstream relationship data.
- * Used for list-time enrichment (metatags/alt-text) so the UI can show fix targets.
+ * Used for on-demand popup lookups with caller-provided pages.
  * @param {object} ctx - Context with dataAccess, log.
- * @returns {object} Controller with getForOpportunity.
+ * @returns {object} Controller with search.
  */
 function PageRelationshipsController(ctx) {
   const { dataAccess, log } = ctx;
@@ -182,17 +201,23 @@ function PageRelationshipsController(ctx) {
 
       const items = [];
       const resolveErrors = {};
+      const relationshipContextByKey = {};
 
       for (let i = 0; i < normalizedBatch.length; i += 1) {
         const pageSpec = normalizedBatch[i];
         const r = resolved[i] || {};
-        const responseUrl = pageSpec.normalizedPageUrl;
+        const suggestionType = hasText(pageSpec.suggestionType) ? pageSpec.suggestionType : '';
+        const responseKey = pageSpec.key;
         if (r.error || !r.pageId) {
-          resolveErrors[responseUrl] = { error: r.error || 'Could not resolve page' };
+          resolveErrors[responseKey] = { error: r.error || 'Could not resolve page' };
         } else {
-          const checkPath = buildCheckPath(pageSpec.suggestionType, deliveryConfig);
+          relationshipContextByKey[responseKey] = {
+            pagePath: pageSpec.normalizedPageUrl,
+            pageId: r.pageId,
+          };
+          const checkPath = buildCheckPath(suggestionType, deliveryConfig);
           const item = {
-            key: `${responseUrl}:${pageSpec.suggestionType}`,
+            key: pageSpec.key,
             pageId: r.pageId,
             include: ['upstream'],
           };
@@ -208,7 +233,22 @@ function PageRelationshipsController(ctx) {
       if (items.length > 0) {
         // eslint-disable-next-line no-await-in-loop
         const aemResponse = await fetchRelationships(authorURL, items, imsToken, log);
-        Object.assign(allRelationships, aemResponse.results);
+        const mappedResultEntries = Object.entries(aemResponse.results || {})
+          .map(([key, value]) => {
+            const relationshipContext = relationshipContextByKey[key];
+            if (!hasText(relationshipContext?.pagePath) || !hasText(relationshipContext?.pageId)) {
+              return null;
+            }
+            const mappedRelationship = mapRelationship(value);
+            mappedRelationship.pagePath = relationshipContext.pagePath;
+            mappedRelationship.pageId = relationshipContext.pageId;
+            return [key, mappedRelationship];
+          })
+          .filter(Boolean);
+        const mappedResults = Object.fromEntries(
+          mappedResultEntries,
+        );
+        Object.assign(allRelationships, mappedResults);
         Object.assign(allErrors, aemResponse.errors);
       }
     }
@@ -220,18 +260,14 @@ function PageRelationshipsController(ctx) {
   }
 
   /**
-   * GET /sites/:siteId/opportunities/:opportunityId/page-relationships
-   * Resolves page relationships from all opportunity suggestions.
+   * POST /sites/:siteId/page-relationships/search
+   * Resolves page relationships for caller-provided pages.
    * Returns { supported, relationships, errors }.
    */
-  async function getForOpportunity(context) {
+  async function search(context) {
     const siteId = context.params?.siteId;
-    const opportunityId = context.params?.opportunityId;
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
-    }
-    if (!isValidUUID(opportunityId)) {
-      return badRequest('Opportunity ID required');
     }
 
     const site = await dataAccess.Site.findById(siteId);
@@ -243,22 +279,15 @@ function PageRelationshipsController(ctx) {
       return forbidden('Only users belonging to the organization can access this site');
     }
 
-    const opportunity = await dataAccess.Opportunity.findById(opportunityId);
-    if (!opportunity || opportunity.getSiteId() !== siteId) {
-      return notFound('Opportunity not found');
+    const pages = context.data?.pages;
+    if (!isNonEmptyArray(pages)) {
+      return badRequest('pages array required');
     }
-    const opportunityType = opportunity.getType?.();
-    if (!SUPPORTED_OPPORTUNITY_TYPES.has(opportunityType)) {
-      log.warn(`Unsupported opportunity type for page relationships: ${opportunityType || 'unknown'} (opportunityId=${opportunityId})`);
-      return createResponse({
-        supported: false,
-        relationships: {},
-        errors: {
-          _opportunity: {
-            error: `Unsupported opportunity type: ${opportunityType || 'unknown'}`,
-          },
-        },
-      });
+    if (pages.some((page) => !page || !hasText(page.pageUrl))) {
+      return badRequest('Each page must include a non-empty pageUrl');
+    }
+    if (pages.some((page) => !hasText(page.key))) {
+      return badRequest('Each page must include a non-empty key');
     }
 
     const supportState = getSupportState(site);
@@ -267,21 +296,21 @@ function PageRelationshipsController(ctx) {
     }
     const { deliveryConfig, authorURL } = supportState;
 
-    const suggestions = await dataAccess.Suggestion.allByOpportunityId(opportunityId);
-    const pages = extractPagesFromSuggestions(suggestions, {
-      siteBaseURL: site.getBaseURL(),
-    });
-
     let imsToken;
     try {
       const promiseTokenResponse = await getIMSPromiseToken(context);
       imsToken = await exchangePromiseToken(context, promiseTokenResponse.promise_token);
     } catch (e) {
       if (e instanceof ErrorWithStatusCode) {
-        return badRequest(e.message);
+        return createResponse({ message: e.message }, e.status || 400);
       }
+      const status = getStatusFromError(e);
       const detail = [e.statusCode, e.status, e.message].filter(Boolean).join(' ') || e.message || 'Unknown error';
-      return badRequest(`Problem getting IMS token: ${detail}`);
+      if (status && status >= 400 && status < 500) {
+        return createResponse({ message: `Problem getting IMS token: ${detail}` }, status);
+      }
+      log.error(`Problem getting IMS token for site ${siteId}: ${detail}`);
+      return internalServerError('Error getting IMS token');
     }
 
     const { relationships, errors } = await lookupRelationships(site, pages, imsToken, {
@@ -296,7 +325,7 @@ function PageRelationshipsController(ctx) {
     });
   }
 
-  return { getForOpportunity };
+  return { search };
 }
 
 export default PageRelationshipsController;
