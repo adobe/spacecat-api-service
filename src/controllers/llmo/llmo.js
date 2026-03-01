@@ -30,7 +30,6 @@ import crypto from 'crypto';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
-import { exchangePromiseToken } from '../../support/utils.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import {
   applyFilters,
@@ -1261,11 +1260,11 @@ function LlmoController(ctx) {
   /**
    * POST /sites/{siteId}/llmo/edge-optimize-routing
    * Updates edge optimize routing for the site via the internal CDN API.
-   * - Requires x-promise-token header and request body cdnType.
+   * - Extracts the site's organization IMS org ID and sends it as x-ims-org-id to the CDN API.
+   * - Uses static token from env (EDGE_OPTIMIZE_CDN_API_TOKEN) in CDN API Authorization header.
    * - Probes the site with custom User-Agent (2xx continues; 301: if Location domain
    *   normalizes to same as probe URL domain, use Location domain for CDN API; otherwise break).
-   * - Exchanges promise token for IMS user token, then calls internal CDN API.
-   * @param {object} context - Request context (context.request for headers)
+   * @param {object} context - Request context
    * @returns {Promise<Response>}
    */
   const updateEdgeOptimizeCDNRouting = async (context) => {
@@ -1273,18 +1272,15 @@ function LlmoController(ctx) {
     const { siteId } = context.params;
     const { Site } = dataAccess;
     const { cdnType, enabled = true } = context.data || {};
-    const promiseToken = context.request?.headers?.get?.('x-promise-token');
-    log.info(`Edge optimize routing update request received for site ${siteId}`);
+    const profile = context.attributes?.authInfo?.getProfile?.();
+    const requester = profile?.email || 'unknown';
+    log.info(`Edge optimize routing update request received for site ${siteId} by ${requester}`);
 
     if (env?.ENV && env.ENV !== 'prod') {
       return createResponse(
         { message: `API is not available in ${env?.ENV} environment` },
         400,
       );
-    }
-
-    if (!hasText(promiseToken)) {
-      return badRequest('x-promise-token header is required and must be a non-empty string');
     }
 
     if (!hasText(cdnType)) {
@@ -1316,6 +1312,15 @@ function LlmoController(ctx) {
       );
     }
 
+    const cdnApiToken = env?.EDGE_OPTIMIZE_CDN_API_TOKEN;
+    if (!hasText(cdnApiToken)) {
+      log.error('EDGE_OPTIMIZE_CDN_API_TOKEN is not set');
+      return createResponse(
+        { message: 'API is missing mandatory environment variable' },
+        503,
+      );
+    }
+
     const strategy = EDGE_OPTIMIZE_CDN_STRATEGIES[cdnTypeNormalized];
 
     if (enabled !== undefined && typeof enabled !== 'boolean') {
@@ -1329,6 +1334,17 @@ function LlmoController(ctx) {
 
     if (!await accessControlUtil.hasAccess(site)) {
       return forbidden('User does not have access to this site');
+    }
+
+    const org = await site.getOrganization();
+    if (!isObject(org)) {
+      log.error(`Site ${siteId} has no organization`);
+      return badRequest('Site organization is missing');
+    }
+    const imsOrgId = org.getImsOrgId?.();
+    if (!hasText(imsOrgId)) {
+      log.error(`Site ${siteId} organization has no IMS org ID`);
+      return badRequest('Site organization has no IMS org ID');
     }
 
     const overrideBaseURL = site.getConfig()?.getFetchConfig?.()?.overrideBaseURL;
@@ -1377,16 +1393,6 @@ function LlmoController(ctx) {
       return badRequest(msg);
     }
 
-    let imsUserToken;
-    try {
-      log.debug(`Getting IMS user token for site ${siteId}`);
-      imsUserToken = await exchangePromiseToken(context, promiseToken);
-      log.info('IMS user token obtained successfully');
-    } catch (tokenError) {
-      log.warn(`Fetching IMS user token for site ${siteId} failed: ${tokenError.status} ${tokenError.message}`);
-      return createResponse({ message: 'Authentication failed with upstream IMS service' }, 401);
-    }
-
     try {
       const cdnUrl = strategy.buildUrl(cdnConfig, domain);
       const cdnBody = strategy.buildBody(enabled);
@@ -1395,7 +1401,8 @@ function LlmoController(ctx) {
         method: strategy.method,
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${imsUserToken}`,
+          Authorization: `Bearer ${cdnApiToken}`,
+          'x-ims-org-id': imsOrgId,
         },
         body: JSON.stringify(cdnBody),
         signal: AbortSignal.timeout(5000),
