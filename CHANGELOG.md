@@ -1,3 +1,10 @@
+## [1.326.2](https://github.com/adobe/spacecat-api-service/compare/v1.326.1...v1.326.2) (2026-03-01)
+
+
+### Bug Fixes
+
+* **deps:** bump data-access to 3.4.1 tier client to 1.3.13 ([#1880](https://github.com/adobe/spacecat-api-service/issues/1880)) ([6d0d8a7](https://github.com/adobe/spacecat-api-service/commit/6d0d8a7d5c9b09467e712b310fb9489ce3aefc4b))
+
 ## [1.326.1](https://github.com/adobe/spacecat-api-service/compare/v1.326.0...v1.326.1) (2026-02-28)
 
 
