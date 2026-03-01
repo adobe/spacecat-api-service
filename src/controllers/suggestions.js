@@ -1008,34 +1008,48 @@ function SuggestionsController(ctx, sqs, env) {
     const opportunityId = context.params?.opportunityId;
     const { authInfo: { profile } } = context.attributes;
 
+    context.log.info('[edge-preview] request', {
+      siteId,
+      opportunityId,
+      suggestionIds: context.data?.suggestionIds,
+      userId: profile?.email,
+    });
+
     if (!isValidUUID(siteId)) {
+      context.log.warn('[edge-preview-failed] siteId is not a valid UUID');
       return badRequest('Site ID required');
     }
 
     if (!isValidUUID(opportunityId)) {
+      context.log.warn('[edge-preview-failed] opportunityId is not a valid UUID');
       return badRequest('Opportunity ID required');
     }
 
     // validate request body
     if (!isNonEmptyObject(context.data)) {
+      context.log.warn('[edge-preview-failed] no request body data provided');
       return badRequest('No data provided');
     }
     const { suggestionIds } = context.data;
     if (!isArray(suggestionIds) || suggestionIds.length === 0) {
+      context.log.warn('[edge-preview-failed] suggestionIds is not a non-empty array');
       return badRequest('Request body must contain a non-empty array of suggestionIds');
     }
 
     const site = await Site.findById(siteId);
     if (!site) {
+      context.log.warn(`[edge-preview-failed] site ${siteId} not found`);
       return notFound('Site not found');
     }
 
     if (!await accessControlUtil.hasAccess(site)) {
+      context.log.warn('[edge-preview-failed] user does not have access to the site');
       return forbidden('User does not belong to the organization');
     }
 
     const opportunity = await Opportunity.findById(opportunityId);
     if (!opportunity || opportunity.getSiteId() !== siteId) {
+      context.log.warn(`[edge-preview-failed] opportunity ${opportunityId} not found`);
       return notFound('Opportunity not found');
     }
 
@@ -1081,10 +1095,12 @@ function SuggestionsController(ctx, sqs, env) {
       });
 
       if (urls.size > 1) {
+        context.log.warn('[edge-preview-failed] all suggestions must belong to the same URL');
         return badRequest('All suggestions must belong to the same URL for preview');
       }
 
       if (urls.size === 0) {
+        context.log.warn('[edge-preview-failed] no valid URLs found in suggestions');
         return badRequest('No valid URLs found in suggestions');
       }
     }
@@ -1140,7 +1156,7 @@ function SuggestionsController(ctx, sqs, env) {
           + ` and ${succeededSuggestions.length} suggestions`);
         }
       } catch (error) {
-        context.log.error(`Error generating preview: ${error.message}`, error);
+        context.log.error(`[edge-preview-failed] Error generating preview: ${error.message}`, error);
         // If preview fails, mark all valid suggestions as failed
         validSuggestions.forEach((suggestion) => {
           failedSuggestions.push({
@@ -1176,6 +1192,10 @@ function SuggestionsController(ctx, sqs, env) {
     };
     response.suggestions.sort((a, b) => a.index - b.index);
 
+    context.log.info('[edge-preview] response', {
+      response: { metadata: response.metadata },
+    });
+
     return createResponse(response, 207);
   };
 
@@ -1189,42 +1209,62 @@ function SuggestionsController(ctx, sqs, env) {
     const opportunityId = context.params?.opportunityId;
     const { authInfo: { profile } } = context.attributes;
 
+    context.log.info('[edge-deploy] request', {
+      siteId,
+      opportunityId,
+      suggestionIdsCount: context.data?.suggestionIds?.length ?? 0,
+      userId: profile?.email,
+    });
+
+    context.log.info('[edge-deploy] suggestionIds', {
+      suggestionIds: context.data?.suggestionIds,
+    });
+
     if (!accessControlUtil.isLLMOAdministrator()) {
+      context.log.warn('[edge-deploy-failed] user is not an LLMO administrator');
       return forbidden('Only LLMO administrators can deploy suggestions to edge');
     }
 
     if (!isValidUUID(siteId)) {
+      context.log.warn(`[edge-deploy-failed] siteId ${siteId} is not a valid UUID`);
       return badRequest('Site ID required');
     }
 
     if (!isValidUUID(opportunityId)) {
+      context.log.warn(`[edge-deploy-failed] opportunityId ${opportunityId} is not a valid UUID`);
       return badRequest('Opportunity ID required');
     }
 
     // validate request body
     if (!isNonEmptyObject(context.data)) {
+      context.log.warn('[edge-deploy-failed] no requesy body data provided');
       return badRequest('No data provided');
     }
     const { suggestionIds } = context.data;
     if (!isArray(suggestionIds) || suggestionIds.length === 0) {
+      context.log.warn('[edge-deploy-failed] suggestionIds is not a non-empty array');
       return badRequest('Request body must contain a non-empty array of suggestionIds');
     }
 
     const site = await Site.findById(siteId);
     if (!site) {
+      context.log.warn(`[edge-deploy-failed] site ${siteId} not found`);
       return notFound('Site not found');
     }
 
     if (!await accessControlUtil.hasAccess(site)) {
+      context.log.warn('[edge-deploy-failed] user does not have access to the site.');
       return forbidden('User does not belong to the organization');
     }
 
     if (!await accessControlUtil.isOwnerOfSite(site)) {
+      context.log.warn('[edge-deploy-failed] user is not the owner of the site');
       return forbidden('User does not have access to deploy edge optimize fixes for this site');
     }
 
     const opportunity = await Opportunity.findById(opportunityId);
     if (!opportunity || opportunity.getSiteId() !== siteId) {
+      context.log.warn(`[edge-deploy-failed] opportunity ${opportunityId} not found`);
       return notFound('Opportunity not found');
     }
 
@@ -1242,6 +1282,7 @@ function SuggestionsController(ctx, sqs, env) {
       const suggestion = allSuggestions.find((s) => s.getId() === suggestionId);
 
       if (!suggestion) {
+        context.log.warn(`[edge-deploy-failed] suggestion ${suggestionId} not found`);
         failedSuggestions.push({
           uuid: suggestionId,
           index,
@@ -1256,6 +1297,7 @@ function SuggestionsController(ctx, sqs, env) {
             allowedRegexPatterns: data.allowedRegexPatterns,
           });
         } else {
+          context.log.warn(`[edge-deploy-failed] domain-wide suggestion ${suggestionId} missing allowedRegexPatterns`);
           failedSuggestions.push({
             uuid: suggestionId,
             index,
@@ -1264,6 +1306,7 @@ function SuggestionsController(ctx, sqs, env) {
           });
         }
       } else if (suggestion.getStatus() !== SuggestionModel.STATUSES.NEW) {
+        context.log.warn(`[edge-deploy-failed] suggestion ${suggestionId} (status: ${suggestion.getStatus()}) is not in NEW status`);
         failedSuggestions.push({
           uuid: suggestionId,
           index,
@@ -1382,9 +1425,9 @@ function SuggestionsController(ctx, sqs, env) {
           });
         });
 
-        context.log.info(`[edge-deployment] Successfully deployed ${succeededSuggestions.length} suggestions by ${profile?.email || 'tokowaka-deployment'}`);
+        context.log.info(`[edge-deploy] Successfully deployed ${succeededSuggestions.length} suggestions by ${profile?.email || 'tokowaka-deployment'}`);
       } catch (error) {
-        context.log.error(`Error deploying to Tokowaka: ${error.message}`, error);
+        context.log.error(`[edge-deploy-failed] Error deploying to Tokowaka: ${error.message}`, error);
         // If deployment fails, mark all valid suggestions as failed
         validSuggestions.forEach((suggestion) => {
           failedSuggestions.push({
@@ -1444,7 +1487,7 @@ function SuggestionsController(ctx, sqs, env) {
             await suggestion.save();
 
             succeededSuggestions.push(suggestion);
-            context.log.info(`[edge-deployment] Successfully deployed domain-wide suggestion ${suggestionId} by ${profile?.email || 'tokowaka-deployment'}`);
+            context.log.info(`[edge-deploy] Successfully deployed domain-wide suggestion ${suggestionId} by ${profile?.email || 'tokowaka-deployment'}`);
 
             // Mark all other NEW suggestions that match allowedRegexPatterns
             try {
@@ -1516,7 +1559,7 @@ function SuggestionsController(ctx, sqs, env) {
               // Don't fail the deployment if marking covered suggestions fails
             }
           } catch (error) {
-            context.log.error(`Error deploying domain-wide suggestion ${suggestion.getId()}: ${error.message}`, error);
+            context.log.error(`[edge-deploy-failed] Error deploying domain-wide suggestion ${suggestion.getId()}: ${error.message}`, error);
             failedSuggestions.push({
               uuid: suggestion.getId(),
               index: suggestionIds.indexOf(suggestion.getId()),
@@ -1526,7 +1569,7 @@ function SuggestionsController(ctx, sqs, env) {
           }
         }
       } catch (error) {
-        context.log.error(`Error deploying domain-wide suggestions: ${error.message}`, error);
+        context.log.error(`[edge-deploy-failed] Error deploying domain-wide suggestions: ${error.message}`, error);
         // Mark all domain-wide suggestions as failed
         domainWideSuggestions.forEach(({ suggestion }) => {
           failedSuggestions.push({
@@ -1607,6 +1650,9 @@ function SuggestionsController(ctx, sqs, env) {
       },
     };
     response.suggestions.sort((a, b) => a.index - b.index);
+    context.log.info('[edge-deploy] response', {
+      response,
+    });
 
     return createResponse(response, 207);
   };
@@ -1614,32 +1660,50 @@ function SuggestionsController(ctx, sqs, env) {
   const rollbackSuggestionFromEdge = async (context) => {
     const { siteId, opportunityId } = context.params;
     const { authInfo: { profile } } = context.attributes;
+
+    context.log.info('[edge-rollback] request', {
+      siteId,
+      opportunityId,
+      suggestionIdsCount: context.data?.suggestionIds?.length ?? 0,
+      userId: profile?.email,
+    });
+    context.log.info('[edge-rollback] suggestionIds', {
+      suggestionIds: context.data?.suggestionIds,
+    });
+
     if (!isNonEmptyObject(context.data)) {
+      context.log.warn('[edge-rollback-failed] no request body data provided');
       return badRequest('No data provided');
     }
     if (!accessControlUtil.isLLMOAdministrator()) {
+      context.log.warn('[edge-rollback-failed] user is not an LLMO administrator');
       return forbidden('Only LLMO administrators can rollback suggestions');
     }
     const { suggestionIds } = context.data;
     if (!isArray(suggestionIds) || suggestionIds.length === 0) {
+      context.log.warn('[edge-rollback-failed] suggestionIds is not a non-empty array');
       return badRequest('Request body must contain a non-empty array of suggestionIds');
     }
 
     const site = await Site.findById(siteId);
     if (!site) {
+      context.log.warn(`[edge-rollback-failed] site ${siteId} not found`);
       return notFound('Site not found');
     }
 
     if (!await accessControlUtil.hasAccess(site)) {
+      context.log.warn('[edge-rollback-failed] user does not have access to the site.');
       return forbidden('User does not belong to the organization');
     }
 
     if (!await accessControlUtil.isOwnerOfSite(site)) {
+      context.log.warn('[edge-rollback-failed] user is not the owner of the site');
       return forbidden('User does not have access to rollback edge optimize fixes for this site');
     }
 
     const opportunity = await Opportunity.findById(opportunityId);
     if (!opportunity || opportunity.getSiteId() !== siteId) {
+      context.log.warn(`[edge-rollback-failed] opportunity ${opportunityId} not found`);
       return notFound('Opportunity not found');
     }
 
@@ -1655,6 +1719,7 @@ function SuggestionsController(ctx, sqs, env) {
       const suggestion = allSuggestions.find((s) => s.getId() === suggestionId);
 
       if (!suggestion) {
+        context.log.warn(`[edge-rollback-failed] suggestion ${suggestionId} not found`);
         failedSuggestions.push({
           uuid: suggestionId,
           index,
@@ -1665,6 +1730,7 @@ function SuggestionsController(ctx, sqs, env) {
         // For rollback, check if suggestion has been deployed
         const hasBeenDeployed = suggestion.getData()?.edgeDeployed;
         if (!hasBeenDeployed) {
+          context.log.warn(`[edge-rollback-failed] suggestion ${suggestionId} hasn't been deployed, can't rollback`);
           failedSuggestions.push({
             uuid: suggestionId,
             index,
@@ -1743,7 +1809,7 @@ function SuggestionsController(ctx, sqs, env) {
               );
             }
           } catch (error) {
-            context.log.error(`Error rolling back domain-wide suggestion ${suggestion.getId()}: ${error.message}`, error);
+            context.log.error(`[edge-rollback-failed] Error rolling back domain-wide suggestion ${suggestion.getId()}: ${error.message}`, error);
             failedSuggestions.push({
               uuid: suggestion.getId(),
               index: suggestionIds.indexOf(suggestion.getId()),
@@ -1753,7 +1819,7 @@ function SuggestionsController(ctx, sqs, env) {
           }
         }
       } catch (error) {
-        context.log.error(`Error during domain-wide rollback: ${error.message}`, error);
+        context.log.error(`[edge-rollback-failed] Error during domain-wide rollback: ${error.message}`, error);
         domainWideSuggestions.forEach((suggestion) => {
           failedSuggestions.push({
             uuid: suggestion.getId(),
@@ -1810,7 +1876,7 @@ function SuggestionsController(ctx, sqs, env) {
 
         context.log.info(`[edge-rollback] Successfully rolled back ${succeededSuggestions.length} suggestions from Edge by ${profile?.email || 'tokowaka-rollback'}`);
       } catch (error) {
-        context.log.error(`Error during Tokowaka rollback: ${error.message}`, error);
+        context.log.error(`[edge-rollback-failed] Error during Tokowaka rollback: ${error.message}`, error);
         // If rollback fails, mark all valid suggestions as failed
         validSuggestions.forEach((suggestion) => {
           failedSuggestions.push({
@@ -1840,6 +1906,10 @@ function SuggestionsController(ctx, sqs, env) {
       },
     };
     response.suggestions.sort((a, b) => a.index - b.index);
+
+    context.log.info('[edge-rollback] response', {
+      response,
+    });
 
     return createResponse(response, 207);
   };

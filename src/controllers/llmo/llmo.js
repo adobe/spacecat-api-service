@@ -971,29 +971,39 @@ function LlmoController(ctx) {
       enhancements, tokowakaEnabled, forceFail, patches = {}, prerender,
     } = context.data || {};
 
+    log.info('[edge-optimize-config] request', {
+      siteId,
+      userId: profile?.email,
+      dataKeys: context.data ? Object.keys(context.data) : [],
+    });
+
     if (!accessControlUtil.isLLMOAdministrator()) {
+      log.warn('[edge-optimize-config-failed] user is not an LLMO administrator');
       return forbidden('Only LLMO administrators can update the edge optimize config');
     }
 
-    log.info(`createOrUpdateEdgeConfig request received for site ${siteId}, data=${JSON.stringify(context.data)}`);
-
     if (tokowakaEnabled !== undefined && typeof tokowakaEnabled !== 'boolean') {
+      log.warn('[edge-optimize-config-failed] tokowakaEnabled must be a boolean');
       return badRequest('tokowakaEnabled field must be a boolean');
     }
 
     if (enhancements !== undefined && typeof enhancements !== 'boolean') {
+      log.warn('[edge-optimize-config-failed] enhancements must be a boolean');
       return badRequest('enhancements field must be a boolean');
     }
 
     if (forceFail !== undefined && typeof forceFail !== 'boolean') {
+      log.warn('[edge-optimize-config-failed] forceFail must be a boolean');
       return badRequest('forceFail field must be a boolean');
     }
 
     if (patches !== undefined && typeof patches !== 'object') {
+      log.warn('[edge-optimize-config-failed] patches must be an object');
       return badRequest('patches field must be an object');
     }
 
     if (prerender !== undefined && (typeof prerender !== 'object' || Array.isArray(prerender) || !Array.isArray(prerender.allowList))) {
+      log.warn('[edge-optimize-config-failed] prerender must be an object with allowList array');
       return badRequest('prerender field must be an object with allowList property that is an array');
     }
 
@@ -1002,14 +1012,17 @@ function LlmoController(ctx) {
       const site = await Site.findById(siteId);
 
       if (!site) {
+        log.warn(`[edge-optimize-config-failed] site ${siteId} not found`);
         return notFound('Site not found');
       }
 
       if (!await accessControlUtil.hasAccess(site)) {
+        log.warn('[edge-optimize-config-failed] user does not have access to the site');
         return forbidden('User does not have access to this site');
       }
 
       if (!await accessControlUtil.isOwnerOfSite(site)) {
+        log.warn('[edge-optimize-config-failed] user does not own the site');
         return forbidden('User does not own this site');
       }
 
@@ -1086,7 +1099,7 @@ function LlmoController(ctx) {
         ...metaconfig,
       });
     } catch (error) {
-      log.error(`Failed to create/update edge config for site ${siteId}:`, error);
+      log.error(`[edge-optimize-config-failed] Failed to create/update edge config for site ${siteId}: ${error.message}`, error);
       return badRequest(error.message);
     }
   };
