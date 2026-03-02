@@ -33,7 +33,6 @@ import { isHelixSite } from '../support/utils.js';
 import { getHlxConfigMessagePart } from '../utils/slack/base.js';
 
 const CDN_HOOK_SECRET_NAME = 'INCOMING_WEBHOOK_SECRET_CDN';
-
 export const BUTTON_LABELS = {
   APPROVE_CUSTOMER: 'As Customer',
   APPROVE_FRIENDS_FAMILY: 'As Friends/Family',
