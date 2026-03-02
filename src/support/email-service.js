@@ -18,7 +18,7 @@ import { ImsClient } from '@adobe/spacecat-shared-ims-client';
  * @param {Object} context - The request context with env and log.
  * @returns {Promise<string>} The access token string.
  */
-async function getEmailServiceToken(context) {
+export async function getEmailServiceToken(context) {
   const { env } = context;
 
   const emailEnv = {
@@ -49,6 +49,7 @@ async function getEmailServiceToken(context) {
  * @param {string} options.templateName - Post Office template name.
  * @param {Object<string,string>} [options.templateData] - Template variable key/value pairs.
  * @param {string} [options.locale='en_US'] - Locale for the email.
+ * @param {string} [options.accessToken] - when provided, skips token acquisition.
  * @returns {Promise<{success: boolean, statusCode: number, error?: string, templateUsed: string}>}
  *   Result object. Never throws by default.
  */
@@ -57,6 +58,7 @@ export async function sendEmail(context, {
   templateName,
   templateData,
   locale = 'en_US',
+  accessToken: providedToken,
 }) {
   const { env, log } = context;
   const result = { success: false, statusCode: 0, templateUsed: templateName };
@@ -67,7 +69,12 @@ export async function sendEmail(context, {
       return result;
     }
 
-    const accessToken = await getEmailServiceToken(context);
+    if (!templateName) {
+      result.error = 'templateName is required';
+      return result;
+    }
+
+    const accessToken = providedToken ?? await getEmailServiceToken(context);
     const postOfficeEndpoint = env.ADOBE_POSTOFFICE_ENDPOINT;
 
     if (!postOfficeEndpoint) {

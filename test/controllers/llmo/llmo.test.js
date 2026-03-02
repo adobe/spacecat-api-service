@@ -4553,16 +4553,18 @@ describe('LlmoController', () => {
       expect(params.prevData).to.be.null;
     });
 
-    it('should pass null prevData when readStrategy fails', async () => {
+    it('should skip notifications when readStrategy fails (prevents email storm)', async () => {
       readStrategyStub.rejects(new Error('S3 read error'));
 
       const result = await controller.saveStrategy(mockContext);
 
       expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.notifications).to.deep.equal({
+        sent: 0, failed: 0, skipped: 0, changes: 0,
+      });
 
-      expect(notifyStrategyChangesStub).to.have.been.calledOnce;
-      const [, params] = notifyStrategyChangesStub.firstCall.args;
-      expect(params.prevData).to.be.null;
+      expect(notifyStrategyChangesStub).to.not.have.been.called;
       expect(mockLog.warn).to.have.been.calledWith(
         sinon.match(/Could not read previous strategy/),
       );

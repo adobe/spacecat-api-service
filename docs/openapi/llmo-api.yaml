@@ -1605,8 +1605,9 @@ llmo-strategy:
 
       When status changes are detected (either at the strategy level or at the
       opportunity level), email notifications are sent to the relevant assignees
-      and the strategy owner. Notification delivery is fire-and-forget and does
-      not affect the response.
+      and the strategy owner. Notification delivery is awaited, and a summary of
+      sent/failed/skipped counts is included in the response. Notification
+      failures do not cause the endpoint to return an error.
     operationId: saveStrategy
     requestBody:
       required: true
@@ -1628,8 +1629,25 @@ llmo-strategy:
                   type: string
                   description: The S3 object version ID of the saved strategy
                   example: "abc123def456"
+                notifications:
+                  type: object
+                  description: Summary of notification delivery
+                  properties:
+                    sent:
+                      type: integer
+                      description: Number of emails sent successfully
+                    failed:
+                      type: integer
+                      description: Number of emails that failed to send
+                    skipped:
+                      type: integer
+                      description: Number of changes skipped (e.g. no valid recipients)
+                    changes:
+                      type: integer
+                      description: Number of status changes detected
               required:
                 - version
+                - notifications
       '400':
         $ref: './responses.yaml#/400'
       '401':

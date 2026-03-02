@@ -26,14 +26,18 @@ describe('opportunity-workspace-notifications', () => {
   let mockLog;
   let mockContext;
 
+  let getEmailServiceTokenStub;
+
   before(async () => {
     sendEmailStub = sinon.stub();
+    getEmailServiceTokenStub = sinon.stub().resolves('cached-token');
 
     const notifications = await esmock(
       '../../src/support/opportunity-workspace-notifications.js',
       {
         '../../src/support/email-service.js': {
           sendEmail: sendEmailStub,
+          getEmailServiceToken: getEmailServiceTokenStub,
         },
         '@adobe/spacecat-shared-utils': {
           isValidEmail: (email) => typeof email === 'string' && email.includes('@') && email.includes('.'),
@@ -49,6 +53,8 @@ describe('opportunity-workspace-notifications', () => {
   beforeEach(() => {
     sendEmailStub.reset();
     sendEmailStub.resolves({ success: true, statusCode: 200, templateUsed: 'test' });
+    getEmailServiceTokenStub.reset();
+    getEmailServiceTokenStub.resolves('cached-token');
 
     mockLog = {
       info: sinon.stub(),
@@ -394,6 +400,22 @@ describe('opportunity-workspace-notifications', () => {
       const changes = detectStatusChanges(prev, next, mockLog);
       expect(changes[0].recipients).to.have.lengthOf(0);
       expect(mockLog.warn).to.have.been.calledWith(sinon.match(/Skipping invalid email/));
+    });
+
+    it('should log warn for non-string email recipient', () => {
+      const nextData = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [{ opportunityId: 'o1', status: 'new', assignee: 123 }],
+          createdBy: 'owner@test.com',
+        }],
+      };
+
+      const changes = detectStatusChanges(null, nextData, mockLog);
+      expect(changes[0].recipients).to.not.include(123);
+      expect(mockLog.warn).to.have.been.calledWith(sinon.match(/Skipping non-string email recipient: number/));
     });
 
     it('should detect changes for new strategies that do not exist in prevData', () => {
@@ -897,7 +919,7 @@ describe('opportunity-workspace-notifications', () => {
       }];
 
       const summary = await sendStatusChangeNotifications(mockContext, {
-        changes, siteId: 'site-1', siteBaseUrl: '', changedBy: 'admin@test.com',
+        changes, siteBaseUrl: '',
       });
 
       expect(summary.skipped).to.equal(1);
@@ -919,7 +941,7 @@ describe('opportunity-workspace-notifications', () => {
       }];
 
       const summary = await sendStatusChangeNotifications(mockContext, {
-        changes, siteId: 'site-1', siteBaseUrl: 'http://', changedBy: 'admin@test.com',
+        changes, siteBaseUrl: 'http://',
       });
 
       expect(summary.sent).to.equal(1);
@@ -942,7 +964,7 @@ describe('opportunity-workspace-notifications', () => {
       }];
 
       const summary = await sendStatusChangeNotifications(mockContext, {
-        changes, siteId: 'site-1', siteBaseUrl: 'https://www.example.com', changedBy: 'admin@test.com',
+        changes, siteBaseUrl: 'https://www.example.com',
       });
 
       expect(summary.sent).to.equal(1);
@@ -979,7 +1001,7 @@ describe('opportunity-workspace-notifications', () => {
       }];
 
       const summary = await sendStatusChangeNotifications(mockContext, {
-        changes, siteId: 'site-1', siteBaseUrl: 'https://www.example.com', changedBy: 'admin@test.com',
+        changes, siteBaseUrl: 'https://www.example.com',
       });
 
       expect(summary.sent).to.equal(1);
@@ -1005,7 +1027,7 @@ describe('opportunity-workspace-notifications', () => {
       }];
 
       await sendStatusChangeNotifications(mockContext, {
-        changes, siteId: 'site-1', siteBaseUrl: 'https://www.example.com',
+        changes, siteBaseUrl: 'https://www.example.com',
       });
 
       const [, emailOptions] = sendEmailStub.firstCall.args;
@@ -1037,7 +1059,7 @@ describe('opportunity-workspace-notifications', () => {
       }];
 
       const summary = await sendStatusChangeNotifications(mockContext, {
-        changes, siteId: 'site-1', siteBaseUrl: '', changedBy: 'admin@test.com',
+        changes, siteBaseUrl: '',
       });
 
       expect(summary.sent).to.equal(1);
@@ -1060,7 +1082,7 @@ describe('opportunity-workspace-notifications', () => {
       }];
 
       const summary = await sendStatusChangeNotifications(mockContext, {
-        changes, siteId: 'site-1', siteBaseUrl: 'https://www.example.com', changedBy: 'admin@test.com',
+        changes, siteBaseUrl: 'https://www.example.com',
       });
 
       expect(summary.sent).to.equal(1);
@@ -1090,7 +1112,7 @@ describe('opportunity-workspace-notifications', () => {
       }];
 
       const summary = await sendStatusChangeNotifications(mockContext, {
-        changes, siteId: 'site-1', siteBaseUrl: '', changedBy: 'admin@test.com',
+        changes, siteBaseUrl: '',
       });
 
       expect(summary.sent).to.equal(2);
@@ -1114,7 +1136,7 @@ describe('opportunity-workspace-notifications', () => {
       }];
 
       const summary = await sendStatusChangeNotifications(mockContext, {
-        changes, siteId: 'site-1', siteBaseUrl: '', changedBy: 'admin@test.com',
+        changes, siteBaseUrl: '',
       });
 
       expect(summary.failed).to.equal(1);
@@ -1138,7 +1160,7 @@ describe('opportunity-workspace-notifications', () => {
       }];
 
       const summary = await sendStatusChangeNotifications(mockContext, {
-        changes, siteId: 'site-1', siteBaseUrl: '', changedBy: 'admin@test.com',
+        changes, siteBaseUrl: '',
       });
 
       expect(summary.failed).to.equal(1);
@@ -1159,7 +1181,7 @@ describe('opportunity-workspace-notifications', () => {
       }];
 
       const summary = await sendStatusChangeNotifications(mockContext, {
-        changes, siteId: 'site-1', siteBaseUrl: '', changedBy: 'admin@test.com',
+        changes, siteBaseUrl: '',
       });
 
       expect(summary.sent).to.equal(1);
@@ -1378,7 +1400,7 @@ describe('opportunity-workspace-notifications', () => {
       }];
 
       const summary = await sendStatusChangeNotifications(mockContext, {
-        changes, siteId: 'site-1', siteBaseUrl: 'https://www.example.com', changedBy: 'admin@test.com',
+        changes, siteBaseUrl: 'https://www.example.com',
       });
 
       expect(summary.sent).to.equal(1);
@@ -1386,6 +1408,71 @@ describe('opportunity-workspace-notifications', () => {
       expect(emailOptions.templateData.recipient_name).to.equal('unknown@test.com');
       expect(emailOptions.templateData.assignee_name).to.equal('unknown@test.com');
       expect(emailOptions.templateData.strategy_url).to.equal('https://llmo.now/www.example.com/insights/opportunity-workspace');
+    });
+
+    it('should call getEmailServiceToken once and pass token to all sendEmail calls', async () => {
+      const changes = [
+        {
+          type: 'opportunity',
+          strategyId: 's1',
+          strategyName: 'Strategy 1',
+          opportunityId: 'o1',
+          opportunityName: 'Opp 1',
+          statusBefore: 'new',
+          statusAfter: 'done',
+          recipients: ['user1@test.com'],
+          createdBy: 'owner@test.com',
+          assignee: 'user1@test.com',
+        },
+        {
+          type: 'opportunity',
+          strategyId: 's1',
+          strategyName: 'Strategy 1',
+          opportunityId: 'o2',
+          opportunityName: 'Opp 2',
+          statusBefore: 'new',
+          statusAfter: 'done',
+          recipients: ['user2@test.com'],
+          createdBy: 'owner@test.com',
+          assignee: 'user2@test.com',
+        },
+      ];
+
+      await sendStatusChangeNotifications(mockContext, {
+        changes, siteBaseUrl: 'https://www.example.com',
+      });
+
+      expect(getEmailServiceTokenStub).to.have.been.calledOnce;
+      expect(sendEmailStub).to.have.been.calledTwice;
+      expect(sendEmailStub.firstCall.args[1].accessToken).to.equal('cached-token');
+      expect(sendEmailStub.secondCall.args[1].accessToken).to.equal('cached-token');
+    });
+
+    it('should return early and not send emails when getEmailServiceToken fails', async () => {
+      getEmailServiceTokenStub.rejects(new Error('IMS unavailable'));
+
+      const changes = [{
+        type: 'opportunity',
+        strategyId: 's1',
+        strategyName: 'Strategy 1',
+        opportunityId: 'o1',
+        opportunityName: 'Opp 1',
+        statusBefore: 'new',
+        statusAfter: 'done',
+        recipients: ['user@test.com'],
+        createdBy: 'owner@test.com',
+        assignee: 'user@test.com',
+      }];
+
+      const summary = await sendStatusChangeNotifications(mockContext, {
+        changes, siteBaseUrl: 'https://www.example.com',
+      });
+
+      expect(summary.sent).to.equal(0);
+      expect(summary.failed).to.equal(0);
+      expect(summary.skipped).to.equal(0);
+      expect(sendEmailStub).to.not.have.been.called;
+      expect(mockContext.log.error).to.have.been.calledWith(sinon.match(/Failed to acquire IMS token/));
     });
   });
 

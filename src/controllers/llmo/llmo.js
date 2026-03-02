@@ -1199,12 +1199,14 @@ function LlmoController(ctx) {
 
       // Read previous strategy for diff (best-effort, null if not found)
       let prevData = null;
+      let skipNotifications = false;
       try {
         const prev = await readStrategy(siteId, s3.s3Client, { s3Bucket: s3.s3Bucket });
         if (prev.exists) {
           prevData = prev.data;
         }
       } catch (readError) {
+        skipNotifications = true;
         log.warn(`Could not read previous strategy for site ${siteId} (notifications will be skipped): ${readError.message}`);
       }
 
@@ -1216,7 +1218,6 @@ function LlmoController(ctx) {
       log.info(`Successfully saved LLMO strategy for siteId: ${siteId}, version: ${version}`);
 
       // Await notifications and include summary in response for debugging
-      const changedBy = context.attributes?.authInfo?.getProfile?.()?.email || 'system';
       let siteBaseUrl = '';
       if (dataAccess?.Site) {
         const site = await dataAccess.Site.findById(siteId);
@@ -1225,19 +1226,21 @@ function LlmoController(ctx) {
       let notificationSummary = {
         sent: 0, failed: 0, skipped: 0, changes: 0,
       };
-      try {
-        notificationSummary = await notifyStrategyChanges(context, {
-          prevData,
-          nextData: data,
-          siteId,
-          siteBaseUrl,
-          changedBy,
-        });
-        if (notificationSummary.changes > 0) {
-          log.info(`Strategy notification summary for site ${siteId}: ${JSON.stringify(notificationSummary)}`);
+      if (!skipNotifications) {
+        try {
+          notificationSummary = await notifyStrategyChanges(context, {
+            prevData,
+            nextData: data,
+            siteId,
+            siteBaseUrl,
+            changedBy: context.attributes?.authInfo?.getProfile?.()?.email || 'system',
+          });
+          if (notificationSummary.changes > 0) {
+            log.info(`Strategy notification summary for site ${siteId}: ${JSON.stringify(notificationSummary)}`);
+          }
+        } catch (err) {
+          log.error(`Strategy notification error for site ${siteId}: ${err.message}`);
         }
-      } catch (err) {
-        log.error(`Strategy notification error for site ${siteId}: ${err.message}`);
       }
 
       return ok({ version, notifications: notificationSummary });

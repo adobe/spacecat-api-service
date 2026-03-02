@@ -11,7 +11,7 @@
  */
 
 import { isValidEmail } from '@adobe/spacecat-shared-utils';
-import { sendEmail } from './email-service.js';
+import { sendEmail, getEmailServiceToken } from './email-service.js';
 
 /**
  * @typedef {Object} StatusChange
@@ -113,8 +113,10 @@ function filterValidEmails(candidates, log) {
   const seen = new Set();
   const result = [];
   for (const email of candidates) {
-    if (!email || typeof email !== 'string') {
-      // Skip non-string or empty values
+    if (!email) {
+      // null, undefined, empty string -- expected for unassigned opps
+    } else if (typeof email !== 'string') {
+      log.warn(`Skipping non-string email recipient: ${typeof email}`);
     } else if (!isValidEmail(email)) {
       log.warn(`Skipping invalid email recipient: ${email}`);
     } else {
@@ -289,9 +291,7 @@ export function detectStatusChanges(prevData, nextData, log) {
  * @param {Object} context - The request context (env, log, dataAccess).
  * @param {Object} params
  * @param {StatusChange[]} params.changes - Detected status changes.
- * @param {string} params.siteId - The site ID.
  * @param {string} [params.siteBaseUrl] - Site base URL for strategy_url.
- * @param {string} [params.changedBy] - Email or identifier of who made the change.
  * @returns {Promise<{sent: number, failed: number, skipped: number}>}
  *   Summary counts. Never throws.
  */
@@ -308,6 +308,14 @@ export async function sendStatusChangeNotifications(context, {
   const strategyUrl = hostname
     ? `https://llmo.now/${hostname}/insights/opportunity-workspace`
     : '';
+
+  let accessToken;
+  try {
+    accessToken = await getEmailServiceToken(context);
+  } catch (err) {
+    log.error(`Failed to acquire IMS token for notifications: ${err.message}`);
+    return summary;
+  }
 
   for (const change of changes) {
     if (change.recipients.length === 0) {
@@ -372,6 +380,7 @@ export async function sendStatusChangeNotifications(context, {
             recipients: [recipient],
             templateName,
             templateData,
+            accessToken,
           });
 
           if (result.success) {
@@ -402,11 +411,10 @@ export async function sendStatusChangeNotifications(context, {
  * @param {Object} params.nextData - New strategy data.
  * @param {string} params.siteId - The site ID.
  * @param {string} [params.siteBaseUrl] - Site base URL for strategy_url.
- * @param {string} [params.changedBy] - Who made the change (email or 'system').
  * @returns {Promise<{sent: number, failed: number, skipped: number, changes: number}>}
  */
 export async function notifyStrategyChanges(context, {
-  prevData, nextData, siteId, siteBaseUrl, changedBy,
+  prevData, nextData, siteId, siteBaseUrl,
 }) {
   const { log } = context;
 
@@ -422,7 +430,7 @@ export async function notifyStrategyChanges(context, {
 
     log.info(`Detected ${changes.length} status change(s) for site ${siteId}, sending notifications`);
     const summary = await sendStatusChangeNotifications(context, {
-      changes, siteId, siteBaseUrl, changedBy,
+      changes, siteBaseUrl,
     });
 
     return { ...summary, changes: changes.length };

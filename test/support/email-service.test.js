@@ -138,6 +138,33 @@ describe('email-service', () => {
       expect(fetchStub).to.not.have.been.called;
     });
 
+    it('should return error when templateName is missing', async () => {
+      const result = await sendEmail(mockContext, {
+        recipients: ['test@example.com'],
+        templateName: null,
+      });
+
+      expect(result.success).to.be.false;
+      expect(result.error).to.equal('templateName is required');
+      expect(fetchStub).to.not.have.been.called;
+      expect(imsClientInstance.getServiceAccessToken).to.not.have.been.called;
+    });
+
+    it('should skip token acquisition when accessToken is provided', async () => {
+      fetchStub.resolves({ status: 200, text: async () => 'OK' });
+
+      const result = await sendEmail(mockContext, {
+        recipients: ['test@example.com'],
+        templateName: 'test-template',
+        accessToken: 'provided-token',
+      });
+
+      expect(result.success).to.be.true;
+      expect(ImsClientStub.createFrom).to.not.have.been.called;
+      const [, options] = fetchStub.firstCall.args;
+      expect(options.headers.Authorization).to.equal('IMS provided-token');
+    });
+
     it('should return error when ADOBE_POSTOFFICE_ENDPOINT is not configured', async () => {
       delete mockContext.env.ADOBE_POSTOFFICE_ENDPOINT;
 
