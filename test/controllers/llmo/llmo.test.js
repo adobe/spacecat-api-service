@@ -5193,7 +5193,7 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body).to.deep.equal(['opportunitiesReviewed']);
-      expect(mockConfig.addLlmoTag).to.have.been.calledOnceWith('opportunitiesReviewed');
+      expect(mockConfig.addLlmoTag).to.not.have.been.called;
     });
 
     it('should return forbidden when user has no access', async () => {
