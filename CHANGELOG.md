@@ -1,3 +1,10 @@
+## [1.330.2](https://github.com/adobe/spacecat-api-service/compare/v1.330.1...v1.330.2) (2026-03-02)
+
+
+### Bug Fixes
+
+* add logs to edge APIs ([#1884](https://github.com/adobe/spacecat-api-service/issues/1884)) ([46bcea0](https://github.com/adobe/spacecat-api-service/commit/46bcea0b03d2ba010f24db8f7267c81900ff5a22))
+
 ## [1.330.1](https://github.com/adobe/spacecat-api-service/compare/v1.330.0...v1.330.1) (2026-03-02)
 
 
