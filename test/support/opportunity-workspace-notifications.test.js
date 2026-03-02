@@ -101,13 +101,10 @@ describe('opportunity-workspace-notifications', () => {
         }],
       };
       const changes = detectStatusChanges(null, nextData, mockLog);
-      expect(changes).to.have.lengthOf(2); // 1 strategy + 1 opportunity
-      expect(changes[0].type).to.equal('strategy');
+      expect(changes).to.have.lengthOf(1);
+      expect(changes[0].type).to.equal('opportunity');
       expect(changes[0].statusBefore).to.equal('');
       expect(changes[0].statusAfter).to.equal('new');
-      expect(changes[1].type).to.equal('opportunity');
-      expect(changes[1].statusBefore).to.equal('');
-      expect(changes[1].statusAfter).to.equal('new');
     });
 
     it('should detect opportunity changes when prevData is null (first save)', () => {
@@ -124,14 +121,13 @@ describe('opportunity-workspace-notifications', () => {
         }],
       };
       const changes = detectStatusChanges(null, nextData, mockLog);
-      expect(changes).to.have.lengthOf(3); // 1 strategy + 2 opportunities
-      expect(changes[0].type).to.equal('strategy');
+      expect(changes).to.have.lengthOf(2);
+      expect(changes[0].type).to.equal('opportunity');
+      expect(changes[0].opportunityId).to.equal('o1');
+      expect(changes[0].statusAfter).to.equal('completed');
       expect(changes[1].type).to.equal('opportunity');
-      expect(changes[1].opportunityId).to.equal('o1');
-      expect(changes[1].statusAfter).to.equal('completed');
-      expect(changes[2].type).to.equal('opportunity');
-      expect(changes[2].opportunityId).to.equal('o2');
-      expect(changes[2].statusAfter).to.equal('new');
+      expect(changes[1].opportunityId).to.equal('o2');
+      expect(changes[1].statusAfter).to.equal('new');
     });
 
     it('should handle new strategy with undefined opportunities (first save)', () => {
@@ -144,11 +140,7 @@ describe('opportunity-workspace-notifications', () => {
         }],
       };
       const changes = detectStatusChanges(null, nextData, mockLog);
-      expect(changes).to.have.lengthOf(1);
-      expect(changes[0].type).to.equal('strategy');
-      expect(changes[0].statusBefore).to.equal('');
-      expect(changes[0].statusAfter).to.equal('new');
-      expect(changes[0].opportunityNames).to.deep.equal([]);
+      expect(changes).to.have.lengthOf(0); // no strategy email on initial creation, no opps
     });
 
     it('should handle new strategy with null opportunities (first save)', () => {
@@ -162,9 +154,7 @@ describe('opportunity-workspace-notifications', () => {
         }],
       };
       const changes = detectStatusChanges(null, nextData, mockLog);
-      expect(changes).to.have.lengthOf(1);
-      expect(changes[0].type).to.equal('strategy');
-      expect(changes[0].opportunityNames).to.deep.equal([]);
+      expect(changes).to.have.lengthOf(0); // no strategy email on initial creation, no opps
     });
 
     it('should use opportunityId when opportunity has no name (new strategy)', () => {
@@ -178,8 +168,8 @@ describe('opportunity-workspace-notifications', () => {
         }],
       };
       const changes = detectStatusChanges(null, nextData, mockLog);
-      expect(changes).to.have.lengthOf(2);
-      expect(changes[1].opportunityName).to.equal('o1');
+      expect(changes).to.have.lengthOf(1);
+      expect(changes[0].opportunityName).to.equal('o1');
     });
 
     it('should resolve library opportunity name from nextData.opportunities when strategyOpportunity has no name', () => {
@@ -204,10 +194,9 @@ describe('opportunity-workspace-notifications', () => {
         }],
       };
       const changes = detectStatusChanges(null, nextData, mockLog);
-      expect(changes).to.have.lengthOf(3); // 1 strategy + 2 opportunities
-      expect(changes[0].opportunityNames).to.deep.equal(['EV Charging Expansion', 'Depot Grid Modernization']);
-      expect(changes[1].opportunityName).to.equal('EV Charging Expansion');
-      expect(changes[2].opportunityName).to.equal('Depot Grid Modernization');
+      expect(changes).to.have.lengthOf(2);
+      expect(changes[0].opportunityName).to.equal('EV Charging Expansion');
+      expect(changes[1].opportunityName).to.equal('Depot Grid Modernization');
     });
 
     it('should use empty assignee when new strategy opportunity has no assignee', () => {
@@ -221,8 +210,7 @@ describe('opportunity-workspace-notifications', () => {
         }],
       };
       const changes = detectStatusChanges(null, nextData, mockLog);
-      expect(changes).to.have.lengthOf(2);
-      expect(changes[1].assignee).to.equal('');
+      expect(changes).to.have.lengthOf(0);
     });
 
     it('should use empty createdBy when new strategy has no owner', () => {
@@ -235,9 +223,8 @@ describe('opportunity-workspace-notifications', () => {
         }],
       };
       const changes = detectStatusChanges(null, nextData, mockLog);
-      expect(changes).to.have.lengthOf(2);
+      expect(changes).to.have.lengthOf(1);
       expect(changes[0].createdBy).to.equal('');
-      expect(changes[1].createdBy).to.equal('');
     });
 
     it('should return empty array when nextData is null', () => {
@@ -433,10 +420,7 @@ describe('opportunity-workspace-notifications', () => {
       };
 
       const changes = detectStatusChanges(prev, next, mockLog);
-      expect(changes).to.have.lengthOf(1);
-      expect(changes[0].type).to.equal('strategy');
-      expect(changes[0].statusBefore).to.equal('');
-      expect(changes[0].statusAfter).to.equal('new');
+      expect(changes).to.have.lengthOf(0);
     });
 
     it('should emit assignment change when new opportunity added to existing strategy with assignee', () => {
@@ -470,8 +454,7 @@ describe('opportunity-workspace-notifications', () => {
       expect(changes[0].assigneeBefore).to.equal('');
       expect(changes[0].assigneeAfter).to.equal('user@test.com');
       expect(changes[0].statusAfter).to.equal('new');
-      expect(changes[0].recipients).to.include('user@test.com');
-      expect(changes[0].recipients).to.include('owner@test.com');
+      expect(changes[0].recipients).to.deep.equal(['user@test.com']); // assignee only, not owner
     });
 
     it('should not emit assignment change when new opportunity added without assignee', () => {
@@ -526,6 +509,7 @@ describe('opportunity-workspace-notifications', () => {
       expect(changes[0].assigneeBefore).to.equal('');
       expect(changes[0].assigneeAfter).to.equal('user@test.com');
       expect(changes[0].statusAfter).to.equal('new');
+      expect(changes[0].recipients).to.deep.equal(['user@test.com']); // assignee only
     });
 
     it('should emit assignment change when assignee changes from one user to another', () => {
@@ -558,6 +542,7 @@ describe('opportunity-workspace-notifications', () => {
       expect(changes[0].assigneeBefore).to.equal('user1@test.com');
       expect(changes[0].assigneeAfter).to.equal('user2@test.com');
       expect(changes[0].statusAfter).to.equal('new');
+      expect(changes[0].recipients).to.deep.equal(['user2@test.com']); // new assignee only
     });
 
     it('should not emit assignment change when assignee is removed', () => {
@@ -743,6 +728,7 @@ describe('opportunity-workspace-notifications', () => {
       expect(assignmentChange.assigneeBefore).to.equal('user1@test.com');
       expect(assignmentChange.assigneeAfter).to.equal('user2@test.com');
       expect(assignmentChange.statusAfter).to.equal('completed');
+      expect(assignmentChange.recipients).to.deep.equal(['user2@test.com']); // assignee only, not owner
     });
 
     it('should collect all assignees for strategy status change', () => {

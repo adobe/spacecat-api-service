@@ -159,40 +159,25 @@ export function detectStatusChanges(prevData, nextData, log) {
     const prevStrategy = prevStrategyIndex.get(nextStrategy.id);
 
     if (!prevStrategy) {
-      // New strategy (first save or newly added) -- treat current status as a change
-      const candidateEmails = [
-        ...(nextStrategy.opportunities || []).map((o) => o.assignee),
-        nextStrategy.createdBy,
-      ];
-      const opportunityNames = (nextStrategy.opportunities || [])
-        .map((o) => o.name || libraryOppNames.get(o.opportunityId) || o.opportunityId);
-
-      changes.push({
-        type: 'strategy',
-        strategyId: nextStrategy.id,
-        strategyName: nextStrategy.name,
-        statusBefore: '',
-        statusAfter: nextStrategy.status,
-        recipients: filterValidEmails(candidateEmails, log),
-        createdBy: nextStrategy.createdBy || '',
-        opportunityNames,
-      });
-
-      // Also emit changes for each opportunity in the new strategy
+      // New strategy (first save or newly added)
+      // Skip opportunities without an assignee
       for (const opp of nextStrategy.opportunities || []) {
-        const oppCandidates = [opp.assignee, nextStrategy.createdBy];
-        changes.push({
-          type: 'opportunity',
-          strategyId: nextStrategy.id,
-          strategyName: nextStrategy.name,
-          opportunityId: opp.opportunityId,
-          opportunityName: opp.name || libraryOppNames.get(opp.opportunityId) || opp.opportunityId,
-          statusBefore: '',
-          statusAfter: opp.status,
-          recipients: filterValidEmails(oppCandidates, log),
-          createdBy: nextStrategy.createdBy || '',
-          assignee: opp.assignee || '',
-        });
+        if (opp.assignee) {
+          const oppCandidates = [opp.assignee, nextStrategy.createdBy];
+          changes.push({
+            type: 'opportunity',
+            strategyId: nextStrategy.id,
+            strategyName: nextStrategy.name,
+            opportunityId: opp.opportunityId,
+            opportunityName: opp.name || libraryOppNames.get(opp.opportunityId)
+              || opp.opportunityId,
+            statusBefore: '',
+            statusAfter: opp.status,
+            recipients: filterValidEmails(oppCandidates, log),
+            createdBy: nextStrategy.createdBy || '',
+            assignee: opp.assignee,
+          });
+        }
       }
     } else {
       // Existing strategy -- check strategy-level status change
@@ -233,7 +218,7 @@ export function detectStatusChanges(prevData, nextData, log) {
               assigneeBefore: '',
               assigneeAfter: nextOpp.assignee,
               statusAfter: nextOpp.status,
-              recipients: filterValidEmails([nextOpp.assignee, nextStrategy.createdBy], log),
+              recipients: filterValidEmails([nextOpp.assignee], log),
               createdBy: nextStrategy.createdBy || '',
               assignee: nextOpp.assignee,
             });
@@ -272,7 +257,7 @@ export function detectStatusChanges(prevData, nextData, log) {
               assigneeBefore: prevOpp.assignee || '',
               assigneeAfter: nextOpp.assignee,
               statusAfter: nextOpp.status,
-              recipients: filterValidEmails([nextOpp.assignee, nextStrategy.createdBy], log),
+              recipients: filterValidEmails([nextOpp.assignee], log),
               createdBy: nextStrategy.createdBy || '',
               assignee: nextOpp.assignee,
             });
