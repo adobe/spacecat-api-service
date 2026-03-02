@@ -971,35 +971,29 @@ function LlmoController(ctx) {
       enhancements, tokowakaEnabled, forceFail, patches = {}, prerender,
     } = context.data || {};
 
-    log.info(`createOrUpdateEdgeConfig request received for site ${siteId}, data=${JSON.stringify(context.data)}`);
-
     if (!accessControlUtil.isLLMOAdministrator()) {
-      log.warn('[edge-optimize-config-failed] user is not an LLMO administrator');
       return forbidden('Only LLMO administrators can update the edge optimize config');
     }
 
+    log.info(`createOrUpdateEdgeConfig request received for site ${siteId}, data=${JSON.stringify(context.data)}`);
+
     if (tokowakaEnabled !== undefined && typeof tokowakaEnabled !== 'boolean') {
-      log.warn('[edge-optimize-config-failed] tokowakaEnabled must be a boolean');
       return badRequest('tokowakaEnabled field must be a boolean');
     }
 
     if (enhancements !== undefined && typeof enhancements !== 'boolean') {
-      log.warn('[edge-optimize-config-failed] enhancements must be a boolean');
       return badRequest('enhancements field must be a boolean');
     }
 
     if (forceFail !== undefined && typeof forceFail !== 'boolean') {
-      log.warn('[edge-optimize-config-failed] forceFail must be a boolean');
       return badRequest('forceFail field must be a boolean');
     }
 
     if (patches !== undefined && typeof patches !== 'object') {
-      log.warn('[edge-optimize-config-failed] patches must be an object');
       return badRequest('patches field must be an object');
     }
 
     if (prerender !== undefined && (typeof prerender !== 'object' || Array.isArray(prerender) || !Array.isArray(prerender.allowList))) {
-      log.warn('[edge-optimize-config-failed] prerender must be an object with allowList array');
       return badRequest('prerender field must be an object with allowList property that is an array');
     }
 
@@ -1008,17 +1002,14 @@ function LlmoController(ctx) {
       const site = await Site.findById(siteId);
 
       if (!site) {
-        log.warn(`[edge-optimize-config-failed] site ${siteId} not found`);
         return notFound('Site not found');
       }
 
       if (!await accessControlUtil.hasAccess(site)) {
-        log.warn('[edge-optimize-config-failed] user does not have access to the site');
         return forbidden('User does not have access to this site');
       }
 
       if (!await accessControlUtil.isOwnerOfSite(site)) {
-        log.warn('[edge-optimize-config-failed] user does not own the site');
         return forbidden('User does not own this site');
       }
 
@@ -1095,7 +1086,7 @@ function LlmoController(ctx) {
         ...metaconfig,
       });
     } catch (error) {
-      log.error(`[edge-optimize-config-failed] Failed to create/update edge config for site ${siteId}: ${error.message}`, error);
+      log.error(`Failed to create/update edge config for site ${siteId}:`, error);
       return badRequest(error.message);
     }
   };
@@ -1283,16 +1274,9 @@ function LlmoController(ctx) {
     const { Site } = dataAccess;
     const { cdnType, enabled = true } = context.data || {};
     const promiseToken = context.request?.headers?.get?.('x-promise-token');
-
-    log.info('[edge-optimize-routing] request', {
-      siteId,
-      cdnType: context.data?.cdnType,
-      enabled: context.data?.enabled,
-      profile: context.attributes?.authInfo?.profile?.email,
-    });
+    log.info(`Edge optimize routing update request received for site ${siteId}`);
 
     if (env?.ENV && env.ENV !== 'prod') {
-      log.warn(`[edge-optimize-routing-failed] API is not available in ${env?.ENV} environment`);
       return createResponse(
         { message: `API is not available in ${env?.ENV} environment` },
         400,
@@ -1304,7 +1288,6 @@ function LlmoController(ctx) {
     }
 
     if (!hasText(cdnType)) {
-      log.warn('[edge-optimize-routing-failed] missing or empty cdnType');
       return badRequest('cdnType is required and must be a non-empty string');
     }
     const cdnTypeTrimmed = cdnType.toLowerCase().trim();
@@ -1313,7 +1296,6 @@ function LlmoController(ctx) {
       : null;
 
     if (!cdnTypeNormalized) {
-      log.warn(`[edge-optimize-routing-failed] cdnType must be one of: ${EDGE_OPTIMIZE_CDN_TYPES.join(', ')}`);
       return badRequest(`cdnType must be one of: ${EDGE_OPTIMIZE_CDN_TYPES.join(', ')}`);
     }
 
@@ -1337,18 +1319,15 @@ function LlmoController(ctx) {
     const strategy = EDGE_OPTIMIZE_CDN_STRATEGIES[cdnTypeNormalized];
 
     if (enabled !== undefined && typeof enabled !== 'boolean') {
-      log.warn(`[edge-optimize-routing-failed] invalid enabled field: ${enabled}`);
       return badRequest('enabled field must be a boolean');
     }
 
     const site = await Site.findById(siteId);
     if (!site) {
-      log.warn(`[edge-optimize-routing-failed] site ${siteId} not found`);
       return notFound('Site not found');
     }
 
     if (!await accessControlUtil.hasAccess(site)) {
-      log.warn(`[edge-optimize-routing-failed] user does not have access to site ${siteId}`);
       return forbidden('User does not have access to this site');
     }
 
@@ -1366,7 +1345,7 @@ function LlmoController(ctx) {
         signal: AbortSignal.timeout(5000),
       });
     } catch (probeError) {
-      log.warn(`[edge-optimize-routing-failed] error probing site ${siteId}: ${probeError.message}`);
+      log.error(`Error probing site ${siteId}: ${probeError.message}`);
       return badRequest(`Error probing site: ${probeError.message}`);
     }
     let domain;
@@ -1380,13 +1359,13 @@ function LlmoController(ctx) {
         probeHostname = getHostnameWithoutWww(probeUrl, log);
         locationHostname = getHostnameWithoutWww(locationValue, log);
       } catch (hostError) {
-        log.warn(`[edge-optimize-routing-failed] invalid URL for 301 domain check: ${hostError.message}`);
+        log.error(`Invalid URL for 301 domain check: ${hostError.message}`);
         return badRequest(hostError.message);
       }
       if (probeHostname !== locationHostname) {
         const msg = `Site ${probeUrl} returned 301 to ${locationValue}; domain `
           + `(${locationHostname}) does not match probe domain (${probeHostname})`;
-        log.warn(`[edge-optimize-routing-failed] CDN routing update failed: ${msg}`);
+        log.error(`CDN routing update failed: ${msg}`);
         return badRequest(msg);
       }
       domain = calculateForwardedHost(locationValue, log);
@@ -1394,7 +1373,7 @@ function LlmoController(ctx) {
     } else {
       const msg = `Site ${probeUrl} did not return 2xx or 301 for`
         + ` User-Agent AdobeEdgeOptimize-Test (got ${probeResponse.status})`;
-      log.warn(`[edge-optimize-routing-failed] CDN routing update failed: ${msg}, url=${probeUrl}`);
+      log.error(`CDN routing update failed: ${msg}, url=${probeUrl}`);
       return badRequest(msg);
     }
 
@@ -1424,8 +1403,7 @@ function LlmoController(ctx) {
 
       if (!cdnResponse.ok) {
         const body = await cdnResponse.text();
-        log.warn(`[edge-optimize-routing-failed] CDN API failed for site ${siteId},`
-          + `domain ${domain}: ${cdnResponse.status} ${body}`);
+        log.error(`CDN API failed for site ${siteId}, domain ${domain}: ${cdnResponse.status} ${body}`);
         if (cdnResponse.status === 401 || cdnResponse.status === 403) {
           return createResponse(
             { message: 'User is not authorized to update CDN routing' },
@@ -1438,11 +1416,10 @@ function LlmoController(ctx) {
         );
       }
 
-      const response = { enabled, domain, cdnType: cdnTypeNormalized };
-      log.info(`[edge-optimize-routing] routing updated for site ${siteId}`, response);
-      return ok(response);
+      log.info(`Edge optimize routing updated for site ${siteId}, domain ${domain}`);
+      return ok({ enabled, domain, cdnType: cdnTypeNormalized });
     } catch (error) {
-      log.warn(`[edge-optimize-routing-failed] routing update failed for site ${siteId}: ${error.message}`);
+      log.error(`Edge optimize routing update failed for site ${siteId}: ${error.message}`);
       if (error.status) {
         return createResponse({ message: error.message }, error.status);
       }
