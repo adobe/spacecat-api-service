@@ -564,6 +564,128 @@ describe('opportunity-workspace-notifications', () => {
       expect(changes).to.be.empty;
     });
 
+    it('should resolve library opportunity name and use empty createdBy when new opp added to existing strategy', () => {
+      const prev = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [],
+        }],
+      };
+      const next = {
+        opportunities: [{
+          id: 'lib-1', name: 'Library Opp Name', description: '', category: 'energy',
+        }],
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [{
+            opportunityId: 'lib-1', status: 'new', assignee: 'user@test.com',
+          }],
+        }],
+      };
+
+      const changes = detectStatusChanges(prev, next, mockLog);
+      expect(changes).to.have.lengthOf(1);
+      expect(changes[0].type).to.equal('assignment');
+      expect(changes[0].opportunityName).to.equal('Library Opp Name');
+      expect(changes[0].createdBy).to.equal('');
+    });
+
+    it('should resolve library opportunity name and use empty createdBy when assignee changes on existing opp', () => {
+      const prev = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [{
+            opportunityId: 'lib-1', status: 'new', assignee: 'user1@test.com',
+          }],
+        }],
+      };
+      const next = {
+        opportunities: [{
+          id: 'lib-1', name: 'Library Opp Name', description: '', category: 'energy',
+        }],
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [{
+            opportunityId: 'lib-1', status: 'new', assignee: 'user2@test.com',
+          }],
+        }],
+      };
+
+      const changes = detectStatusChanges(prev, next, mockLog);
+      expect(changes).to.have.lengthOf(1);
+      expect(changes[0].type).to.equal('assignment');
+      expect(changes[0].opportunityName).to.equal('Library Opp Name');
+      expect(changes[0].createdBy).to.equal('');
+    });
+
+    it('should fallback to opportunityId when new opp has no name and no library match', () => {
+      const prev = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [],
+          createdBy: 'owner@test.com',
+        }],
+      };
+      const next = {
+        opportunities: [],
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [{
+            opportunityId: 'unknown-opp', status: 'new', assignee: 'user@test.com',
+          }],
+          createdBy: 'owner@test.com',
+        }],
+      };
+
+      const changes = detectStatusChanges(prev, next, mockLog);
+      expect(changes).to.have.lengthOf(1);
+      expect(changes[0].type).to.equal('assignment');
+      expect(changes[0].opportunityName).to.equal('unknown-opp');
+    });
+
+    it('should fallback to opportunityId when assignee changes on existing opp with no name and no library match', () => {
+      const prev = {
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [{
+            opportunityId: 'unknown-opp', status: 'new', assignee: 'user1@test.com',
+          }],
+          createdBy: 'owner@test.com',
+        }],
+      };
+      const next = {
+        opportunities: [],
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [{
+            opportunityId: 'unknown-opp', status: 'new', assignee: 'user2@test.com',
+          }],
+          createdBy: 'owner@test.com',
+        }],
+      };
+
+      const changes = detectStatusChanges(prev, next, mockLog);
+      expect(changes).to.have.lengthOf(1);
+      expect(changes[0].type).to.equal('assignment');
+      expect(changes[0].opportunityName).to.equal('unknown-opp');
+    });
+
     it('should emit both status and assignment changes when both change', () => {
       const prev = {
         strategies: [{
