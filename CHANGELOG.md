@@ -1,3 +1,10 @@
+# [1.330.0](https://github.com/adobe/spacecat-api-service/compare/v1.329.0...v1.330.0) (2026-03-02)
+
+
+### Features
+
+* email notification for opportunity workspace ([#1867](https://github.com/adobe/spacecat-api-service/issues/1867)) ([ef6d126](https://github.com/adobe/spacecat-api-service/commit/ef6d126a322dc74230b01961aad33177b46ab6e3))
+
 # [1.329.0](https://github.com/adobe/spacecat-api-service/compare/v1.328.0...v1.329.0) (2026-03-02)
 
 
