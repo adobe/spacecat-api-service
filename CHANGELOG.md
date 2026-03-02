@@ -1,3 +1,10 @@
+# [1.328.0](https://github.com/adobe/spacecat-api-service/compare/v1.327.3...v1.328.0) (2026-03-02)
+
+
+### Features
+
+* support dedicated no-cta-above-the-fold opportunity type in matcher ([#1888](https://github.com/adobe/spacecat-api-service/issues/1888)) ([86eed5d](https://github.com/adobe/spacecat-api-service/commit/86eed5d46bbe4c79d84b92a737c2873bff878a3f))
+
 ## [1.327.3](https://github.com/adobe/spacecat-api-service/compare/v1.327.2...v1.327.3) (2026-03-02)
 
 
