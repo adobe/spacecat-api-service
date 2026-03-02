@@ -1433,6 +1433,12 @@ function LlmoController(ctx) {
     try {
       const { site, config } = await getSiteAndValidateLlmo(context);
       const OPPORTUNITIES_REVIEWED_TAG = 'opportunitiesReviewed';
+      const tags = config.getLlmoConfig().tags || [];
+
+      if (tags.includes(OPPORTUNITIES_REVIEWED_TAG)) {
+        log.info(`Site ${site.getId()} already has '${OPPORTUNITIES_REVIEWED_TAG}' tag, skipping`);
+        return ok(tags);
+      }
 
       config.addLlmoTag(OPPORTUNITIES_REVIEWED_TAG);
 
