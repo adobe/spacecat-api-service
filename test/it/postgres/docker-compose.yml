@@ -26,7 +26,7 @@ services:
       retries: 30
 
   data-service:
-    image: 682033462621.dkr.ecr.us-east-1.amazonaws.com/mysticat-data-service:v1.11.0
+    image: 682033462621.dkr.ecr.us-east-1.amazonaws.com/mysticat-data-service:v1.13.0
     container_name: spacecat-it-data-service
     depends_on:
       db:
@@ -39,6 +39,7 @@ services:
       PGRST_DB_ANON_ROLE: postgrest_anon
       PGRST_DB_EXTRA_SEARCH_PATH: ""
       PGRST_LOG_LEVEL: warn
+      PGRST_JWT_SECRET: local-dev-jwt-secret-for-postgrest-only
       PGRST_ADMIN_SERVER_PORT: 3001
       PGRST_OPENAPI_SERVER_PROXY_URI: "http://localhost:${IT_POSTGREST_PORT:-3300}"
     command: ["sh", "-c", "dbmate -d db/migrations up && exec postgrest"]
