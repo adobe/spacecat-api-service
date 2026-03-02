@@ -3723,6 +3723,23 @@ describe('Suggestions Controller', () => {
       };
     });
 
+    it('uses base URL fallback when getHostName returns null (deploy)', async () => {
+      site.getBaseURL = sandbox.stub().returns('');
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+        },
+      });
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata).to.have.property('total');
+    });
+
     it('should deploy headings suggestions successfully', async () => {
       const response = await suggestionsController.deploySuggestionToEdge({
         ...context,
@@ -5258,6 +5275,23 @@ describe('Suggestions Controller', () => {
       expect(error).to.have.property('message', 'Request body must contain a non-empty array of suggestionIds');
     });
 
+    it('uses base URL fallback when getHostName returns null (rollback)', async () => {
+      site.getBaseURL = sandbox.stub().returns('');
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata).to.have.property('total');
+    });
+
     it('should return 403 when user is not an LLMO administrator', async () => {
       // Restore the default stub and create a new one that returns false
       AccessControlUtil.prototype.isLLMOAdministrator.restore();
@@ -6040,6 +6074,23 @@ describe('Suggestions Controller', () => {
         error: sandbox.stub(),
         debug: sandbox.stub(),
       };
+    });
+
+    it('uses base URL fallback when getHostName returns null (preview)', async function () {
+      site.getBaseURL = sandbox.stub().returns('');
+      const response = await suggestionsController.previewSuggestions({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+        },
+      });
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata).to.have.property('total');
     });
 
     it('should preview headings suggestions successfully', async function () {

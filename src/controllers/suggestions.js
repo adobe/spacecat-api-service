@@ -1200,10 +1200,6 @@ function SuggestionsController(ctx, sqs, env) {
     };
     response.suggestions.sort((a, b) => a.index - b.index);
 
-    context.log.info('[edge-preview] response', {
-      response: { metadata: response.metadata },
-    });
-
     return createResponse(response, 207);
   };
 
@@ -1715,6 +1711,8 @@ function SuggestionsController(ctx, sqs, env) {
 
     // Fetch all suggestions for this opportunity
     const allSuggestions = await Suggestion.allByOpportunityId(opportunityId);
+
+    context.log.info(`[edge-rollback] allSuggestions count: ${allSuggestions.length}`);
 
     // Track valid, failed, and missing suggestions
     const validSuggestions = [];
