@@ -1,3 +1,10 @@
+## [1.327.3](https://github.com/adobe/spacecat-api-service/compare/v1.327.2...v1.327.3) (2026-03-02)
+
+
+### Bug Fixes
+
+* correct DRS client parameter name and prompt count (LLMO-1819) ([#1889](https://github.com/adobe/spacecat-api-service/issues/1889)) ([9fc6fdd](https://github.com/adobe/spacecat-api-service/commit/9fc6fdd141da105947b50a4d1ed1ef4f4c1d30f1))
+
 ## [1.327.2](https://github.com/adobe/spacecat-api-service/compare/v1.327.1...v1.327.2) (2026-03-02)
 
 
