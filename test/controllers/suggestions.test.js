@@ -2128,14 +2128,14 @@ describe('Suggestions Controller', () => {
       },
       data: {
         status: 'SKIPPED',
-        skipReason: 'already_implemented',
+        skipReason: 'ALREADY_IMPLEMENTED',
         skipDetail: 'Fix was applied manually',
       },
       ...context,
     });
     expect(response.status).to.equal(200);
     expect(suggs[0].status).to.equal('SKIPPED');
-    expect(suggs[0].skipReason).to.equal('already_implemented');
+    expect(suggs[0].skipReason).to.equal('ALREADY_IMPLEMENTED');
     expect(suggs[0].skipDetail).to.equal('Fix was applied manually');
   });
 
@@ -2160,7 +2160,7 @@ describe('Suggestions Controller', () => {
   it('patches a suggestion updates skipReason/skipDetail when already SKIPPED', async () => {
     // First set the suggestion to SKIPPED
     suggs[0].status = 'SKIPPED';
-    suggs[0].skipReason = 'no_reason';
+    suggs[0].skipReason = 'NO_REASON';
     suggs[0].skipDetail = null;
 
     const response = await suggestionsController.patchSuggestion({
@@ -2171,19 +2171,19 @@ describe('Suggestions Controller', () => {
       },
       data: {
         status: 'SKIPPED',
-        skipReason: 'too_risky',
+        skipReason: 'TOO_RISKY',
         skipDetail: 'Changed my mind',
       },
       ...context,
     });
     expect(response.status).to.equal(200);
-    expect(suggs[0].skipReason).to.equal('too_risky');
+    expect(suggs[0].skipReason).to.equal('TOO_RISKY');
     expect(suggs[0].skipDetail).to.equal('Changed my mind');
   });
 
   it('patches a suggestion updates only skipReason when already SKIPPED without providing skipDetail', async () => {
     suggs[0].status = 'SKIPPED';
-    suggs[0].skipReason = 'no_reason';
+    suggs[0].skipReason = 'NO_REASON';
     suggs[0].skipDetail = 'old detail';
 
     const response = await suggestionsController.patchSuggestion({
@@ -2194,18 +2194,18 @@ describe('Suggestions Controller', () => {
       },
       data: {
         status: 'SKIPPED',
-        skipReason: 'too_risky',
+        skipReason: 'TOO_RISKY',
       },
       ...context,
     });
     expect(response.status).to.equal(200);
-    expect(suggs[0].skipReason).to.equal('too_risky');
+    expect(suggs[0].skipReason).to.equal('TOO_RISKY');
     expect(suggs[0].skipDetail).to.be.null;
   });
 
   it('patches a suggestion updates only skipDetail when already SKIPPED without providing skipReason', async () => {
     suggs[0].status = 'SKIPPED';
-    suggs[0].skipReason = 'no_reason';
+    suggs[0].skipReason = 'NO_REASON';
     suggs[0].skipDetail = null;
 
     const response = await suggestionsController.patchSuggestion({
@@ -2244,7 +2244,7 @@ describe('Suggestions Controller', () => {
       },
       data: {
         status: 'SKIPPED',
-        skipReason: 'other',
+        skipReason: 'OTHER',
       },
       ...context,
     });
@@ -2261,7 +2261,7 @@ describe('Suggestions Controller', () => {
 
   it('patches a suggestion returns 400 for invalid skipReason when already SKIPPED and updating skip fields', async () => {
     suggs[0].status = 'SKIPPED';
-    suggs[0].skipReason = 'no_reason';
+    suggs[0].skipReason = 'NO_REASON';
 
     const response = await suggestionsController.patchSuggestion({
       params: {
@@ -2347,7 +2347,7 @@ describe('Suggestions Controller', () => {
       },
       data: {
         status: 'SKIPPED',
-        skipReason: 'too_risky',
+        skipReason: 'TOO_RISKY',
       },
       ...context,
     });
@@ -2362,7 +2362,7 @@ describe('Suggestions Controller', () => {
 
   it('patches a suggestion clears skip fields when changing from SKIPPED to another status', async () => {
     suggs[0].status = 'SKIPPED';
-    suggs[0].skipReason = 'too_risky';
+    suggs[0].skipReason = 'TOO_RISKY';
     suggs[0].skipDetail = 'Some detail';
 
     const response = await suggestionsController.patchSuggestion({
@@ -2391,7 +2391,7 @@ describe('Suggestions Controller', () => {
       },
       data: {
         status: 'SKIPPED',
-        skipReason: 'other',
+        skipReason: 'OTHER',
         skipDetail: 'x'.repeat(501),
       },
       ...context,
@@ -2648,7 +2648,7 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
       },
       data: [
-        { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'too_risky', skipDetail: 'Low confidence' },
+        { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'TOO_RISKY', skipDetail: 'Low confidence' },
       ],
       ...context,
     });
@@ -2657,7 +2657,7 @@ describe('Suggestions Controller', () => {
     expect(bulkPatchResponse.metadata.success).to.equal(1);
     expect(bulkPatchResponse.suggestions[0].statusCode).to.equal(200);
     expect(suggs[0].status).to.equal('SKIPPED');
-    expect(suggs[0].skipReason).to.equal('too_risky');
+    expect(suggs[0].skipReason).to.equal('TOO_RISKY');
     expect(suggs[0].skipDetail).to.equal('Low confidence');
   });
 
@@ -2676,7 +2676,7 @@ describe('Suggestions Controller', () => {
 
   it('bulk patches suggestion status clears skip fields when changing from SKIPPED to another status', async () => {
     suggs[0].status = 'SKIPPED';
-    suggs[0].skipReason = 'too_risky';
+    suggs[0].skipReason = 'TOO_RISKY';
     suggs[0].skipDetail = 'Some detail';
 
     const response = await suggestionsController.patchSuggestionsStatus({
@@ -2769,7 +2769,7 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
       },
       data: [
-        { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'too_risky' },
+        { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'TOO_RISKY' },
       ],
       ...context,
     });
@@ -2786,7 +2786,7 @@ describe('Suggestions Controller', () => {
 
   it('bulk patches suggestion status updates only skipReason when already SKIPPED without providing skipDetail', async () => {
     suggs[0].status = 'SKIPPED';
-    suggs[0].skipReason = 'no_reason';
+    suggs[0].skipReason = 'NO_REASON';
     suggs[0].skipDetail = 'old detail';
 
     const response = await suggestionsController.patchSuggestionsStatus({
@@ -2795,20 +2795,20 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
       },
       data: [
-        { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'other' },
+        { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'OTHER' },
       ],
       ...context,
     });
     expect(response.status).to.equal(207);
     const bulkPatchResponse = await response.json();
     expect(bulkPatchResponse.metadata.success).to.equal(1);
-    expect(suggs[0].skipReason).to.equal('other');
+    expect(suggs[0].skipReason).to.equal('OTHER');
     expect(suggs[0].skipDetail).to.be.null;
   });
 
   it('bulk patches suggestion status updates only skipDetail when already SKIPPED without providing skipReason', async () => {
     suggs[0].status = 'SKIPPED';
-    suggs[0].skipReason = 'no_reason';
+    suggs[0].skipReason = 'NO_REASON';
     suggs[0].skipDetail = null;
 
     const response = await suggestionsController.patchSuggestionsStatus({
@@ -2845,7 +2845,7 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
       },
       data: [
-        { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'other' },
+        { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'OTHER' },
       ],
       ...context,
     });
@@ -2863,7 +2863,7 @@ describe('Suggestions Controller', () => {
 
   it('bulk patches suggestion status updates skipReason/skipDetail when already SKIPPED', async () => {
     suggs[0].status = 'SKIPPED';
-    suggs[0].skipReason = 'no_reason';
+    suggs[0].skipReason = 'NO_REASON';
     suggs[0].skipDetail = null;
 
     const response = await suggestionsController.patchSuggestionsStatus({
@@ -2872,7 +2872,7 @@ describe('Suggestions Controller', () => {
         opportunityId: OPPORTUNITY_ID,
       },
       data: [
-        { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'other', skipDetail: 'Updated reason' },
+        { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'OTHER', skipDetail: 'Updated reason' },
       ],
       ...context,
     });
@@ -2880,7 +2880,7 @@ describe('Suggestions Controller', () => {
     const bulkPatchResponse = await response.json();
     expect(bulkPatchResponse.metadata.success).to.equal(1);
     expect(bulkPatchResponse.suggestions[0].statusCode).to.equal(200);
-    expect(suggs[0].skipReason).to.equal('other');
+    expect(suggs[0].skipReason).to.equal('OTHER');
     expect(suggs[0].skipDetail).to.equal('Updated reason');
   });
 

@@ -13,7 +13,6 @@
 /* eslint-env mocha */
 
 import { expect } from 'chai';
-import esmock from 'esmock';
 
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../../src/dto/suggestion.js';
 
@@ -40,31 +39,13 @@ describe('Suggestion DTO', () => {
   });
 
   describe('SUGGESTION_SKIP_REASONS', () => {
-    it('exports valid skip reason enum values', () => {
-      expect(SUGGESTION_SKIP_REASONS).to.include('already_implemented');
-      expect(SUGGESTION_SKIP_REASONS).to.include('inaccurate_or_incomplete');
-      expect(SUGGESTION_SKIP_REASONS).to.include('too_risky');
-      expect(SUGGESTION_SKIP_REASONS).to.include('no_reason');
-      expect(SUGGESTION_SKIP_REASONS).to.include('other');
-    });
-
-    it('falls back to hardcoded values when Suggestion.SKIP_REASONS is falsy', async () => {
-      const { SUGGESTION_SKIP_REASONS: fallback } = await esmock('../../src/dto/suggestion.js', {
-        '@adobe/spacecat-shared-data-access': {
-          Suggestion: {
-            SKIP_REASONS: null,
-            getProjection: () => ({ fields: [] }),
-            FIELD_TRANSFORMERS: {},
-          },
-        },
-      });
-      expect(fallback).to.deep.equal([
-        'already_implemented',
-        'inaccurate_or_incomplete',
-        'too_risky',
-        'no_reason',
-        'other',
-      ]);
+    it('exports valid skip reason enum values from shared-data-access', () => {
+      expect(SUGGESTION_SKIP_REASONS).to.be.an('array').that.is.not.empty;
+      expect(SUGGESTION_SKIP_REASONS).to.include('ALREADY_IMPLEMENTED');
+      expect(SUGGESTION_SKIP_REASONS).to.include('INACCURATE_OR_INCOMPLETE');
+      expect(SUGGESTION_SKIP_REASONS).to.include('TOO_RISKY');
+      expect(SUGGESTION_SKIP_REASONS).to.include('NO_REASON');
+      expect(SUGGESTION_SKIP_REASONS).to.include('OTHER');
     });
   });
 
@@ -110,14 +91,14 @@ describe('Suggestion DTO', () => {
           {},
           {
             status: 'SKIPPED',
-            getSkipReason: () => 'already_implemented',
+            getSkipReason: () => 'ALREADY_IMPLEMENTED',
             getSkipDetail: () => 'Fix was applied manually',
           },
         );
 
         const json = SuggestionDto.toJSON(suggestion);
 
-        expect(json).to.have.property('skipReason', 'already_implemented');
+        expect(json).to.have.property('skipReason', 'ALREADY_IMPLEMENTED');
         expect(json).to.have.property('skipDetail', 'Fix was applied manually');
       });
 
@@ -359,20 +340,20 @@ describe('Suggestion DTO', () => {
         });
       });
 
-      it('includes skipReason and skipDetail in minimal view when present', () => {
+      it('omits skipReason and skipDetail in minimal view even when present', () => {
         const suggestion = createMockSuggestion(
           {},
           {
             status: 'SKIPPED',
-            getSkipReason: () => 'too_risky',
+            getSkipReason: () => 'TOO_RISKY',
             getSkipDetail: () => 'Low confidence',
           },
         );
 
         const json = SuggestionDto.toJSON(suggestion, 'minimal');
 
-        expect(json).to.have.property('skipReason', 'too_risky');
-        expect(json).to.have.property('skipDetail', 'Low confidence');
+        expect(json).to.not.have.property('skipReason');
+        expect(json).to.not.have.property('skipDetail');
       });
 
       describe('accessibility-specific filtering', () => {
@@ -575,14 +556,14 @@ describe('Suggestion DTO', () => {
           {},
           {
             status: 'SKIPPED',
-            getSkipReason: () => 'inaccurate_or_incomplete',
+            getSkipReason: () => 'INACCURATE_OR_INCOMPLETE',
             getSkipDetail: () => 'Data was outdated',
           },
         );
 
         const json = SuggestionDto.toJSON(suggestion, 'summary');
 
-        expect(json).to.have.property('skipReason', 'inaccurate_or_incomplete');
+        expect(json).to.have.property('skipReason', 'INACCURATE_OR_INCOMPLETE');
         expect(json).to.have.property('skipDetail', 'Data was outdated');
       });
 

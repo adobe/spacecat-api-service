@@ -2862,11 +2862,11 @@ SuggestionSkipReason:
   description: Reason for skipping a suggestion when status is SKIPPED
   type: string
   enum:
-    - already_implemented
-    - inaccurate_or_incomplete
-    - too_risky
-    - no_reason
-    - other
+    - ALREADY_IMPLEMENTED
+    - INACCURATE_OR_INCOMPLETE
+    - TOO_RISKY
+    - NO_REASON
+    - OTHER
 SuggestionType:
   description: |
     Type of suggestion:

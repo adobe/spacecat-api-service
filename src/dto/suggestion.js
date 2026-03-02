@@ -21,20 +21,9 @@ export const SUGGESTION_VIEWS = ['minimal', 'summary', 'full'];
 
 /**
  * Valid skip reasons when a suggestion is marked as SKIPPED.
- * Must match Suggestion.SKIP_REASONS from spacecat-shared-data-access.
  * @type {string[]}
  */
-export const SUGGESTION_SKIP_REASONS = (
-  Suggestion.SKIP_REASONS
-    ? Object.values(Suggestion.SKIP_REASONS)
-    : [
-      'already_implemented',
-      'inaccurate_or_incomplete',
-      'too_risky',
-      'no_reason',
-      'other',
-    ]
-);
+export const SUGGESTION_SKIP_REASONS = Object.values(Suggestion.SKIP_REASONS);
 
 /**
  * Extracts minimal data fields from suggestion data using schema-driven projection.
@@ -95,7 +84,6 @@ export const SuggestionDto = {
         id: suggestion.getId(),
         status: suggestion.getStatus(),
         ...(minimalData && { data: minimalData }),
-        ...skipFields,
         createdAt: suggestion.getCreatedAt(),
         updatedAt: suggestion.getUpdatedAt(),
       };

@@ -315,14 +315,14 @@ export default function suggestionTests(getHttpClient, resetData) {
         const http = getHttpClient();
         const res = await http.user.patch(`${BASE}/${testSuggId}`, {
           status: 'SKIPPED',
-          skipReason: 'inaccurate_or_incomplete',
+          skipReason: 'INACCURATE_OR_INCOMPLETE',
           skipDetail: 'Data was outdated',
         });
         expect(res.status).to.equal(200);
         expectSuggestionDto(res.body);
         expect(res.body.status).to.equal('SKIPPED');
         if (res.body.skipReason != null) {
-          expect(res.body.skipReason).to.equal('inaccurate_or_incomplete');
+          expect(res.body.skipReason).to.equal('INACCURATE_OR_INCOMPLETE');
           expect(res.body.skipDetail).to.equal('Data was outdated');
         }
       });
@@ -373,7 +373,7 @@ export default function suggestionTests(getHttpClient, resetData) {
           {
             id: testSuggId,
             status: 'SKIPPED',
-            skipReason: 'already_implemented',
+            skipReason: 'ALREADY_IMPLEMENTED',
             skipDetail: 'Fix was applied manually',
           },
         ]);
@@ -383,7 +383,7 @@ export default function suggestionTests(getHttpClient, resetData) {
         const updated = res.body.suggestions[0].suggestion;
         if (updated) {
           expect(updated.status).to.equal('SKIPPED');
-          expect(updated.skipReason).to.equal('already_implemented');
+          expect(updated.skipReason).to.equal('ALREADY_IMPLEMENTED');
           expect(updated.skipDetail).to.equal('Fix was applied manually');
         }
       });
