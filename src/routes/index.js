@@ -173,6 +173,7 @@ export default function getRouteHandlers(
     'GET /projects/:projectId/sites': projectsController.getSitesByProjectId,
     'GET /projects/by-project-name/:projectName/sites': projectsController.getSitesByProjectName,
     'POST /preflight/jobs': preflightController.createPreflightJob,
+    'POST /preflight/jobs-v2': preflightController.createPreflightJobV2,
     'GET /preflight/jobs/:jobId': preflightController.getPreflightJobStatusAndResult,
     'GET /sites': sitesController.getAll,
     'POST /sites': sitesController.createSite,

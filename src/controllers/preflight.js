@@ -11,6 +11,7 @@
  */
 
 import {
+  hasText,
   isNonEmptyObject, isValidUUID, isValidUrl, isNonEmptyArray,
 } from '@adobe/spacecat-shared-utils';
 import {
@@ -85,7 +86,8 @@ function PreflightController(ctx, log, env) {
   }
 
   /**
-   * Creates a new preflight job
+   * Creates a new preflight job. For promise-based authoring types (CS, CS_CW, AMS),
+   * obtains the promise token from IMS via the Authorization header.
    * @param {Object} context - The request context
    * @param {Object} context.data - The request data
    * @param {string[]} context.data.urls - Array of URLs to process
@@ -191,6 +193,107 @@ function PreflightController(ctx, log, env) {
   };
 
   /**
+   * Creates a new preflight job (v2). For promise-based authoring types (CS, CS_CW, AMS),
+   * reads the promise token from the x-promise-token header instead of creating one via IMS.
+   * All other logic is identical to createPreflightJob.
+   * @param {Object} context - The request context
+   * @param {Object} context.data - The request data
+   * @param {Object} context.request - The request object with headers
+   * @returns {Promise<Object>} The HTTP response object
+   */
+  const createPreflightJobV2 = async (context) => {
+    const promiseToken = context.request?.headers?.get?.('x-promise-token');
+    if (!hasText(promiseToken)) {
+      return badRequest('x-promise-token header is required and must be a non-empty string');
+    }
+
+    const { data } = context;
+    const promiseBasedTypes = [
+      SiteModel.AUTHORING_TYPES.CS, SiteModel.AUTHORING_TYPES.CS_CW, SiteModel.AUTHORING_TYPES.AMS,
+    ];
+    try {
+      validateRequestData(data);
+    } catch (error) {
+      log.error(`Invalid request data: ${error.message}`);
+      return badRequest(error.message);
+    }
+
+    try {
+      const isDev = env.AWS_ENV === 'dev';
+      const step = data.step.toLowerCase();
+      let site;
+      const url = new URL(data.urls[0]);
+      const previewBaseURL = `${url.protocol}//${url.hostname}`;
+      if (isValidUUID(data.siteId)) {
+        site = await dataAccess.Site.findById(data.siteId);
+      } else {
+        site = await dataAccess.Site.findByPreviewURL(previewBaseURL);
+      }
+
+      if (!site) {
+        throw new Error(`No site found for preview URL: ${previewBaseURL}`);
+      }
+
+      let promiseTokenResponse;
+      if (promiseBasedTypes.includes(site.getAuthoringType())) {
+        promiseTokenResponse = { promise_token: promiseToken };
+      }
+
+      let enableAuthentication = false;
+      const headResponse = await fetch(`${previewBaseURL}`, {
+        method: 'HEAD',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      if (headResponse.status !== 200) {
+        enableAuthentication = true;
+      }
+
+      // Create a new async job
+      const job = await dataAccess.AsyncJob.create({
+        status: 'IN_PROGRESS',
+        metadata: {
+          payload: {
+            siteId: site.getId(),
+            urls: data.urls,
+            step,
+            enableAuthentication,
+          },
+          jobType: 'preflight',
+          tags: ['preflight'],
+        },
+      });
+
+      try {
+        const sqsMessage = {
+          jobId: job.getId(),
+          siteId: site.getId(),
+          type: 'preflight',
+        };
+        if (promiseBasedTypes.includes(site.getAuthoringType())) {
+          sqsMessage.promiseToken = promiseTokenResponse;
+        }
+        await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, sqsMessage);
+      } catch (error) {
+        log.error(`Failed to send message to SQS: ${error.message}`);
+        await job.remove();
+        throw new Error(`Failed to send message to SQS: ${error.message}`);
+      }
+
+      return accepted({
+        jobId: job.getId(),
+        status: job.getStatus(),
+        createdAt: job.getCreatedAt(),
+        pollUrl: `https://spacecat.experiencecloud.live/api/${isDev ? 'ci' : 'v1'}/preflight/jobs/${job.getId()}`,
+      });
+    } catch (error) {
+      log.error(`Failed to create preflight job: ${error.message}`);
+      return internalServerError(error.message);
+    }
+  };
+
+  /**
    * Gets the status and result of a preflight job
    * @param {Object} context - The request context
    * @param {Object} context.params - The request parameters
@@ -235,6 +338,7 @@ function PreflightController(ctx, log, env) {
 
   return {
     createPreflightJob,
+    createPreflightJobV2,
     getPreflightJobStatusAndResult,
   };
 }

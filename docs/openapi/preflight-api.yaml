@@ -52,6 +52,80 @@ preflight-jobs:
         $ref: './responses.yaml#/401'
       '500':
         $ref: './responses.yaml#/500'
+
+preflight-jobs-v2:
+  parameters:
+    - name: x-promise-token
+      in: header
+      required: true
+      description: |
+        Promise token exchanged for IMS user token. Required for all requests.
+        For promise-based authoring types (CS, CS_CW, AMS), the token is forwarded
+        to the audit worker. For other types, the header is validated but not used.
+      schema:
+        type: string
+  post:
+    tags:
+      - preflight
+    security:
+      - api_key: [ ]
+      - ims_key: [ ]
+    summary: Submit a new preflight async job (v2)
+    description: |
+      Same as POST /preflight/jobs, but reads the promise token from the `x-promise-token`
+      header instead of creating one from the Authorization header via IMS. The header is
+      required for all requests; returns 400 immediately if missing or empty (before any
+      validation or async work).
+
+      The job will process the provided URL and return the results.
+      The jobId can be used to poll for the status of the job.
+    operationId: submitPreflightJobV2
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              urls:
+                type: array
+                items:
+                  type: string
+                  format: uri
+                description: Array of URLs to be processed by the job
+                minItems: 1
+              step:
+                type: string
+                enum: [identify, suggest]
+                description: The audit step to be performed
+              siteId:
+                type: string
+                format: uuid
+                description: The site ID for AMS sites (optional)
+            required:
+              - urls
+              - step
+    responses:
+      '202':
+        description: Job accepted
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/CreatePreflightJobResponse'
+      '400':
+        description: Invalid request (missing x-promise-token, urls/step, or other fields)
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+
 preflight-job-status:
   parameters:
     - $ref: './parameters.yaml#/jobId'

@@ -158,6 +158,8 @@ paths:
     $ref: './project-api.yaml#/project-sites-by-name'
   /preflight/jobs:
     $ref: './preflight-api.yaml#/preflight-jobs'
+  /preflight/jobs-v2:
+    $ref: './preflight-api.yaml#/preflight-jobs-v2'
   /preflight/jobs/{jobId}:
     $ref: './preflight-api.yaml#/preflight-job-status'
   /tools/scrape/jobs:

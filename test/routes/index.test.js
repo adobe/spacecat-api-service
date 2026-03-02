@@ -160,6 +160,7 @@ describe('getRouteHandlers', () => {
 
   const mockPreflightController = {
     createPreflightJob: sinon.stub(),
+    createPreflightJobV2: sinon.stub(),
     getPreflightJobStatusAndResult: sinon.stub(),
   };
 
@@ -391,6 +392,7 @@ describe('getRouteHandlers', () => {
       'GET /projects',
       'POST /projects',
       'POST /preflight/jobs',
+      'POST /preflight/jobs-v2',
       'GET /sites',
       'POST /sites',
       'GET /sites.csv',
