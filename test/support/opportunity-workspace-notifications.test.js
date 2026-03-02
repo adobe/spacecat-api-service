@@ -105,6 +105,7 @@ describe('opportunity-workspace-notifications', () => {
       expect(changes[0].type).to.equal('opportunity');
       expect(changes[0].statusBefore).to.equal('');
       expect(changes[0].statusAfter).to.equal('new');
+      expect(changes[0].recipients).to.deep.equal(['user@test.com']);
     });
 
     it('should detect opportunity changes when prevData is null (first save)', () => {
@@ -125,9 +126,11 @@ describe('opportunity-workspace-notifications', () => {
       expect(changes[0].type).to.equal('opportunity');
       expect(changes[0].opportunityId).to.equal('o1');
       expect(changes[0].statusAfter).to.equal('completed');
+      expect(changes[0].recipients).to.deep.equal(['user@test.com']);
       expect(changes[1].type).to.equal('opportunity');
       expect(changes[1].opportunityId).to.equal('o2');
       expect(changes[1].statusAfter).to.equal('new');
+      expect(changes[1].recipients).to.deep.equal(['other@test.com']);
     });
 
     it('should handle new strategy with undefined opportunities (first save)', () => {
@@ -401,7 +404,8 @@ describe('opportunity-workspace-notifications', () => {
       };
 
       const changes = detectStatusChanges(null, nextData, mockLog);
-      expect(changes[0].recipients).to.not.include(123);
+      expect(changes).to.have.lengthOf(1);
+      expect(changes[0].recipients).to.deep.equal([]);
       expect(mockLog.warn).to.have.been.calledWith(sinon.match(/Skipping non-string email recipient: number/));
     });
 
@@ -1573,8 +1577,8 @@ describe('opportunity-workspace-notifications', () => {
         changedBy: 'admin@test.com',
       });
 
-      expect(result.changes).to.be.greaterThan(0);
-      expect(sendEmailStub).to.have.been.called;
+      expect(result.changes).to.equal(1);
+      expect(result.sent).to.equal(1);
     });
   });
 });

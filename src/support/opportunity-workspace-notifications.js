@@ -163,7 +163,7 @@ export function detectStatusChanges(prevData, nextData, log) {
       // Skip opportunities without an assignee
       for (const opp of nextStrategy.opportunities || []) {
         if (opp.assignee) {
-          const oppCandidates = [opp.assignee, nextStrategy.createdBy];
+          const oppCandidates = [opp.assignee];
           changes.push({
             type: 'opportunity',
             strategyId: nextStrategy.id,
