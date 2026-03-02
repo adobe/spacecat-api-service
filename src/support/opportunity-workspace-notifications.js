@@ -141,6 +141,12 @@ export function detectStatusChanges(prevData, nextData, log) {
   const changes = [];
   if (!nextData) return changes;
 
+  // Build name lookup from opportunity library
+  const libraryOppNames = new Map();
+  for (const opp of (nextData.opportunities || [])) {
+    libraryOppNames.set(opp.id, opp.name);
+  }
+
   // When prevData is null (first save), use empty structure as baseline
   const effectivePrevData = prevData || { strategies: [] };
 
@@ -157,7 +163,7 @@ export function detectStatusChanges(prevData, nextData, log) {
         nextStrategy.createdBy,
       ];
       const opportunityNames = (nextStrategy.opportunities || [])
-        .map((o) => o.name || o.opportunityId);
+        .map((o) => o.name || libraryOppNames.get(o.opportunityId) || o.opportunityId);
 
       changes.push({
         type: 'strategy',
@@ -178,7 +184,7 @@ export function detectStatusChanges(prevData, nextData, log) {
           strategyId: nextStrategy.id,
           strategyName: nextStrategy.name,
           opportunityId: opp.opportunityId,
-          opportunityName: opp.name || opp.opportunityId,
+          opportunityName: opp.name || libraryOppNames.get(opp.opportunityId) || opp.opportunityId,
           statusBefore: '',
           statusAfter: opp.status,
           recipients: filterValidEmails(oppCandidates, log),
@@ -194,7 +200,7 @@ export function detectStatusChanges(prevData, nextData, log) {
           nextStrategy.createdBy,
         ];
         const opportunityNames = (nextStrategy.opportunities || [])
-          .map((o) => o.name || o.opportunityId);
+          .map((o) => o.name || libraryOppNames.get(o.opportunityId) || o.opportunityId);
 
         changes.push({
           type: 'strategy',
@@ -220,7 +226,8 @@ export function detectStatusChanges(prevData, nextData, log) {
               strategyId: nextStrategy.id,
               strategyName: nextStrategy.name,
               opportunityId: nextOpp.opportunityId,
-              opportunityName: nextOpp.name || nextOpp.opportunityId,
+              opportunityName: (nextOpp.name
+                || libraryOppNames.get(nextOpp.opportunityId) || nextOpp.opportunityId),
               assigneeBefore: '',
               assigneeAfter: nextOpp.assignee,
               statusAfter: nextOpp.status,
@@ -242,7 +249,8 @@ export function detectStatusChanges(prevData, nextData, log) {
               strategyId: nextStrategy.id,
               strategyName: nextStrategy.name,
               opportunityId: nextOpp.opportunityId,
-              opportunityName: nextOpp.name || nextOpp.opportunityId,
+              opportunityName: (nextOpp.name
+                || libraryOppNames.get(nextOpp.opportunityId) || nextOpp.opportunityId),
               statusBefore: prevOpp.status,
               statusAfter: nextOpp.status,
               recipients: filterValidEmails(candidateEmails, log),
@@ -257,7 +265,8 @@ export function detectStatusChanges(prevData, nextData, log) {
               strategyId: nextStrategy.id,
               strategyName: nextStrategy.name,
               opportunityId: nextOpp.opportunityId,
-              opportunityName: nextOpp.name || nextOpp.opportunityId,
+              opportunityName: (nextOpp.name
+                || libraryOppNames.get(nextOpp.opportunityId) || nextOpp.opportunityId),
               assigneeBefore: prevOpp.assignee || '',
               assigneeAfter: nextOpp.assignee,
               statusAfter: nextOpp.status,
@@ -317,8 +326,8 @@ export async function sendStatusChangeNotifications(context, {
       const strategyOwnerName = createdBy
         // eslint-disable-next-line no-await-in-loop
         ? await resolveUserName(dataAccess, createdBy)
-        : '';
-      const strategyOwnerEmail = createdBy;
+        : '-';
+      const strategyOwnerEmail = createdBy || '-';
 
       const assigneeEmail = (isOpportunity || isAssignment) ? (change.assignee || '') : '';
       const assigneeName = assigneeEmail

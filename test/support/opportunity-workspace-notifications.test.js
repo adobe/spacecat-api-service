@@ -176,6 +176,34 @@ describe('opportunity-workspace-notifications', () => {
       expect(changes[1].opportunityName).to.equal('o1');
     });
 
+    it('should resolve library opportunity name from nextData.opportunities when strategyOpportunity has no name', () => {
+      const nextData = {
+        opportunities: [
+          {
+            id: 'lib-opp-1', name: 'EV Charging Expansion', description: '', category: 'energy',
+          },
+          {
+            id: 'lib-opp-2', name: 'Depot Grid Modernization', description: '', category: 'energy',
+          },
+        ],
+        strategies: [{
+          id: 's1',
+          name: 'Strategy 1',
+          status: 'new',
+          opportunities: [
+            { opportunityId: 'lib-opp-1', status: 'new', assignee: 'user@test.com' },
+            { opportunityId: 'lib-opp-2', status: 'new', assignee: 'other@test.com' },
+          ],
+          createdBy: 'owner@test.com',
+        }],
+      };
+      const changes = detectStatusChanges(null, nextData, mockLog);
+      expect(changes).to.have.lengthOf(3); // 1 strategy + 2 opportunities
+      expect(changes[0].opportunityNames).to.deep.equal(['EV Charging Expansion', 'Depot Grid Modernization']);
+      expect(changes[1].opportunityName).to.equal('EV Charging Expansion');
+      expect(changes[2].opportunityName).to.equal('Depot Grid Modernization');
+    });
+
     it('should use empty assignee when new strategy opportunity has no assignee', () => {
       const nextData = {
         strategies: [{
@@ -871,7 +899,7 @@ describe('opportunity-workspace-notifications', () => {
       expect(emailOptions.templateData.strategy_url).to.equal('https://llmo.now/www.example.com/insights/opportunity-workspace');
     });
 
-    it('should use empty strategy_owner fields for assignment change when createdBy is missing', async () => {
+    it('should use "-" for strategy_owner fields when createdBy is missing (assignment)', async () => {
       const changes = [{
         type: 'assignment',
         strategyId: 's1',
@@ -893,8 +921,8 @@ describe('opportunity-workspace-notifications', () => {
       expect(summary.sent).to.equal(1);
       expect(mockLog.warn).to.have.been.calledWith(sinon.match(/Strategy owner.*unknown/));
       const [, emailOptions] = sendEmailStub.firstCall.args;
-      expect(emailOptions.templateData.strategy_owner_name).to.equal('');
-      expect(emailOptions.templateData.strategy_owner_email).to.equal('');
+      expect(emailOptions.templateData.strategy_owner_name).to.equal('-');
+      expect(emailOptions.templateData.strategy_owner_email).to.equal('-');
     });
 
     it('should send strategy status change email', async () => {
@@ -994,7 +1022,7 @@ describe('opportunity-workspace-notifications', () => {
       expect(summary.failed).to.equal(1);
     });
 
-    it('should use empty strategy_owner_* when createdBy is missing', async () => {
+    it('should use "-" for strategy_owner_* when createdBy is missing', async () => {
       const changes = [{
         type: 'opportunity',
         strategyId: 's1',
@@ -1015,8 +1043,8 @@ describe('opportunity-workspace-notifications', () => {
       expect(summary.sent).to.equal(1);
       expect(mockLog.warn).to.have.been.calledWith(sinon.match(/Strategy owner.*unknown/));
       const [, emailOptions] = sendEmailStub.firstCall.args;
-      expect(emailOptions.templateData.strategy_owner_name).to.equal('');
-      expect(emailOptions.templateData.strategy_owner_email).to.equal('');
+      expect(emailOptions.templateData.strategy_owner_name).to.equal('-');
+      expect(emailOptions.templateData.strategy_owner_email).to.equal('-');
     });
 
     it('should log strategy fallback in skip warning for strategy change with no recipients', async () => {
