@@ -1602,6 +1602,14 @@ llmo-strategy:
       This operation completely overwrites the existing strategy with the provided payload.
       The payload can be any valid JSON object - no schema validation is performed.
       The strategy is stored in S3 at `workspace/llmo/{siteId}/strategy.json`.
+
+      When status changes are detected (either at the strategy level or at the
+      opportunity level), email notifications are sent to the relevant recipients.
+      Initial strategy creation does not trigger strategy status emails. Assignment
+      notifications go to the assignee only (not the strategy owner). Notification
+      delivery is awaited, and a summary of sent/failed/skipped counts is included
+      in the response. Notification failures do not cause the endpoint to return
+      an error.
     operationId: saveStrategy
     requestBody:
       required: true
@@ -1623,8 +1631,25 @@ llmo-strategy:
                   type: string
                   description: The S3 object version ID of the saved strategy
                   example: "abc123def456"
+                notifications:
+                  type: object
+                  description: Summary of notification delivery
+                  properties:
+                    sent:
+                      type: integer
+                      description: Number of emails sent successfully
+                    failed:
+                      type: integer
+                      description: Number of emails that failed to send
+                    skipped:
+                      type: integer
+                      description: Number of changes skipped (e.g. no valid recipients)
+                    changes:
+                      type: integer
+                      description: Number of status changes detected
               required:
                 - version
+                - notifications
       '400':
         $ref: './responses.yaml#/400'
       '401':
