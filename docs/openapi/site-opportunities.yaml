@@ -515,7 +515,7 @@ site-opportunity-suggestions-auto-fix:
         Trigger autofix for one or multiple suggestions (deprecated)
     description: |
       **Deprecated** — use the v2 endpoint (`/sites/{siteId}/opportunities/{opportunityId}/suggestions/auto-fix-v2`)
-      instead, which reads the promise token from the request `promise_token` cookie rather
+      instead, which reads the promise token from the `x-promise-token` header rather
       than creating one from the Authorization header via IMS.
 
       Triggers the autofix worker for the given suggestions. By default, suggestions are
@@ -565,14 +565,20 @@ site-opportunity-suggestions-auto-fix-v2:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/opportunityId'
+    - name: x-promise-token
+      in: header
+      required: true
+      description: Promise token exchanged for IMS user token to authorize the autofix worker.
+      schema:
+        type: string
   patch:
     operationId: autoFixSiteOpportunitySuggestionsV2
     summary: |
         Trigger autofix for one or multiple suggestions (v2)
     description: |
       Triggers the autofix worker for the given suggestions. The promise token is read from
-      the `promise_token` cookie on the request instead of being created from the Authorization
-      header via IMS (as in v1). Returns 400 if the cookie is missing or empty.
+      the `x-promise-token` header instead of being created from the Authorization header via
+      IMS (as in v1). Returns 400 if the header is missing or empty.
 
       By default, suggestions are transitioned to IN_PROGRESS status before the message is
       queued. When `action` is set to `"assess"`, suggestions remain in their current status
@@ -615,7 +621,7 @@ site-opportunity-suggestions-auto-fix-v2:
               broken-backlinks-suggestions-status-update-response:
                 $ref: './examples.yaml#/broken-backlinks-suggestions-status-update-response'
       '400':
-        description: Promise token cookie is missing or empty.
+        description: x-promise-token header is missing or empty.
     security:
       - ims_key: [ ]
 

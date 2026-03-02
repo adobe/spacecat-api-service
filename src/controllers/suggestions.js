@@ -767,7 +767,7 @@ function SuggestionsController(ctx, sqs, env) {
   };
   /**
    * @deprecated Use autofixSuggestionsV2 instead, which reads the promise token from
-   * the request cookie rather than creating one from the Authorization header via IMS.
+   * the x-promise-token header rather than creating one from the Authorization header via IMS.
    */
   const autofixSuggestions = async (context) => {
     const siteId = context.params?.siteId;
@@ -1070,13 +1070,11 @@ function SuggestionsController(ctx, sqs, env) {
       );
     }
 
-    const cookieHeader = context.pathInfo?.headers?.cookie || '';
-    const promiseTokenMatch = cookieHeader.match(/(?:^|;\s*)promise_token=([^;]*)/);
-    const promiseTokenValue = promiseTokenMatch?.[1];
-    if (!hasText(promiseTokenValue)) {
-      return badRequest('Promise token cookie is required');
+    const promiseToken = context.request?.headers?.get?.('x-promise-token');
+    if (!hasText(promiseToken)) {
+      return badRequest('x-promise-token header is required and must be a non-empty string');
     }
-    const promiseTokenResponse = { promise_token: promiseTokenValue };
+    const promiseTokenResponse = { promise_token: promiseToken };
 
     const response = {
       suggestions: [

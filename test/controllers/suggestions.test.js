@@ -3304,55 +3304,15 @@ describe('Suggestions Controller', () => {
       sandbox.restore();
     });
 
-    it('returns 400 when promise_token cookie is missing', async () => {
-      opportunity.getType = sandbox.stub().returns('meta-tags');
-      mockSuggestion.allByOpportunityId.resolves(
-        [mockSuggestionEntity(suggs[0])],
-      );
-      mockSuggestion.bulkUpdateStatus.resolves(
-        [mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' })],
-      );
-
-      const response = await suggestionsController.autofixSuggestionsV2({
-        params: {
-          siteId: SITE_ID,
-          opportunityId: OPPORTUNITY_ID,
+    const requestWithPromiseToken = (token) => ({
+      request: {
+        headers: {
+          get: (name) => (name?.toLowerCase?.() === 'x-promise-token' ? token : null),
         },
-        data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        pathInfo: { headers: {} },
-        ...context,
-      });
-
-      expect(response.status).to.equal(400);
-      const error = await response.json();
-      expect(error).to.have.property('message', 'Promise token cookie is required');
+      },
     });
 
-    it('returns 400 when promise_token cookie is empty', async () => {
-      opportunity.getType = sandbox.stub().returns('meta-tags');
-      mockSuggestion.allByOpportunityId.resolves(
-        [mockSuggestionEntity(suggs[0])],
-      );
-      mockSuggestion.bulkUpdateStatus.resolves(
-        [mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' })],
-      );
-
-      const response = await suggestionsController.autofixSuggestionsV2({
-        params: {
-          siteId: SITE_ID,
-          opportunityId: OPPORTUNITY_ID,
-        },
-        data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        pathInfo: { headers: { cookie: 'other_cookie=abc' } },
-        ...context,
-      });
-
-      expect(response.status).to.equal(400);
-      const error = await response.json();
-      expect(error).to.have.property('message', 'Promise token cookie is required');
-    });
-
-    it('returns 400 when cookie header is absent', async () => {
+    it('returns 400 when x-promise-token header is missing', async () => {
       opportunity.getType = sandbox.stub().returns('meta-tags');
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0])],
@@ -3372,10 +3332,58 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(400);
       const error = await response.json();
-      expect(error).to.have.property('message', 'Promise token cookie is required');
+      expect(error).to.have.property('message', 'x-promise-token header is required and must be a non-empty string');
     });
 
-    it('triggers autofix with promise token from cookie', async () => {
+    it('returns 400 when x-promise-token header is empty', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves(
+        [mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' })],
+      );
+
+      const response = await suggestionsController.autofixSuggestionsV2({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        request: { headers: { get: () => '' } },
+        ...context,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'x-promise-token header is required and must be a non-empty string');
+    });
+
+    it('returns 400 when request headers are absent', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves(
+        [mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' })],
+      );
+
+      const response = await suggestionsController.autofixSuggestionsV2({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        request: {},
+        ...context,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'x-promise-token header is required and must be a non-empty string');
+    });
+
+    it('triggers autofix with promise token from x-promise-token header', async () => {
       opportunity.getType = sandbox.stub().returns('meta-tags');
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0]), mockSuggestionEntity(suggs[2])],
@@ -3391,7 +3399,7 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
         },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
-        pathInfo: { headers: { cookie: 'session=xyz; promise_token=myPromiseToken123; other=val' } },
+        ...requestWithPromiseToken('myPromiseToken123'),
         ...context,
       });
 
@@ -3407,7 +3415,7 @@ describe('Suggestions Controller', () => {
       expect(sqsCallArgs[1].promiseToken).to.deep.equal({ promise_token: 'myPromiseToken123' });
     });
 
-    it('extracts promise_token when it is the only cookie', async () => {
+    it('extracts promise token when passed via x-promise-token header', async () => {
       opportunity.getType = sandbox.stub().returns('meta-tags');
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0])],
@@ -3422,7 +3430,7 @@ describe('Suggestions Controller', () => {
           opportunityId: OPPORTUNITY_ID,
         },
         data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        pathInfo: { headers: { cookie: 'promise_token=singleToken' } },
+        ...requestWithPromiseToken('singleToken'),
         ...context,
       });
 
@@ -3537,7 +3545,7 @@ describe('Suggestions Controller', () => {
       const response = await suggestionsController.autofixSuggestionsV2({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: ['not-found', SUGGESTION_IDS[2]] },
-        pathInfo: { headers: { cookie: 'promise_token=tok123' } },
+        ...requestWithPromiseToken('tok123'),
         ...context,
       });
 
@@ -3556,7 +3564,7 @@ describe('Suggestions Controller', () => {
       const response = await suggestionsController.autofixSuggestionsV2({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[1]] },
-        pathInfo: { headers: { cookie: 'promise_token=tok123' } },
+        ...requestWithPromiseToken('tok123'),
         ...context,
       });
 
@@ -3574,7 +3582,7 @@ describe('Suggestions Controller', () => {
       const response = await suggestionsController.autofixSuggestionsV2({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: ['not-found'] },
-        pathInfo: { headers: { cookie: 'promise_token=tok123' } },
+        ...requestWithPromiseToken('tok123'),
         ...context,
       });
 
@@ -3588,7 +3596,7 @@ describe('Suggestions Controller', () => {
       const response = await suggestionsController.autofixSuggestionsV2({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0]] },
-        pathInfo: { headers: { cookie: 'promise_token=tok123' } },
+        ...requestWithPromiseToken('tok123'),
         ...context,
       });
 
@@ -3608,7 +3616,7 @@ describe('Suggestions Controller', () => {
       const response = await suggestionsController.autofixSuggestionsV2({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
-        pathInfo: { headers: { cookie: 'promise_token=tok123' } },
+        ...requestWithPromiseToken('tok123'),
         ...context,
       });
 
@@ -3635,7 +3643,7 @@ describe('Suggestions Controller', () => {
       const response = await suggestionsController.autofixSuggestionsV2({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
         data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
-        pathInfo: { headers: { cookie: 'promise_token=tok123' } },
+        ...requestWithPromiseToken('tok123'),
         ...context,
       });
 
