@@ -104,7 +104,8 @@ function OpportunitiesController(ctx) {
    */
   const getByStatus = async (context) => {
     const siteId = context.params?.siteId;
-    const status = context.params?.status;
+
+    const status = context.params?.status?.toUpperCase();
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');

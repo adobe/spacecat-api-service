@@ -333,7 +333,7 @@ function SitesController(ctx, log, env) {
     if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can view all sites');
     }
-    const deliveryType = context.params?.deliveryType;
+    const deliveryType = context.params?.deliveryType?.toLowerCase();
 
     if (!hasText(deliveryType)) {
       return badRequest('Delivery type required');

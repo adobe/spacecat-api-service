@@ -130,6 +130,27 @@ export default function suggestionTests(getHttpClient, resetData) {
         });
       });
 
+      it('user: matches status case-insensitively (lowercase)', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}/by-status/new`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(2);
+        res.body.forEach((s) => {
+          expectSuggestionDto(s);
+          expect(s.status).to.equal('NEW');
+        });
+      });
+
+      it('user: matches status case-insensitively (mixed case)', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}/by-status/New`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(2);
+        res.body.forEach((s) => {
+          expect(s.status).to.equal('NEW');
+        });
+      });
+
       it('user: returns empty for status with no matches', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`${BASE}/by-status/SKIPPED`);

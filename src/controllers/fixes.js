@@ -141,7 +141,8 @@ export class FixesController {
    * @returns {Promise<Response>} Array of suggestions response.
    */
   async getByStatus(context) {
-    const { siteId, opportunityId, status } = context.params;
+    const { siteId, opportunityId, status: rawStatus } = context.params;
+    const status = rawStatus?.toUpperCase();
     let res = checkRequestParams(siteId, opportunityId) ?? await this.#checkAccess(siteId);
     if (res) return res;
 

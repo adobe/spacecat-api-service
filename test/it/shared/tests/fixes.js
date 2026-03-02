@@ -123,6 +123,23 @@ export default function fixTests(getHttpClient, resetData) {
         expect(res.body[0].status).to.equal('PENDING');
       });
 
+      it('user: matches status case-insensitively (lowercase)', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}/by-status/pending`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(1);
+        expectFixDto(res.body[0]);
+        expect(res.body[0].status).to.equal('PENDING');
+      });
+
+      it('user: matches status case-insensitively (mixed case)', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}/by-status/Pending`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(1);
+        expect(res.body[0].status).to.equal('PENDING');
+      });
+
       it('user: returns empty for status with no matches', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`${BASE}/by-status/FAILED`);

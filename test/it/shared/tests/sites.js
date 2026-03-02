@@ -175,6 +175,26 @@ export default function siteTests(getHttpClient, resetData) {
         });
       });
 
+      it('admin: matches delivery type case-insensitively (uppercase)', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites/by-delivery-type/AEM_EDGE');
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(2);
+        res.body.forEach((site) => {
+          expect(site.deliveryType).to.equal('aem_edge');
+        });
+      });
+
+      it('admin: matches delivery type case-insensitively (mixed case)', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites/by-delivery-type/Aem_Edge');
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(2);
+        res.body.forEach((site) => {
+          expect(site.deliveryType).to.equal('aem_edge');
+        });
+      });
+
       it('admin: returns empty array for unmatched delivery type', async () => {
         const http = getHttpClient();
         const res = await http.admin.get('/sites/by-delivery-type/other');

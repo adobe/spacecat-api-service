@@ -278,7 +278,7 @@ function SuggestionsController(ctx, sqs, env) {
   const getByStatus = async (context) => {
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId;
-    const status = context.params?.status || undefined;
+    const status = context.params?.status?.toUpperCase() || undefined;
     const viewParam = context.data?.view;
 
     if (!isValidUUID(siteId)) {
@@ -326,7 +326,7 @@ function SuggestionsController(ctx, sqs, env) {
   const getByStatusPaged = async (context) => {
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId;
-    const status = context.params?.status || undefined;
+    const status = context.params?.status?.toUpperCase() || undefined;
     const limit = parseInt(context.params?.limit, 10) || DEFAULT_PAGE_SIZE;
     const cursor = context.params?.cursor || null;
     const viewParam = context.data?.view;
