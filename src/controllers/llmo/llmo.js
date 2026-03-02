@@ -1233,7 +1233,6 @@ function LlmoController(ctx) {
             nextData: data,
             siteId,
             siteBaseUrl,
-            changedBy: context.attributes?.authInfo?.getProfile?.()?.email || 'system',
           });
           if (notificationSummary.changes > 0) {
             log.info(`Strategy notification summary for site ${siteId}: ${JSON.stringify(notificationSummary)}`);

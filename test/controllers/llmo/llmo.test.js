@@ -4584,25 +4584,6 @@ describe('LlmoController', () => {
       });
     });
 
-    it('should extract changedBy from auth profile email', async () => {
-      readStrategyStub.resolves({ data: prevStrategyData, exists: true });
-
-      await controller.saveStrategy(mockContext);
-
-      const [, params] = notifyStrategyChangesStub.firstCall.args;
-      expect(params.changedBy).to.be.a('string');
-    });
-
-    it('should use system as changedBy when auth profile has no email', async () => {
-      mockContext.attributes.authInfo.getProfile = () => ({});
-      readStrategyStub.resolves({ data: prevStrategyData, exists: true });
-
-      await controller.saveStrategy(mockContext);
-
-      const [, params] = notifyStrategyChangesStub.firstCall.args;
-      expect(params.changedBy).to.equal('system');
-    });
-
     it('should use empty siteBaseUrl when site is not found', async () => {
       mockDataAccess.Site.findById.resolves(null);
       readStrategyStub.resolves({ data: prevStrategyData, exists: true });
