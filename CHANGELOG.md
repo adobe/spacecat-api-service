@@ -1,3 +1,24 @@
+## [1.327.2](https://github.com/adobe/spacecat-api-service/compare/v1.327.1...v1.327.2) (2026-03-02)
+
+
+### Bug Fixes
+
+* **deps:** upgrade data-access to 3.5.0 for case-insensitive enum queries ([#1890](https://github.com/adobe/spacecat-api-service/issues/1890)) ([5edb461](https://github.com/adobe/spacecat-api-service/commit/5edb4613ac44eff3080d81c5129065ac93182fc1))
+
+## [1.327.1](https://github.com/adobe/spacecat-api-service/compare/v1.327.0...v1.327.1) (2026-03-02)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1881](https://github.com/adobe/spacecat-api-service/issues/1881)) ([801c1b6](https://github.com/adobe/spacecat-api-service/commit/801c1b6ba19e08b25dddb56cc59a4f6ce306a849))
+
+# [1.327.0](https://github.com/adobe/spacecat-api-service/compare/v1.326.2...v1.327.0) (2026-03-02)
+
+
+### Features
+
+* consumer controller apis ([#1832](https://github.com/adobe/spacecat-api-service/issues/1832)) ([2d4ea88](https://github.com/adobe/spacecat-api-service/commit/2d4ea880177f03d496e312ebb838d0b90c42dbba))
+
 ## [1.326.2](https://github.com/adobe/spacecat-api-service/compare/v1.326.1...v1.326.2) (2026-03-01)
 
 
