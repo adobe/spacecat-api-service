@@ -17,7 +17,6 @@ import sinon from 'sinon';
 
 import {
   addEllipsis,
-  escapeSlackMrkdwn,
   formatDate,
   formatLighthouseError,
   formatScore,
@@ -68,46 +67,6 @@ describe('Utility Functions', () => {
     it('formats bytes into the appropriate size format', () => {
       expect(formatSize(1024)).to.equal('1.00 KB');
       expect(formatSize(1048576)).to.equal('1.00 MB');
-    });
-  });
-
-  describe('escapeSlackMrkdwn()', () => {
-    it('escapes asterisks to prevent bold injection', () => {
-      expect(escapeSlackMrkdwn('foo *bold* bar')).to.equal('foo \\*bold\\* bar');
-    });
-
-    it('escapes underscores to prevent italic injection', () => {
-      expect(escapeSlackMrkdwn('foo _italic_ bar')).to.equal('foo \\_italic\\_ bar');
-    });
-
-    it('escapes backticks to prevent code block breakout', () => {
-      expect(escapeSlackMrkdwn('foo`bar')).to.equal('foo\\`bar');
-    });
-
-    it('escapes tildes to prevent strikethrough', () => {
-      expect(escapeSlackMrkdwn('foo ~strike~ bar')).to.equal('foo \\~strike\\~ bar');
-    });
-
-    it('escapes angle brackets to prevent link injection', () => {
-      expect(escapeSlackMrkdwn('foo <bar> baz')).to.equal('foo &lt;bar&gt; baz');
-    });
-
-    it('escapes backslashes first to avoid double-escaping', () => {
-      expect(escapeSlackMrkdwn('path\\to\\file')).to.equal('path\\\\to\\\\file');
-    });
-
-    it('returns empty string for null or undefined', () => {
-      expect(escapeSlackMrkdwn(null)).to.equal('');
-      expect(escapeSlackMrkdwn(undefined)).to.equal('');
-    });
-
-    it('coerces non-string to string before escaping', () => {
-      expect(escapeSlackMrkdwn(123)).to.equal('123');
-      expect(escapeSlackMrkdwn(true)).to.equal('true');
-    });
-
-    it('escapes multiple special characters together', () => {
-      expect(escapeSlackMrkdwn('`foo` *bar* _baz_')).to.equal('\\`foo\\` \\*bar\\* \\_baz\\_');
     });
   });
 

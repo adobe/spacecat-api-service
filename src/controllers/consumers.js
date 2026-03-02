@@ -30,13 +30,36 @@ import {
 import { ErrorWithStatusCode } from '../support/utils.js';
 import { ConsumerDto } from '../dto/consumer.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { escapeSlackMrkdwn } from '../utils/slack/format.js';
 
 const HEADER_ERROR = 'x-error';
 const IMS_TA_TOKEN_HEADER = 'x-ta-access-token';
 const IMMUTABLE_FIELDS = ['clientId', 'technicalAccountId', 'imsOrgId'];
 const UPDATABLE_STATUSES = Object.values(ConsumerModel.STATUS)
   .filter((s) => s !== ConsumerModel.STATUS.REVOKED);
+
+function getHeaderCaseInsensitive(headers, name) {
+  const lower = name.toLowerCase();
+  const key = Object.keys(headers).find((k) => k.toLowerCase() === lower);
+  return key ? headers[key] : undefined;
+}
+
+function validateCapabilities(Consumer, capabilities) {
+  if (!Array.isArray(capabilities) || capabilities.length === 0) {
+    throw new ErrorWithStatusCode('capabilities must be a non-empty array', STATUS_BAD_REQUEST);
+  }
+  const invalidElement = capabilities.find((c) => typeof c !== 'string' || !hasText(c));
+  if (invalidElement !== undefined) {
+    throw new ErrorWithStatusCode(
+      'All capability elements must be non-empty strings in entity:operation format (e.g. site:read)',
+      STATUS_BAD_REQUEST,
+    );
+  }
+  try {
+    Consumer.validateCapabilities(capabilities);
+  } catch (validationErr) {
+    throw new ErrorWithStatusCode(validationErr.message, STATUS_BAD_REQUEST);
+  }
+}
 
 function createErrorResponse(error) {
   const statusCode = error.status || STATUS_INTERNAL_SERVER_ERROR;
@@ -212,7 +235,7 @@ function ConsumersController(ctx) {
       }
 
       const headers = context.pathInfo?.headers || {};
-      const accessToken = headers[IMS_TA_TOKEN_HEADER];
+      const accessToken = getHeaderCaseInsensitive(headers, IMS_TA_TOKEN_HEADER);
       const { consumerName, capabilities } = data;
       log.info(`Register consumer request: consumerName=${consumerName}`);
 
@@ -225,23 +248,7 @@ function ConsumersController(ctx) {
       if (!hasText(consumerName)) {
         throw new ErrorWithStatusCode('consumerName is required', STATUS_BAD_REQUEST);
       }
-      if (!Array.isArray(capabilities) || capabilities.length === 0) {
-        throw new ErrorWithStatusCode('capabilities must be a non-empty array', STATUS_BAD_REQUEST);
-      }
-
-      const invalidElement = capabilities.find((c) => typeof c !== 'string' || !hasText(c));
-      if (invalidElement !== undefined) {
-        throw new ErrorWithStatusCode(
-          'All capability elements must be non-empty strings in entity:operation format (e.g. site:read)',
-          STATUS_BAD_REQUEST,
-        );
-      }
-
-      try {
-        Consumer.validateCapabilities(capabilities);
-      } catch (validationErr) {
-        throw new ErrorWithStatusCode(validationErr.message, STATUS_BAD_REQUEST);
-      }
+      validateCapabilities(Consumer, capabilities);
 
       let tokenPayload;
       try {
@@ -282,6 +289,7 @@ function ConsumersController(ctx) {
         );
       }
 
+      const updatedBy = getUpdatedBy();
       const consumer = await Consumer.create({
         clientId,
         technicalAccountId,
@@ -289,22 +297,18 @@ function ConsumersController(ctx) {
         consumerName,
         capabilities,
         status: ConsumerModel.STATUS.ACTIVE,
-        updatedBy: getUpdatedBy(),
+        updatedBy,
       });
 
-      const safeName = escapeSlackMrkdwn(consumerName);
-      const safeClientId = escapeSlackMrkdwn(clientId);
-      const safeImsOrgId = escapeSlackMrkdwn(imsOrgId);
-      const safeCapabilities = capabilities.map((c) => `\`${escapeSlackMrkdwn(c)}\``).join(', ');
-      const safeUpdatedBy = escapeSlackMrkdwn(getUpdatedBy());
+      const safeCapabilities = capabilities.map((c) => `\`${c}\``).join(', ');
       const registerMsg = ':new: *New Consumer Registered*\n'
-        + `• *Name:* \`${safeName}\`\n`
-        + `• *Client ID:* \`${safeClientId}\`\n`
-        + `• *IMS Org:* \`${safeImsOrgId}\`\n`
+        + `• *Name:* \`${consumerName}\`\n`
+        + `• *Client ID:* \`${clientId}\`\n`
+        + `• *IMS Org:* \`${imsOrgId}\`\n`
         + `• *Capabilities:* ${safeCapabilities}\n`
-        + `• *Registered by:* \`${safeUpdatedBy}\``;
+        + `• *Registered by:* \`${updatedBy}\``;
       log.info(registerMsg);
-      await notifySlack(registerMsg);
+      notifySlack(registerMsg);
 
       return createResponse(ConsumerDto.toJSON(consumer), STATUS_CREATED);
     } catch (error) {
@@ -385,52 +389,33 @@ function ConsumersController(ctx) {
       const changes = [];
 
       if (hasText(data.consumerName)) {
-        const safeOld = escapeSlackMrkdwn(consumer.getConsumerName());
-        const safeNew = escapeSlackMrkdwn(data.consumerName);
-        changes.push(`  › *consumerName:* \`${safeOld}\` → \`${safeNew}\``);
+        changes.push(`  › *consumerName:* \`${consumer.getConsumerName()}\` → \`${data.consumerName}\``);
         consumer.setConsumerName(data.consumerName);
       }
 
       if (Array.isArray(data.capabilities)) {
-        if (data.capabilities.length === 0) {
-          throw new ErrorWithStatusCode('capabilities must be a non-empty array', STATUS_BAD_REQUEST);
-        }
-        const invalidElement = data.capabilities.find((c) => typeof c !== 'string' || !hasText(c));
-        if (invalidElement !== undefined) {
-          throw new ErrorWithStatusCode(
-            'All capability elements must be non-empty strings in entity:operation format (e.g. site:read)',
-            STATUS_BAD_REQUEST,
-          );
-        }
-        try {
-          Consumer.validateCapabilities(data.capabilities);
-        } catch (validationErr) {
-          throw new ErrorWithStatusCode(validationErr.message, STATUS_BAD_REQUEST);
-        }
-        const oldCaps = consumer.getCapabilities().map((c) => `\`${escapeSlackMrkdwn(c)}\``).join(', ');
-        const newCaps = data.capabilities.map((c) => `\`${escapeSlackMrkdwn(c)}\``).join(', ');
+        validateCapabilities(Consumer, data.capabilities);
+        const oldCaps = consumer.getCapabilities().map((c) => `\`${c}\``).join(', ');
+        const newCaps = data.capabilities.map((c) => `\`${c}\``).join(', ');
         changes.push(`  › *capabilities:* [${oldCaps}] → [${newCaps}]`);
         consumer.setCapabilities(data.capabilities);
       }
 
       if (hasText(data.status)) {
-        const safeOld = escapeSlackMrkdwn(consumer.getStatus());
-        const safeNew = escapeSlackMrkdwn(data.status);
-        changes.push(`  › *status:* \`${safeOld}\` → \`${safeNew}\``);
+        changes.push(`  › *status:* \`${consumer.getStatus()}\` → \`${data.status}\``);
         consumer.setStatus(data.status);
       }
 
-      consumer.setUpdatedBy(getUpdatedBy());
+      const updatedBy = getUpdatedBy();
+      consumer.setUpdatedBy(updatedBy);
       await consumer.save();
 
-      const safeConsumerId = escapeSlackMrkdwn(consumerId);
-      const safeUpdatedBy = escapeSlackMrkdwn(getUpdatedBy());
       const updateMsg = ':pencil2: *Consumer Updated*\n'
-        + `• *Consumer ID:* \`${safeConsumerId}\`\n`
+        + `• *Consumer ID:* \`${consumerId}\`\n`
         + `• *Changes:*\n${changes.join('\n')}\n`
-        + `• *Updated by:* \`${safeUpdatedBy}\``;
+        + `• *Updated by:* \`${updatedBy}\``;
       log.info(updateMsg);
-      await notifySlack(updateMsg);
+      notifySlack(updateMsg);
 
       return ok(ConsumerDto.toJSON(consumer));
     } catch (error) {
@@ -478,19 +463,18 @@ function ConsumersController(ctx) {
         );
       }
 
+      const updatedBy = getUpdatedBy();
       consumer.setStatus(ConsumerModel.STATUS.REVOKED);
       consumer.setRevokedAt(new Date().toISOString());
-      consumer.setUpdatedBy(getUpdatedBy());
+      consumer.setUpdatedBy(updatedBy);
 
       await consumer.save();
 
-      const safeConsumerId = escapeSlackMrkdwn(consumerId);
-      const safeRevokedBy = escapeSlackMrkdwn(getUpdatedBy());
       const revokeMsg = ':rotating_light: *Consumer Revoked*\n'
-        + `• *Consumer ID:* \`${safeConsumerId}\`\n`
-        + `• *Revoked by:* \`${safeRevokedBy}\``;
+        + `• *Consumer ID:* \`${consumerId}\`\n`
+        + `• *Revoked by:* \`${updatedBy}\``;
       log.info(revokeMsg);
-      await notifySlack(revokeMsg);
+      notifySlack(revokeMsg);
 
       return ok(ConsumerDto.toJSON(consumer));
     } catch (error) {

@@ -379,28 +379,33 @@ describe('ConsumersController', () => {
       expect(body.status).to.equal('ACTIVE');
     });
 
-    it('escapes mrkdwn special characters in Slack notification to prevent injection', async () => {
+    it('wraps user-controlled values in backticks without double-escaping', async () => {
       context.dataAccess.Consumer.findByClientId.resolves(null);
       context.env = { S2S_SLACK_CHANNEL_ID: 'C_DUMMY_CHANNEL_ID' };
       context.pathInfo.headers['x-ta-access-token'] = 'valid-ta-token';
-      const maliciousPayload = {
-        consumerName: 'Evil `name` *bold* _italic_',
-        capabilities: ['site:read', 'cap`inject'],
+      const payload = {
+        consumerName: 'My Integration',
+        capabilities: ['site:read', 'site:write'],
       };
       const controller = ConsumersController(context);
       await controller.register({
         ...context,
-        data: maliciousPayload,
+        data: payload,
       });
+
+      // Wait for fire-and-forget notifySlack to settle
+      // eslint-disable-next-line max-statements-per-line
+      await new Promise((resolve) => { setTimeout(resolve, 10); });
 
       expect(slackPostMessageStub).to.have.been.calledOnce;
       const [postMessageArg] = slackPostMessageStub.firstCall.args;
       const slackMessage = postMessageArg?.text ?? postMessageArg;
-      expect(slackMessage).to.include('\\`name\\`');
-      expect(slackMessage).to.include('\\*bold\\*');
-      expect(slackMessage).to.include('\\_italic\\_');
-      expect(slackMessage).to.include('cap\\`inject');
-      expect(slackMessage).not.to.include('**');
+      // Values inside backticks should not be escaped (no visible backslashes)
+      expect(slackMessage).to.include('`My Integration`');
+      expect(slackMessage).to.include('`site:read`');
+      expect(slackMessage).to.include('`site:write`');
+      expect(slackMessage).not.to.include('\\*');
+      expect(slackMessage).not.to.include('\\`');
     });
 
     it('succeeds even when Slack notification fails (postMessage rejects)', async () => {
@@ -416,6 +421,10 @@ describe('ConsumersController', () => {
       });
 
       expect(response.status).to.equal(STATUS_CREATED);
+
+      // notifySlack is fire-and-forget; wait for the promise to settle
+      // eslint-disable-next-line max-statements-per-line
+      await new Promise((resolve) => { setTimeout(resolve, 10); });
       expect(context.log.error).to.have.been.calledWith(
         `Failed to send Slack notification: ${slackError.message}`,
       );
@@ -431,6 +440,10 @@ describe('ConsumersController', () => {
       });
 
       expect(response.status).to.equal(STATUS_CREATED);
+
+      // notifySlack is fire-and-forget; wait for the promise to settle
+      // eslint-disable-next-line max-statements-per-line
+      await new Promise((resolve) => { setTimeout(resolve, 10); });
       expect(context.log.warn).to.have.been.calledWith(
         'S2S_SLACK_CHANNEL_ID is not configured; skipping Slack notification',
       );
@@ -487,6 +500,26 @@ describe('ConsumersController', () => {
 
       expect(response.status).to.equal(STATUS_BAD_REQUEST);
       expect(response.headers.get('x-error')).to.include('x-ta-access-token header');
+    });
+
+    it('reads the access token header case-insensitively', async () => {
+      context.dataAccess.Consumer.findByClientId.resolves(null);
+      const contextMixedCase = {
+        ...context,
+        pathInfo: {
+          headers: {
+            'X-Ta-Access-Token': 'valid-ta-token',
+          },
+        },
+      };
+      const controller = ConsumersController(contextMixedCase);
+      const response = await controller.register({
+        ...contextMixedCase,
+        data: validPayload,
+      });
+
+      expect(response.status).to.equal(STATUS_CREATED);
+      expect(context.imsClient.validateAccessToken).to.have.been.calledWith('valid-ta-token');
     });
 
     it('returns bad request when pathInfo is missing (access token not available)', async () => {

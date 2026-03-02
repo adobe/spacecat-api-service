@@ -425,10 +425,10 @@ export default function getRouteHandlers(
     // Combined config
     'GET /sites/:siteId/sentiment/config': sentimentController.getConfig,
 
-    // Consumer management
+    // Consumer management (by-client-id before :consumerId to avoid ambiguous matching)
     'GET /consumers': consumersController.getAll,
-    'GET /consumers/:consumerId': consumersController.getByConsumerId,
     'GET /consumers/by-client-id/:clientId': consumersController.getByClientId,
+    'GET /consumers/:consumerId': consumersController.getByConsumerId,
     'POST /consumers/register': consumersController.register,
     'PATCH /consumers/:consumerId': consumersController.update,
     'POST /consumers/:consumerId/revoke': consumersController.revoke,
