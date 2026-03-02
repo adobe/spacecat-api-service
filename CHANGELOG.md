@@ -1,3 +1,10 @@
+# [1.329.0](https://github.com/adobe/spacecat-api-service/compare/v1.328.0...v1.329.0) (2026-03-02)
+
+
+### Features
+
+* add markOpportunitiesReviewed endpoint to LlmoController | LLMO-3058 ([#1828](https://github.com/adobe/spacecat-api-service/issues/1828)) ([f09cb9c](https://github.com/adobe/spacecat-api-service/commit/f09cb9cdd88f220327541c66c9b71451b6534629))
+
 # [1.328.0](https://github.com/adobe/spacecat-api-service/compare/v1.327.3...v1.328.0) (2026-03-02)
 
 
