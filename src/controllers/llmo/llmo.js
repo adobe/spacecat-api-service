@@ -1427,6 +1427,37 @@ function LlmoController(ctx) {
     }
   };
 
+  const markOpportunitiesReviewed = async (context) => {
+    const { log } = context;
+
+    try {
+      const { site, config } = await getSiteAndValidateLlmo(context);
+      const OPPORTUNITIES_REVIEWED_TAG = 'opportunitiesReviewed';
+      const tags = config.getLlmoConfig().tags || [];
+
+      if (tags.includes(OPPORTUNITIES_REVIEWED_TAG)) {
+        log.info(`Site ${site.getId()} already has '${OPPORTUNITIES_REVIEWED_TAG}' tag, skipping`);
+        return ok(tags);
+      }
+
+      const userId = context.attributes?.authInfo?.getProfile()?.sub || 'system';
+      config.addLlmoTag(OPPORTUNITIES_REVIEWED_TAG);
+
+      await saveSiteConfig(site, config, log, 'marking opportunities as reviewed');
+
+      log.info(`User ${userId} marked opportunities as reviewed for site ${site.getId()}, added '${OPPORTUNITIES_REVIEWED_TAG}' tag`);
+
+      return ok(config.getLlmoConfig().tags || []);
+    } catch (error) {
+      log.error(`Error marking opportunities as reviewed: ${error.message}`);
+
+      if (error.message === 'Only users belonging to the organization can view its sites') {
+        return forbidden(error.message);
+      }
+      return badRequest(error.message);
+    }
+  };
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -1453,6 +1484,7 @@ function LlmoController(ctx) {
     saveStrategy,
     checkEdgeOptimizeStatus,
     updateEdgeOptimizeCDNRouting,
+    markOpportunitiesReviewed,
   };
 }
 
