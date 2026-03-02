@@ -1,3 +1,10 @@
+# [1.327.0](https://github.com/adobe/spacecat-api-service/compare/v1.326.2...v1.327.0) (2026-03-02)
+
+
+### Features
+
+* consumer controller apis ([#1832](https://github.com/adobe/spacecat-api-service/issues/1832)) ([2d4ea88](https://github.com/adobe/spacecat-api-service/commit/2d4ea880177f03d496e312ebb838d0b90c42dbba))
+
 ## [1.326.2](https://github.com/adobe/spacecat-api-service/compare/v1.326.1...v1.326.2) (2026-03-01)
 
 
