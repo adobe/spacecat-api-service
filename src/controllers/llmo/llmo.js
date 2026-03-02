@@ -1440,9 +1440,12 @@ function LlmoController(ctx) {
         return ok(tags);
       }
 
+      const userId = context.attributes?.authInfo?.getProfile()?.sub || 'system';
       config.addLlmoTag(OPPORTUNITIES_REVIEWED_TAG);
 
       await saveSiteConfig(site, config, log, 'marking opportunities as reviewed');
+
+      log.info(`User ${userId} marked opportunities as reviewed for site ${site.getId()}, added '${OPPORTUNITIES_REVIEWED_TAG}' tag`);
 
       return ok(config.getLlmoConfig().tags || []);
     } catch (error) {
