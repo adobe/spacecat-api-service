@@ -8,6 +8,7 @@ https://opensource.adobe.com/spacecat-api-service/
 
 ### Build documentation locally
 
+
 ```bash
 $ npm run docs
 ```
