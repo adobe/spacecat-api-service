@@ -97,7 +97,7 @@ describe('email-service', () => {
 
       const [url, options] = fetchStub.firstCall.args;
       expect(url).to.include('postoffice.example.com');
-      expect(url).to.include('name=test-template');
+      expect(url).to.include('templateName=test-template');
       expect(url).to.include('locale=en_US');
       expect(options.method).to.equal('POST');
       expect(options.headers.Authorization).to.equal('IMS test-token');

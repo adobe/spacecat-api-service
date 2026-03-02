@@ -79,7 +79,7 @@ export async function sendEmail(context, {
       toList: recipients.join(','),
       templateData: templateData || {},
     });
-    const url = `${postOfficeEndpoint}/po-server/message?name=${encodeURIComponent(templateName)}&locale=${encodeURIComponent(locale)}`;
+    const url = `${postOfficeEndpoint}/po-server/message?templateName=${encodeURIComponent(templateName)}&locale=${encodeURIComponent(locale)}`;
 
     log.info(`[email-service] Sending ${templateName} email to ${recipients.length} recipient(s)`);
 
