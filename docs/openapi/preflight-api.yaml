@@ -2,12 +2,17 @@ preflight-jobs:
   post:
     tags:
       - preflight
+    deprecated: true
     security:
       - api_key: [ ]
       - ims_key: [ ]
-    summary: Submit a new preflight async job
+    summary: Submit a new preflight async job (deprecated)
     description: |
-      This endpoint is useful for submitting a new preflight async job.
+      **Deprecated** — use the v2 endpoint (`/preflight/jobs-v2`) instead, which reads the
+      promise token from the `x-promise-token` header rather than creating one from the
+      Authorization header via IMS.
+
+      This endpoint submits a new preflight async job.
       The job will process the provided URL and return the results.
       The jobId can be used to poll for the status of the job.
     operationId: submitPreflightJob

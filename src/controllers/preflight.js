@@ -86,8 +86,8 @@ function PreflightController(ctx, log, env) {
   }
 
   /**
-   * Creates a new preflight job. For promise-based authoring types (CS, CS_CW, AMS),
-   * obtains the promise token from IMS via the Authorization header.
+   * @deprecated Use createPreflightJobV2 instead, which reads the promise token from
+   * the x-promise-token header rather than creating one from the Authorization header via IMS.
    * @param {Object} context - The request context
    * @param {Object} context.data - The request data
    * @param {string[]} context.data.urls - Array of URLs to process
