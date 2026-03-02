@@ -353,7 +353,7 @@ export async function sendStatusChangeNotifications(context, {
             strategy_url: strategyUrl,
             strategy_owner_name: strategyOwnerName,
             strategy_owner_email: strategyOwnerEmail,
-            opportunity_list: JSON.stringify(change.opportunityNames || []),
+            opportunity_list: change.opportunityNames || [],
           };
         }
 

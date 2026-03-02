@@ -918,7 +918,7 @@ describe('opportunity-workspace-notifications', () => {
       expect(emailOptions.templateName).to.equal('llmo_strategy_update');
       expect(emailOptions.templateData.strategy_status).to.equal('in_progress');
       expect(emailOptions.templateData.strategy_owner_name).to.equal('Owner Smith');
-      expect(emailOptions.templateData.opportunity_list).to.equal('["EV Charging Expansion","Depot Grid Modernization"]');
+      expect(emailOptions.templateData.opportunity_list).to.deep.equal(['EV Charging Expansion', 'Depot Grid Modernization']);
       expect(emailOptions.templateData).to.not.have.property('assignee_name');
       expect(emailOptions.templateData).to.not.have.property('assignee_email');
       expect(emailOptions.templateData).to.not.have.property('opportunity_name');
@@ -1077,7 +1077,7 @@ describe('opportunity-workspace-notifications', () => {
 
       expect(summary.sent).to.equal(1);
       const [, emailOptions] = sendEmailStub.firstCall.args;
-      expect(emailOptions.templateData.opportunity_list).to.equal('[]');
+      expect(emailOptions.templateData.opportunity_list).to.deep.equal([]);
     });
 
     it('should fall back to email when dataAccess has no TrialUser', async () => {

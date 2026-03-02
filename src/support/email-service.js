@@ -13,58 +13,13 @@
 import { ImsClient } from '@adobe/spacecat-shared-ims-client';
 
 /**
- * Escapes special XML characters in a string.
- * @param {string} str - The string to escape.
- * @returns {string} The escaped string.
- */
-function escapeXml(str) {
-  if (typeof str !== 'string') return '';
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
-/**
- * Builds the XML payload for a Post Office templated email.
- * @param {string[]} toList - Array of recipient email addresses.
- * @param {Object<string,string>} [templateData] - Key-value pairs for template variables.
- * @returns {string} XML payload string.
- */
-function buildTemplateEmailPayload(toList, templateData) {
-  const toListXml = toList.map((email) => `<toList>${escapeXml(email)}</toList>`).join('\n    ');
-
-  let templateDataXml = '';
-  if (templateData && Object.keys(templateData).length > 0) {
-    const entries = Object.entries(templateData)
-      .map(([key, value]) => `<entry><key>${escapeXml(key)}</key><value>${escapeXml(String(value))}</value></entry>`)
-      .join('\n        ');
-    templateDataXml = `\n    <templateData>\n        ${entries}\n    </templateData>`;
-  }
-
-  return `<sendTemplateEmailReq>
-    ${toListXml}${templateDataXml}
-</sendTemplateEmailReq>`;
-}
-
-/**
  * Acquires an IMS service access token using email-specific credentials.
  * Does NOT mutate context.env.
  * @param {Object} context - The request context with env and log.
  * @returns {Promise<string>} The access token string.
  */
 async function getEmailServiceToken(context) {
-  const { env, log } = context;
-
-  log.info('[email-service] Acquiring email service IMS token', {
-    emailClientId: env.LLMO_EMAIL_IMS_CLIENT_ID,
-    emailClientSecret: env.LLMO_EMAIL_IMS_CLIENT_SECRET,
-    emailClientCode: env.LLMO_EMAIL_IMS_CLIENT_CODE,
-    emailImsScope: env.LLMO_EMAIL_IMS_SCOPE,
-    imsHost: env.IMS_HOST,
-  });
+  const { env } = context;
 
   const emailEnv = {
     ...env,
@@ -78,14 +33,9 @@ async function getEmailServiceToken(context) {
 
   try {
     const tokenPayload = await imsClient.getServiceAccessToken();
-    log.info('[email-service] IMS token acquired successfully', {
-      tokenPrefix: tokenPayload.access_token?.substring(0, 10),
-      expiresIn: tokenPayload.expires_in,
-      tokenType: tokenPayload.token_type,
-    });
     return tokenPayload.access_token;
   } catch (error) {
-    log.error('[email-service] Failed to acquire IMS token', { error: error.message });
+    context.log.error('[email-service] Failed to acquire IMS token', { error: error.message });
     throw error;
   }
 }
@@ -98,7 +48,7 @@ async function getEmailServiceToken(context) {
  * @param {string[]} options.recipients - Array of email addresses.
  * @param {string} options.templateName - Post Office template name.
  * @param {Object<string,string>} [options.templateData] - Template variable key/value pairs.
- * @param {string} [options.locale='en-us'] - Locale for the email.
+ * @param {string} [options.locale='en_US'] - Locale for the email.
  * @returns {Promise<{success: boolean, statusCode: number, error?: string, templateUsed: string}>}
  *   Result object. Never throws by default.
  */
@@ -106,7 +56,7 @@ export async function sendEmail(context, {
   recipients,
   templateName,
   templateData,
-  locale = 'en-us',
+  locale = 'en_US',
 }) {
   const { env, log } = context;
   const result = { success: false, statusCode: 0, templateUsed: templateName };
@@ -125,25 +75,22 @@ export async function sendEmail(context, {
       return result;
     }
 
-    const emailPayload = buildTemplateEmailPayload(recipients, templateData);
-    const url = `${postOfficeEndpoint}/po-server/message?templateName=${encodeURIComponent(templateName)}&locale=${encodeURIComponent(locale)}`;
-
-    log.info('[email-service] Sending email via Post Office', {
-      url,
-      templateName,
-      locale,
-      recipientCount: recipients.length,
-      tokenPrefix: accessToken?.substring(0, 10),
+    const body = JSON.stringify({
+      toList: recipients.join(','),
+      templateData: templateData || {},
     });
+    const url = `${postOfficeEndpoint}/po-server/message?name=${encodeURIComponent(templateName)}&locale=${encodeURIComponent(locale)}`;
+
+    log.info(`[email-service] Sending ${templateName} email to ${recipients.length} recipient(s)`);
 
     const response = await fetch(url, {
       method: 'POST',
       headers: {
-        Accept: 'application/xml',
+        Accept: 'application/json',
         Authorization: `IMS ${accessToken}`,
-        'Content-Type': 'application/xml',
+        'Content-Type': 'application/json',
       },
-      body: emailPayload,
+      body,
     });
 
     result.statusCode = response.status;
@@ -161,5 +108,3 @@ export async function sendEmail(context, {
 
   return result;
 }
-
-export { buildTemplateEmailPayload, escapeXml };

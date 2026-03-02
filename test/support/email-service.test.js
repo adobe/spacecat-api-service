@@ -20,8 +20,6 @@ use(sinonChai);
 
 describe('email-service', () => {
   let sendEmail;
-  let buildTemplateEmailPayload;
-  let escapeXml;
   let mockContext;
   let fetchStub;
   let imsClientInstance;
@@ -42,8 +40,6 @@ describe('email-service', () => {
     });
 
     sendEmail = emailService.sendEmail;
-    buildTemplateEmailPayload = emailService.buildTemplateEmailPayload;
-    escapeXml = emailService.escapeXml;
   });
 
   beforeEach(() => {
@@ -70,56 +66,6 @@ describe('email-service', () => {
 
   afterEach(() => {
     sinon.restore();
-  });
-
-  describe('escapeXml', () => {
-    it('should escape XML special characters', () => {
-      expect(escapeXml('a & b < c > d " e \' f')).to.equal('a &amp; b &lt; c &gt; d &quot; e &apos; f');
-    });
-
-    it('should return empty string for non-string input', () => {
-      expect(escapeXml(null)).to.equal('');
-      expect(escapeXml(undefined)).to.equal('');
-      expect(escapeXml(123)).to.equal('');
-    });
-
-    it('should return the same string when no special characters', () => {
-      expect(escapeXml('hello world')).to.equal('hello world');
-    });
-  });
-
-  describe('buildTemplateEmailPayload', () => {
-    it('should build XML with single recipient and no template data', () => {
-      const xml = buildTemplateEmailPayload(['test@example.com']);
-      expect(xml).to.include('<toList>test@example.com</toList>');
-      expect(xml).to.include('<sendTemplateEmailReq>');
-      expect(xml).to.not.include('<templateData>');
-    });
-
-    it('should build XML with multiple recipients', () => {
-      const xml = buildTemplateEmailPayload(['a@example.com', 'b@example.com']);
-      expect(xml).to.include('<toList>a@example.com</toList>');
-      expect(xml).to.include('<toList>b@example.com</toList>');
-    });
-
-    it('should build XML with template data', () => {
-      const xml = buildTemplateEmailPayload(['test@example.com'], {
-        site_id: 'site-123',
-        status: 'active',
-      });
-      expect(xml).to.include('<templateData>');
-      expect(xml).to.include('<key>site_id</key>');
-      expect(xml).to.include('<value>site-123</value>');
-      expect(xml).to.include('<key>status</key>');
-      expect(xml).to.include('<value>active</value>');
-    });
-
-    it('should escape special characters in template data', () => {
-      const xml = buildTemplateEmailPayload(['test@example.com'], {
-        name: 'A & B <Corp>',
-      });
-      expect(xml).to.include('<value>A &amp; B &lt;Corp&gt;</value>');
-    });
   });
 
   describe('sendEmail', () => {
@@ -151,9 +97,17 @@ describe('email-service', () => {
 
       const [url, options] = fetchStub.firstCall.args;
       expect(url).to.include('postoffice.example.com');
-      expect(url).to.include('templateName=test-template');
+      expect(url).to.include('name=test-template');
+      expect(url).to.include('locale=en_US');
       expect(options.method).to.equal('POST');
       expect(options.headers.Authorization).to.equal('IMS test-token');
+      expect(options.headers['Content-Type']).to.equal('application/json');
+      expect(options.headers.Accept).to.equal('application/json');
+      const body = JSON.parse(options.body);
+      expect(body).to.deep.equal({
+        toList: 'test@example.com',
+        templateData: { key: 'value' },
+      });
     });
 
     it('should create ImsClient with email-specific credentials', async () => {
@@ -244,11 +198,25 @@ describe('email-service', () => {
       await sendEmail(mockContext, {
         recipients: ['test@example.com'],
         templateName: 'test-template',
-        locale: 'de-de',
+        locale: 'de_DE',
       });
 
       const [url] = fetchStub.firstCall.args;
-      expect(url).to.include('locale=de-de');
+      expect(url).to.include('locale=de_DE');
+    });
+
+    it('should send JSON body with toList as comma-separated string for multiple recipients', async () => {
+      fetchStub.resolves({ status: 200, text: async () => 'OK' });
+
+      await sendEmail(mockContext, {
+        recipients: ['a@example.com', 'b@example.com'],
+        templateName: 'test-template',
+      });
+
+      const [, options] = fetchStub.firstCall.args;
+      const body = JSON.parse(options.body);
+      expect(body.toList).to.equal('a@example.com,b@example.com');
+      expect(body.templateData).to.deep.equal({});
     });
   });
 });
