@@ -1076,7 +1076,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
           brandName: brandName.trim(),
           audience,
           region: 'US',
-          numPrompts: 42,
+          numPrompts: 50,
           siteId: site.getId(),
           imsOrgId,
         });
