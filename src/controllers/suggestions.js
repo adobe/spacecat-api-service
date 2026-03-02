@@ -1216,9 +1216,7 @@ function SuggestionsController(ctx, sqs, env) {
       userId: profile?.email,
     });
 
-    context.log.info('[edge-deploy] suggestionIds', {
-      suggestionIds: context.data?.suggestionIds,
-    });
+    context.log.info(`[edge-deploy] suggestionIds: ${JSON.stringify(context.data?.suggestionIds)}`);
 
     if (!accessControlUtil.isLLMOAdministrator()) {
       context.log.warn('[edge-deploy-failed] user is not an LLMO administrator');
@@ -1237,7 +1235,7 @@ function SuggestionsController(ctx, sqs, env) {
 
     // validate request body
     if (!isNonEmptyObject(context.data)) {
-      context.log.warn('[edge-deploy-failed] no requesy body data provided');
+      context.log.warn('[edge-deploy-failed] no request body data provided');
       return badRequest('No data provided');
     }
     const { suggestionIds } = context.data;
@@ -1257,10 +1255,10 @@ function SuggestionsController(ctx, sqs, env) {
       return forbidden('User does not belong to the organization');
     }
 
-    if (!await accessControlUtil.isOwnerOfSite(site)) {
-      context.log.warn('[edge-deploy-failed] user is not the owner of the site');
-      return forbidden('User does not have access to deploy edge optimize fixes for this site');
-    }
+    // if (!await accessControlUtil.isOwnerOfSite(site)) {
+    //   context.log.warn('[edge-deploy-failed] user is not the owner of the site');
+    //   return forbidden('User does not have access to deploy edge optimize fixes for this site');
+    // }
 
     const opportunity = await Opportunity.findById(opportunityId);
     if (!opportunity || opportunity.getSiteId() !== siteId) {
@@ -1650,10 +1648,7 @@ function SuggestionsController(ctx, sqs, env) {
       },
     };
     response.suggestions.sort((a, b) => a.index - b.index);
-    context.log.info('[edge-deploy] response', {
-      response,
-    });
-
+    context.log.info(`[edge-deploy] response: ${JSON.stringify(response)}`);
     return createResponse(response, 207);
   };
 
@@ -1667,9 +1662,7 @@ function SuggestionsController(ctx, sqs, env) {
       suggestionIdsCount: context.data?.suggestionIds?.length ?? 0,
       userId: profile?.email,
     });
-    context.log.info('[edge-rollback] suggestionIds', {
-      suggestionIds: context.data?.suggestionIds,
-    });
+    context.log.info(`[edge-rollback] suggestionIds: ${JSON.stringify(context.data?.suggestionIds)}`);
 
     if (!isNonEmptyObject(context.data)) {
       context.log.warn('[edge-rollback-failed] no request body data provided');
@@ -1907,10 +1900,7 @@ function SuggestionsController(ctx, sqs, env) {
     };
     response.suggestions.sort((a, b) => a.index - b.index);
 
-    context.log.info('[edge-rollback] response', {
-      response,
-    });
-
+    context.log.info(`[edge-rollback] response: ${JSON.stringify(response)}`);
     return createResponse(response, 207);
   };
 

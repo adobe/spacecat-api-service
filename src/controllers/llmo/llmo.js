@@ -971,11 +971,7 @@ function LlmoController(ctx) {
       enhancements, tokowakaEnabled, forceFail, patches = {}, prerender,
     } = context.data || {};
 
-    log.info('[edge-optimize-config] request', {
-      siteId,
-      userId: profile?.email,
-      dataKeys: context.data ? Object.keys(context.data) : [],
-    });
+    log.info(`createOrUpdateEdgeConfig request received for site ${siteId}, data=${JSON.stringify(context.data)}`);
 
     if (!accessControlUtil.isLLMOAdministrator()) {
       log.warn('[edge-optimize-config-failed] user is not an LLMO administrator');
@@ -1287,9 +1283,16 @@ function LlmoController(ctx) {
     const { Site } = dataAccess;
     const { cdnType, enabled = true } = context.data || {};
     const promiseToken = context.request?.headers?.get?.('x-promise-token');
-    log.info(`Edge optimize routing update request received for site ${siteId}`);
+
+    log.info('[edge-optimize-routing] request', {
+      siteId,
+      cdnType: context.data?.cdnType,
+      enabled: context.data?.enabled,
+      profile: context.attributes?.authInfo?.profile?.email,
+    });
 
     if (env?.ENV && env.ENV !== 'prod') {
+      log.warn(`[edge-optimize-routing-failed] API is not available in ${env?.ENV} environment`);
       return createResponse(
         { message: `API is not available in ${env?.ENV} environment` },
         400,
@@ -1301,6 +1304,7 @@ function LlmoController(ctx) {
     }
 
     if (!hasText(cdnType)) {
+      log.warn('[edge-optimize-routing-failed] missing or empty cdnType');
       return badRequest('cdnType is required and must be a non-empty string');
     }
     const cdnTypeTrimmed = cdnType.toLowerCase().trim();
@@ -1309,6 +1313,7 @@ function LlmoController(ctx) {
       : null;
 
     if (!cdnTypeNormalized) {
+      log.warn(`[edge-optimize-routing-failed] cdnType must be one of: ${EDGE_OPTIMIZE_CDN_TYPES.join(', ')}`);
       return badRequest(`cdnType must be one of: ${EDGE_OPTIMIZE_CDN_TYPES.join(', ')}`);
     }
 
@@ -1332,15 +1337,18 @@ function LlmoController(ctx) {
     const strategy = EDGE_OPTIMIZE_CDN_STRATEGIES[cdnTypeNormalized];
 
     if (enabled !== undefined && typeof enabled !== 'boolean') {
+      log.warn(`[edge-optimize-routing-failed] invalid enabled field: ${enabled}`);
       return badRequest('enabled field must be a boolean');
     }
 
     const site = await Site.findById(siteId);
     if (!site) {
+      log.warn(`[edge-optimize-routing-failed] site ${siteId} not found`);
       return notFound('Site not found');
     }
 
     if (!await accessControlUtil.hasAccess(site)) {
+      log.warn(`[edge-optimize-routing-failed] user does not have access to site ${siteId}`);
       return forbidden('User does not have access to this site');
     }
 
@@ -1358,7 +1366,7 @@ function LlmoController(ctx) {
         signal: AbortSignal.timeout(5000),
       });
     } catch (probeError) {
-      log.error(`Error probing site ${siteId}: ${probeError.message}`);
+      log.warn(`[edge-optimize-routing-failed] error probing site ${siteId}: ${probeError.message}`);
       return badRequest(`Error probing site: ${probeError.message}`);
     }
     let domain;
@@ -1372,13 +1380,13 @@ function LlmoController(ctx) {
         probeHostname = getHostnameWithoutWww(probeUrl, log);
         locationHostname = getHostnameWithoutWww(locationValue, log);
       } catch (hostError) {
-        log.error(`Invalid URL for 301 domain check: ${hostError.message}`);
+        log.warn(`[edge-optimize-routing-failed] invalid URL for 301 domain check: ${hostError.message}`);
         return badRequest(hostError.message);
       }
       if (probeHostname !== locationHostname) {
         const msg = `Site ${probeUrl} returned 301 to ${locationValue}; domain `
           + `(${locationHostname}) does not match probe domain (${probeHostname})`;
-        log.error(`CDN routing update failed: ${msg}`);
+        log.warn(`[edge-optimize-routing-failed] CDN routing update failed: ${msg}`);
         return badRequest(msg);
       }
       domain = calculateForwardedHost(locationValue, log);
@@ -1386,7 +1394,7 @@ function LlmoController(ctx) {
     } else {
       const msg = `Site ${probeUrl} did not return 2xx or 301 for`
         + ` User-Agent AdobeEdgeOptimize-Test (got ${probeResponse.status})`;
-      log.error(`CDN routing update failed: ${msg}, url=${probeUrl}`);
+      log.warn(`[edge-optimize-routing-failed] CDN routing update failed: ${msg}, url=${probeUrl}`);
       return badRequest(msg);
     }
 
@@ -1416,7 +1424,8 @@ function LlmoController(ctx) {
 
       if (!cdnResponse.ok) {
         const body = await cdnResponse.text();
-        log.error(`CDN API failed for site ${siteId}, domain ${domain}: ${cdnResponse.status} ${body}`);
+        log.warn(`[edge-optimize-routing-failed] CDN API failed for site ${siteId},`
+          + `domain ${domain}: ${cdnResponse.status} ${body}`);
         if (cdnResponse.status === 401 || cdnResponse.status === 403) {
           return createResponse(
             { message: 'User is not authorized to update CDN routing' },
@@ -1429,10 +1438,11 @@ function LlmoController(ctx) {
         );
       }
 
-      log.info(`Edge optimize routing updated for site ${siteId}, domain ${domain}`);
-      return ok({ enabled, domain, cdnType: cdnTypeNormalized });
+      const response = { enabled, domain, cdnType: cdnTypeNormalized };
+      log.info(`[edge-optimize-routing] routing updated for site ${siteId}`, response);
+      return ok(response);
     } catch (error) {
-      log.error(`Edge optimize routing update failed for site ${siteId}: ${error.message}`);
+      log.warn(`[edge-optimize-routing-failed] routing update failed for site ${siteId}: ${error.message}`);
       if (error.status) {
         return createResponse({ message: error.message }, error.status);
       }
