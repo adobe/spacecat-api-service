@@ -19,6 +19,7 @@ import {
   DynamoDBClient,
 } from '@aws-sdk/client-dynamodb';
 
+import { FIX_1_ID, ORG_1_IMS_ORG_ID, SUGG_1_ID } from '../shared/seed-ids.js';
 import { organizations } from './seed-data/organizations.js';
 import { sites } from './seed-data/sites.js';
 import { audits } from './seed-data/audits.js';
@@ -35,7 +36,7 @@ import { sentimentGuidelines } from './seed-data/sentiment-guidelines.js';
 import { auditUrls } from './seed-data/audit-urls.js';
 import { trialUsers } from './seed-data/trial-users.js';
 import { trialUserActivities } from './seed-data/trial-user-activities.js';
-import { FIX_1_ID, SUGG_1_ID } from '../shared/seed-ids.js';
+import { consumers } from './seed-data/consumers.js';
 import { createTableParams } from './setup.js';
 
 const TABLE_NAME = 'spacecat-services-data';
@@ -51,7 +52,10 @@ const client = new DynamoDBClient({
 const quietLog = { ...console, debug: () => {} };
 
 const dataAccess = createDataAccess(
-  { tableNameData: TABLE_NAME },
+  {
+    tableNameData: TABLE_NAME,
+    s2sAllowedImsOrgIds: [ORG_1_IMS_ORG_ID],
+  },
   quietLog,
   client,
 );
@@ -142,6 +146,9 @@ async function seed() {
   }
   for (const activity of trialUserActivities) {
     await dataAccess.TrialUserActivity.create(activity);
+  }
+  for (const consumer of consumers) {
+    await dataAccess.Consumer.create(consumer);
   }
 }
 
