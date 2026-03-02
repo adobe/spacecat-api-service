@@ -1,3 +1,10 @@
+## [1.327.2](https://github.com/adobe/spacecat-api-service/compare/v1.327.1...v1.327.2) (2026-03-02)
+
+
+### Bug Fixes
+
+* **deps:** upgrade data-access to 3.5.0 for case-insensitive enum queries ([#1890](https://github.com/adobe/spacecat-api-service/issues/1890)) ([5edb461](https://github.com/adobe/spacecat-api-service/commit/5edb4613ac44eff3080d81c5129065ac93182fc1))
+
 ## [1.327.1](https://github.com/adobe/spacecat-api-service/compare/v1.327.0...v1.327.1) (2026-03-02)
 
 
