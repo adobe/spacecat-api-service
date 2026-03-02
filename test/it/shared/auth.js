@@ -51,6 +51,7 @@ export async function createAdminToken() {
     email: 'test-admin@adobe.com',
     is_admin: true,
     is_llmo_administrator: false,
+    is_s2s_admin: true,
     tenants: [{
       id: IMS_ORG_IDENT,
       subServices: [],
