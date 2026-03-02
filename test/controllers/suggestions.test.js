@@ -4094,12 +4094,21 @@ describe('Suggestions Controller', () => {
               getConfig: sandbox.stub().returns({
                 getTokowakaConfig: sandbox.stub().returns({}),
               }),
+              getBaseURL: () => 'https://example.com',
             }),
           },
         },
         pathInfo: { headers: { 'x-product': 'llmo' } },
         ...authContext,
       }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      // Make S3 fetchMetaconfig fail so deployment throws and controller returns 207 with failed: 1, 500
+      const originalSend = context.s3.s3Client.send;
+      context.s3.s3Client.send = sandbox.stub().callsFake((cmd) => {
+        if (cmd.constructor.name === 'GetObjectCommand') {
+          return Promise.reject(new Error('Internal server error'));
+        }
+        return originalSend(cmd);
+      });
       const response = await suggestionsController2.deploySuggestionToEdge({
         ...context,
         params: {
@@ -4768,8 +4777,9 @@ describe('Suggestions Controller', () => {
       });
 
       it('should handle errors at the start of domain-wide deployment', async () => {
-        // Make site.getBaseURL throw an error
-        site.getBaseURL.throws(new Error('Cannot get base URL'));
+        // First call (apexBaseUrl) succeeds; second call (domain-wide baseURL) throws
+        site.getBaseURL.onFirstCall().returns('https://example.com');
+        site.getBaseURL.onSecondCall().throws(new Error('Cannot get base URL'));
 
         const response = await suggestionsController.deploySuggestionToEdge({
           ...context,
@@ -6876,6 +6886,10 @@ describe('Suggestions Controller', () => {
   });
 
   describe('previewSuggestions with domain-wide suggestions', () => {
+    beforeEach(() => {
+      site.getBaseURL = sandbox.stub().returns('https://example.com');
+    });
+
     it('should reject preview for domain-wide suggestions', async () => {
       const domainWideSuggestion = {
         getId: () => SUGGESTION_IDS[0],

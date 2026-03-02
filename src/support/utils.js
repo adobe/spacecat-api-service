@@ -1522,6 +1522,6 @@ export function getHostName(url, logger = console) {
     return urlObj.hostname.replace(/^www\./, '');
   } catch (error) {
     logger.error(`Error extracting host name: ${error.message}`);
-    throw new Error(`Error extracting host name: ${url.toString()}`);
+    return null;
   }
 }

@@ -1012,7 +1012,6 @@ function SuggestionsController(ctx, sqs, env) {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
     const { authInfo: { profile } } = context.attributes;
-    let apexBaseUrl = null;
 
     context.log.info('[edge-preview] request', {
       siteId,
@@ -1022,32 +1021,33 @@ function SuggestionsController(ctx, sqs, env) {
     });
 
     if (!isValidUUID(siteId)) {
-      context.log.warn('[edge-preview-failed] site: n/a, siteId is not a valid UUID');
+      context.log.warn('[edge-preview-failed] siteId is not a valid UUID');
       return badRequest('Site ID required');
     }
 
+    const site = await Site.findById(siteId);
+    if (!site) {
+      context.log.warn(`[edge-preview-failed] site ${siteId} not found`);
+      return notFound('Site not found');
+    }
+
+    const apexBaseUrl = getHostName(site.getBaseURL()) || site.getBaseURL();
+
     if (!isValidUUID(opportunityId)) {
-      context.log.warn('[edge-preview-failed] site: n/a, opportunityId is not a valid UUID');
+      context.log.warn(`[edge-preview-failed] site: ${apexBaseUrl}, opportunityId is not a valid UUID`);
       return badRequest('Opportunity ID required');
     }
 
     // validate request body
     if (!isNonEmptyObject(context.data)) {
-      context.log.warn('[edge-preview-failed] site: n/a, no request body data provided');
+      context.log.warn(`[edge-preview-failed] site: ${apexBaseUrl}, no request body data provided`);
       return badRequest('No data provided');
     }
     const { suggestionIds } = context.data;
     if (!isArray(suggestionIds) || suggestionIds.length === 0) {
-      context.log.warn('[edge-preview-failed] site: n/a, suggestionIds is not a non-empty array');
+      context.log.warn(`[edge-preview-failed] site: ${apexBaseUrl}, suggestionIds is not a non-empty array`);
       return badRequest('Request body must contain a non-empty array of suggestionIds');
     }
-
-    const site = await Site.findById(siteId);
-    if (!site) {
-      context.log.warn(`[edge-preview-failed] site: n/a, site ${siteId} not found`);
-      return notFound('Site not found');
-    }
-    apexBaseUrl = getHostName(site.getBaseURL());
 
     if (!await accessControlUtil.hasAccess(site)) {
       context.log.warn(`[edge-preview-failed] site: ${apexBaseUrl}, user does not have access to the site`);
@@ -1063,6 +1063,7 @@ function SuggestionsController(ctx, sqs, env) {
     // Fetch all suggestions for this opportunity
     const allSuggestions = await Suggestion.allByOpportunityId(opportunityId);
 
+    context.log.info(`[edge-preview] allSuggestions count: ${allSuggestions.length}`);
     // Track valid, failed, and missing suggestions
     const validSuggestions = [];
     const failedSuggestions = [];
@@ -1215,7 +1216,6 @@ function SuggestionsController(ctx, sqs, env) {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
     const { authInfo: { profile } } = context.attributes;
-    let apexBaseUrl = null;
 
     context.log.info('[edge-deploy] request', {
       siteId,
@@ -1226,38 +1226,38 @@ function SuggestionsController(ctx, sqs, env) {
 
     context.log.info(`[edge-deploy] suggestionIds: ${JSON.stringify(context.data?.suggestionIds)}`);
 
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      context.log.warn('[edge-deploy-failed] site: n/a, user is not an LLMO administrator');
-      return forbidden('Only LLMO administrators can deploy suggestions to edge');
-    }
-
     if (!isValidUUID(siteId)) {
       context.log.warn(`[edge-deploy-failed] site: n/a, siteId ${siteId} is not a valid UUID`);
       return badRequest('Site ID required');
     }
 
+    const site = await Site.findById(siteId);
+    if (!site) {
+      context.log.warn(`[edge-deploy-failed] site ${siteId} not found`);
+      return notFound('Site not found');
+    }
+    const apexBaseUrl = getHostName(site.getBaseURL()) || site.getBaseURL();
+
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, user is not an LLMO administrator`);
+      return forbidden('Only LLMO administrators can deploy suggestions to edge');
+    }
+
     if (!isValidUUID(opportunityId)) {
-      context.log.warn(`[edge-deploy-failed] site: n/a, opportunityId ${opportunityId} is not a valid UUID`);
+      context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, opportunityId ${opportunityId} is not a valid UUID`);
       return badRequest('Opportunity ID required');
     }
 
     // validate request body
     if (!isNonEmptyObject(context.data)) {
-      context.log.warn('[edge-deploy-failed] site: n/a, no request body data provided');
+      context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, no request body data provided`);
       return badRequest('No data provided');
     }
     const { suggestionIds } = context.data;
     if (!isArray(suggestionIds) || suggestionIds.length === 0) {
-      context.log.warn('[edge-deploy-failed] site: n/a, suggestionIds is not a non-empty array');
+      context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, suggestionIds is not a non-empty array`);
       return badRequest('Request body must contain a non-empty array of suggestionIds');
     }
-
-    const site = await Site.findById(siteId);
-    if (!site) {
-      context.log.warn(`[edge-deploy-failed] site: n/a, site ${siteId} not found`);
-      return notFound('Site not found');
-    }
-    apexBaseUrl = getHostName(site.getBaseURL());
 
     if (!await accessControlUtil.hasAccess(site)) {
       context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, user does not have access to the site.`);
@@ -1277,6 +1277,8 @@ function SuggestionsController(ctx, sqs, env) {
 
     // Fetch all suggestions for this opportunity
     const allSuggestions = await Suggestion.allByOpportunityId(opportunityId);
+
+    context.log.info(`[edge-deploy] allSuggestions count: ${allSuggestions.length}`);
 
     // Track valid, failed, and missing suggestions
     const validSuggestions = [];
@@ -1664,7 +1666,6 @@ function SuggestionsController(ctx, sqs, env) {
   const rollbackSuggestionFromEdge = async (context) => {
     const { siteId, opportunityId } = context.params;
     const { authInfo: { profile } } = context.attributes;
-    let apexBaseUrl = null;
 
     context.log.info('[edge-rollback] request', {
       siteId,
@@ -1673,6 +1674,14 @@ function SuggestionsController(ctx, sqs, env) {
       userId: profile?.email,
     });
     context.log.info(`[edge-rollback] suggestionIds: ${JSON.stringify(context.data?.suggestionIds)}`);
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      context.log.warn(`[edge-rollback-failed] site ${siteId} not found`);
+      return notFound('Site not found');
+    }
+
+    const apexBaseUrl = getHostName(site.getBaseURL()) || site.getBaseURL();
 
     if (!isNonEmptyObject(context.data)) {
       context.log.warn('[edge-rollback-failed] site: n/a, no request body data provided');
@@ -1687,13 +1696,6 @@ function SuggestionsController(ctx, sqs, env) {
       context.log.warn('[edge-rollback-failed] site: n/a, suggestionIds is not a non-empty array');
       return badRequest('Request body must contain a non-empty array of suggestionIds');
     }
-
-    const site = await Site.findById(siteId);
-    if (!site) {
-      context.log.warn(`[edge-rollback-failed] site: n/a, site ${siteId} not found`);
-      return notFound('Site not found');
-    }
-    apexBaseUrl = getHostName(site.getBaseURL());
 
     if (!await accessControlUtil.hasAccess(site)) {
       context.log.warn(`[edge-rollback-failed] site: ${apexBaseUrl}, user does not have access to the site.`);
