@@ -16,6 +16,7 @@
 
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
+import esmock from 'esmock';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import EntityRegistry from '@adobe/spacecat-shared-data-access/src/models/base/entity.registry.js';
@@ -61,11 +62,18 @@ describe('Fixes Controller', () => {
   /** @type {RequestContext} */
   let requestContext;
   let opportunityGetStub;
+  /**
+   * @type {import('@adobe/spacecat-shared-data-access').SiteCollection
+   *   & { findById: sinon.SinonStub }}
+   */
+  let dataAccess;
 
   const siteId = '86ef4aae-7296-417d-9658-8cd4c7edc374';
   const opportunityId = 'a3d2f1e9-5f4c-4e6b-8c7d-0c7b5a2f1a2f';
 
-  const log = { ...console, debug: () => undefined, info: () => undefined };
+  const log = {
+    ...console, debug: () => undefined, info: () => undefined, warn: () => undefined,
+  };
 
   beforeEach(() => {
     const { fixEntity, opportunity, suggestion } = electroService.entities;
@@ -78,7 +86,7 @@ describe('Fixes Controller', () => {
       .callsFake((data) => ({ go: async () => ({ data: { ...data, siteId } }) }));
 
     const entityRegistry = new EntityRegistry({ postgrest: electroService, s3: null }, {}, log);
-    const dataAccess = entityRegistry.getCollections();
+    dataAccess = entityRegistry.getCollections();
     fixEntityCollection = dataAccess.FixEntity;
     suggestionCollection = dataAccess.Suggestion;
     fixEntitySuggestionCollection = dataAccess.FixEntitySuggestion;
@@ -899,6 +907,372 @@ describe('Fixes Controller', () => {
       expect(fixes).have.lengthOf(1);
       expect(fixes[0]).includes({ index: 0, statusCode: 500 });
       expect(fixes[0].message).to.include('Invalid suggestion IDs');
+    });
+
+    describe('document path enrichment (AEM CS and AEM Edge)', () => {
+      let FixesControllerWithStubbedResolver;
+      const EDIT_URL = 'https://editor.example.com/page';
+
+      before(async () => {
+        const resolveDocumentPathStub = sinon.stub().resolves(EDIT_URL);
+        const mod = await esmock('../../src/controllers/fixes.js', {
+          '../../src/support/document-path-resolver.js': { resolveDocumentPath: resolveDocumentPathStub },
+        });
+        FixesControllerWithStubbedResolver = mod.FixesController;
+      });
+
+      it('enriches manual fix (origin aso) with documentPath when site is AEM CS', async () => {
+        const mockSite = {
+          getDeliveryType: () => 'aem_cs',
+          getDeliveryConfig: () => ({ authorURL: 'https://author.example.com' }),
+        };
+        const mockOpportunity = { getType: () => 'broken-internal-links', getSiteId: () => siteId };
+        sandbox.stub(dataAccess.Site, 'findById').withArgs(siteId).resolves(mockSite);
+        sandbox.stub(dataAccess.Opportunity, 'findById').withArgs(opportunityId).resolves(mockOpportunity);
+
+        fixesController = new FixesControllerWithStubbedResolver(
+          {
+            dataAccess,
+            pathInfo: { headers: { authorization: 'Bearer token' } },
+            log,
+          },
+          accessControlUtil,
+        );
+
+        requestContext.data = [{
+          origin: 'aso',
+          type: 'CONTENT_UPDATE',
+          opportunityId,
+          changeDetails: { urlFrom: 'https://example.com/page' },
+        }];
+
+        const response = await fixesController.createFixes(requestContext);
+        expect(response).includes({ status: 207 });
+
+        const { fixes, metadata } = await response.json();
+        expect(metadata).deep.equals({ total: 1, success: 1, failed: 0 });
+        expect(fixes[0].fix.changeDetails).to.include({ documentPath: EDIT_URL });
+      });
+
+      it('enriches manual fix with documentPath when site is AEM Edge and ContentClient is created', async () => {
+        const mockContentClient = {};
+        const mockSite = {
+          getDeliveryType: () => 'aem_edge',
+          getDeliveryConfig: () => ({}),
+        };
+        const mockOpportunity = { getType: () => 'meta-tags', getSiteId: () => siteId };
+        sandbox.stub(dataAccess.Site, 'findById').withArgs(siteId).resolves(mockSite);
+        sandbox.stub(dataAccess.Opportunity, 'findById').withArgs(opportunityId).resolves(mockOpportunity);
+
+        const ContentClientStub = { createFrom: sinon.stub().resolves(mockContentClient) };
+        const resolveDocumentPathStub = sinon.stub().resolves(EDIT_URL);
+        const mod = await esmock('../../src/controllers/fixes.js', {
+          '@adobe/spacecat-shared-content-client': { ContentClient: ContentClientStub },
+          '../../src/support/document-path-resolver.js': { resolveDocumentPath: resolveDocumentPathStub },
+        });
+        const EdgeFixesController = mod.FixesController;
+
+        fixesController = new EdgeFixesController(
+          {
+            dataAccess,
+            pathInfo: { headers: { authorization: 'Bearer token' } },
+            log,
+          },
+          accessControlUtil,
+        );
+
+        requestContext.data = [{
+          origin: 'aso',
+          type: 'METADATA_UPDATE',
+          opportunityId,
+          changeDetails: { url: 'https://example.com/page' },
+        }];
+
+        const response = await fixesController.createFixes(requestContext);
+        expect(response).includes({ status: 207 });
+
+        const { fixes, metadata } = await response.json();
+        expect(metadata).deep.equals({ total: 1, success: 1, failed: 0 });
+        expect(fixes[0].fix.changeDetails).to.include({ documentPath: EDIT_URL });
+        expect(ContentClientStub.createFrom).to.have.been.calledOnce;
+        expect(resolveDocumentPathStub).to.have.been.calledWith(
+          mockSite,
+          'meta-tags',
+          { url: 'https://example.com/page' },
+          'Bearer token',
+          log,
+          mockContentClient,
+        );
+      });
+
+      it('does not enrich when fix already has documentPath in changeDetails', async () => {
+        const mockSite = {
+          getDeliveryType: () => 'aem_cs',
+          getDeliveryConfig: () => ({ authorURL: 'https://author.example.com' }),
+        };
+        const mockOpportunity = { getType: () => 'broken-internal-links', getSiteId: () => siteId };
+        sandbox.stub(dataAccess.Site, 'findById').withArgs(siteId).resolves(mockSite);
+        sandbox.stub(dataAccess.Opportunity, 'findById').withArgs(opportunityId).resolves(mockOpportunity);
+
+        fixesController = new FixesControllerWithStubbedResolver(
+          {
+            dataAccess,
+            pathInfo: { headers: { authorization: 'Bearer token' } },
+            log,
+          },
+          accessControlUtil,
+        );
+
+        const existingDocPath = 'https://already-set.com/editor';
+        // Batch: one needs enrichment, one already has documentPath so
+        // enrichWithDocumentPath returns early at line 333
+        requestContext.data = [
+          {
+            origin: 'aso',
+            type: 'CONTENT_UPDATE',
+            opportunityId,
+            changeDetails: { urlFrom: 'https://example.com/page1' },
+          },
+          {
+            origin: 'aso',
+            type: 'CONTENT_UPDATE',
+            opportunityId,
+            changeDetails: { urlFrom: 'https://example.com/page2', documentPath: existingDocPath },
+          },
+        ];
+
+        const response = await fixesController.createFixes(requestContext);
+        expect(response).includes({ status: 207 });
+
+        const { fixes } = await response.json();
+        expect(fixes).have.lengthOf(2);
+        expect(fixes[0].fix.changeDetails.documentPath).to.equal(EDIT_URL);
+        expect(fixes[1].fix.changeDetails.documentPath).to.equal(existingDocPath);
+      });
+
+      it('enriches fix when origin is aso and changeDetails is undefined (branch coverage)', async () => {
+        const mockSite = {
+          getDeliveryType: () => 'aem_cs',
+          getDeliveryConfig: () => ({ authorURL: 'https://author.example.com' }),
+        };
+        const mockOpportunity = { getType: () => 'broken-internal-links', getSiteId: () => siteId };
+        sandbox.stub(dataAccess.Site, 'findById').withArgs(siteId).resolves(mockSite);
+        sandbox.stub(dataAccess.Opportunity, 'findById').withArgs(opportunityId).resolves(mockOpportunity);
+
+        fixesController = new FixesControllerWithStubbedResolver(
+          {
+            dataAccess,
+            pathInfo: { headers: { authorization: 'Bearer token' } },
+            log,
+          },
+          accessControlUtil,
+        );
+
+        requestContext.data = [{
+          origin: 'aso',
+          type: 'CONTENT_UPDATE',
+          opportunityId,
+          changeDetails: undefined,
+        }];
+
+        const response = await fixesController.createFixes(requestContext);
+        expect(response).includes({ status: 207 });
+
+        const { fixes } = await response.json();
+        expect(fixes[0].fix.changeDetails).to.exist;
+        expect(fixes[0].fix.changeDetails.documentPath).to.equal(EDIT_URL);
+      });
+
+      it('skips enrichment when getImsUserToken throws (e.g. missing Authorization) and creates fix', async () => {
+        sandbox.stub(log, 'warn');
+        const mockSite = {
+          getDeliveryType: () => 'aem_cs',
+          getDeliveryConfig: () => ({ authorURL: 'https://author.example.com' }),
+        };
+        const mockOpportunity = { getType: () => 'broken-internal-links', getSiteId: () => siteId };
+        sandbox.stub(dataAccess.Site, 'findById').withArgs(siteId).resolves(mockSite);
+        sandbox.stub(dataAccess.Opportunity, 'findById').withArgs(opportunityId).resolves(mockOpportunity);
+
+        fixesController = new FixesControllerWithStubbedResolver(
+          { dataAccess, log },
+          accessControlUtil,
+        );
+
+        requestContext.data = [{
+          origin: 'aso',
+          type: 'CONTENT_UPDATE',
+          opportunityId,
+          changeDetails: { urlFrom: 'https://example.com/page' },
+        }];
+
+        const response = await fixesController.createFixes(requestContext);
+        expect(response).includes({ status: 207 });
+
+        const { fixes } = await response.json();
+        expect(fixes[0].fix.changeDetails.documentPath).to.be.undefined;
+        expect(log.warn).to.have.been.calledWith(
+          sinon.match(/Could not prepare documentPath enrichment/),
+        );
+      });
+
+      it('skips enrichment when site is not found in prepareDocumentPathEnrichment (second findById returns null)', async () => {
+        const mockSite = {
+          getDeliveryType: () => 'aem_cs',
+          getDeliveryConfig: () => ({ authorURL: 'https://author.example.com' }),
+        };
+        const mockOpportunity = { getType: () => 'broken-internal-links', getSiteId: () => siteId };
+        // checkAccess calls Site.findById first; prepareDocumentPathEnrichment calls it again
+        sandbox.stub(dataAccess.Site, 'findById').withArgs(siteId)
+          .onFirstCall().resolves(mockSite)
+          .onSecondCall()
+          .resolves(null);
+        sandbox.stub(dataAccess.Opportunity, 'findById').withArgs(opportunityId).resolves(mockOpportunity);
+
+        fixesController = new FixesControllerWithStubbedResolver(
+          {
+            dataAccess,
+            pathInfo: { headers: { authorization: 'Bearer token' } },
+            log,
+          },
+          accessControlUtil,
+        );
+
+        requestContext.data = [{
+          origin: 'aso',
+          type: 'CONTENT_UPDATE',
+          opportunityId,
+          changeDetails: { urlFrom: 'https://example.com/page' },
+        }];
+
+        const response = await fixesController.createFixes(requestContext);
+        expect(response).includes({ status: 207 });
+
+        const { fixes } = await response.json();
+        expect(fixes[0].fix.changeDetails.documentPath).to.be.undefined;
+      });
+
+      it('skips enrichment when opportunity is not found in prepareDocumentPathEnrichment', async () => {
+        const mockSite = {
+          getDeliveryType: () => 'aem_cs',
+          getDeliveryConfig: () => ({ authorURL: 'https://author.example.com' }),
+        };
+        const mockOpportunity = { getType: () => 'broken-internal-links', getSiteId: () => siteId };
+        sandbox.stub(dataAccess.Site, 'findById').withArgs(siteId).resolves(mockSite);
+        sandbox.stub(dataAccess.Opportunity, 'findById').withArgs(opportunityId)
+          .onFirstCall().resolves(mockOpportunity)
+          .onSecondCall()
+          .resolves(null);
+
+        fixesController = new FixesControllerWithStubbedResolver(
+          {
+            dataAccess,
+            pathInfo: { headers: { authorization: 'Bearer token' } },
+            log,
+          },
+          accessControlUtil,
+        );
+
+        requestContext.data = [{
+          origin: 'aso',
+          type: 'CONTENT_UPDATE',
+          opportunityId,
+          changeDetails: { urlFrom: 'https://example.com/page' },
+        }];
+
+        const response = await fixesController.createFixes(requestContext);
+        expect(response).includes({ status: 207 });
+
+        const { fixes } = await response.json();
+        expect(fixes[0].fix.changeDetails.documentPath).to.be.undefined;
+      });
+
+      it('does not enrich when fix origin is not aso', async () => {
+        const mockSite = {
+          getDeliveryType: () => 'aem_cs',
+          getDeliveryConfig: () => ({ authorURL: 'https://author.example.com' }),
+        };
+        const mockOpportunity = { getType: () => 'broken-internal-links', getSiteId: () => siteId };
+        sandbox.stub(dataAccess.Site, 'findById').withArgs(siteId).resolves(mockSite);
+        sandbox.stub(dataAccess.Opportunity, 'findById').withArgs(opportunityId).resolves(mockOpportunity);
+
+        fixesController = new FixesControllerWithStubbedResolver(
+          {
+            dataAccess,
+            pathInfo: { headers: { authorization: 'Bearer token' } },
+            log,
+          },
+          accessControlUtil,
+        );
+
+        // Batch: one aso (enrichment runs), one worker (enrichWithDocumentPath
+        // returns early at origin check)
+        requestContext.data = [
+          {
+            origin: 'aso',
+            type: 'CONTENT_UPDATE',
+            opportunityId,
+            changeDetails: { urlFrom: 'https://example.com/page1' },
+          },
+          {
+            origin: 'worker',
+            type: 'CONTENT_UPDATE',
+            opportunityId,
+            changeDetails: { urlFrom: 'https://example.com/page2' },
+          },
+        ];
+
+        const response = await fixesController.createFixes(requestContext);
+        expect(response).includes({ status: 207 });
+
+        const { fixes } = await response.json();
+        expect(fixes).have.lengthOf(2);
+        expect(fixes[0].fix.changeDetails.documentPath).to.equal(EDIT_URL);
+        expect(fixes[1].fix.changeDetails.documentPath).to.be.undefined;
+      });
+
+      it('continues when ContentClient.createFrom fails for AEM Edge and logs warning', async () => {
+        sandbox.stub(log, 'warn');
+        const mockSite = {
+          getDeliveryType: () => 'aem_edge',
+          getDeliveryConfig: () => ({}),
+        };
+        const mockOpportunity = { getType: () => 'meta-tags', getSiteId: () => siteId };
+        sandbox.stub(dataAccess.Site, 'findById').withArgs(siteId).resolves(mockSite);
+        sandbox.stub(dataAccess.Opportunity, 'findById').withArgs(opportunityId).resolves(mockOpportunity);
+
+        const ContentClientStub = { createFrom: sinon.stub().rejects(new Error('ContentClient init failed')) };
+        const resolveDocumentPathStub = sinon.stub().resolves(null);
+        const mod = await esmock('../../src/controllers/fixes.js', {
+          '@adobe/spacecat-shared-content-client': { ContentClient: ContentClientStub },
+          '../../src/support/document-path-resolver.js': { resolveDocumentPath: resolveDocumentPathStub },
+        });
+        const EdgeFixesController = mod.FixesController;
+
+        fixesController = new EdgeFixesController(
+          {
+            dataAccess,
+            pathInfo: { headers: { authorization: 'Bearer token' } },
+            log,
+          },
+          accessControlUtil,
+        );
+
+        requestContext.data = [{
+          origin: 'aso',
+          type: 'METADATA_UPDATE',
+          opportunityId,
+          changeDetails: { url: 'https://example.com/page' },
+        }];
+
+        const response = await fixesController.createFixes(requestContext);
+        expect(response).includes({ status: 207 });
+
+        const { fixes } = await response.json();
+        expect(fixes[0].fix.changeDetails.documentPath).to.be.undefined;
+        expect(log.warn).to.have.been.calledWith(
+          sinon.match(/Could not create ContentClient for AEM Edge documentPath enrichment/),
+        );
+      });
     });
   });
 

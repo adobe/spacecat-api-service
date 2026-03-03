@@ -75,9 +75,13 @@ function extractPagePath(opportunityType, changeDetails) {
  */
 function resolveBrokenBacklinksDocPath(deliveryConfig, changeDetails) {
   const authorURL = deliveryConfig?.authorURL;
+  // Caller (resolveDocumentPath) only invokes us when authorURL is set; this is defensive
+  /* c8 ignore next 1 - falsy authorURL branch unreachable from caller */
   if (!authorURL) return null;
 
-  if (deliveryConfig?.redirectsMode === VANITY_URL_MANAGER) {
+  // deliveryConfig is defined when authorURL is set
+  const { redirectsMode, redirectsSource } = deliveryConfig;
+  if (redirectsMode === VANITY_URL_MANAGER) {
     const targetUrl = changeDetails?.urlEdited
       || changeDetails?.urlsSuggested?.[0]
       || changeDetails?.urlSuggested?.[0];
@@ -92,7 +96,6 @@ function resolveBrokenBacklinksDocPath(deliveryConfig, changeDetails) {
     }
   }
 
-  const { redirectsSource } = deliveryConfig;
   if (redirectsSource) {
     return `${authorURL}${redirectsSource}`;
   }
