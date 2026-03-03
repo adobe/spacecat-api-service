@@ -85,6 +85,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} trafficToolsController - The traffic tools controller.
 * @param {Object} botBlockerController - The bot blocker controller.
  * @param {Object} sentimentController - The sentiment controller.
+ * @param {Object} consumersController - The consumers controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -126,6 +127,7 @@ export default function getRouteHandlers(
   trafficToolsController,
   botBlockerController,
   sentimentController,
+  consumersController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -155,6 +157,12 @@ export default function getRouteHandlers(
     'DELETE /organizations/:organizationId': organizationsController.removeOrganization,
     'GET /organizations/:organizationId/sites': organizationsController.getSitesForOrganization,
     'GET /organizations/:organizationId/brands': brandsController.getBrandsForOrganization,
+    'GET /v2/orgs/:spaceCatId/llmo-customer-config': brandsController.getCustomerConfig,
+    'GET /v2/orgs/:spaceCatId/llmo-customer-config-lean': brandsController.getCustomerConfigLean,
+    'GET /v2/orgs/:spaceCatId/llmo-topics': brandsController.getTopics,
+    'GET /v2/orgs/:spaceCatId/llmo-prompts': brandsController.getPrompts,
+    'POST /v2/orgs/:spaceCatId/llmo-customer-config': brandsController.saveCustomerConfig,
+    'PATCH /v2/orgs/:spaceCatId/llmo-customer-config': brandsController.patchCustomerConfig,
     'GET /organizations/:organizationId/projects': organizationsController.getProjectsByOrganizationId,
     'GET /organizations/:organizationId/projects/:projectId/sites': organizationsController.getSitesByProjectIdAndOrganizationId,
     'GET /organizations/:organizationId/by-project-name/:projectName/sites': organizationsController.getSitesByProjectNameAndOrganizationId,
@@ -181,6 +189,15 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/audits/latest': auditsController.getAllLatestForSite,
     'GET /sites/:siteId/audits/:auditType': auditsController.getAllForSite,
     'GET /sites/:siteId/audits/:auditType/:auditedAt': sitesController.getAuditForSite,
+
+    // URL Store endpoints (defined before :auditType to ensure static segment match)
+    'GET /sites/:siteId/url-store': urlStoreController.listUrls,
+    'GET /sites/:siteId/url-store/by-audit/:auditType': urlStoreController.listUrlsByAuditType,
+    'GET /sites/:siteId/url-store/:base64Url': urlStoreController.getUrl,
+    'POST /sites/:siteId/url-store': urlStoreController.addUrls,
+    'PATCH /sites/:siteId/url-store': urlStoreController.updateUrls,
+    'POST /sites/:siteId/url-store/delete': urlStoreController.deleteUrls,
+
     'PATCH /sites/:siteId/:auditType': auditsController.patchAuditForSite,
     'GET /sites/:siteId/latest-audit/:auditType': auditsController.getLatestForSite,
     'GET /sites/:siteId/experiments': experimentsController.getExperiments,
@@ -287,13 +304,6 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/top-pages/:source/:geo': sitesController.getTopPages,
     'POST /sites/:siteId/graph': sitesController.getGraph,
 
-    // URL Store endpoints
-    'GET /sites/:siteId/url-store': urlStoreController.listUrls,
-    'GET /sites/:siteId/url-store/by-audit/:auditType': urlStoreController.listUrlsByAuditType,
-    'GET /sites/:siteId/url-store/:base64Url': urlStoreController.getUrl,
-    'POST /sites/:siteId/url-store': urlStoreController.addUrls,
-    'PATCH /sites/:siteId/url-store': urlStoreController.updateUrls,
-    'DELETE /sites/:siteId/url-store': urlStoreController.deleteUrls,
     'GET /slack/events': slackController.handleEvent,
     'POST /slack/events': slackController.handleEvent,
     'POST /slack/channels/invite-by-user-id': slackController.inviteUserToChannel,
@@ -366,6 +376,8 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/strategy': llmoController.getStrategy,
     'PUT /sites/:siteId/llmo/strategy': llmoController.saveStrategy,
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,
+    'POST /sites/:siteId/llmo/edge-optimize-routing': llmoController.updateEdgeOptimizeCDNRouting,
+    'PUT /sites/:siteId/llmo/opportunities-reviewed': llmoController.markOpportunitiesReviewed,
 
     // Tier Specific Routes
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,
@@ -402,7 +414,7 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/sentiment/topics/:topicId': sentimentController.updateTopic,
     'DELETE /sites/:siteId/sentiment/topics/:topicId': sentimentController.deleteTopic,
     'POST /sites/:siteId/sentiment/topics/:topicId/prompts': sentimentController.addSubPrompts,
-    'DELETE /sites/:siteId/sentiment/topics/:topicId/prompts': sentimentController.removeSubPrompts,
+    'POST /sites/:siteId/sentiment/topics/:topicId/prompts/remove': sentimentController.removeSubPrompts,
     // Guidelines
     'GET /sites/:siteId/sentiment/guidelines': sentimentController.listGuidelines,
     'GET /sites/:siteId/sentiment/guidelines/:guidelineId': sentimentController.getGuideline,
@@ -410,9 +422,17 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/sentiment/guidelines/:guidelineId': sentimentController.updateGuideline,
     'DELETE /sites/:siteId/sentiment/guidelines/:guidelineId': sentimentController.deleteGuideline,
     'POST /sites/:siteId/sentiment/guidelines/:guidelineId/audits': sentimentController.linkAudits,
-    'DELETE /sites/:siteId/sentiment/guidelines/:guidelineId/audits': sentimentController.unlinkAudits,
+    'POST /sites/:siteId/sentiment/guidelines/:guidelineId/audits/unlink': sentimentController.unlinkAudits,
     // Combined config
     'GET /sites/:siteId/sentiment/config': sentimentController.getConfig,
+
+    // Consumer management (by-client-id before :consumerId to avoid ambiguous matching)
+    'GET /consumers': consumersController.getAll,
+    'GET /consumers/by-client-id/:clientId': consumersController.getByClientId,
+    'GET /consumers/:consumerId': consumersController.getByConsumerId,
+    'POST /consumers/register': consumersController.register,
+    'PATCH /consumers/:consumerId': consumersController.update,
+    'POST /consumers/:consumerId/revoke': consumersController.revoke,
   };
 
   // Initialization of static and dynamic routes

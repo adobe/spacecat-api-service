@@ -258,12 +258,27 @@ topic-prompts:
     security:
       - api_key: [ ]
 
-  delete:
+topic-prompts-remove:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: topicId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Topic identifier
+  post:
     tags:
       - site
       - sentiment
     summary: Remove sub-prompts from a topic
-    description: Removes one or more sub-prompts from an existing topic.
+    description: |
+      Removes one or more sub-prompts from an existing topic.
+      
+      **Note:** This endpoint uses POST instead of DELETE because the operation requires
+      a request body to identify resources, and the body-data middleware does not parse
+      DELETE request bodies. See [ADR-001](../../docs/decisions/001-bulk-delete-via-post.md).
     operationId: removeTopicSubPrompts
     requestBody:
       required: true
@@ -556,12 +571,27 @@ guideline-audits:
     security:
       - api_key: [ ]
 
-  delete:
+guideline-audits-unlink:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: guidelineId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Guideline identifier
+  post:
     tags:
       - site
       - sentiment
     summary: Unlink audit types from a guideline
-    description: Removes audit type associations from a guideline.
+    description: |
+      Removes audit type associations from a guideline.
+      
+      **Note:** This endpoint uses POST instead of DELETE because the operation requires
+      a request body to identify resources, and the body-data middleware does not parse
+      DELETE request bodies. See [ADR-001](../../docs/decisions/001-bulk-delete-via-post.md).
     operationId: unlinkGuidelineAudits
     requestBody:
       required: true

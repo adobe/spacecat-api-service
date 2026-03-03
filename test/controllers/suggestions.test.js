@@ -2644,6 +2644,48 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'IN_PROGRESS');
     });
 
+    it('skips bulkUpdateStatus when action is assess and still sends SQS message', async () => {
+      opportunity.getType = sandbox.stub().returns('alt-text');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(altTextSuggs[0]),
+          mockSuggestionEntity(altTextSuggs[1])],
+      );
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]], action: 'assess' },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse).to.have.property('suggestions');
+      expect(bulkPatchResponse).to.have.property('metadata');
+      expect(bulkPatchResponse.metadata).to.have.property('total', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('success', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('failed', 0);
+      expect(bulkPatchResponse.suggestions).to.have.property('length', 2);
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'NEW');
+      expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'NEW');
+
+      expect(mockSuggestion.bulkUpdateStatus).to.not.have.been.called;
+
+      // alt-text is grouped by URL, so 2 suggestions with different URLs = 2 SQS calls
+      expect(mockSqs.sendMessage).to.have.been.calledTwice;
+      const allSqsCalls = mockSqs.sendMessage.getCalls();
+      allSqsCalls.forEach((call) => {
+        expect(call.args[1]).to.have.property('action', 'assess');
+        expect(call.args[1]).to.have.property('siteId', SITE_ID);
+        expect(call.args[1]).to.have.property('opportunityId', OPPORTUNITY_ID);
+        expect(call.args[1]).to.have.property('url').that.is.a('string');
+      });
+      const allSentIds = allSqsCalls.flatMap((call) => call.args[1].suggestionIds);
+      expect(allSentIds).to.have.members([SUGGESTION_IDS[0], SUGGESTION_IDS[1]]);
+    });
+
     it('triggers autofixSuggestion for form-accessibility (non-grouped)', async () => {
       opportunity.getType = sandbox.stub().returns('form-accessibility');
       mockSuggestion.allByOpportunityId.resolves(
@@ -3562,6 +3604,7 @@ describe('Suggestions Controller', () => {
     beforeEach(() => {
       // Default: allow LLMO administrator access (can be overridden in specific tests)
       sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(true);
+      sandbox.stub(AccessControlUtil.prototype, 'isOwnerOfSite').resolves(true);
 
       tokowakaSuggestions = [
         {
@@ -3678,6 +3721,23 @@ describe('Suggestions Controller', () => {
         error: sandbox.stub(),
         debug: sandbox.stub(),
       };
+    });
+
+    it('uses base URL fallback when getHostName returns null (deploy)', async () => {
+      site.getBaseURL = sandbox.stub().returns('');
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+        },
+      });
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata).to.have.property('total');
     });
 
     it('should deploy headings suggestions successfully', async () => {
@@ -3980,6 +4040,25 @@ describe('Suggestions Controller', () => {
       expect(body.message).to.equal('User does not belong to the organization');
     });
 
+    it('should return 403 if user cannot deploy for site', async () => {
+      AccessControlUtil.prototype.isOwnerOfSite.resolves(false);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.equal('User does not have access to deploy edge optimize fixes for this site');
+    });
+
     it('should return 404 if opportunity not found', async () => {
       mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(null);
 
@@ -4032,12 +4111,21 @@ describe('Suggestions Controller', () => {
               getConfig: sandbox.stub().returns({
                 getTokowakaConfig: sandbox.stub().returns({}),
               }),
+              getBaseURL: () => 'https://example.com',
             }),
           },
         },
         pathInfo: { headers: { 'x-product': 'llmo' } },
         ...authContext,
       }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      // Make S3 fetchMetaconfig fail so deployment throws and controller returns 207 with failed: 1, 500
+      const originalSend = context.s3.s3Client.send;
+      context.s3.s3Client.send = sandbox.stub().callsFake((cmd) => {
+        if (cmd.constructor.name === 'GetObjectCommand') {
+          return Promise.reject(new Error('Internal server error'));
+        }
+        return originalSend(cmd);
+      });
       const response = await suggestionsController2.deploySuggestionToEdge({
         ...context,
         params: {
@@ -4706,8 +4794,9 @@ describe('Suggestions Controller', () => {
       });
 
       it('should handle errors at the start of domain-wide deployment', async () => {
-        // Make site.getBaseURL throw an error
-        site.getBaseURL.throws(new Error('Cannot get base URL'));
+        // First call (apexBaseUrl) succeeds; second call (domain-wide baseURL) throws
+        site.getBaseURL.onFirstCall().returns('https://example.com');
+        site.getBaseURL.onSecondCall().throws(new Error('Cannot get base URL'));
 
         const response = await suggestionsController.deploySuggestionToEdge({
           ...context,
@@ -5005,6 +5094,7 @@ describe('Suggestions Controller', () => {
     beforeEach(() => {
       // Default: allow LLMO administrator access (can be overridden in specific tests)
       sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(true);
+      sandbox.stub(AccessControlUtil.prototype, 'isOwnerOfSite').resolves(true);
 
       // Mock suggestions with tokowakaDeployed timestamp
       // Mock suggestions with edgeDeployed timestamp
@@ -5183,6 +5273,23 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(400);
       const error = await response.json();
       expect(error).to.have.property('message', 'Request body must contain a non-empty array of suggestionIds');
+    });
+
+    it('uses base URL fallback when getHostName returns null (rollback)', async () => {
+      site.getBaseURL = sandbox.stub().returns('');
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata).to.have.property('total');
     });
 
     it('should return 403 when user is not an LLMO administrator', async () => {
@@ -5502,6 +5609,25 @@ describe('Suggestions Controller', () => {
       expect(failedSuggestion.statusCode).to.equal(400);
       expect(failedSuggestion.message).to.include('invalid configuration');
     });
+
+    it('should return 403 if user cannot deploy for site', async () => {
+      AccessControlUtil.prototype.isOwnerOfSite.resolves(false);
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.equal('User does not have access to rollback edge optimize fixes for this site');
+    });
   });
 
   describe('rollbackSuggestionFromEdge - domain-wide rollback', () => {
@@ -5513,6 +5639,7 @@ describe('Suggestions Controller', () => {
     beforeEach(() => {
       // Default: allow LLMO administrator access (can be overridden in specific tests)
       sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(true);
+      sandbox.stub(AccessControlUtil.prototype, 'isOwnerOfSite').resolves(true);
 
       // Create a domain-wide suggestion that has been deployed
       domainWideSuggestion = {
@@ -5947,6 +6074,23 @@ describe('Suggestions Controller', () => {
         error: sandbox.stub(),
         debug: sandbox.stub(),
       };
+    });
+
+    it('uses base URL fallback when getHostName returns null (preview)', async function () {
+      site.getBaseURL = sandbox.stub().returns('');
+      const response = await suggestionsController.previewSuggestions({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+        },
+      });
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata).to.have.property('total');
     });
 
     it('should preview headings suggestions successfully', async function () {
@@ -6793,6 +6937,10 @@ describe('Suggestions Controller', () => {
   });
 
   describe('previewSuggestions with domain-wide suggestions', () => {
+    beforeEach(() => {
+      site.getBaseURL = sandbox.stub().returns('https://example.com');
+    });
+
     it('should reject preview for domain-wide suggestions', async () => {
       const domainWideSuggestion = {
         getId: () => SUGGESTION_IDS[0],
@@ -6920,6 +7068,7 @@ describe('Suggestions Controller', () => {
             fromContext: () => ({
               hasAccess: sandbox.stub().resolves(true),
               isLLMOAdministrator: sandbox.stub().returns(true),
+              isOwnerOfSite: sandbox.stub().resolves(true),
             }),
           },
         },
