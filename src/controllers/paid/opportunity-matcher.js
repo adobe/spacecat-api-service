@@ -102,6 +102,7 @@ const OPPORTUNITY_TYPE_CONFIGS = [
       return lowerTags?.includes('paid media')
         || lowerTags?.includes('paid traffic')
         || type === 'consent-banner'
+        || type === 'no-cta-above-the-fold'
         || data?.opportunityType === 'no-cta-above-the-fold';
     },
   },
