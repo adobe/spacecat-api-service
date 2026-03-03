@@ -30,6 +30,8 @@ import {
   ok,
 } from '@adobe/spacecat-shared-http-utils';
 import { ValidationError } from '@adobe/spacecat-shared-data-access';
+// eslint-disable-next-line import/no-extraneous-dependencies -- listed in package.json dependencies
+import { ContentClient } from '@adobe/spacecat-shared-content-client';
 import {
   hasText, isArray, isIsoDate, isNonEmptyObject, isValidUUID,
 } from '@adobe/spacecat-shared-utils';
@@ -278,7 +280,8 @@ export class FixesController {
    * Prepares context for documentPath enrichment by pre-fetching site and opportunity.
    * Only performs lookups when at least one fix in the batch is a manual fix (origin: 'aso')
    * that doesn't already have a documentPath.
-   * @returns {Promise<{site: Object, opportunityType: string, bearerToken: string}|null>}
+   * For AEM Edge sites, also creates ContentClient when deliveryType is 'aem_edge'.
+   * @returns {Promise<{site, opportunityType, bearerToken, contentClient?}|null>}
    */
   async #prepareDocumentPathEnrichment(fixDataArray, siteId, opportunityId, log) {
     const needsEnrichment = fixDataArray.some(
@@ -295,11 +298,23 @@ export class FixesController {
       if (!site || !opportunity) return null;
 
       const bearerToken = `Bearer ${getImsUserToken(this.#ctx)}`;
-      return {
+      const enrichmentCtx = {
         site,
         opportunityType: opportunity.getType(),
         bearerToken,
       };
+
+      if (site.getDeliveryType() === 'aem_edge') {
+        try {
+          enrichmentCtx.contentClient = await ContentClient.createFrom(this.#ctx, site);
+        } catch (contentClientErr) {
+          log.warn(
+            `Could not create ContentClient for AEM Edge documentPath enrichment: ${contentClientErr.message}`,
+          );
+        }
+      }
+
+      return enrichmentCtx;
     } catch (e) {
       log.warn(`Could not prepare documentPath enrichment: ${e.message}`);
       return null;
@@ -315,13 +330,16 @@ export class FixesController {
     if (fixData.origin !== 'aso') return fixData;
     if (fixData.changeDetails?.documentPath) return fixData;
 
-    const { site, opportunityType, bearerToken } = enrichmentCtx;
+    const {
+      site, opportunityType, bearerToken, contentClient,
+    } = enrichmentCtx;
     const documentPath = await resolveDocumentPath(
       site,
       opportunityType,
       fixData.changeDetails,
       bearerToken,
       log,
+      contentClient ?? undefined, // used for AEM Edge
     );
 
     if (!documentPath) return fixData;

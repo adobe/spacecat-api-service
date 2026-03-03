@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { determineAEMCSPageId, getPageEditUrl } from '@adobe/spacecat-shared-utils';
+import { determineAEMCSPageId, getPageEditUrl, prependSchema } from '@adobe/spacecat-shared-utils';
 
 const VANITY_URL_MANAGER = 'vanityurlmgr';
 
@@ -21,7 +21,6 @@ const PAGE_URL_FIELDS = {
   'structured-data': 'url',
   canonical: 'url',
   hreflang: 'url',
-  'high-organic-low-ctr': 'url',
 };
 
 /**
@@ -44,6 +43,26 @@ function extractPageUrl(opportunityType, changeDetails) {
   }
 
   return null;
+}
+
+/**
+ * Extracts the page pathname (for AEM Edge) from changeDetails.
+ * Returns a path starting with /, or null.
+ * @param {string} opportunityType
+ * @param {Object} changeDetails
+ * @returns {string|null}
+ */
+function extractPagePath(opportunityType, changeDetails) {
+  const pathOrUrl = opportunityType === 'structured-data'
+    ? (changeDetails?.path || changeDetails?.url)
+    : extractPageUrl(opportunityType, changeDetails);
+  if (!pathOrUrl) return null;
+  if (pathOrUrl.startsWith('/')) return pathOrUrl;
+  try {
+    return new URL(prependSchema(pathOrUrl)).pathname;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -82,16 +101,35 @@ function resolveBrokenBacklinksDocPath(deliveryConfig, changeDetails) {
 }
 
 /**
+ * Resolves the AEM Edge edit URL using ContentClient:
+ * pathname → resource path → edit or preview URL.
+ * @param {Object} contentClient - ContentClient instance
+ * @param {string} pagePath - URL pathname (e.g. /docs/page)
+ * @returns {Promise<string|null>}
+ */
+async function resolveAEMEdgeEditUrl(contentClient, pagePath) {
+  const documentPath = await contentClient.getResourcePath(pagePath);
+  if (!documentPath) return null;
+  const docPath = documentPath.replace(/[.]md$/, '');
+  const editUrl = await contentClient.getEditURL(docPath);
+  if (editUrl) return editUrl;
+  const urls = await contentClient.getLivePreviewURLs(docPath);
+  return urls?.previewURL ?? null;
+}
+
+/**
  * Resolves the AEM editor documentPath for a given opportunity type and suggestion data.
  * For broken-backlinks: uses site-level config (no per-page resolution).
  * For page-level opportunities on AEM_CS: resolves page ID and fetches the edit URL.
- * AEM_EDGE is not yet supported (requires ContentClient).
+ * For AEM_EDGE: uses ContentClient to resolve pathname → resource path → edit/preview URL
+ * (when contentClient is provided).
  *
  * @param {Object} site - Site entity with getDeliveryType(), getDeliveryConfig()
  * @param {string} opportunityType - e.g. 'broken-backlinks', 'meta-tags'
  * @param {Object} changeDetails - the suggestion data / fix changeDetails
  * @param {string} bearerToken - full Authorization header value (e.g. 'Bearer xxx')
  * @param {Object} [log] - logger
+ * @param {Object} [contentClient] - ContentClient for AEM Edge (required when aem_edge)
  * @returns {Promise<string|null>} the editor URL or null
  */
 export async function resolveDocumentPath(
@@ -100,19 +138,28 @@ export async function resolveDocumentPath(
   changeDetails,
   bearerToken,
   log = console,
+  contentClient = null,
 ) {
   try {
     const deliveryType = site.getDeliveryType();
     const deliveryConfig = site.getDeliveryConfig();
     const authorURL = deliveryConfig?.authorURL;
 
-    if (!authorURL) return null;
-
     if (opportunityType === 'broken-backlinks') {
+      if (!authorURL) return null;
       return resolveBrokenBacklinksDocPath(deliveryConfig, changeDetails);
     }
 
     if (deliveryType === 'aem_cs') {
+      if (!authorURL) return null;
+      // meta-tags may have page_id directly in changeDetails (no URL → pageId resolution needed)
+      if (opportunityType === 'meta-tags') {
+        const directPageId = changeDetails?.page_id ?? changeDetails?.pageId;
+        if (directPageId) {
+          return await getPageEditUrl(authorURL, bearerToken, directPageId);
+        }
+      }
+
       const pageUrl = extractPageUrl(opportunityType, changeDetails);
       if (!pageUrl) return null;
 
@@ -127,6 +174,12 @@ export async function resolveDocumentPath(
       if (!pageId) return null;
 
       return await getPageEditUrl(authorURL, bearerToken, pageId);
+    }
+
+    if (deliveryType === 'aem_edge' && contentClient) {
+      const pagePath = extractPagePath(opportunityType, changeDetails);
+      if (!pagePath) return null;
+      return await resolveAEMEdgeEditUrl(contentClient, pagePath);
     }
 
     return null;
