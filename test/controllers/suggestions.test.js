@@ -3900,6 +3900,417 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[1].suggestion).to.not.exist;
       expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'Suggestion is not in NEW status');
     });
+
+    it('groups by fixTargetPageId when fixTargetGroups is provided for a groupable type', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0]), mockSuggestionEntity(suggs[2])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]],
+              fixTargetPageId: '/content/my-site/en/target-page',
+            },
+          ],
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.metadata).to.have.property('success', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('failed', 0);
+
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const sqsPayload = mockSqs.sendMessage.firstCall.args[1];
+      expect(sqsPayload).to.have.property('fixTargetPageId', '/content/my-site/en/target-page');
+      expect(sqsPayload.suggestionIds).to.have.members([SUGGESTION_IDS[0], SUGGESTION_IDS[2]]);
+    });
+
+    it('returns 400 when fixTargetGroups has invalid structure', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          fixTargetGroups: [{ suggestionIds: [], fixTargetPageId: '/content/page' }],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Each fixTargetGroup must have a non-empty suggestionIds array');
+    });
+
+    it('returns 400 when fixTargetGroups is not an array', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          fixTargetGroups: 'not-an-array',
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'fixTargetGroups must be an array');
+    });
+
+    it('returns 400 when fixTargetGroup has empty fixTargetPageId', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          fixTargetGroups: [
+            { suggestionIds: [SUGGESTION_IDS[0]], fixTargetPageId: '' },
+          ],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property(
+        'message',
+        'Each fixTargetGroup must have a non-empty fixTargetPageId',
+      );
+    });
+
+    it('ignores fixTargetGroups for non-groupable opportunity type', async () => {
+      opportunity.getType = sandbox.stub().returns('broken-backlinks');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              fixTargetPageId: 'source-page-id',
+            },
+          ],
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const sqsPayload = mockSqs.sendMessage.firstCall.args[1];
+      expect(sqsPayload).to.not.have.property('fixTargetPageId');
+    });
+
+    it('sends multiple SQS messages for multiple fixTargetGroups', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0]), mockSuggestionEntity(suggs[2])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              fixTargetPageId: 'source-page-A',
+            },
+            {
+              suggestionIds: [SUGGESTION_IDS[2]],
+              fixTargetPageId: 'source-page-B',
+            },
+          ],
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSqs.sendMessage).to.have.been.calledTwice;
+
+      const allCalls = mockSqs.sendMessage.getCalls();
+      const payloads = allCalls.map((call) => call.args[1]);
+      const pageIds = payloads.map((p) => p.fixTargetPageId);
+      expect(pageIds).to.include.members(
+        ['source-page-A', 'source-page-B'],
+      );
+
+      const suggIdsA = payloads.find(
+        (p) => p.fixTargetPageId === 'source-page-A',
+      ).suggestionIds;
+      expect(suggIdsA).to.deep.equal([SUGGESTION_IDS[0]]);
+
+      const suggIdsB = payloads.find(
+        (p) => p.fixTargetPageId === 'source-page-B',
+      ).suggestionIds;
+      expect(suggIdsB).to.deep.equal([SUGGESTION_IDS[2]]);
+    });
+
+    it('falls back to URL grouping for suggestions not covered by fixTargetGroups', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      const suggA = {
+        ...suggs[0],
+        data: { ...suggs[0].data, url: 'https://example.com/page-a' },
+      };
+      const suggB = {
+        ...suggs[2],
+        data: { ...suggs[2].data, url: 'https://example.com/page-b' },
+      };
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggA), mockSuggestionEntity(suggB)],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggA, status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggB, status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              fixTargetPageId: 'source-page-1',
+            },
+          ],
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSqs.sendMessage).to.have.been.calledTwice;
+
+      const allCalls = mockSqs.sendMessage.getCalls();
+      const payloads = allCalls.map((call) => call.args[1]);
+
+      const sourceGroupPayload = payloads.find(
+        (p) => p.fixTargetPageId === 'source-page-1',
+      );
+      expect(sourceGroupPayload).to.exist;
+      expect(sourceGroupPayload.suggestionIds).to.deep.equal(
+        [SUGGESTION_IDS[0]],
+      );
+
+      const urlFallbackPayload = payloads.find(
+        (p) => !p.fixTargetPageId,
+      );
+      expect(urlFallbackPayload).to.exist;
+      expect(urlFallbackPayload.suggestionIds).to.deep.equal(
+        [SUGGESTION_IDS[2]],
+      );
+      expect(urlFallbackPayload.url).to.equal(
+        'https://example.com/page-b',
+      );
+    });
+
+    it('resolves uncovered suggestion URL via recommendations pageUrl when url is absent', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      const suggCovered = {
+        ...suggs[0],
+        data: { ...suggs[0].data, url: 'https://example.com/page-a' },
+      };
+      const suggUncovered = {
+        ...suggs[2],
+        data: { recommendations: [{ pageUrl: 'https://example.com/rec-url' }] },
+      };
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggCovered), mockSuggestionEntity(suggUncovered)],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggCovered, status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggUncovered, status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              fixTargetPageId: 'source-page-1',
+            },
+          ],
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const allCalls = mockSqs.sendMessage.getCalls();
+      const payloads = allCalls.map((call) => call.args[1]);
+      const urlFallback = payloads.find((p) => !p.fixTargetPageId);
+      expect(urlFallback).to.exist;
+      expect(urlFallback.url).to.equal('https://example.com/rec-url');
+    });
+
+    it('resolves uncovered suggestion URL via urlFrom when url and url_from are absent', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      const suggCovered = {
+        ...suggs[0],
+        data: { ...suggs[0].data, url: 'https://example.com/page-a' },
+      };
+      const suggUncovered = {
+        ...suggs[2],
+        data: { urlFrom: 'https://example.com/urlFrom-fallback' },
+      };
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggCovered), mockSuggestionEntity(suggUncovered)],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggCovered, status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggUncovered, status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              fixTargetPageId: 'source-page-1',
+            },
+          ],
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const allCalls = mockSqs.sendMessage.getCalls();
+      const payloads = allCalls.map((call) => call.args[1]);
+      const urlFallback = payloads.find((p) => !p.fixTargetPageId);
+      expect(urlFallback).to.exist;
+      expect(urlFallback.url).to.equal('https://example.com/urlFrom-fallback');
+    });
+
+    it('resolves uncovered suggestion URL via opportunityData.page as last resort', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      opportunity.getData = sandbox.stub().returns({ page: 'https://example.com/opp-page' });
+      const suggCovered = {
+        ...suggs[0],
+        data: { ...suggs[0].data, url: 'https://example.com/page-a' },
+      };
+      const suggUncovered = {
+        ...suggs[2],
+        data: {},
+      };
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggCovered), mockSuggestionEntity(suggUncovered)],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggCovered, status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggUncovered, status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              fixTargetPageId: 'source-page-1',
+            },
+          ],
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const allCalls = mockSqs.sendMessage.getCalls();
+      const payloads = allCalls.map((call) => call.args[1]);
+      const urlFallback = payloads.find((p) => !p.fixTargetPageId);
+      expect(urlFallback).to.exist;
+      expect(urlFallback.url).to.equal('https://example.com/opp-page');
+    });
+
+    it('skips uncovered suggestion when no URL can be resolved', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      opportunity.getData = sandbox.stub().returns({});
+      const suggCovered = {
+        ...suggs[0],
+        data: { ...suggs[0].data, url: 'https://example.com/page-a' },
+      };
+      const suggNoUrl = {
+        ...suggs[2],
+        data: {},
+      };
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggCovered), mockSuggestionEntity(suggNoUrl)],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggCovered, status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggNoUrl, status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              fixTargetPageId: 'source-page-1',
+            },
+          ],
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload.fixTargetPageId).to.equal('source-page-1');
+    });
   });
 
   describe('auto-fix with action assess-urls', () => {

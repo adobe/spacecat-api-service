@@ -914,7 +914,7 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('No updates provided');
     }
     const {
-      suggestionIds, variations, action, customData, url: requestUrl, precheckOnly, pages,
+      suggestionIds, variations, action, customData, url: requestUrl, precheckOnly, pages, fixTargetGroups,
     } = context.data;
     const isAssessAction = action === 'assess';
     const isAssessUrlsAction = action === 'assess-urls';
@@ -927,7 +927,19 @@ function SuggestionsController(ctx, sqs, env) {
         return badRequest('precheckOnly must be a boolean');
       }
     }
-
+    if (fixTargetGroups !== undefined) {
+      if (!isArray(fixTargetGroups)) {
+        return badRequest('fixTargetGroups must be an array');
+      }
+      for (const group of fixTargetGroups) {
+        if (!isArray(group?.suggestionIds) || group.suggestionIds.length === 0) {
+          return badRequest('Each fixTargetGroup must have a non-empty suggestionIds array');
+        }
+        if (!hasText(group?.fixTargetPageId)) {
+          return badRequest('Each fixTargetGroup must have a non-empty fixTargetPageId');
+        }
+      }
+    }
     const site = await Site.findById(siteId);
     if (!site) {
       return notFound('Site not found');
@@ -1024,26 +1036,63 @@ function SuggestionsController(ctx, sqs, env) {
 
     let suggestionGroups;
     if (shouldGroupSuggestionsForAutofix(opportunity.getType())) {
-      const opportunityData = opportunity.getData();
-      const suggestionsByUrl = validSuggestions.reduce((acc, suggestion) => {
-        const data = suggestion.getData();
-        const url = data?.url || data?.recommendations?.[0]?.pageUrl
-          || data?.url_from
-          || data?.urlFrom
-          || opportunityData?.page; // for high-organic-low-ctr
-        if (!url) return acc;
+      if (isNonEmptyArray(fixTargetGroups)) {
+        suggestionGroups = fixTargetGroups
+          .map(({ suggestionIds: groupIds, fixTargetPageId }) => ({
+            groupedSuggestions: validSuggestions.filter(
+              (s) => groupIds.includes(s.getId()),
+            ),
+            url: undefined,
+            fixTargetPageId,
+          }))
+          .filter(({ groupedSuggestions }) => groupedSuggestions.length > 0);
 
-        if (!acc[url]) {
-          acc[url] = [];
+        const coveredIds = new Set(
+          suggestionGroups.flatMap(
+            ({ groupedSuggestions }) => groupedSuggestions.map((s) => s.getId()),
+          ),
+        );
+        const uncoveredSuggestions = validSuggestions.filter(
+          (s) => !coveredIds.has(s.getId()),
+        );
+        if (isNonEmptyArray(uncoveredSuggestions)) {
+          const opportunityData = opportunity.getData();
+          const uncoveredByUrl = uncoveredSuggestions.reduce((acc, suggestion) => {
+            const data = suggestion.getData();
+            const url = data?.url || data?.recommendations?.[0]?.pageUrl
+              || data?.url_from || data?.urlFrom || opportunityData?.page;
+            if (!url) return acc;
+            if (!acc[url]) acc[url] = [];
+            acc[url].push(suggestion);
+            return acc;
+          }, {});
+          Object.entries(uncoveredByUrl).forEach(([url, grouped]) => {
+            suggestionGroups.push({ groupedSuggestions: grouped, url, fixTargetPageId: undefined });
+          });
         }
-        acc[url].push(suggestion);
-        return acc;
-      }, {});
+      } else {
+        const opportunityData = opportunity.getData();
+        const suggestionsByUrl = validSuggestions.reduce((acc, suggestion) => {
+          const data = suggestion.getData();
+          const url = data?.url || data?.recommendations?.[0]?.pageUrl
+            || data?.url_from
+            || data?.urlFrom
+            || opportunityData?.page;
+          if (!url) return acc;
 
-      suggestionGroups = Object.entries(suggestionsByUrl).map(([url, groupedSuggestions]) => ({
-        groupedSuggestions,
-        url,
-      }));
+          if (!acc[url]) {
+            acc[url] = [];
+          }
+          acc[url].push(suggestion);
+          return acc;
+        }, {});
+
+        suggestionGroups = Object.entries(suggestionsByUrl).map(([url, groupedSuggestions]) => ({
+          groupedSuggestions,
+          url,
+          fixTargetPageId: undefined,
+        }));
+      }
     }
 
     suggestionIds.forEach((suggestionId, index) => {
@@ -1112,7 +1161,7 @@ function SuggestionsController(ctx, sqs, env) {
     });
     if (shouldGroupSuggestionsForAutofix(opportunity.getType())) {
       await Promise.all(
-        suggestionGroups.map(({ groupedSuggestions, url }) => sendAutofixMessage(
+        suggestionGroups.map(({ groupedSuggestions, url, fixTargetPageId }) => sendAutofixMessage(
           sqs,
           queueUrl,
           siteId,
@@ -1122,7 +1171,7 @@ function SuggestionsController(ctx, sqs, env) {
           variations,
           action,
           customData,
-          autofixOptions(url),
+          { ...autofixOptions(url), ...(fixTargetPageId && { fixTargetPageId }) },
         )),
       );
     } else {
