@@ -1,3 +1,10 @@
+## [1.330.3](https://github.com/adobe/spacecat-api-service/compare/v1.330.2...v1.330.3) (2026-03-03)
+
+
+### Bug Fixes
+
+* enhance logging for edge-optimize ([#1895](https://github.com/adobe/spacecat-api-service/issues/1895)) ([128caa7](https://github.com/adobe/spacecat-api-service/commit/128caa7b836145c76147159b68fb3dba5a3a6be9))
+
 ## [1.330.2](https://github.com/adobe/spacecat-api-service/compare/v1.330.1...v1.330.2) (2026-03-02)
 
 
