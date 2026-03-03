@@ -1440,10 +1440,10 @@ site-llmo-edge-optimize-config-stage:
 
       - Validates that the apex of the staging domain matches the apex of the prod site base URL.
       - Creates or finds a stage site in Spacecat in the same organization.
-      - Creates S3 metaconfig for the stage site with prerender enabled for the whole domain.
-      - Persists the staging domain to site ID mapping in the prod site's edgeOptimizeConfig (Spacecat config only, not in S3).
+      - Creates edge optimize metaconfig for the stage site with prerender enabled for the whole domain.
+      - Persists the staging domain to site ID mapping in the prod site's edgeOptimizeConfig.
 
-      Returns the complete S3 metaconfig for each stage site in an array (stageConfigs). Each item includes domain, id, and all S3 metaconfig properties (apiKeys, enabled, prerender, etc.).
+      Returns the complete metaconfig for each stage site in an array (stageConfigs). Each item includes domain, siteId, and all metaconfig properties (apiKeys, enabled, prerender, etc.).
 
       The staging domains list can be retrieved via GET /sites/{siteId} under config.edgeOptimizeConfig.stagingDomains.
 
@@ -1458,7 +1458,7 @@ site-llmo-edge-optimize-config-stage:
             $ref: './schemas.yaml#/StageDomainsRequest'
     responses:
       '200':
-        description: Staging domains added successfully. Returns an array of stage configs; each element is the staging domain plus full S3 metaconfig (siteId, apiKeys, enabled, enhancements, patches, prerender) for that stage site.
+        description: Staging domains added successfully. Returns an array of stage configs; each element is the staging domain plus full metaconfig (siteId, apiKeys, enabled, enhancements, patches, prerender) for that stage site.
         content:
           application/json:
             schema:

@@ -6178,7 +6178,7 @@ StageDomainsRequest:
 
 StageConfigItem:
   type: object
-  description: Full S3 metaconfig for one stage site (domain plus metaconfig fields)
+  description: Full edge optimize metaconfig for one stage site (domain plus metaconfig fields)
   required:
     - domain
     - siteId
@@ -6202,6 +6202,6 @@ StageConfigItem:
 
 StageConfigsResponse:
   type: array
-  description: Response is the array of stage configs (one per staging domain). Each item is domain plus full S3 metaconfig for that stage site.
+  description: Response is the array of stage configs (one per staging domain). Each item is domain plus full edge optimize metaconfig for that stage site.
   items:
     $ref: '#/StageConfigItem'
