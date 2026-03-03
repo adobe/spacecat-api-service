@@ -17,7 +17,7 @@ import BaseCommand from './base.js';
 import { extractURLFromSlackInput, postErrorMessage } from '../../../utils/slack/base.js';
 
 const PHRASES = ['identify-redirects'];
-const DEFAULT_MINUTES = 60;
+const DEFAULT_MINUTES = 3000; // 50 hours
 
 export default function IdentifyRedirectsCommand(context) {
   const baseCommand = BaseCommand({
@@ -33,6 +33,7 @@ export default function IdentifyRedirectsCommand(context) {
     env,
     log,
     sqs,
+    updateRedirects = false,
   } = context;
   const { Site } = dataAccess;
 
@@ -98,6 +99,7 @@ export default function IdentifyRedirectsCommand(context) {
         programId: String(programId),
         environmentId: String(environmentId),
         minutes,
+        updateRedirects,
         slackContext: {
           channelId,
           threadTs,

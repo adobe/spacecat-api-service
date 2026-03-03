@@ -223,7 +223,7 @@ describe('IdentifyRedirectsCommand', () => {
       baseURL: 'https://example.com',
       programId: 'p',
       environmentId: 'e',
-      minutes: 60,
+      minutes: 3000,
     });
     expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.include({
       slackContext: {
