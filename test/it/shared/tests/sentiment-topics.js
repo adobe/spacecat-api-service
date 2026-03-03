@@ -31,7 +31,6 @@ function expectTopicDto(topic) {
   expect(topic.topicId).to.be.a('string');
   expect(topic.name).to.be.a('string');
   expect(topic.subPrompts).to.be.an('array');
-  expect(topic.categories).to.be.an('array');
   expect(topic.citations).to.be.an('array');
   expect(topic.enabled).to.be.a('boolean');
   expectISOTimestamp(topic.createdAt, 'createdAt');
@@ -180,7 +179,7 @@ export default function sentimentTopicTests(getHttpClient, resetData, options = 
 
       it('user: creates topic with citations', async () => {
         const http = getHttpClient();
-        const citations = [{ url: 'https://example.com/page', timesCited: 7 }];
+        const citations = [{ url: 'https://example.com/page', timesCited: 7, category: 'tech' }];
         const res = await http.user.post(`/sites/${SITE_1_ID}/sentiment/topics`, [
           { name: 'Cited Topic', citations },
         ]);

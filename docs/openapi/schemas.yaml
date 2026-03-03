@@ -5884,13 +5884,6 @@ SentimentTopic:
         type: string
       description: Additional prompts/questions for deeper analysis
       example: ["What do people say about performance?", "Price sentiment?"]
-    categories:
-      type: array
-      items:
-        type: string
-      description: Classification categories for the topic
-      default: []
-      example: ["automotive", "luxury"]
     citations:
       type: array
       description: Per-URL citation counts for this topic
@@ -5909,6 +5902,10 @@ SentimentTopic:
             type: integer
             description: Number of times cited on this URL
             example: 12
+          category:
+            type: string
+            description: Classification category for this citation
+            example: "automotive"
     enabled:
       type: boolean
       description: Whether topic is active
@@ -5945,13 +5942,6 @@ SentimentTopicInput:
         type: string
       description: Additional prompts/questions for deeper analysis
       example: ["What do people say about performance?", "Price sentiment?"]
-    categories:
-      type: array
-      items:
-        type: string
-      description: Classification categories for the topic
-      default: []
-      example: ["automotive", "luxury"]
     citations:
       type: array
       description: Per-URL citation counts for this topic
@@ -5968,6 +5958,9 @@ SentimentTopicInput:
           timesCited:
             type: integer
             example: 0
+          category:
+            type: string
+            example: "automotive"
     enabled:
       type: boolean
       default: true
@@ -5984,10 +5977,6 @@ SentimentTopicUpdate:
       type: array
       items:
         type: string
-    categories:
-      type: array
-      items:
-        type: string
     citations:
       type: array
       items:
@@ -6000,6 +5989,8 @@ SentimentTopicUpdate:
             type: string
           timesCited:
             type: integer
+          category:
+            type: string
     enabled:
       type: boolean
 

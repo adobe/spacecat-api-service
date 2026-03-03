@@ -253,14 +253,12 @@ function SentimentController(ctx, log) {
       batchNames.add(normalizedName);
 
       try {
-        const categories = isArray(topicData.categories) ? topicData.categories : [];
         const citations = isArray(topicData.citations) ? topicData.citations : [];
         const newTopic = await SentimentTopic.create({
           siteId,
           name: topicData.name,
           description: topicData.description,
           subPrompts: isArray(topicData.subPrompts) ? topicData.subPrompts : [],
-          categories,
           citations,
           enabled: topicData.enabled !== false,
           createdBy: userId,
@@ -352,7 +350,6 @@ function SentimentController(ctx, log) {
       if (hasText(updates.name)) topic.setName(updates.name);
       if (updates.description !== undefined) topic.setDescription(updates.description);
       if (isArray(updates.subPrompts)) topic.setSubPrompts(updates.subPrompts);
-      if (isArray(updates.categories)) topic.setCategories(updates.categories);
       if (isArray(updates.citations)) topic.setCitations(updates.citations);
       if (typeof updates.enabled === 'boolean') topic.setEnabled(updates.enabled);
 
