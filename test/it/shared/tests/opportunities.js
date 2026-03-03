@@ -106,6 +106,24 @@ export default function opportunityTests(getHttpClient, resetData) {
         const res = await http.user.get(`/sites/${SITE_3_ID}/opportunities/by-status/NEW`);
         expect(res.status).to.equal(403);
       });
+
+      it('user: returns opportunities when status is lowercase', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${SITE_1_ID}/opportunities/by-status/new`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(1);
+        expect(res.body[0].id).to.equal(OPPTY_1_ID);
+        expect(res.body[0].status).to.equal('NEW');
+      });
+
+      it('user: returns opportunities when status is mixed-case', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${SITE_1_ID}/opportunities/by-status/New`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(1);
+        expect(res.body[0].id).to.equal(OPPTY_1_ID);
+        expect(res.body[0].status).to.equal('NEW');
+      });
     });
 
     describe('GET /sites/:siteId/opportunities/:opportunityId', () => {

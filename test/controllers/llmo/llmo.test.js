@@ -76,6 +76,7 @@ describe('LlmoController', () => {
   let mockTokowakaClient;
   let readStrategyStub;
   let writeStrategyStub;
+  let notifyStrategyChangesStub;
   let exchangePromiseTokenStub;
   let fetchWithTimeoutStub;
   let postLlmoAlertStub;
@@ -193,6 +194,9 @@ describe('LlmoController', () => {
       },
       '../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+      },
+      '../../../src/support/opportunity-workspace-notifications.js': {
+        notifyStrategyChanges: (...args) => notifyStrategyChangesStub(...args),
       },
       '../../../src/support/access-control-util.js': {
         default: {
@@ -326,6 +330,8 @@ describe('LlmoController', () => {
       updateLlmoCustomerIntent: sinon.stub(),
       updateLlmoCdnlogsFilter: sinon.stub(),
       updateLlmoCdnBucketConfig: sinon.stub(),
+      addLlmoTag: sinon.stub(),
+      state: { llmo: mockLlmoConfig },
       getSlackConfig: sinon.stub().returns(null),
       getHandlers: sinon.stub().returns({}),
       getLlmoDataFolder: sinon.stub().returns(TEST_FOLDER),
@@ -362,6 +368,7 @@ describe('LlmoController', () => {
       setConfig: sinon.stub(),
       save: sinon.stub().resolves(),
       getOrganization: sinon.stub().resolves(mockOrganization),
+      getBaseURL: sinon.stub().returns('https://www.example.com'),
     };
 
     // Reset mockTokowakaClient
@@ -454,6 +461,9 @@ describe('LlmoController', () => {
     writeConfigStub = sinon.stub();
     readStrategyStub = sinon.stub();
     writeStrategyStub = sinon.stub();
+    notifyStrategyChangesStub = sinon.stub().resolves({
+      sent: 0, failed: 0, skipped: 0, changes: 0,
+    });
     llmoConfigSchemaStub = {
       safeParse: sinon.stub().returns({ success: true, data: {} }),
     };
@@ -4441,13 +4451,35 @@ describe('LlmoController', () => {
           name: 'Performance Optimization',
           status: 'pending',
           url: 'https://example.com/products',
-          opportunities: [{ opportunityId: 'opp-1', status: 'pending' }],
+          opportunities: [{ opportunityId: 'opp-1', status: 'pending', assignee: 'user@example.com' }],
+          createdBy: 'owner@example.com',
+        },
+      ],
+    };
+
+    const prevStrategyData = {
+      opportunities: [
+        { id: 'opp-1', name: 'Improve page speed', category: 'Performance' },
+      ],
+      strategies: [
+        {
+          id: 'strategy-1',
+          name: 'Performance Optimization',
+          status: 'new',
+          url: 'https://example.com/products',
+          opportunities: [{ opportunityId: 'opp-1', status: 'new', assignee: 'user@example.com' }],
+          createdBy: 'owner@example.com',
         },
       ],
     };
 
     beforeEach(() => {
       writeStrategyStub.resolves({ version: 'v1' });
+      readStrategyStub.resolves({ data: null, exists: false });
+      notifyStrategyChangesStub.resetHistory();
+      notifyStrategyChangesStub.resolves({
+        sent: 0, failed: 0, skipped: 0, changes: 0,
+      });
       mockContext.data = testStrategyData;
     });
 
@@ -4456,13 +4488,112 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
-      expect(responseBody).to.deep.equal({ version: 'v1' });
+      expect(responseBody.version).to.equal('v1');
+      expect(responseBody.notifications).to.deep.equal({
+        sent: 0, failed: 0, skipped: 0, changes: 0,
+      });
       expect(writeStrategyStub).to.have.been.calledWith(
         TEST_SITE_ID,
         testStrategyData,
         s3Client,
         { s3Bucket: TEST_BUCKET },
       );
+    });
+
+    it('should read previous strategy before writing', async () => {
+      readStrategyStub.resolves({ data: prevStrategyData, exists: true });
+
+      const result = await controller.saveStrategy(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(readStrategyStub).to.have.been.calledWith(
+        TEST_SITE_ID,
+        s3Client,
+        { s3Bucket: TEST_BUCKET },
+      );
+    });
+
+    it('should call notifyStrategyChanges with prev and next data', async () => {
+      readStrategyStub.resolves({ data: prevStrategyData, exists: true });
+
+      await controller.saveStrategy(mockContext);
+
+      expect(notifyStrategyChangesStub).to.have.been.calledOnce;
+      const [ctx, params] = notifyStrategyChangesStub.firstCall.args;
+      expect(ctx).to.equal(mockContext);
+      expect(params.prevData).to.deep.equal(prevStrategyData);
+      expect(params.nextData).to.deep.equal(testStrategyData);
+      expect(params.siteId).to.equal(TEST_SITE_ID);
+      expect(params.siteBaseUrl).to.equal('https://www.example.com');
+    });
+
+    it('should log strategy notification summary when changes > 0', async () => {
+      readStrategyStub.resolves({ data: prevStrategyData, exists: true });
+      notifyStrategyChangesStub.resolves({
+        sent: 1, failed: 0, skipped: 0, changes: 1,
+      });
+
+      const result = await controller.saveStrategy(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.notifications).to.deep.equal({
+        sent: 1, failed: 0, skipped: 0, changes: 1,
+      });
+      expect(mockLog.info).to.have.been.calledWith(
+        sinon.match(/Strategy notification summary for site .*: .*"changes":1/),
+      );
+    });
+
+    it('should pass null prevData when previous strategy does not exist', async () => {
+      readStrategyStub.resolves({ data: null, exists: false });
+
+      await controller.saveStrategy(mockContext);
+
+      expect(notifyStrategyChangesStub).to.have.been.calledOnce;
+      const [, params] = notifyStrategyChangesStub.firstCall.args;
+      expect(params.prevData).to.be.null;
+    });
+
+    it('should skip notifications when readStrategy fails (prevents email storm)', async () => {
+      readStrategyStub.rejects(new Error('S3 read error'));
+
+      const result = await controller.saveStrategy(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.notifications).to.deep.equal({
+        sent: 0, failed: 0, skipped: 0, changes: 0,
+      });
+
+      expect(notifyStrategyChangesStub).to.not.have.been.called;
+      expect(mockLog.warn).to.have.been.calledWith(
+        sinon.match(/Could not read previous strategy/),
+      );
+    });
+
+    it('should still return 200 when notification fails', async () => {
+      readStrategyStub.resolves({ data: prevStrategyData, exists: true });
+      notifyStrategyChangesStub.rejects(new Error('Email service down'));
+
+      const result = await controller.saveStrategy(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.version).to.equal('v1');
+      expect(responseBody.notifications).to.deep.equal({
+        sent: 0, failed: 0, skipped: 0, changes: 0,
+      });
+    });
+
+    it('should use empty siteBaseUrl when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      readStrategyStub.resolves({ data: prevStrategyData, exists: true });
+
+      await controller.saveStrategy(mockContext);
+
+      const [, params] = notifyStrategyChangesStub.firstCall.args;
+      expect(params.siteBaseUrl).to.equal('');
     });
 
     it('should return bad request when payload is not an object', async () => {
@@ -5170,6 +5301,61 @@ describe('LlmoController', () => {
       expect(mockLog.error).to.have.been.called;
       const errorCall = mockLog.error.firstCall.args[0];
       expect(errorCall).to.match(/Error checking edge optimize status.*Service error/);
+    });
+  });
+
+  describe('markOpportunitiesReviewed', () => {
+    it('should mark opportunities as reviewed and return empty array when no tags', async () => {
+      const result = await controller.markOpportunitiesReviewed(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.deep.equal([]);
+      expect(mockConfig.addLlmoTag).to.have.been.calledOnceWith('opportunitiesReviewed');
+      expect(mockLog.info).to.have.been.calledWith(
+        `User test-user-id marked opportunities as reviewed for site ${TEST_SITE_ID}, added 'opportunitiesReviewed' tag`,
+      );
+    });
+
+    it('should log with "system" userId when authInfo is missing', async () => {
+      mockContext.attributes = {};
+
+      const result = await controller.markOpportunitiesReviewed(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockConfig.addLlmoTag).to.have.been.calledOnceWith('opportunitiesReviewed');
+      expect(mockLog.info).to.have.been.calledWith(
+        `User system marked opportunities as reviewed for site ${TEST_SITE_ID}, added 'opportunitiesReviewed' tag`,
+      );
+    });
+
+    it('should return existing tags after marking reviewed', async () => {
+      mockConfig.getLlmoConfig.returns({ ...mockLlmoConfig, tags: ['opportunitiesReviewed'] });
+
+      const result = await controller.markOpportunitiesReviewed(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.deep.equal(['opportunitiesReviewed']);
+      expect(mockConfig.addLlmoTag).to.not.have.been.called;
+    });
+
+    it('should return forbidden when user has no access', async () => {
+      const deniedController = controllerWithAccessDenied(mockContext);
+
+      const result = await deniedController.markOpportunitiesReviewed(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('should return bad request on unexpected error', async () => {
+      mockDataAccess.Site.findById.rejects(new Error('Database connection failed'));
+
+      const result = await controller.markOpportunitiesReviewed(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Database connection failed');
     });
   });
 });

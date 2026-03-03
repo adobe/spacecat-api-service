@@ -67,6 +67,9 @@ export function buildEnv(mode, publicKeyB64) {
     // Other middleware (dummy values, not called by Tier 1 routes)
     AUDIT_JOBS_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/000000000000/dummy-audits',
     S3_CONFIG_BUCKET: 'dummy-config-bucket',
+
+    // Consumers (S2S) — allow ORG_1 IMS org for seeding and IT tests
+    S2S_ALLOWED_IMS_ORG_IDS: 'AAAAAAAABBBBBBBBCCCCCCCC@AdobeOrg',
   };
 
   if (mode === 'dynamo') {
