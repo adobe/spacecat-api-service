@@ -1474,6 +1474,7 @@ function LlmoController(ctx) {
     const { log } = context;
 
     try {
+      console.log('markOpportunitiesReviewed');
       const { site, config } = await getSiteAndValidateLlmo(context);
       const OPPORTUNITIES_REVIEWED_TAG = 'opportunitiesReviewed';
       const tags = config.getLlmoConfig().tags || [];
