@@ -1322,6 +1322,8 @@ function SuggestionsController(ctx, sqs, env) {
         validSuggestions.push(suggestion);
       }
     });
+    context.log.info(`[edge-deploy] validSuggestions count: ${validSuggestions.length}
+      , Failed suggestions count: ${failedSuggestions.length}`);
 
     // Filter out validSuggestions that are covered by domain-wide suggestions
     // in the same deployment
@@ -1422,6 +1424,8 @@ function SuggestionsController(ctx, sqs, env) {
 
         // Add ineligible suggestions to failed list
         ineligibleSuggestions.forEach((item) => {
+          context.log.info(`[edge-deploy-failed] site: ${apexBaseUrl}, ${opportunity.getType()}`
+          + ` suggestion ${item.suggestion.getId()} is ineligible: ${item.reason}`);
           failedSuggestions.push({
             uuid: item.suggestion.getId(),
             index: suggestionIds.indexOf(item.suggestion.getId()),
@@ -1447,6 +1451,7 @@ function SuggestionsController(ctx, sqs, env) {
 
     // Handle domain-wide suggestions separately
     if (isNonEmptyArray(domainWideSuggestions)) {
+      context.log.info(`[edge-deploy] domainWideSuggestions count: ${domainWideSuggestions.length}`);
       try {
         const tokowakaClient = TokowakaClient.createFrom(context);
         const baseURL = site.getBaseURL();
@@ -1621,7 +1626,7 @@ function SuggestionsController(ctx, sqs, env) {
         // Add to succeeded suggestions list for response
         succeededSuggestions.push(...skippedSuggestionEntities);
       } catch (error) {
-        context.log.error(`Error marking skipped suggestions: ${error.message}`, error);
+        context.log.error(`[edge-deploy-failed] site: ${apexBaseUrl}, Error marking skipped suggestions: ${error.message}`, error);
         // Add to failed if we couldn't mark them
         context.skippedDueToSameBatchDomainWide.forEach((skipped) => {
           failedSuggestions.push({
@@ -1746,7 +1751,8 @@ function SuggestionsController(ctx, sqs, env) {
         }
       }
     });
-
+    context.log.info(`[edge-rollback] validSuggestions count: ${validSuggestions.length},
+      failedSuggestions count: ${failedSuggestions.length}`);
     let succeededSuggestions = [];
 
     // Separate domain-wide from regular suggestions
@@ -1870,6 +1876,8 @@ function SuggestionsController(ctx, sqs, env) {
 
         // Add ineligible suggestions to failed list
         ineligibleSuggestions.forEach((item) => {
+          context.log.info(`[edge-rollback-failed] site: ${apexBaseUrl}, ${opportunity.getType()}`
+          + ` suggestion ${item.suggestion.getId()} is ineligible: ${item.reason}`);
           failedSuggestions.push({
             uuid: item.suggestion.getId(),
             index: suggestionIds.indexOf(item.suggestion.getId()),
