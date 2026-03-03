@@ -457,6 +457,15 @@ describe('Sentiment Controller', () => {
         sinon.match.has('timesCited', 0),
       );
     });
+
+    it('handles null data from allBySiteId when checking duplicates', async () => {
+      mockDataAccess.SentimentTopic.allBySiteId.resolves({ data: null, cursor: null });
+      context.data = [{ name: 'New Topic' }];
+      const result = await sentimentController.createTopics(context);
+      expect(result.status).to.equal(201);
+      const body = await result.json();
+      expect(body.metadata.success).to.equal(1);
+    });
   });
 
   describe('updateTopic', () => {
@@ -658,6 +667,7 @@ describe('Sentiment Controller', () => {
         getName: () => 'Test Topic',
         getDescription: () => undefined,
         getSubPrompts: () => null,
+        getTimesCited: () => 0,
         getEnabled: () => true,
         getCreatedAt: () => '2026-01-01T00:00:00Z',
         getUpdatedAt: () => '2026-01-01T00:00:00Z',
