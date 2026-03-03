@@ -25,6 +25,7 @@ import {
   ScopedApiKeyHandler,
   AdobeImsHandler,
   JwtHandler,
+  s2sAuthWrapper,
 } from '@adobe/spacecat-shared-http-utils';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import { imsClientWrapper } from '@adobe/spacecat-shared-ims-client';
@@ -83,6 +84,7 @@ import TrafficToolsController from './controllers/paid/traffic-tools.js';
 import BotBlockerController from './controllers/bot-blocker.js';
 import SentimentController from './controllers/sentiment.js';
 import ConsumersController from './controllers/consumers.js';
+import routeRequiredCapabilities from './routes/required-capabilities.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -282,7 +284,8 @@ const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 
 const wrappedMain = wrap(run).with(authWrapper, {
   authHandlers: [JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler],
-});
+})
+  .with(s2sAuthWrapper, { routeCapabilities: routeRequiredCapabilities });
 
 export const main = wrappedMain
   .with(localCORSWrapper)
