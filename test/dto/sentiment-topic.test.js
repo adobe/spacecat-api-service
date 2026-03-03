@@ -24,6 +24,7 @@ describe('SentimentTopicDto', () => {
         getName: () => '2026 Corvette Stingray',
         getDescription: () => 'Latest corvette model reviews',
         getSubPrompts: () => ['Focus on performance', 'Analyze design feedback'],
+        getCategories: () => ['automotive', 'luxury'],
         getCitations: () => [{ url: 'https://example.com/page1', timesCited: 42 }],
         getEnabled: () => true,
         getCreatedAt: () => '2026-01-01T00:00:00Z',
@@ -40,6 +41,7 @@ describe('SentimentTopicDto', () => {
         name: '2026 Corvette Stingray',
         description: 'Latest corvette model reviews',
         subPrompts: ['Focus on performance', 'Analyze design feedback'],
+        categories: ['automotive', 'luxury'],
         citations: [{ url: 'https://example.com/page1', timesCited: 42 }],
         enabled: true,
         createdAt: '2026-01-01T00:00:00Z',
@@ -56,6 +58,7 @@ describe('SentimentTopicDto', () => {
         getName: () => 'Empty Topic',
         getDescription: () => undefined,
         getSubPrompts: () => [],
+        getCategories: () => [],
         getCitations: () => [],
         getEnabled: () => false,
         getCreatedAt: () => '2026-01-01T00:00:00Z',
@@ -67,6 +70,7 @@ describe('SentimentTopicDto', () => {
       const result = SentimentTopicDto.toJSON(mockTopic);
 
       expect(result.subPrompts).to.deep.equal([]);
+      expect(result.categories).to.deep.equal([]);
       expect(result.citations).to.deep.equal([]);
       expect(result.enabled).to.equal(false);
       expect(result.description).to.equal(undefined);
@@ -79,6 +83,7 @@ describe('SentimentTopicDto', () => {
         getName: () => 'Test Topic',
         getDescription: () => null,
         getSubPrompts: () => undefined,
+        getCategories: () => undefined,
         getCitations: () => undefined,
         getEnabled: () => true,
         getCreatedAt: () => null,
@@ -94,6 +99,7 @@ describe('SentimentTopicDto', () => {
       expect(result.name).to.equal('Test Topic');
       expect(result.description).to.equal(null);
       expect(result.subPrompts).to.deep.equal([]);
+      expect(result.categories).to.deep.equal([]);
       expect(result.citations).to.deep.equal([]);
     });
   });

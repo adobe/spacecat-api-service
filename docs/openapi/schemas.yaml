@@ -5884,6 +5884,13 @@ SentimentTopic:
         type: string
       description: Additional prompts/questions for deeper analysis
       example: ["What do people say about performance?", "Price sentiment?"]
+    categories:
+      type: array
+      items:
+        type: string
+      description: Classification categories for the topic
+      default: []
+      example: ["automotive", "luxury"]
     citations:
       type: array
       description: Per-URL citation counts for this topic
@@ -5938,6 +5945,13 @@ SentimentTopicInput:
         type: string
       description: Additional prompts/questions for deeper analysis
       example: ["What do people say about performance?", "Price sentiment?"]
+    categories:
+      type: array
+      items:
+        type: string
+      description: Classification categories for the topic
+      default: []
+      example: ["automotive", "luxury"]
     citations:
       type: array
       description: Per-URL citation counts for this topic
@@ -5967,6 +5981,10 @@ SentimentTopicUpdate:
     description:
       type: string
     subPrompts:
+      type: array
+      items:
+        type: string
+    categories:
       type: array
       items:
         type: string

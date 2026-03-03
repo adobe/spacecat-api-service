@@ -31,6 +31,7 @@ function expectTopicDto(topic) {
   expect(topic.topicId).to.be.a('string');
   expect(topic.name).to.be.a('string');
   expect(topic.subPrompts).to.be.an('array');
+  expect(topic.categories).to.be.an('array');
   expect(topic.citations).to.be.an('array');
   expect(topic.enabled).to.be.a('boolean');
   expectISOTimestamp(topic.createdAt, 'createdAt');
