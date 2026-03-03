@@ -31,7 +31,7 @@ function expectTopicDto(topic) {
   expect(topic.topicId).to.be.a('string');
   expect(topic.name).to.be.a('string');
   expect(topic.subPrompts).to.be.an('array');
-  expect(topic.timesCited).to.be.a('number');
+  expect(topic.citations).to.be.an('array');
   expect(topic.enabled).to.be.a('boolean');
   expectISOTimestamp(topic.createdAt, 'createdAt');
   expectISOTimestamp(topic.updatedAt, 'updatedAt');
@@ -105,7 +105,7 @@ export default function sentimentTopicTests(getHttpClient, resetData, options = 
         expect(res.body.siteId).to.equal(SITE_1_ID);
         expect(res.body.name).to.equal('Product Quality');
         expect(res.body.subPrompts).to.have.lengthOf(2);
-        expect(res.body.timesCited).to.equal(15);
+        expect(res.body.citations).to.be.an('array').with.lengthOf(2);
         expect(res.body.enabled).to.be.true;
       });
 
@@ -177,14 +177,15 @@ export default function sentimentTopicTests(getHttpClient, resetData, options = 
         expect(res.body.failures[0].reason).to.include('already exists');
       });
 
-      it('user: creates topic with timesCited', async () => {
+      it('user: creates topic with citations', async () => {
         const http = getHttpClient();
+        const citations = [{ url: 'https://example.com/page', timesCited: 7 }];
         const res = await http.user.post(`/sites/${SITE_1_ID}/sentiment/topics`, [
-          { name: 'Cited Topic', timesCited: 7 },
+          { name: 'Cited Topic', citations },
         ]);
         expectBatch201(res, 1);
         expect(res.body.metadata.success).to.equal(1);
-        expect(res.body.items[0].timesCited).to.equal(7);
+        expect(res.body.items[0].citations).to.deep.equal(citations);
       });
     });
 

@@ -55,7 +55,7 @@ describe('Sentiment Controller', () => {
     getName: () => data.name || 'Test Topic',
     getDescription: () => data.description,
     getSubPrompts: () => data.subPrompts || [],
-    getTimesCited: () => data.timesCited ?? 0,
+    getCitations: () => data.citations || [],
     getEnabled: () => data.enabled !== false,
     getCreatedAt: () => data.createdAt || '2026-01-01T00:00:00Z',
     getUpdatedAt: () => data.updatedAt || '2026-01-01T00:00:00Z',
@@ -64,7 +64,7 @@ describe('Sentiment Controller', () => {
     setName: sandbox.stub(),
     setDescription: sandbox.stub(),
     setSubPrompts: sandbox.stub(),
-    setTimesCited: sandbox.stub(),
+    setCitations: sandbox.stub(),
     setEnabled: sandbox.stub(),
     setUpdatedBy: sandbox.stub(),
     addSubPrompt: sandbox.stub(),
@@ -431,30 +431,31 @@ describe('Sentiment Controller', () => {
       expect(body.failures[0].reason).to.equal('Duplicate topic name within the same request');
     });
 
-    it('creates topic with timesCited', async () => {
-      context.data = [{ name: 'New Topic', timesCited: 5 }];
+    it('creates topic with citations', async () => {
+      const citations = [{ url: 'https://example.com', timesCited: 5 }];
+      context.data = [{ name: 'New Topic', citations }];
       const result = await sentimentController.createTopics(context);
       expect(result.status).to.equal(201);
       expect(mockDataAccess.SentimentTopic.create).to.have.been.calledWith(
-        sinon.match.has('timesCited', 5),
+        sinon.match.has('citations', citations),
       );
     });
 
-    it('defaults timesCited to 0 when not provided', async () => {
+    it('defaults citations to empty array when not provided', async () => {
       context.data = [{ name: 'New Topic' }];
       const result = await sentimentController.createTopics(context);
       expect(result.status).to.equal(201);
       expect(mockDataAccess.SentimentTopic.create).to.have.been.calledWith(
-        sinon.match.has('timesCited', 0),
+        sinon.match.has('citations', []),
       );
     });
 
-    it('defaults timesCited to 0 when non-integer provided', async () => {
-      context.data = [{ name: 'New Topic', timesCited: 'not-a-number' }];
+    it('defaults citations to empty array when non-array provided', async () => {
+      context.data = [{ name: 'New Topic', citations: 'not-an-array' }];
       const result = await sentimentController.createTopics(context);
       expect(result.status).to.equal(201);
       expect(mockDataAccess.SentimentTopic.create).to.have.been.calledWith(
-        sinon.match.has('timesCited', 0),
+        sinon.match.has('citations', []),
       );
     });
 
@@ -535,11 +536,12 @@ describe('Sentiment Controller', () => {
       expect(result.status).to.equal(200);
     });
 
-    it('updates topic timesCited', async () => {
-      context.data = { timesCited: 10 };
+    it('updates topic citations', async () => {
+      const citations = [{ url: 'https://example.com', timesCited: 10 }];
+      context.data = { citations };
       const result = await sentimentController.updateTopic(context);
       expect(result.status).to.equal(200);
-      expect(mockTopics[0].setTimesCited).to.have.been.calledWith(10);
+      expect(mockTopics[0].setCitations).to.have.been.calledWith(citations);
     });
 
     it('returns forbidden if user does not have access', async () => {
@@ -667,7 +669,7 @@ describe('Sentiment Controller', () => {
         getName: () => 'Test Topic',
         getDescription: () => undefined,
         getSubPrompts: () => null,
-        getTimesCited: () => 0,
+        getCitations: () => [],
         getEnabled: () => true,
         getCreatedAt: () => '2026-01-01T00:00:00Z',
         getUpdatedAt: () => '2026-01-01T00:00:00Z',

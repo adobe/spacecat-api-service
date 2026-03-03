@@ -5884,11 +5884,24 @@ SentimentTopic:
         type: string
       description: Additional prompts/questions for deeper analysis
       example: ["What do people say about performance?", "Price sentiment?"]
-    timesCited:
-      type: integer
-      description: Number of times the topic has been cited across analyses
-      default: 0
-      example: 42
+    citations:
+      type: array
+      description: Per-URL citation counts for this topic
+      default: []
+      items:
+        type: object
+        required:
+          - url
+          - timesCited
+        properties:
+          url:
+            type: string
+            description: The URL where the topic was cited
+            example: "https://en.wikipedia.org/wiki/BMW_XM"
+          timesCited:
+            type: integer
+            description: Number of times cited on this URL
+            example: 12
     enabled:
       type: boolean
       description: Whether topic is active
@@ -5925,11 +5938,22 @@ SentimentTopicInput:
         type: string
       description: Additional prompts/questions for deeper analysis
       example: ["What do people say about performance?", "Price sentiment?"]
-    timesCited:
-      type: integer
-      description: Number of times the topic has been cited across analyses
-      default: 0
-      example: 0
+    citations:
+      type: array
+      description: Per-URL citation counts for this topic
+      default: []
+      items:
+        type: object
+        required:
+          - url
+          - timesCited
+        properties:
+          url:
+            type: string
+            example: "https://en.wikipedia.org/wiki/BMW_XM"
+          timesCited:
+            type: integer
+            example: 0
     enabled:
       type: boolean
       default: true
@@ -5946,8 +5970,18 @@ SentimentTopicUpdate:
       type: array
       items:
         type: string
-    timesCited:
-      type: integer
+    citations:
+      type: array
+      items:
+        type: object
+        required:
+          - url
+          - timesCited
+        properties:
+          url:
+            type: string
+          timesCited:
+            type: integer
     enabled:
       type: boolean
 
