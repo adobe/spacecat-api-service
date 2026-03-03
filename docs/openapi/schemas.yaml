@@ -5884,6 +5884,11 @@ SentimentTopic:
         type: string
       description: Additional prompts/questions for deeper analysis
       example: ["What do people say about performance?", "Price sentiment?"]
+    timesCited:
+      type: integer
+      description: Number of times the topic has been cited across analyses
+      default: 0
+      example: 42
     enabled:
       type: boolean
       description: Whether topic is active
@@ -5920,6 +5925,11 @@ SentimentTopicInput:
         type: string
       description: Additional prompts/questions for deeper analysis
       example: ["What do people say about performance?", "Price sentiment?"]
+    timesCited:
+      type: integer
+      description: Number of times the topic has been cited across analyses
+      default: 0
+      example: 0
     enabled:
       type: boolean
       default: true
@@ -5936,6 +5946,8 @@ SentimentTopicUpdate:
       type: array
       items:
         type: string
+    timesCited:
+      type: integer
     enabled:
       type: boolean
 

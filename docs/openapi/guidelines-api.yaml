@@ -71,7 +71,7 @@ topics-list:
       
       - Maximum 100 topics per request
       - Returns per-item success/failure information
-      - Not idempotent: duplicate names create separate entries
+      - Duplicate topic names within a site are rejected as per-item failures
       - Partial success possible: some items may succeed while others fail
     operationId: createSentimentTopics
     requestBody:

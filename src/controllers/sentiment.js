@@ -218,8 +218,13 @@ function SentimentController(ctx, log) {
 
     const userId = getUserIdentifier(context);
 
+    const existingResult = await SentimentTopic.allBySiteId(siteId, {});
+    const existingNames = new Set(
+      (existingResult.data || []).map((t) => t.getName().toLowerCase()),
+    );
+    const batchNames = new Set();
+
     const processingPromises = topics.map(async (topicData) => {
-      // Validate name
       if (!hasText(topicData.name)) {
         return {
           success: false,
@@ -228,12 +233,33 @@ function SentimentController(ctx, log) {
         };
       }
 
+      const normalizedName = topicData.name.toLowerCase();
+
+      if (existingNames.has(normalizedName)) {
+        return {
+          success: false,
+          name: topicData.name,
+          reason: 'A topic with this name already exists for this site',
+        };
+      }
+
+      if (batchNames.has(normalizedName)) {
+        return {
+          success: false,
+          name: topicData.name,
+          reason: 'Duplicate topic name within the same request',
+        };
+      }
+      batchNames.add(normalizedName);
+
       try {
+        const timesCited = isInteger(topicData.timesCited) ? topicData.timesCited : 0;
         const newTopic = await SentimentTopic.create({
           siteId,
           name: topicData.name,
           description: topicData.description,
           subPrompts: isArray(topicData.subPrompts) ? topicData.subPrompts : [],
+          timesCited,
           enabled: topicData.enabled !== false,
           createdBy: userId,
           updatedBy: userId,
@@ -321,10 +347,10 @@ function SentimentController(ctx, log) {
         return notFound('Topic not found');
       }
 
-      // Update allowed fields
       if (hasText(updates.name)) topic.setName(updates.name);
       if (updates.description !== undefined) topic.setDescription(updates.description);
       if (isArray(updates.subPrompts)) topic.setSubPrompts(updates.subPrompts);
+      if (isInteger(updates.timesCited)) topic.setTimesCited(updates.timesCited);
       if (typeof updates.enabled === 'boolean') topic.setEnabled(updates.enabled);
 
       topic.setUpdatedBy(userId);

@@ -31,6 +31,7 @@ function expectTopicDto(topic) {
   expect(topic.topicId).to.be.a('string');
   expect(topic.name).to.be.a('string');
   expect(topic.subPrompts).to.be.an('array');
+  expect(topic.timesCited).to.be.a('number');
   expect(topic.enabled).to.be.a('boolean');
   expectISOTimestamp(topic.createdAt, 'createdAt');
   expectISOTimestamp(topic.updatedAt, 'updatedAt');
@@ -104,6 +105,7 @@ export default function sentimentTopicTests(getHttpClient, resetData, options = 
         expect(res.body.siteId).to.equal(SITE_1_ID);
         expect(res.body.name).to.equal('Product Quality');
         expect(res.body.subPrompts).to.have.lengthOf(2);
+        expect(res.body.timesCited).to.equal(15);
         expect(res.body.enabled).to.be.true;
       });
 
@@ -162,6 +164,27 @@ export default function sentimentTopicTests(getHttpClient, resetData, options = 
         expect(res.body.metadata.success).to.equal(1);
         expect(res.body.metadata.failure).to.equal(1);
         expect(res.body.failures).to.have.lengthOf(1);
+      });
+
+      it('user: rejects duplicate topic name for same site', async () => {
+        const http = getHttpClient();
+        const res = await http.user.post(`/sites/${SITE_1_ID}/sentiment/topics`, [
+          { name: 'Product Quality' },
+        ]);
+        expectBatch201(res, 1);
+        expect(res.body.metadata.success).to.equal(0);
+        expect(res.body.metadata.failure).to.equal(1);
+        expect(res.body.failures[0].reason).to.include('already exists');
+      });
+
+      it('user: creates topic with timesCited', async () => {
+        const http = getHttpClient();
+        const res = await http.user.post(`/sites/${SITE_1_ID}/sentiment/topics`, [
+          { name: 'Cited Topic', timesCited: 7 },
+        ]);
+        expectBatch201(res, 1);
+        expect(res.body.metadata.success).to.equal(1);
+        expect(res.body.items[0].timesCited).to.equal(7);
       });
     });
 

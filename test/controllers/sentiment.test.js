@@ -55,6 +55,7 @@ describe('Sentiment Controller', () => {
     getName: () => data.name || 'Test Topic',
     getDescription: () => data.description,
     getSubPrompts: () => data.subPrompts || [],
+    getTimesCited: () => data.timesCited ?? 0,
     getEnabled: () => data.enabled !== false,
     getCreatedAt: () => data.createdAt || '2026-01-01T00:00:00Z',
     getUpdatedAt: () => data.updatedAt || '2026-01-01T00:00:00Z',
@@ -63,6 +64,7 @@ describe('Sentiment Controller', () => {
     setName: sandbox.stub(),
     setDescription: sandbox.stub(),
     setSubPrompts: sandbox.stub(),
+    setTimesCited: sandbox.stub(),
     setEnabled: sandbox.stub(),
     setUpdatedBy: sandbox.stub(),
     addSubPrompt: sandbox.stub(),
@@ -399,6 +401,62 @@ describe('Sentiment Controller', () => {
       const body = await result.json();
       expect(body.failures).to.have.lengthOf(1);
     });
+
+    it('rejects duplicate topic names that already exist for the site', async () => {
+      context.data = [{ name: 'Topic 1' }];
+      const result = await sentimentController.createTopics(context);
+      expect(result.status).to.equal(201);
+      const body = await result.json();
+      expect(body.failures).to.have.lengthOf(1);
+      expect(body.failures[0].reason).to.equal('A topic with this name already exists for this site');
+      expect(body.metadata.success).to.equal(0);
+    });
+
+    it('rejects duplicate topic names case-insensitively', async () => {
+      context.data = [{ name: 'TOPIC 1' }];
+      const result = await sentimentController.createTopics(context);
+      expect(result.status).to.equal(201);
+      const body = await result.json();
+      expect(body.failures).to.have.lengthOf(1);
+      expect(body.failures[0].reason).to.equal('A topic with this name already exists for this site');
+    });
+
+    it('rejects duplicate topic names within the same batch', async () => {
+      context.data = [{ name: 'Brand New Topic' }, { name: 'Brand New Topic' }];
+      const result = await sentimentController.createTopics(context);
+      expect(result.status).to.equal(201);
+      const body = await result.json();
+      expect(body.metadata.success).to.equal(1);
+      expect(body.failures).to.have.lengthOf(1);
+      expect(body.failures[0].reason).to.equal('Duplicate topic name within the same request');
+    });
+
+    it('creates topic with timesCited', async () => {
+      context.data = [{ name: 'New Topic', timesCited: 5 }];
+      const result = await sentimentController.createTopics(context);
+      expect(result.status).to.equal(201);
+      expect(mockDataAccess.SentimentTopic.create).to.have.been.calledWith(
+        sinon.match.has('timesCited', 5),
+      );
+    });
+
+    it('defaults timesCited to 0 when not provided', async () => {
+      context.data = [{ name: 'New Topic' }];
+      const result = await sentimentController.createTopics(context);
+      expect(result.status).to.equal(201);
+      expect(mockDataAccess.SentimentTopic.create).to.have.been.calledWith(
+        sinon.match.has('timesCited', 0),
+      );
+    });
+
+    it('defaults timesCited to 0 when non-integer provided', async () => {
+      context.data = [{ name: 'New Topic', timesCited: 'not-a-number' }];
+      const result = await sentimentController.createTopics(context);
+      expect(result.status).to.equal(201);
+      expect(mockDataAccess.SentimentTopic.create).to.have.been.calledWith(
+        sinon.match.has('timesCited', 0),
+      );
+    });
   });
 
   describe('updateTopic', () => {
@@ -466,6 +524,13 @@ describe('Sentiment Controller', () => {
       context.data = { subPrompts: ['prompt1', 'prompt2'] };
       const result = await sentimentController.updateTopic(context);
       expect(result.status).to.equal(200);
+    });
+
+    it('updates topic timesCited', async () => {
+      context.data = { timesCited: 10 };
+      const result = await sentimentController.updateTopic(context);
+      expect(result.status).to.equal(200);
+      expect(mockTopics[0].setTimesCited).to.have.been.calledWith(10);
     });
 
     it('returns forbidden if user does not have access', async () => {
