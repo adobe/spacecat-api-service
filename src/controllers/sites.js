@@ -319,8 +319,18 @@ function SitesController(ctx, log, env) {
     if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can view all sites');
     }
+
+    // TODO: implement proper pagination or filtering to stay under AWS Lambda
+    // response size limits (6MB). Currently excluding the two non customer facing orgs as
+    // a temporary workaround to avoid 413 responses.
+    const DEFAULT_ORG_ID = '6146eb0e-c7f0-41c8-9692-17e172d6f3c8';
+    const FRIENDS_AND_FAMILY_ORG_ID = 'f4b02c1b-b4e8-4d0f-884e-a35768020455';
+    const EXCLUDED_ORG_IDS = [DEFAULT_ORG_ID, FRIENDS_AND_FAMILY_ORG_ID];
+
     const all = await Site.all({}, { fetchAllPages: true });
-    const sites = all.map((site) => SiteDto.toJSON(site));
+    const sites = all
+      .filter((site) => !EXCLUDED_ORG_IDS.includes(site.getOrganizationId()))
+      .map((site) => SiteDto.toJSON(site));
     return ok(sites);
   };
 
