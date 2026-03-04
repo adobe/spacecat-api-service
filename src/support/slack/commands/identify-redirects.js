@@ -58,11 +58,16 @@ export default function IdentifyRedirectsCommand(context) {
       }
 
       const authoringType = site.getAuthoringType();
+      const deliveryType = site.getDeliveryType();
+      // check either authoringType or deliveryType is CS/CW
       if (![
         SiteModel.AUTHORING_TYPES.CS,
         SiteModel.AUTHORING_TYPES.CS_CW,
-      ].includes(authoringType)) {
-        await say(`:warning: identify-redirects currently supports AEM CS/CW only. This site authoringType is \`${authoringType}\`.`);
+      ].includes(authoringType)
+      && ![
+        SiteModel.DELIVERY_TYPES.AEM_CS,
+      ].includes(deliveryType)) {
+        await say(`:warning: identify-redirects currently supports AEM CS/CW only. This site authoringType is \`${authoringType}\` and deliveryType is \`${deliveryType}\`.`);
         return;
       }
 
