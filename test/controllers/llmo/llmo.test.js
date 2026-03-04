@@ -4698,12 +4698,8 @@ describe('LlmoController', () => {
       [LOG_SOURCES.AEM_CS_FASTLY]: { cdnRoutingUrl: 'https://internal-cdn.example.com' },
     });
 
-    function mockRequestWithPromiseToken(token = FAKE_PROMISE_TOKEN) {
-      return {
-        headers: {
-          get: (name) => (name === 'x-promise-token' ? token : null),
-        },
-      };
+    function mockHeadersWithPromiseToken(token = FAKE_PROMISE_TOKEN) {
+      return { 'x-promise-token': token };
     }
 
     beforeEach(() => {
@@ -4711,7 +4707,7 @@ describe('LlmoController', () => {
         ...mockContext,
         params: { siteId: validSiteId },
         data: { cdnType: LOG_SOURCES.AEM_CS_FASTLY },
-        request: mockRequestWithPromiseToken(),
+        pathInfo: { headers: mockHeadersWithPromiseToken() },
       };
       mockDataAccess.Site.findById.resetBehavior();
       mockDataAccess.Site.findById.resolves(mockSite);
@@ -4736,7 +4732,7 @@ describe('LlmoController', () => {
 
     it('returns 400 when x-promise-token header is missing', async () => {
       enableEdgeContext.data = { cdnType: LOG_SOURCES.AEM_CS_FASTLY };
-      enableEdgeContext.request = mockRequestWithPromiseToken('');
+      enableEdgeContext.pathInfo = { headers: mockHeadersWithPromiseToken('') };
       enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
       const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
       expect(result.status).to.equal(400);
@@ -4745,7 +4741,7 @@ describe('LlmoController', () => {
 
     it('returns 400 when x-promise-token header is undefined (null/undefined branch)', async () => {
       enableEdgeContext.data = { cdnType: LOG_SOURCES.AEM_CS_FASTLY };
-      enableEdgeContext.request = { headers: { get: () => undefined } };
+      enableEdgeContext.pathInfo = { headers: {} };
       enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
       const result = await controller.updateEdgeOptimizeCDNRouting(enableEdgeContext);
       expect(result.status).to.equal(400);
@@ -4761,7 +4757,7 @@ describe('LlmoController', () => {
     });
 
     it('returns 400 when context.data is undefined and no promise token in header', async () => {
-      const ctxNoData = { ...enableEdgeContext, data: undefined, request: mockRequestWithPromiseToken('') };
+      const ctxNoData = { ...enableEdgeContext, data: undefined, pathInfo: { headers: mockHeadersWithPromiseToken('') } };
       ctxNoData.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
       const result = await controller.updateEdgeOptimizeCDNRouting(ctxNoData);
       expect(result.status).to.equal(400);
@@ -4805,6 +4801,21 @@ describe('LlmoController', () => {
         .updateEdgeOptimizeCDNRouting(enableEdgeContext);
       expect(result.status).to.equal(403);
       expect((await result.json()).message).to.equal('User does not have access to this site');
+    });
+
+    it('returns 403 when user is not LLMO administrator', async () => {
+      const LlmoControllerNoLLMOAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': {
+          default: createMockAccessControlUtil(true, true, false),
+        },
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        ...getCommonMocks(),
+      });
+      const controllerNoLLMOAdmin = LlmoControllerNoLLMOAdmin(mockContext);
+      enableEdgeContext.env = { ENV: 'prod', EDGE_OPTIMIZE_ROUTING_CONFIG: routingConfigFastly };
+      const result = await controllerNoLLMOAdmin.updateEdgeOptimizeCDNRouting(enableEdgeContext);
+      expect(result.status).to.equal(403);
+      expect((await result.json()).message).to.equal('Only LLMO administrators can update edge optimize routing');
     });
 
     it('returns 401 when exchangePromiseToken fails', async () => {
