@@ -271,6 +271,7 @@ describe('getRouteHandlers', () => {
     offboardCustomer: () => null,
     queryFiles: () => null,
     getLlmoRationale: () => null,
+    getBrandClaims: () => null,
     createOrUpdateEdgeConfig: () => null,
     getEdgeConfig: () => null,
     checkEdgeOptimizeStatus: () => null,
@@ -665,6 +666,7 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/llmo/cdn-logs-bucket-config',
       'GET /sites/:siteId/llmo/global-sheet-data/:configName',
       'GET /sites/:siteId/llmo/rationale',
+      'GET /sites/:siteId/llmo/brand-claims',
       'GET /sites/:siteId/url-store',
       'GET /sites/:siteId/url-store/by-audit/:auditType',
       'GET /sites/:siteId/url-store/:base64Url',
@@ -908,6 +910,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/llmo/global-sheet-data/:configName'].paramNames).to.deep.equal(['siteId', 'configName']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/rationale'].handler).to.equal(mockLlmoController.getLlmoRationale);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/rationale'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/brand-claims'].handler).to.equal(mockLlmoController.getBrandClaims);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/brand-claims'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:dataSource'].handler).to.equal(mockLlmoController.queryLlmoSheetData);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:dataSource'].paramNames).to.deep.equal(['siteId', 'dataSource']);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource'].handler).to.equal(mockLlmoController.queryLlmoSheetData);
