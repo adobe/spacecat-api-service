@@ -460,6 +460,8 @@ paths:
     $ref: './llmo-api.yaml#/llmo-offboard'
   /sites/{siteId}/llmo/opportunities-reviewed:
     $ref: './llmo-api.yaml#/llmo-opportunities-reviewed'
+  /sites/{siteId}/llmo/brand-claims:
+    $ref: './llmo-api.yaml#/llmo-brand-claims'
   /sites/{siteId}/llmo/edge-optimize-config:
     $ref: './llmo-api.yaml#/site-llmo-edge-optimize-config'
   /sites/{siteId}/llmo/edge-optimize-status:

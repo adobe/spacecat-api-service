@@ -3509,6 +3509,103 @@ describe('LlmoController', () => {
     });
   });
 
+  describe('getBrandClaims', () => {
+    let brandClaimsContext;
+    let mockGetSignedUrl;
+
+    beforeEach(() => {
+      mockGetSignedUrl = sinon.stub().resolves('https://s3.amazonaws.com/presigned-url');
+
+      brandClaimsContext = {
+        ...mockContext,
+        params: {
+          siteId: TEST_SITE_ID,
+        },
+        env: {
+          ...mockEnv,
+          ENV: 'dev',
+        },
+        s3: {
+          s3Client: {},
+          getSignedUrl: mockGetSignedUrl,
+          GetObjectCommand: function MockGetObjectCommand(params) {
+            this.params = params;
+          },
+        },
+        data: {},
+      };
+    });
+
+    it('should return presigned URL for default model', async () => {
+      const result = await controller.getBrandClaims(brandClaimsContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.siteId).to.equal(TEST_SITE_ID);
+      expect(responseBody.model).to.equal('default');
+      expect(responseBody.presignedUrl).to.equal('https://s3.amazonaws.com/presigned-url');
+      expect(responseBody.expiresAt).to.be.a('string');
+
+      const commandArg = mockGetSignedUrl.getCall(0).args[1];
+      expect(commandArg.params.Bucket).to.equal('spacecat-dev-mystique-assets');
+      expect(commandArg.params.Key).to.equal(`brand_claims/${TEST_SITE_ID}/data.json.gz`);
+    });
+
+    it('should return presigned URL for specific model', async () => {
+      const context = {
+        ...brandClaimsContext,
+        data: { model: 'gpt-4.1' },
+      };
+
+      const result = await controller.getBrandClaims(context);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.model).to.equal('gpt-4.1');
+
+      const commandArg = mockGetSignedUrl.getCall(0).args[1];
+      expect(commandArg.params.Key).to.equal(`brand_claims/${TEST_SITE_ID}/gpt-4.1.json.gz`);
+    });
+
+    it('should return 400 when LLMO access validation fails', async () => {
+      const controllerDenied = controllerWithAccessDenied(mockContext);
+      const result = await controllerDenied.getBrandClaims(brandClaimsContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
+
+      expect(mockLog.error).to.have.been.calledWith(
+        `Error getting brand claims for site ${TEST_SITE_ID}: Only users belonging to the organization can view its sites`,
+      );
+    });
+
+    it('should return 400 when S3 is not configured', async () => {
+      const contextWithoutS3 = {
+        ...brandClaimsContext,
+        s3: null,
+      };
+
+      const result = await controller.getBrandClaims(contextWithoutS3);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('S3 storage is not configured for this environment');
+    });
+
+    it('should return 404 when S3 key not found', async () => {
+      const noSuchKeyError = new Error('The specified key does not exist');
+      noSuchKeyError.name = 'NoSuchKey';
+      mockGetSignedUrl.rejects(noSuchKeyError);
+
+      const result = await controller.getBrandClaims(brandClaimsContext);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal(`Brand claims data not found for site ${TEST_SITE_ID}`);
+    });
+  });
+
   describe('createOrUpdateEdgeConfig', () => {
     let edgeConfigContext;
 

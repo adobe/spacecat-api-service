@@ -53,6 +53,7 @@ import {
 import { queryLlmoFiles } from './llmo-query-handler.js';
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
+import { handleBrandClaims } from './brand-claims.js';
 import { notifyStrategyChanges } from '../../support/opportunity-workspace-notifications.js';
 
 const { readConfig, writeConfig } = llmo;
@@ -955,6 +956,22 @@ function LlmoController(ctx) {
     }
   };
 
+  // Handles requests to the brand claims endpoint
+  const getBrandClaims = async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+    try {
+      // Validate site and LLMO access
+      await getSiteAndValidateLlmo(context);
+
+      // Delegate to the brand claims handler for the actual processing
+      return await handleBrandClaims(context);
+    } catch (error) {
+      log.error(`Error getting brand claims for site ${siteId}: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
   /**
    * POST /sites/{siteId}/llmo/edge-optimize-config
    * Creates or updates Tokowaka edge optimization configuration
@@ -1521,6 +1538,7 @@ function LlmoController(ctx) {
     offboardCustomer,
     queryFiles,
     getLlmoRationale,
+    getBrandClaims,
     createOrUpdateEdgeConfig,
     getEdgeConfig,
     getStrategy,
