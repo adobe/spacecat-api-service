@@ -43,12 +43,12 @@ const VALIDATION_ERROR_NAME = 'ValidationError';
 /**
  * Suggestions controller.
  * @param {object} ctx - Context of the request.
- * @param {SQS} sqs - SQS client.
+ * @param {SNS} sns - SNS client.
  * @param env
  * @returns {object} Suggestions controller.
  * @constructor
  */
-function SuggestionsController(ctx, sqs, env) {
+function SuggestionsController(ctx, sns, env) {
   if (!isNonEmptyObject(ctx)) {
     throw new Error('Context required');
   }
@@ -920,15 +920,16 @@ function SuggestionsController(ctx, sqs, env) {
       },
     };
     response.suggestions.sort((a, b) => a.index - b.index);
-    const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
+    const { AUTOFIX_JOBS_TOPIC_NAME: topicName } = env;
 
     if (shouldGroupSuggestionsForAutofix(opportunity.getType())) {
       await Promise.all(
         suggestionGroups.map(({ groupedSuggestions, url }) => sendAutofixMessage(
-          sqs,
-          queueUrl,
+          sns,
+          topicName,
           siteId,
           opportunityId,
+          opportunity.getType(),
           groupedSuggestions.map((s) => s.getId()),
           promiseTokenResponse,
           variations,
@@ -939,10 +940,11 @@ function SuggestionsController(ctx, sqs, env) {
       );
     } else {
       await sendAutofixMessage(
-        sqs,
-        queueUrl,
+        sns,
+        topicName,
         siteId,
         opportunityId,
+        opportunity.getType(),
         succeededSuggestions.map((s) => s.getId()),
         promiseTokenResponse,
         variations,

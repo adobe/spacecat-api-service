@@ -201,18 +201,20 @@ export const triggerTrafficAnalysisBackfill = async (
 };
 
 export const sendAutofixMessage = async (
-  sqs,
-  queueUrl,
+  sns,
+  topicName,
   siteId,
   opportunityId,
+  opportunityType,
   suggestionIds,
   promiseToken,
   variations,
   action,
   customData,
   { url } = {},
-) => sqs.sendMessage(queueUrl, {
+) => sns.publish(topicName, {
   opportunityId,
+  opportunityType,
   siteId,
   suggestionIds,
   promiseToken,
