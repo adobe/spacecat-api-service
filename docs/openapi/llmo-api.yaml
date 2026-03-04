@@ -1403,7 +1403,7 @@ llmo-brand-claims:
               properties:
                 error:
                   type: string
-                  example: 'S3 storage is not configured for this environment'
+                  example: 'S3 bucket is not configured for this environment'
       '401':
         $ref: './responses.yaml#/401'
       '404':

@@ -23,7 +23,7 @@ import {
  * @returns {Promise<Response>} The brand claims presigned URL response
  */
 export async function handleBrandClaims(context) {
-  const { log, s3, env } = context;
+  const { log, s3 } = context;
   const { siteId } = context.params;
   const { model } = context.data;
 
@@ -31,7 +31,11 @@ export async function handleBrandClaims(context) {
     return badRequest('S3 storage is not configured for this environment');
   }
 
-  const bucketName = `spacecat-${env.ENV}-mystique-assets`;
+  const bucketName = s3.s3Bucket;
+  if (!bucketName) {
+    return badRequest('S3 bucket is not configured for this environment');
+  }
+
   const s3Key = model
     ? `brand_claims/${siteId}/${model}.json.gz`
     : `brand_claims/${siteId}/data.json.gz`;

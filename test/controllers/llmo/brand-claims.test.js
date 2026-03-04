@@ -67,6 +67,7 @@ describe('handleBrandClaims', () => {
       env: { ENV: 'dev' },
       s3: {
         s3Client: mockS3Client,
+        s3Bucket: 'test-bucket',
         getSignedUrl: mockGetSignedUrl,
         GetObjectCommand: function MockGetObjectCommand(params) {
           this.params = params;
@@ -87,7 +88,7 @@ describe('handleBrandClaims', () => {
 
     // Verify S3 key uses default path
     const commandArg = mockGetSignedUrl.getCall(0).args[1];
-    expect(commandArg.params.Bucket).to.equal('spacecat-dev-mystique-assets');
+    expect(commandArg.params.Bucket).to.equal('test-bucket');
     expect(commandArg.params.Key).to.equal(`brand_claims/${TEST_SITE_ID}/data.json.gz`);
 
     // Verify expiresIn is 1 hour
@@ -140,6 +141,22 @@ describe('handleBrandClaims', () => {
     expect(body.message).to.equal('S3 storage is not configured for this environment');
   });
 
+  it('should return 400 when S3 bucket is not configured', async () => {
+    const context = {
+      ...baseContext,
+      s3: {
+        ...baseContext.s3,
+        s3Bucket: null,
+      },
+    };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    const body = await result.json();
+    expect(body.message).to.equal('S3 bucket is not configured for this environment');
+  });
+
   it('should return 404 when S3 key not found (NoSuchKey)', async () => {
     const noSuchKeyError = new Error('The specified key does not exist');
     noSuchKeyError.name = 'NoSuchKey';
@@ -165,10 +182,10 @@ describe('handleBrandClaims', () => {
 
     expect(result.status).to.equal(400);
     const body = await result.json();
-    expect(body.message).to.equal('Storage bucket not found: spacecat-dev-mystique-assets');
+    expect(body.message).to.equal('Storage bucket not found: test-bucket');
 
     expect(mockLog.error).to.have.been.calledWith(
-      'S3 bucket spacecat-dev-mystique-assets not found',
+      'S3 bucket test-bucket not found',
     );
   });
 

@@ -3527,6 +3527,7 @@ describe('LlmoController', () => {
         },
         s3: {
           s3Client: {},
+          s3Bucket: 'test-bucket',
           getSignedUrl: mockGetSignedUrl,
           GetObjectCommand: function MockGetObjectCommand(params) {
             this.params = params;
@@ -3547,7 +3548,7 @@ describe('LlmoController', () => {
       expect(responseBody.expiresAt).to.be.a('string');
 
       const commandArg = mockGetSignedUrl.getCall(0).args[1];
-      expect(commandArg.params.Bucket).to.equal('spacecat-dev-mystique-assets');
+      expect(commandArg.params.Bucket).to.equal('test-bucket');
       expect(commandArg.params.Key).to.equal(`brand_claims/${TEST_SITE_ID}/data.json.gz`);
     });
 
