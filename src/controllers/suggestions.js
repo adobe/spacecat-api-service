@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 import {
+  accepted,
   badRequest,
   createResponse,
   forbidden,
@@ -787,19 +788,18 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('No updates provided');
     }
     const {
-      suggestionIds, variations, action, customData, url: requestUrl,
+      suggestionIds, variations, action, customData, url: requestUrl, precheckOnly, pages,
     } = context.data;
     const isAssessAction = action === 'assess';
+    const isAssessUrlsAction = action === 'assess-urls';
 
-    if (!isArray(suggestionIds)) {
-      return badRequest('Request body must be an array of suggestionIds');
-    }
-    if (variations && !isArray(variations)) {
-      return badRequest('variations must be an array');
+    if (precheckOnly !== undefined && typeof precheckOnly !== 'boolean') {
+      return badRequest('precheckOnly must be a boolean');
     }
     if (action !== undefined && !hasText(action)) {
       return badRequest('action cannot be empty');
     }
+
     const site = await Site.findById(siteId);
     if (!site) {
       return notFound('Site not found');
@@ -813,6 +813,34 @@ function SuggestionsController(ctx, sqs, env) {
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
     }
+
+    // assess-urls action: validate pages and send worker message, return 202
+    if (isAssessUrlsAction) {
+      if (!isNonEmptyArray(pages)) {
+        return badRequest('Request body must contain a non-empty array of pages (URLs) when action is assess-urls');
+      }
+      const configuration = await Configuration.findLatest();
+      if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-auto-fix`, site)) {
+        return badRequest(`Handler is not enabled for site ${site.getId()} autofix type ${opportunity.getType()}`);
+      }
+      const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
+      await sqs.sendMessage(queueUrl, {
+        siteId,
+        action: 'assess-urls',
+        pages,
+        ...(precheckOnly === true && { precheckOnly: true }),
+      });
+      return accepted({ message: 'Assess-urls job queued', siteId, pagesCount: pages.length });
+    }
+
+    // suggestion-based flow (assess, fix, etc.)
+    if (!isArray(suggestionIds)) {
+      return badRequest('Request body must be an array of suggestionIds');
+    }
+    if (variations && !isArray(variations)) {
+      return badRequest('variations must be an array');
+    }
+
     const configuration = await Configuration.findLatest();
     if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-auto-fix`, site)) {
       return badRequest(`Handler is not enabled for site ${site.getId()} autofix type ${opportunity.getType()}`);
@@ -894,13 +922,16 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     let promiseTokenResponse;
-    try {
-      promiseTokenResponse = await getIMSPromiseToken(context);
-    } catch (e) {
-      if (e instanceof ErrorWithStatusCode) {
-        return badRequest(e.message);
+    const skipPromiseToken = isAssessAction && precheckOnly === true;
+    if (!skipPromiseToken) {
+      try {
+        promiseTokenResponse = await getIMSPromiseToken(context);
+      } catch (e) {
+        if (e instanceof ErrorWithStatusCode) {
+          return badRequest(e.message);
+        }
+        return createResponse({ message: 'Error getting promise token' }, 500);
       }
-      return createResponse({ message: 'Error getting promise token' }, 500);
     }
 
     const response = {
@@ -922,6 +953,10 @@ function SuggestionsController(ctx, sqs, env) {
     response.suggestions.sort((a, b) => a.index - b.index);
     const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
 
+    const autofixOptions = (urlParam) => ({
+      url: urlParam,
+      ...(precheckOnly === true && { precheckOnly: true }),
+    });
     if (shouldGroupSuggestionsForAutofix(opportunity.getType())) {
       await Promise.all(
         suggestionGroups.map(({ groupedSuggestions, url }) => sendAutofixMessage(
@@ -934,7 +969,7 @@ function SuggestionsController(ctx, sqs, env) {
           variations,
           action,
           customData,
-          { url },
+          autofixOptions(url),
         )),
       );
     } else {
@@ -948,7 +983,7 @@ function SuggestionsController(ctx, sqs, env) {
         variations,
         action,
         customData,
-        { url: requestUrl },
+        autofixOptions(requestUrl),
       );
     }
 

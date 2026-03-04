@@ -516,7 +516,10 @@ site-opportunity-suggestions-auto-fix:
       Triggers the autofix worker for the given suggestions. By default, suggestions are
       transitioned to IN_PROGRESS status before the message is queued. When `action` is set
       to `"assess"`, suggestions remain in their current status (no IN_PROGRESS transition)
-      and the worker performs a read-only fixability assessment instead.
+      and the worker performs a read-only fixability assessment instead. When `precheckOnly`
+      is true (for assess or assess-urls), the worker runs only checks that do not require
+      AEM CS access and does not need a valid promise token; when omitted or false, behavior
+      is unchanged (full assessment with AEM when possible).
     tags:
       - opportunity-suggestions
     requestBody:
@@ -535,13 +538,48 @@ site-opportunity-suggestions-auto-fix:
                   description: |
                     Optional action to forward to the autofix worker. When set to `"assess"`,
                     the suggestion status transition to IN_PROGRESS is skipped and the worker
-                    performs a read-only fixability assessment.
+                    performs a read-only fixability assessment. When set to `"assess-urls"`,
+                    the body must include `pages` (array of URLs) and the worker assesses those
+                    URLs for fixability; suggestionIds is not used.
+                pages:
+                  type: array
+                  items:
+                    type: string
+                    format: uri
+                  description: |
+                    Required when action is `"assess-urls"`. Page URLs to assess for fixability.
+                precheckOnly:
+                  type: boolean
+                  description: |
+                    Optional. When true, the worker runs only checks that do not require AEM CS
+                    access (no bearer token). For action `"assess"`, a valid promise token is not
+                    required when precheckOnly is true. When omitted or false, full assessment with
+                    AEM when possible.
                 customData:
                   description: Additional custom data to forward to the autofix worker
               required:
                 - suggestionIds
+              description: |
+                For action `"assess-urls"`, `pages` is required and `suggestionIds` is not used.
+                For all other actions, `suggestionIds` is required.
 
     responses:
+      '202':
+        description: |
+          Returned when action is `"assess-urls"`. Assess-urls job has been queued.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: Assess-urls job queued
+                siteId:
+                  $ref: './schemas.yaml#/Id'
+                pagesCount:
+                  type: integer
+                  description: Number of page URLs in the job
       '207':
         description: |
           A list of suggestions that are sent to autofix,

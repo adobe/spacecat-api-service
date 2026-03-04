@@ -2686,6 +2686,45 @@ describe('Suggestions Controller', () => {
       expect(allSentIds).to.have.members([SUGGESTION_IDS[0], SUGGESTION_IDS[1]]);
     });
 
+    it('forwards precheckOnly to worker when action is assess', async () => {
+      opportunity.getType = sandbox.stub().returns('alt-text');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(altTextSuggs[0])],
+      );
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          action: 'assess',
+          precheckOnly: true,
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload).to.have.property('precheckOnly', true);
+      expect(payload).to.have.property('action', 'assess');
+    });
+
+    it('returns 400 when precheckOnly is not a boolean', async () => {
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          action: 'assess',
+          precheckOnly: 'yes',
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'precheckOnly must be a boolean');
+    });
+
     it('triggers autofixSuggestion for form-accessibility (non-grouped)', async () => {
       opportunity.getType = sandbox.stub().returns('form-accessibility');
       mockSuggestion.allByOpportunityId.resolves(
@@ -3119,6 +3158,71 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[0].suggestion).to.exist;
       expect(bulkPatchResponse.suggestions[1].suggestion).to.not.exist;
       expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'Suggestion is not in NEW status');
+    });
+  });
+
+  describe('auto-fix with action assess-urls', () => {
+    let assessUrlsConfig;
+    beforeEach(() => {
+      opportunity.getType = sandbox.stub().returns('alt-text');
+      assessUrlsConfig = { isHandlerEnabledForSite: sandbox.stub().returns(true) };
+      mockConfiguration.findLatest.resolves(assessUrlsConfig);
+    });
+
+    it('queues assess-urls job and returns 202', async () => {
+      const pages = ['https://example.com/page1', 'https://example.com/page2'];
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { action: 'assess-urls', pages },
+        ...context,
+      });
+
+      expect(response.status).to.equal(202);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Assess-urls job queued');
+      expect(body).to.have.property('siteId', SITE_ID);
+      expect(body).to.have.property('pagesCount', 2);
+
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload).to.have.property('siteId', SITE_ID);
+      expect(payload).to.have.property('action', 'assess-urls');
+      expect(payload).to.deep.include({ pages });
+    });
+
+    it('forwards precheckOnly to worker when action is assess-urls', async () => {
+      const pages = ['https://example.com/page1'];
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { action: 'assess-urls', pages, precheckOnly: true },
+        ...context,
+      });
+
+      expect(response.status).to.equal(202);
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload).to.have.property('precheckOnly', true);
+    });
+
+    it('returns 400 when action is assess-urls but pages is missing', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { action: 'assess-urls' },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Request body must contain a non-empty array of pages (URLs) when action is assess-urls');
+    });
+
+    it('returns 400 when action is assess-urls but pages is empty', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { action: 'assess-urls', pages: [] },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Request body must contain a non-empty array of pages (URLs) when action is assess-urls');
     });
   });
 
