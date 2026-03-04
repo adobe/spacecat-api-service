@@ -145,6 +145,7 @@ describe('Suggestions Controller', () => {
 
   const suggestionsFunctions = [
     'autofixSuggestions',
+    'autofixSuggestionsV2',
     'createSuggestions',
     'getAllForOpportunity',
     'getAllForOpportunityPaged',
@@ -3295,6 +3296,361 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(500);
       const error = await response.json();
       expect(error).to.have.property('message', 'Error getting promise token');
+    });
+  });
+
+  describe('autofixSuggestionsV2', () => {
+    afterEach(() => {
+      sandbox.restore();
+    });
+
+    const requestWithPromiseToken = (token) => ({
+      request: {
+        headers: {
+          get: (name) => (name?.toLowerCase?.() === 'x-promise-token' ? token : null),
+        },
+      },
+    });
+
+    it('returns 400 when x-promise-token header is missing', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves(
+        [mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' })],
+      );
+
+      const response = await suggestionsController.autofixSuggestionsV2({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'x-promise-token header is required and must be a non-empty string');
+    });
+
+    it('returns 400 when x-promise-token header is empty', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves(
+        [mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' })],
+      );
+
+      const response = await suggestionsController.autofixSuggestionsV2({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        request: { headers: { get: () => '' } },
+        ...context,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'x-promise-token header is required and must be a non-empty string');
+    });
+
+    it('returns 400 when request headers are absent', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves(
+        [mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' })],
+      );
+
+      const response = await suggestionsController.autofixSuggestionsV2({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        request: {},
+        ...context,
+      });
+
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'x-promise-token header is required and must be a non-empty string');
+    });
+
+    it('triggers autofix with promise token from x-promise-token header', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0]), mockSuggestionEntity(suggs[2])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsController.autofixSuggestionsV2({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        ...requestWithPromiseToken('myPromiseToken123'),
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse.metadata).to.have.property('total', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('success', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('failed', 0);
+
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const sqsCallArgs = mockSqs.sendMessage.firstCall.args;
+      expect(sqsCallArgs[1]).to.have.property('promiseToken');
+      expect(sqsCallArgs[1].promiseToken).to.deep.equal({ promise_token: 'myPromiseToken123' });
+    });
+
+    it('extracts promise token when passed via x-promise-token header', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsController.autofixSuggestionsV2({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...requestWithPromiseToken('singleToken'),
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const sqsCallArgs = mockSqs.sendMessage.firstCall.args;
+      expect(sqsCallArgs[1].promiseToken).to.deep.equal({ promise_token: 'singleToken' });
+    });
+
+    it('returns 400 for bad siteId', async () => {
+      const response = await suggestionsController.autofixSuggestionsV2({
+        params: { opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Site ID required');
+    });
+
+    it('returns 400 for bad opportunityId', async () => {
+      const response = await suggestionsController.autofixSuggestionsV2({
+        params: { siteId: SITE_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Opportunity ID required');
+    });
+
+    it('returns 400 when no data is provided', async () => {
+      const response = await suggestionsController.autofixSuggestionsV2({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'No updates provided');
+    });
+
+    it('returns 400 when suggestionIds is not an array', async () => {
+      const response = await suggestionsController.autofixSuggestionsV2({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: 'not-an-array' },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Request body must be an array of suggestionIds');
+    });
+
+    it('returns 400 when variations is not an array', async () => {
+      const response = await suggestionsController.autofixSuggestionsV2({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]], variations: 'not-an-array' },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'variations must be an array');
+    });
+
+    it('returns 400 when action is empty', async () => {
+      const response = await suggestionsController.autofixSuggestionsV2({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]], action: '' },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'action cannot be empty');
+    });
+
+    it('returns 404 when site not found', async () => {
+      const response = await suggestionsController.autofixSuggestionsV2({
+        params: { siteId: SITE_ID_NOT_FOUND, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+      expect(response.status).to.equal(404);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Site not found');
+    });
+
+    it('returns 404 when opportunity not found', async () => {
+      const response = await suggestionsController.autofixSuggestionsV2({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID_NOT_FOUND },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+      expect(response.status).to.equal(404);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Opportunity not found');
+    });
+
+    it('returns 400 when handler is not enabled for site', async () => {
+      const response = await suggestionsController.autofixSuggestionsV2({
+        params: { siteId: SITE_ID_NOT_ENABLED, opportunityId: OPPORTUNITY_ID_NOT_ENABLED },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error.message).to.include('Handler is not enabled for site');
+    });
+
+    it('returns 207 with failed suggestions when suggestion not found', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggs[2])]);
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
+
+      const response = await suggestionsController.autofixSuggestionsV2({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: ['not-found', SUGGESTION_IDS[2]] },
+        ...requestWithPromiseToken('tok123'),
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata).to.have.property('total', 2);
+      expect(body.metadata).to.have.property('success', 1);
+      expect(body.metadata).to.have.property('failed', 1);
+      expect(body.suggestions[0]).to.have.property('statusCode', 404);
+    });
+
+    it('returns 207 with failed suggestions when suggestion is not in NEW status', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggs[1])]);
+
+      const response = await suggestionsController.autofixSuggestionsV2({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[1]] },
+        ...requestWithPromiseToken('tok123'),
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata).to.have.property('failed', 1);
+      expect(body.suggestions[0]).to.have.property('statusCode', 400);
+      expect(body.suggestions[0]).to.have.property('message', 'Suggestion is not in NEW status');
+    });
+
+    it('does not call bulkUpdateStatus when no valid suggestions exist', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves([]);
+
+      const response = await suggestionsController.autofixSuggestionsV2({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: ['not-found'] },
+        ...requestWithPromiseToken('tok123'),
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSuggestion.bulkUpdateStatus).to.not.have.been.called;
+    });
+
+    it('returns 403 when user does not have access', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
+
+      const response = await suggestionsController.autofixSuggestionsV2({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        ...requestWithPromiseToken('tok123'),
+        ...context,
+      });
+
+      expect(response.status).to.equal(403);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'User does not belong to the organization or does not have sufficient permissions');
+    });
+
+    it('sends ungrouped autofix message for broken-backlinks type', async () => {
+      opportunity.getType = sandbox.stub().returns('broken-backlinks');
+      mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggs[0]), mockSuggestionEntity(suggs[2])]);
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsController.autofixSuggestionsV2({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        ...requestWithPromiseToken('tok123'),
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata).to.have.property('success', 2);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const sqsCallArgs = mockSqs.sendMessage.firstCall.args;
+      expect(sqsCallArgs[1]).to.have.property('promiseToken');
+      expect(sqsCallArgs[1].promiseToken).to.deep.equal({ promise_token: 'tok123' });
+    });
+
+    it('groups suggestions by URL for alt-text opportunity type', async () => {
+      opportunity.getType = sandbox.stub().returns('alt-text');
+      mockSuggestion.allByOpportunityId.resolves([
+        mockSuggestionEntity(altTextSuggs[0]),
+        mockSuggestionEntity(altTextSuggs[1]),
+      ]);
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...altTextSuggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...altTextSuggs[1], status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsController.autofixSuggestionsV2({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
+        ...requestWithPromiseToken('tok123'),
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata).to.have.property('success', 2);
+      expect(mockSqs.sendMessage).to.have.been.called;
     });
   });
 
