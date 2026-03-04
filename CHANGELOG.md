@@ -1,3 +1,10 @@
+## [1.333.1](https://github.com/adobe/spacecat-api-service/compare/v1.333.0...v1.333.1) (2026-03-04)
+
+
+### Bug Fixes
+
+* exclude large non-customer orgs from getAll sites to avoid 413 ([#1906](https://github.com/adobe/spacecat-api-service/issues/1906)) ([2641b52](https://github.com/adobe/spacecat-api-service/commit/2641b52d78e816aa33a4d8076609d4d34b0c68d0))
+
 # [1.333.0](https://github.com/adobe/spacecat-api-service/compare/v1.332.0...v1.333.0) (2026-03-04)
 
 
