@@ -1,3 +1,17 @@
+# [1.331.0](https://github.com/adobe/spacecat-api-service/compare/v1.330.4...v1.331.0) (2026-03-04)
+
+
+### Features
+
+* add brand claims presigned URL endpoint ([#1902](https://github.com/adobe/spacecat-api-service/issues/1902)) ([ee01d59](https://github.com/adobe/spacecat-api-service/commit/ee01d59b21c48474db9290150f2b04ccec878731))
+
+## [1.330.4](https://github.com/adobe/spacecat-api-service/compare/v1.330.3...v1.330.4) (2026-03-03)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v3.6.1 ([#1897](https://github.com/adobe/spacecat-api-service/issues/1897)) ([6b35dcc](https://github.com/adobe/spacecat-api-service/commit/6b35dcc58cb78f3d73e6c59840b3d1c1ec1a45c2))
+
 ## [1.330.3](https://github.com/adobe/spacecat-api-service/compare/v1.330.2...v1.330.3) (2026-03-03)
 
 
