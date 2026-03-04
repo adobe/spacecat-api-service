@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { createHash } from 'crypto';
 import { buildAggregationKeyFromSuggestion } from '@adobe/spacecat-shared-utils';
 import { Suggestion } from '@adobe/spacecat-shared-data-access';
 
@@ -17,7 +18,7 @@ import { Suggestion } from '@adobe/spacecat-shared-data-access';
  * Valid projection views for suggestions.
  * @type {string[]}
  */
-export const SUGGESTION_VIEWS = ['minimal', 'summary', 'full'];
+export const SUGGESTION_VIEWS = ['minimal', 'summary', 'full', 'full-dedupe'];
 
 /**
  * Extracts minimal data fields from suggestion data using schema-driven projection.
@@ -112,3 +113,30 @@ export const SuggestionDto = {
     };
   },
 };
+
+/**
+ * Extracts patchContent from serialized suggestions into a deduplicated map.
+ * Each suggestion's data.patchContent is replaced with a short content hash
+ * that serves as a key into the returned map.
+ *
+ * @param {object[]} suggestions - Array of serialized suggestion JSON objects (mutated in place).
+ * @returns {object|null} Map of hash → patchContent, or null if no patches found.
+ */
+export function extractCodePatchMap(suggestions) {
+  const codePatchMap = {};
+  let hasPatches = false;
+
+  for (const suggestion of suggestions) {
+    const content = suggestion.data?.patchContent;
+    if (content != null) {
+      const hash = createHash('sha256').update(String(content)).digest('hex').substring(0, 12);
+      if (!codePatchMap[hash]) {
+        codePatchMap[hash] = content;
+      }
+      suggestion.data.patchContent = hash;
+      hasPatches = true;
+    }
+  }
+
+  return hasPatches ? codePatchMap : null;
+}
