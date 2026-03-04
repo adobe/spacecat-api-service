@@ -1,3 +1,10 @@
+# [1.333.0](https://github.com/adobe/spacecat-api-service/compare/v1.332.0...v1.333.0) (2026-03-04)
+
+
+### Features
+
+* brokenbacklink detection ([#1893](https://github.com/adobe/spacecat-api-service/issues/1893)) ([d39d0f7](https://github.com/adobe/spacecat-api-service/commit/d39d0f7ecb2c759bd719231fa30ae169434baa84))
+
 # [1.332.0](https://github.com/adobe/spacecat-api-service/compare/v1.331.1...v1.332.0) (2026-03-04)
 
 
