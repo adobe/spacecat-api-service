@@ -19,7 +19,7 @@ import esmock from 'esmock';
 use(sinonChai);
 
 const TEST_SITE_ID = 'test-site-id';
-const TEST_PRESIGNED_URL = 'https://s3.amazonaws.com/test-bucket/brand_claims/test-site-id/data.json.gz?X-Amz-Signature=abc123';
+const TEST_PRESIGNED_URL = 'https://s3.amazonaws.com/test-bucket/brand_claims/llmo/test-site-id/data.json.gz?X-Amz-Signature=abc123';
 
 describe('handleBrandClaims', () => {
   let handleBrandClaims;
@@ -89,7 +89,7 @@ describe('handleBrandClaims', () => {
     // Verify S3 key uses default path
     const commandArg = mockGetSignedUrl.getCall(0).args[1];
     expect(commandArg.params.Bucket).to.equal('test-bucket');
-    expect(commandArg.params.Key).to.equal(`brand_claims/${TEST_SITE_ID}/data.json.gz`);
+    expect(commandArg.params.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/data.json.gz`);
 
     // Verify expiresIn is 1 hour
     const options = mockGetSignedUrl.getCall(0).args[2];
@@ -112,7 +112,7 @@ describe('handleBrandClaims', () => {
 
     // Verify S3 key uses model-specific path
     const commandArg = mockGetSignedUrl.getCall(0).args[1];
-    expect(commandArg.params.Key).to.equal(`brand_claims/${TEST_SITE_ID}/gpt-4.1.json.gz`);
+    expect(commandArg.params.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/gpt-4.1.json.gz`);
   });
 
   it('should return 400 when S3 is not configured', async () => {
@@ -169,7 +169,7 @@ describe('handleBrandClaims', () => {
     expect(body.message).to.equal(`Brand claims data not found for site ${TEST_SITE_ID}`);
 
     expect(mockLog.warn).to.have.been.calledWith(
-      `Brand claims file not found for site ${TEST_SITE_ID} at brand_claims/${TEST_SITE_ID}/data.json.gz`,
+      `Brand claims file not found for site ${TEST_SITE_ID} at brand_claims/llmo/${TEST_SITE_ID}/data.json.gz`,
     );
   });
 
