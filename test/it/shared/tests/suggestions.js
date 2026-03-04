@@ -321,10 +321,8 @@ export default function suggestionTests(getHttpClient, resetData) {
         expect(res.status).to.equal(200);
         expectSuggestionDto(res.body);
         expect(res.body.status).to.equal('SKIPPED');
-        if (res.body.skipReason != null) {
-          expect(res.body.skipReason).to.equal('INACCURATE_OR_INCOMPLETE');
-          expect(res.body.skipDetail).to.equal('Data was outdated');
-        }
+        expect(res.body.skipReason).to.equal('INACCURATE_OR_INCOMPLETE');
+        expect(res.body.skipDetail).to.equal('Data was outdated');
       });
 
       it('user: returns 403 for denied site', async () => {
@@ -381,11 +379,10 @@ export default function suggestionTests(getHttpClient, resetData) {
         expect(res.body.metadata.success).to.equal(1);
         expect(res.body.suggestions[0].statusCode).to.equal(200);
         const updated = res.body.suggestions[0].suggestion;
-        if (updated) {
-          expect(updated.status).to.equal('SKIPPED');
-          expect(updated.skipReason).to.equal('ALREADY_IMPLEMENTED');
-          expect(updated.skipDetail).to.equal('Fix was applied manually');
-        }
+        expect(updated).to.be.an('object');
+        expect(updated.status).to.equal('SKIPPED');
+        expect(updated.skipReason).to.equal('ALREADY_IMPLEMENTED');
+        expect(updated.skipDetail).to.equal('Fix was applied manually');
       });
 
       it('user: returns 403 for denied site', async () => {

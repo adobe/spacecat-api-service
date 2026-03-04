@@ -123,6 +123,12 @@ function SuggestionsController(ctx, sqs, env) {
    */
   const validateSkipFields = (status, skipReason, skipDetail) => {
     if (status !== SuggestionModel.STATUSES.SKIPPED) {
+      if (skipReason != null || skipDetail != null) {
+        return {
+          valid: false,
+          error: 'skipReason and skipDetail can only be provided when status is SKIPPED',
+        };
+      }
       return { valid: true };
     }
     if (skipReason != null && skipReason !== '' && !SUGGESTION_SKIP_REASONS.includes(skipReason)) {
@@ -131,7 +137,13 @@ function SuggestionsController(ctx, sqs, env) {
         error: `Invalid skipReason. Must be one of: ${SUGGESTION_SKIP_REASONS.join(', ')}`,
       };
     }
-    if (skipDetail != null && typeof skipDetail === 'string' && skipDetail.length > SKIP_DETAIL_MAX_LENGTH) {
+    if (skipDetail != null && typeof skipDetail !== 'string') {
+      return {
+        valid: false,
+        error: 'skipDetail must be a string',
+      };
+    }
+    if (typeof skipDetail === 'string' && skipDetail.length > SKIP_DETAIL_MAX_LENGTH) {
       return {
         valid: false,
         error: `skipDetail must be at most ${SKIP_DETAIL_MAX_LENGTH} characters`,
@@ -604,6 +616,8 @@ function SuggestionsController(ctx, sqs, env) {
           if (suggestion.setSkipReason) {
             suggestion.setSkipReason(skipReason ?? null);
             suggestion.setSkipDetail(skipDetail ?? null);
+          } else {
+            context.log.warn('Suggestion model does not support skip fields (setSkipReason). Upgrade spacecat-shared-data-access.');
           }
         } else if (suggestion.setSkipReason) {
           suggestion.setSkipReason(null);
@@ -614,10 +628,14 @@ function SuggestionsController(ctx, sqs, env) {
         if (!valid) {
           return badRequest(error);
         }
-        if ((skipReason != null || skipDetail != null) && suggestion.setSkipReason) {
-          hasUpdates = true;
-          suggestion.setSkipReason(skipReason ?? null);
-          suggestion.setSkipDetail(skipDetail ?? null);
+        if ((skipReason != null || skipDetail != null)) {
+          if (suggestion.setSkipReason) {
+            hasUpdates = true;
+            suggestion.setSkipReason(skipReason ?? null);
+            suggestion.setSkipDetail(skipDetail ?? null);
+          } else {
+            context.log.warn('Suggestion model does not support skip fields (setSkipReason). Upgrade spacecat-shared-data-access.');
+          }
         }
       }
 
@@ -787,9 +805,13 @@ function SuggestionsController(ctx, sqs, env) {
           }
 
           suggestion.setStatus(status);
-          if (status === SuggestionModel.STATUSES.SKIPPED && suggestion.setSkipReason) {
-            suggestion.setSkipReason(skipReason ?? null);
-            suggestion.setSkipDetail(skipDetail ?? null);
+          if (status === SuggestionModel.STATUSES.SKIPPED) {
+            if (suggestion.setSkipReason) {
+              suggestion.setSkipReason(skipReason ?? null);
+              suggestion.setSkipDetail(skipDetail ?? null);
+            } else {
+              context.log.warn('Suggestion model does not support skip fields (setSkipReason). Upgrade spacecat-shared-data-access.');
+            }
           } else if (suggestion.setSkipReason) {
             suggestion.setSkipReason(null);
             suggestion.setSkipDetail(null);
@@ -797,12 +819,15 @@ function SuggestionsController(ctx, sqs, env) {
           suggestion.setUpdatedBy(profile.email);
         } else if (
           status === SuggestionModel.STATUSES.SKIPPED
-          && (skipReason !== undefined || skipDetail !== undefined)
-          && suggestion.setSkipReason
+          && (skipReason != null || skipDetail != null)
         ) {
-          suggestion.setSkipReason(skipReason ?? null);
-          suggestion.setSkipDetail(skipDetail ?? null);
-          suggestion.setUpdatedBy(profile.email);
+          if (suggestion.setSkipReason) {
+            suggestion.setSkipReason(skipReason ?? null);
+            suggestion.setSkipDetail(skipDetail ?? null);
+            suggestion.setUpdatedBy(profile.email);
+          } else {
+            context.log.warn('Suggestion model does not support skip fields (setSkipReason). Upgrade spacecat-shared-data-access.');
+          }
         } else {
           return {
             index,

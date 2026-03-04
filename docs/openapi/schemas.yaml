@@ -2949,13 +2949,6 @@ SuggestionMinimal:
     status:
       description: Status of this suggestion
       $ref: '#/SuggestionStatus'
-    skipReason:
-      description: Reason for skipping when status is SKIPPED
-      $ref: '#/SuggestionSkipReason'
-    skipDetail:
-      description: Optional detail for skip reason, max 500 characters
-      type: string
-      maxLength: 500
     data:
       type: object
       description: URL-related fields extracted from the full data object. Only present if any URL fields exist.

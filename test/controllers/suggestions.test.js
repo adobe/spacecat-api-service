@@ -203,6 +203,11 @@ describe('Suggestions Controller', () => {
           .withProfile({ is_admin: true, email: 'test@test.com' })
           .withAuthenticated(true),
       },
+      log: {
+        info: sandbox.stub(),
+        warn: sandbox.stub(),
+        error: sandbox.stub(),
+      },
     };
     apikeyAuthAttributes = {
       attributes: {
@@ -2225,7 +2230,7 @@ describe('Suggestions Controller', () => {
     expect(suggs[0].skipDetail).to.equal('Only updating detail');
   });
 
-  it('patches a suggestion skips setting skip fields when already SKIPPED and setSkipReason unavailable', async () => {
+  it('patches a suggestion logs warning when already SKIPPED and setSkipReason unavailable', async () => {
     suggs[0].status = 'SKIPPED';
     const entity = mockSuggestionEntity(suggs[0]);
     delete entity.setSkipReason;
@@ -2248,10 +2253,11 @@ describe('Suggestions Controller', () => {
       },
       ...context,
     });
-    // No updates since setSkipReason is unavailable and status hasn't changed
+    // Skip fields silently dropped with warning when model doesn't support them
     expect(response.status).to.equal(400);
     const error = await response.json();
     expect(error.message).to.include('No updates provided');
+    expect(context.log.warn.calledWithMatch('Suggestion model does not support skip fields')).to.be.true;
     // Restore
     mockSuggestion.findById.callsFake((id) => {
       const s = suggs.find((sg) => sg.id === id);
@@ -2353,6 +2359,7 @@ describe('Suggestions Controller', () => {
     });
     expect(response.status).to.equal(200);
     expect(suggs[0].status).to.equal('SKIPPED');
+    expect(context.log.warn.calledWithMatch('Suggestion model does not support skip fields')).to.be.true;
     // Restore findById
     mockSuggestion.findById.callsFake((id) => {
       const s = suggs.find((sg) => sg.id === id);
@@ -2399,6 +2406,93 @@ describe('Suggestions Controller', () => {
     expect(response.status).to.equal(400);
     const error = await response.json();
     expect(error.message).to.include('500');
+  });
+
+  it('patches a suggestion returns 400 when skipReason provided with non-SKIPPED status', async () => {
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'APPROVED',
+        skipReason: 'TOO_RISKY',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error.message).to.include('skipReason and skipDetail can only be provided when status is SKIPPED');
+  });
+
+  it('patches a suggestion returns 400 when skipDetail provided with non-SKIPPED status', async () => {
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'APPROVED',
+        skipDetail: 'Some detail',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error.message).to.include('skipReason and skipDetail can only be provided when status is SKIPPED');
+  });
+
+  it('patches a suggestion returns 400 when skipDetail is not a string', async () => {
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'SKIPPED',
+        skipReason: 'OTHER',
+        skipDetail: 12345,
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error.message).to.include('skipDetail must be a string');
+  });
+
+  it('patches a suggestion logs warning when model does not support skip fields on status change to SKIPPED', async () => {
+    suggs[0].status = 'NEW';
+    const entity = mockSuggestionEntity(suggs[0]);
+    delete entity.setSkipReason;
+    delete entity.setSkipDetail;
+    mockSuggestion.findById.callsFake((id) => {
+      if (id === SUGGESTION_IDS[0]) return Promise.resolve(entity);
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'SKIPPED',
+        skipReason: 'TOO_RISKY',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(context.log.warn.calledWithMatch('Suggestion model does not support skip fields')).to.be.true;
+    // Restore findById
+    mockSuggestion.findById.callsFake((id) => {
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
   });
 
   it('bulk patches suggestion status 2 successes', async () => {
@@ -2828,7 +2922,7 @@ describe('Suggestions Controller', () => {
     expect(suggs[0].skipDetail).to.equal('Only detail');
   });
 
-  it('bulk patches suggestion status returns no updates when already SKIPPED without setSkipReason and updating skip fields', async () => {
+  it('bulk patches suggestion status logs warning when already SKIPPED without setSkipReason and updating skip fields', async () => {
     suggs[0].status = 'SKIPPED';
     const entity = mockSuggestionEntity(suggs[0]);
     delete entity.setSkipReason;
@@ -2851,9 +2945,9 @@ describe('Suggestions Controller', () => {
     });
     expect(response.status).to.equal(207);
     const bulkPatchResponse = await response.json();
-    expect(bulkPatchResponse.metadata.failed).to.equal(1);
-    expect(bulkPatchResponse.suggestions[0].statusCode).to.equal(400);
-    expect(bulkPatchResponse.suggestions[0].message).to.include('No updates provided');
+    expect(bulkPatchResponse.metadata.success).to.equal(1);
+    expect(bulkPatchResponse.suggestions[0].statusCode).to.equal(200);
+    expect(context.log.warn.calledWithMatch('Suggestion model does not support skip fields')).to.be.true;
     // Restore
     mockSuggestion.findById.callsFake((id) => {
       const s = suggs.find((sg) => sg.id === id);
@@ -2900,6 +2994,42 @@ describe('Suggestions Controller', () => {
     expect(bulkPatchResponse.metadata.failed).to.equal(1);
     expect(bulkPatchResponse.suggestions[0].statusCode).to.equal(400);
     expect(bulkPatchResponse.suggestions[0].message).to.include('Invalid skipReason');
+  });
+
+  it('bulk patches suggestion status returns 400 when skipReason provided with non-SKIPPED status', async () => {
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [
+        { id: SUGGESTION_IDS[0], status: 'APPROVED', skipReason: 'TOO_RISKY' },
+      ],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.failed).to.equal(1);
+    expect(bulkPatchResponse.suggestions[0].statusCode).to.equal(400);
+    expect(bulkPatchResponse.suggestions[0].message).to.include('skipReason and skipDetail can only be provided when status is SKIPPED');
+  });
+
+  it('bulk patches suggestion status returns 400 when skipDetail is not a string', async () => {
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [
+        { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipDetail: 12345 },
+      ],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.failed).to.equal(1);
+    expect(bulkPatchResponse.suggestions[0].statusCode).to.equal(400);
+    expect(bulkPatchResponse.suggestions[0].message).to.include('skipDetail must be a string');
   });
 
   it('bulk patches suggestion status fails if validation error in set status', async () => {
