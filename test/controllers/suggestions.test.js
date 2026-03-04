@@ -3224,6 +3224,18 @@ describe('Suggestions Controller', () => {
       const body = await response.json();
       expect(body).to.have.property('message', 'Request body must contain a non-empty array of pages (URLs) when action is assess-urls');
     });
+
+    it('returns 400 when action is assess-urls but handler is not enabled for site', async () => {
+      assessUrlsConfig.isHandlerEnabledForSite.returns(false);
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { action: 'assess-urls', pages: ['https://example.com/p'] },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message').that.includes('Handler is not enabled for site');
+    });
   });
 
   describe('auto-fix suggestions for CS', function () {
