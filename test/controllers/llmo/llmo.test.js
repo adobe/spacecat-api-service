@@ -3549,7 +3549,7 @@ describe('LlmoController', () => {
 
       const commandArg = mockGetSignedUrl.getCall(0).args[1];
       expect(commandArg.params.Bucket).to.equal('test-bucket');
-      expect(commandArg.params.Key).to.equal(`brand_claims/${TEST_SITE_ID}/data.json.gz`);
+      expect(commandArg.params.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/data.json.gz`);
     });
 
     it('should return presigned URL for specific model', async () => {
@@ -3565,7 +3565,7 @@ describe('LlmoController', () => {
       expect(responseBody.model).to.equal('gpt-4.1');
 
       const commandArg = mockGetSignedUrl.getCall(0).args[1];
-      expect(commandArg.params.Key).to.equal(`brand_claims/${TEST_SITE_ID}/gpt-4.1.json.gz`);
+      expect(commandArg.params.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/gpt-4.1.json.gz`);
     });
 
     it('should return 400 when LLMO access validation fails', async () => {

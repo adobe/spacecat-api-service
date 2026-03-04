@@ -1360,8 +1360,8 @@ llmo-brand-claims:
       If omitted, the default model's data file is returned.
 
       S3 key convention:
-      - Default model: `brand_claims/{siteId}/data.json.gz`
-      - Specific model: `brand_claims/{siteId}/{model}.json.gz`
+      - Default model: `brand_claims/llmo/{siteId}/data.json.gz`
+      - Specific model: `brand_claims/llmo/{siteId}/{model}.json.gz`
     operationId: getBrandClaims
     responses:
       '200':

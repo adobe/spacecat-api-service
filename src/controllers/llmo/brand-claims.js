@@ -37,8 +37,8 @@ export async function handleBrandClaims(context) {
   }
 
   const s3Key = model
-    ? `brand_claims/${siteId}/${model}.json.gz`
-    : `brand_claims/${siteId}/data.json.gz`;
+    ? `brand_claims/llmo/${siteId}/${model}.json.gz`
+    : `brand_claims/llmo/${siteId}/data.json.gz`;
 
   log.info(`Getting brand claims for site ${siteId}, model: ${model || 'default'}`);
 
