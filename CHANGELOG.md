@@ -1,3 +1,38 @@
+## [1.331.1](https://github.com/adobe/spacecat-api-service/compare/v1.331.0...v1.331.1) (2026-03-04)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1901](https://github.com/adobe/spacecat-api-service/issues/1901)) ([678fbfc](https://github.com/adobe/spacecat-api-service/commit/678fbfc0eeab3b5864e45c9e4a59dbee89d9c94e))
+
+# [1.331.0](https://github.com/adobe/spacecat-api-service/compare/v1.330.4...v1.331.0) (2026-03-04)
+
+
+### Features
+
+* add brand claims presigned URL endpoint ([#1902](https://github.com/adobe/spacecat-api-service/issues/1902)) ([ee01d59](https://github.com/adobe/spacecat-api-service/commit/ee01d59b21c48474db9290150f2b04ccec878731))
+
+## [1.330.4](https://github.com/adobe/spacecat-api-service/compare/v1.330.3...v1.330.4) (2026-03-03)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v3.6.1 ([#1897](https://github.com/adobe/spacecat-api-service/issues/1897)) ([6b35dcc](https://github.com/adobe/spacecat-api-service/commit/6b35dcc58cb78f3d73e6c59840b3d1c1ec1a45c2))
+
+## [1.330.3](https://github.com/adobe/spacecat-api-service/compare/v1.330.2...v1.330.3) (2026-03-03)
+
+
+### Bug Fixes
+
+* enhance logging for edge-optimize ([#1895](https://github.com/adobe/spacecat-api-service/issues/1895)) ([128caa7](https://github.com/adobe/spacecat-api-service/commit/128caa7b836145c76147159b68fb3dba5a3a6be9))
+
+## [1.330.2](https://github.com/adobe/spacecat-api-service/compare/v1.330.1...v1.330.2) (2026-03-02)
+
+
+### Bug Fixes
+
+* add logs to edge APIs ([#1884](https://github.com/adobe/spacecat-api-service/issues/1884)) ([46bcea0](https://github.com/adobe/spacecat-api-service/commit/46bcea0b03d2ba010f24db8f7267c81900ff5a22))
+
 ## [1.330.1](https://github.com/adobe/spacecat-api-service/compare/v1.330.0...v1.330.1) (2026-03-02)
 
 
