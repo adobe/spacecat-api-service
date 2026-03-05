@@ -142,6 +142,40 @@ export default function suggestionTests(getHttpClient, resetData) {
         const res = await http.user.get(`${DENIED_BASE}/by-status/NEW`);
         expect(res.status).to.equal(403);
       });
+
+      it('user: returns suggestions when status is lowercase', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}/by-status/new`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(2);
+        res.body.forEach((s) => {
+          expectSuggestionDto(s);
+          expect(s.status).to.equal('NEW');
+        });
+      });
+
+      it('user: returns suggestions when status is mixed-case', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}/by-status/New`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(2);
+        res.body.forEach((s) => {
+          expectSuggestionDto(s);
+          expect(s.status).to.equal('NEW');
+        });
+      });
+
+      it('user: returns paged suggestions when status is lowercase', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}/by-status/new/paged/10`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('object');
+        expect(res.body.suggestions).to.be.an('array').with.lengthOf(2);
+        res.body.suggestions.forEach((s) => {
+          expectSuggestionDto(s);
+          expect(s.status).to.equal('NEW');
+        });
+      });
     });
 
     describe('GET .../suggestions/:suggestionId', () => {

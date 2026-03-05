@@ -1,3 +1,122 @@
+## [1.333.2](https://github.com/adobe/spacecat-api-service/compare/v1.333.1...v1.333.2) (2026-03-04)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v3.7.0 ([#1904](https://github.com/adobe/spacecat-api-service/issues/1904)) ([3a5fd80](https://github.com/adobe/spacecat-api-service/commit/3a5fd8046ffea2660b0ad135d2d571761732c113))
+
+## [1.333.1](https://github.com/adobe/spacecat-api-service/compare/v1.333.0...v1.333.1) (2026-03-04)
+
+
+### Bug Fixes
+
+* exclude large non-customer orgs from getAll sites to avoid 413 ([#1906](https://github.com/adobe/spacecat-api-service/issues/1906)) ([2641b52](https://github.com/adobe/spacecat-api-service/commit/2641b52d78e816aa33a4d8076609d4d34b0c68d0))
+
+# [1.333.0](https://github.com/adobe/spacecat-api-service/compare/v1.332.0...v1.333.0) (2026-03-04)
+
+
+### Features
+
+* brokenbacklink detection ([#1893](https://github.com/adobe/spacecat-api-service/issues/1893)) ([d39d0f7](https://github.com/adobe/spacecat-api-service/commit/d39d0f7ecb2c759bd719231fa30ae169434baa84))
+
+# [1.332.0](https://github.com/adobe/spacecat-api-service/compare/v1.331.1...v1.332.0) (2026-03-04)
+
+
+### Features
+
+* add llmo in the path ([#1903](https://github.com/adobe/spacecat-api-service/issues/1903)) ([e5f4187](https://github.com/adobe/spacecat-api-service/commit/e5f4187c2073190b66097300162243709780dbea))
+
+## [1.331.1](https://github.com/adobe/spacecat-api-service/compare/v1.331.0...v1.331.1) (2026-03-04)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1901](https://github.com/adobe/spacecat-api-service/issues/1901)) ([678fbfc](https://github.com/adobe/spacecat-api-service/commit/678fbfc0eeab3b5864e45c9e4a59dbee89d9c94e))
+
+# [1.331.0](https://github.com/adobe/spacecat-api-service/compare/v1.330.4...v1.331.0) (2026-03-04)
+
+
+### Features
+
+* add brand claims presigned URL endpoint ([#1902](https://github.com/adobe/spacecat-api-service/issues/1902)) ([ee01d59](https://github.com/adobe/spacecat-api-service/commit/ee01d59b21c48474db9290150f2b04ccec878731))
+
+## [1.330.4](https://github.com/adobe/spacecat-api-service/compare/v1.330.3...v1.330.4) (2026-03-03)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v3.6.1 ([#1897](https://github.com/adobe/spacecat-api-service/issues/1897)) ([6b35dcc](https://github.com/adobe/spacecat-api-service/commit/6b35dcc58cb78f3d73e6c59840b3d1c1ec1a45c2))
+
+## [1.330.3](https://github.com/adobe/spacecat-api-service/compare/v1.330.2...v1.330.3) (2026-03-03)
+
+
+### Bug Fixes
+
+* enhance logging for edge-optimize ([#1895](https://github.com/adobe/spacecat-api-service/issues/1895)) ([128caa7](https://github.com/adobe/spacecat-api-service/commit/128caa7b836145c76147159b68fb3dba5a3a6be9))
+
+## [1.330.2](https://github.com/adobe/spacecat-api-service/compare/v1.330.1...v1.330.2) (2026-03-02)
+
+
+### Bug Fixes
+
+* add logs to edge APIs ([#1884](https://github.com/adobe/spacecat-api-service/issues/1884)) ([46bcea0](https://github.com/adobe/spacecat-api-service/commit/46bcea0b03d2ba010f24db8f7267c81900ff5a22))
+
+## [1.330.1](https://github.com/adobe/spacecat-api-service/compare/v1.330.0...v1.330.1) (2026-03-02)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1891](https://github.com/adobe/spacecat-api-service/issues/1891)) ([dcc0e58](https://github.com/adobe/spacecat-api-service/commit/dcc0e587f9ad8d0b970cae934b13efd35815bb1c))
+
+# [1.330.0](https://github.com/adobe/spacecat-api-service/compare/v1.329.0...v1.330.0) (2026-03-02)
+
+
+### Features
+
+* email notification for opportunity workspace ([#1867](https://github.com/adobe/spacecat-api-service/issues/1867)) ([ef6d126](https://github.com/adobe/spacecat-api-service/commit/ef6d126a322dc74230b01961aad33177b46ab6e3))
+
+# [1.329.0](https://github.com/adobe/spacecat-api-service/compare/v1.328.0...v1.329.0) (2026-03-02)
+
+
+### Features
+
+* add markOpportunitiesReviewed endpoint to LlmoController | LLMO-3058 ([#1828](https://github.com/adobe/spacecat-api-service/issues/1828)) ([f09cb9c](https://github.com/adobe/spacecat-api-service/commit/f09cb9cdd88f220327541c66c9b71451b6534629))
+
+# [1.328.0](https://github.com/adobe/spacecat-api-service/compare/v1.327.3...v1.328.0) (2026-03-02)
+
+
+### Features
+
+* support dedicated no-cta-above-the-fold opportunity type in matcher ([#1888](https://github.com/adobe/spacecat-api-service/issues/1888)) ([86eed5d](https://github.com/adobe/spacecat-api-service/commit/86eed5d46bbe4c79d84b92a737c2873bff878a3f))
+
+## [1.327.3](https://github.com/adobe/spacecat-api-service/compare/v1.327.2...v1.327.3) (2026-03-02)
+
+
+### Bug Fixes
+
+* correct DRS client parameter name and prompt count (LLMO-1819) ([#1889](https://github.com/adobe/spacecat-api-service/issues/1889)) ([9fc6fdd](https://github.com/adobe/spacecat-api-service/commit/9fc6fdd141da105947b50a4d1ed1ef4f4c1d30f1))
+
+## [1.327.2](https://github.com/adobe/spacecat-api-service/compare/v1.327.1...v1.327.2) (2026-03-02)
+
+
+### Bug Fixes
+
+* **deps:** upgrade data-access to 3.5.0 for case-insensitive enum queries ([#1890](https://github.com/adobe/spacecat-api-service/issues/1890)) ([5edb461](https://github.com/adobe/spacecat-api-service/commit/5edb4613ac44eff3080d81c5129065ac93182fc1))
+
+## [1.327.1](https://github.com/adobe/spacecat-api-service/compare/v1.327.0...v1.327.1) (2026-03-02)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1881](https://github.com/adobe/spacecat-api-service/issues/1881)) ([801c1b6](https://github.com/adobe/spacecat-api-service/commit/801c1b6ba19e08b25dddb56cc59a4f6ce306a849))
+
+# [1.327.0](https://github.com/adobe/spacecat-api-service/compare/v1.326.2...v1.327.0) (2026-03-02)
+
+
+### Features
+
+* consumer controller apis ([#1832](https://github.com/adobe/spacecat-api-service/issues/1832)) ([2d4ea88](https://github.com/adobe/spacecat-api-service/commit/2d4ea880177f03d496e312ebb838d0b90c42dbba))
+
 ## [1.326.2](https://github.com/adobe/spacecat-api-service/compare/v1.326.1...v1.326.2) (2026-03-01)
 
 
