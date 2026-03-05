@@ -304,6 +304,84 @@ describe('Customer Config Mapper', () => {
       expect(result.customer.brands[0].name).to.equal('Alias Name');
     });
 
+    it('expands multiple alias strings into multiple v2 brandAlias entries (v1→v2)', () => {
+      const llmoConfig = {
+        brands: {
+          aliases: [{ aliases: ['Adobe', 'Adobe Inc'], region: ['us'] }],
+        },
+        categories: {},
+        topics: {},
+      };
+
+      const v2 = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
+      expect(v2.customer.brands[0].brandAliases).to.have.lengthOf(2);
+      expect(v2.customer.brands[0].brandAliases[0].name).to.equal('Adobe');
+      expect(v2.customer.brands[0].brandAliases[0].regions).to.deep.equal(['us']);
+      expect(v2.customer.brands[0].brandAliases[1].name).to.equal('Adobe Inc');
+      expect(v2.customer.brands[0].brandAliases[1].regions).to.deep.equal(['us']);
+
+      const backToV1 = convertV2ToV1(v2);
+      expect(backToV1.brands.aliases).to.have.lengthOf(2);
+      expect(backToV1.brands.aliases[0].aliases).to.deep.equal(['Adobe']);
+      expect(backToV1.brands.aliases[1].aliases).to.deep.equal(['Adobe Inc']);
+    });
+
+    it('carries customerIntent per brand (v1 site-level → v2 brand.customerIntent)', () => {
+      const llmoConfig = {
+        brands: {
+          aliases: [{ name: 'Test' }],
+        },
+        categories: {},
+        topics: {},
+        customerIntent: [
+          { key: 'target_audience', value: 'small business' },
+          { key: 'primary_goal', value: 'conversions' },
+        ],
+      };
+
+      const v2 = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
+      expect(v2.customer.brands[0].customerIntent).to.deep.equal(llmoConfig.customerIntent);
+
+      const backToV1 = convertV2ToV1(v2);
+      expect(backToV1.customerIntent).to.deep.equal(llmoConfig.customerIntent);
+    });
+
+    it('carries tags per brand (v1 site-level → v2 brand.tags)', () => {
+      const llmoConfig = {
+        brands: {
+          aliases: [{ name: 'Test' }],
+        },
+        categories: {},
+        topics: {},
+        tags: ['opportunitiesReviewed', 'otherFlag'],
+      };
+
+      const v2 = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
+      expect(v2.customer.brands[0].tags).to.deep.equal(llmoConfig.tags);
+
+      const backToV1 = convertV2ToV1(v2);
+      expect(backToV1.tags).to.deep.equal(llmoConfig.tags);
+    });
+
+    it('carries cdnlogsFilter per brand (v1 site-level → v2 brand.cdnlogsFilter)', () => {
+      const llmoConfig = {
+        brands: {
+          aliases: [{ name: 'Test' }],
+        },
+        categories: {},
+        topics: {},
+        cdnlogsFilter: [
+          { key: 'user-agent', value: ['bot', 'crawler'], type: 'exclude' },
+        ],
+      };
+
+      const v2 = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
+      expect(v2.customer.brands[0].cdnlogsFilter).to.deep.equal(llmoConfig.cdnlogsFilter);
+
+      const backToV1 = convertV2ToV1(v2);
+      expect(backToV1.cdnlogsFilter).to.deep.equal(llmoConfig.cdnlogsFilter);
+    });
+
     it('uses brandName fallback when both name and aliases are missing', () => {
       const llmoConfig = {
         brands: {
@@ -604,6 +682,40 @@ describe('Customer Config Mapper', () => {
       const deletedTopic = result.customer.topics.find((t) => t.name === 'New Topic');
       expect(deletedTopic).to.exist;
       expect(deletedTopic.status).to.equal('deleted');
+    });
+
+    it('handles ignored prompts (status "ignored" in V2, same pattern as deleted)', () => {
+      const llmoConfig = {
+        brands: {
+          aliases: [{ name: 'Test' }],
+        },
+        categories: {},
+        topics: {},
+        ignored: {
+          prompts: {
+            'ign-1': {
+              prompt: 'Ignored prompt text',
+              region: 'us',
+              source: 'gsc',
+              updatedBy: 'user',
+              updatedAt: '2024-01-01T00:00:00.000Z',
+            },
+          },
+        },
+      };
+
+      const result = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
+      const ignoredPrompt = result.customer.brands[0].prompts.find((p) => p.id === 'ign-1');
+      expect(ignoredPrompt).to.exist;
+      expect(ignoredPrompt.status).to.equal('ignored');
+      expect(ignoredPrompt.prompt).to.equal('Ignored prompt text');
+      expect(ignoredPrompt.regions).to.deep.equal(['us']);
+      expect(ignoredPrompt.source).to.equal('gsc');
+
+      const backToV1 = convertV2ToV1(result);
+      expect(backToV1.ignored.prompts['ign-1']).to.exist;
+      expect(backToV1.ignored.prompts['ign-1'].prompt).to.equal('Ignored prompt text');
+      expect(backToV1.ignored.prompts['ign-1'].region).to.equal('us');
     });
 
     it('avoids duplicate topic entries when processing multiple prompts', () => {

@@ -72,6 +72,9 @@ function generatePromptId(brandName, promptText) {
   return `${brandSlug}-${hash}`;
 }
 
+/** Synthetic category/topic id in V2 for prompts with status 'ignored' (same as deleted). */
+const IGNORED_PROMPTS_PLACEHOLDER_ID = 'ignored-prompts';
+
 /**
  * Converts LLMO config (V1) to Customer Config (V2)
  * @param {object} llmoConfig - V1 LLMO configuration
@@ -171,10 +174,11 @@ export function convertV1ToV2(llmoConfig, brandName, imsOrgId) {
     vertical: '',
     urls: brandUrls,
     socialAccounts: [],
-    brandAliases: brandAliases.map((alias) => ({
-      name: alias.name || (alias.aliases && alias.aliases[0]) || brandName,
-      regions: alias.region || alias.regions || ['gl'],
-    })),
+    brandAliases: brandAliases.flatMap((alias) => {
+      const names = (alias.aliases?.length) ? alias.aliases : [alias.name || brandName];
+      const regions = alias.region || alias.regions || ['gl'];
+      return names.map((name) => ({ name: name || brandName, regions }));
+    }),
     competitors: (llmoConfig.competitors?.competitors || []).map((comp) => ({
       name: comp.name,
       url: comp.url || '',
@@ -183,11 +187,22 @@ export function convertV1ToV2(llmoConfig, brandName, imsOrgId) {
     relatedBrands: [],
     earnedContent: [],
     prompts: [], // Flat list of prompts with categoryId/topicId references
+    customerIntent: Array.isArray(llmoConfig.customerIntent) ? llmoConfig.customerIntent : [],
+    tags: Array.isArray(llmoConfig.tags) ? llmoConfig.tags : [],
+    cdnlogsFilter: Array.isArray(llmoConfig.cdnlogsFilter) ? llmoConfig.cdnlogsFilter : [],
   };
 
-  // Build top-level categories collection
+  // Build top-level categories collection.
+  // v1CategoryUrls / v1Regions: v1-only fields for lossless v2→v1→v2 (matches v1SiteId).
   const categoriesCollection = [];
   Object.entries(categories).forEach(([categoryUuid, category]) => {
+    const v1CategoryUrls = category.urls || [];
+    let v1Regions = [];
+    if (Array.isArray(category.region)) {
+      v1Regions = category.region;
+    } else if (category.region) {
+      v1Regions = [category.region];
+    }
     categoriesCollection.push({
       id: categoryUuid,
       name: category.name,
@@ -195,6 +210,8 @@ export function convertV1ToV2(llmoConfig, brandName, imsOrgId) {
       origin: category.origin || 'human',
       updatedBy: category.updatedBy || 'system',
       updatedAt: category.updatedAt || new Date().toISOString(),
+      ...(v1CategoryUrls.length > 0 && { v1CategoryUrls }),
+      ...(v1Regions.length > 0 && { v1Regions }),
     });
   });
 
@@ -317,6 +334,44 @@ export function convertV1ToV2(llmoConfig, brandName, imsOrgId) {
     });
   });
 
+  // Add ignored prompts (same pattern as deleted: status 'ignored' in V2, synthetic category/topic)
+  const ignoredPrompts = llmoConfig.ignored?.prompts || {};
+  if (Object.keys(ignoredPrompts).length > 0) {
+    if (!categoriesCollection.find((c) => c.id === IGNORED_PROMPTS_PLACEHOLDER_ID)) {
+      categoriesCollection.push({
+        id: IGNORED_PROMPTS_PLACEHOLDER_ID,
+        name: 'Ignored',
+        status: 'active',
+        origin: 'human',
+        updatedBy: 'system',
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    if (!topicsCollection.find((t) => t.id === IGNORED_PROMPTS_PLACEHOLDER_ID)) {
+      topicsCollection.push({
+        id: IGNORED_PROMPTS_PLACEHOLDER_ID,
+        name: 'Ignored',
+        status: 'active',
+        categoryId: IGNORED_PROMPTS_PLACEHOLDER_ID,
+      });
+    }
+    Object.entries(ignoredPrompts).forEach(([promptId, prompt]) => {
+      const region = prompt.region || (prompt.regions && prompt.regions[0]) || 'gl';
+      brand.prompts.push({
+        id: promptId,
+        prompt: prompt.prompt,
+        status: 'ignored',
+        regions: Array.isArray(prompt.regions) ? prompt.regions : [region],
+        origin: 'human',
+        source: prompt.source || 'gsc',
+        updatedBy: prompt.updatedBy || 'system',
+        updatedAt: prompt.updatedAt || new Date().toISOString(),
+        categoryId: IGNORED_PROMPTS_PLACEHOLDER_ID,
+        topicId: IGNORED_PROMPTS_PLACEHOLDER_ID,
+      });
+    });
+  }
+
   brands.push(brand);
 
   return {
@@ -382,10 +437,18 @@ export function convertV2ToV1(customerConfig) {
     deleted: {
       prompts: {},
     },
+    ignored: {
+      prompts: {},
+    },
+    customerIntent: Array.isArray(brand.customerIntent) ? brand.customerIntent : [],
+    tags: Array.isArray(brand.tags) ? brand.tags : [],
+    cdnlogsFilter: Array.isArray(brand.cdnlogsFilter) ? brand.cdnlogsFilter : [],
     brands: {
       aliases: brand.brandAliases.map((alias) => {
-        // Find first active category from prompts
-        const firstActivePrompt = brand.prompts.find((p) => p.status !== 'deleted');
+        // Find first active category from prompts (exclude deleted and ignored)
+        const firstActivePrompt = brand.prompts.find(
+          (p) => p.status !== 'deleted' && p.status !== 'ignored',
+        );
         const firstCategoryId = firstActivePrompt?.categoryId || null;
         return {
           aliases: [alias.name],
@@ -447,6 +510,22 @@ export function convertV2ToV1(customerConfig) {
 
     if (!category || !topic) return;
 
+    // Ignored: same as deleted — prompts under synthetic category/topic in V2
+    const isIgnored = categoryId === IGNORED_PROMPTS_PLACEHOLDER_ID
+      && topicId === IGNORED_PROMPTS_PLACEHOLDER_ID;
+    if (isIgnored) {
+      prompts.forEach((p) => {
+        llmoConfig.ignored.prompts[p.id] = {
+          prompt: p.prompt,
+          region: (p.regions && p.regions[0]) || 'gl',
+          source: p.source || 'gsc',
+          updatedBy: p.updatedBy || 'system',
+          updatedAt: p.updatedAt || new Date().toISOString(),
+        };
+      });
+      return;
+    }
+
     const isAITopic = prompts.length > 0 && prompts.every((p) => p.origin === 'ai');
     const allDeleted = prompts.every((p) => p.status === 'deleted');
 
@@ -455,10 +534,14 @@ export function convertV2ToV1(customerConfig) {
 
     // Add category if not already added (only for active topics)
     if (!allDeleted && !llmoConfig.categories[categoryId]) {
+      const { v1CategoryUrls, v1Regions } = category;
+      const region = Array.isArray(v1Regions) && v1Regions.length > 0
+        ? v1Regions
+        : (prompts[0]?.regions || ['gl']);
       llmoConfig.categories[categoryId] = {
         name: category.name,
-        region: prompts[0]?.regions || ['gl'],
-        urls: [], // Category URLs are lost in V2
+        region,
+        urls: Array.isArray(v1CategoryUrls) ? v1CategoryUrls : [],
         origin: category.origin || 'human',
         updatedBy: category.updatedBy || 'system',
         updatedAt: category.updatedAt || new Date().toISOString(),

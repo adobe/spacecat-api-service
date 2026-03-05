@@ -31,6 +31,7 @@ import {
 } from '../utils/constants.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { mergeCustomerConfigV2 } from '../support/customer-config-v2-metadata.js';
+import { syncV2ToV1Sites } from '../support/llmo-config-sync.js';
 
 const HEADER_ERROR = 'x-error';
 
@@ -555,6 +556,15 @@ function BrandsController(ctx, log, env) {
 
       log.info(`Customer config saved to S3 for organization: ${spaceCatId}`);
 
+      // Sync to V1 for each brand that has a linked site (v1SiteId)
+      if (context.s3?.s3Client) {
+        await syncV2ToV1Sites(spaceCatId, customerConfig, {
+          s3Client: context.s3.s3Client,
+          s3Bucket: context.s3.s3Bucket,
+          log,
+        });
+      }
+
       return ok({ message: 'Customer configuration saved successfully' });
     } catch (error) {
       log.error(`Error saving customer config for organization: ${spaceCatId}`, error);
@@ -626,6 +636,15 @@ function BrandsController(ctx, log, env) {
       );
 
       log.info(`Customer config patched for organization: ${spaceCatId} by ${userId}. Stats:`, stats);
+
+      // Sync to V1 for each brand that has a linked site (v1SiteId)
+      if (context.s3?.s3Client) {
+        await syncV2ToV1Sites(spaceCatId, mergedConfig, {
+          s3Client: context.s3.s3Client,
+          s3Bucket: context.s3.s3Bucket,
+          log,
+        });
+      }
 
       return ok({
         message: 'Customer configuration updated successfully',
