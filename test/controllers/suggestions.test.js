@@ -3296,6 +3296,102 @@ describe('Suggestions Controller', () => {
       const error = await response.json();
       expect(error).to.have.property('message', 'Error getting promise token');
     });
+
+    it('uses x-promise-token header when present instead of IMS', async () => {
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0]),
+          mockSuggestionEntity(suggs[2]),
+        ],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
+
+      const getPromiseTokenStub = imsPromiseClient.createFrom().getPromiseToken;
+
+      const response = await suggestionsControllerWithIms.autofixSuggestions({
+        env: {
+          AUTOFIX_CRYPT_SECRET: 'superSecret',
+          AUTOFIX_CRYPT_SALT: 'salt',
+        },
+        pathInfo: {
+          headers: {
+            authorization: 'Bearer token123',
+          },
+        },
+        request: {
+          headers: {
+            get: (name) => (name?.toLowerCase?.() === 'x-promise-token' ? 'header-promise-token' : null),
+          },
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(sqsSpy.firstCall.args[1]).to.have.property('promiseToken');
+      expect(sqsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token', 'header-promise-token');
+      expect(getPromiseTokenStub).to.not.have.been.called;
+    });
+
+    it('falls back to IMS when x-promise-token header is absent', async () => {
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0]),
+          mockSuggestionEntity(suggs[2]),
+        ],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
+      const response = await suggestionsControllerWithIms.autofixSuggestions({
+        pathInfo: {
+          headers: {
+            authorization: 'Bearer token123',
+          },
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(sqsSpy.firstCall.args[1]).to.have.property('promiseToken');
+      expect(sqsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token', 'promiseTokenExample');
+    });
+
+    it('falls back to IMS when x-promise-token header is empty', async () => {
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0]),
+          mockSuggestionEntity(suggs[2]),
+        ],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
+      const response = await suggestionsControllerWithIms.autofixSuggestions({
+        pathInfo: {
+          headers: {
+            authorization: 'Bearer token123',
+          },
+        },
+        request: {
+          headers: {
+            get: () => '',
+          },
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(sqsSpy.firstCall.args[1]).to.have.property('promiseToken');
+      expect(sqsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token', 'promiseTokenExample');
+    });
   });
 
   describe('removeSuggestion', () => {

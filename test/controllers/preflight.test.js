@@ -628,6 +628,152 @@ describe('Preflight Controller', () => {
         message: 'Error getting promise token',
       });
     });
+
+    it('uses x-promise-token header when present instead of IMS', async () => {
+      const aemCsSite = {
+        getId: () => 'test-site-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
+      };
+      mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
+
+      const getIMSPromiseTokenStub = sandbox.stub();
+      const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
+        '../../src/support/utils.js': {
+          ...utils,
+          getIMSPromiseToken: getIMSPromiseTokenStub,
+          ErrorWithStatusCode: utils.ErrorWithStatusCode,
+        },
+      });
+
+      const preflightControllerWithMock = PreflightControllerWithMock(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const context = {
+        data: {
+          urls: ['https://example.com/test.html'],
+          step: 'identify',
+        },
+        request: {
+          headers: {
+            get: (name) => (name === 'x-promise-token' ? 'headerToken123' : null),
+          },
+        },
+      };
+
+      const response = await preflightControllerWithMock.createPreflightJob(context);
+      expect(response.status).to.equal(202);
+      expect(getIMSPromiseTokenStub).to.not.have.been.called;
+      expect(mockSqs.sendMessage).to.have.been.calledWith(
+        'https://sqs.test.amazonaws.com/audit-queue',
+        {
+          jobId,
+          siteId: 'test-site-123',
+          type: 'preflight',
+          promiseToken: { promise_token: 'headerToken123' },
+        },
+      );
+    });
+
+    it('falls back to IMS when x-promise-token header is absent', async () => {
+      const aemCsSite = {
+        getId: () => 'test-site-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS_CW,
+      };
+      mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
+
+      const mockPromiseToken = { promise_token: 'ims-token', expires_in: 3600, token_type: 'Bearer' };
+      const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
+        '../../src/support/utils.js': {
+          ...utils,
+          getIMSPromiseToken: async () => mockPromiseToken,
+          ErrorWithStatusCode: utils.ErrorWithStatusCode,
+        },
+      });
+
+      const preflightControllerWithMock = PreflightControllerWithMock(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const context = {
+        data: {
+          urls: ['https://example.com/test.html'],
+          step: 'identify',
+        },
+      };
+
+      const response = await preflightControllerWithMock.createPreflightJob(context);
+      expect(response.status).to.equal(202);
+      expect(mockSqs.sendMessage).to.have.been.calledWith(
+        'https://sqs.test.amazonaws.com/audit-queue',
+        {
+          jobId,
+          siteId: mockSite.getId(),
+          type: 'preflight',
+          promiseToken: mockPromiseToken,
+        },
+      );
+    });
+
+    it('falls back to IMS when x-promise-token header is empty', async () => {
+      const aemCsSite = {
+        getId: () => 'test-site-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.AMS,
+      };
+      mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
+
+      const mockPromiseToken = { promise_token: 'ims-fallback', expires_in: 3600, token_type: 'Bearer' };
+      const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
+        '../../src/support/utils.js': {
+          ...utils,
+          getIMSPromiseToken: async () => mockPromiseToken,
+          ErrorWithStatusCode: utils.ErrorWithStatusCode,
+        },
+      });
+
+      const preflightControllerWithMock = PreflightControllerWithMock(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const context = {
+        data: {
+          urls: ['https://example.com/test.html'],
+          step: 'identify',
+        },
+        request: {
+          headers: {
+            get: () => '',
+          },
+        },
+      };
+
+      const response = await preflightControllerWithMock.createPreflightJob(context);
+      expect(response.status).to.equal(202);
+      expect(mockSqs.sendMessage).to.have.been.calledWith(
+        'https://sqs.test.amazonaws.com/audit-queue',
+        {
+          jobId,
+          siteId: 'test-site-123',
+          type: 'preflight',
+          promiseToken: mockPromiseToken,
+        },
+      );
+    });
   });
 
   describe('getPreflightJobStatusAndResult', () => {
