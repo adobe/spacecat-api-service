@@ -932,13 +932,19 @@ function SuggestionsController(ctx, sqs, env) {
     let promiseTokenResponse;
     const skipPromiseToken = isAssessAction && precheckOnly === true;
     if (!skipPromiseToken) {
-      try {
-        promiseTokenResponse = await getIMSPromiseToken(context);
-      } catch (e) {
-        if (e instanceof ErrorWithStatusCode) {
-          return badRequest(e.message);
+      const { pathInfo } = context;
+      const headerToken = pathInfo?.headers?.['x-promise-token'];
+      if (hasText(headerToken)) {
+        promiseTokenResponse = { promise_token: headerToken };
+      } else {
+        try {
+          promiseTokenResponse = await getIMSPromiseToken(context);
+        } catch (e) {
+          if (e instanceof ErrorWithStatusCode) {
+            return badRequest(e.message);
+          }
+          return createResponse({ message: 'Error getting promise token' }, 500);
         }
-        return createResponse({ message: 'Error getting promise token' }, 500);
       }
     }
 
