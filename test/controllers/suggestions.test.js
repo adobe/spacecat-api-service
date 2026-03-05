@@ -3326,11 +3326,7 @@ describe('Suggestions Controller', () => {
         pathInfo: {
           headers: {
             authorization: 'Bearer token123',
-          },
-        },
-        request: {
-          headers: {
-            get: (name) => (name?.toLowerCase?.() === 'x-promise-token' ? 'header-promise-token' : null),
+            'x-promise-token': 'header-promise-token',
           },
         },
         params: {
@@ -3384,11 +3380,7 @@ describe('Suggestions Controller', () => {
         pathInfo: {
           headers: {
             authorization: 'Bearer token123',
-          },
-        },
-        request: {
-          headers: {
-            get: () => '',
+            'x-promise-token': '',
           },
         },
         params: {
