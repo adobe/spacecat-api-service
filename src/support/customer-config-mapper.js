@@ -175,7 +175,12 @@ export function convertV1ToV2(llmoConfig, brandName, imsOrgId) {
     urls: brandUrls,
     socialAccounts: [],
     brandAliases: brandAliases.flatMap((alias) => {
-      const names = (alias.aliases?.length) ? alias.aliases : [alias.name || brandName];
+      let names;
+      if (alias.aliases && alias.aliases.length > 0) {
+        names = alias.aliases;
+      } else {
+        names = [alias.name || brandName];
+      }
       const regions = alias.region || alias.regions || ['gl'];
       return names.map((name) => ({ name: name || brandName, regions }));
     }),
@@ -357,11 +362,17 @@ export function convertV1ToV2(llmoConfig, brandName, imsOrgId) {
     }
     Object.entries(ignoredPrompts).forEach(([promptId, prompt]) => {
       const region = prompt.region || (prompt.regions && prompt.regions[0]) || 'gl';
+      let regions;
+      if (Array.isArray(prompt.regions)) {
+        regions = prompt.regions;
+      } else {
+        regions = [region];
+      }
       brand.prompts.push({
         id: promptId,
         prompt: prompt.prompt,
         status: 'ignored',
-        regions: Array.isArray(prompt.regions) ? prompt.regions : [region],
+        regions,
         origin: 'human',
         source: prompt.source || 'gsc',
         updatedBy: prompt.updatedBy || 'system',
