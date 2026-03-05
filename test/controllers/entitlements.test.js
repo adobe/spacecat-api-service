@@ -295,6 +295,7 @@ describe('Entitlements Controller', () => {
     it('should create entitlement successfully for admin user', async () => {
       const context = {
         params: { organizationId },
+        data: { productCode: 'LLMO' },
         log: { error: sinon.stub() },
         authInfo: { getProfile: () => ({ email: 'admin@example.com' }) },
       };
@@ -317,6 +318,76 @@ describe('Entitlements Controller', () => {
         'LLMO',
       );
       expect(mockTierClient.createEntitlement).to.have.been.calledWith('FREE_TRIAL');
+    });
+
+    it('should default to LLMO when productCode is not provided', async () => {
+      const context = {
+        params: { organizationId },
+        data: {},
+        log: { error: sinon.stub() },
+        authInfo: { getProfile: () => ({ email: 'admin@example.com' }) },
+      };
+
+      const result = await entitlementController.createEntitlement(context);
+
+      expect(result.status).to.equal(201);
+      expect(TierClient.createForOrg).to.have.been.calledWith(
+        context,
+        mockOrganization,
+        'LLMO',
+      );
+    });
+
+    it('should default to LLMO when data is not provided', async () => {
+      const context = {
+        params: { organizationId },
+        log: { error: sinon.stub() },
+        authInfo: { getProfile: () => ({ email: 'admin@example.com' }) },
+      };
+
+      const result = await entitlementController.createEntitlement(context);
+
+      expect(result.status).to.equal(201);
+      expect(TierClient.createForOrg).to.have.been.calledWith(
+        context,
+        mockOrganization,
+        'LLMO',
+      );
+    });
+
+    it('should create entitlement with ASO product code', async () => {
+      const context = {
+        params: { organizationId },
+        data: { productCode: 'ASO' },
+        log: { error: sinon.stub() },
+        authInfo: { getProfile: () => ({ email: 'admin@example.com' }) },
+      };
+
+      await entitlementController.createEntitlement(context);
+
+      expect(TierClient.createForOrg).to.have.been.calledWith(
+        context,
+        mockOrganization,
+        'ASO',
+      );
+    });
+
+    it('should return bad request for invalid product code', async () => {
+      const context = {
+        params: { organizationId },
+        data: { productCode: 'INVALID' },
+        log: { error: sinon.stub() },
+        authInfo: { getProfile: () => ({ email: 'admin@example.com' }) },
+      };
+
+      const result = await entitlementController.createEntitlement(context);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('Invalid product code');
+      expect(body.message).to.include('LLMO');
+      expect(body.message).to.include('ASO');
+      expect(body.message).to.include('ACO');
     });
 
     it('should return forbidden when user is not admin', async () => {
@@ -353,6 +424,7 @@ describe('Entitlements Controller', () => {
     it('should return bad request for invalid organization ID', async () => {
       const context = {
         params: { organizationId: 'invalid-uuid' },
+        data: { productCode: 'LLMO' },
         log: { error: sinon.stub() },
         authInfo: { getProfile: () => ({ email: 'admin@example.com' }) },
       };
@@ -369,6 +441,7 @@ describe('Entitlements Controller', () => {
 
       const context = {
         params: { organizationId },
+        data: { productCode: 'LLMO' },
         log: { error: sinon.stub() },
         authInfo: { getProfile: () => ({ email: 'admin@example.com' }) },
       };
@@ -386,6 +459,7 @@ describe('Entitlements Controller', () => {
 
       const context = {
         params: { organizationId },
+        data: { productCode: 'LLMO' },
         log: { error: sinon.stub() },
         authInfo: { getProfile: () => ({ email: 'admin@example.com' }) },
       };
@@ -406,6 +480,7 @@ describe('Entitlements Controller', () => {
 
       const context = {
         params: { organizationId },
+        data: { productCode: 'LLMO' },
         log: { error: sinon.stub() },
         authInfo: { getProfile: () => ({ email: 'admin@example.com' }) },
       };
@@ -426,6 +501,7 @@ describe('Entitlements Controller', () => {
 
       const context = {
         params: { organizationId },
+        data: { productCode: 'LLMO' },
         log: { error: sinon.stub() },
         authInfo: { getProfile: () => ({ email: 'admin@example.com' }) },
       };
@@ -438,26 +514,6 @@ describe('Entitlements Controller', () => {
 
       // Verify that log.error was called
       expect(context.log.error).to.have.been.calledWith(`Error creating entitlement for organization ${organizationId}: ${orgError.message}`);
-    });
-
-    it('should use correct product code and tier constants', async () => {
-      const context = {
-        params: { organizationId },
-        log: { error: sinon.stub() },
-        authInfo: { getProfile: () => ({ email: 'admin@example.com' }) },
-      };
-
-      await entitlementController.createEntitlement(context);
-
-      // Verify TierClient.createForOrg was called with correct product code
-      expect(TierClient.createForOrg).to.have.been.calledWith(
-        context,
-        mockOrganization,
-        'LLMO',
-      );
-
-      // Verify createEntitlement was called with correct tier
-      expect(mockTierClient.createEntitlement).to.have.been.calledWith('FREE_TRIAL');
     });
   });
 });

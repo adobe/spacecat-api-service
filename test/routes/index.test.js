@@ -305,6 +305,7 @@ describe('getRouteHandlers', () => {
 
   const mockEntitlementController = {
     getByOrganizationID: () => null,
+    createEntitlement: () => null,
   };
 
   const mockReportsController = {
