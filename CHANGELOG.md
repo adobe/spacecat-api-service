@@ -1,3 +1,10 @@
+## [1.335.2](https://github.com/adobe/spacecat-api-service/compare/v1.335.1...v1.335.2) (2026-03-05)
+
+
+### Bug Fixes
+
+* fix header fetch for promise token ([#1912](https://github.com/adobe/spacecat-api-service/issues/1912)) ([f71d037](https://github.com/adobe/spacecat-api-service/commit/f71d037263794a5a16d1dc5e21409da390f5e518))
+
 ## [1.335.1](https://github.com/adobe/spacecat-api-service/compare/v1.335.0...v1.335.1) (2026-03-05)
 
 
