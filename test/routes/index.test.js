@@ -38,6 +38,7 @@ describe('getRouteHandlers', () => {
   };
 
   const mockHooksController = {
+    processDrsPromptGenerationHook: sinon.stub(),
   };
 
   const mockSitesController = {
@@ -270,12 +271,15 @@ describe('getRouteHandlers', () => {
     offboardCustomer: () => null,
     queryFiles: () => null,
     getLlmoRationale: () => null,
+    getBrandClaims: () => null,
     createOrUpdateEdgeConfig: () => null,
     getEdgeConfig: () => null,
+    createOrUpdateStageEdgeConfig: () => null,
     checkEdgeOptimizeStatus: () => null,
     updateEdgeOptimizeCDNRouting: () => null,
     getStrategy: () => null,
     saveStrategy: () => null,
+    markOpportunitiesReviewed: () => null,
   };
 
   const mockSandboxAuditController = {
@@ -338,6 +342,15 @@ describe('getRouteHandlers', () => {
     getConfig: sinon.stub(),
   };
 
+  const mockConsumersController = {
+    getAll: sinon.stub(),
+    getByConsumerId: sinon.stub(),
+    getByClientId: sinon.stub(),
+    register: sinon.stub(),
+    update: sinon.stub(),
+    revoke: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -378,6 +391,7 @@ describe('getRouteHandlers', () => {
       mockTrafficToolsController,
       mockBotBlockerController,
       mockSentimentController,
+      mockConsumersController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -409,6 +423,8 @@ describe('getRouteHandlers', () => {
       'GET /sites-resolve',
       'GET /trial-users/email-preferences',
       'PATCH /trial-users/email-preferences',
+      'GET /consumers',
+      'POST /consumers/register',
     );
 
     expect(staticRoutes['GET /configurations/latest']).to.equal(mockConfigurationController.getLatest);
@@ -641,8 +657,10 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/offboard',
       'POST /sites/:siteId/llmo/edge-optimize-config',
       'GET /sites/:siteId/llmo/edge-optimize-config',
+      'POST /sites/:siteId/llmo/edge-optimize-config/stage',
       'GET /sites/:siteId/llmo/edge-optimize-status',
       'POST /sites/:siteId/llmo/edge-optimize-routing',
+      'PUT /sites/:siteId/llmo/opportunities-reviewed',
       'GET /sites/:siteId/llmo/strategy',
       'PUT /sites/:siteId/llmo/strategy',
       'GET /consent-banner/:jobId',
@@ -651,6 +669,7 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/llmo/cdn-logs-bucket-config',
       'GET /sites/:siteId/llmo/global-sheet-data/:configName',
       'GET /sites/:siteId/llmo/rationale',
+      'GET /sites/:siteId/llmo/brand-claims',
       'GET /sites/:siteId/url-store',
       'GET /sites/:siteId/url-store/by-audit/:auditType',
       'GET /sites/:siteId/url-store/:base64Url',
@@ -673,6 +692,10 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/sentiment/guidelines/:guidelineId',
       'DELETE /sites/:siteId/sentiment/guidelines/:guidelineId',
       'GET /sites/:siteId/sentiment/config',
+      'GET /consumers/:consumerId',
+      'GET /consumers/by-client-id/:clientId',
+      'PATCH /consumers/:consumerId',
+      'POST /consumers/:consumerId/revoke',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
@@ -866,10 +889,14 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-config'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-config'].handler).to.equal(mockLlmoController.getEdgeConfig);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-config'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-config/stage'].handler).to.equal(mockLlmoController.createOrUpdateStageEdgeConfig);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-config/stage'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-status'].handler).to.equal(mockLlmoController.checkEdgeOptimizeStatus);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/edge-optimize-status'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-routing'].handler).to.equal(mockLlmoController.updateEdgeOptimizeCDNRouting);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-routing'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['PUT /sites/:siteId/llmo/opportunities-reviewed'].handler).to.equal(mockLlmoController.markOpportunitiesReviewed);
+    expect(dynamicRoutes['PUT /sites/:siteId/llmo/opportunities-reviewed'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy'].handler).to.equal(mockLlmoController.getStrategy);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['PUT /sites/:siteId/llmo/strategy'].handler).to.equal(mockLlmoController.saveStrategy);
@@ -888,6 +915,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/llmo/global-sheet-data/:configName'].paramNames).to.deep.equal(['siteId', 'configName']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/rationale'].handler).to.equal(mockLlmoController.getLlmoRationale);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/rationale'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/brand-claims'].handler).to.equal(mockLlmoController.getBrandClaims);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/brand-claims'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:dataSource'].handler).to.equal(mockLlmoController.queryLlmoSheetData);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:dataSource'].paramNames).to.deep.equal(['siteId', 'dataSource']);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource'].handler).to.equal(mockLlmoController.queryLlmoSheetData);

@@ -85,6 +85,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} trafficToolsController - The traffic tools controller.
 * @param {Object} botBlockerController - The bot blocker controller.
  * @param {Object} sentimentController - The sentiment controller.
+ * @param {Object} consumersController - The consumers controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -126,6 +127,7 @@ export default function getRouteHandlers(
   trafficToolsController,
   botBlockerController,
   sentimentController,
+  consumersController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -367,14 +369,17 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/llmo/cdn-logs-bucket-config': llmoController.patchLlmoCdnBucketConfig,
     'GET /sites/:siteId/llmo/global-sheet-data/:configName': llmoController.getLlmoGlobalSheetData,
     'GET /sites/:siteId/llmo/rationale': llmoController.getLlmoRationale,
+    'GET /sites/:siteId/llmo/brand-claims': llmoController.getBrandClaims,
     'POST /llmo/onboard': llmoController.onboardCustomer,
     'POST /sites/:siteId/llmo/offboard': llmoController.offboardCustomer,
     'POST /sites/:siteId/llmo/edge-optimize-config': llmoController.createOrUpdateEdgeConfig,
     'GET /sites/:siteId/llmo/edge-optimize-config': llmoController.getEdgeConfig,
+    'POST /sites/:siteId/llmo/edge-optimize-config/stage': llmoController.createOrUpdateStageEdgeConfig,
     'GET /sites/:siteId/llmo/strategy': llmoController.getStrategy,
     'PUT /sites/:siteId/llmo/strategy': llmoController.saveStrategy,
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,
     'POST /sites/:siteId/llmo/edge-optimize-routing': llmoController.updateEdgeOptimizeCDNRouting,
+    'PUT /sites/:siteId/llmo/opportunities-reviewed': llmoController.markOpportunitiesReviewed,
 
     // Tier Specific Routes
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,
@@ -422,6 +427,14 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/sentiment/guidelines/:guidelineId/audits/unlink': sentimentController.unlinkAudits,
     // Combined config
     'GET /sites/:siteId/sentiment/config': sentimentController.getConfig,
+
+    // Consumer management (by-client-id before :consumerId to avoid ambiguous matching)
+    'GET /consumers': consumersController.getAll,
+    'GET /consumers/by-client-id/:clientId': consumersController.getByClientId,
+    'GET /consumers/:consumerId': consumersController.getByConsumerId,
+    'POST /consumers/register': consumersController.register,
+    'PATCH /consumers/:consumerId': consumersController.update,
+    'POST /consumers/:consumerId/revoke': consumersController.revoke,
   };
 
   // Initialization of static and dynamic routes

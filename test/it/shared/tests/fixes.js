@@ -135,6 +135,24 @@ export default function fixTests(getHttpClient, resetData) {
         const res = await http.user.get(`${DENIED_BASE}/by-status/PENDING`);
         expect(res.status).to.equal(403);
       });
+
+      it('user: returns fixes when status is lowercase', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}/by-status/pending`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(1);
+        expectFixDto(res.body[0]);
+        expect(res.body[0].status).to.equal('PENDING');
+      });
+
+      it('user: returns fixes when status is mixed-case', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}/by-status/Pending`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(1);
+        expectFixDto(res.body[0]);
+        expect(res.body[0].status).to.equal('PENDING');
+      });
     });
 
     describe('GET .../fixes/:fixId', () => {

@@ -197,6 +197,7 @@ describe('Sites Controller', () => {
       log: loggerStub,
       env: {
         DEFAULT_ORGANIZATION_ID: 'default',
+        ORGANIZATION_ID_FRIENDS_FAMILY: 'friends-family',
         AGENT_WORKFLOW_STATE_MACHINE_ARN: 'arn:aws:states:us-east-1:123456789012:stateMachine:agent-workflow',
       },
       dataAccess: mockDataAccess,

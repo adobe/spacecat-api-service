@@ -1337,6 +1337,90 @@ llmo-rationale:
     security:
       - api_key: [ ]
 
+llmo-brand-claims:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: model
+      in: query
+      required: false
+      description: AI model name to retrieve brand claims for. If omitted, returns the default model's data.
+      schema:
+        type: string
+        example: 'gpt-4.1'
+  get:
+    tags:
+      - llmo
+    summary: Get brand claims presigned URL
+    description: |
+      Returns a presigned S3 URL for downloading brand claims data for a specific site.
+      The data files are `.json.gz` compressed and can be very large (100MB+ uncompressed),
+      so this endpoint returns a presigned URL rather than the data directly.
+
+      The optional `model` query parameter selects which AI model's data to retrieve.
+      If omitted, the default model's data file is returned.
+
+      S3 key convention:
+      - Default model: `brand_claims/llmo/{siteId}/data.json.gz`
+      - Specific model: `brand_claims/llmo/{siteId}/{model}.json.gz`
+    operationId: getBrandClaims
+    responses:
+      '200':
+        description: Presigned URL for brand claims data generated successfully
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                siteId:
+                  type: string
+                  format: uuid
+                  description: The site ID
+                  example: '9ae8877a-bbf3-407d-9adb-d6a72ce3c5e3'
+                model:
+                  type: string
+                  description: The AI model name, or 'default' if no model was specified
+                  example: 'gpt-4.1'
+                presignedUrl:
+                  type: string
+                  format: uri
+                  description: Presigned S3 URL to download the brand claims data file
+                expiresAt:
+                  type: string
+                  format: date-time
+                  description: ISO 8601 timestamp when the presigned URL expires
+                  example: '2025-06-15T12:00:00.000Z'
+              required:
+                - siteId
+                - model
+                - presignedUrl
+                - expiresAt
+      '400':
+        description: Bad request - S3 not configured or other error
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: 'S3 bucket is not configured for this environment'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        description: Brand claims data not found for the specified site
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                error:
+                  type: string
+                  example: 'Brand claims data not found for site 9ae8877a-bbf3-407d-9adb-d6a72ce3c5e3'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 site-llmo-edge-optimize-config:
   parameters:
     - $ref: './parameters.yaml#/siteId'
@@ -1413,6 +1497,58 @@ site-llmo-edge-optimize-config:
               additionalProperties: true
               description: The metaconfig object stored in S3
       '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
+site-llmo-edge-optimize-config-stage:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    operationId: createOrUpdateStageEdgeConfig
+    summary: Add staging domains for edge optimize (stage environment support)
+    description: |
+      Adds one or more staging domains for the specified LLMO prod site. For each domain:
+
+      - Validates that the apex of the staging domain matches the apex of the prod site base URL.
+      - Creates or finds a stage site in Spacecat in the same organization.
+      - Creates edge optimize metaconfig for the stage site with prerender enabled for the whole domain.
+      - Persists the staging domain to site ID mapping in the prod site's edgeOptimizeConfig.
+
+      Returns the complete metaconfig for each stage site in an array (stageConfigs). Each item includes domain, siteId, and all metaconfig properties (apiKeys, enabled, prerender, etc.).
+
+      The staging domains list can be retrieved via GET /sites/{siteId} under config.edgeOptimizeConfig.stagingDomains.
+
+      **Note:** This endpoint requires LLMO administrator access for the site.
+    tags:
+      - llmo
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/StageDomainsRequest'
+    responses:
+      '200':
+        description: Staging domains added successfully. Returns an array of stage configs; each element is the staging domain plus full metaconfig (siteId, apiKeys, enabled, enhancements, patches, prerender) for that stage site.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/StageConfigsResponse'
+      '400':
+        description: Invalid request (e.g. empty stagingDomains, apex mismatch)
         $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
@@ -1602,6 +1738,14 @@ llmo-strategy:
       This operation completely overwrites the existing strategy with the provided payload.
       The payload can be any valid JSON object - no schema validation is performed.
       The strategy is stored in S3 at `workspace/llmo/{siteId}/strategy.json`.
+
+      When status changes are detected (either at the strategy level or at the
+      opportunity level), email notifications are sent to the relevant recipients.
+      Initial strategy creation does not trigger strategy status emails. Assignment
+      notifications go to the assignee only (not the strategy owner). Notification
+      delivery is awaited, and a summary of sent/failed/skipped counts is included
+      in the response. Notification failures do not cause the endpoint to return
+      an error.
     operationId: saveStrategy
     requestBody:
       required: true
@@ -1623,14 +1767,64 @@ llmo-strategy:
                   type: string
                   description: The S3 object version ID of the saved strategy
                   example: "abc123def456"
+                notifications:
+                  type: object
+                  description: Summary of notification delivery
+                  properties:
+                    sent:
+                      type: integer
+                      description: Number of emails sent successfully
+                    failed:
+                      type: integer
+                      description: Number of emails that failed to send
+                    skipped:
+                      type: integer
+                      description: Number of changes skipped (e.g. no valid recipients)
+                    changes:
+                      type: integer
+                      description: Number of status changes detected
               required:
                 - version
+                - notifications
       '400':
         $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
       '500':
         $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+llmo-opportunities-reviewed:
+  put:
+    tags:
+      - llmo
+    summary: Mark opportunities as reviewed
+    description: |
+      Marks the LLMO opportunities for a site as reviewed by adding an
+      `opportunitiesReviewed` tag to the site's LLMO configuration.
+      The tag is idempotent — calling this endpoint multiple times will not
+      create duplicate tags.
+    operationId: markOpportunitiesReviewed
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    responses:
+      '200':
+        description: Opportunities marked as reviewed successfully
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: string
+              example:
+                - opportunitiesReviewed
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
     security:
       - api_key: [ ]
 
