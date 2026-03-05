@@ -25,6 +25,7 @@ import {
   isObject,
   isInteger,
   isValidUUID,
+  isValidUrl,
 } from '@adobe/spacecat-shared-utils';
 
 import { Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-access';
@@ -793,11 +794,13 @@ function SuggestionsController(ctx, sqs, env) {
     const isAssessAction = action === 'assess';
     const isAssessUrlsAction = action === 'assess-urls';
 
-    if (precheckOnly !== undefined && typeof precheckOnly !== 'boolean') {
-      return badRequest('precheckOnly must be a boolean');
-    }
     if (action !== undefined && !hasText(action)) {
       return badRequest('action cannot be empty');
+    }
+    if (action === 'assess' || action === 'assess-urls') {
+      if (precheckOnly !== undefined && typeof precheckOnly !== 'boolean') {
+        return badRequest('precheckOnly must be a boolean');
+      }
     }
 
     const site = await Site.findById(siteId);
@@ -819,11 +822,16 @@ function SuggestionsController(ctx, sqs, env) {
       if (!isNonEmptyArray(pages)) {
         return badRequest('Request body must contain a non-empty array of pages (URLs) when action is assess-urls');
       }
+      const invalidPage = pages.find((p) => typeof p !== 'string' || !isValidUrl(p));
+      if (invalidPage !== undefined) {
+        return badRequest('Each page in the pages array must be a valid URL');
+      }
       const configuration = await Configuration.findLatest();
       if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-auto-fix`, site)) {
         return badRequest(`Handler is not enabled for site ${site.getId()} autofix type ${opportunity.getType()}`);
       }
       const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
+      // Intentionally omit opportunityId: worker uses context differently for URL-based assessments
       await sqs.sendMessage(queueUrl, {
         siteId,
         action: 'assess-urls',

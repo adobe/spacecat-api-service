@@ -2709,6 +2709,28 @@ describe('Suggestions Controller', () => {
       expect(payload).to.have.property('action', 'assess');
     });
 
+    it('does not include precheckOnly in SQS payload when precheckOnly is false', async () => {
+      opportunity.getType = sandbox.stub().returns('alt-text');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(altTextSuggs[0])],
+      );
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          action: 'assess',
+          precheckOnly: false,
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload).to.not.have.property('precheckOnly');
+    });
+
     it('returns 400 when precheckOnly is not a boolean', async () => {
       const response = await suggestionsControllerWithMock.autofixSuggestions({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
@@ -3223,6 +3245,17 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(400);
       const body = await response.json();
       expect(body).to.have.property('message', 'Request body must contain a non-empty array of pages (URLs) when action is assess-urls');
+    });
+
+    it('returns 400 when action is assess-urls but a page is not a valid URL', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { action: 'assess-urls', pages: ['https://valid.com/p', 'not-a-url'] },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Each page in the pages array must be a valid URL');
     });
 
     it('returns 400 when action is assess-urls but handler is not enabled for site', async () => {
