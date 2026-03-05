@@ -1,3 +1,10 @@
+# [1.335.0](https://github.com/adobe/spacecat-api-service/compare/v1.334.2...v1.335.0) (2026-03-05)
+
+
+### Features
+
+* migrate DRS client to @adobe/spacecat-shared-drs-client (LLMO-1819) ([#1892](https://github.com/adobe/spacecat-api-service/issues/1892)) ([dbf1785](https://github.com/adobe/spacecat-api-service/commit/dbf17857737b9dffeb357b352cc50806db19c9a9))
+
 ## [1.334.2](https://github.com/adobe/spacecat-api-service/compare/v1.334.1...v1.334.2) (2026-03-05)
 
 
