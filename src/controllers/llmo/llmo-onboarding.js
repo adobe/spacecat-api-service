@@ -17,9 +17,9 @@ import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-acc
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import { composeBaseURL, tracingFetch as fetch, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
 import AhrefsAPIClient from '@adobe/spacecat-shared-ahrefs-client';
+import DrsClient from '@adobe/spacecat-shared-drs-client';
 import { parse as parseDomain } from 'tldts';
 import { postSlackMessage } from '../../utils/slack/base.js';
-import DrsClient from '../../support/drs-client.js';
 
 // LLMO Constants
 const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
@@ -1063,7 +1063,7 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
 
     // Submit DRS prompt generation job (non-blocking)
     try {
-      const drsClient = DrsClient(context);
+      const drsClient = DrsClient.createFrom(context);
       if (drsClient.isConfigured()) {
         // Try to get audience from brand profile, fall back to default
         const brandProfile = siteConfig.getBrandProfile?.();
