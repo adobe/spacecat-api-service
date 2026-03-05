@@ -772,6 +772,20 @@ function SuggestionsController(ctx, sqs, env) {
     };
     return createResponse(fullResponse, 207);
   };
+  /**
+   * Triggers auto-fix for the given suggestions. Validates the site, opportunity, and
+   * suggestions, then queues an autofix message via SQS.
+   *
+   * For promise token resolution, prefers the x-promise-token request header if present.
+   * Falls back to obtaining a token via IMS when the header is absent or empty.
+   *
+   * @param {Object} context - The request context
+   * @param {Object} [context.pathInfo] - The path info object
+   * @param {Object} [context.pathInfo.headers] - Request headers (x-promise-token preferred)
+   * @param {Object} context.params - Path parameters (siteId, opportunityId)
+   * @param {Object} context.data - Request body containing suggestionIds
+   * @returns {Promise<Response>} 207 multi-status response with per-suggestion results
+   */
   const autofixSuggestions = async (context) => {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;

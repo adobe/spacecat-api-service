@@ -508,6 +508,7 @@ site-opportunity-suggestions-auto-fix:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/opportunityId'
+    - $ref: './parameters.yaml#/xPromiseToken'
   patch:
     operationId: autoFixSiteOpportunitySuggestions
     summary: |
