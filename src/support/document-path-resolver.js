@@ -155,16 +155,10 @@ export async function resolveDocumentPath(
 
     if (deliveryType === 'aem_cs') {
       if (!authorURL) return null;
-      // meta-tags may have page_id directly in changeDetails (no URL → pageId resolution needed)
-      if (opportunityType === 'meta-tags') {
-        const directPageId = changeDetails?.page_id ?? changeDetails?.pageId;
-        if (directPageId) {
-          return await getPageEditUrl(authorURL, bearerToken, directPageId);
-        }
-      }
 
-      const pageUrl = extractPageUrl(opportunityType, changeDetails);
-      if (!pageUrl) return null;
+      const pageUrlRaw = extractPageUrl(opportunityType, changeDetails);
+      if (!pageUrlRaw) return null;
+      const pageUrl = prependSchema(pageUrlRaw);
 
       const preferContentApi = deliveryConfig?.preferContentApi ?? false;
       const pageId = await determineAEMCSPageId(

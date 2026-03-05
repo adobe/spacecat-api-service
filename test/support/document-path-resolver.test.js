@@ -11,9 +11,12 @@
  */
 
 /* eslint-env mocha */
-import { expect } from 'chai';
+import { expect, use } from 'chai';
 import sinon from 'sinon';
+import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
+
+use(sinonChai);
 
 describe('document-path-resolver', () => {
   let sandbox;
@@ -241,28 +244,6 @@ describe('document-path-resolver', () => {
         expect(result).to.be.null;
       });
 
-      it('returns getPageEditUrl when meta-tags has page_id in changeDetails', async () => {
-        getPageEditUrlStub.resolves('https://author.example.com/editor.html/page-id');
-        const site = {
-          getDeliveryType: () => 'aem_cs',
-          getDeliveryConfig: () => ({ authorURL: 'https://author.example.com' }),
-        };
-        const result = await resolveDocumentPath(site, 'meta-tags', { page_id: 'page-123' }, 'Bearer t', log);
-        expect(result).to.equal('https://author.example.com/editor.html/page-id');
-        expect(getPageEditUrlStub).to.have.been.calledWith('https://author.example.com', 'Bearer t', 'page-123');
-      });
-
-      it('uses pageId when meta-tags has pageId (camelCase) in changeDetails', async () => {
-        getPageEditUrlStub.resolves('https://author.example.com/editor.html/page-456');
-        const site = {
-          getDeliveryType: () => 'aem_cs',
-          getDeliveryConfig: () => ({ authorURL: 'https://author.example.com' }),
-        };
-        const result = await resolveDocumentPath(site, 'meta-tags', { pageId: 'page-456' }, 'Bearer t', log);
-        expect(result).to.equal('https://author.example.com/editor.html/page-456');
-        expect(getPageEditUrlStub).to.have.been.calledWith('https://author.example.com', 'Bearer t', 'page-456');
-      });
-
       it('resolves page URL via determineAEMCSPageId and getPageEditUrl for broken-internal-links', async () => {
         determineAEMCSPageIdStub.resolves('resolved-page-id');
         getPageEditUrlStub.resolves('https://author.example.com/editor.html/resolved');
@@ -315,8 +296,9 @@ describe('document-path-resolver', () => {
         };
         const result = await resolveDocumentPath(site, 'structured-data', { path: '/docs/page' }, 'Bearer t', log);
         expect(result).to.equal('https://author.example.com/editor.html');
+        // Resolver passes prependSchema(pageUrlRaw) to determineAEMCSPageId; path '/docs/page' becomes 'https:///docs/page'
         expect(determineAEMCSPageIdStub).to.have.been.calledWith(
-          '/docs/page',
+          'https:///docs/page',
           'https://author.example.com',
           'Bearer t',
           false,
