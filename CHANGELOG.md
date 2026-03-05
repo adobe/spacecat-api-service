@@ -1,3 +1,10 @@
+# [1.334.0](https://github.com/adobe/spacecat-api-service/compare/v1.333.2...v1.334.0) (2026-03-05)
+
+
+### Features
+
+* LLMO-2805 Stage config addition api changes ([#1847](https://github.com/adobe/spacecat-api-service/issues/1847)) ([7bde7fc](https://github.com/adobe/spacecat-api-service/commit/7bde7fc0530fdfc919c5c3e9c6a87f1543dedd6e))
+
 ## [1.333.2](https://github.com/adobe/spacecat-api-service/compare/v1.333.1...v1.333.2) (2026-03-04)
 
 
