@@ -1,3 +1,10 @@
+## [1.335.1](https://github.com/adobe/spacecat-api-service/compare/v1.335.0...v1.335.1) (2026-03-05)
+
+
+### Bug Fixes
+
+* migrate preflight and autofix to session token validation ([#1909](https://github.com/adobe/spacecat-api-service/issues/1909)) ([186a599](https://github.com/adobe/spacecat-api-service/commit/186a599831178c8354583574da83c0098671932d))
+
 # [1.335.0](https://github.com/adobe/spacecat-api-service/compare/v1.334.2...v1.335.0) (2026-03-05)
 
 
