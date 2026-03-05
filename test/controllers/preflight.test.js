@@ -718,7 +718,7 @@ describe('Preflight Controller', () => {
         'https://sqs.test.amazonaws.com/audit-queue',
         {
           jobId,
-          siteId: mockSite.getId(),
+          siteId: aemCsSite.getId(),
           type: 'preflight',
           promiseToken: mockPromiseToken,
         },

@@ -3306,9 +3306,19 @@ describe('Suggestions Controller', () => {
       mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
         mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
 
-      const getPromiseTokenStub = imsPromiseClient.createFrom().getPromiseToken;
+      const getIMSPromiseTokenStub = sandbox.stub();
+      const SuggestionsControllerWithStub = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/utils.js': {
+          getIMSPromiseToken: getIMSPromiseTokenStub,
+        },
+      });
+      const controllerWithStub = SuggestionsControllerWithStub({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'abcd' } },
+        ...authContext,
+      }, spySqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
 
-      const response = await suggestionsControllerWithIms.autofixSuggestions({
+      const response = await controllerWithStub.autofixSuggestions({
         env: {
           AUTOFIX_CRYPT_SECRET: 'superSecret',
           AUTOFIX_CRYPT_SALT: 'salt',
@@ -3333,7 +3343,7 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(207);
       expect(sqsSpy.firstCall.args[1]).to.have.property('promiseToken');
       expect(sqsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token', 'header-promise-token');
-      expect(getPromiseTokenStub).to.not.have.been.called;
+      expect(getIMSPromiseTokenStub).to.not.have.been.called;
     });
 
     it('falls back to IMS when x-promise-token header is absent', async () => {
