@@ -1,3 +1,10 @@
+# [1.336.0](https://github.com/adobe/spacecat-api-service/compare/v1.335.2...v1.336.0) (2026-03-05)
+
+
+### Features
+
+* update for alt-text autofix assessment-urls action handling ([#1905](https://github.com/adobe/spacecat-api-service/issues/1905)) ([91f592f](https://github.com/adobe/spacecat-api-service/commit/91f592fc5b66365c776e0ae79da590c014bd7c30))
+
 ## [1.335.2](https://github.com/adobe/spacecat-api-service/compare/v1.335.1...v1.335.2) (2026-03-05)
 
 
