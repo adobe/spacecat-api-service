@@ -259,6 +259,38 @@ Config:
       description: Optional. The Brand Profile determined during on-boarding.
       type: object
       additionalProperties: true
+    edgeOptimizeConfig:
+      description: Optional. The edge optimize configuration for the site.
+      $ref: '#/EdgeOptimizeConfig'
+EdgeOptimizeConfig:
+  type: object
+  description: Edge optimize configuration for a site
+  properties:
+    enabled:
+      description: Whether edge optimize is enabled for the site
+      type: boolean
+    opted:
+      description: Timestamp (milliseconds since epoch) when the site opted into edge optimize
+      type: number
+      example: 1772531669121
+    stagingDomains:
+      description: Staging domains associated with this site for edge optimize
+      type: array
+      items:
+        type: object
+        required:
+          - domain
+          - id
+        properties:
+          domain:
+            type: string
+            description: Staging domain hostname
+            example: 'staging.example.com'
+          id:
+            type: string
+            format: uuid
+            description: Spacecat site ID for the stage site
+  additionalProperties: true
 ContentAiConfig:
   type: object
   properties:
@@ -6129,3 +6161,47 @@ SentimentConfig:
       items:
         $ref: '#/SentimentGuideline'
       description: Guidelines (optionally filtered by audit type)
+
+StageDomainsRequest:
+  type: object
+  description: Request body for adding staging domains to a prod LLMO site
+  required:
+    - stagingDomains
+  properties:
+    stagingDomains:
+      type: array
+      items:
+        type: string
+        description: Staging domain (hostname, e.g. staging.lovesac.com)
+      minItems: 1
+      example: ['staging.lovesac.com', 'stage1.lovesac.com']
+
+StageConfigItem:
+  type: object
+  description: Full edge optimize metaconfig for one stage site (domain plus metaconfig fields)
+  required:
+    - domain
+    - siteId
+  properties:
+    domain:
+      type: string
+      description: Staging domain (e.g. staging.lovesac.com)
+      example: 'staging.lovesac.com'
+    siteId:
+      type: string
+      format: uuid
+      description: Spacecat site ID for the stage site
+    apiKeys:
+      type: array
+      items:
+        type: string
+      description: API keys for the stage site
+    tokowakaEnabled:
+      type: boolean
+  additionalProperties: true
+
+StageConfigsResponse:
+  type: array
+  description: Response is the array of stage configs (one per staging domain). Each item is domain plus full edge optimize metaconfig for that stage site.
+  items:
+    $ref: '#/StageConfigItem'

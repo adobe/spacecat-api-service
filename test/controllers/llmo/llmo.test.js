@@ -4347,6 +4347,258 @@ describe('LlmoController', () => {
     });
   });
 
+  describe('createOrUpdateStageEdgeConfig', () => {
+    const STAGE_SITE_ID = 'stage-site-uuid';
+    let stageConfigContext;
+    let mockStageSite;
+    const fullMetaconfig = { apiKeys: ['key1'], tokowakaEnabled: true, prerender: { allowList: ['/*'] } };
+
+    beforeEach(() => {
+      mockStageSite = {
+        getId: sinon.stub().returns(STAGE_SITE_ID),
+        getConfig: sinon.stub().returns(mockConfig),
+        getBaseURL: sinon.stub().returns('https://staging.lovesac.com'),
+        getOrganizationId: sinon.stub().returns(TEST_ORG_ID),
+        save: sinon.stub().resolves(),
+      };
+      mockSite.getBaseURL = sinon.stub().returns('https://www.lovesac.com');
+      mockSite.getOrganizationId = sinon.stub().returns(TEST_ORG_ID);
+      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({});
+      mockConfig.updateEdgeOptimizeConfig = sinon.stub();
+      mockDataAccess.Site.findById.resolves(mockSite);
+      mockDataAccess.Site.findByBaseURL = sinon.stub().resolves(null);
+      mockDataAccess.Site.create = sinon.stub().resolves(mockStageSite);
+      mockTokowakaClient.fetchMetaconfig.resolves(null);
+      mockTokowakaClient.createMetaconfig.resolves(fullMetaconfig);
+      mockTokowakaClient.updateMetaconfig.resolves({});
+
+      stageConfigContext = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        data: { stagingDomains: ['staging.lovesac.com'] },
+        attributes: { authInfo: { profile: { email: 'admin@example.com' } } },
+      };
+    });
+
+    it('should create stage site and metaconfig and return full S3 config array', async () => {
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.be.an('array').with.lengthOf(1);
+      expect(responseBody[0]).to.deep.include({
+        domain: 'staging.lovesac.com',
+        ...fullMetaconfig,
+      });
+      expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith('https://staging.lovesac.com');
+      expect(mockDataAccess.Site.create).to.have.been.calledWith({
+        baseURL: 'https://staging.lovesac.com',
+        organizationId: TEST_ORG_ID,
+      });
+      expect(mockTokowakaClient.createMetaconfig).to.have.been.calledWith(
+        'https://staging.lovesac.com',
+        STAGE_SITE_ID,
+        sinon.match({ tokowakaEnabled: true }),
+        sinon.match({ lastModifiedBy: 'admin@example.com', isStageDomain: true }),
+      );
+      expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(
+        sinon.match({ stagingDomains: sinon.match.array }),
+      );
+      expect(mockSite.save).to.have.been.called;
+    });
+
+    it('should use existing stage site when found and return full config after fetch', async () => {
+      mockDataAccess.Site.findByBaseURL.resolves(mockStageSite);
+      const existingMetaconfig = { apiKeys: ['existing-key'], tokowakaEnabled: true };
+      mockTokowakaClient.fetchMetaconfig
+        .onFirstCall().resolves(existingMetaconfig)
+        .onSecondCall().resolves({ ...existingMetaconfig, prerender: { allowList: ['/*'] } });
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockDataAccess.Site.create).to.not.have.been.called;
+      expect(mockTokowakaClient.updateMetaconfig).to.have.been.calledWith(
+        'https://staging.lovesac.com',
+        STAGE_SITE_ID,
+        {},
+        sinon.match({ lastModifiedBy: sinon.match.string, isStageDomain: true }),
+      );
+      const responseBody = await result.json();
+      expect(responseBody).to.be.an('array').with.lengthOf(1);
+      expect(responseBody[0]).to.have.property('domain', 'staging.lovesac.com');
+    });
+
+    it('should return 400 when stagingDomains is not an array', async () => {
+      stageConfigContext.data = { stagingDomains: 'staging.lovesac.com' };
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('non-empty array');
+    });
+
+    it('should return 400 when stagingDomains is empty array', async () => {
+      stageConfigContext.data = { stagingDomains: [] };
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('non-empty array');
+    });
+
+    it('should return 400 when staging domain apex does not match prod apex', async () => {
+      stageConfigContext.data = { stagingDomains: ['staging.otherdomain.com'] };
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('same base domain');
+    });
+
+    it('should return 403 when not LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      });
+      const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
+
+      const result = await controllerNoAdmin.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Only LLMO administrators');
+    });
+
+    it('should return 404 when prod site not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Site not found');
+    });
+
+    it('should return 403 when user does not have access to site', async () => {
+      const deniedController = controllerWithAccessDenied(mockContext);
+      const result = await deniedController.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('does not have access');
+    });
+
+    it('should merge with existing stagingDomains in config and return stageConfigs array', async () => {
+      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({
+        stagingDomains: [
+          { domain: 'existing.stage.lovesac.com', id: 'existing-id' },
+        ],
+      });
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.be.an('array').with.lengthOf(1);
+      expect(responseBody[0].domain).to.equal('staging.lovesac.com');
+      expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(
+        sinon.match({
+          stagingDomains: sinon.match.array,
+        }),
+      );
+    });
+
+    it('should return 400 when stagingDomains contains only empty/whitespace strings', async () => {
+      stageConfigContext.data = { stagingDomains: ['  ', '', '   \t  '] };
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('at least one non-empty domain string');
+    });
+
+    it('should return 400 when an error occurs during site creation', async () => {
+      mockDataAccess.Site.create.rejects(new Error('Database connection failed'));
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Database connection failed');
+    });
+
+    it('should return 400 when createMetaconfig fails', async () => {
+      mockTokowakaClient.createMetaconfig.rejects(new Error('Tokowaka service error'));
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Tokowaka service error');
+    });
+
+    it('should return 400 when updateEdgeOptimizeConfig throws', async () => {
+      mockConfig.updateEdgeOptimizeConfig.throws(new Error('Config update failed'));
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Config update failed');
+    });
+
+    it('should return 400 when context.data is undefined', async () => {
+      stageConfigContext.data = undefined;
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('non-empty array');
+    });
+
+    it('should filter out non-string values from stagingDomains array', async () => {
+      stageConfigContext.data = { stagingDomains: ['staging.lovesac.com', 123, { domain: 'test' }, null, undefined] };
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.be.an('array').with.lengthOf(1);
+      expect(responseBody[0].domain).to.equal('staging.lovesac.com');
+    });
+
+    it('should use default lastModifiedBy when profile.email is missing', async () => {
+      stageConfigContext.attributes.authInfo = { profile: {} };
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockTokowakaClient.createMetaconfig).to.have.been.calledWith(
+        sinon.match.string,
+        sinon.match.string,
+        sinon.match.object,
+        sinon.match({ lastModifiedBy: 'tokowaka-stage-edge-optimize-config' }),
+      );
+    });
+
+    it('should handle when getEdgeOptimizeConfig returns null', async () => {
+      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns(null);
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.be.an('array').with.lengthOf(1);
+      expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.called;
+    });
+  });
+
   describe('getEdgeConfig', () => {
     let edgeConfigContext;
 
