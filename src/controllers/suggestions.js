@@ -778,8 +778,8 @@ function SuggestionsController(ctx, sqs, env) {
    * Falls back to obtaining a token via IMS when the header is absent or empty.
    *
    * @param {Object} context - The request context
-   * @param {Object} [context.request] - The request object
-   * @param {Object} [context.request.headers] - Request headers (x-promise-token preferred)
+   * @param {Object} [context.pathInfo] - The path info object
+   * @param {Object} [context.pathInfo.headers] - Request headers (x-promise-token preferred)
    * @param {Object} context.params - Path parameters (siteId, opportunityId)
    * @param {Object} context.data - Request body containing suggestionIds
    * @returns {Promise<Response>} 207 multi-status response with per-suggestion results
@@ -908,7 +908,8 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     let promiseTokenResponse;
-    const headerToken = context.request?.headers?.get?.('x-promise-token');
+    const { pathInfo } = context;
+    const headerToken = pathInfo?.headers?.['x-promise-token'];
     if (hasText(headerToken)) {
       promiseTokenResponse = { promise_token: headerToken };
     } else {

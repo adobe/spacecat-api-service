@@ -93,8 +93,8 @@ function PreflightController(ctx, log, env) {
    * @param {string[]} context.data.urls - Array of URLs to process
    * @param {string} context.data.step - The audit step
    * @param {string} context.data.siteId - The siteId, if it's an AMS site
-   * @param {Object} [context.request] - The request object
-   * @param {Object} [context.request.headers] - Request headers (x-promise-token preferred)
+   * @param {Object} [context.pathInfo] - The path info object
+   * @param {Object} [context.pathInfo.headers] - Request headers (x-promise-token preferred)
    * @returns {Promise<Object>} The HTTP response object
    */
   const createPreflightJob = async (context) => {
@@ -138,7 +138,8 @@ function PreflightController(ctx, log, env) {
 
       let promiseTokenResponse;
       if (promiseBasedTypes.includes(site.getAuthoringType())) {
-        const headerToken = context.request?.headers?.get?.('x-promise-token');
+        const { pathInfo } = context;
+        const headerToken = pathInfo?.headers?.['x-promise-token'];
         if (hasText(headerToken)) {
           promiseTokenResponse = { promise_token: headerToken };
         } else {

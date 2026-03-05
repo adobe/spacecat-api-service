@@ -659,9 +659,9 @@ describe('Preflight Controller', () => {
           urls: ['https://example.com/test.html'],
           step: 'identify',
         },
-        request: {
+        pathInfo: {
           headers: {
-            get: (name) => (name === 'x-promise-token' ? 'headerToken123' : null),
+            'x-promise-token': 'headerToken123',
           },
         },
       };
@@ -755,9 +755,9 @@ describe('Preflight Controller', () => {
           urls: ['https://example.com/test.html'],
           step: 'identify',
         },
-        request: {
+        pathInfo: {
           headers: {
-            get: () => '',
+            'x-promise-token': '',
           },
         },
       };
