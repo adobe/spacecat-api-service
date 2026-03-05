@@ -1,3 +1,45 @@
+## [1.334.2](https://github.com/adobe/spacecat-api-service/compare/v1.334.1...v1.334.2) (2026-03-05)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1911](https://github.com/adobe/spacecat-api-service/issues/1911)) ([29e6316](https://github.com/adobe/spacecat-api-service/commit/29e631684faa02549d763595a5743cd878117287))
+
+## [1.334.1](https://github.com/adobe/spacecat-api-service/compare/v1.334.0...v1.334.1) (2026-03-05)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v3.8.0 ([#1908](https://github.com/adobe/spacecat-api-service/issues/1908)) ([0390112](https://github.com/adobe/spacecat-api-service/commit/039011286f8613b0ccd8cbfb71d054a0082d9cac))
+
+# [1.334.0](https://github.com/adobe/spacecat-api-service/compare/v1.333.2...v1.334.0) (2026-03-05)
+
+
+### Features
+
+* LLMO-2805 Stage config addition api changes ([#1847](https://github.com/adobe/spacecat-api-service/issues/1847)) ([7bde7fc](https://github.com/adobe/spacecat-api-service/commit/7bde7fc0530fdfc919c5c3e9c6a87f1543dedd6e))
+
+## [1.333.2](https://github.com/adobe/spacecat-api-service/compare/v1.333.1...v1.333.2) (2026-03-04)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v3.7.0 ([#1904](https://github.com/adobe/spacecat-api-service/issues/1904)) ([3a5fd80](https://github.com/adobe/spacecat-api-service/commit/3a5fd8046ffea2660b0ad135d2d571761732c113))
+
+## [1.333.1](https://github.com/adobe/spacecat-api-service/compare/v1.333.0...v1.333.1) (2026-03-04)
+
+
+### Bug Fixes
+
+* exclude large non-customer orgs from getAll sites to avoid 413 ([#1906](https://github.com/adobe/spacecat-api-service/issues/1906)) ([2641b52](https://github.com/adobe/spacecat-api-service/commit/2641b52d78e816aa33a4d8076609d4d34b0c68d0))
+
+# [1.333.0](https://github.com/adobe/spacecat-api-service/compare/v1.332.0...v1.333.0) (2026-03-04)
+
+
+### Features
+
+* brokenbacklink detection ([#1893](https://github.com/adobe/spacecat-api-service/issues/1893)) ([d39d0f7](https://github.com/adobe/spacecat-api-service/commit/d39d0f7ecb2c759bd719231fa30ae169434baa84))
+
 # [1.332.0](https://github.com/adobe/spacecat-api-service/compare/v1.331.1...v1.332.0) (2026-03-04)
 
 
