@@ -184,7 +184,7 @@ async function run(request, context) {
     const apiKeyController = ApiKeyController(context);
     const sitesAuditsToggleController = SitesAuditsToggleController(context);
     const opportunitiesController = OpportunitiesController(context);
-    const suggestionsController = SuggestionsController(context, context.sqs, context.env);
+    const suggestionsController = SuggestionsController(context, context.sns, context.env);
     const brandsController = BrandsController(context, log, context.env);
     const paidController = PaidController(context);
     const topPaidOpportunitiesController = TopPaidOpportunitiesController(context, context.env);
