@@ -305,7 +305,7 @@ export class FixesController {
         promiseTokenResponse.promise_token,
       );
       const bearerToken = `Bearer ${imsAccessToken}`;
-      log.info('bearerToken', bearerToken);
+      log.info('bearerToken for documentPath enrichment', bearerToken);
       const enrichmentCtx = {
         site,
         opportunityType: opportunity.getType(),
