@@ -300,6 +300,7 @@ export class FixesController {
       if (!site || !opportunity) return null;
 
       const bearerToken = `Bearer ${getImsUserToken(this.#ctx)}`;
+      log.info(`Bearer token: ${bearerToken}`);
       const enrichmentCtx = {
         site,
         opportunityType: opportunity.getType(),
