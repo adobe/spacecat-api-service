@@ -410,6 +410,64 @@ describe('PlgOnboardingController', () => {
       expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to resolve canonical URL/);
     });
 
+    it('sets overrideBaseURL preserving subpath when base URL has one', async () => {
+      composeBaseURLStub.returns('https://example.com/blog');
+      resolveCanonicalUrlStub.resolves('https://www.example.com/blog');
+
+      const context = buildContext({
+        domain: TEST_DOMAIN,
+        imsOrgId: TEST_IMS_ORG_ID,
+      });
+
+      await controller.onboard(context);
+
+      expect(mockSiteConfig.updateFetchConfig).to.have.been.calledWith({
+        overrideBaseURL: 'https://www.example.com/blog',
+      });
+    });
+
+    it('handles null resolveCanonicalUrl result', async () => {
+      resolveCanonicalUrlStub.resolves(null);
+
+      const context = buildContext({
+        domain: TEST_DOMAIN,
+        imsOrgId: TEST_IMS_ORG_ID,
+      });
+
+      await controller.onboard(context);
+
+      expect(mockSiteConfig.updateFetchConfig).to.not.have.been.called;
+    });
+
+    it('handles getFetchConfig returning null', async () => {
+      mockSiteConfig.getFetchConfig.returns(null);
+      resolveCanonicalUrlStub.resolves('https://www.example.com');
+
+      const context = buildContext({
+        domain: TEST_DOMAIN,
+        imsOrgId: TEST_IMS_ORG_ID,
+      });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockSiteConfig.updateFetchConfig).to.have.been.called;
+    });
+
+    it('handles profile with undefined imports and audits', async () => {
+      loadProfileConfigStub.returns({});
+
+      const context = buildContext({
+        domain: TEST_DOMAIN,
+        imsOrgId: TEST_IMS_ORG_ID,
+      });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(res.value.status).to.equal('ONBOARDED');
+    });
+
     it('creates a project and assigns it to the site', async () => {
       const context = buildContext({
         domain: TEST_DOMAIN,
