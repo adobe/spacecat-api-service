@@ -1,3 +1,4 @@
+
 # SpaceCat API Service
 
 > Provides an HTTP API to interact with SpaceCat data
