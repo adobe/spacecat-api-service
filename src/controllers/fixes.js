@@ -237,7 +237,7 @@ export class FixesController {
       opportunityId,
       log,
     );
-
+    log.info('enrichmentCtx', enrichmentCtx);
     const FixEntity = this.#FixEntity;
     const fixes = await Promise.all(context.data.map(async (fixData, index) => {
       try {
@@ -298,7 +298,7 @@ export class FixesController {
       ]);
 
       if (!site || !opportunity) return null;
-
+      log.info('Before bearerToken for documentPath enrichment');
       const promiseTokenResponse = await getIMSPromiseToken(this.#ctx);
       const imsAccessToken = await exchangePromiseToken(
         this.#ctx,
