@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 import {
+  accepted,
   badRequest,
   createResponse,
   forbidden,
@@ -24,6 +25,7 @@ import {
   isObject,
   isInteger,
   isValidUUID,
+  isValidUrl,
 } from '@adobe/spacecat-shared-utils';
 
 import { Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-access';
@@ -770,6 +772,20 @@ function SuggestionsController(ctx, sqs, env) {
     };
     return createResponse(fullResponse, 207);
   };
+  /**
+   * Triggers auto-fix for the given suggestions. Validates the site, opportunity, and
+   * suggestions, then queues an autofix message via SQS.
+   *
+   * For promise token resolution, prefers the x-promise-token request header if present.
+   * Falls back to obtaining a token via IMS when the header is absent or empty.
+   *
+   * @param {Object} context - The request context
+   * @param {Object} [context.pathInfo] - The path info object
+   * @param {Object} [context.pathInfo.headers] - Request headers (x-promise-token preferred)
+   * @param {Object} context.params - Path parameters (siteId, opportunityId)
+   * @param {Object} context.data - Request body containing suggestionIds
+   * @returns {Promise<Response>} 207 multi-status response with per-suggestion results
+   */
   const autofixSuggestions = async (context) => {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
@@ -787,19 +803,20 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('No updates provided');
     }
     const {
-      suggestionIds, variations, action, customData, url: requestUrl,
+      suggestionIds, variations, action, customData, url: requestUrl, precheckOnly, pages,
     } = context.data;
     const isAssessAction = action === 'assess';
+    const isAssessUrlsAction = action === 'assess-urls';
 
-    if (!isArray(suggestionIds)) {
-      return badRequest('Request body must be an array of suggestionIds');
-    }
-    if (variations && !isArray(variations)) {
-      return badRequest('variations must be an array');
-    }
     if (action !== undefined && !hasText(action)) {
       return badRequest('action cannot be empty');
     }
+    if (action === 'assess' || action === 'assess-urls') {
+      if (precheckOnly !== undefined && typeof precheckOnly !== 'boolean') {
+        return badRequest('precheckOnly must be a boolean');
+      }
+    }
+
     const site = await Site.findById(siteId);
     if (!site) {
       return notFound('Site not found');
@@ -813,6 +830,39 @@ function SuggestionsController(ctx, sqs, env) {
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
     }
+
+    // assess-urls action: validate pages and send worker message, return 202
+    if (isAssessUrlsAction) {
+      if (!isNonEmptyArray(pages)) {
+        return badRequest('Request body must contain a non-empty array of pages (URLs) when action is assess-urls');
+      }
+      const invalidPage = pages.find((p) => typeof p !== 'string' || !isValidUrl(p));
+      if (invalidPage !== undefined) {
+        return badRequest('Each page in the pages array must be a valid URL');
+      }
+      const configuration = await Configuration.findLatest();
+      if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-auto-fix`, site)) {
+        return badRequest(`Handler is not enabled for site ${site.getId()} autofix type ${opportunity.getType()}`);
+      }
+      const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
+      // Intentionally omit opportunityId: worker uses context differently for URL-based assessments
+      await sqs.sendMessage(queueUrl, {
+        siteId,
+        action: 'assess-urls',
+        pages,
+        ...(precheckOnly === true && { precheckOnly: true }),
+      });
+      return accepted({ message: 'Assess-urls job queued', siteId, pagesCount: pages.length });
+    }
+
+    // suggestion-based flow (assess, fix, etc.)
+    if (!isArray(suggestionIds)) {
+      return badRequest('Request body must be an array of suggestionIds');
+    }
+    if (variations && !isArray(variations)) {
+      return badRequest('variations must be an array');
+    }
+
     const configuration = await Configuration.findLatest();
     if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-auto-fix`, site)) {
       return badRequest(`Handler is not enabled for site ${site.getId()} autofix type ${opportunity.getType()}`);
@@ -894,13 +944,22 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     let promiseTokenResponse;
-    try {
-      promiseTokenResponse = await getIMSPromiseToken(context);
-    } catch (e) {
-      if (e instanceof ErrorWithStatusCode) {
-        return badRequest(e.message);
+    const skipPromiseToken = isAssessAction && precheckOnly === true;
+    if (!skipPromiseToken) {
+      const { pathInfo } = context;
+      const headerToken = pathInfo?.headers?.['x-promise-token'];
+      if (hasText(headerToken)) {
+        promiseTokenResponse = { promise_token: headerToken };
+      } else {
+        try {
+          promiseTokenResponse = await getIMSPromiseToken(context);
+        } catch (e) {
+          if (e instanceof ErrorWithStatusCode) {
+            return badRequest(e.message);
+          }
+          return createResponse({ message: 'Error getting promise token' }, 500);
+        }
       }
-      return createResponse({ message: 'Error getting promise token' }, 500);
     }
 
     const response = {
@@ -922,6 +981,10 @@ function SuggestionsController(ctx, sqs, env) {
     response.suggestions.sort((a, b) => a.index - b.index);
     const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
 
+    const autofixOptions = (urlParam) => ({
+      url: urlParam,
+      ...(precheckOnly === true && { precheckOnly: true }),
+    });
     if (shouldGroupSuggestionsForAutofix(opportunity.getType())) {
       await Promise.all(
         suggestionGroups.map(({ groupedSuggestions, url }) => sendAutofixMessage(
@@ -934,7 +997,7 @@ function SuggestionsController(ctx, sqs, env) {
           variations,
           action,
           customData,
-          { url },
+          autofixOptions(url),
         )),
       );
     } else {
@@ -948,7 +1011,7 @@ function SuggestionsController(ctx, sqs, env) {
         variations,
         action,
         customData,
-        { url: requestUrl },
+        autofixOptions(requestUrl),
       );
     }
 
@@ -1322,6 +1385,8 @@ function SuggestionsController(ctx, sqs, env) {
         validSuggestions.push(suggestion);
       }
     });
+    context.log.info(`[edge-deploy] validSuggestions count: ${validSuggestions.length}
+      , Failed suggestions count: ${failedSuggestions.length}`);
 
     // Filter out validSuggestions that are covered by domain-wide suggestions
     // in the same deployment
@@ -1422,6 +1487,8 @@ function SuggestionsController(ctx, sqs, env) {
 
         // Add ineligible suggestions to failed list
         ineligibleSuggestions.forEach((item) => {
+          context.log.info(`[edge-deploy-failed] site: ${apexBaseUrl}, ${opportunity.getType()}`
+          + ` suggestion ${item.suggestion.getId()} is ineligible: ${item.reason}`);
           failedSuggestions.push({
             uuid: item.suggestion.getId(),
             index: suggestionIds.indexOf(item.suggestion.getId()),
@@ -1447,6 +1514,7 @@ function SuggestionsController(ctx, sqs, env) {
 
     // Handle domain-wide suggestions separately
     if (isNonEmptyArray(domainWideSuggestions)) {
+      context.log.info(`[edge-deploy] domainWideSuggestions count: ${domainWideSuggestions.length}`);
       try {
         const tokowakaClient = TokowakaClient.createFrom(context);
         const baseURL = site.getBaseURL();
@@ -1621,7 +1689,7 @@ function SuggestionsController(ctx, sqs, env) {
         // Add to succeeded suggestions list for response
         succeededSuggestions.push(...skippedSuggestionEntities);
       } catch (error) {
-        context.log.error(`Error marking skipped suggestions: ${error.message}`, error);
+        context.log.error(`[edge-deploy-failed] site: ${apexBaseUrl}, Error marking skipped suggestions: ${error.message}`, error);
         // Add to failed if we couldn't mark them
         context.skippedDueToSameBatchDomainWide.forEach((skipped) => {
           failedSuggestions.push({
@@ -1746,7 +1814,8 @@ function SuggestionsController(ctx, sqs, env) {
         }
       }
     });
-
+    context.log.info(`[edge-rollback] validSuggestions count: ${validSuggestions.length},
+      failedSuggestions count: ${failedSuggestions.length}`);
     let succeededSuggestions = [];
 
     // Separate domain-wide from regular suggestions
@@ -1870,6 +1939,8 @@ function SuggestionsController(ctx, sqs, env) {
 
         // Add ineligible suggestions to failed list
         ineligibleSuggestions.forEach((item) => {
+          context.log.info(`[edge-rollback-failed] site: ${apexBaseUrl}, ${opportunity.getType()}`
+          + ` suggestion ${item.suggestion.getId()} is ineligible: ${item.reason}`);
           failedSuggestions.push({
             uuid: item.suggestion.getId(),
             index: suggestionIds.indexOf(item.suggestion.getId()),

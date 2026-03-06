@@ -11,7 +11,7 @@
  */
 
 import {
-  isNonEmptyObject, isValidUUID, isValidUrl, isNonEmptyArray,
+  hasText, isNonEmptyObject, isValidUUID, isValidUrl, isNonEmptyArray,
 } from '@adobe/spacecat-shared-utils';
 import {
   badRequest, internalServerError, notFound, ok, accepted,
@@ -85,12 +85,16 @@ function PreflightController(ctx, log, env) {
   }
 
   /**
-   * Creates a new preflight job
+   * Creates a new preflight job. For promise-based authoring types (CS, CS_CW, AMS),
+   * the promise token is resolved from the x-promise-token request header if present,
+   * otherwise falls back to creating one from the Authorization header via IMS.
    * @param {Object} context - The request context
    * @param {Object} context.data - The request data
    * @param {string[]} context.data.urls - Array of URLs to process
    * @param {string} context.data.step - The audit step
    * @param {string} context.data.siteId - The siteId, if it's an AMS site
+   * @param {Object} [context.pathInfo] - The path info object
+   * @param {Object} [context.pathInfo.headers] - Request headers (x-promise-token preferred)
    * @returns {Promise<Object>} The HTTP response object
    */
   const createPreflightJob = async (context) => {
@@ -134,14 +138,20 @@ function PreflightController(ctx, log, env) {
 
       let promiseTokenResponse;
       if (promiseBasedTypes.includes(site.getAuthoringType())) {
-        try {
-          promiseTokenResponse = await getIMSPromiseToken(context);
-        } catch (e) {
-          log.error(`Failed to get promise token: ${e.message}`);
-          if (e instanceof ErrorWithStatusCode) {
-            return badRequest(e.message);
+        const { pathInfo } = context;
+        const headerToken = pathInfo?.headers?.['x-promise-token'];
+        if (hasText(headerToken)) {
+          promiseTokenResponse = { promise_token: headerToken };
+        } else {
+          try {
+            promiseTokenResponse = await getIMSPromiseToken(context);
+          } catch (e) {
+            log.error(`Failed to get promise token: ${e.message}`);
+            if (e instanceof ErrorWithStatusCode) {
+              return badRequest(e.message);
+            }
+            return internalServerError('Error getting promise token');
           }
-          return internalServerError('Error getting promise token');
         }
       }
 

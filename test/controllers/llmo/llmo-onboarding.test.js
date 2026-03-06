@@ -155,10 +155,14 @@ describe('LLMO Onboarding Functions', () => {
       submitPromptGenerationJob = sandbox.stub().resolves({ job_id: 'test-drs-job-123' }),
     } = options;
 
-    return sandbox.stub().returns({
+    const instance = {
       isConfigured: sandbox.stub().returns(isConfigured),
       submitPromptGenerationJob,
-    });
+    };
+
+    return {
+      createFrom: sandbox.stub().returns(instance),
+    };
   };
 
   const createCommonEsmockDependencies = (options = {}) => {
@@ -204,7 +208,7 @@ describe('LLMO Onboarding Functions', () => {
     }
 
     if (mockDrsClient) {
-      deps['../../../src/support/drs-client.js'] = { default: mockDrsClient };
+      deps['@adobe/spacecat-shared-drs-client'] = { default: mockDrsClient };
     }
 
     return deps;
@@ -1277,7 +1281,7 @@ describe('LLMO Onboarding Functions', () => {
       const result = await performLlmoOnboardingWithMocks(params, context);
 
       // Verify DRS job was submitted with audience from brand profile
-      expect(mockDrsClient().submitPromptGenerationJob).to.have.been.calledWith(
+      expect(mockDrsClient.createFrom().submitPromptGenerationJob).to.have.been.calledWith(
         sinon.match({ audience: 'Tech-savvy professionals' }),
       );
 
