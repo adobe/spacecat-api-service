@@ -19,7 +19,7 @@ import { Request } from '@adobe/fetch';
  * decompresses it, and forwards a new request with the decompressed body.
  * Non-gzipped requests pass through unchanged.
  */
-export default function gzipBody(func) {
+export default function compressedBody(func) {
   return async (request, context) => {
     if (request.headers.get('content-encoding') === 'gzip') {
       const compressed = Buffer.from(await request.arrayBuffer());

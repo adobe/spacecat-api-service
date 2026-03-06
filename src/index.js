@@ -56,7 +56,7 @@ import FulfillmentController from './controllers/event/fulfillment.js';
 import { FixesController } from './controllers/fixes.js';
 import ImportController from './controllers/import.js';
 import { s3ClientWrapper } from './support/s3.js';
-import gzipBody from './support/gzip-body.js';
+import compressedBody from './support/compressed-body.js';
 import { multipartFormData } from './support/multipart-form-data.js';
 import ApiKeyController from './controllers/api-key.js';
 import OpportunitiesController from './controllers/opportunities.js';
@@ -289,7 +289,7 @@ export const main = wrappedMain
   .with(localCORSWrapper)
   .with(logWrapper)
   .with(dataAccess)
-  .with(gzipBody)
+  .with(compressedBody)
   .with(bodyData)
   .with(multipartFormData)
   .with(enrichPathInfo)

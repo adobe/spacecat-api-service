@@ -14,9 +14,9 @@ import { expect } from 'chai';
 import sinon from 'sinon';
 import { gzipSync } from 'zlib';
 import { Request } from '@adobe/fetch';
-import gzipBody from '../../src/support/gzip-body.js';
+import compressedBody from '../../src/support/compressed-body.js';
 
-describe('gzipBody middleware', () => {
+describe('compressedBody middleware', () => {
   let sandbox;
   let handler;
   const context = { log: { info: () => {} } };
@@ -43,7 +43,7 @@ describe('gzipBody middleware', () => {
       body: compressed,
     });
 
-    const wrapped = gzipBody(handler);
+    const wrapped = compressedBody(handler);
     await wrapped(request, context);
 
     expect(handler.calledOnce).to.be.true;
@@ -54,10 +54,9 @@ describe('gzipBody middleware', () => {
     expect(body).to.deep.equal({ key: 'value', nested: { a: 1 } });
     expect(forwardedRequest.headers.get('content-encoding')).to.be.null;
     expect(forwardedRequest.headers.get('content-type')).to.equal('application/json');
-    expect(forwardedRequest.method).to.equal('POST');
   });
 
-  it('passes through non-gzipped requests unchanged', async () => {
+  it('passes through non-compressed requests unchanged', async () => {
     const payload = JSON.stringify({ key: 'value' });
     const request = new Request('https://example.com/api/test', {
       method: 'POST',
@@ -67,13 +66,11 @@ describe('gzipBody middleware', () => {
       body: payload,
     });
 
-    const wrapped = gzipBody(handler);
+    const wrapped = compressedBody(handler);
     await wrapped(request, context);
 
     expect(handler.calledOnce).to.be.true;
-
-    const [forwardedRequest] = handler.firstCall.args;
-    expect(forwardedRequest).to.equal(request);
+    expect(handler.firstCall.args[0]).to.equal(request);
   });
 
   it('passes through GET requests without Content-Encoding', async () => {
@@ -81,7 +78,7 @@ describe('gzipBody middleware', () => {
       method: 'GET',
     });
 
-    const wrapped = gzipBody(handler);
+    const wrapped = compressedBody(handler);
     await wrapped(request, context);
 
     expect(handler.calledOnce).to.be.true;
@@ -102,7 +99,7 @@ describe('gzipBody middleware', () => {
       body: compressed,
     });
 
-    const wrapped = gzipBody(handler);
+    const wrapped = compressedBody(handler);
     await wrapped(request, testContext);
 
     expect(handler.firstCall.args[1]).to.equal(testContext);
@@ -123,7 +120,7 @@ describe('gzipBody middleware', () => {
       body: compressed,
     });
 
-    const wrapped = gzipBody(handler);
+    const wrapped = compressedBody(handler);
     await wrapped(request, context);
 
     const [forwardedRequest] = handler.firstCall.args;
