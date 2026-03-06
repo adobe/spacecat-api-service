@@ -11,12 +11,85 @@
  */
 
 /**
+ * Routes that are intentionally excluded from S2S consumer access.
+ * Deny-by-default blocks these for S2S consumers. Every omission is a conscious decision
+ * documented below. These must never be added to routeRequiredCapabilities.
+ *
+ * @type {string[]}
+ */
+export const INTERNAL_ROUTES = [
+  // Webhooks - called by external Adobe systems with shared secrets, not S2S JWT
+  'POST /event/fulfillment',
+  'POST /event/fulfillment/:eventType',
+
+  // Hooks - use hookSecret in path for auth, not JWT
+  'POST /hooks/site-detection/cdn/:hookSecret',
+  'POST /hooks/site-detection/rum/:hookSecret',
+
+  // Preflight - CS/preflight flow not exposed to S2S consumers; end-user UI only
+  'POST /preflight/jobs',
+  'GET /preflight/jobs/:jobId',
+
+  // Suggestion edge ops (auto-fix, edge-deploy, etc.): not yet required by S2S
+  // TODO: Add these back in when we have a S2S consumer that needs them
+  'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix',
+  'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy',
+  'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-rollback',
+  'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-preview',
+  'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-live-preview',
+
+  // Slack - event subscriptions and commands use Slack's signature verification
+  'GET /slack/events',
+  'POST /slack/events',
+  'POST /slack/channels/invite-by-user-id',
+
+  // Consent banner - screenshot tooling, end-user/internal use only
+  'POST /consent-banner',
+  'GET /consent-banner/:jobId',
+
+  // LLMO operations not exposed to S2S - onboard, offboard, edge config, brand claims, etc.
+  'GET /sites/:siteId/llmo/brand-claims',
+  'POST /llmo/onboard',
+  'POST /sites/:siteId/llmo/offboard',
+  'POST /sites/:siteId/llmo/edge-optimize-config',
+  'POST /sites/:siteId/llmo/edge-optimize-config/stage',
+  'POST /sites/:siteId/llmo/edge-optimize-routing',
+  'PUT /sites/:siteId/llmo/opportunities-reviewed',
+
+  // Tier-specific - user activities, trial users, user details: end-user/admin flows only
+  'GET /sites/:siteId/user-activities',
+  'POST /sites/:siteId/user-activities',
+  'GET /organizations/:organizationId/trial-users',
+  'GET /organizations/:organizationId/userDetails/:externalUserId',
+  'POST /organizations/:organizationId/userDetails',
+  'POST /organizations/:organizationId/trial-user-invite',
+  'GET /trial-users/email-preferences',
+  'PATCH /trial-users/email-preferences',
+
+  // Entitlement write - admin/manual provisioning only, not S2S
+  'POST /organizations/:organizationId/entitlements',
+
+  // Consumer management - admin-only, requires is_s2s_admin; not for general S2S consumers
+  'GET /consumers',
+  'GET /consumers/by-client-id/:clientId',
+  'GET /consumers/:consumerId',
+  'POST /consumers/register',
+  'PATCH /consumers/:consumerId',
+  'POST /consumers/:consumerId/revoke',
+];
+
+/**
  * Maps each route key to the required capability for S2S consumer validation.
  * Format: 'entity:action' where action is 'read' for GET, 'write' for all other methods.
- * Entity is derived from the deepest resource noun in the route path, singularized.
+ * Entity names use camelCase consistently (e.g. apiKey, botBlocker, importJob) to avoid
+ * silent auth failures when granting capabilities — consumers must use exact entity names.
  *
- * Routes not listed here are not accessible to S2S consumers. Only routes explicitly
- * defined with a capability in this mapping can be called by S2S consumers.
+ * Routes not listed here (and not in INTERNAL_ROUTES) are denied for S2S consumers.
+ * Only routes explicitly defined with a capability in this mapping can be called by S2S consumers.
+ *
+ * site:read scope: Granting site:read implicitly covers traffic data, URL store, LLMO data,
+ * experiments, metrics, scraped content, and more. Fine for v1 with few trusted S2S consumers.
+ * If fine-grained access control is ever needed, this bundling will need unwinding.
  */
 const routeRequiredCapabilities = {
   // Audits
@@ -73,7 +146,7 @@ const routeRequiredCapabilities = {
   'PATCH /sites/:siteId': 'site:write',
   'PATCH /sites/:siteId/config/cdn-logs': 'site:write',
   'DELETE /sites/:siteId': 'site:write',
-  'GET /sites/:siteId/bot-blocker': 'bot-blocker:read',
+  'GET /sites/:siteId/bot-blocker': 'site:read',
   'GET /sites/:siteId/audits': 'audit:read',
   'GET /sites/:siteId/audits/latest': 'audit:read',
   'GET /sites/:siteId/audits/:auditType': 'audit:read',
@@ -200,13 +273,13 @@ const routeRequiredCapabilities = {
   // Graph
   'POST /sites/:siteId/graph': 'site:write',
 
-  // Trigger
+  // Trigger — GET triggers side effect; consider POST for RFC 7231 semantics (follow-up)
   'GET /trigger': 'audit:write',
 
   // API Keys
-  'POST /tools/api-keys': 'api-key:write',
-  'DELETE /tools/api-keys/:id': 'api-key:write',
-  'GET /tools/api-keys': 'api-key:read',
+  'POST /tools/api-keys': 'apiKey:write',
+  'DELETE /tools/api-keys/:id': 'apiKey:write',
+  'GET /tools/api-keys': 'apiKey:read',
 
   // Import Jobs
   'POST /tools/import/jobs': 'importJob:write',

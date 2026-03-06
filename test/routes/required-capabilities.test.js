@@ -12,8 +12,13 @@
 
 /* eslint-env mocha */
 
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import { expect } from 'chai';
-import routeRequiredCapabilities from '../../src/routes/required-capabilities.js';
+import routeRequiredCapabilities, { INTERNAL_ROUTES } from '../../src/routes/required-capabilities.js';
+
+const testDir = dirname(fileURLToPath(import.meta.url));
 
 const ALLOWED_HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 const ALLOWED_ACTIONS = ['read', 'write'];
@@ -63,6 +68,30 @@ describe('routeRequiredCapabilities', () => {
         const [, action] = value.split(':');
         expect(ALLOWED_ACTIONS).to.include(action, `Invalid action "${action}" in value "${value}" for "${key}"`);
       });
+    });
+  });
+
+  describe('route coverage', () => {
+    it('every route from routes/index.js must be in routeRequiredCapabilities or INTERNAL_ROUTES', () => {
+      const routesPath = join(testDir, '../../src/routes/index.js');
+      const content = readFileSync(routesPath, 'utf8');
+      const routeDefMatch = content.match(/const routeDefinitions = \{([\s\S]*?)\};/);
+      if (!routeDefMatch) {
+        throw new Error('Could not find routeDefinitions in routes/index.js');
+      }
+      const routeKeys = [...routeDefMatch[1].matchAll(/'([A-Z]+\s[^']+)'/g)].map((m) => m[1]);
+
+      const inCapabilities = new Set(Object.keys(routeRequiredCapabilities));
+      const internalSet = new Set(INTERNAL_ROUTES);
+
+      const uncategorized = routeKeys.filter(
+        (r) => !inCapabilities.has(r) && !internalSet.has(r),
+      );
+
+      expect(
+        uncategorized,
+        `New route(s) need to be added to either routeRequiredCapabilities or INTERNAL_ROUTES: ${uncategorized.join(', ')}`,
+      ).to.have.lengthOf(0);
     });
   });
 });

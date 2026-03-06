@@ -282,6 +282,9 @@ async function run(request, context) {
 
 const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 
+// Wrapper execution order (helix-shared-wrap: last .with() = outermost = runs first):
+// 1. s2sAuthWrapper — intercepts S2S JWT bearer tokens, passes through non-S2S to authWrapper
+// 2. authWrapper — handles JWT, IMS, scoped API key, legacy API key
 const wrappedMain = wrap(run)
   .with(authWrapper, {
     authHandlers: [JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler],
