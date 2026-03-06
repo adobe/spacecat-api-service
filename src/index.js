@@ -283,7 +283,6 @@ async function run(request, context) {
 const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 
 const wrappedMain = wrap(run)
-  .with(dataAccess)
   .with(authWrapper, {
     authHandlers: [JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler],
   })
@@ -292,6 +291,7 @@ const wrappedMain = wrap(run)
 export const main = wrappedMain
   .with(localCORSWrapper)
   .with(logWrapper)
+  .with(dataAccess)
   .with(bodyData)
   .with(multipartFormData)
   .with(enrichPathInfo)
