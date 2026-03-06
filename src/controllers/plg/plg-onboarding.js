@@ -1,0 +1,305 @@
+/*
+ * Copyright 2026 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
+import TierClient from '@adobe/spacecat-shared-tier-client';
+import { badRequest, ok } from '@adobe/spacecat-shared-http-utils';
+import {
+  composeBaseURL,
+  detectBotBlocker,
+  detectLocale,
+  hasText,
+  isValidIMSOrgId,
+  resolveCanonicalUrl,
+} from '@adobe/spacecat-shared-utils';
+
+import {
+  createOrFindOrganization,
+  enableAudits,
+  enableImports,
+  triggerAudits,
+  ASO_DEMO_ORG,
+} from '../llmo/llmo-onboarding.js';
+import { findDeliveryType, deriveProjectName } from '../../support/utils.js';
+import { loadProfileConfig } from '../../utils/slack/base.js';
+import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
+
+const ASO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.ASO;
+const ASO_TIER = EntitlementModel.TIERS.FREE_TRIAL;
+const PLG_PROFILE_KEY = 'plg';
+
+function isInternalOrg(orgId, env) {
+  return orgId === env.DEFAULT_ORGANIZATION_ID || orgId === ASO_DEMO_ORG;
+}
+
+async function ensureAsoEntitlement(site, context) {
+  const { log } = context;
+  try {
+    const tierClient = await TierClient.createForSite(context, site, ASO_PRODUCT_CODE);
+    const { entitlement, siteEnrollment } = await tierClient
+      .createEntitlement(ASO_TIER);
+    log.info(`Created ASO entitlement ${entitlement.getId()} and enrollment ${siteEnrollment.getId()} for site ${site.getId()}`);
+    return { entitlement, siteEnrollment };
+  } catch (error) {
+    if (error.message?.includes('already exists')
+      || error.message?.includes('Already enrolled')) {
+      log.info(`ASO entitlement already exists for site ${site.getId()}`);
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function createOrFindProject(baseURL, organizationId, context) {
+  const { dataAccess, log } = context;
+  const { Project } = dataAccess;
+  const projectName = deriveProjectName(baseURL);
+
+  const existingProject = (
+    await Project.allByOrganizationId(organizationId)
+  ).find((p) => p.getProjectName() === projectName);
+
+  if (existingProject) {
+    log.debug(`Found existing project ${existingProject.getId()}`);
+    return existingProject;
+  }
+
+  const newProject = await Project.create({
+    projectName, organizationId,
+  });
+  log.info(`Created project ${newProject.getId()} for ${baseURL}`);
+  return newProject;
+}
+
+/**
+ * Performs ASO PLG onboarding for a given domain and IMS org.
+ *
+ * Flow:
+ * 1. Resolve organization for the IMS org ID
+ * 2. Check if site already exists:
+ *    - Same customer org: proceed with config updates
+ *    - Internal org: reassign to customer org, then proceed
+ *    - Different customer org: reject
+ * 3. Bot blocker check - return early if blocked
+ * 4. Create site if new
+ * 5. Check existing opportunities
+ * 6. Update configs (imports, fetch config, locale, project)
+ * 7. Enable audits + add ASO entitlement
+ * 8. Trigger audit runs + brand-profile agent
+ *
+ * @param {object} params
+ * @param {string} params.domain - The domain to onboard
+ * @param {string} params.imsOrgId - The IMS Organization ID
+ * @param {object} context - The request context
+ * @returns {Promise<object>} Onboarding result
+ */
+async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
+  const { dataAccess, log, env } = context;
+  const { Site, Opportunity } = dataAccess;
+
+  const baseURL = composeBaseURL(domain);
+  log.info(`Starting PLG ASO onboarding for IMS org ${imsOrgId}, baseURL ${baseURL}`);
+
+  const profile = loadProfileConfig(PLG_PROFILE_KEY);
+
+  // Step 1: Resolve organization
+  const organization = await createOrFindOrganization(imsOrgId, context);
+  const organizationId = organization.getId();
+
+  // Step 2: Check if site already exists
+  let site = await Site.findByBaseURL(baseURL);
+  let isNewSite = false;
+
+  if (site) {
+    const existingOrgId = site.getOrganizationId();
+
+    if (existingOrgId !== organizationId
+      && !isInternalOrg(existingOrgId, env)) {
+      throw new Error(
+        `Domain ${domain} is already assigned to another organization`,
+      );
+    }
+
+    // Move from internal org to customer's org if needed
+    if (existingOrgId !== organizationId) {
+      site.setOrganizationId(organizationId);
+      log.info(`Reassigning site ${site.getId()} from org ${existingOrgId} to ${organizationId}`);
+    }
+  }
+
+  // Step 3: Bot blocker check
+  const botBlockerResult = await detectBotBlocker({ baseUrl: baseURL });
+  if (!botBlockerResult.crawlable) {
+    if (site) await site.save();
+    return {
+      status: 'WAITING_FOR_IP_WHITELISTING',
+      domain,
+      baseURL,
+      siteId: site?.getId(),
+      organizationId,
+      // eslint-disable-next-line id-match
+      botBlocker: {
+        type: botBlockerResult.type,
+        ipsToAllowlist: botBlockerResult.ipsToAllowlist
+          || botBlockerResult.ipsToWhitelist,
+        userAgent: botBlockerResult.userAgent,
+      },
+    };
+  }
+
+  // Step 4: Create site if new
+  if (!site) {
+    isNewSite = true;
+    const deliveryType = await findDeliveryType(baseURL);
+    site = await Site.create({
+      baseURL,
+      organizationId,
+      ...(deliveryType && { deliveryType }),
+    });
+    log.info(`Created site ${site.getId()} for ${baseURL}`);
+  }
+
+  // Step 5: Check existing opportunities
+  const opportunities = await Opportunity.allBySiteId(site.getId());
+
+  // Step 6: Update configs
+  const siteConfig = site.getConfig();
+
+  // Enable imports from PLG profile
+  const importDefs = Object.keys(profile.imports || {})
+    .map((type) => ({ type }));
+  await enableImports(siteConfig, importDefs, log);
+
+  // Resolve canonical URL for overrideBaseURL
+  const currentFetchConfig = siteConfig.getFetchConfig() || {};
+  if (!currentFetchConfig.overrideBaseURL) {
+    try {
+      const resolvedUrl = await resolveCanonicalUrl(baseURL);
+      if (resolvedUrl) {
+        const { pathname: basePath, origin: baseOrigin } = new URL(baseURL);
+        const {
+          pathname: resolvedPath, origin: resolvedOrigin,
+        } = new URL(resolvedUrl);
+
+        if (basePath !== resolvedPath
+          || baseOrigin !== resolvedOrigin) {
+          const overrideBaseURL = basePath !== '/'
+            ? `${resolvedOrigin}${basePath}`
+            : resolvedOrigin;
+          siteConfig.updateFetchConfig({
+            ...currentFetchConfig, overrideBaseURL,
+          });
+          log.info(`Set overrideBaseURL to ${overrideBaseURL} for site ${site.getId()}`);
+        }
+      }
+    } catch (error) {
+      log.warn(`Failed to resolve canonical URL for ${baseURL}: ${error.message}`);
+    }
+  }
+
+  // Detect and set locale
+  if (!site.getLanguage() || !site.getRegion()) {
+    try {
+      const locale = await detectLocale({ baseUrl: baseURL });
+      if (!site.getLanguage() && locale.language) {
+        site.setLanguage(locale.language);
+      }
+      if (!site.getRegion() && locale.region) {
+        site.setRegion(locale.region);
+      }
+    } catch (error) {
+      log.warn(`Locale detection failed for ${baseURL}: ${error.message}`);
+      if (!site.getLanguage()) site.setLanguage('en');
+      if (!site.getRegion()) site.setRegion('US');
+    }
+  }
+
+  // Create/assign project
+  const project = await createOrFindProject(baseURL, organizationId, context);
+  if (!site.getProjectId()) {
+    site.setProjectId(project.getId());
+  }
+
+  // Save site with updated config
+  site.setConfig(Config.toDynamoItem(siteConfig));
+  await site.save();
+
+  // Enable audits from PLG profile
+  const auditTypes = Object.keys(profile.audits || {});
+  await enableAudits(site, context, auditTypes);
+
+  // Step 7: Add ASO entitlement
+  await ensureAsoEntitlement(site, context);
+
+  // Step 8: Trigger audit runs
+  await triggerAudits(auditTypes, context, site);
+
+  // Trigger brand profile (non-blocking)
+  try {
+    await triggerBrandProfileAgent({
+      context, site, reason: 'plg-onboarding',
+    });
+  } catch (error) {
+    log.warn(`Failed to trigger brand-profile for site ${site.getId()}: ${error.message}`);
+  }
+
+  return {
+    status: 'ONBOARDED',
+    domain,
+    baseURL,
+    siteId: site.getId(),
+    organizationId,
+    isNewSite,
+    existingOpportunityCount: opportunities.length,
+    completedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * PLG Onboarding controller.
+ * @param {object} ctx - Context of the request.
+ * @returns {object} Controller with onboard method.
+ */
+function PlgOnboardingController(ctx) {
+  const { log } = ctx;
+
+  const onboard = async (context) => {
+    const { data } = context;
+
+    if (!data || typeof data !== 'object') {
+      return badRequest('Request body is required');
+    }
+
+    const { domain, imsOrgId } = data;
+
+    if (!hasText(domain)) {
+      return badRequest('domain is required');
+    }
+
+    if (!hasText(imsOrgId) || !isValidIMSOrgId(imsOrgId)) {
+      return badRequest('Valid imsOrgId is required');
+    }
+
+    try {
+      const result = await performAsoPlgOnboarding({ domain, imsOrgId }, context);
+      return ok(result);
+    } catch (error) {
+      log.error(`PLG onboarding failed for domain ${domain}: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
+  return { onboard };
+}
+
+export default PlgOnboardingController;

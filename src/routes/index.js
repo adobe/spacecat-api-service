@@ -128,6 +128,7 @@ export default function getRouteHandlers(
   botBlockerController,
   sentimentController,
   consumersController,
+  plgOnboardingController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -380,6 +381,9 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,
     'POST /sites/:siteId/llmo/edge-optimize-routing': llmoController.updateEdgeOptimizeCDNRouting,
     'PUT /sites/:siteId/llmo/opportunities-reviewed': llmoController.markOpportunitiesReviewed,
+
+    // PLG Routes
+    'POST /plg/onboard': plgOnboardingController.onboard,
 
     // Tier Specific Routes
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,

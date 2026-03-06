@@ -71,6 +71,7 @@ import ScrapeController from './controllers/scrape.js';
 import ScrapeJobController from './controllers/scrapeJob.js';
 import ReportsController from './controllers/reports.js';
 import LlmoController from './controllers/llmo/llmo.js';
+import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
 import UserActivitiesController from './controllers/user-activities.js';
 import SiteEnrollmentsController from './controllers/site-enrollments.js';
 import TrialUsersController from './controllers/trial-users.js';
@@ -209,6 +210,7 @@ async function run(request, context) {
     const botBlockerController = BotBlockerController(context, log);
     const sentimentController = SentimentController(context, log);
     const consumersController = ConsumersController(context);
+    const plgOnboardingController = PlgOnboardingController(context);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -250,6 +252,7 @@ async function run(request, context) {
       botBlockerController,
       sentimentController,
       consumersController,
+      plgOnboardingController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
