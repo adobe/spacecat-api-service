@@ -506,18 +506,18 @@ describe('Preflight Controller', () => {
       expect(mockJob.remove).to.have.been.calledOnce;
     });
 
-    it('creates a preflight job with crosswalk authoring type and includes promise token', async () => {
+    it('creates a preflight job using promiseToken cookie for crosswalk authoring type', async () => {
       const aemCsSite = {
         getId: () => 'test-site-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS_CW,
       };
       mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
 
-      const mockPromiseToken = { promise_token: 'test-token', expires_in: 3600, token_type: 'Bearer' };
+      const getIMSPromiseTokenStub = sandbox.stub();
       const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
         '../../src/support/utils.js': {
           ...utils,
-          getIMSPromiseToken: async () => mockPromiseToken,
+          getIMSPromiseToken: getIMSPromiseTokenStub,
           ErrorWithStatusCode: utils.ErrorWithStatusCode,
         },
       });
@@ -536,17 +536,23 @@ describe('Preflight Controller', () => {
           urls: ['https://example.com/test.html'],
           step: 'identify',
         },
+        pathInfo: {
+          headers: {
+            cookie: 'promiseToken=promiseToken123',
+          },
+        },
       };
 
       const response = await preflightControllerWithMock.createPreflightJob(context);
       expect(response.status).to.equal(202);
+      expect(getIMSPromiseTokenStub).to.not.have.been.called;
       expect(mockSqs.sendMessage).to.have.been.calledWith(
         'https://sqs.test.amazonaws.com/audit-queue',
         {
           jobId,
           siteId: mockSite.getId(),
           type: 'preflight',
-          promiseToken: mockPromiseToken,
+          promiseToken: { promise_token: 'promiseToken123' },
         },
       );
     });
@@ -629,7 +635,7 @@ describe('Preflight Controller', () => {
       });
     });
 
-    it('uses x-promise-token header when present instead of IMS', async () => {
+    it('uses promiseToken cookie when present instead of IMS', async () => {
       const aemCsSite = {
         getId: () => 'test-site-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
@@ -661,7 +667,7 @@ describe('Preflight Controller', () => {
         },
         pathInfo: {
           headers: {
-            'x-promise-token': 'headerToken123',
+            cookie: 'promiseToken=promiseToken123',
           },
         },
       };
@@ -675,12 +681,12 @@ describe('Preflight Controller', () => {
           jobId,
           siteId: 'test-site-123',
           type: 'preflight',
-          promiseToken: { promise_token: 'headerToken123' },
+          promiseToken: { promise_token: 'promiseToken123' },
         },
       );
     });
 
-    it('falls back to IMS when x-promise-token header is absent', async () => {
+    it('falls back to IMS when promiseToken cookie is absent', async () => {
       const aemCsSite = {
         getId: () => 'test-site-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS_CW,
@@ -725,7 +731,7 @@ describe('Preflight Controller', () => {
       );
     });
 
-    it('falls back to IMS when x-promise-token header is empty', async () => {
+    it('falls back to IMS when promiseToken cookie is empty', async () => {
       const aemCsSite = {
         getId: () => 'test-site-123',
         getAuthoringType: () => SiteModel.AUTHORING_TYPES.AMS,
@@ -757,7 +763,7 @@ describe('Preflight Controller', () => {
         },
         pathInfo: {
           headers: {
-            'x-promise-token': '',
+            cookie: 'otherCookie=abc',
           },
         },
       };
