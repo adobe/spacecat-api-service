@@ -162,13 +162,14 @@ export async function resolveDocumentPath(
 
       const preferContentApi = deliveryConfig?.preferContentApi ?? false;
 
-      log.info('resolveDocumentPath AEM CS: determineAEMCSPageId', {
-        pageUrl,
-        authorURL,
-        bearerToken,
-        preferContentApi,
-        log,
-      });
+      if (typeof log?.info === 'function') {
+        log.info('resolveDocumentPath AEM CS: determineAEMCSPageId', {
+          pageUrl,
+          authorURL,
+          bearerToken,
+          preferContentApi,
+        });
+      }
 
       const pageId = await determineAEMCSPageId(
         pageUrl,

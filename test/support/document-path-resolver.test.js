@@ -266,6 +266,22 @@ describe('document-path-resolver', () => {
         expect(getPageEditUrlStub).to.have.been.calledWith('https://author.example.com', 'Bearer t', 'resolved-page-id');
       });
 
+      it('calls log.info with AEM CS resolve params when log.info is present', async () => {
+        const logWithInfo = { warn: sandbox.stub(), info: sandbox.stub() };
+        determineAEMCSPageIdStub.resolves('page-id');
+        getPageEditUrlStub.resolves('https://author.example.com/editor.html');
+        const site = {
+          getDeliveryType: () => 'aem_cs',
+          getDeliveryConfig: () => ({ authorURL: 'https://author.example.com' }),
+        };
+        const result = await resolveDocumentPath(site, 'meta-tags', { url: 'https://example.com/p' }, 'Bearer t', logWithInfo);
+        expect(result).to.equal('https://author.example.com/editor.html');
+        expect(logWithInfo.info).to.have.been.calledOnce;
+        expect(logWithInfo.info.firstCall.args[0]).to.equal('resolveDocumentPath AEM CS: determineAEMCSPageId');
+        expect(logWithInfo.info.firstCall.args[1]).to.include({ pageUrl: 'https://example.com/p', authorURL: 'https://author.example.com', preferContentApi: false });
+        expect(logWithInfo.info.firstCall.args[1]).to.have.property('bearerToken', 'Bearer t');
+      });
+
       it('returns null when extractPageUrl returns null for opportunity type', async () => {
         const site = {
           getDeliveryType: () => 'aem_cs',
