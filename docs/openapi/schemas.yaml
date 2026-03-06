@@ -2958,6 +2958,21 @@ Suggestion:
     updatedAt:
       description: UTC timestamp of when the suggestion was last updated
       $ref: '#/DateTime'
+  example:
+    id: '123e4567-e89b-12d3-a456-426614174000'
+    opportunityId: '123e4567-e89b-12d3-a456-426614174000'
+    type: 'REDIRECT_UPDATE'
+    rank: 45600
+    data:
+      title: 'Fix broken backlink from example.com'
+      url_from: 'https://www.example.com/old-page'
+      url_to: 'https://www.example.com/broken-link'
+      urls_suggested:
+        - 'https://www.example.com/new-page'
+    kpiDeltas: {}
+    status: 'NEW'
+    createdAt: '2024-01-19T14:20:30Z'
+    updatedAt: '2024-01-19T14:20:30Z'
   required:
     - id
     - opportunityId
