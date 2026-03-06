@@ -4041,6 +4041,12 @@ describe('Sites Controller', () => {
       };
       tierClientStub = sandbox.stub(TierClient, 'createForOrg').returns(mockTierClientStub);
       sandbox.stub(TierClient, 'createForSite').returns(mockTierClientStub);
+
+      mockDataAccess.Configuration = {
+        findLatest: sandbox.stub().resolves({
+          isHandlerEnabledForSite: sandbox.stub().returns(true),
+        }),
+      };
     });
 
     afterEach(() => {
@@ -4089,6 +4095,44 @@ describe('Sites Controller', () => {
       expect(body).to.have.property('data');
       expect(body.data).to.have.property('organization');
       expect(body.data).to.have.property('site');
+    });
+
+    it('should include isSummitPlgEnabled in response when site is resolved', async () => {
+      context.data = { organizationId: testOrganizations[0].getId() };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+      mockDataAccess.Site.findById.resolves(testSites[0]);
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: { getId: () => 'entitlement-123' },
+        enrollment: { getId: () => 'enrollment-1', getSiteId: () => SITE_IDS[0] },
+        site: testSites[0],
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.data).to.have.property('isSummitPlgEnabled', true);
+    });
+
+    it('should set isSummitPlgEnabled to false when summit-plg is not enabled for site', async () => {
+      mockDataAccess.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: sandbox.stub().returns(false),
+      });
+
+      context.data = { organizationId: testOrganizations[0].getId() };
+      mockDataAccess.Organization.findById.resolves(testOrganizations[0]);
+      mockDataAccess.Site.findById.resolves(testSites[0]);
+      mockTierClientStub.getFirstEnrollment.resolves({
+        entitlement: { getId: () => 'entitlement-123' },
+        enrollment: { getId: () => 'enrollment-1', getSiteId: () => SITE_IDS[0] },
+        site: testSites[0],
+      });
+
+      const response = await sitesController.resolveSite(context);
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.data).to.have.property('isSummitPlgEnabled', false);
     });
 
     it('should return not found for non-existent imsOrg', async () => {
