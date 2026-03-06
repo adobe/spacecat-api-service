@@ -1513,6 +1513,58 @@ site-llmo-edge-optimize-config:
     security:
       - ims_key: [ ]
 
+site-llmo-edge-optimize-config-stage:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    operationId: createOrUpdateStageEdgeConfig
+    summary: Add staging domains for edge optimize (stage environment support)
+    description: |
+      Adds one or more staging domains for the specified LLMO prod site. For each domain:
+
+      - Validates that the apex of the staging domain matches the apex of the prod site base URL.
+      - Creates or finds a stage site in Spacecat in the same organization.
+      - Creates edge optimize metaconfig for the stage site with prerender enabled for the whole domain.
+      - Persists the staging domain to site ID mapping in the prod site's edgeOptimizeConfig.
+
+      Returns the complete metaconfig for each stage site in an array (stageConfigs). Each item includes domain, siteId, and all metaconfig properties (apiKeys, enabled, prerender, etc.).
+
+      The staging domains list can be retrieved via GET /sites/{siteId} under config.edgeOptimizeConfig.stagingDomains.
+
+      **Note:** This endpoint requires LLMO administrator access for the site.
+    tags:
+      - llmo
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/StageDomainsRequest'
+    responses:
+      '200':
+        description: Staging domains added successfully. Returns an array of stage configs; each element is the staging domain plus full metaconfig (siteId, apiKeys, enabled, enhancements, patches, prerender) for that stage site.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/StageConfigsResponse'
+      '400':
+        description: Invalid request (e.g. empty stagingDomains, apex mismatch)
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - ims_key: [ ]
+
 site-llmo-edge-optimize-routing:
   parameters:
     - $ref: './parameters.yaml#/siteId'
