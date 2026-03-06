@@ -911,14 +911,29 @@ describe('Fixes Controller', () => {
 
     describe('document path enrichment (AEM CS and AEM Edge)', () => {
       let FixesControllerWithStubbedResolver;
+      let getIMSPromiseTokenStub;
+      let exchangePromiseTokenStub;
       const EDIT_URL = 'https://editor.example.com/page';
 
       before(async () => {
         const resolveDocumentPathStub = sinon.stub().resolves(EDIT_URL);
+        getIMSPromiseTokenStub = sinon.stub().resolves({ promise_token: 'mock-promise-token' });
+        exchangePromiseTokenStub = sinon.stub().resolves('mock-ims-access-token');
         const mod = await esmock('../../src/controllers/fixes.js', {
           '../../src/support/document-path-resolver.js': { resolveDocumentPath: resolveDocumentPathStub },
+          '../../src/support/utils.js': {
+            getIMSPromiseToken: getIMSPromiseTokenStub,
+            exchangePromiseToken: exchangePromiseTokenStub,
+          },
         });
         FixesControllerWithStubbedResolver = mod.FixesController;
+      });
+
+      afterEach(() => {
+        getIMSPromiseTokenStub.resetBehavior();
+        getIMSPromiseTokenStub.resolves({ promise_token: 'mock-promise-token' });
+        exchangePromiseTokenStub.resetBehavior();
+        exchangePromiseTokenStub.resolves('mock-ims-access-token');
       });
 
       it('enriches manual fix (origin aso) with documentPath when site is AEM CS', async () => {
@@ -969,13 +984,16 @@ describe('Fixes Controller', () => {
         const mod = await esmock('../../src/controllers/fixes.js', {
           '@adobe/spacecat-shared-content-client': { ContentClient: ContentClientStub },
           '../../src/support/document-path-resolver.js': { resolveDocumentPath: resolveDocumentPathStub },
+          '../../src/support/utils.js': {
+            getIMSPromiseToken: sinon.stub().resolves({ promise_token: 'mock-promise-token' }),
+            exchangePromiseToken: sinon.stub().resolves('mock-ims-access-token'),
+          },
         });
         const EdgeFixesController = mod.FixesController;
 
         fixesController = new EdgeFixesController(
           {
             dataAccess,
-            pathInfo: { headers: { authorization: 'Bearer token' } },
             log,
           },
           accessControlUtil,
@@ -999,7 +1017,7 @@ describe('Fixes Controller', () => {
           mockSite,
           'meta-tags',
           { url: 'https://example.com/page' },
-          'Bearer token',
+          'Bearer mock-ims-access-token',
           log,
           mockContentClient,
         );
@@ -1083,7 +1101,8 @@ describe('Fixes Controller', () => {
         expect(fixes[0].fix.changeDetails.documentPath).to.equal(EDIT_URL);
       });
 
-      it('skips enrichment when getImsUserToken throws (e.g. missing Authorization) and creates fix', async () => {
+      it('skips enrichment when IMS promise token exchange fails and creates fix', async () => {
+        getIMSPromiseTokenStub.rejects(new Error('Missing Authorization header'));
         sandbox.stub(log, 'warn');
         const mockSite = {
           getDeliveryType: () => 'aem_cs',
@@ -1245,13 +1264,16 @@ describe('Fixes Controller', () => {
         const mod = await esmock('../../src/controllers/fixes.js', {
           '@adobe/spacecat-shared-content-client': { ContentClient: ContentClientStub },
           '../../src/support/document-path-resolver.js': { resolveDocumentPath: resolveDocumentPathStub },
+          '../../src/support/utils.js': {
+            getIMSPromiseToken: sinon.stub().resolves({ promise_token: 'mock-promise-token' }),
+            exchangePromiseToken: sinon.stub().resolves('mock-ims-access-token'),
+          },
         });
         const EdgeFixesController = mod.FixesController;
 
         fixesController = new EdgeFixesController(
           {
             dataAccess,
-            pathInfo: { headers: { authorization: 'Bearer token' } },
             log,
           },
           accessControlUtil,

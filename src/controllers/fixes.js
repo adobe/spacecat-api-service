@@ -38,7 +38,7 @@ import AccessControlUtil from '../support/access-control-util.js';
 import { FixDto } from '../dto/fix.js';
 import { SuggestionDto } from '../dto/suggestion.js';
 import { resolveDocumentPath } from '../support/document-path-resolver.js';
-import { getImsUserToken } from '../support/utils.js';
+import { getIMSPromiseToken, exchangePromiseToken } from '../support/utils.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 
@@ -299,7 +299,12 @@ export class FixesController {
 
       if (!site || !opportunity) return null;
 
-      const bearerToken = `Bearer ${getImsUserToken(this.#ctx)}`;
+      const promiseTokenResponse = await getIMSPromiseToken(this.#ctx);
+      const imsAccessToken = await exchangePromiseToken(
+        this.#ctx,
+        promiseTokenResponse.promise_token,
+      );
+      const bearerToken = `Bearer ${imsAccessToken}`;
       const enrichmentCtx = {
         site,
         opportunityType: opportunity.getType(),
