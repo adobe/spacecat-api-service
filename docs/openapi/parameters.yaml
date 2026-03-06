@@ -385,6 +385,18 @@ cursor:
     type: string
     example: "eyJzayI6IjIwMjQtMDEtMTVUMTI6MzA6MDBaIiwiaWQiOiIxMjNlNDU2Ny1lODliLTEyZDMtYTQ1Ni00MjY2MTQxNzQwMDAifQ=="
 
+xPromiseToken:
+  name: x-promise-token
+  description: |
+    Optional session-based promise token. When provided, this token is used directly
+    instead of creating one via IMS. Only relevant for promise-based authoring types
+    (CS, CS_CW, AMS); ignored for other site types.
+  in: header
+  required: false
+  schema:
+    type: string
+  example: eyJhbGciOiJSUzI1NiIs...
+
 suggestionView:
   name: view
   description: |

@@ -369,14 +369,17 @@ export default function getRouteHandlers(
     'PATCH /sites/:siteId/llmo/cdn-logs-bucket-config': llmoController.patchLlmoCdnBucketConfig,
     'GET /sites/:siteId/llmo/global-sheet-data/:configName': llmoController.getLlmoGlobalSheetData,
     'GET /sites/:siteId/llmo/rationale': llmoController.getLlmoRationale,
+    'GET /sites/:siteId/llmo/brand-claims': llmoController.getBrandClaims,
     'POST /llmo/onboard': llmoController.onboardCustomer,
     'POST /sites/:siteId/llmo/offboard': llmoController.offboardCustomer,
     'POST /sites/:siteId/llmo/edge-optimize-config': llmoController.createOrUpdateEdgeConfig,
     'GET /sites/:siteId/llmo/edge-optimize-config': llmoController.getEdgeConfig,
+    'POST /sites/:siteId/llmo/edge-optimize-config/stage': llmoController.createOrUpdateStageEdgeConfig,
     'GET /sites/:siteId/llmo/strategy': llmoController.getStrategy,
     'PUT /sites/:siteId/llmo/strategy': llmoController.saveStrategy,
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,
     'POST /sites/:siteId/llmo/edge-optimize-routing': llmoController.updateEdgeOptimizeCDNRouting,
+    'PUT /sites/:siteId/llmo/opportunities-reviewed': llmoController.markOpportunitiesReviewed,
 
     // Tier Specific Routes
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,

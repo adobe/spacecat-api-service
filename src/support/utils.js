@@ -210,7 +210,7 @@ export const sendAutofixMessage = async (
   variations,
   action,
   customData,
-  { url } = {},
+  { url, precheckOnly } = {},
 ) => sqs.sendMessage(queueUrl, {
   opportunityId,
   siteId,
@@ -220,6 +220,7 @@ export const sendAutofixMessage = async (
   action,
   url,
   ...(customData && { customData }),
+  ...(precheckOnly === true && { precheckOnly: true }),
 });
 /* c8 ignore end */
 
@@ -1500,3 +1501,28 @@ export const filterSitesForProductCode = async (context, organization, sites, pr
   // Filter sites based on enrollment
   return sites.filter((site) => enrolledSiteIds.has(site.getId()));
 };
+
+/**
+ * Extracts and normalizes hostname from URL
+ * - Strips 'www.' prefix
+ * @param {URL} url - URL object
+ * @param {Object} logger - Logger instance
+ * @returns {string} - Normalized hostname
+ * @throws {Error} - If hostname extraction fails
+ */
+export function getHostName(url, logger = console) {
+  try {
+    let urlObj;
+    if (url instanceof URL) {
+      urlObj = url;
+    } else if (typeof url === 'string') {
+      urlObj = new URL(url);
+    } else {
+      throw new TypeError('Input must be a URL or a string');
+    }
+    return urlObj.hostname.replace(/^www\./, '');
+  } catch (error) {
+    logger.error(`Error extracting host name: ${error.message}`);
+    return null;
+  }
+}

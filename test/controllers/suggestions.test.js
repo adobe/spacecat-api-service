@@ -2686,6 +2686,67 @@ describe('Suggestions Controller', () => {
       expect(allSentIds).to.have.members([SUGGESTION_IDS[0], SUGGESTION_IDS[1]]);
     });
 
+    it('forwards precheckOnly to worker when action is assess', async () => {
+      opportunity.getType = sandbox.stub().returns('alt-text');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(altTextSuggs[0])],
+      );
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          action: 'assess',
+          precheckOnly: true,
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload).to.have.property('precheckOnly', true);
+      expect(payload).to.have.property('action', 'assess');
+    });
+
+    it('does not include precheckOnly in SQS payload when precheckOnly is false', async () => {
+      opportunity.getType = sandbox.stub().returns('alt-text');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(altTextSuggs[0])],
+      );
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          action: 'assess',
+          precheckOnly: false,
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload).to.not.have.property('precheckOnly');
+    });
+
+    it('returns 400 when precheckOnly is not a boolean', async () => {
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          action: 'assess',
+          precheckOnly: 'yes',
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'precheckOnly must be a boolean');
+    });
+
     it('triggers autofixSuggestion for form-accessibility (non-grouped)', async () => {
       opportunity.getType = sandbox.stub().returns('form-accessibility');
       mockSuggestion.allByOpportunityId.resolves(
@@ -3122,6 +3183,94 @@ describe('Suggestions Controller', () => {
     });
   });
 
+  describe('auto-fix with action assess-urls', () => {
+    let assessUrlsConfig;
+    beforeEach(() => {
+      opportunity.getType = sandbox.stub().returns('alt-text');
+      assessUrlsConfig = { isHandlerEnabledForSite: sandbox.stub().returns(true) };
+      mockConfiguration.findLatest.resolves(assessUrlsConfig);
+    });
+
+    it('queues assess-urls job and returns 202', async () => {
+      const pages = ['https://example.com/page1', 'https://example.com/page2'];
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { action: 'assess-urls', pages },
+        ...context,
+      });
+
+      expect(response.status).to.equal(202);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Assess-urls job queued');
+      expect(body).to.have.property('siteId', SITE_ID);
+      expect(body).to.have.property('pagesCount', 2);
+
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload).to.have.property('siteId', SITE_ID);
+      expect(payload).to.have.property('action', 'assess-urls');
+      expect(payload).to.deep.include({ pages });
+    });
+
+    it('forwards precheckOnly to worker when action is assess-urls', async () => {
+      const pages = ['https://example.com/page1'];
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { action: 'assess-urls', pages, precheckOnly: true },
+        ...context,
+      });
+
+      expect(response.status).to.equal(202);
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload).to.have.property('precheckOnly', true);
+    });
+
+    it('returns 400 when action is assess-urls but pages is missing', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { action: 'assess-urls' },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Request body must contain a non-empty array of pages (URLs) when action is assess-urls');
+    });
+
+    it('returns 400 when action is assess-urls but pages is empty', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { action: 'assess-urls', pages: [] },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Request body must contain a non-empty array of pages (URLs) when action is assess-urls');
+    });
+
+    it('returns 400 when action is assess-urls but a page is not a valid URL', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { action: 'assess-urls', pages: ['https://valid.com/p', 'not-a-url'] },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Each page in the pages array must be a valid URL');
+    });
+
+    it('returns 400 when action is assess-urls but handler is not enabled for site', async () => {
+      assessUrlsConfig.isHandlerEnabledForSite.returns(false);
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { action: 'assess-urls', pages: ['https://example.com/p'] },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message').that.includes('Handler is not enabled for site');
+    });
+  });
+
   describe('auto-fix suggestions for CS', function () {
     this.timeout(10000);
     let spySqs;
@@ -3295,6 +3444,104 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(500);
       const error = await response.json();
       expect(error).to.have.property('message', 'Error getting promise token');
+    });
+
+    it('uses x-promise-token header when present instead of IMS', async () => {
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0]),
+          mockSuggestionEntity(suggs[2]),
+        ],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
+
+      const getIMSPromiseTokenStub = sandbox.stub();
+      const SuggestionsControllerWithStub = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/utils.js': {
+          getIMSPromiseToken: getIMSPromiseTokenStub,
+        },
+      });
+      const controllerWithStub = SuggestionsControllerWithStub({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'abcd' } },
+        ...authContext,
+      }, spySqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithStub.autofixSuggestions({
+        env: {
+          AUTOFIX_CRYPT_SECRET: 'superSecret',
+          AUTOFIX_CRYPT_SALT: 'salt',
+        },
+        pathInfo: {
+          headers: {
+            authorization: 'Bearer token123',
+            'x-promise-token': 'header-promise-token',
+          },
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(sqsSpy.firstCall.args[1]).to.have.property('promiseToken');
+      expect(sqsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token', 'header-promise-token');
+      expect(getIMSPromiseTokenStub).to.not.have.been.called;
+    });
+
+    it('falls back to IMS when x-promise-token header is absent', async () => {
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0]),
+          mockSuggestionEntity(suggs[2]),
+        ],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
+      const response = await suggestionsControllerWithIms.autofixSuggestions({
+        pathInfo: {
+          headers: {
+            authorization: 'Bearer token123',
+          },
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(sqsSpy.firstCall.args[1]).to.have.property('promiseToken');
+      expect(sqsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token', 'promiseTokenExample');
+    });
+
+    it('falls back to IMS when x-promise-token header is empty', async () => {
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0]),
+          mockSuggestionEntity(suggs[2]),
+        ],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
+      const response = await suggestionsControllerWithIms.autofixSuggestions({
+        pathInfo: {
+          headers: {
+            authorization: 'Bearer token123',
+            'x-promise-token': '',
+          },
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(sqsSpy.firstCall.args[1]).to.have.property('promiseToken');
+      expect(sqsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token', 'promiseTokenExample');
     });
   });
 
@@ -3723,6 +3970,23 @@ describe('Suggestions Controller', () => {
       };
     });
 
+    it('uses base URL fallback when getHostName returns null (deploy)', async () => {
+      site.getBaseURL = sandbox.stub().returns('');
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+        },
+      });
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata).to.have.property('total');
+    });
+
     it('should deploy headings suggestions successfully', async () => {
       const response = await suggestionsController.deploySuggestionToEdge({
         ...context,
@@ -4094,12 +4358,21 @@ describe('Suggestions Controller', () => {
               getConfig: sandbox.stub().returns({
                 getTokowakaConfig: sandbox.stub().returns({}),
               }),
+              getBaseURL: () => 'https://example.com',
             }),
           },
         },
         pathInfo: { headers: { 'x-product': 'llmo' } },
         ...authContext,
       }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      // Make S3 fetchMetaconfig fail so deployment throws and controller returns 207 with failed: 1, 500
+      const originalSend = context.s3.s3Client.send;
+      context.s3.s3Client.send = sandbox.stub().callsFake((cmd) => {
+        if (cmd.constructor.name === 'GetObjectCommand') {
+          return Promise.reject(new Error('Internal server error'));
+        }
+        return originalSend(cmd);
+      });
       const response = await suggestionsController2.deploySuggestionToEdge({
         ...context,
         params: {
@@ -4768,8 +5041,9 @@ describe('Suggestions Controller', () => {
       });
 
       it('should handle errors at the start of domain-wide deployment', async () => {
-        // Make site.getBaseURL throw an error
-        site.getBaseURL.throws(new Error('Cannot get base URL'));
+        // First call (apexBaseUrl) succeeds; second call (domain-wide baseURL) throws
+        site.getBaseURL.onFirstCall().returns('https://example.com');
+        site.getBaseURL.onSecondCall().throws(new Error('Cannot get base URL'));
 
         const response = await suggestionsController.deploySuggestionToEdge({
           ...context,
@@ -5246,6 +5520,23 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(400);
       const error = await response.json();
       expect(error).to.have.property('message', 'Request body must contain a non-empty array of suggestionIds');
+    });
+
+    it('uses base URL fallback when getHostName returns null (rollback)', async () => {
+      site.getBaseURL = sandbox.stub().returns('');
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata).to.have.property('total');
     });
 
     it('should return 403 when user is not an LLMO administrator', async () => {
@@ -6030,6 +6321,23 @@ describe('Suggestions Controller', () => {
         error: sandbox.stub(),
         debug: sandbox.stub(),
       };
+    });
+
+    it('uses base URL fallback when getHostName returns null (preview)', async function () {
+      site.getBaseURL = sandbox.stub().returns('');
+      const response = await suggestionsController.previewSuggestions({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+        },
+      });
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata).to.have.property('total');
     });
 
     it('should preview headings suggestions successfully', async function () {
@@ -6876,6 +7184,10 @@ describe('Suggestions Controller', () => {
   });
 
   describe('previewSuggestions with domain-wide suggestions', () => {
+    beforeEach(() => {
+      site.getBaseURL = sandbox.stub().returns('https://example.com');
+    });
+
     it('should reject preview for domain-wide suggestions', async () => {
       const domainWideSuggestion = {
         getId: () => SUGGESTION_IDS[0],

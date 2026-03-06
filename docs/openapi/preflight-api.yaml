@@ -1,4 +1,6 @@
 preflight-jobs:
+  parameters:
+    - $ref: './parameters.yaml#/xPromiseToken'
   post:
     tags:
       - preflight
