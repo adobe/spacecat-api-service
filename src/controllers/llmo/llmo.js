@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { gunzipSync } from 'zlib';
 import {
   ok, badRequest, forbidden, createResponse, notFound, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
@@ -440,7 +441,6 @@ function LlmoController(ctx) {
     const {
       log,
       s3,
-      data,
       pathInfo,
     } = context;
     const { siteId } = context.params;
@@ -450,6 +450,14 @@ function LlmoController(ctx) {
     try {
       // Validate site and LLMO access
       await getSiteAndValidateLlmo(context);
+
+      // Support gzip-compressed request bodies (Content-Type: application/gzip)
+      let { data } = context;
+      const contentType = context.request?.headers?.get?.('content-type');
+      if (contentType === 'application/gzip') {
+        const compressed = Buffer.from(await context.request.arrayBuffer());
+        data = JSON.parse(gunzipSync(compressed).toString());
+      }
 
       if (!isObject(data)) {
         return badRequest('LLMO config update must be provided as an object');

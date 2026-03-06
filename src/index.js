@@ -56,7 +56,6 @@ import FulfillmentController from './controllers/event/fulfillment.js';
 import { FixesController } from './controllers/fixes.js';
 import ImportController from './controllers/import.js';
 import { s3ClientWrapper } from './support/s3.js';
-import compressedBody from './support/compressed-body.js';
 import { multipartFormData } from './support/multipart-form-data.js';
 import ApiKeyController from './controllers/api-key.js';
 import OpportunitiesController from './controllers/opportunities.js';
@@ -112,7 +111,7 @@ function localCORSWrapper(fn) {
       response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
       response.headers.set(
         'Access-Control-Allow-Headers',
-        'Content-Type, Content-Encoding, Authorization, x-api-key, x-ims-org-id, x-client-type, x-import-api-key, '
+        'Content-Type, Authorization, x-api-key, x-ims-org-id, x-client-type, x-import-api-key, '
         + 'x-trigger-audits, x-requested-with, origin, accept',
       );
       response.headers.set('Access-Control-Max-Age', '86400');
@@ -162,7 +161,7 @@ async function run(request, context) {
   if (method === 'OPTIONS') {
     return noContent({
       'access-control-allow-methods': 'GET, HEAD, PATCH, POST, OPTIONS, DELETE',
-      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, content-encoding, accept, x-import-api-key, x-client-type, x-trigger-audits',
+      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type, x-trigger-audits',
       'access-control-max-age': '86400',
       'access-control-allow-origin': '*',
     });
@@ -289,7 +288,6 @@ export const main = wrappedMain
   .with(localCORSWrapper)
   .with(logWrapper)
   .with(dataAccess)
-  .with(compressedBody)
   .with(bodyData)
   .with(multipartFormData)
   .with(enrichPathInfo)
