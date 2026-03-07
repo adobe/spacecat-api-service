@@ -3329,7 +3329,7 @@ describe('LlmoController', () => {
       );
     });
 
-    it('should return 400 when site validation fails', async () => {
+    it('should return 404 when site is not found', async () => {
       const contextWithInvalidSite = {
         ...rationaleContext,
         dataAccess: {
@@ -3344,13 +3344,9 @@ describe('LlmoController', () => {
 
       const result = await controller.getLlmoRationale(contextWithInvalidSite);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(404);
       const responseBody = await result.json();
-      expect(responseBody.message).to.include('Cannot read properties of null');
-
-      expect(mockLog.error).to.have.been.calledWith(
-        sinon.match(`Error getting LLMO rationale for site ${TEST_SITE_ID}:`),
-      );
+      expect(responseBody.message).to.include('Site not found');
     });
 
     it('should handle empty JSON file correctly', async () => {
