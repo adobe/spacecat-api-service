@@ -108,19 +108,15 @@ function resolveBrokenBacklinksDocPath(deliveryConfig, changeDetails) {
  * pathname → resource path → edit or preview URL.
  * @param {Object} contentClient - ContentClient instance
  * @param {string} pagePath - URL pathname (e.g. /docs/page)
- * @param {Object} [log] - logger (optional)
  * @returns {Promise<string|null>}
  */
-async function resolveAEMEdgeEditUrl(contentClient, pagePath, log = console) {
+async function resolveAEMEdgeEditUrl(contentClient, pagePath) {
   const documentPath = await contentClient.getResourcePath(pagePath);
   if (!documentPath) return null;
   const docPath = documentPath.replace(/[.]md$/, '');
-  if (typeof log?.info === 'function') log.info('docPath', docPath);
   const editUrl = await contentClient.getEditURL(docPath);
-  if (typeof log?.info === 'function') log.info('editUrl', editUrl);
   if (editUrl) return editUrl;
   const urls = await contentClient.getLivePreviewURLs(docPath);
-  if (typeof log?.info === 'function') log.info('urls', urls);
   return urls?.previewURL ?? null;
 }
 
@@ -181,7 +177,7 @@ export async function resolveDocumentPath(
     if (deliveryType === 'aem_edge' && contentClient) {
       const pagePath = extractPagePath(opportunityType, changeDetails);
       if (!pagePath) return null;
-      return await resolveAEMEdgeEditUrl(contentClient, pagePath, log);
+      return await resolveAEMEdgeEditUrl(contentClient, pagePath);
     }
 
     return null;
