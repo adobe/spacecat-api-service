@@ -25,6 +25,9 @@ describe('IdentifyRedirectsCommand', () => {
       CS: 'CS',
       CS_CW: 'CS_CW',
     },
+    DELIVERY_TYPES: {
+      AEM_CS: 'AEM_CS',
+    },
   };
 
   let IdentifyRedirectsCommand;
@@ -109,6 +112,7 @@ describe('IdentifyRedirectsCommand', () => {
     extractURLFromSlackInputStub.returns('https://example.com');
     dataAccessStub.Site.findByBaseURL.resolves({
       getAuthoringType: () => 'AMS',
+      getDeliveryType: () => 'AEM_AMS',
       getDeliveryConfig: () => ({ programId: 'p', environmentId: 'e' }),
       getId: () => 'site-1',
     });
@@ -126,6 +130,7 @@ describe('IdentifyRedirectsCommand', () => {
     extractURLFromSlackInputStub.returns('https://example.com');
     dataAccessStub.Site.findByBaseURL.resolves({
       getAuthoringType: () => SiteModelStub.AUTHORING_TYPES.CS,
+      getDeliveryType: () => SiteModelStub.DELIVERY_TYPES.AEM_CS,
       getDeliveryConfig: () => ({ programId: '', environmentId: 'e' }),
       getId: () => 'site-1',
     });
@@ -133,7 +138,8 @@ describe('IdentifyRedirectsCommand', () => {
 
     await command.handleExecution(['example.com'], slackContext);
 
-    expect(slackContext.say).to.have.been.calledWithMatch(
+    expect(slackContext.say).to.have.been.calledOnce;
+    expect(slackContext.say.firstCall.args[0]).to.include(
       'missing `deliveryConfig.programId` and/or `deliveryConfig.environmentId`',
     );
   });
@@ -142,13 +148,15 @@ describe('IdentifyRedirectsCommand', () => {
     extractURLFromSlackInputStub.returns('https://example.com');
     dataAccessStub.Site.findByBaseURL.resolves({
       getAuthoringType: () => SiteModelStub.AUTHORING_TYPES.CS,
+      getDeliveryType: () => 'AEM_CS',
       getId: () => 'site-1',
     });
     const command = IdentifyRedirectsCommand(context);
 
     await command.handleExecution(['example.com'], slackContext);
 
-    expect(slackContext.say).to.have.been.calledWithMatch(
+    expect(slackContext.say).to.have.been.calledOnce;
+    expect(slackContext.say.firstCall.args[0]).to.include(
       'missing `deliveryConfig.programId` and/or `deliveryConfig.environmentId`',
     );
   });
@@ -157,6 +165,7 @@ describe('IdentifyRedirectsCommand', () => {
     extractURLFromSlackInputStub.returns('https://example.com');
     dataAccessStub.Site.findByBaseURL.resolves({
       getAuthoringType: () => SiteModelStub.AUTHORING_TYPES.CS_CW,
+      getDeliveryType: () => SiteModelStub.DELIVERY_TYPES.AEM_CS,
       getDeliveryConfig: () => ({ programId: 'p', environmentId: 'e' }),
       getId: () => 'site-1',
     });
@@ -168,15 +177,15 @@ describe('IdentifyRedirectsCommand', () => {
 
     await command.handleExecution(['example.com'], slackContext);
 
-    expect(slackContext.say).to.have.been.calledWithMatch(
-      'missing `AUDIT_JOBS_QUEUE_URL`',
-    );
+    expect(slackContext.say).to.have.been.calledOnce;
+    expect(slackContext.say.firstCall.args[0]).to.include('missing `AUDIT_JOBS_QUEUE_URL`');
   });
 
   it('fails when SQS client is missing', async () => {
     extractURLFromSlackInputStub.returns('https://example.com');
     dataAccessStub.Site.findByBaseURL.resolves({
       getAuthoringType: () => SiteModelStub.AUTHORING_TYPES.CS_CW,
+      getDeliveryType: () => SiteModelStub.DELIVERY_TYPES.AEM_CS,
       getDeliveryConfig: () => ({ programId: 'p', environmentId: 'e' }),
       getId: () => 'site-1',
     });
@@ -188,15 +197,15 @@ describe('IdentifyRedirectsCommand', () => {
 
     await command.handleExecution(['example.com'], slackContext);
 
-    expect(slackContext.say).to.have.been.calledWithMatch(
-      'missing SQS client',
-    );
+    expect(slackContext.say).to.have.been.calledOnce;
+    expect(slackContext.say.firstCall.args[0]).to.include('missing SQS client');
   });
 
   it('enqueues a job with default minutes when minutes is omitted', async () => {
     extractURLFromSlackInputStub.returns('https://example.com');
     dataAccessStub.Site.findByBaseURL.resolves({
       getAuthoringType: () => SiteModelStub.AUTHORING_TYPES.CS,
+      getDeliveryType: () => SiteModelStub.DELIVERY_TYPES.AEM_CS,
       getDeliveryConfig: () => ({ programId: 'p', environmentId: 'e' }),
       getId: () => 'site-1',
     });
@@ -204,7 +213,8 @@ describe('IdentifyRedirectsCommand', () => {
 
     await command.handleExecution(['example.com'], slackContext);
 
-    expect(slackContext.say).to.have.been.calledWithMatch('Queued redirect pattern detection');
+    expect(slackContext.say).to.have.been.calledOnce;
+    expect(slackContext.say.firstCall.args[0]).to.include('Queued redirect pattern detection');
     expect(sqsStub.sendMessage).to.have.been.calledOnce;
     expect(sqsStub.sendMessage.firstCall.args[0]).to.equal('testQueueUrl');
     expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.include({
@@ -227,6 +237,7 @@ describe('IdentifyRedirectsCommand', () => {
     extractURLFromSlackInputStub.returns('https://example.com');
     dataAccessStub.Site.findByBaseURL.resolves({
       getAuthoringType: () => SiteModelStub.AUTHORING_TYPES.CS_CW,
+      getDeliveryType: () => SiteModelStub.DELIVERY_TYPES.AEM_CS,
       getDeliveryConfig: () => ({ programId: 'p', environmentId: 'e' }),
       getId: () => 'site-1',
     });
