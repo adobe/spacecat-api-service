@@ -6178,14 +6178,15 @@ describe('Suggestions Controller', () => {
       // Stub global fetch for HTML fetching
       fetchStub = sandbox.stub(global, 'fetch');
       // Mock fetch responses for HTML fetching (warmup + actual for both original and optimized)
+      // Header must be x-edgeoptimize-cache (no hyphen) to match tokowaka client
       fetchStub.resolves({
         ok: true,
         status: 200,
         statusText: 'OK',
         headers: {
           get: (headerName) => {
-            if (headerName === 'x-edge-optimize-cache') {
-              return 'hit';
+            if (headerName === 'x-edgeoptimize-cache') {
+              return 'HIT';
             }
             return null;
           },
