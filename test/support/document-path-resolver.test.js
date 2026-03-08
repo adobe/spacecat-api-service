@@ -491,6 +491,76 @@ describe('document-path-resolver', () => {
         expect(result).to.be.null;
         expect(mockContentClient.getResourcePath).to.not.have.been.called;
       });
+
+      it('calls log.info when logger has info (edit URL path)', async () => {
+        const logWithInfo = { info: sandbox.stub(), warn: sandbox.stub() };
+        const mockContentClient = {
+          getResourcePath: sandbox.stub().resolves('/docs/page.md'),
+          getEditURL: sandbox.stub().resolves('https://edit.url/page'),
+          getLivePreviewURLs: sandbox.stub().resolves({ previewURL: null }),
+        };
+        const site = {
+          getDeliveryType: () => 'aem_edge',
+          getDeliveryConfig: () => ({}),
+        };
+        const result = await resolveDocumentPath(
+          site,
+          'meta-tags',
+          { url: 'https://example.com/page' },
+          'Bearer t',
+          logWithInfo,
+          mockContentClient,
+        );
+        expect(result).to.equal('https://edit.url/page');
+        expect(logWithInfo.info).to.have.been.calledWith('docPath', '/docs/page');
+        expect(logWithInfo.info).to.have.been.calledWith('editUrl', 'https://edit.url/page');
+      });
+
+      it('calls log.info when logger has info (preview URL fallback path)', async () => {
+        const logWithInfo = { info: sandbox.stub(), warn: sandbox.stub() };
+        const mockContentClient = {
+          getResourcePath: sandbox.stub().resolves('/docs/page.md'),
+          getEditURL: sandbox.stub().resolves(null),
+          getLivePreviewURLs: sandbox.stub().resolves({ previewURL: 'https://preview.url/page' }),
+        };
+        const site = {
+          getDeliveryType: () => 'aem_edge',
+          getDeliveryConfig: () => ({}),
+        };
+        const result = await resolveDocumentPath(
+          site,
+          'meta-tags',
+          { url: 'https://example.com/page' },
+          'Bearer t',
+          logWithInfo,
+          mockContentClient,
+        );
+        expect(result).to.equal('https://preview.url/page');
+        expect(logWithInfo.info).to.have.been.calledWith('docPath', '/docs/page');
+        expect(logWithInfo.info).to.have.been.calledWith('editUrl', null);
+        expect(logWithInfo.info).to.have.been.calledWith('urls', { previewURL: 'https://preview.url/page' });
+      });
+
+      it('returns null when getLivePreviewURLs returns undefined (urls?.previewURL branch)', async () => {
+        const mockContentClient = {
+          getResourcePath: sandbox.stub().resolves('/docs/p.md'),
+          getEditURL: sandbox.stub().resolves(null),
+          getLivePreviewURLs: sandbox.stub().resolves(undefined),
+        };
+        const site = {
+          getDeliveryType: () => 'aem_edge',
+          getDeliveryConfig: () => ({}),
+        };
+        const result = await resolveDocumentPath(
+          site,
+          'meta-tags',
+          { url: 'https://example.com/p' },
+          'Bearer t',
+          log,
+          mockContentClient,
+        );
+        expect(result).to.be.null;
+      });
     });
 
     describe('error handling', () => {
