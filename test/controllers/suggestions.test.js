@@ -3418,6 +3418,38 @@ describe('Suggestions Controller', () => {
       expect(payload).to.not.have.property('precheckOnly');
     });
 
+    it('does not call getIMSPromiseToken when action is assess and precheckOnly is true', async () => {
+      const getIMSPromiseTokenStub = sandbox.stub().resolves({ promise_token: 'unused' });
+      const ControllerWithSpy = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/utils.js': {
+          getIMSPromiseToken: getIMSPromiseTokenStub,
+        },
+      });
+      const controller = ControllerWithSpy({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'abcd' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      opportunity.getType = sandbox.stub().returns('alt-text');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(altTextSuggs[0])],
+      );
+
+      const response = await controller.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          action: 'assess',
+          precheckOnly: true,
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(getIMSPromiseTokenStub).to.not.have.been.called;
+    });
+
     it('returns 400 when precheckOnly is not a boolean', async () => {
       const response = await suggestionsControllerWithMock.autofixSuggestions({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
