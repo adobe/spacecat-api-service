@@ -80,6 +80,10 @@ describe('routeRequiredCapabilities', () => {
         throw new Error('Could not find routeDefinitions in routes/index.js');
       }
       const routeKeys = [...routeDefMatch[1].matchAll(/'([A-Z]+\s[^']+)'/g)].map((m) => m[1]);
+      expect(routeKeys.length).to.be.greaterThan(
+        100,
+        'Regex failed to extract routes from routes/index.js - format may have changed',
+      );
 
       const inCapabilities = new Set(Object.keys(routeRequiredCapabilities));
       const internalSet = new Set(INTERNAL_ROUTES);

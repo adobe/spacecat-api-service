@@ -173,4 +173,62 @@ describe('s2sAuthWrapper integration', () => {
     expect(response.status).to.equal(403);
     expect(mockInnerHandler).to.not.have.been.called;
   });
+
+  it('passes expired/invalid token through to authWrapper (not rejected at S2S layer)', async () => {
+    const invalidToken = 'eyJhbGciOiJIUzI1NiJ9.invalid.signature';
+    const request = new Request('https://example.com/sites', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${invalidToken}` },
+    });
+    const context = buildContext(
+      { method: 'GET', suffix: '/sites' },
+      { authorization: `Bearer ${invalidToken}` },
+    );
+
+    const response = await wrappedHandler(request, context);
+
+    expect(response.status).to.equal(200);
+    expect(mockInnerHandler).to.have.been.calledOnce;
+  });
+
+  it('returns 403 when consumer is revoked', async () => {
+    const token = await createS2sToken();
+    const request = new Request('https://example.com/sites', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const context = buildContext(
+      { method: 'GET', suffix: '/sites' },
+      { authorization: `Bearer ${token}` },
+    );
+
+    const mockConsumer = {
+      isRevoked: () => true,
+      getStatus: () => 'ACTIVE',
+      getCapabilities: () => ['site:read'],
+    };
+    context.dataAccess.Consumer.findByClientIdAndImsOrgId.resolves(mockConsumer);
+
+    const response = await wrappedHandler(request, context);
+
+    expect(response.status).to.equal(403);
+    expect(mockInnerHandler).to.not.have.been.called;
+  });
+
+  it('passes IMS bearer token (non-S2S) through cleanly', async () => {
+    const imsToken = await createS2sToken({ is_s2s_consumer: false });
+    const request = new Request('https://example.com/sites', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${imsToken}` },
+    });
+    const context = buildContext(
+      { method: 'GET', suffix: '/sites' },
+      { authorization: `Bearer ${imsToken}` },
+    );
+
+    const response = await wrappedHandler(request, context);
+
+    expect(response.status).to.equal(200);
+    expect(mockInnerHandler).to.have.been.calledOnce;
+  });
 });
