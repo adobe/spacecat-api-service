@@ -4016,6 +4016,38 @@ describe('Suggestions Controller', () => {
       expect(body).to.have.property('message').that.includes('valid URL');
     });
 
+    it('returns 400 when action is assess-urls and page object has invalid or missing pageUrl', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          action: 'assess-urls',
+          pages: [
+            { imageUrls: ['https://example.com/img.jpg'] },
+          ],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message').that.includes('valid URL');
+    });
+
+    it('returns 400 when action is assess-urls and page object has imageUrls that is not an array', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          action: 'assess-urls',
+          pages: [
+            { pageUrl: 'https://valid.com/p', imageUrls: 'https://single-url.com' },
+          ],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message').that.includes('valid URL');
+    });
+
     it('returns 400 when action is assess-urls but a page entry is not a string or page object', async () => {
       const response = await suggestionsController.autofixSuggestions({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
