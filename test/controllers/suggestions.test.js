@@ -4016,6 +4016,20 @@ describe('Suggestions Controller', () => {
       expect(body).to.have.property('message').that.includes('valid URL');
     });
 
+    it('returns 400 when action is assess-urls but a page entry is not a string or page object', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          action: 'assess-urls',
+          pages: ['https://valid.com/p', 123],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message').that.includes('valid URL');
+    });
+
     it('returns 400 when action is assess-urls but handler is not enabled for site', async () => {
       assessUrlsConfig.isHandlerEnabledForSite.returns(false);
       const response = await suggestionsController.autofixSuggestions({
