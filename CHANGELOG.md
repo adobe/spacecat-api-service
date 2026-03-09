@@ -1,3 +1,31 @@
+## [1.336.4](https://github.com/adobe/spacecat-api-service/compare/v1.336.3...v1.336.4) (2026-03-09)
+
+
+### Bug Fixes
+
+* return 404 instead of 400 for missing sites in LLMO config endpoints ([#1920](https://github.com/adobe/spacecat-api-service/issues/1920)) ([9fcd6ee](https://github.com/adobe/spacecat-api-service/commit/9fcd6ee1d43d4c071e2b9ee6c45a508ab4edf2b9))
+
+## [1.336.3](https://github.com/adobe/spacecat-api-service/compare/v1.336.2...v1.336.3) (2026-03-07)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1922](https://github.com/adobe/spacecat-api-service/issues/1922)) ([9beefdb](https://github.com/adobe/spacecat-api-service/commit/9beefdbed238b0dbbe542d5f05bc8c3235e20c2d))
+
+## [1.336.2](https://github.com/adobe/spacecat-api-service/compare/v1.336.1...v1.336.2) (2026-03-07)
+
+
+### Bug Fixes
+
+* **deps:** update external fixes ([#1921](https://github.com/adobe/spacecat-api-service/issues/1921)) ([0ebc440](https://github.com/adobe/spacecat-api-service/commit/0ebc440a3c4529e50f49fa2d4f07807a833c1c2d))
+
+## [1.336.1](https://github.com/adobe/spacecat-api-service/compare/v1.336.0...v1.336.1) (2026-03-06)
+
+
+### Bug Fixes
+
+* **deps:** update adobe fixes ([#1919](https://github.com/adobe/spacecat-api-service/issues/1919)) ([3762b19](https://github.com/adobe/spacecat-api-service/commit/3762b193cfc086e6c87cc18fc86c516f9ee21a0f))
+
 # [1.336.0](https://github.com/adobe/spacecat-api-service/compare/v1.335.2...v1.336.0) (2026-03-05)
 
 
