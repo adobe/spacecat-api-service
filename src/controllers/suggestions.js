@@ -947,9 +947,23 @@ function SuggestionsController(ctx, sqs, env) {
       if (!isNonEmptyArray(pages)) {
         return badRequest('Request body must contain a non-empty array of pages (URLs) when action is assess-urls');
       }
-      const invalidPage = pages.find((p) => typeof p !== 'string' || !isValidUrl(p));
-      if (invalidPage !== undefined) {
-        return badRequest('Each page in the pages array must be a valid URL');
+      const invalidEntry = pages.find((p) => {
+        if (typeof p === 'string') {
+          return !isValidUrl(p);
+        }
+        if (isObject(p) && p !== null) {
+          const { pageUrl, imageUrls } = p;
+          if (typeof pageUrl !== 'string' || !isValidUrl(pageUrl)) return true;
+          if (imageUrls !== undefined) {
+            if (!isArray(imageUrls)) return true;
+            return imageUrls.some((u) => typeof u !== 'string' || !isValidUrl(u));
+          }
+          return false;
+        }
+        return true;
+      });
+      if (invalidEntry !== undefined) {
+        return badRequest('Each page must be a valid URL string or an object with pageUrl (valid URL) and optional imageUrls (array of valid URLs)');
       }
       const configuration = await Configuration.findLatest();
       if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-auto-fix`, site)) {

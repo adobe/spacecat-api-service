@@ -3418,6 +3418,38 @@ describe('Suggestions Controller', () => {
       expect(payload).to.not.have.property('precheckOnly');
     });
 
+    it('does not call getIMSPromiseToken when action is assess and precheckOnly is true', async () => {
+      const getIMSPromiseTokenStub = sandbox.stub().resolves({ promise_token: 'unused' });
+      const ControllerWithSpy = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/utils.js': {
+          getIMSPromiseToken: getIMSPromiseTokenStub,
+        },
+      });
+      const controller = ControllerWithSpy({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'abcd' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      opportunity.getType = sandbox.stub().returns('alt-text');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(altTextSuggs[0])],
+      );
+
+      const response = await controller.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          action: 'assess',
+          precheckOnly: true,
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(getIMSPromiseTokenStub).to.not.have.been.called;
+    });
+
     it('returns 400 when precheckOnly is not a boolean', async () => {
       const response = await suggestionsControllerWithMock.autofixSuggestions({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
@@ -3912,6 +3944,29 @@ describe('Suggestions Controller', () => {
       expect(payload).to.have.property('precheckOnly', true);
     });
 
+    it('accepts pages as array of objects with pageUrl and imageUrls', async () => {
+      const pages = [
+        {
+          pageUrl: 'https://example.com/page1',
+          imageUrls: [
+            'https://example.com/img1.jpg',
+            'https://example.com/img2.jpg',
+          ],
+        },
+        { pageUrl: 'https://example.com/page2' },
+      ];
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { action: 'assess-urls', pages },
+        ...context,
+      });
+
+      expect(response.status).to.equal(202);
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload).to.have.property('pages').that.deep.equals(pages);
+      expect(payload).to.have.property('action', 'assess-urls');
+    });
+
     it('returns 400 when action is assess-urls but pages is missing', async () => {
       const response = await suggestionsController.autofixSuggestions({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
@@ -3942,7 +3997,69 @@ describe('Suggestions Controller', () => {
       });
       expect(response.status).to.equal(400);
       const body = await response.json();
-      expect(body).to.have.property('message', 'Each page in the pages array must be a valid URL');
+      expect(body).to.have.property('message').that.includes('valid URL');
+    });
+
+    it('returns 400 when action is assess-urls and page object has invalid pageUrl or imageUrls', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          action: 'assess-urls',
+          pages: [
+            { pageUrl: 'https://valid.com/p', imageUrls: ['https://ok.jpg', 'not-a-url'] },
+          ],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message').that.includes('valid URL');
+    });
+
+    it('returns 400 when action is assess-urls and page object has invalid or missing pageUrl', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          action: 'assess-urls',
+          pages: [
+            { imageUrls: ['https://example.com/img.jpg'] },
+          ],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message').that.includes('valid URL');
+    });
+
+    it('returns 400 when action is assess-urls and page object has imageUrls that is not an array', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          action: 'assess-urls',
+          pages: [
+            { pageUrl: 'https://valid.com/p', imageUrls: 'https://single-url.com' },
+          ],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message').that.includes('valid URL');
+    });
+
+    it('returns 400 when action is assess-urls but a page entry is not a string or page object', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          action: 'assess-urls',
+          pages: ['https://valid.com/p', 123],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message').that.includes('valid URL');
     });
 
     it('returns 400 when action is assess-urls but handler is not enabled for site', async () => {
