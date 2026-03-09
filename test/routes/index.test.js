@@ -352,6 +352,7 @@ describe('getRouteHandlers', () => {
 
   const mockPlgOnboardingController = {
     onboard: sinon.stub(),
+    getStatus: sinon.stub(),
   };
 
   it('segregates static and dynamic routes', () => {
@@ -702,6 +703,7 @@ describe('getRouteHandlers', () => {
       'GET /consumers/by-client-id/:clientId',
       'PATCH /consumers/:consumerId',
       'POST /consumers/:consumerId/revoke',
+      'GET /plg/onboard/status/:imsOrgId',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);

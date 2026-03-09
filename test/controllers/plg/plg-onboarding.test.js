@@ -24,6 +24,7 @@ const TEST_IMS_ORG_ID = 'ABC123@AdobeOrg';
 const TEST_ORG_ID = 'org-uuid-1';
 const TEST_SITE_ID = 'site-uuid-1';
 const TEST_PROJECT_ID = 'project-uuid-1';
+const TEST_ONBOARDING_ID = 'onboarding-uuid-1';
 const DEFAULT_ORG_ID = 'default-org-id';
 const DEMO_ORG_ID = '66331367-70e6-4a49-8445-4f6d9c265af9';
 const OTHER_CUSTOMER_ORG_ID = 'other-customer-org-id';
@@ -57,6 +58,7 @@ describe('PlgOnboardingController', () => {
   let mockOrganization;
   let mockProject;
   let mockDataAccess;
+  let mockOnboarding;
 
   const PLG_PROFILE = {
     audits: {
@@ -85,6 +87,51 @@ describe('PlgOnboardingController', () => {
       setRegion: sandbox.stub(),
       getProjectId: sandbox.stub().returns(overrides.projectId || null),
       setProjectId: sandbox.stub(),
+      save: sandbox.stub().resolves(),
+    };
+  }
+
+  function createMockOnboarding(overrides = {}) {
+    const record = {
+      id: overrides.id || TEST_ONBOARDING_ID,
+      imsOrgId: overrides.imsOrgId || TEST_IMS_ORG_ID,
+      domain: overrides.domain || TEST_DOMAIN,
+      baseURL: overrides.baseURL || TEST_BASE_URL,
+      status: overrides.status || 'IN_PROGRESS',
+      siteId: overrides.siteId || null,
+      organizationId: overrides.organizationId || null,
+      steps: overrides.steps || null,
+      error: overrides.error || null,
+      botBlocker: overrides.botBlocker || null,
+      waitlistReason: overrides.waitlistReason || null,
+      completedAt: overrides.completedAt || null,
+      createdAt: overrides.createdAt || '2026-03-09T12:00:00.000Z',
+      updatedAt: overrides.updatedAt || '2026-03-09T12:00:00.000Z',
+    };
+
+    return {
+      getId: sandbox.stub().returns(record.id),
+      getImsOrgId: sandbox.stub().returns(record.imsOrgId),
+      getDomain: sandbox.stub().returns(record.domain),
+      getBaseURL: sandbox.stub().returns(record.baseURL),
+      getStatus: sandbox.stub().returns(record.status),
+      getSiteId: sandbox.stub().returns(record.siteId),
+      getOrganizationId: sandbox.stub().returns(record.organizationId),
+      getSteps: sandbox.stub().returns(record.steps),
+      getError: sandbox.stub().returns(record.error),
+      getBotBlocker: sandbox.stub().returns(record.botBlocker),
+      getWaitlistReason: sandbox.stub().returns(record.waitlistReason),
+      getCompletedAt: sandbox.stub().returns(record.completedAt),
+      getCreatedAt: sandbox.stub().returns(record.createdAt),
+      getUpdatedAt: sandbox.stub().returns(record.updatedAt),
+      setStatus: sandbox.stub(),
+      setSiteId: sandbox.stub(),
+      setOrganizationId: sandbox.stub(),
+      setSteps: sandbox.stub(),
+      setError: sandbox.stub(),
+      setBotBlocker: sandbox.stub(),
+      setWaitlistReason: sandbox.stub(),
+      setCompletedAt: sandbox.stub(),
       save: sandbox.stub().resolves(),
     };
   }
@@ -146,6 +193,9 @@ describe('PlgOnboardingController', () => {
       getProjectName: sandbox.stub().returns('example.com'),
     };
 
+    // PlgOnboarding mock
+    mockOnboarding = createMockOnboarding();
+
     // DataAccess
     mockDataAccess = {
       Site: {
@@ -154,9 +204,6 @@ describe('PlgOnboardingController', () => {
       },
       Organization: {
         findByImsOrgId: sandbox.stub().resolves(mockOrganization),
-      },
-      Opportunity: {
-        allBySiteId: sandbox.stub().resolves([]),
       },
       Project: {
         allByOrganizationId: sandbox.stub().resolves([]),
@@ -168,6 +215,11 @@ describe('PlgOnboardingController', () => {
           save: sandbox.stub().resolves(),
           getQueues: sandbox.stub().returns({ audits: 'audit-queue-url' }),
         }),
+      },
+      PlgOnboarding: {
+        findByImsOrgIdAndDomain: sandbox.stub().resolves(null),
+        create: sandbox.stub().resolves(mockOnboarding),
+        allByImsOrgId: sandbox.stub().resolves([]),
       },
     };
 
@@ -195,6 +247,7 @@ describe('PlgOnboardingController', () => {
         },
         '@adobe/spacecat-shared-http-utils': {
           badRequest: (msg) => ({ status: 400, value: msg }),
+          notFound: (msg) => ({ status: 404, value: msg }),
           ok: (data) => ({ status: 200, value: data }),
         },
         '@adobe/spacecat-shared-tier-client': {
@@ -300,12 +353,21 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(res.value.status).to.equal('ONBOARDED');
-      expect(res.value.siteId).to.equal(TEST_SITE_ID);
-      expect(res.value.organizationId).to.equal(TEST_ORG_ID);
-      expect(res.value.isNewSite).to.be.true;
+      // Response is now a DTO of the PlgOnboarding model
+      expect(res.value.id).to.equal(TEST_ONBOARDING_ID);
+      expect(res.value.imsOrgId).to.equal(TEST_IMS_ORG_ID);
       expect(res.value.domain).to.equal(TEST_DOMAIN);
       expect(res.value.baseURL).to.equal(TEST_BASE_URL);
+
+      // Verify PlgOnboarding was created
+      expect(mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain)
+        .to.have.been.calledWith(TEST_IMS_ORG_ID, TEST_DOMAIN);
+      expect(mockDataAccess.PlgOnboarding.create).to.have.been.calledWith({
+        imsOrgId: TEST_IMS_ORG_ID,
+        domain: TEST_DOMAIN,
+        baseURL: TEST_BASE_URL,
+        status: 'IN_PROGRESS',
+      });
 
       // Verify flow
       expect(composeBaseURLStub).to.have.been.calledWith(TEST_DOMAIN);
@@ -322,6 +384,33 @@ describe('PlgOnboardingController', () => {
       expect(triggerBrandProfileAgentStub).to.have.been.called;
       expect(configToDynamoItemStub).to.have.been.called;
       expect(mockSite.save).to.have.been.called;
+
+      // Verify onboarding record updated with final status
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(mockOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+      expect(mockOnboarding.setSiteId).to.have.been.calledWith(TEST_SITE_ID);
+      expect(mockOnboarding.setCompletedAt).to.have.been.called;
+      expect(mockOnboarding.setSteps).to.have.been.called;
+      expect(mockOnboarding.save).to.have.been.called;
+    });
+
+    it('resumes existing onboarding record for same imsOrgId+domain', async () => {
+      const existingOnboarding = createMockOnboarding({ status: 'ERROR' });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingOnboarding);
+
+      const context = buildContext({
+        domain: TEST_DOMAIN,
+        imsOrgId: TEST_IMS_ORG_ID,
+      });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockDataAccess.PlgOnboarding.create).to.not.have.been.called;
+      expect(existingOnboarding.setStatus).to.have.been.calledWith('IN_PROGRESS');
+      expect(existingOnboarding.setError).to.have.been.calledWith(null);
+      expect(existingOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(existingOnboarding.save).to.have.been.called;
     });
 
     it('sets locale when detected', async () => {
@@ -406,7 +495,6 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(res.value.status).to.equal('ONBOARDED');
       expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to resolve canonical URL/);
     });
 
@@ -465,7 +553,6 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(res.value.status).to.equal('ONBOARDED');
     });
 
     it('creates a project and assigns it to the site', async () => {
@@ -510,21 +597,6 @@ describe('PlgOnboardingController', () => {
 
       expect(mockSite.setProjectId).to.not.have.been.called;
     });
-
-    it('includes existing opportunity count in response', async () => {
-      mockDataAccess.Opportunity.allBySiteId.resolves([
-        { id: 'opp-1' }, { id: 'opp-2' },
-      ]);
-
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
-
-      const res = await controller.onboard(context);
-
-      expect(res.value.existingOpportunityCount).to.equal(2);
-    });
   });
 
   // --- Bot blocker ---
@@ -551,10 +623,15 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(res.value.status).to.equal('WAITING_FOR_IP_WHITELISTING');
-      expect(res.value.botBlocker.type).to.equal('cloudflare');
-      expect(res.value.botBlocker.ipsToAllowlist).to.deep.equal(['1.2.3.4']);
-      expect(res.value.siteId).to.be.undefined;
+      // Verify onboarding record was updated with bot blocker status
+      expect(mockOnboarding.setStatus)
+        .to.have.been.calledWith('WAITING_FOR_IP_WHITELISTING');
+      expect(mockOnboarding.setBotBlocker).to.have.been.calledWith({
+        type: 'cloudflare',
+        ipsToAllowlist: ['1.2.3.4'],
+        userAgent: 'SpaceCat/1.0',
+      });
+      expect(mockOnboarding.save).to.have.been.called;
       // Should NOT create a site
       expect(mockDataAccess.Site.create).to.not.have.been.called;
     });
@@ -577,10 +654,33 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(res.value.status).to.equal('WAITING_FOR_IP_WHITELISTING');
-      expect(res.value.siteId).to.equal(TEST_SITE_ID);
+      expect(mockOnboarding.setStatus)
+        .to.have.been.calledWith('WAITING_FOR_IP_WHITELISTING');
       expect(existingSite.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
       expect(existingSite.save).to.have.been.called;
+    });
+
+    it('uses ipsToWhitelist fallback for bot blocker', async () => {
+      detectBotBlockerStub.resolves({
+        crawlable: false,
+        type: 'generic',
+        // eslint-disable-next-line id-match
+        ipsToWhitelist: ['5.6.7.8'],
+        userAgent: 'Bot/2.0',
+      });
+
+      const context = buildContext({
+        domain: TEST_DOMAIN,
+        imsOrgId: TEST_IMS_ORG_ID,
+      });
+
+      await controller.onboard(context);
+
+      expect(mockOnboarding.setBotBlocker).to.have.been.calledWith({
+        type: 'generic',
+        ipsToAllowlist: ['5.6.7.8'],
+        userAgent: 'Bot/2.0',
+      });
     });
   });
 
@@ -604,8 +704,6 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(res.value.status).to.equal('ONBOARDED');
-      expect(res.value.isNewSite).to.be.false;
       // Should NOT reassign org
       expect(existingSite.setOrganizationId).to.not.have.been.called;
       // Should NOT create a new site
@@ -614,6 +712,8 @@ describe('PlgOnboardingController', () => {
       expect(enableAuditsStub).to.have.been.called;
       expect(enableImportsStub).to.have.been.called;
       expect(tierClientCreateForSiteStub).to.have.been.called;
+      // Verify onboarding record completed
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
   });
 
@@ -637,9 +737,8 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(res.value.status).to.equal('ONBOARDED');
-      expect(res.value.isNewSite).to.be.false;
       expect(existingSite.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
     it('reassigns site from ASO_DEMO_ORG to customer org', async () => {
@@ -682,6 +781,10 @@ describe('PlgOnboardingController', () => {
       // Should NOT modify the site
       expect(existingSite.setOrganizationId).to.not.have.been.called;
       expect(existingSite.save).to.not.have.been.called;
+      // Verify onboarding record was set to ERROR
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ERROR');
+      expect(mockOnboarding.setError).to.have.been.called;
+      expect(mockOnboarding.save).to.have.been.called;
     });
   });
 
@@ -706,7 +809,7 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(res.value.status).to.equal('ONBOARDED');
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
     it('returns 400 when entitlement creation fails unexpectedly', async () => {
@@ -723,6 +826,9 @@ describe('PlgOnboardingController', () => {
 
       expect(res.status).to.equal(400);
       expect(res.value).to.include('Tier service unavailable');
+      // Verify error was recorded in onboarding record
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ERROR');
+      expect(mockOnboarding.setError).to.have.been.called;
     });
   });
 
@@ -745,7 +851,7 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(res.value.status).to.equal('ONBOARDED');
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
       expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to trigger brand-profile/);
     });
   });
@@ -772,6 +878,72 @@ describe('PlgOnboardingController', () => {
       expect(detectLocaleStub).to.not.have.been.called;
       expect(mockSite.setLanguage).to.not.have.been.called;
       expect(mockSite.setRegion).to.not.have.been.called;
+    });
+  });
+
+  // --- getStatus endpoint ---
+
+  describe('getStatus', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    it('returns 400 for invalid imsOrgId', async () => {
+      const res = await controller.getStatus({
+        dataAccess: mockDataAccess,
+        params: { imsOrgId: 'not-valid' },
+      });
+
+      expect(res.status).to.equal(400);
+      expect(res.value).to.equal('Valid imsOrgId is required');
+    });
+
+    it('returns 400 for empty imsOrgId', async () => {
+      const res = await controller.getStatus({
+        dataAccess: mockDataAccess,
+        params: { imsOrgId: '' },
+      });
+
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 404 when no records found', async () => {
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([]);
+
+      const res = await controller.getStatus({
+        dataAccess: mockDataAccess,
+        params: { imsOrgId: TEST_IMS_ORG_ID },
+      });
+
+      expect(res.status).to.equal(404);
+      expect(res.value).to.include('No onboarding records found');
+    });
+
+    it('returns onboarding records for valid imsOrgId', async () => {
+      const record1 = createMockOnboarding({
+        id: 'rec-1',
+        domain: 'example1.com',
+        status: 'ONBOARDED',
+      });
+      const record2 = createMockOnboarding({
+        id: 'rec-2',
+        domain: 'example2.com',
+        status: 'IN_PROGRESS',
+      });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([record1, record2]);
+
+      const res = await controller.getStatus({
+        dataAccess: mockDataAccess,
+        params: { imsOrgId: TEST_IMS_ORG_ID },
+      });
+
+      expect(res.status).to.equal(200);
+      expect(res.value).to.be.an('array').with.length(2);
+      expect(res.value[0].id).to.equal('rec-1');
+      expect(res.value[0].domain).to.equal('example1.com');
+      expect(res.value[1].id).to.equal('rec-2');
+      expect(res.value[1].domain).to.equal('example2.com');
     });
   });
 });
