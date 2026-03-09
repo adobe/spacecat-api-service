@@ -968,6 +968,39 @@ function LlmoController(ctx) {
     }
   };
 
+  const getGeographicAvailability = async (context) => {
+    const { log, env } = context;
+    const { dataSource } = context.params;
+
+    try {
+      const url = new URL(`${LLMO_SHEETDATA_SOURCE_URL}/geographic-availability/${dataSource}`);
+
+      if (!env.LLMO_HLX_API_KEY) {
+        throw new Error('LLMO_HLX_API_KEY environment variable is not configured');
+      }
+
+      log.info(`Fetching geographic availability: ${url.toString()}`);
+
+      const response = await fetch(url.toString(), {
+        headers: {
+          Authorization: `token ${env.LLMO_HLX_API_KEY}`,
+          'User-Agent': SPACECAT_USER_AGENT,
+        },
+      });
+
+      if (!response.ok) {
+        log.error(`Failed to fetch geographic availability: ${response.status} ${response.statusText}`);
+        throw new Error(`External API returned ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      return ok(data);
+    } catch (error) {
+      log.error(`Error fetching geographic availability for ${dataSource}: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
   const queryFiles = async (context) => {
     const { log } = context;
     const { siteId } = context.params;
@@ -1706,6 +1739,7 @@ function LlmoController(ctx) {
     onboardCustomer,
     offboardCustomer,
     queryFiles,
+    getGeographicAvailability,
     getLlmoRationale,
     getBrandClaims,
     createOrUpdateEdgeConfig,

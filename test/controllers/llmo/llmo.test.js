@@ -5846,4 +5846,69 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(404);
     });
   });
+
+  describe('getGeographicAvailability', () => {
+    beforeEach(() => {
+      mockContext.params = { dataSource: 'countries-aimode.json' };
+    });
+
+    it('should return geographic availability data successfully', async () => {
+      const mockData = {
+        countries: {
+          total: 2,
+          offset: 0,
+          limit: 100,
+          data: [
+            { Code: 'US', Name: 'United States' },
+            { Code: 'DE', Name: 'Germany' },
+          ],
+        },
+      };
+
+      tracingFetchStub.resolves(createMockResponse(mockData));
+
+      const result = await controller.getGeographicAvailability(mockContext);
+      expect(result.status).to.equal(200);
+
+      const body = await result.json();
+      expect(body.countries.data).to.have.lengthOf(2);
+      expect(tracingFetchStub).to.have.been.calledOnce;
+
+      const fetchUrl = tracingFetchStub.firstCall.args[0];
+      expect(fetchUrl).to.equal(`${EXTERNAL_API_BASE_URL}/geographic-availability/countries-aimode.json`);
+
+      const fetchOptions = tracingFetchStub.firstCall.args[1];
+      expect(fetchOptions.headers.Authorization).to.equal(`token ${TEST_API_KEY}`);
+    });
+
+    it('should return 400 when LLMO_HLX_API_KEY is not configured', async () => {
+      mockContext.env = { ...mockEnv, LLMO_HLX_API_KEY: undefined };
+
+      const result = await controller.getGeographicAvailability(mockContext);
+      expect(result.status).to.equal(400);
+
+      const body = await result.json();
+      expect(body.message).to.equal('LLMO_HLX_API_KEY environment variable is not configured');
+    });
+
+    it('should return 400 when external API returns an error', async () => {
+      tracingFetchStub.resolves(createMockResponse(null, false, 404));
+
+      const result = await controller.getGeographicAvailability(mockContext);
+      expect(result.status).to.equal(400);
+
+      const body = await result.json();
+      expect(body.message).to.equal('External API returned 404: Not Found');
+    });
+
+    it('should return 400 when fetch throws an error', async () => {
+      tracingFetchStub.rejects(new Error('Network error'));
+
+      const result = await controller.getGeographicAvailability(mockContext);
+      expect(result.status).to.equal(400);
+
+      const body = await result.json();
+      expect(body.message).to.equal('Network error');
+    });
+  });
 });

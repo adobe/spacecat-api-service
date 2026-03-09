@@ -270,6 +270,7 @@ describe('getRouteHandlers', () => {
     onboardCustomer: () => null,
     offboardCustomer: () => null,
     queryFiles: () => null,
+    getGeographicAvailability: () => null,
     getLlmoRationale: () => null,
     getBrandClaims: () => null,
     createOrUpdateEdgeConfig: () => null,
@@ -660,6 +661,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/edge-optimize-status',
       'POST /sites/:siteId/llmo/edge-optimize-routing',
       'PUT /sites/:siteId/llmo/opportunities-reviewed',
+      'GET /geographic-availability/:dataSource',
       'GET /sites/:siteId/llmo/strategy',
       'PUT /sites/:siteId/llmo/strategy',
       'GET /consent-banner/:jobId',
@@ -896,6 +898,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['POST /sites/:siteId/llmo/edge-optimize-routing'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['PUT /sites/:siteId/llmo/opportunities-reviewed'].handler).to.equal(mockLlmoController.markOpportunitiesReviewed);
     expect(dynamicRoutes['PUT /sites/:siteId/llmo/opportunities-reviewed'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /geographic-availability/:dataSource'].handler).to.equal(mockLlmoController.getGeographicAvailability);
+    expect(dynamicRoutes['GET /geographic-availability/:dataSource'].paramNames).to.deep.equal(['dataSource']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy'].handler).to.equal(mockLlmoController.getStrategy);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/strategy'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['PUT /sites/:siteId/llmo/strategy'].handler).to.equal(mockLlmoController.saveStrategy);
