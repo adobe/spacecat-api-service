@@ -1,3 +1,10 @@
+# [1.338.0](https://github.com/adobe/spacecat-api-service/compare/v1.337.0...v1.338.0) (2026-03-09)
+
+
+### Features
+
+* [SITES-38900] add skipReason and skipDetail support for SKIPPED suggestions ([#1873](https://github.com/adobe/spacecat-api-service/issues/1873)) ([9cfe84e](https://github.com/adobe/spacecat-api-service/commit/9cfe84ef6165dc386cc20344b5d8e8cb51c4f4c6))
+
 # [1.337.0](https://github.com/adobe/spacecat-api-service/compare/v1.336.4...v1.337.0) (2026-03-09)
 
 
