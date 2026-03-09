@@ -3912,6 +3912,29 @@ describe('Suggestions Controller', () => {
       expect(payload).to.have.property('precheckOnly', true);
     });
 
+    it('accepts pages as array of objects with pageUrl and imageUrls', async () => {
+      const pages = [
+        {
+          pageUrl: 'https://example.com/page1',
+          imageUrls: [
+            'https://example.com/img1.jpg',
+            'https://example.com/img2.jpg',
+          ],
+        },
+        { pageUrl: 'https://example.com/page2' },
+      ];
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { action: 'assess-urls', pages },
+        ...context,
+      });
+
+      expect(response.status).to.equal(202);
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload).to.have.property('pages').that.deep.equals(pages);
+      expect(payload).to.have.property('action', 'assess-urls');
+    });
+
     it('returns 400 when action is assess-urls but pages is missing', async () => {
       const response = await suggestionsController.autofixSuggestions({
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
@@ -3942,7 +3965,23 @@ describe('Suggestions Controller', () => {
       });
       expect(response.status).to.equal(400);
       const body = await response.json();
-      expect(body).to.have.property('message', 'Each page in the pages array must be a valid URL');
+      expect(body).to.have.property('message').that.includes('valid URL');
+    });
+
+    it('returns 400 when action is assess-urls and page object has invalid pageUrl or imageUrls', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          action: 'assess-urls',
+          pages: [
+            { pageUrl: 'https://valid.com/p', imageUrls: ['https://ok.jpg', 'not-a-url'] },
+          ],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message').that.includes('valid URL');
     });
 
     it('returns 400 when action is assess-urls but handler is not enabled for site', async () => {
