@@ -1,3 +1,10 @@
+## [1.336.4](https://github.com/adobe/spacecat-api-service/compare/v1.336.3...v1.336.4) (2026-03-09)
+
+
+### Bug Fixes
+
+* return 404 instead of 400 for missing sites in LLMO config endpoints ([#1920](https://github.com/adobe/spacecat-api-service/issues/1920)) ([9fcd6ee](https://github.com/adobe/spacecat-api-service/commit/9fcd6ee1d43d4c071e2b9ee6c45a508ab4edf2b9))
+
 ## [1.336.3](https://github.com/adobe/spacecat-api-service/compare/v1.336.2...v1.336.3) (2026-03-07)
 
 
