@@ -1,3 +1,10 @@
+# [1.337.0](https://github.com/adobe/spacecat-api-service/compare/v1.336.4...v1.337.0) (2026-03-09)
+
+
+### Features
+
+* decompress gzip ([#1916](https://github.com/adobe/spacecat-api-service/issues/1916)) ([15fb326](https://github.com/adobe/spacecat-api-service/commit/15fb3260511a67685be3538b26afc36dce74cc16))
+
 ## [1.336.4](https://github.com/adobe/spacecat-api-service/compare/v1.336.3...v1.336.4) (2026-03-09)
 
 
