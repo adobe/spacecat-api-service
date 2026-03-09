@@ -1399,6 +1399,33 @@ describe('LlmoController', () => {
       );
     });
 
+    it('should decompress and write gzip-compressed config to S3', async () => {
+      const { gzipSync } = await import('zlib');
+      const compressed = gzipSync(Buffer.from(JSON.stringify(testData)));
+      mockContext.data = undefined;
+      mockContext.request = {
+        headers: {
+          get: (name) => (name === 'content-type' ? 'application/gzip' : null),
+        },
+        arrayBuffer: () => Promise.resolve(compressed.buffer.slice(
+          compressed.byteOffset,
+          compressed.byteOffset + compressed.byteLength,
+        )),
+      };
+
+      const result = await controller.updateLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ version: 'v1' });
+      expect(writeConfigStub).to.have.been.calledWith(
+        TEST_SITE_ID,
+        testData,
+        s3Client,
+        { s3Bucket: TEST_BUCKET },
+      );
+    });
+
     it('should override existing fields in prev config', async () => {
       readConfigStub.resolves({
         config: {
