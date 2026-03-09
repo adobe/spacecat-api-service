@@ -1,3 +1,10 @@
+# [1.339.0](https://github.com/adobe/spacecat-api-service/compare/v1.338.0...v1.339.0) (2026-03-09)
+
+
+### Features
+
+* enhance assess-urls action ([#1926](https://github.com/adobe/spacecat-api-service/issues/1926)) ([8e8de76](https://github.com/adobe/spacecat-api-service/commit/8e8de762746213ac4dcb2ada1f5759defcefbbdb))
+
 # [1.338.0](https://github.com/adobe/spacecat-api-service/compare/v1.337.0...v1.338.0) (2026-03-09)
 
 
