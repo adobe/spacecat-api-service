@@ -76,6 +76,7 @@
     "@adobe/spacecat-shared-ahrefs-client": "1.10.7",
     "@adobe/spacecat-shared-athena-client": "1.9.6",
     "@adobe/spacecat-shared-brand-client": "1.1.38",
+    "@adobe/spacecat-shared-content-client": "1.8.17",
     "@adobe/spacecat-shared-data-access": "3.10.1",
     "@adobe/spacecat-shared-data-access-v2": "npm:@adobe/spacecat-shared-data-access@2.109.0",
     "@adobe/spacecat-shared-drs-client": "1.1.1",
