@@ -381,6 +381,9 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/llmo/edge-optimize-routing': llmoController.updateEdgeOptimizeCDNRouting,
     'PUT /sites/:siteId/llmo/opportunities-reviewed': llmoController.markOpportunitiesReviewed,
 
+    // Geographic Availability (global, not site-specific)
+    'GET /geographic-availability/:dataSource': llmoController.getGeographicAvailability,
+
     // Tier Specific Routes
     'GET /sites/:siteId/user-activities': userActivityController.getBySiteID,
     'POST /sites/:siteId/user-activities': userActivityController.createTrialUserActivity,
