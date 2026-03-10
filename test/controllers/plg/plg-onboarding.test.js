@@ -359,69 +359,34 @@ describe('PlgOnboardingController', () => {
       expect(res.value).to.equal('domain is required');
     });
 
-    it('returns 400 when no imsOrgId from token or body', async () => {
+    it('returns 400 when authInfo is missing', async () => {
       const context = buildContext(
         { domain: TEST_DOMAIN },
         { authInfo: null },
       );
       const res = await controller.onboard(context);
       expect(res.status).to.equal(400);
-      expect(res.value).to.equal('Valid imsOrgId is required');
+      expect(res.value).to.equal('Authentication information is required');
     });
 
-    it('returns 400 when token has no tenants and body has no imsOrgId', async () => {
+    it('returns 400 when profile has no tenants', async () => {
       const context = buildContext(
         { domain: TEST_DOMAIN },
         { authInfo: { getProfile: sandbox.stub().returns({}) } },
       );
       const res = await controller.onboard(context);
       expect(res.status).to.equal(400);
-      expect(res.value).to.equal('Valid imsOrgId is required');
+      expect(res.value).to.equal('User profile or organization ID not found in authentication token');
     });
 
-    it('returns 400 when attributes is undefined and body has no imsOrgId', async () => {
-      const context = {
-        data: { domain: TEST_DOMAIN },
-      };
-      const res = await controller.onboard(context);
-      expect(res.status).to.equal(400);
-      expect(res.value).to.equal('Valid imsOrgId is required');
-    });
-
-    it('returns 400 when body imsOrgId is invalid format', async () => {
+    it('returns 400 when profile is null', async () => {
       const context = buildContext(
-        { domain: TEST_DOMAIN, imsOrgId: 'not-valid' },
-        { authInfo: null },
+        { domain: TEST_DOMAIN },
+        { authInfo: { getProfile: sandbox.stub().returns(null) } },
       );
       const res = await controller.onboard(context);
       expect(res.status).to.equal(400);
-      expect(res.value).to.equal('Valid imsOrgId is required');
-    });
-
-    it('uses imsOrgId from body when no IMS token (API key auth)', async () => {
-      const context = buildContext(
-        { domain: TEST_DOMAIN, imsOrgId: TEST_IMS_ORG_ID },
-        { authInfo: null },
-      );
-
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      expect(mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain)
-        .to.have.been.calledWith(TEST_IMS_ORG_ID, TEST_DOMAIN);
-    });
-
-    it('prefers imsOrgId from IMS token over body', async () => {
-      const context = buildContext(
-        { domain: TEST_DOMAIN, imsOrgId: 'OTHER999@AdobeOrg' },
-      );
-
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      // Should use token org, not body org
-      expect(mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain)
-        .to.have.been.calledWith(TEST_IMS_ORG_ID, TEST_DOMAIN);
+      expect(res.value).to.equal('User profile or organization ID not found in authentication token');
     });
   });
 
@@ -1063,19 +1028,26 @@ describe('PlgOnboardingController', () => {
       expect(res.status).to.equal(403);
     });
 
-    it('allows access when no IMS token (API key auth)', async () => {
-      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([
-        createMockOnboarding({ id: 'rec-api' }),
-      ]);
-
+    it('returns 400 when authInfo is missing', async () => {
       const res = await controller.getStatus({
         dataAccess: mockDataAccess,
         params: { imsOrgId: TEST_IMS_ORG_ID },
         attributes: {},
       });
 
-      expect(res.status).to.equal(200);
-      expect(res.value).to.be.an('array').with.length(1);
+      expect(res.status).to.equal(400);
+      expect(res.value).to.equal('Authentication information is required');
+    });
+
+    it('returns 400 when profile has no tenants', async () => {
+      const res = await controller.getStatus({
+        dataAccess: mockDataAccess,
+        params: { imsOrgId: TEST_IMS_ORG_ID },
+        attributes: { authInfo: { getProfile: sandbox.stub().returns({}) } },
+      });
+
+      expect(res.status).to.equal(400);
+      expect(res.value).to.equal('User profile or organization ID not found in authentication token');
     });
 
     it('returns 404 when no records found', async () => {

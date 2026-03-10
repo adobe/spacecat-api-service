@@ -351,21 +351,6 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
 }
 
 /**
- * Extracts imsOrgId from the IMS authentication token.
- * @param {object} context - Request context with attributes.authInfo.
- * @returns {{ imsOrgId: string }|null} imsOrgId or null if not found.
- */
-function getImsOrgIdFromToken(context) {
-  const { authInfo } = context.attributes || {};
-  if (!authInfo) return null;
-
-  const profile = authInfo.getProfile();
-  if (!profile || !profile.tenants?.[0]?.id) return null;
-
-  return `${profile.tenants[0].id}@AdobeOrg`;
-}
-
-/**
  * PLG Onboarding controller.
  * @param {object} ctx - Context of the request.
  * @returns {object} Controller with onboard and getStatus methods.
@@ -374,7 +359,7 @@ function PlgOnboardingController(ctx) {
   const { log } = ctx;
 
   const onboard = async (context) => {
-    const { data } = context;
+    const { data, attributes } = context;
 
     if (!data || typeof data !== 'object') {
       return badRequest('Request body is required');
@@ -386,12 +371,19 @@ function PlgOnboardingController(ctx) {
       return badRequest('domain is required');
     }
 
-    // Prefer imsOrgId from IMS token; fall back to body for API key auth
-    const imsOrgId = getImsOrgIdFromToken(context) || data.imsOrgId;
+    const { authInfo } = attributes;
 
-    if (!hasText(imsOrgId) || !isValidIMSOrgId(imsOrgId)) {
-      return badRequest('Valid imsOrgId is required');
+    if (!authInfo) {
+      return badRequest('Authentication information is required');
     }
+
+    const profile = authInfo.getProfile();
+
+    if (!profile || !profile.tenants?.[0]?.id) {
+      return badRequest('User profile or organization ID not found in authentication token');
+    }
+
+    const imsOrgId = `${profile.tenants[0].id}@AdobeOrg`;
 
     try {
       const onboarding = await performAsoPlgOnboarding({ domain, imsOrgId }, context);
@@ -410,16 +402,27 @@ function PlgOnboardingController(ctx) {
   };
 
   const getStatus = async (context) => {
-    const { dataAccess: da, params } = context;
+    const { dataAccess: da, params, attributes } = context;
     const { imsOrgId: requestedImsOrgId } = params;
 
     if (!hasText(requestedImsOrgId) || !isValidIMSOrgId(requestedImsOrgId)) {
       return badRequest('Valid imsOrgId is required');
     }
 
-    // Enforce org match when authenticated via IMS token
-    const callerImsOrgId = getImsOrgIdFromToken(context);
-    if (callerImsOrgId && callerImsOrgId !== requestedImsOrgId) {
+    const { authInfo } = attributes;
+
+    if (!authInfo) {
+      return badRequest('Authentication information is required');
+    }
+
+    const profile = authInfo.getProfile();
+
+    if (!profile || !profile.tenants?.[0]?.id) {
+      return badRequest('User profile or organization ID not found in authentication token');
+    }
+
+    const callerImsOrgId = `${profile.tenants[0].id}@AdobeOrg`;
+    if (callerImsOrgId !== requestedImsOrgId) {
       return forbidden('Not authorized for this IMS org');
     }
 
