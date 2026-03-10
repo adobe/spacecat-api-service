@@ -40,8 +40,12 @@ export async function createAndValidateNewImportJob({
     key: apiKey,
   });
 
-  // Expect a 202 Created response
-  expect(response.ok).to.be.true;
+  // Expect a 202 Accepted response
+  const xError = response.headers.get('x-error');
+  expect(
+    response.ok,
+    `Expected 202 Accepted but got ${response.status}${xError ? `: ${xError}` : ''}`,
+  ).to.be.true;
   expect(response.status).to.equal(202);
 
   const newJob = await response.json();
