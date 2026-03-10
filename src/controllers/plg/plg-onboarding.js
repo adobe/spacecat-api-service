@@ -12,6 +12,7 @@
 
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
+import PlgOnboardingModel from '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js';
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import {
@@ -38,13 +39,7 @@ import { loadProfileConfig } from '../../utils/slack/base.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import { PlgOnboardingDto } from '../../dto/plg-onboarding.js';
 
-const STATUSES = {
-  IN_PROGRESS: 'IN_PROGRESS',
-  ONBOARDED: 'ONBOARDED',
-  ERROR: 'ERROR',
-  WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
-  WAITLISTED: 'WAITLISTED',
-};
+const { STATUSES } = PlgOnboardingModel;
 const ASO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.ASO;
 const ASO_TIER = EntitlementModel.TIERS.FREE_TRIAL;
 const PLG_PROFILE_KEY = 'aso_plg';

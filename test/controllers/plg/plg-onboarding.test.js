@@ -276,6 +276,17 @@ describe('PlgOnboardingController', () => {
             TIERS: { FREE_TRIAL: 'FREE_TRIAL' },
           },
         },
+        '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
+          default: {
+            STATUSES: {
+              IN_PROGRESS: 'IN_PROGRESS',
+              ONBOARDED: 'ONBOARDED',
+              ERROR: 'ERROR',
+              WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
+              WAITLISTED: 'WAITLISTED',
+            },
+          },
+        },
         '../../../src/controllers/llmo/llmo-onboarding.js': {
           createOrFindOrganization: createOrFindOrganizationStub,
           enableAudits: enableAuditsStub,
