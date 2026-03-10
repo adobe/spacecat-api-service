@@ -150,6 +150,7 @@ AuditType:
     - 'experimentation-opportunities'
     - 'llm-error-pages'
     - 'prerender'
+    - 'related-urls'
     - 'summarization'
     - 'faqs'
   example: 'cwv'
@@ -1143,6 +1144,30 @@ AuditResult:
                 description: A list of prompts for this URL and topic
                 items:
                   type: string
+    - type: object
+      description: The result of related-urls audit (brand presence prompts by region)
+      properties:
+        success:
+          type: boolean
+          description: Whether the audit was successful
+        baseURL:
+          type: string
+          description: Base URL of the site (present when success is true)
+        fanoutCount:
+          type: integer
+          description: Number of URLs to fan out for related-urls processing (present when success is true)
+        promptRegions:
+          type: array
+          description: List of prompt and region pairs used for related-urls
+          items:
+            type: object
+            properties:
+              prompt:
+                type: string
+                description: The brand presence prompt
+              region:
+                type: string
+                description: Region for the prompt (e.g. GLOBAL or region code)
 AuditList:
   type: array
   items:
