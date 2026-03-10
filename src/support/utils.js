@@ -210,7 +210,7 @@ export const sendAutofixMessage = async (
   variations,
   action,
   customData,
-  { url } = {},
+  { url, precheckOnly } = {},
 ) => sqs.sendMessage(queueUrl, {
   opportunityId,
   siteId,
@@ -220,6 +220,7 @@ export const sendAutofixMessage = async (
   action,
   url,
   ...(customData && { customData }),
+  ...(precheckOnly === true && { precheckOnly: true }),
 });
 /* c8 ignore end */
 
@@ -579,6 +580,28 @@ export async function resolveWwwUrl(site, context) {
   const { log } = context;
   const rumApiClient = RUMAPIClient.createFrom(context);
   return sharedWwwUrlResolver(site, rumApiClient, log);
+}
+
+/**
+ * Returns whether the summit-plg audit handler is enabled for the site in configuration.
+ * No entitlement check; use when the site was already resolved via TierClient (e.g. sites-resolve).
+ * @param {Object} site - Site entity
+ * @param {Object} context - Request context with dataAccess, log
+ * @returns {Promise<boolean>}
+ */
+export async function getIsSummitPlgEnabled(site, context) {
+  try {
+    const { Configuration } = context.dataAccess || {};
+    if (!Configuration) return false;
+    const configuration = await Configuration.findLatest();
+    if (!configuration || typeof configuration.isHandlerEnabledForSite !== 'function') {
+      return false;
+    }
+    return configuration.isHandlerEnabledForSite('summit-plg', site);
+  } catch (err) {
+    context.log?.error?.('Error checking audit summit-plg for site:', err);
+    return false;
+  }
 }
 
 /**
