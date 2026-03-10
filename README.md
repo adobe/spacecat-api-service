@@ -101,7 +101,31 @@ The server will start on `http://localhost:3002` by default.
 docker compose -f test/it/postgres/docker-compose.yml down -v
 ```
 
-### Option 2: Full mysticat-data-service Stack
+### Option 2: Connect to Dev PostgREST Directly (No Docker)
+
+If you don't want to run Docker locally, you can point the API service directly at the dev environment's PostgREST instance via CloudFront. This requires VPN access from a supported Adobe office (Basel, Dublin, San Jose).
+
+> **Limitations**: The anonymous PostgREST role only supports **SELECT** and **INSERT**. UPDATE and DELETE operations require a `POSTGREST_API_KEY` JWT signed with the dev environment's secret (stored in Vault).
+
+1. Copy the `.env.example` and update the PostgREST URL to the dev CloudFront URL:
+
+```bash
+cp .env.example .env
+```
+
+```plaintext
+POSTGREST_URL=<dev CloudFront URL>
+```
+
+Find the dev CloudFront URL in the [mysticat-data-service CLAUDE.md](https://github.com/adobe/mysticat-data-service/blob/main/CLAUDE.md) under "CloudFront URLs" (not listed here as this is a public repo).
+
+2. Start the dev server:
+
+```bash
+npm start
+```
+
+### Option 3: Full mysticat-data-service Stack
 
 For a richer local environment (Swagger UI, separate test database, persistent data), clone the [mysticat-data-service](https://git.corp.adobe.com/anthropic/mysticat-data-service) repo and use its Docker Compose setup:
 
