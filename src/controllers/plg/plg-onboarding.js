@@ -44,7 +44,7 @@ const STATUSES = {
 };
 const ASO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.ASO;
 const ASO_TIER = EntitlementModel.TIERS.FREE_TRIAL;
-const PLG_PROFILE_KEY = 'plg';
+const PLG_PROFILE_KEY = 'aso_plg';
 
 function isInternalOrg(orgId, env) {
   return orgId === env.DEFAULT_ORGANIZATION_ID || orgId === ASO_DEMO_ORG;

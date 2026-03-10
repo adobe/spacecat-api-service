@@ -62,14 +62,15 @@ describe('PlgOnboardingController', () => {
 
   const PLG_PROFILE = {
     audits: {
-      'scrape-top-pages': {},
-      'broken-backlinks': {},
-      'meta-tags': {},
+      'alt-text': {},
       cwv: {},
+      'broken-backlinks': {},
+      'scrape-top-pages': {},
     },
     imports: {
       'organic-traffic': {},
       'top-pages': {},
+      'all-traffic': {},
     },
   };
 
@@ -371,7 +372,7 @@ describe('PlgOnboardingController', () => {
 
       // Verify flow
       expect(composeBaseURLStub).to.have.been.calledWith(TEST_DOMAIN);
-      expect(loadProfileConfigStub).to.have.been.calledWith('plg');
+      expect(loadProfileConfigStub).to.have.been.calledWith('aso_plg');
       expect(createOrFindOrganizationStub).to.have.been.calledWith(TEST_IMS_ORG_ID, context);
       expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith(TEST_BASE_URL);
       expect(detectBotBlockerStub).to.have.been.calledWith({ baseUrl: TEST_BASE_URL });
