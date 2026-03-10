@@ -49,7 +49,7 @@ The rotation process uses a **dual-credential period** where both old and new se
 
 - Multiple secrets can be active simultaneously
 - The new secret is immediately active upon creation
-- S2S Admin provides the new secret to consumer team securely
+- S2S Admin stores the new secret in consumer's specified secret location (same location used during initial provisioning)
 
 ### Step 2: Update Application
 

@@ -1,6 +1,6 @@
 # S2S Consumer Integration Guide
 
-This guide helps service teams request and integrate Service-to-Service (S2S) authentication for accessing the Spacecat API.
+This guide helps service teams request and integrate Service-to-Service (S2S) authentication for accessing the SpaceCat API.
 
 ---
 
@@ -21,8 +21,8 @@ This guide helps service teams request and integrate Service-to-Service (S2S) au
 Before requesting an S2S account, ensure you have:
 
 ### Technical Requirements
-- **Service/Application**: A service that needs programmatic access to Spacecat API
-- **Required Capabilities**: Clear understanding of which Spacecat API endpoints you need to access
+- **Service/Application**: A service that needs programmatic access to SpaceCat API
+- **Required Capabilities**: Clear understanding of which SpaceCat API endpoints you need to access
 
 ---
 
@@ -30,7 +30,7 @@ Before requesting an S2S account, ensure you have:
 
 ### Step 1: Create JIRA Ticket
 
-Create a JIRA ticket in the **SITE** project with the following information:
+Create a JIRA ticket in the **SITES** project with the following information:
 
 **JIRA Template**:
 
@@ -121,13 +121,15 @@ Once approved, the SpaceCat Security Team will:
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
+> 📝 **Note**: All code examples below use **Development/Stage environment** endpoints (`api/ci`, `ims-na1-stg1`). For production deployment, replace with production endpoints (`api/v1`, `ims-na1`). See [Environment URLs](#environment-urls) table for details.
+
 ### Step 1: Generate IMS Access Token
 
 Retrieve your OAuth Server-to-Server credentials from your service's secret location (configured during provisioning), then generate an IMS access token:
 
 ```bash
 # Sample curl command to get IMS access token for your registered consumer
-curl -X POST 'https://ims-na1.adobelogin.com/ims/token/v3' \
+curl -X POST 'https://ims-na1-stg1.adobelogin.com/ims/token/v3' \
   -H 'Content-Type: application/x-www-form-urlencoded' \
   -d 'grant_type=client_credentials&client_id=<client_id>&client_secret=<client_secret>&scope=openid,AdobeID,user_management_sdk'
 ```
@@ -149,7 +151,7 @@ async function getIMSAccessToken() {
   });
 
   const response = await axios.post(
-    'https://ims-na1.adobelogin.com/ims/token/v3',
+    'https://ims-na1-stg1.adobelogin.com/ims/token/v3',
     params,
     {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
@@ -241,6 +243,8 @@ async function getSiteOpportunities(sessionToken, siteId) {
 ### Step 4: Implement Token Caching and Refresh
 
 Implement caching for both IMS and session tokens with automatic refresh:
+
+> ⚠️ **Lambda/Serverless Note**: The following caching pattern uses module-level variables which persist across invocations in the same container. For AWS Lambda or similar serverless environments, consider using external caching (Redis, ElastiCache) for cross-invocation token reuse.
 
 ```javascript
 let cachedIMSToken = null;
@@ -347,7 +351,7 @@ const opportunities = await callSpaceCatAPIWithAuth(
 
 ```bash
 # Test IMS token generation (retrieve CLIENT_ID and CLIENT_SECRET from your secret location)
-curl -X POST 'https://ims-na1.adobelogin.com/ims/token/v3' \
+curl -X POST 'https://ims-na1-stg1.adobelogin.com/ims/token/v3' \
   -H 'Content-Type: application/x-www-form-urlencoded' \
   -d "grant_type=client_credentials&client_id=${CLIENT_ID}&client_secret=${CLIENT_SECRET}&scope=openid,AdobeID,user_management_sdk"
 ```
@@ -479,7 +483,7 @@ Before deploying to production:
 
 ```bash
 # Test IMS token generation
-curl -X POST 'https://ims-na1.adobelogin.com/ims/token/v3' \
+curl -X POST 'https://ims-na1-stg1.adobelogin.com/ims/token/v3' \
   -H 'Content-Type: application/x-www-form-urlencoded' \
   -d "grant_type=client_credentials&client_id=${CLIENT_ID}&client_secret=${CLIENT_SECRET}&scope=openid,AdobeID,user_management_sdk"
 ```
@@ -535,7 +539,7 @@ curl -X POST 'https://ims-na1.adobelogin.com/ims/token/v3' \
 4. **Verify IMS Org Scope**: Confirm you're accessing resources within your approved IMS organization
 5. **Review Endpoint Requirements**: Check API documentation for required capabilities
 
-**Capability to Endpoint Mapping**:
+**Common Capability to Endpoint Mapping Examples**:
 ```
 GET /sites                              → site:read
 POST /sites                             → site:write
@@ -630,7 +634,7 @@ PATCH /organizations/{id}               → organization:write
 # Retrieve CLIENT_ID and CLIENT_SECRET from your secret location
 
 # Step 1: Generate IMS Access Token
-IMS_RESPONSE=$(curl -s -X POST 'https://ims-na1.adobelogin.com/ims/token/v3' \
+IMS_RESPONSE=$(curl -s -X POST 'https://ims-na1-stg1.adobelogin.com/ims/token/v3' \
   -H 'Content-Type: application/x-www-form-urlencoded' \
   -d "grant_type=client_credentials&client_id=${CLIENT_ID}&client_secret=${CLIENT_SECRET}&scope=openid,AdobeID,user_management_sdk")
 
@@ -660,7 +664,8 @@ curl -X GET https://spacecat.experiencecloud.live/api/ci/sites/${SITE_ID}/opport
 
 | Environment | IMS Token Endpoint | SpaceCat S2S Login | SpaceCat API Base |
 |-------------|-------------------|-------------------|-------------------|
-| **Production** | `https://ims-na1.adobelogin.com/ims/token/v3` | `https://spacecat.experiencecloud.live/api/ci/auth/s2s/login` | `https://spacecat.experiencecloud.live/api/ci` |
+| **Development/Stage** | `https://ims-na1-stg1.adobelogin.com/ims/token/v3` | `https://spacecat.experiencecloud.live/api/ci/auth/s2s/login` | `https://spacecat.experiencecloud.live/api/ci` |
+| **Production** | `https://ims-na1.adobelogin.com/ims/token/v3` | `https://spacecat.experiencecloud.live/api/v1/auth/s2s/login` | `https://spacecat.experiencecloud.live/api/v1` |
 
 ### Token Lifetimes
 
@@ -676,7 +681,7 @@ curl -X GET https://spacecat.experiencecloud.live/api/ci/sites/${SITE_ID}/opport
 - **S2S Admin Operations Guide**: `docs/s2s/S2S_ADMIN_GUIDE.md`
 - **Secret Rotation Guide**: `docs/s2s/SECRET_ROTATION_GUIDE.md`
 - **Adobe Server-to-Server Authentication**: [Official Documentation](https://developer.adobe.com/developer-console/docs/guides/authentication/ServerToServerAuthentication/)
-- **Spacecat API Documentation**: [API Reference](https://developer.adobe.com/spacecat-api/) (if available)
+- **SpaceCat API Documentation**: [API Reference](https://opensource.adobe.com/spacecat-api-service/)
 
 ### Contact
 

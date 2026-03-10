@@ -1,6 +1,6 @@
 # S2S Admin Operations Guide
 
-This guide provides detailed instructions for Service-to-Service (S2S) administrators managing API consumers (Technical Accounts) in the Spacecat API service.
+This guide provides detailed instructions for Service-to-Service (S2S) administrators managing API consumers (Technical Accounts) in the SpaceCat API service.
 
 ---
 
@@ -54,7 +54,7 @@ Registers a new Technical Account as an API consumer.
 
 ##### Step 0: Create Service-to-Service Account in Developer Console
 
-Before registering a consumer in the Spacecat API service, the Technical Account must first be created in Adobe Developer Console:
+Before registering a consumer in the SpaceCat API service, the Technical Account must first be created in Adobe Developer Console:
 
 1. **Access Adobe Developer Console**:
    - **Stage**: Navigate to [Adobe Developer Console - Stage](https://developer-stage.adobe.com)
@@ -182,7 +182,7 @@ Headers:
   "capabilities": [
     "site:read",
     "audit:read",
-    "audit:write",      # Added after scrutiny
+    "audit:write",
     "organization:read"
   ]
 }
@@ -580,9 +580,7 @@ Headers:
 ## Additional Resources
 
 - **Adobe Server-to-Server Authentication**: https://developer.adobe.com/developer-console/docs/guides/authentication/ServerToServerAuthentication/
-- **Controller Implementation**: `src/controllers/consumers.js`
-- **Integration Tests**: `test/it/shared/tests/consumers.js`
-- **Access Control**: `src/support/access-control-util.js`
+- **SpaceCat API Documentation**: https://opensource.adobe.com/spacecat-api-service/
 - **Data Model**: `@adobe/spacecat-shared-data-access` (Consumer model)
 
 ---
