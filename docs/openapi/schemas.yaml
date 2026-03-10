@@ -1164,7 +1164,7 @@ AuditResult:
             properties:
               prompt:
                 type: string
-                description: The brand presence promp
+                description: The brand presence prompt
               region:
                 type: string
                 description: Region for the prompt (e.g. GLOBAL or region code)
