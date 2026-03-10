@@ -71,7 +71,11 @@ export async function deleteJobs(jobIdsToCleanUp) {
       key: apiKey,
     });
 
-    expect(response.ok).to.be.true;
+    const deleteXError = response.headers.get('x-error');
+    expect(
+      response.ok,
+      `Expected 204 No Content for job ${jobId} but got ${response.status}${deleteXError ? `: ${deleteXError}` : ''}`,
+    ).to.be.true;
     expect(response.status).to.equal(204);
 
     log.info('Deleted job:', jobId);
@@ -88,21 +92,28 @@ export async function getPreSignedZipUrl(jobId) {
     key: apiKey,
   });
 
-  expect(response.ok).to.be.true;
+  const resultXError = response.headers.get('x-error');
+  expect(
+    response.ok,
+    `Expected 200 OK for job result ${jobId} but got ${response.status}${resultXError ? `: ${resultXError}` : ''}`,
+  ).to.be.true;
   expect(response.status).to.equal(200);
 
   const { downloadUrl } = await response.json();
 
   expect(downloadUrl).to.be.a('string');
   // Should look like a pre-signed S3 URL
-  expect(downloadUrl).to.match(/^https:\/\/.*\.s3\..*\.amazonaws\.com\/.*import-result\.zip/);
+  expect(
+    downloadUrl,
+    `Expected a pre-signed S3 URL but got: ${downloadUrl}`,
+  ).to.match(/^https:\/\/.*\.s3\..*\.amazonaws\.com\/.*import-result\.zip/);
 
   return downloadUrl;
 }
 
 export async function downloadZipFile(url) {
   const response = await fetch(url);
-  expect(response.ok).to.be.true;
+  expect(response.ok, `Expected successful download from ${url} but got ${response.status}`).to.be.true;
 
   // Convert response to binary data (ArrayBuffer)
   return response.arrayBuffer();
