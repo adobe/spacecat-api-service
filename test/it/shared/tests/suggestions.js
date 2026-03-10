@@ -311,6 +311,20 @@ export default function suggestionTests(getHttpClient, resetData) {
         expect(res.body.rank).to.equal(99);
       });
 
+      it('user: updates suggestion to SKIPPED with skipReason and skipDetail via PATCH', async () => {
+        const http = getHttpClient();
+        const res = await http.user.patch(`${BASE}/${testSuggId}`, {
+          status: 'SKIPPED',
+          skipReason: 'INACCURATE_OR_INCOMPLETE',
+          skipDetail: 'Data was outdated',
+        });
+        expect(res.status).to.equal(200);
+        expectSuggestionDto(res.body);
+        expect(res.body.status).to.equal('SKIPPED');
+        expect(res.body.skipReason).to.equal('INACCURATE_OR_INCOMPLETE');
+        expect(res.body.skipDetail).to.equal('Data was outdated');
+      });
+
       it('user: returns 403 for denied site', async () => {
         const http = getHttpClient();
         const res = await http.user.patch(`${DENIED_BASE}/${testSuggId}`, { rank: 1 });
@@ -349,6 +363,26 @@ export default function suggestionTests(getHttpClient, resetData) {
         expectBatch207(res, 1, 'suggestions');
         expect(res.body.metadata.success).to.equal(1);
         expect(res.body.suggestions[0].statusCode).to.equal(200);
+      });
+
+      it('user: updates suggestion to SKIPPED with skipReason and skipDetail', async () => {
+        const http = getHttpClient();
+        const res = await http.user.patch(`${BASE}/status`, [
+          {
+            id: testSuggId,
+            status: 'SKIPPED',
+            skipReason: 'ALREADY_IMPLEMENTED',
+            skipDetail: 'Fix was applied manually',
+          },
+        ]);
+        expectBatch207(res, 1, 'suggestions');
+        expect(res.body.metadata.success).to.equal(1);
+        expect(res.body.suggestions[0].statusCode).to.equal(200);
+        const updated = res.body.suggestions[0].suggestion;
+        expect(updated).to.be.an('object');
+        expect(updated.status).to.equal('SKIPPED');
+        expect(updated.skipReason).to.equal('ALREADY_IMPLEMENTED');
+        expect(updated.skipDetail).to.equal('Fix was applied manually');
       });
 
       it('user: returns 403 for denied site', async () => {
