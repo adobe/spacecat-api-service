@@ -34,6 +34,7 @@ describe('PlgOnboardingController', () => {
   let PlgOnboardingController;
 
   // Stubs for external dependencies
+  let rumRetrieveDomainkeyStub;
   let composeBaseURLStub;
   let detectBotBlockerStub;
   let detectLocaleStub;
@@ -139,6 +140,9 @@ describe('PlgOnboardingController', () => {
 
   beforeEach(async () => {
     sandbox = sinon.createSandbox();
+
+    // RUM API client stubs
+    rumRetrieveDomainkeyStub = sandbox.stub().resolves('test-domainkey');
 
     // Shared-utils stubs
     composeBaseURLStub = sandbox.stub().returns(TEST_BASE_URL);
@@ -248,8 +252,17 @@ describe('PlgOnboardingController', () => {
         },
         '@adobe/spacecat-shared-http-utils': {
           badRequest: (msg) => ({ status: 400, value: msg }),
+          createResponse: (body, status) => ({ status, value: body }),
+          internalServerError: (msg) => ({ status: 500, value: msg }),
           notFound: (msg) => ({ status: 404, value: msg }),
           ok: (data) => ({ status: 200, value: data }),
+        },
+        '@adobe/spacecat-shared-rum-api-client': {
+          default: {
+            createFrom: sandbox.stub().returns({
+              retrieveDomainkey: rumRetrieveDomainkeyStub,
+            }),
+          },
         },
         '@adobe/spacecat-shared-tier-client': {
           default: { createForSite: tierClientCreateForSiteStub },
@@ -334,6 +347,117 @@ describe('PlgOnboardingController', () => {
       });
       expect(res.status).to.equal(400);
       expect(res.value).to.equal('Valid imsOrgId is required');
+    });
+  });
+
+  // --- SSRF protection ---
+
+  describe('onboard - SSRF protection', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    const unsafeDomains = [
+      'localhost',
+      '127.0.0.1',
+      '10.0.0.1',
+      '172.16.0.1',
+      '192.168.1.1',
+      '169.254.169.254',
+      '0.0.0.0',
+      '[::1]',
+      'myhost.local',
+      'service.internal',
+      'foo.private.adobe.io',
+    ];
+
+    unsafeDomains.forEach((unsafeDomain) => {
+      it(`returns 400 for unsafe domain: ${unsafeDomain}`, async () => {
+        const context = buildContext({
+          domain: unsafeDomain,
+          imsOrgId: TEST_IMS_ORG_ID,
+        });
+
+        const res = await controller.onboard(context);
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.equal('Invalid domain');
+      });
+    });
+  });
+
+  // --- Race condition handling ---
+
+  describe('onboard - race condition on create', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    it('resumes when concurrent create causes unique violation', async () => {
+      mockDataAccess.PlgOnboarding.create.rejects(
+        new Error('unique constraint violation'),
+      );
+      // Second findByImsOrgIdAndDomain call returns the record
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .onFirstCall().resolves(null)
+        .onSecondCall().resolves(mockOnboarding);
+
+      const context = buildContext({
+        domain: TEST_DOMAIN,
+        imsOrgId: TEST_IMS_ORG_ID,
+      });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('throws when create fails and record still not found', async () => {
+      mockDataAccess.PlgOnboarding.create.rejects(
+        new Error('DB connection lost'),
+      );
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(null);
+
+      const context = buildContext({
+        domain: TEST_DOMAIN,
+        imsOrgId: TEST_IMS_ORG_ID,
+      });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(500);
+    });
+  });
+
+  // --- Error handler resilience ---
+
+  describe('onboard - error handler resilience', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    it('does not swallow original error when save in catch fails', async () => {
+      tierClientCreateEntitlementStub.rejects(
+        new Error('Tier service down'),
+      );
+      mockOnboarding.save.rejects(new Error('DB write failed'));
+
+      const context = buildContext({
+        domain: TEST_DOMAIN,
+        imsOrgId: TEST_IMS_ORG_ID,
+      });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(500);
+      expect(res.value).to.equal('Onboarding failed. Please try again later.');
+      expect(mockLog.error).to.have.been.calledWithMatch(
+        /Failed to persist error state/,
+      );
     });
   });
 
@@ -608,7 +732,7 @@ describe('PlgOnboardingController', () => {
       controller = PlgOnboardingController({ log: mockLog });
     });
 
-    it('returns WAITING_FOR_IP_WHITELISTING when bot blocked (new site)', async () => {
+    it('returns WAITING_FOR_IP_ALLOWLISTING when bot blocked (new site)', async () => {
       detectBotBlockerStub.resolves({
         crawlable: false,
         type: 'cloudflare',
@@ -626,7 +750,7 @@ describe('PlgOnboardingController', () => {
       expect(res.status).to.equal(200);
       // Verify onboarding record was updated with bot blocker status
       expect(mockOnboarding.setStatus)
-        .to.have.been.calledWith('WAITING_FOR_IP_WHITELISTING');
+        .to.have.been.calledWith('WAITING_FOR_IP_ALLOWLISTING');
       expect(mockOnboarding.setBotBlocker).to.have.been.calledWith({
         type: 'cloudflare',
         ipsToAllowlist: ['1.2.3.4'],
@@ -637,7 +761,7 @@ describe('PlgOnboardingController', () => {
       expect(mockDataAccess.Site.create).to.not.have.been.called;
     });
 
-    it('returns WAITING_FOR_IP_WHITELISTING for existing site and saves org change', async () => {
+    it('returns WAITING_FOR_IP_ALLOWLISTING for existing site and saves org change', async () => {
       const existingSite = createMockSite({ orgId: DEFAULT_ORG_ID });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
 
@@ -656,7 +780,7 @@ describe('PlgOnboardingController', () => {
 
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus)
-        .to.have.been.calledWith('WAITING_FOR_IP_WHITELISTING');
+        .to.have.been.calledWith('WAITING_FOR_IP_ALLOWLISTING');
       expect(existingSite.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
       expect(existingSite.save).to.have.been.called;
     });
@@ -682,6 +806,38 @@ describe('PlgOnboardingController', () => {
         ipsToAllowlist: ['5.6.7.8'],
         userAgent: 'Bot/2.0',
       });
+    });
+  });
+
+  // --- RUM gate ---
+
+  describe('onboard - RUM gate', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    it('returns WAITLISTED when no RUM data for domain', async () => {
+      rumRetrieveDomainkeyStub.rejects(new Error('No domainkey found'));
+
+      const context = buildContext({
+        domain: TEST_DOMAIN,
+        imsOrgId: TEST_IMS_ORG_ID,
+      });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus)
+        .to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWith('No RUM data available for this domain');
+      expect(mockOnboarding.setSteps).to.have.been.called;
+      expect(mockOnboarding.save).to.have.been.called;
+      // Should NOT proceed to bot blocker or site creation
+      expect(detectBotBlockerStub).to.not.have.been.called;
+      expect(mockDataAccess.Site.findByBaseURL).to.not.have.been.called;
+      expect(mockDataAccess.Site.create).to.not.have.been.called;
     });
   });
 
@@ -766,7 +922,7 @@ describe('PlgOnboardingController', () => {
       controller = PlgOnboardingController({ log: mockLog });
     });
 
-    it('returns 400 when site belongs to another customer org', async () => {
+    it('returns 409 when site belongs to another customer org', async () => {
       const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
 
@@ -777,8 +933,8 @@ describe('PlgOnboardingController', () => {
 
       const res = await controller.onboard(context);
 
-      expect(res.status).to.equal(400);
-      expect(res.value).to.include('already assigned to another organization');
+      expect(res.status).to.equal(409);
+      expect(res.value.message).to.include('already assigned to another organization');
       // Should NOT modify the site
       expect(existingSite.setOrganizationId).to.not.have.been.called;
       expect(existingSite.save).to.not.have.been.called;
@@ -813,7 +969,7 @@ describe('PlgOnboardingController', () => {
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
-    it('returns 400 when entitlement creation fails unexpectedly', async () => {
+    it('returns 500 when entitlement creation fails unexpectedly', async () => {
       tierClientCreateEntitlementStub.rejects(
         new Error('Tier service unavailable'),
       );
@@ -825,11 +981,13 @@ describe('PlgOnboardingController', () => {
 
       const res = await controller.onboard(context);
 
-      expect(res.status).to.equal(400);
-      expect(res.value).to.include('Tier service unavailable');
-      // Verify error was recorded in onboarding record
+      expect(res.status).to.equal(500);
+      expect(res.value).to.equal('Onboarding failed. Please try again later.');
+      // Verify error was recorded with sanitized message
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ERROR');
-      expect(mockOnboarding.setError).to.have.been.called;
+      expect(mockOnboarding.setError).to.have.been.calledWith({
+        message: 'An internal error occurred',
+      });
     });
   });
 

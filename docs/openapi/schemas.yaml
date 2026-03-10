@@ -6230,7 +6230,7 @@ PlgOnboarding:
         - IN_PROGRESS
         - ONBOARDED
         - ERROR
-        - WAITING_FOR_IP_WHITELISTING
+        - WAITING_FOR_IP_ALLOWLISTING
         - WAITLISTED
       example: "ONBOARDED"
     siteId:

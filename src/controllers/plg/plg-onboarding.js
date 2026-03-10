@@ -12,8 +12,11 @@
 
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
+import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
 import TierClient from '@adobe/spacecat-shared-tier-client';
-import { badRequest, notFound, ok } from '@adobe/spacecat-shared-http-utils';
+import {
+  badRequest, createResponse, internalServerError, notFound, ok,
+} from '@adobe/spacecat-shared-http-utils';
 import {
   composeBaseURL,
   detectBotBlocker,
@@ -39,12 +42,36 @@ const STATUSES = {
   IN_PROGRESS: 'IN_PROGRESS',
   ONBOARDED: 'ONBOARDED',
   ERROR: 'ERROR',
-  WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_WHITELISTING',
+  WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
   WAITLISTED: 'WAITLISTED',
 };
 const ASO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.ASO;
 const ASO_TIER = EntitlementModel.TIERS.FREE_TRIAL;
 const PLG_PROFILE_KEY = 'aso_plg';
+
+const DOMAIN_ALREADY_ASSIGNED = 'already assigned to another organization';
+
+/**
+ * Validates that a domain is not a private/internal address to prevent SSRF.
+ * @param {string} domain - The domain to validate.
+ * @returns {boolean} true if safe, false if potentially dangerous.
+ */
+function isSafeDomain(domain) {
+  const blocked = [
+    /^localhost$/i,
+    /^127\./,
+    /^10\./,
+    /^172\.(1[6-9]|2\d|3[01])\./,
+    /^192\.168\./,
+    /^169\.254\./,
+    /^0\./,
+    /^\[::1\]/,
+    /\.local$/i,
+    /\.internal$/i,
+    /\.private\./i,
+  ];
+  return !blocked.some((pattern) => pattern.test(domain));
+}
 
 function isInternalOrg(orgId, env) {
   return orgId === env.DEFAULT_ORGANIZATION_ID || orgId === ASO_DEMO_ORG;
@@ -103,6 +130,13 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
   const { dataAccess, log, env } = context;
   const { Site, PlgOnboarding } = dataAccess;
 
+  if (!isSafeDomain(domain)) {
+    throw Object.assign(
+      new Error('Invalid domain'),
+      { clientError: true },
+    );
+  }
+
   const baseURL = composeBaseURL(domain);
   log.info(`Starting PLG ASO onboarding for IMS org ${imsOrgId}, baseURL ${baseURL}`);
 
@@ -111,14 +145,22 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
   // Create or find existing PlgOnboarding record for this imsOrgId + domain
   let onboarding = await PlgOnboarding.findByImsOrgIdAndDomain(imsOrgId, domain);
   if (!onboarding) {
-    onboarding = await PlgOnboarding.create({
-      imsOrgId,
-      domain,
-      baseURL,
-      status: STATUSES.IN_PROGRESS,
-    });
-    log.info(`Created PlgOnboarding record ${onboarding.getId()}`);
-  } else {
+    try {
+      onboarding = await PlgOnboarding.create({
+        imsOrgId,
+        domain,
+        baseURL,
+        status: STATUSES.IN_PROGRESS,
+      });
+      log.info(`Created PlgOnboarding record ${onboarding.getId()}`);
+    } catch (createError) {
+      // Handle race condition: concurrent request may have created the record
+      onboarding = await PlgOnboarding.findByImsOrgIdAndDomain(imsOrgId, domain);
+      if (!onboarding) throw createError;
+      log.info(`Concurrent create detected, resuming PlgOnboarding record ${onboarding.getId()}`);
+    }
+  }
+  if (onboarding.getStatus() !== STATUSES.IN_PROGRESS) {
     onboarding.setStatus(STATUSES.IN_PROGRESS);
     onboarding.setError(null);
     log.info(`Resuming PlgOnboarding record ${onboarding.getId()}`);
@@ -133,7 +175,20 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
     onboarding.setOrganizationId(organizationId);
     steps.orgResolved = true;
 
-    // Step 2: Check if site already exists
+    // Step 2: RUM check — gate onboarding if no RUM data
+    const rumApiClient = RUMAPIClient.createFrom(context);
+    try {
+      await rumApiClient.retrieveDomainkey(domain);
+      steps.rumVerified = true;
+    } catch {
+      onboarding.setStatus(STATUSES.WAITLISTED);
+      onboarding.setWaitlistReason('No RUM data available for this domain');
+      onboarding.setSteps(steps);
+      await onboarding.save();
+      return onboarding;
+    }
+
+    // Step 3: Check site ownership
     let site = await Site.findByBaseURL(baseURL);
     let isNewSite = false;
 
@@ -142,8 +197,9 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
 
       if (existingOrgId !== organizationId
         && !isInternalOrg(existingOrgId, env)) {
-        throw new Error(
-          `Domain ${domain} is already assigned to another organization`,
+        throw Object.assign(
+          new Error(`Domain ${domain} is ${DOMAIN_ALREADY_ASSIGNED}`),
+          { conflict: true },
         );
       }
 
@@ -154,7 +210,7 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
       }
     }
 
-    // Step 3: Bot blocker check
+    // Step 4: Bot blocker check
     const botBlockerResult = await detectBotBlocker({ baseUrl: baseURL });
     if (!botBlockerResult.crawlable) {
       if (site) await site.save();
@@ -176,7 +232,7 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
       return onboarding;
     }
 
-    // Step 4: Create site if new
+    // Step 5: Create site if new
     if (!site) {
       isNewSite = true;
       const deliveryType = await findDeliveryType(baseURL);
@@ -191,7 +247,7 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
     steps.siteCreated = isNewSite;
     steps.siteResolved = true;
 
-    // Step 5: Update configs
+    // Step 6: Update configs
     const siteConfig = site.getConfig();
 
     // Enable imports from PLG profile
@@ -254,19 +310,19 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
     await site.save();
     steps.configUpdated = true;
 
-    // Enable audits from PLG profile
+    // Step 7: Enable audits from PLG profile
     const auditTypes = Object.keys(profile.audits || {});
     await enableAudits(site, context, auditTypes);
     steps.auditsEnabled = true;
 
-    // Step 7: Add ASO entitlement
+    // Step 8: Add ASO entitlement
     await ensureAsoEntitlement(site, context);
     steps.entitlementCreated = true;
 
-    // Step 8: Trigger audit runs
+    // Step 9: Trigger audit runs
     await triggerAudits(auditTypes, context, site);
 
-    // Trigger brand profile (non-blocking)
+    // Step 10: Trigger brand profile (non-blocking)
     try {
       await triggerBrandProfileAgent({
         context, site, reason: 'plg-onboarding',
@@ -287,9 +343,14 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
     onboarding.setStatus(STATUSES.ERROR);
     onboarding.setSteps(steps);
     onboarding.setError({
-      message: error.message,
+      message: (error.clientError || error.conflict)
+        ? error.message : 'An internal error occurred',
     });
-    await onboarding.save();
+    try {
+      await onboarding.save();
+    } catch (saveError) {
+      log.error(`Failed to persist error state for onboarding ${onboarding.getId()}: ${saveError.message}`);
+    }
     throw error;
   }
 }
@@ -324,7 +385,14 @@ function PlgOnboardingController(ctx) {
       return ok(PlgOnboardingDto.toJSON(onboarding));
     } catch (error) {
       log.error(`PLG onboarding failed for domain ${domain}: ${error.message}`);
-      return badRequest(error.message);
+
+      if (error.conflict) {
+        return createResponse({ message: error.message }, 409);
+      }
+      if (error.clientError) {
+        return badRequest(error.message);
+      }
+      return internalServerError('Onboarding failed. Please try again later.');
     }
   };
 

@@ -60,7 +60,7 @@ describe('PlgOnboardingDto', () => {
       getImsOrgId: () => 'XYZ789@AdobeOrg',
       getDomain: () => 'blocked.com',
       getBaseURL: () => 'https://www.blocked.com',
-      getStatus: () => 'WAITING_FOR_IP_WHITELISTING',
+      getStatus: () => 'WAITING_FOR_IP_ALLOWLISTING',
       getSiteId: () => null,
       getOrganizationId: () => 'org-111',
       getSteps: () => ({ orgResolved: true }),
@@ -78,7 +78,7 @@ describe('PlgOnboardingDto', () => {
 
     const result = PlgOnboardingDto.toJSON(onboarding);
 
-    expect(result.status).to.equal('WAITING_FOR_IP_WHITELISTING');
+    expect(result.status).to.equal('WAITING_FOR_IP_ALLOWLISTING');
     expect(result.botBlocker).to.deep.equal({
       type: 'cloudflare',
       ipsToAllowlist: ['1.2.3.4'],
