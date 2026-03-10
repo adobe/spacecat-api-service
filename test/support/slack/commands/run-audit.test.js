@@ -104,22 +104,19 @@ describe('RunAuditCommand', () => {
       expect(sqsStub.sendMessage).called;
     });
 
-    it('does not trigger an audit when audit for type is disabled', async () => {
+    it('triggers an audit even when audit type is disabled for site (enablement checked upstream)', async () => {
       const site = {
         getId: () => '123',
       };
       dataAccessStub.Site.findByBaseURL.resolves(site);
-      dataAccessStub.Configuration.findLatest.resolves({
-        isHandlerEnabledForSite: sinon.stub().returns(false),
-      });
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('lhs-mobile', ['LLMO']));
       const command = RunAuditCommand(context);
 
       await command.handleExecution(['validsite.com'], slackContext);
 
       expect(slackContext.say.called).to.be.true;
       expect(slackContext.say.firstCall.args[0]).to.include(':adobe-run: Triggering lhs-mobile audit for https://validsite.com');
-      expect(slackContext.say.secondCall.args[0]).to.include(':x: Will not audit site \'https://validsite.com\' because audits of type \'lhs-mobile\' are disabled for this site.');
-      expect(sqsStub.sendMessage.called).to.be.false;
+      expect(sqsStub.sendMessage.called).to.be.true;
     });
 
     it('responds with a warning for an invalid site url', async () => {
@@ -149,14 +146,10 @@ describe('RunAuditCommand', () => {
     });
 
     it('trigger all audits for a valid site', async () => {
-      const handlerEnabledStub = sinon.stub().onCall(0).returns(true).onCall(1)
-        .returns(true);
       dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
       });
-      dataAccessStub.Configuration.findLatest.resolves({
-        isHandlerEnabledForSite: handlerEnabledStub,
-      });
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('lhs-mobile', ['LLMO']));
 
       const command = RunAuditCommand(context);
       await command.handleExecution(['validsite.com', 'all'], slackContext);
@@ -167,16 +160,10 @@ describe('RunAuditCommand', () => {
     });
 
     it('triggers all audits for all sites specified in a CSV file', async () => {
-      const handlerEnabledStub = sinon.stub().onCall(0).returns(true).onCall(1)
-        .returns(true)
-        .onCall(22)
-        .returns(true);
       dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
       });
-      dataAccessStub.Configuration.findLatest.resolves({
-        isHandlerEnabledForSite: handlerEnabledStub,
-      });
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('lhs-mobile', ['LLMO']));
       const fileUrl = 'https://example.com/sites.csv';
       slackContext.files = [
         {
@@ -253,32 +240,26 @@ describe('RunAuditCommand', () => {
       expect(slackContext.say.calledWith(':warning: Invalid URL found in CSV file: invalid-url')).to.be.true;
     });
 
-    it('handles site with no enable audits', async () => {
-      const handlerEnabledStub = sinon.stub().onCall(0).returns(false);
+    it('triggers all audits from list for site without filtering by enablement', async () => {
       dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
       });
-      dataAccessStub.Configuration.findLatest.resolves({
-        isHandlerEnabledForSite: handlerEnabledStub,
-      });
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('lhs-mobile', ['LLMO']));
 
       const command = RunAuditCommand(context);
       await command.handleExecution(['validsite.com', 'all'], slackContext);
 
       expect(slackContext.say.called).to.be.true;
       expect(slackContext.say.firstCall.args[0]).to.equal(':adobe-run: Triggering all audit for https://validsite.com');
-      expect(slackContext.say.secondCall.args[0]).to.equal(':warning: No audits configured for site `https://validsite.com`');
+      expect(sqsStub.sendMessage.called).to.be.true;
     });
 
     it('handles error while triggering audits', async () => {
       const errorMessage = 'Failed to trigger';
-      const handlerEnabledStub = sinon.stub().onCall(0).returns(true);
       dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
       });
-      dataAccessStub.Configuration.findLatest.resolves({
-        isHandlerEnabledForSite: handlerEnabledStub,
-      });
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('lhs-mobile', ['LLMO']));
       sqsStub.sendMessage.rejects(new Error(errorMessage));
 
       const command = RunAuditCommand(context);
@@ -307,7 +288,7 @@ describe('RunAuditCommand', () => {
       ];
       nock('https://example.com')
         .get('/sites.csv')
-        . reply(401, 'Unauthorized');
+        .reply(401, 'Unauthorized');
 
       await command.handleExecution(['', 'all'], slackContext);
       expect(slackContext.say.calledWith(':nuclear-warning: Oops! Something went wrong: CSV processing failed: Authentication failed: Invalid Slack token.')).to.be.true;
