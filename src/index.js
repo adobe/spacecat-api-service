@@ -267,6 +267,7 @@ async function run(request, context) {
         return badRequest('Organization Id is invalid. Please provide a valid UUID.');
       }
       context.params = params;
+      context.request = request;
 
       return await handler(context);
     } else {

@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { gunzipSync } from 'zlib';
 import {
   ok, badRequest, forbidden, createResponse, notFound, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
@@ -71,6 +72,9 @@ function LlmoController(ctx) {
     const { Site } = dataAccess;
 
     const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound(`Site not found: ${siteId}`);
+    }
     const config = site.getConfig();
     const llmoConfig = config.getLlmoConfig();
 
@@ -126,7 +130,9 @@ function LlmoController(ctx) {
     } = context.params;
     const { env } = context;
     try {
-      const { llmoConfig } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { llmoConfig } = siteValidation;
       // Construct the sheet URL based on which parameters are provided
       let sheetURL;
       if (sheetType && week) {
@@ -222,7 +228,9 @@ function LlmoController(ctx) {
     }
 
     try {
-      const { llmoConfig } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { llmoConfig } = siteValidation;
       // Construct the sheet URL based on which parameters are provided
       let sheetURL;
       if (sheetType && week) {
@@ -353,7 +361,8 @@ function LlmoController(ctx) {
     try {
       log.info(`validating LLMO global sheet data for siteId: ${siteId}, configName: ${configName}`);
       // Validate LLMO access but don't use the site-specific dataFolder
-      await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
 
       // Use 'llmo-global' folder
       const sheetURL = `llmo-global/${configName}.json`;
@@ -407,7 +416,8 @@ function LlmoController(ctx) {
     const version = context.data?.version;
     try {
       // Validate site and LLMO access
-      await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
 
       if (!s3 || !s3.s3Client) {
         return badRequest('LLMO config storage is not configured for this environment');
@@ -440,7 +450,6 @@ function LlmoController(ctx) {
     const {
       log,
       s3,
-      data,
       pathInfo,
     } = context;
     const { siteId } = context.params;
@@ -449,7 +458,16 @@ function LlmoController(ctx) {
 
     try {
       // Validate site and LLMO access
-      await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+
+      // Support gzip-compressed request bodies (Content-Type: application/gzip)
+      let { data } = context;
+      const contentType = context.request?.headers?.get?.('content-type');
+      if (contentType === 'application/gzip') {
+        const compressed = Buffer.from(await context.request.arrayBuffer());
+        data = JSON.parse(gunzipSync(compressed).toString());
+      }
 
       if (!isObject(data)) {
         return badRequest('LLMO config update must be provided as an object');
@@ -523,7 +541,9 @@ function LlmoController(ctx) {
 
   // Handles requests to the LLMO questions endpoint, returns both human and ai questions
   const getLlmoQuestions = async (context) => {
-    const { llmoConfig } = await getSiteAndValidateLlmo(context);
+    const siteValidation = await getSiteAndValidateLlmo(context);
+    if (siteValidation.status) return siteValidation;
+    const { llmoConfig } = siteValidation;
     return ok(llmoConfig.questions || {});
   };
 
@@ -534,7 +554,9 @@ function LlmoController(ctx) {
       return forbidden('Only LLMO administrators can add questions');
     }
     const { log } = context;
-    const { site, config } = await getSiteAndValidateLlmo(context);
+    const siteValidation = await getSiteAndValidateLlmo(context);
+    if (siteValidation.status) return siteValidation;
+    const { site, config } = siteValidation;
 
     // add the question to the llmoConfig
     const newQuestions = context.data;
@@ -578,7 +600,9 @@ function LlmoController(ctx) {
     }
     const { log } = context;
     const { questionKey } = context.params;
-    const { site, config } = await getSiteAndValidateLlmo(context);
+    const siteValidation = await getSiteAndValidateLlmo(context);
+    if (siteValidation.status) return siteValidation;
+    const { site, config } = siteValidation;
 
     validateQuestionKey(config, questionKey);
 
@@ -599,7 +623,9 @@ function LlmoController(ctx) {
     const { log } = context;
     const { questionKey } = context.params;
     const { data } = context;
-    const { site, config } = await getSiteAndValidateLlmo(context);
+    const siteValidation = await getSiteAndValidateLlmo(context);
+    if (siteValidation.status) return siteValidation;
+    const { site, config } = siteValidation;
 
     validateQuestionKey(config, questionKey);
 
@@ -615,7 +641,9 @@ function LlmoController(ctx) {
   // Handles requests to the LLMO customer intent endpoint, returns customer intent array
   const getLlmoCustomerIntent = async (context) => {
     try {
-      const { llmoConfig } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { llmoConfig } = siteValidation;
       return ok(llmoConfig.customerIntent || []);
     } catch (error) {
       if (error.message === 'Only users belonging to the organization can view its sites') {
@@ -633,7 +661,9 @@ function LlmoController(ctx) {
     }
 
     try {
-      const { site, config } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { site, config } = siteValidation;
 
       const newCustomerIntent = context.data;
       if (!Array.isArray(newCustomerIntent)) {
@@ -681,7 +711,9 @@ function LlmoController(ctx) {
     const { intentKey } = context.params;
 
     try {
-      const { site, config } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { site, config } = siteValidation;
 
       validateCustomerIntentKey(config, intentKey);
 
@@ -707,7 +739,9 @@ function LlmoController(ctx) {
     const { data } = context;
 
     try {
-      const { site, config } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { site, config } = siteValidation;
 
       validateCustomerIntentKey(config, intentKey);
 
@@ -746,7 +780,9 @@ function LlmoController(ctx) {
         return forbidden('Only LLMO administrators can update the CDN logs filter');
       }
 
-      const { site, config } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { site, config } = siteValidation;
 
       if (!isObject(data)) {
         return badRequest('Update data must be provided as an object');
@@ -776,7 +812,9 @@ function LlmoController(ctx) {
         return forbidden('Only LLMO administrators can update the CDN bucket config');
       }
 
-      const { site, config } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { site, config } = siteValidation;
 
       if (!isObject(data)) {
         return badRequest('Update data must be provided as an object');
@@ -907,7 +945,9 @@ function LlmoController(ctx) {
       log.info(`Starting LLMO offboarding for site ${siteId}`);
 
       // Validate site and LLMO access
-      const { site, config } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { site, config } = siteValidation;
 
       // Perform the complete offboarding process
       const result = await performLlmoOffboarding(site, config, context);
@@ -932,7 +972,9 @@ function LlmoController(ctx) {
     const { log } = context;
     const { siteId } = context.params;
     try {
-      const { llmoConfig } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { llmoConfig } = siteValidation;
       const { data, headers } = await queryLlmoFiles(context, llmoConfig);
       return ok(data, headers);
     } catch (error) {
@@ -947,7 +989,8 @@ function LlmoController(ctx) {
     const { siteId } = context.params;
     try {
       // Validate site and LLMO access
-      await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
 
       // Delegate to the rationale handler for the actual processing
       return await handleLlmoRationale(context);
@@ -963,7 +1006,8 @@ function LlmoController(ctx) {
     const { siteId } = context.params;
     try {
       // Validate site and LLMO access
-      await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
 
       // Delegate to the brand claims handler for the actual processing
       return await handleBrandClaims(context);
@@ -1492,7 +1536,9 @@ function LlmoController(ctx) {
     const { log } = context;
 
     try {
-      const { site, config } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { site, config } = siteValidation;
       const OPPORTUNITIES_REVIEWED_TAG = 'opportunitiesReviewed';
       const tags = config.getLlmoConfig().tags || [];
 
