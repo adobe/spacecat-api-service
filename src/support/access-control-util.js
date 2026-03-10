@@ -125,15 +125,23 @@ export default class AccessControlUtil {
       const trialUser = await this.TrialUser.findByEmailId(profile.trial_email);
 
       if (!trialUser) {
-        await this.TrialUser.create({
-          emailId: profile.trial_email,
-          firstName: profile.first_name || '-',
-          lastName: profile.last_name || '-',
-          organizationId: org.getId(),
-          status: TrialUserModel.STATUSES.REGISTERED,
-          externalUserId: profile.email,
-          lastSeenAt: new Date().toISOString(),
-        });
+        try {
+          await this.TrialUser.create({
+            emailId: profile.trial_email,
+            firstName: profile.first_name || '-',
+            lastName: profile.last_name || '-',
+            organizationId: org.getId(),
+            status: TrialUserModel.STATUSES.REGISTERED,
+            externalUserId: profile.email,
+            lastSeenAt: new Date().toISOString(),
+          });
+        } catch (e) {
+          const isUniqueViolation = e.cause?.code === '23505'
+            || e.message?.includes('23505')
+            || e.cause?.message?.includes('23505');
+          if (!isUniqueViolation) throw e;
+          this.log.warn(`Trial user ${profile.trial_email} already created by concurrent request, skipping.`);
+        }
       }
     }
   }
