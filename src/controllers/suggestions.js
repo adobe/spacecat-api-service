@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 import {
+  accepted,
   badRequest,
   createResponse,
   forbidden,
@@ -24,11 +25,12 @@ import {
   isObject,
   isInteger,
   isValidUUID,
+  isValidUrl,
 } from '@adobe/spacecat-shared-utils';
 
 import { Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
-import { SuggestionDto, SUGGESTION_VIEWS } from '../dto/suggestion.js';
+import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
 import { FixDto } from '../dto/fix.js';
 import {
   sendAutofixMessage,
@@ -115,6 +117,46 @@ function SuggestionsController(ctx, sqs, env) {
       throw new Error(`Invalid status value(s): ${invalidStatuses.join(', ')}. Valid: ${validStatuses.join(', ')}`);
     }
     return statuses;
+  };
+
+  const SKIP_DETAIL_MAX_LENGTH = 500;
+
+  /**
+   * Validates skipReason and skipDetail for SKIPPED status.
+   * @param {string} status - Target status
+   * @param {string} [skipReason] - Optional skip reason
+   * @param {string} [skipDetail] - Optional skip detail
+   * @returns {{ valid: boolean, error?: string }}
+   */
+  const validateSkipFields = (status, skipReason, skipDetail) => {
+    if (status !== SuggestionModel.STATUSES.SKIPPED) {
+      if (skipReason != null || skipDetail != null) {
+        return {
+          valid: false,
+          error: 'skipReason and skipDetail can only be provided when status is SKIPPED',
+        };
+      }
+      return { valid: true };
+    }
+    if (skipReason != null && skipReason !== '' && !SUGGESTION_SKIP_REASONS.includes(skipReason)) {
+      return {
+        valid: false,
+        error: `Invalid skipReason. Must be one of: ${SUGGESTION_SKIP_REASONS.join(', ')}`,
+      };
+    }
+    if (skipDetail != null && typeof skipDetail !== 'string') {
+      return {
+        valid: false,
+        error: 'skipDetail must be a string',
+      };
+    }
+    if (typeof skipDetail === 'string' && skipDetail.length > SKIP_DETAIL_MAX_LENGTH) {
+      return {
+        valid: false,
+        error: `skipDetail must be at most ${SKIP_DETAIL_MAX_LENGTH} characters`,
+      };
+    }
+    return { valid: true };
   };
 
   const shouldGroupSuggestionsForAutofix = (type) => !AUTOFIX_UNGROUPED_OPPTY_TYPES.includes(type);
@@ -551,9 +593,11 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     let hasUpdates = false;
-    const { rank, data, kpiDeltas } = context.data;
+    const {
+      rank, data, kpiDeltas, status, skipReason, skipDetail,
+    } = context.data;
     try {
-      if (rank && rank !== suggestion.rank) {
+      if (rank != null && rank !== suggestion.getRank()) {
         hasUpdates = true;
         suggestion.setRank(rank);
       }
@@ -566,6 +610,40 @@ function SuggestionsController(ctx, sqs, env) {
       if (kpiDeltas) {
         hasUpdates = true;
         suggestion.setKpiDeltas(kpiDeltas);
+      }
+
+      if (hasText(status) && status !== suggestion.getStatus()) {
+        const { valid, error } = validateSkipFields(status, skipReason, skipDetail);
+        if (!valid) {
+          return badRequest(error);
+        }
+        hasUpdates = true;
+        suggestion.setStatus(status);
+        if (status === SuggestionModel.STATUSES.SKIPPED) {
+          if (suggestion.setSkipReason) {
+            suggestion.setSkipReason(skipReason ?? null);
+            suggestion.setSkipDetail(skipDetail ?? null);
+          } else {
+            context.log.warn('Suggestion model does not support skip fields (setSkipReason). Upgrade spacecat-shared-data-access.');
+          }
+        } else if (suggestion.setSkipReason) {
+          suggestion.setSkipReason(null);
+          suggestion.setSkipDetail(null);
+        }
+      } else if (hasText(status) && status === SuggestionModel.STATUSES.SKIPPED) {
+        const { valid, error } = validateSkipFields(status, skipReason, skipDetail);
+        if (!valid) {
+          return badRequest(error);
+        }
+        if ((skipReason != null || skipDetail != null)) {
+          if (suggestion.setSkipReason) {
+            hasUpdates = true;
+            suggestion.setSkipReason(skipReason ?? null);
+            suggestion.setSkipDetail(skipDetail ?? null);
+          } else {
+            context.log.warn('Suggestion model does not support skip fields (setSkipReason). Upgrade spacecat-shared-data-access.');
+          }
+        }
       }
 
       if (hasUpdates) {
@@ -657,7 +735,10 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('Request body must be an array of [{ id: <suggestion id>, status: <suggestion status> },...]');
     }
 
-    const suggestionPromises = context.data.map(async ({ id, status }, index) => {
+    const suggestionPromises = context.data.map(async (item, index) => {
+      const {
+        id, status, skipReason, skipDetail,
+      } = item;
       if (!hasText(id)) {
         return {
           index,
@@ -671,6 +752,16 @@ function SuggestionsController(ctx, sqs, env) {
           index,
           uuid: id,
           message: 'status is required',
+          statusCode: 400,
+        };
+      }
+
+      const { valid, error } = validateSkipFields(status, skipReason, skipDetail);
+      if (!valid) {
+        return {
+          index,
+          uuid: id,
+          message: error,
           statusCode: 400,
         };
       }
@@ -721,7 +812,29 @@ function SuggestionsController(ctx, sqs, env) {
           }
 
           suggestion.setStatus(status);
+          if (status === SuggestionModel.STATUSES.SKIPPED) {
+            if (suggestion.setSkipReason) {
+              suggestion.setSkipReason(skipReason ?? null);
+              suggestion.setSkipDetail(skipDetail ?? null);
+            } else {
+              context.log.warn('Suggestion model does not support skip fields (setSkipReason). Upgrade spacecat-shared-data-access.');
+            }
+          } else if (suggestion.setSkipReason) {
+            suggestion.setSkipReason(null);
+            suggestion.setSkipDetail(null);
+          }
           suggestion.setUpdatedBy(profile.email);
+        } else if (
+          status === SuggestionModel.STATUSES.SKIPPED
+          && (skipReason != null || skipDetail != null)
+        ) {
+          if (suggestion.setSkipReason) {
+            suggestion.setSkipReason(skipReason ?? null);
+            suggestion.setSkipDetail(skipDetail ?? null);
+            suggestion.setUpdatedBy(profile.email);
+          } else {
+            context.log.warn('Suggestion model does not support skip fields (setSkipReason). Upgrade spacecat-shared-data-access.');
+          }
         } else {
           return {
             index,
@@ -747,11 +860,11 @@ function SuggestionsController(ctx, sqs, env) {
           suggestion: SuggestionDto.toJSON(updatedSuggestion),
           statusCode: 200,
         };
-      } catch (error) {
+      } catch (saveError) {
         return {
           index,
-          message: error.message,
-          statusCode: error?.name === VALIDATION_ERROR_NAME ? 400 : 500,
+          message: saveError.message,
+          statusCode: saveError?.name === VALIDATION_ERROR_NAME ? 400 : 500,
         };
       }
     });
@@ -770,6 +883,20 @@ function SuggestionsController(ctx, sqs, env) {
     };
     return createResponse(fullResponse, 207);
   };
+  /**
+   * Triggers auto-fix for the given suggestions. Validates the site, opportunity, and
+   * suggestions, then queues an autofix message via SQS.
+   *
+   * For promise token resolution, prefers the x-promise-token request header if present.
+   * Falls back to obtaining a token via IMS when the header is absent or empty.
+   *
+   * @param {Object} context - The request context
+   * @param {Object} [context.pathInfo] - The path info object
+   * @param {Object} [context.pathInfo.headers] - Request headers (x-promise-token preferred)
+   * @param {Object} context.params - Path parameters (siteId, opportunityId)
+   * @param {Object} context.data - Request body containing suggestionIds
+   * @returns {Promise<Response>} 207 multi-status response with per-suggestion results
+   */
   const autofixSuggestions = async (context) => {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
@@ -787,19 +914,20 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('No updates provided');
     }
     const {
-      suggestionIds, variations, action, customData, url: requestUrl,
+      suggestionIds, variations, action, customData, url: requestUrl, precheckOnly, pages,
     } = context.data;
     const isAssessAction = action === 'assess';
+    const isAssessUrlsAction = action === 'assess-urls';
 
-    if (!isArray(suggestionIds)) {
-      return badRequest('Request body must be an array of suggestionIds');
-    }
-    if (variations && !isArray(variations)) {
-      return badRequest('variations must be an array');
-    }
     if (action !== undefined && !hasText(action)) {
       return badRequest('action cannot be empty');
     }
+    if (action === 'assess' || action === 'assess-urls') {
+      if (precheckOnly !== undefined && typeof precheckOnly !== 'boolean') {
+        return badRequest('precheckOnly must be a boolean');
+      }
+    }
+
     const site = await Site.findById(siteId);
     if (!site) {
       return notFound('Site not found');
@@ -813,6 +941,53 @@ function SuggestionsController(ctx, sqs, env) {
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
     }
+
+    // assess-urls action: validate pages and send worker message, return 202
+    if (isAssessUrlsAction) {
+      if (!isNonEmptyArray(pages)) {
+        return badRequest('Request body must contain a non-empty array of pages (URLs) when action is assess-urls');
+      }
+      const invalidEntry = pages.find((p) => {
+        if (typeof p === 'string') {
+          return !isValidUrl(p);
+        }
+        if (isObject(p) && p !== null) {
+          const { pageUrl, imageUrls } = p;
+          if (typeof pageUrl !== 'string' || !isValidUrl(pageUrl)) return true;
+          if (imageUrls !== undefined) {
+            if (!isArray(imageUrls)) return true;
+            return imageUrls.some((u) => typeof u !== 'string' || !isValidUrl(u));
+          }
+          return false;
+        }
+        return true;
+      });
+      if (invalidEntry !== undefined) {
+        return badRequest('Each page must be a valid URL string or an object with pageUrl (valid URL) and optional imageUrls (array of valid URLs)');
+      }
+      const configuration = await Configuration.findLatest();
+      if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-auto-fix`, site)) {
+        return badRequest(`Handler is not enabled for site ${site.getId()} autofix type ${opportunity.getType()}`);
+      }
+      const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
+      // Intentionally omit opportunityId: worker uses context differently for URL-based assessments
+      await sqs.sendMessage(queueUrl, {
+        siteId,
+        action: 'assess-urls',
+        pages,
+        ...(precheckOnly === true && { precheckOnly: true }),
+      });
+      return accepted({ message: 'Assess-urls job queued', siteId, pagesCount: pages.length });
+    }
+
+    // suggestion-based flow (assess, fix, etc.)
+    if (!isArray(suggestionIds)) {
+      return badRequest('Request body must be an array of suggestionIds');
+    }
+    if (variations && !isArray(variations)) {
+      return badRequest('variations must be an array');
+    }
+
     const configuration = await Configuration.findLatest();
     if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-auto-fix`, site)) {
       return badRequest(`Handler is not enabled for site ${site.getId()} autofix type ${opportunity.getType()}`);
@@ -894,13 +1069,22 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     let promiseTokenResponse;
-    try {
-      promiseTokenResponse = await getIMSPromiseToken(context);
-    } catch (e) {
-      if (e instanceof ErrorWithStatusCode) {
-        return badRequest(e.message);
+    const skipPromiseToken = isAssessAction && precheckOnly === true;
+    if (!skipPromiseToken) {
+      const { pathInfo } = context;
+      const headerToken = pathInfo?.headers?.['x-promise-token'];
+      if (hasText(headerToken)) {
+        promiseTokenResponse = { promise_token: headerToken };
+      } else {
+        try {
+          promiseTokenResponse = await getIMSPromiseToken(context);
+        } catch (e) {
+          if (e instanceof ErrorWithStatusCode) {
+            return badRequest(e.message);
+          }
+          return createResponse({ message: 'Error getting promise token' }, 500);
+        }
       }
-      return createResponse({ message: 'Error getting promise token' }, 500);
     }
 
     const response = {
@@ -922,6 +1106,10 @@ function SuggestionsController(ctx, sqs, env) {
     response.suggestions.sort((a, b) => a.index - b.index);
     const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
 
+    const autofixOptions = (urlParam) => ({
+      url: urlParam,
+      ...(precheckOnly === true && { precheckOnly: true }),
+    });
     if (shouldGroupSuggestionsForAutofix(opportunity.getType())) {
       await Promise.all(
         suggestionGroups.map(({ groupedSuggestions, url }) => sendAutofixMessage(
@@ -934,7 +1122,7 @@ function SuggestionsController(ctx, sqs, env) {
           variations,
           action,
           customData,
-          { url },
+          autofixOptions(url),
         )),
       );
     } else {
@@ -948,7 +1136,7 @@ function SuggestionsController(ctx, sqs, env) {
         variations,
         action,
         customData,
-        { url: requestUrl },
+        autofixOptions(requestUrl),
       );
     }
 

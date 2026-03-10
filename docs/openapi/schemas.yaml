@@ -259,6 +259,38 @@ Config:
       description: Optional. The Brand Profile determined during on-boarding.
       type: object
       additionalProperties: true
+    edgeOptimizeConfig:
+      description: Optional. The edge optimize configuration for the site.
+      $ref: '#/EdgeOptimizeConfig'
+EdgeOptimizeConfig:
+  type: object
+  description: Edge optimize configuration for a site
+  properties:
+    enabled:
+      description: Whether edge optimize is enabled for the site
+      type: boolean
+    opted:
+      description: Timestamp (milliseconds since epoch) when the site opted into edge optimize
+      type: number
+      example: 1772531669121
+    stagingDomains:
+      description: Staging domains associated with this site for edge optimize
+      type: array
+      items:
+        type: object
+        required:
+          - domain
+          - id
+        properties:
+          domain:
+            type: string
+            description: Staging domain hostname
+            example: 'staging.example.com'
+          id:
+            type: string
+            format: uuid
+            description: Spacecat site ID for the stage site
+  additionalProperties: true
 ContentAiConfig:
   type: object
   properties:
@@ -2858,6 +2890,15 @@ SuggestionStatus:
     - 'PENDING_VALIDATION'
     - 'REJECTED'
   example: 'NEW'
+SuggestionSkipReason:
+  description: Reason for skipping a suggestion when status is SKIPPED
+  type: string
+  enum:
+    - ALREADY_IMPLEMENTED
+    - INACCURATE_OR_INCOMPLETE
+    - TOO_RISKY
+    - NO_REASON
+    - OTHER
 SuggestionType:
   description: |
     Type of suggestion:
@@ -2904,12 +2945,34 @@ Suggestion:
     status:
       description: Status of this suggestion; status reflects overall fix execution, flagged here for optimization
       $ref: '#/SuggestionStatus'
+    skipReason:
+      description: Reason for skipping when status is SKIPPED
+      $ref: '#/SuggestionSkipReason'
+    skipDetail:
+      description: Optional detail for skip reason, max 500 characters
+      type: string
+      maxLength: 500
     createdAt:
       description: UTC timestamp of when the suggestion was created
       $ref: '#/DateTime'
     updatedAt:
       description: UTC timestamp of when the suggestion was last updated
       $ref: '#/DateTime'
+  example:
+    id: '123e4567-e89b-12d3-a456-426614174000'
+    opportunityId: '123e4567-e89b-12d3-a456-426614174000'
+    type: 'REDIRECT_UPDATE'
+    rank: 45600
+    data:
+      title: 'Fix broken backlink from example.com'
+      url_from: 'https://www.example.com/old-page'
+      url_to: 'https://www.example.com/broken-link'
+      urls_suggested:
+        - 'https://www.example.com/new-page'
+    kpiDeltas: {}
+    status: 'NEW'
+    createdAt: '2024-01-19T14:20:30Z'
+    updatedAt: '2024-01-19T14:20:30Z'
   required:
     - id
     - opportunityId
@@ -3214,6 +3277,16 @@ SuggestionUpdate:
       oneOf:
         - $ref: '#/BrokenBacklinksKpiDeltas'
         - $ref: '#/BrokenInternalLinksKpiDeltas'
+    status:
+      description: Status of this suggestion; when set to SKIPPED, skipReason and skipDetail may be provided
+      $ref: '#/SuggestionStatus'
+    skipReason:
+      description: Reason for skipping when status is SKIPPED; required when status is SKIPPED if provided
+      $ref: '#/SuggestionSkipReason'
+    skipDetail:
+      description: Optional detail for skip reason, max 500 characters
+      type: string
+      maxLength: 500
 SuggestionStatusUpdate:
   type: array
   items:
@@ -3226,6 +3299,13 @@ SuggestionStatusUpdate:
       status:
         description: Status of this suggestion; status reflects overall fix execution, flagged here for optimization
         $ref: '#/SuggestionStatus'
+      skipReason:
+        description: Reason for skipping when status is SKIPPED
+        $ref: '#/SuggestionSkipReason'
+      skipDetail:
+        description: Optional detail for skip reason, max 500 characters
+        type: string
+        maxLength: 500
     required:
       - id
       - status
@@ -6184,3 +6264,47 @@ SentimentConfig:
       items:
         $ref: '#/SentimentGuideline'
       description: Guidelines (optionally filtered by audit type)
+
+StageDomainsRequest:
+  type: object
+  description: Request body for adding staging domains to a prod LLMO site
+  required:
+    - stagingDomains
+  properties:
+    stagingDomains:
+      type: array
+      items:
+        type: string
+        description: Staging domain (hostname, e.g. staging.lovesac.com)
+      minItems: 1
+      example: ['staging.lovesac.com', 'stage1.lovesac.com']
+
+StageConfigItem:
+  type: object
+  description: Full edge optimize metaconfig for one stage site (domain plus metaconfig fields)
+  required:
+    - domain
+    - siteId
+  properties:
+    domain:
+      type: string
+      description: Staging domain (e.g. staging.lovesac.com)
+      example: 'staging.lovesac.com'
+    siteId:
+      type: string
+      format: uuid
+      description: Spacecat site ID for the stage site
+    apiKeys:
+      type: array
+      items:
+        type: string
+      description: API keys for the stage site
+    tokowakaEnabled:
+      type: boolean
+  additionalProperties: true
+
+StageConfigsResponse:
+  type: array
+  description: Response is the array of stage configs (one per staging domain). Each item is domain plus full edge optimize metaconfig for that stage site.
+  items:
+    $ref: '#/StageConfigItem'
