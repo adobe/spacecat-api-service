@@ -1053,7 +1053,35 @@ describe('Sites Controller', () => {
     );
     const metrics = await result.json();
 
-    expect(context.log.error).to.have.been.calledWithMatch('Error getting RUM metrics for site 0b4dcf79-fe5f-410b-b11f-641f0bf56da3: RUM query failed');
+    expect(context.log.error).to.have.been.calledWithMatch('Error getting latest metrics for site 0b4dcf79-fe5f-410b-b11f-641f0bf56da3: RUM query failed');
+    expect(metrics).to.deep.equal({
+      ctrChange: 0,
+      pageViewsChange: 0,
+      projectedTrafficValue: 0,
+      currentLCP: null,
+      previousPageViews: 0,
+      currentPageViews: 0,
+      previousLCP: null,
+      previousEngagement: 0,
+      currentEngagement: 0,
+      currentConversion: 0,
+      previousConversion: 0,
+    });
+  });
+
+  it('returns zeroed metrics when domain resolution fails', async () => {
+    const rumApiClient = {
+      query: sandbox.stub(),
+      retrieveDomainkey: sandbox.stub().rejects(new Error('connect ETIMEDOUT')),
+    };
+
+    const result = await sitesController.getLatestSiteMetrics(
+      { ...context, params: { siteId: SITE_IDS[0] }, rumApiClient },
+    );
+    const metrics = await result.json();
+
+    expect(context.log.error).to.have.been.calledWithMatch('Error getting latest metrics for site 0b4dcf79-fe5f-410b-b11f-641f0bf56da3:');
+    expect(result.status).to.equal(200);
     expect(metrics).to.deep.equal({
       ctrChange: 0,
       pageViewsChange: 0,

@@ -925,7 +925,7 @@ function SitesController(ctx, log, env) {
         previousConversion,
       });
     } catch (error) {
-      log.error(`Error getting RUM metrics for site ${siteId}: ${error.message}`);
+      log.error(`Error getting latest metrics for site ${siteId}: ${error.message}`);
     }
 
     return ok({
