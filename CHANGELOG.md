@@ -1,3 +1,10 @@
+# [1.344.0](https://github.com/adobe/spacecat-api-service/compare/v1.343.1...v1.344.0) (2026-03-10)
+
+
+### Features
+
+* broken backlinks id and update ([#1899](https://github.com/adobe/spacecat-api-service/issues/1899)) ([b971466](https://github.com/adobe/spacecat-api-service/commit/b971466c348300eaa2483f5fbc92807fc6d68747))
+
 ## [1.343.1](https://github.com/adobe/spacecat-api-service/compare/v1.343.0...v1.343.1) (2026-03-10)
 
 
