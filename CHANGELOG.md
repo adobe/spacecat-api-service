@@ -1,3 +1,10 @@
+# [1.340.0](https://github.com/adobe/spacecat-api-service/compare/v1.339.1...v1.340.0) (2026-03-10)
+
+
+### Features
+
+* Service to Service communication guides ([#1928](https://github.com/adobe/spacecat-api-service/issues/1928)) ([91902e1](https://github.com/adobe/spacecat-api-service/commit/91902e15e774eaadf46d628ade4c162c932ae537))
+
 ## [1.339.1](https://github.com/adobe/spacecat-api-service/compare/v1.339.0...v1.339.1) (2026-03-09)
 
 
