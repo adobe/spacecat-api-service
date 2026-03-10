@@ -1041,9 +1041,15 @@ describe('Sites Controller', () => {
       query: sandbox.stub().rejects(new Error('RUM query failed')),
       retrieveDomainkey: sandbox.stub().resolves('domain-key'),
     };
+    const s3 = {
+      s3Client: { send: sandbox.stub().resolves({ Body: { transformToString: () => '[]' } }) },
+      s3Bucket: 'test-bucket',
+    };
 
     const result = await sitesController.getLatestSiteMetrics(
-      { ...context, params: { siteId: SITE_IDS[0] }, rumApiClient },
+      {
+        ...context, params: { siteId: SITE_IDS[0] }, rumApiClient, s3,
+      },
     );
     const metrics = await result.json();
 
