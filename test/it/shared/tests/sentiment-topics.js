@@ -17,7 +17,6 @@ import {
   SITE_2_ID,
   SITE_3_ID,
   TOPIC_1_ID,
-  TOPIC_2_ID,
   TOPIC_3_ID,
   NON_EXISTENT_TOPIC_ID,
 } from '../seed-ids.js';
@@ -30,8 +29,7 @@ function expectTopicDto(topic) {
   expect(topic.siteId).to.be.a('string');
   expect(topic.topicId).to.be.a('string');
   expect(topic.name).to.be.a('string');
-  expect(topic.subPrompts).to.be.an('array');
-  expect(topic.citations).to.be.an('array');
+  expect(topic.urls).to.be.an('array');
   expect(topic.enabled).to.be.a('boolean');
   expectISOTimestamp(topic.createdAt, 'createdAt');
   expectISOTimestamp(topic.updatedAt, 'updatedAt');
@@ -56,8 +54,7 @@ function expectPaginated(res, expectedItemCount) {
  * @param {() => object} getHttpClient - Getter returning the initialized HTTP client
  * @param {() => Promise<void>} resetData - Truncates all data and re-seeds baseline
  */
-export default function sentimentTopicTests(getHttpClient, resetData, options = {}) {
-  const { skipV2Mutations = false } = options;
+export default function sentimentTopicTests(getHttpClient, resetData) {
   describe('Sentiment Topics', () => {
     // ── List topics ──
 
@@ -104,8 +101,7 @@ export default function sentimentTopicTests(getHttpClient, resetData, options = 
         expect(res.body.topicId).to.equal(TOPIC_1_ID);
         expect(res.body.siteId).to.equal(SITE_1_ID);
         expect(res.body.name).to.equal('Product Quality');
-        expect(res.body.subPrompts).to.have.lengthOf(2);
-        expect(res.body.citations).to.be.an('array').with.lengthOf(2);
+        expect(res.body.urls).to.be.an('array').with.lengthOf(2);
         expect(res.body.enabled).to.be.true;
       });
 
@@ -177,15 +173,20 @@ export default function sentimentTopicTests(getHttpClient, resetData, options = 
         expect(res.body.failures[0].reason).to.include('already exists');
       });
 
-      it('user: creates topic with citations', async () => {
+      it('user: creates topic with urls', async () => {
         const http = getHttpClient();
-        const citations = [{ url: 'https://example.com/page', timesCited: 7, category: 'tech' }];
+        const urls = [{
+          url: 'https://example.com/page',
+          timesCited: 7,
+          category: 'tech',
+          subPrompts: ['How is quality?'],
+        }];
         const res = await http.user.post(`/sites/${SITE_1_ID}/sentiment/topics`, [
-          { name: 'Cited Topic', citations },
+          { name: 'URL Topic', urls },
         ]);
         expectBatch201(res, 1);
         expect(res.body.metadata.success).to.equal(1);
-        expect(res.body.items[0].citations).to.deep.equal(citations);
+        expect(res.body.items[0].urls).to.deep.equal(urls);
       });
     });
 
@@ -264,54 +265,6 @@ export default function sentimentTopicTests(getHttpClient, resetData, options = 
         const http = getHttpClient();
         const res = await http.user.delete(`/sites/${SITE_1_ID}/sentiment/topics/${NON_EXISTENT_TOPIC_ID}`);
         expect(res.status).to.equal(404);
-      });
-    });
-
-    // ── Add sub-prompts ──
-
-    describe('POST /sites/:siteId/sentiment/topics/:topicId/prompts', () => {
-      before(() => resetData());
-
-      // Skipped: v2 ElectroDB save fails after addSubPrompt()
-      (skipV2Mutations ? it.skip : it)('user: adds new sub-prompts', async () => {
-        const http = getHttpClient();
-        // TOPIC_2 has 0 subPrompts
-        const res = await http.user.post(
-          `/sites/${SITE_1_ID}/sentiment/topics/${TOPIC_2_ID}/prompts`,
-          { prompts: ['How is the experience?', 'Would you recommend?'] },
-        );
-        expect(res.status).to.equal(200);
-        expectTopicDto(res.body);
-        expect(res.body.subPrompts).to.include('How is the experience?');
-        expect(res.body.subPrompts).to.include('Would you recommend?');
-      });
-
-      it('user: returns 400 for empty prompts', async () => {
-        const http = getHttpClient();
-        const res = await http.user.post(
-          `/sites/${SITE_1_ID}/sentiment/topics/${TOPIC_1_ID}/prompts`,
-          { prompts: [] },
-        );
-        expect(res.status).to.equal(400);
-      });
-    });
-
-    // ── Remove sub-prompts ──
-
-    describe('POST /sites/:siteId/sentiment/topics/:topicId/prompts/remove', () => {
-      before(() => resetData());
-
-      it('user: removes sub-prompts', async () => {
-        const http = getHttpClient();
-        // TOPIC_1 has: ['How is build quality?', 'Is the product reliable?']
-        const res = await http.user.post(
-          `/sites/${SITE_1_ID}/sentiment/topics/${TOPIC_1_ID}/prompts/remove`,
-          { prompts: ['How is build quality?'] },
-        );
-        expect(res.status).to.equal(200);
-        expectTopicDto(res.body);
-        expect(res.body.subPrompts).to.not.include('How is build quality?');
-        expect(res.body.subPrompts).to.include('Is the product reliable?');
       });
     });
 

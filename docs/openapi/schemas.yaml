@@ -5878,15 +5878,9 @@ SentimentTopic:
     description:
       type: string
       description: Optional description for context
-    subPrompts:
+    urls:
       type: array
-      items:
-        type: string
-      description: Additional prompts/questions for deeper analysis
-      example: ["What do people say about performance?", "Price sentiment?"]
-    citations:
-      type: array
-      description: Per-URL citation counts for this topic
+      description: URLs associated with this topic, each with citation data and sub-prompts
       default: []
       items:
         type: object
@@ -5904,8 +5898,15 @@ SentimentTopic:
             example: 12
           category:
             type: string
-            description: Classification category for this citation
+            description: Classification category for this URL
             example: "automotive"
+          subPrompts:
+            type: array
+            items:
+              type: string
+            description: Sub-prompts specific to this URL
+            default: []
+            example: ["What do people say about performance?"]
     enabled:
       type: boolean
       description: Whether topic is active
@@ -5936,15 +5937,9 @@ SentimentTopicInput:
       type: string
       description: Optional description for context
       example: "Track sentiment about the latest Corvette model"
-    subPrompts:
+    urls:
       type: array
-      items:
-        type: string
-      description: Additional prompts/questions for deeper analysis
-      example: ["What do people say about performance?", "Price sentiment?"]
-    citations:
-      type: array
-      description: Per-URL citation counts for this topic
+      description: URLs associated with this topic
       default: []
       items:
         type: object
@@ -5961,6 +5956,11 @@ SentimentTopicInput:
           category:
             type: string
             example: "automotive"
+          subPrompts:
+            type: array
+            items:
+              type: string
+            example: ["What do people say about performance?"]
     enabled:
       type: boolean
       default: true
@@ -5973,11 +5973,7 @@ SentimentTopicUpdate:
       type: string
     description:
       type: string
-    subPrompts:
-      type: array
-      items:
-        type: string
-    citations:
+    urls:
       type: array
       items:
         type: object
@@ -5991,6 +5987,10 @@ SentimentTopicUpdate:
             type: integer
           category:
             type: string
+          subPrompts:
+            type: array
+            items:
+              type: string
     enabled:
       type: boolean
 

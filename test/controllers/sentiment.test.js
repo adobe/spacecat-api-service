@@ -37,8 +37,6 @@ describe('Sentiment Controller', () => {
     'createTopics',
     'updateTopic',
     'deleteTopic',
-    'addSubPrompts',
-    'removeSubPrompts',
     'linkAudits',
     'unlinkAudits',
     'listGuidelines',
@@ -54,8 +52,7 @@ describe('Sentiment Controller', () => {
     getTopicId: () => data.topicId || topicUUID,
     getName: () => data.name || 'Test Topic',
     getDescription: () => data.description,
-    getSubPrompts: () => data.subPrompts || [],
-    getCitations: () => data.citations || [],
+    getUrls: () => data.urls || [],
     getEnabled: () => data.enabled !== false,
     getCreatedAt: () => data.createdAt || '2026-01-01T00:00:00Z',
     getUpdatedAt: () => data.updatedAt || '2026-01-01T00:00:00Z',
@@ -63,12 +60,9 @@ describe('Sentiment Controller', () => {
     getUpdatedBy: () => data.updatedBy || 'system',
     setName: sandbox.stub(),
     setDescription: sandbox.stub(),
-    setSubPrompts: sandbox.stub(),
-    setCitations: sandbox.stub(),
+    setUrls: sandbox.stub(),
     setEnabled: sandbox.stub(),
     setUpdatedBy: sandbox.stub(),
-    addSubPrompt: sandbox.stub(),
-    removeSubPrompt: sandbox.stub(),
     save: sandbox.stub().resolvesThis(),
     remove: sandbox.stub().resolves(),
   });
@@ -357,14 +351,20 @@ describe('Sentiment Controller', () => {
       expect(result.status).to.equal(201);
     });
 
-    it('creates topics with non-array subPrompts defaulting to empty array', async () => {
-      context.data = [{ name: 'New Topic', subPrompts: 'not-an-array' }];
+    it('creates topics with non-array urls defaulting to empty array', async () => {
+      context.data = [{ name: 'New Topic', urls: 'not-an-array' }];
       const result = await sentimentController.createTopics(context);
       expect(result.status).to.equal(201);
     });
 
-    it('creates topics with array subPrompts', async () => {
-      context.data = [{ name: 'New Topic', subPrompts: ['prompt1', 'prompt2'] }];
+    it('creates topics with urls array', async () => {
+      const urls = [{
+        url: 'https://example.com',
+        timesCited: 3,
+        category: 'tech',
+        subPrompts: ['prompt1'],
+      }];
+      context.data = [{ name: 'New Topic', urls }];
       const result = await sentimentController.createTopics(context);
       expect(result.status).to.equal(201);
     });
@@ -431,31 +431,31 @@ describe('Sentiment Controller', () => {
       expect(body.failures[0].reason).to.equal('Duplicate topic name within the same request');
     });
 
-    it('creates topic with citations', async () => {
-      const citations = [{ url: 'https://example.com', timesCited: 5 }];
-      context.data = [{ name: 'New Topic', citations }];
+    it('creates topic with urls', async () => {
+      const urls = [{ url: 'https://example.com', timesCited: 5, category: 'tech' }];
+      context.data = [{ name: 'New Topic', urls }];
       const result = await sentimentController.createTopics(context);
       expect(result.status).to.equal(201);
       expect(mockDataAccess.SentimentTopic.create).to.have.been.calledWith(
-        sinon.match.has('citations', citations),
+        sinon.match.has('urls', urls),
       );
     });
 
-    it('defaults citations to empty array when not provided', async () => {
+    it('defaults urls to empty array when not provided', async () => {
       context.data = [{ name: 'New Topic' }];
       const result = await sentimentController.createTopics(context);
       expect(result.status).to.equal(201);
       expect(mockDataAccess.SentimentTopic.create).to.have.been.calledWith(
-        sinon.match.has('citations', []),
+        sinon.match.has('urls', []),
       );
     });
 
-    it('defaults citations to empty array when non-array provided', async () => {
-      context.data = [{ name: 'New Topic', citations: 'not-an-array' }];
+    it('defaults urls to empty array when non-array provided', async () => {
+      context.data = [{ name: 'New Topic', urls: 'not-an-array' }];
       const result = await sentimentController.createTopics(context);
       expect(result.status).to.equal(201);
       expect(mockDataAccess.SentimentTopic.create).to.have.been.calledWith(
-        sinon.match.has('citations', []),
+        sinon.match.has('urls', []),
       );
     });
 
@@ -530,18 +530,17 @@ describe('Sentiment Controller', () => {
       expect(result.status).to.equal(200);
     });
 
-    it('updates topic subPrompts', async () => {
-      context.data = { subPrompts: ['prompt1', 'prompt2'] };
+    it('updates topic urls', async () => {
+      const urls = [{
+        url: 'https://example.com',
+        timesCited: 10,
+        category: 'tech',
+        subPrompts: ['prompt1'],
+      }];
+      context.data = { urls };
       const result = await sentimentController.updateTopic(context);
       expect(result.status).to.equal(200);
-    });
-
-    it('updates topic citations', async () => {
-      const citations = [{ url: 'https://example.com', timesCited: 10 }];
-      context.data = { citations };
-      const result = await sentimentController.updateTopic(context);
-      expect(result.status).to.equal(200);
-      expect(mockTopics[0].setCitations).to.have.been.calledWith(citations);
+      expect(mockTopics[0].setUrls).to.have.been.calledWith(urls);
     });
 
     it('returns forbidden if user does not have access', async () => {
@@ -603,157 +602,6 @@ describe('Sentiment Controller', () => {
       mockDataAccess.SentimentTopic.findById.rejects(new Error('DB error'));
       const result = await sentimentController.deleteTopic(context);
       expect(result.status).to.equal(500);
-    });
-  });
-
-  describe('addSubPrompts', () => {
-    beforeEach(() => {
-      context.params.topicId = topicUUID;
-    });
-
-    it('returns bad request for invalid siteId', async () => {
-      context.params.siteId = 'invalid';
-      const result = await sentimentController.addSubPrompts(context);
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns bad request for missing topicId', async () => {
-      context.params.topicId = '';
-      const result = await sentimentController.addSubPrompts(context);
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns bad request for missing prompts', async () => {
-      context.data = {};
-      const result = await sentimentController.addSubPrompts(context);
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns bad request when context.data is undefined', async () => {
-      context.data = undefined;
-      const result = await sentimentController.addSubPrompts(context);
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns not found if site does not exist', async () => {
-      mockDataAccess.Site.findById.resolves(null);
-      context.data = { prompts: ['prompt1'] };
-      const result = await sentimentController.addSubPrompts(context);
-      expect(result.status).to.equal(404);
-    });
-
-    it('returns not found if topic does not exist', async () => {
-      mockDataAccess.SentimentTopic.findById.resolves(null);
-      context.data = { prompts: ['prompt1'] };
-      const result = await sentimentController.addSubPrompts(context);
-      expect(result.status).to.equal(404);
-    });
-
-    it('handles error gracefully', async () => {
-      context.data = { prompts: ['prompt1'] };
-      mockDataAccess.SentimentTopic.findById.rejects(new Error('DB error'));
-      const result = await sentimentController.addSubPrompts(context);
-      expect(result.status).to.equal(500);
-    });
-
-    it('adds prompts successfully', async () => {
-      context.data = { prompts: ['prompt1', 'prompt2'] };
-      const result = await sentimentController.addSubPrompts(context);
-      expect(result.status).to.equal(200);
-    });
-
-    it('handles topic with null subPrompts', async () => {
-      const topicWithNullPrompts = {
-        getSiteId: () => siteId,
-        getTopicId: () => topicUUID,
-        getName: () => 'Test Topic',
-        getDescription: () => undefined,
-        getSubPrompts: () => null,
-        getCitations: () => [],
-        getEnabled: () => true,
-        getCreatedAt: () => '2026-01-01T00:00:00Z',
-        getUpdatedAt: () => '2026-01-01T00:00:00Z',
-        getCreatedBy: () => 'system',
-        getUpdatedBy: () => 'system',
-        setUpdatedBy: sandbox.stub(),
-        addSubPrompt: sandbox.stub(),
-        save: sandbox.stub().resolvesThis(),
-      };
-      mockDataAccess.SentimentTopic.findById.resolves(topicWithNullPrompts);
-      context.data = { prompts: ['prompt1'] };
-      const result = await sentimentController.addSubPrompts(context);
-      expect(result.status).to.equal(200);
-    });
-
-    it('returns forbidden if user does not have access', async () => {
-      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
-      context.data = { prompts: ['prompt1'] };
-      const result = await sentimentController.addSubPrompts(context);
-      expect(result.status).to.equal(403);
-    });
-  });
-
-  describe('removeSubPrompts', () => {
-    beforeEach(() => {
-      context.params.topicId = topicUUID;
-    });
-
-    it('returns bad request for invalid siteId', async () => {
-      context.params.siteId = 'invalid';
-      const result = await sentimentController.removeSubPrompts(context);
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns bad request for missing topicId', async () => {
-      context.params.topicId = '';
-      const result = await sentimentController.removeSubPrompts(context);
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns bad request for missing prompts', async () => {
-      context.data = {};
-      const result = await sentimentController.removeSubPrompts(context);
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns bad request when context.data is undefined', async () => {
-      context.data = undefined;
-      const result = await sentimentController.removeSubPrompts(context);
-      expect(result.status).to.equal(400);
-    });
-
-    it('returns not found if site does not exist', async () => {
-      mockDataAccess.Site.findById.resolves(null);
-      context.data = { prompts: ['prompt1'] };
-      const result = await sentimentController.removeSubPrompts(context);
-      expect(result.status).to.equal(404);
-    });
-
-    it('returns not found if topic does not exist', async () => {
-      mockDataAccess.SentimentTopic.findById.resolves(null);
-      context.data = { prompts: ['prompt1'] };
-      const result = await sentimentController.removeSubPrompts(context);
-      expect(result.status).to.equal(404);
-    });
-
-    it('handles error gracefully', async () => {
-      context.data = { prompts: ['prompt1'] };
-      mockDataAccess.SentimentTopic.findById.rejects(new Error('DB error'));
-      const result = await sentimentController.removeSubPrompts(context);
-      expect(result.status).to.equal(500);
-    });
-
-    it('removes prompts successfully', async () => {
-      context.data = { prompts: ['prompt1'] };
-      const result = await sentimentController.removeSubPrompts(context);
-      expect(result.status).to.equal(200);
-    });
-
-    it('returns forbidden if user does not have access', async () => {
-      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
-      context.data = { prompts: ['prompt1'] };
-      const result = await sentimentController.removeSubPrompts(context);
-      expect(result.status).to.equal(403);
     });
   });
 

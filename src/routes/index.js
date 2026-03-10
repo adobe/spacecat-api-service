@@ -414,8 +414,6 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/sentiment/topics': sentimentController.createTopics,
     'PATCH /sites/:siteId/sentiment/topics/:topicId': sentimentController.updateTopic,
     'DELETE /sites/:siteId/sentiment/topics/:topicId': sentimentController.deleteTopic,
-    'POST /sites/:siteId/sentiment/topics/:topicId/prompts': sentimentController.addSubPrompts,
-    'POST /sites/:siteId/sentiment/topics/:topicId/prompts/remove': sentimentController.removeSubPrompts,
     // Guidelines
     'GET /sites/:siteId/sentiment/guidelines': sentimentController.listGuidelines,
     'GET /sites/:siteId/sentiment/guidelines/:guidelineId': sentimentController.getGuideline,
