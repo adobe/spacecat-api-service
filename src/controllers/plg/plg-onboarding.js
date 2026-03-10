@@ -16,7 +16,7 @@ import PlgOnboardingModel from '@adobe/spacecat-shared-data-access/src/models/pl
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import {
-  badRequest, createResponse, internalServerError, notFound, ok,
+  badRequest, createResponse, forbidden, internalServerError, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   composeBaseURL,
@@ -351,6 +351,21 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
 }
 
 /**
+ * Extracts imsOrgId from the IMS authentication token.
+ * @param {object} context - Request context with attributes.authInfo.
+ * @returns {{ imsOrgId: string }|null} imsOrgId or null if not found.
+ */
+function getImsOrgIdFromToken(context) {
+  const { authInfo } = context.attributes || {};
+  if (!authInfo) return null;
+
+  const profile = authInfo.getProfile();
+  if (!profile || !profile.tenants?.[0]?.id) return null;
+
+  return `${profile.tenants[0].id}@AdobeOrg`;
+}
+
+/**
  * PLG Onboarding controller.
  * @param {object} ctx - Context of the request.
  * @returns {object} Controller with onboard and getStatus methods.
@@ -365,11 +380,14 @@ function PlgOnboardingController(ctx) {
       return badRequest('Request body is required');
     }
 
-    const { domain, imsOrgId } = data;
+    const { domain } = data;
 
     if (!hasText(domain)) {
       return badRequest('domain is required');
     }
+
+    // Prefer imsOrgId from IMS token; fall back to body for API key auth
+    const imsOrgId = getImsOrgIdFromToken(context) || data.imsOrgId;
 
     if (!hasText(imsOrgId) || !isValidIMSOrgId(imsOrgId)) {
       return badRequest('Valid imsOrgId is required');
@@ -393,17 +411,23 @@ function PlgOnboardingController(ctx) {
 
   const getStatus = async (context) => {
     const { dataAccess: da, params } = context;
-    const { imsOrgId } = params;
+    const { imsOrgId: requestedImsOrgId } = params;
 
-    if (!hasText(imsOrgId) || !isValidIMSOrgId(imsOrgId)) {
+    if (!hasText(requestedImsOrgId) || !isValidIMSOrgId(requestedImsOrgId)) {
       return badRequest('Valid imsOrgId is required');
     }
 
+    // Enforce org match when authenticated via IMS token
+    const callerImsOrgId = getImsOrgIdFromToken(context);
+    if (callerImsOrgId && callerImsOrgId !== requestedImsOrgId) {
+      return forbidden('Not authorized for this IMS org');
+    }
+
     const { PlgOnboarding } = da;
-    const records = await PlgOnboarding.allByImsOrgId(imsOrgId);
+    const records = await PlgOnboarding.allByImsOrgId(requestedImsOrgId);
 
     if (!records || records.length === 0) {
-      return notFound(`No onboarding records found for IMS org ${imsOrgId}`);
+      return notFound(`No onboarding records found for IMS org ${requestedImsOrgId}`);
     }
 
     return ok(records.map(PlgOnboardingDto.toJSON));

@@ -253,6 +253,7 @@ describe('PlgOnboardingController', () => {
         '@adobe/spacecat-shared-http-utils': {
           badRequest: (msg) => ({ status: 400, value: msg }),
           createResponse: (body, status) => ({ status, value: body }),
+          forbidden: (msg) => ({ status: 403, value: msg }),
           internalServerError: (msg) => ({ status: 500, value: msg }),
           notFound: (msg) => ({ status: 404, value: msg }),
           ok: (data) => ({ status: 200, value: data }),
@@ -312,13 +313,25 @@ describe('PlgOnboardingController', () => {
     sandbox.restore();
   });
 
-  function buildContext(data = {}) {
+  function mockAuthInfo(imsOrgId = TEST_IMS_ORG_ID) {
+    const tenantId = imsOrgId.replace('@AdobeOrg', '');
+    return {
+      getProfile: sandbox.stub().returns({
+        tenants: [{ id: tenantId }],
+      }),
+    };
+  }
+
+  function buildContext(data = {}, { authInfo } = {}) {
     return {
       data,
       dataAccess: mockDataAccess,
       log: mockLog,
       env: mockEnv,
       sqs: { sendMessage: sandbox.stub().resolves() },
+      attributes: {
+        authInfo: authInfo !== undefined ? authInfo : mockAuthInfo(),
+      },
     };
   }
 
@@ -331,33 +344,84 @@ describe('PlgOnboardingController', () => {
     });
 
     it('returns 400 when request body is missing', async () => {
-      const res = await controller.onboard({ data: null });
+      const res = await controller.onboard({
+        data: null,
+        attributes: { authInfo: mockAuthInfo() },
+      });
       expect(res.status).to.equal(400);
       expect(res.value).to.equal('Request body is required');
     });
 
     it('returns 400 when domain is missing', async () => {
-      const res = await controller.onboard({
-        data: { imsOrgId: TEST_IMS_ORG_ID },
-      });
+      const context = buildContext({});
+      const res = await controller.onboard(context);
       expect(res.status).to.equal(400);
       expect(res.value).to.equal('domain is required');
     });
 
-    it('returns 400 when imsOrgId is missing', async () => {
-      const res = await controller.onboard({
-        data: { domain: TEST_DOMAIN },
-      });
+    it('returns 400 when no imsOrgId from token or body', async () => {
+      const context = buildContext(
+        { domain: TEST_DOMAIN },
+        { authInfo: null },
+      );
+      const res = await controller.onboard(context);
       expect(res.status).to.equal(400);
       expect(res.value).to.equal('Valid imsOrgId is required');
     });
 
-    it('returns 400 when imsOrgId is invalid', async () => {
-      const res = await controller.onboard({
-        data: { domain: TEST_DOMAIN, imsOrgId: 'not-valid' },
-      });
+    it('returns 400 when token has no tenants and body has no imsOrgId', async () => {
+      const context = buildContext(
+        { domain: TEST_DOMAIN },
+        { authInfo: { getProfile: sandbox.stub().returns({}) } },
+      );
+      const res = await controller.onboard(context);
       expect(res.status).to.equal(400);
       expect(res.value).to.equal('Valid imsOrgId is required');
+    });
+
+    it('returns 400 when attributes is undefined and body has no imsOrgId', async () => {
+      const context = {
+        data: { domain: TEST_DOMAIN },
+      };
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(400);
+      expect(res.value).to.equal('Valid imsOrgId is required');
+    });
+
+    it('returns 400 when body imsOrgId is invalid format', async () => {
+      const context = buildContext(
+        { domain: TEST_DOMAIN, imsOrgId: 'not-valid' },
+        { authInfo: null },
+      );
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(400);
+      expect(res.value).to.equal('Valid imsOrgId is required');
+    });
+
+    it('uses imsOrgId from body when no IMS token (API key auth)', async () => {
+      const context = buildContext(
+        { domain: TEST_DOMAIN, imsOrgId: TEST_IMS_ORG_ID },
+        { authInfo: null },
+      );
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain)
+        .to.have.been.calledWith(TEST_IMS_ORG_ID, TEST_DOMAIN);
+    });
+
+    it('prefers imsOrgId from IMS token over body', async () => {
+      const context = buildContext(
+        { domain: TEST_DOMAIN, imsOrgId: 'OTHER999@AdobeOrg' },
+      );
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      // Should use token org, not body org
+      expect(mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain)
+        .to.have.been.calledWith(TEST_IMS_ORG_ID, TEST_DOMAIN);
     });
   });
 
@@ -415,10 +479,7 @@ describe('PlgOnboardingController', () => {
         .onFirstCall().resolves(null)
         .onSecondCall().resolves(mockOnboarding);
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       const res = await controller.onboard(context);
 
@@ -432,10 +493,7 @@ describe('PlgOnboardingController', () => {
       );
       mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(null);
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       const res = await controller.onboard(context);
 
@@ -457,10 +515,7 @@ describe('PlgOnboardingController', () => {
       );
       mockOnboarding.save.rejects(new Error('DB write failed'));
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       const res = await controller.onboard(context);
 
@@ -481,21 +536,17 @@ describe('PlgOnboardingController', () => {
     });
 
     it('onboards a new site successfully', async () => {
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      // Response is now a DTO of the PlgOnboarding model
       expect(res.value.id).to.equal(TEST_ONBOARDING_ID);
       expect(res.value.imsOrgId).to.equal(TEST_IMS_ORG_ID);
       expect(res.value.domain).to.equal(TEST_DOMAIN);
       expect(res.value.baseURL).to.equal(TEST_BASE_URL);
 
-      // Verify PlgOnboarding was created
+      // Verify imsOrgId derived from token, not body
       expect(mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain)
         .to.have.been.calledWith(TEST_IMS_ORG_ID, TEST_DOMAIN);
       expect(mockDataAccess.PlgOnboarding.create).to.have.been.calledWith({
@@ -534,10 +585,7 @@ describe('PlgOnboardingController', () => {
       const existingOnboarding = createMockOnboarding({ status: 'ERROR' });
       mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingOnboarding);
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       const res = await controller.onboard(context);
 
@@ -552,10 +600,7 @@ describe('PlgOnboardingController', () => {
     it('sets locale when detected', async () => {
       detectLocaleStub.resolves({ language: 'fr', region: 'FR' });
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       await controller.onboard(context);
 
@@ -566,10 +611,7 @@ describe('PlgOnboardingController', () => {
     it('falls back to en/US when locale detection fails', async () => {
       detectLocaleStub.rejects(new Error('timeout'));
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       await controller.onboard(context);
 
@@ -580,10 +622,7 @@ describe('PlgOnboardingController', () => {
     it('sets overrideBaseURL when canonical differs', async () => {
       resolveCanonicalUrlStub.resolves('https://www.example.com');
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       await controller.onboard(context);
 
@@ -595,10 +634,7 @@ describe('PlgOnboardingController', () => {
     it('skips overrideBaseURL when canonical matches', async () => {
       resolveCanonicalUrlStub.resolves(TEST_BASE_URL);
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       await controller.onboard(context);
 
@@ -610,10 +646,7 @@ describe('PlgOnboardingController', () => {
         overrideBaseURL: 'https://existing.com',
       });
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       await controller.onboard(context);
 
@@ -623,10 +656,7 @@ describe('PlgOnboardingController', () => {
     it('handles canonical URL resolution failure gracefully', async () => {
       resolveCanonicalUrlStub.rejects(new Error('network error'));
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       const res = await controller.onboard(context);
 
@@ -638,10 +668,7 @@ describe('PlgOnboardingController', () => {
       composeBaseURLStub.returns('https://example.com/blog');
       resolveCanonicalUrlStub.resolves('https://www.example.com/blog');
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       await controller.onboard(context);
 
@@ -653,10 +680,7 @@ describe('PlgOnboardingController', () => {
     it('handles null resolveCanonicalUrl result', async () => {
       resolveCanonicalUrlStub.resolves(null);
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       await controller.onboard(context);
 
@@ -667,10 +691,7 @@ describe('PlgOnboardingController', () => {
       mockSiteConfig.getFetchConfig.returns(null);
       resolveCanonicalUrlStub.resolves('https://www.example.com');
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       const res = await controller.onboard(context);
 
@@ -681,10 +702,7 @@ describe('PlgOnboardingController', () => {
     it('handles profile with undefined imports and audits', async () => {
       loadProfileConfigStub.returns({});
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       const res = await controller.onboard(context);
 
@@ -692,10 +710,7 @@ describe('PlgOnboardingController', () => {
     });
 
     it('creates a project and assigns it to the site', async () => {
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       await controller.onboard(context);
 
@@ -709,10 +724,7 @@ describe('PlgOnboardingController', () => {
     it('reuses existing project when found', async () => {
       mockDataAccess.Project.allByOrganizationId.resolves([mockProject]);
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       await controller.onboard(context);
 
@@ -724,10 +736,7 @@ describe('PlgOnboardingController', () => {
       mockSite = createMockSite({ projectId: 'existing-project-id' });
       mockDataAccess.Site.create.resolves(mockSite);
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       await controller.onboard(context);
 
@@ -751,10 +760,7 @@ describe('PlgOnboardingController', () => {
         userAgent: 'SpaceCat/1.0',
       });
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       const res = await controller.onboard(context);
 
@@ -782,10 +788,7 @@ describe('PlgOnboardingController', () => {
         userAgent: 'SpaceCat/1.0',
       });
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       const res = await controller.onboard(context);
 
@@ -805,10 +808,7 @@ describe('PlgOnboardingController', () => {
         userAgent: 'Bot/2.0',
       });
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       await controller.onboard(context);
 
@@ -831,10 +831,7 @@ describe('PlgOnboardingController', () => {
     it('returns WAITLISTED when no RUM data for domain', async () => {
       rumRetrieveDomainkeyStub.rejects(new Error('No domainkey found'));
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       const res = await controller.onboard(context);
 
@@ -864,10 +861,7 @@ describe('PlgOnboardingController', () => {
       const existingSite = createMockSite({ orgId: TEST_ORG_ID });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       const res = await controller.onboard(context);
 
@@ -897,10 +891,7 @@ describe('PlgOnboardingController', () => {
       const existingSite = createMockSite({ orgId: DEFAULT_ORG_ID });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       const res = await controller.onboard(context);
 
@@ -913,10 +904,7 @@ describe('PlgOnboardingController', () => {
       const existingSite = createMockSite({ orgId: DEMO_ORG_ID });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       const res = await controller.onboard(context);
 
@@ -937,10 +925,7 @@ describe('PlgOnboardingController', () => {
       const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       const res = await controller.onboard(context);
 
@@ -969,10 +954,7 @@ describe('PlgOnboardingController', () => {
         new Error('Entitlement already exists'),
       );
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       const res = await controller.onboard(context);
 
@@ -985,10 +967,7 @@ describe('PlgOnboardingController', () => {
         new Error('Tier service unavailable'),
       );
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       const res = await controller.onboard(context);
 
@@ -1013,10 +992,7 @@ describe('PlgOnboardingController', () => {
     it('continues when brand profile trigger fails', async () => {
       triggerBrandProfileAgentStub.rejects(new Error('SFN timeout'));
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       const res = await controller.onboard(context);
 
@@ -1038,10 +1014,7 @@ describe('PlgOnboardingController', () => {
       mockSite = createMockSite({ language: 'de', region: 'DE' });
       mockDataAccess.Site.create.resolves(mockSite);
 
-      const context = buildContext({
-        domain: TEST_DOMAIN,
-        imsOrgId: TEST_IMS_ORG_ID,
-      });
+      const context = buildContext({ domain: TEST_DOMAIN });
 
       await controller.onboard(context);
 
@@ -1063,6 +1036,7 @@ describe('PlgOnboardingController', () => {
       const res = await controller.getStatus({
         dataAccess: mockDataAccess,
         params: { imsOrgId: 'not-valid' },
+        attributes: { authInfo: mockAuthInfo() },
       });
 
       expect(res.status).to.equal(400);
@@ -1073,9 +1047,35 @@ describe('PlgOnboardingController', () => {
       const res = await controller.getStatus({
         dataAccess: mockDataAccess,
         params: { imsOrgId: '' },
+        attributes: { authInfo: mockAuthInfo() },
       });
 
       expect(res.status).to.equal(400);
+    });
+
+    it('returns 403 when caller org does not match requested org', async () => {
+      const res = await controller.getStatus({
+        dataAccess: mockDataAccess,
+        params: { imsOrgId: 'OTHER999@AdobeOrg' },
+        attributes: { authInfo: mockAuthInfo() },
+      });
+
+      expect(res.status).to.equal(403);
+    });
+
+    it('allows access when no IMS token (API key auth)', async () => {
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([
+        createMockOnboarding({ id: 'rec-api' }),
+      ]);
+
+      const res = await controller.getStatus({
+        dataAccess: mockDataAccess,
+        params: { imsOrgId: TEST_IMS_ORG_ID },
+        attributes: {},
+      });
+
+      expect(res.status).to.equal(200);
+      expect(res.value).to.be.an('array').with.length(1);
     });
 
     it('returns 404 when no records found', async () => {
@@ -1084,6 +1084,7 @@ describe('PlgOnboardingController', () => {
       const res = await controller.getStatus({
         dataAccess: mockDataAccess,
         params: { imsOrgId: TEST_IMS_ORG_ID },
+        attributes: { authInfo: mockAuthInfo() },
       });
 
       expect(res.status).to.equal(404);
@@ -1106,6 +1107,7 @@ describe('PlgOnboardingController', () => {
       const res = await controller.getStatus({
         dataAccess: mockDataAccess,
         params: { imsOrgId: TEST_IMS_ORG_ID },
+        attributes: { authInfo: mockAuthInfo() },
       });
 
       expect(res.status).to.equal(200);
