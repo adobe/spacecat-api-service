@@ -358,9 +358,10 @@ related-urls-audit:
   summary: Example for a related-urls audit (brand presence prompts by region)
   value:
     id: '123e4567-e89b-12d3-a456-426614174000'
-    siteId: 'a1b2c3d4-e5f6-7g8h-9i0j-k11l12m13n14'
+    siteId: 'a1b2c3d4-e5f6-7890-9012-3c4d5e6f7a8b'
     auditedAt: '2024-01-20T12:00:00Z'
     expiresAt: '2024-07-20T12:00:00Z'
+    auditType: 'related-urls'
     deliveryType: 'aem_edge'
     fullAuditRef: 'https://www.example.com'
     auditResult:
@@ -368,10 +369,10 @@ related-urls-audit:
       baseURL: 'https://www.example.com'
       fanoutCount: 4
       promptRegions:
-        - prompt: 'Adobe Creative Cloud tutorials'
-          region: 'GLOBAL'
-        - prompt: 'Adobe Acrobat PDF tips'
-          region: 'EMEA'
+        - prompt: 'What is the best photo editing software for portraits?'
+          region: 'US'
+        - prompt: 'What is the best photo editing software for landscapes?'
+          region: 'GB'
 analytics-site-integration-aa-tags:
   summary: Example for an integration with Adobe Analytics via Adobe Tags
   value:
