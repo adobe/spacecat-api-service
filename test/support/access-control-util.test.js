@@ -1049,6 +1049,30 @@ describe('Access Control Util', () => {
       expect(mockTrialUser.create).to.not.have.been.called;
     });
 
+    it('should not create trial user when tier is free_trial, trial user does not exist, but user is S2S consumer', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'llmo',
+        getTier: () => 'free_trial',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
+
+      mockTrialUser.findByEmailId.resolves(null);
+
+      mockAuthInfo.getProfile.returns({
+        trial_email: 'trial@example.com',
+        email: 'user@example.com',
+        first_name: 'John',
+        last_name: 'Doe',
+        is_s2s_consumer: true,
+      });
+      mockAuthInfo.isS2SConsumer = sinon.stub().returns(true);
+
+      await util.validateEntitlement(mockOrg, null, 'llmo');
+
+      expect(mockTrialUser.create).to.not.have.been.called;
+    });
+
     it('should throw error when x-product header does not match productCode', async () => {
       const entitlement = {
         getId: () => 'entitlement-123',

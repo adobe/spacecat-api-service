@@ -1,3 +1,25 @@
+# [1.342.0](https://github.com/adobe/spacecat-api-service/compare/v1.341.0...v1.342.0) (2026-03-10)
+
+
+### Features
+
+* add timesCited to SentimentTopic and reject duplicate topic names ([#1896](https://github.com/adobe/spacecat-api-service/issues/1896)) ([be0c598](https://github.com/adobe/spacecat-api-service/commit/be0c598a40bc684d36302e712ca23a257983a8d1))
+
+# [1.341.0](https://github.com/adobe/spacecat-api-service/compare/v1.340.1...v1.341.0) (2026-03-10)
+
+
+### Features
+
+* Apply s2s auth wrapper ([#1914](https://github.com/adobe/spacecat-api-service/issues/1914)) ([9224c18](https://github.com/adobe/spacecat-api-service/commit/9224c186bebb61f4259586a27d173e051a21d1b9))
+
+## [1.340.1](https://github.com/adobe/spacecat-api-service/compare/v1.340.0...v1.340.1) (2026-03-10)
+
+
+### Bug Fixes
+
+* parallelize sequential API calls in getLatestSiteMetrics ([#1930](https://github.com/adobe/spacecat-api-service/issues/1930)) ([84e0bc4](https://github.com/adobe/spacecat-api-service/commit/84e0bc4618f7a09c5a62665564a2d6ac7e0b239f))
+* SITES-41401 Add isSummitPlgEnabled to sites-resolve API response ([#1915](https://github.com/adobe/spacecat-api-service/issues/1915)) ([c19994c](https://github.com/adobe/spacecat-api-service/commit/c19994cab350376a750c59d14686efff58512533))
+
 # [1.340.0](https://github.com/adobe/spacecat-api-service/compare/v1.339.1...v1.340.0) (2026-03-10)
 
 

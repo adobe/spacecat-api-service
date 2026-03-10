@@ -681,8 +681,6 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/sentiment/topics',
       'PATCH /sites/:siteId/sentiment/topics/:topicId',
       'DELETE /sites/:siteId/sentiment/topics/:topicId',
-      'POST /sites/:siteId/sentiment/topics/:topicId/prompts',
-      'POST /sites/:siteId/sentiment/topics/:topicId/prompts/remove',
       'POST /sites/:siteId/sentiment/guidelines/:guidelineId/audits',
       'POST /sites/:siteId/sentiment/guidelines/:guidelineId/audits/unlink',
       'GET /sites/:siteId/sentiment/guidelines',
