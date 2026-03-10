@@ -30,49 +30,100 @@ See the [API documentation](docs/API.md).
 
 ## Development
 
-To set up local development for `spacecat-api-service`, follow these steps:
+### Prerequisites
 
-1. Create an `.env` file in your project root and define the following environment variables with your AWS credentials:
+- **Node.js** (see `.nvmrc` for version)
+- **Docker Desktop** (or equivalent Docker daemon)
+- **AWS CLI** + ECR access for the private `mysticat-data-service` image
 
-```plaintext
-AWS_REGION=your_aws_region
-AWS_ACCESS_KEY_ID=your_access_key_id
-AWS_SECRET_ACCESS_KEY=your_secret_access_key
-AWS_SESSION_TOKEN=your_session_token
-USER_API_KEY=api_key_for_user_requests
-ADMIN_API_KEY=api_key_for_admin_requests
+### Option 1: Local PostgreSQL via Docker (Recommended)
+
+The API service uses PostgreSQL + PostgREST as its data backend. The same Docker Compose stack used by integration tests can be used for local development.
+
+#### 1. Authenticate Docker to ECR (first time / every 12 hours)
+
+The data-service image is hosted in a private AWS ECR registry under **SpaceCat Development (AWS3338)**.
+
+1. Get temporary AWS credentials from KLAM for the **SpaceCat Development (AWS3338)** account
+2. Add them to `~/.aws/credentials` under a profile name of your choice (e.g. `spacecat-dev`):
+
+```ini
+[spacecat-dev]
+aws_access_key_id = <your-access-key-id>
+aws_secret_access_key = <your-secret-access-key>
+aws_session_token = <your-session-token>
 ```
 
-**Getting AWS Credentials for Local Development:**
+3. Authenticate Docker to ECR (replace `spacecat-dev` with your profile name):
 
-To connect to production AWS data (DynamoDB, etc.) instead of LocalStack:
+```bash
+aws ecr get-login-password --profile spacecat-dev --region us-east-1 \
+  | docker login --username AWS --password-stdin 682033462621.dkr.ecr.us-east-1.amazonaws.com
+```
 
-1. Use [KLAM](https://git.corp.adobe.com/adobe/klam) to obtain temporary AWS credentials for the `spacecat-prod` profile
-2. Run KLAM in your terminal to get credentials
-3. Export the AWS credentials in your terminal session:
-   ```bash
-   export AWS_ACCESS_KEY_ID=<your-access-key>
-   export AWS_SECRET_ACCESS_KEY=<your-secret-key>
-   export AWS_SESSION_TOKEN=<your-session-token>
-   export AWS_REGION=us-east-1
-   ```
-4. Run `npm start` in the same terminal session
+ECR login tokens expire after 12 hours. Re-run step 3 if you see `pull access denied` errors.
 
-Alternatively, you can add these values directly to your `.env` file, but be careful not to commit them.
+#### 2. Start the database stack
 
-2. Start the development server
+```bash
+docker compose -f test/it/postgres/docker-compose.yml up -d
+```
+
+This starts:
+- **PostgreSQL 16** on port `55432`
+- **PostgREST** (with auto-applied dbmate migrations) on port `3300`
+
+Wait for PostgREST to become ready:
+
+```bash
+curl -sf http://localhost:3300/ > /dev/null && echo "Ready" || echo "Not ready yet"
+```
+
+#### 3. Create your `.env` file
+
+```bash
+cp .env.example .env
+```
+
+All required variables (including `POSTGREST_API_KEY`) are pre-filled with working local-dev values. See [`.env.example`](.env.example) for details. The canonical source of truth for env variables is `test/it/env.js`.
+
+#### 4. Start the development server
 
 ```bash
 npm start
 ```
 
-The server will start on `http://localhost:3000` by default.
+The server will start on `http://localhost:3002` by default.
 
-**Changing the Port:**
+#### 5. Tear down the database stack
 
-Most React applications (LLMO UI, ASO UI, etc.) run on port 3000 by default. If you're running the API service alongside a UI application locally, you'll need to change the port to avoid conflicts.
+```bash
+docker compose -f test/it/postgres/docker-compose.yml down -v
+```
 
-To run on a different port, add or modify the `PORT` variable in your `.env` file:
+### Option 2: Full mysticat-data-service Stack
+
+For a richer local environment (Swagger UI, separate test database, persistent data), clone the [mysticat-data-service](https://git.corp.adobe.com/anthropic/mysticat-data-service) repo and use its Docker Compose setup:
+
+```bash
+cd /path/to/mysticat-data-service/docker
+docker compose up -d
+```
+
+This starts:
+- **PostgreSQL 16** on port `5432` (with persistent volume and auto-applied migrations)
+- **PostgREST** on port `3000`
+- **Swagger UI** on port `8080` (API exploration at http://localhost:8080)
+
+Then use the same `.env` from Option 1 (`cp .env.example .env`), but change the PostgREST URL:
+
+```plaintext
+POSTGREST_URL=http://localhost:3000
+```
+
+### Changing the Port
+
+The dev server defaults to port `3002`. To change it, set the `PORT` variable in your `.env` file:
 
 ```plaintext
 PORT=3001
