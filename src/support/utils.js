@@ -594,6 +594,9 @@ export async function getIsSummitPlgEnabled(site, context) {
     const { Configuration } = context.dataAccess || {};
     if (!Configuration) return false;
     const configuration = await Configuration.findLatest();
+    if (!configuration || typeof configuration.isHandlerEnabledForSite !== 'function') {
+      return false;
+    }
     return configuration.isHandlerEnabledForSite('summit-plg', site);
   } catch (err) {
     context.log?.error?.('Error checking audit summit-plg for site:', err);
