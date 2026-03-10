@@ -1,0 +1,74 @@
+plg-onboard:
+  post:
+    tags:
+      - plg
+    summary: Onboard a domain via PLG ASO flow
+    description: |
+      Performs ASO PLG onboarding for a given domain and IMS organization.
+      Creates or resumes a PlgOnboarding record, resolves/creates the organization and site,
+      checks for bot blockers, configures audits and imports, creates ASO entitlements,
+      and triggers initial audit runs and brand profile generation.
+    operationId: plgOnboard
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - domain
+              - imsOrgId
+            properties:
+              domain:
+                type: string
+                format: hostname
+                description: The domain name to onboard (without protocol)
+                example: "example.com"
+              imsOrgId:
+                $ref: './schemas.yaml#/ImsOrganizationId'
+    responses:
+      '200':
+        description: PLG onboarding completed or in progress
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/PlgOnboarding'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]
+
+plg-onboard-status:
+  parameters:
+    - $ref: './parameters.yaml#/imsOrgId'
+  get:
+    tags:
+      - plg
+    summary: Get PLG onboarding status for an IMS org
+    description: |
+      Retrieves all PLG onboarding records for a given IMS Organization ID.
+      Returns the current status and progress of each onboarding.
+    operationId: getPlgOnboardStatus
+    responses:
+      '200':
+        description: List of PLG onboarding records
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: './schemas.yaml#/PlgOnboarding'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]
