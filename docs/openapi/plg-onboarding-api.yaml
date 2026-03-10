@@ -17,15 +17,12 @@ plg-onboard:
             type: object
             required:
               - domain
-              - imsOrgId
             properties:
               domain:
                 type: string
                 format: hostname
                 description: The domain name to onboard (without protocol)
                 example: "example.com"
-              imsOrgId:
-                $ref: './schemas.yaml#/ImsOrganizationId'
     responses:
       '200':
         description: PLG onboarding completed or in progress
@@ -37,6 +34,8 @@ plg-onboard:
         $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
+      '409':
+        description: Conflict - domain is already assigned to another organization
       '500':
         $ref: './responses.yaml#/500'
     security:
@@ -66,6 +65,8 @@ plg-onboard-status:
         $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
       '404':
         $ref: './responses.yaml#/404'
       '500':
