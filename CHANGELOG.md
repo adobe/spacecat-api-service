@@ -1,3 +1,11 @@
+## [1.340.1](https://github.com/adobe/spacecat-api-service/compare/v1.340.0...v1.340.1) (2026-03-10)
+
+
+### Bug Fixes
+
+* parallelize sequential API calls in getLatestSiteMetrics ([#1930](https://github.com/adobe/spacecat-api-service/issues/1930)) ([84e0bc4](https://github.com/adobe/spacecat-api-service/commit/84e0bc4618f7a09c5a62665564a2d6ac7e0b239f))
+* SITES-41401 Add isSummitPlgEnabled to sites-resolve API response ([#1915](https://github.com/adobe/spacecat-api-service/issues/1915)) ([c19994c](https://github.com/adobe/spacecat-api-service/commit/c19994cab350376a750c59d14686efff58512533))
+
 # [1.340.0](https://github.com/adobe/spacecat-api-service/compare/v1.339.1...v1.340.0) (2026-03-10)
 
 
