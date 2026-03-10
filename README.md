@@ -117,6 +117,20 @@ $ npm run test-e2e
 $ npm run lint
 ```
 
+### Integration Tests
+
+Integration tests validate the full API lifecycle against real database backends (DynamoDB and PostgreSQL). They test routing, controllers, DTOs, access control, and data access in a single pass — no mocks.
+
+```bash
+# DynamoDB suite (requires Java 17+)
+$ npx mocha --require test/it/dynamo/harness.js --timeout 30000 'test/it/dynamo/**/*.test.js'
+
+# PostgreSQL suite (requires Docker + ECR access)
+$ npx mocha --require test/it/postgres/harness.js --timeout 30000 'test/it/postgres/**/*.test.js'
+```
+
+Both suites run automatically in CI as parallel GitHub Actions jobs. For the full guide on structure, extending tests, and troubleshooting, see [test/it/README.md](test/it/README.md).
+
 ## Required ENV Variables
 
 Currently, audit worker requires two env variables:

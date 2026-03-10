@@ -8,15 +8,27 @@ permissions:
 on:
   push:
   pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
+    types: [opened, synchronize, ready_for_review, reopened, edited]
 
 env:
   CI_BUILD_NUM: ${{ github.run_id }}
   CI_BRANCH: ${{ github.ref_name }}
   HLX_AWS_REGION: ${{ secrets.AWS_REGION }}
 jobs:
-  protect-nyc-config:
+  validate-pr-title:
     if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Validate PR title
+        uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  protect-nyc-config:
+    if: github.event_name == 'pull_request' && github.event.action != 'edited'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -31,6 +43,7 @@ jobs:
         uses: ./.github/actions/protect-nyc-config
 
   build:
+    if: github.event_name == 'push' || github.event.action != 'edited'
     runs-on: ubuntu-latest
     steps:
       - name: Check out

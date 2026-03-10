@@ -508,10 +508,19 @@ site-opportunity-suggestions-auto-fix:
   parameters:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/opportunityId'
+    - $ref: './parameters.yaml#/xPromiseToken'
   patch:
     operationId: autoFixSiteOpportunitySuggestions
     summary: |
-        Trigger autofix for one or multiple suggestions, and set them to 'In Progress'
+        Trigger autofix for one or multiple suggestions
+    description: |
+      Triggers the autofix worker for the given suggestions. By default, suggestions are
+      transitioned to IN_PROGRESS status before the message is queued. When `action` is set
+      to `"assess"`, suggestions remain in their current status (no IN_PROGRESS transition)
+      and the worker performs a read-only fixability assessment instead. When `precheckOnly`
+      is true (for assess or assess-urls), the worker runs only checks that do not require
+      AEM CS access and does not need a valid promise token; when omitted or false, behavior
+      is unchanged (full assessment with AEM when possible).
     tags:
       - opportunity-suggestions
     requestBody:
@@ -519,18 +528,95 @@ site-opportunity-suggestions-auto-fix:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                suggestionIds:
-                  type: array
-                  items:
-                    $ref: './schemas.yaml#/Id'
-                customData:
-                  description: Additional custom data to forward to the autofix worker
-              required:
-                - suggestionIds
+              description: |
+                Use the assess-urls shape (action + pages) for URL-based assessment; use the
+                suggestion-based shape (suggestionIds required) for assess, fix, or other actions.
+              oneOf:
+                - type: object
+                  description: Request body when action is assess-urls (URL-based assessment).
+                  required:
+                    - action
+                    - pages
+                  properties:
+                    action:
+                      type: string
+                      enum: ['assess-urls']
+                    pages:
+                      type: array
+                      minItems: 1
+                      items:
+                        oneOf:
+                          - type: string
+                            format: uri
+                            description: Page URL to assess
+                          - type: object
+                            required: [pageUrl]
+                            properties:
+                              pageUrl:
+                                type: string
+                                format: uri
+                                description: Page URL to assess
+                              imageUrls:
+                                type: array
+                                items:
+                                  type: string
+                                  format: uri
+                                description: Optional list of image URLs on that page to assess
+                      description: |
+                        List of pages to assess. Each item is either a URL string or an object with
+                        pageUrl and optional imageUrls (array of image URLs on that page).
+                    precheckOnly:
+                      type: boolean
+                      description: |
+                        Optional. When true, the worker runs only no-AEM checks.
+                - type: object
+                  description: Request body for suggestion-based actions (assess, fix, etc.).
+                  required:
+                    - suggestionIds
+                  properties:
+                    suggestionIds:
+                      type: array
+                      items:
+                        $ref: './schemas.yaml#/Id'
+                    action:
+                      type: string
+                      description: |
+                        Optional. When `"assess"`, no IN_PROGRESS transition; worker does read-only
+                        fixability assessment. When `"assess-urls"`, use the other request shape
+                        (pages required instead of suggestionIds).
+                    variations:
+                      type: array
+                    url:
+                      type: string
+                      format: uri
+                    precheckOnly:
+                      type: boolean
+                      description: |
+                        Optional. Meaningful for action assess or assess-urls. When true, worker
+                        runs only no-AEM checks; for assess, promise token is not required.
+                    customData:
+                      description: Additional custom data to forward to the autofix worker
 
     responses:
+      '202':
+        description: |
+          Returned when action is `"assess-urls"`. Assess-urls job has been queued. The SQS
+          payload sent to the worker contains siteId, action, pages, and optionally precheckOnly;
+          opportunityId is intentionally omitted because the worker derives context differently
+          for URL-based assessments.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+                  example: Assess-urls job queued
+                siteId:
+                  $ref: './schemas.yaml#/Id'
+                pagesCount:
+                  type: integer
+                  description: Number of page URLs in the job
       '207':
         description: |
           A list of suggestions that are sent to autofix,

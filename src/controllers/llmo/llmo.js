@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { gunzipSync } from 'zlib';
 import {
   ok, badRequest, forbidden, createResponse, notFound, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
@@ -27,6 +28,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
+import { getDomain } from 'tldts';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
@@ -48,10 +50,13 @@ import {
   generateDataFolder,
   performLlmoOnboarding,
   performLlmoOffboarding,
+  postLlmoAlert,
 } from './llmo-onboarding.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
+import { handleBrandClaims } from './brand-claims.js';
+import { notifyStrategyChanges } from '../../support/opportunity-workspace-notifications.js';
 
 const { readConfig, writeConfig } = llmo;
 const { readStrategy, writeStrategy } = llmoStrategy;
@@ -67,6 +72,9 @@ function LlmoController(ctx) {
     const { Site } = dataAccess;
 
     const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound(`Site not found: ${siteId}`);
+    }
     const config = site.getConfig();
     const llmoConfig = config.getLlmoConfig();
 
@@ -122,7 +130,9 @@ function LlmoController(ctx) {
     } = context.params;
     const { env } = context;
     try {
-      const { llmoConfig } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { llmoConfig } = siteValidation;
       // Construct the sheet URL based on which parameters are provided
       let sheetURL;
       if (sheetType && week) {
@@ -218,7 +228,9 @@ function LlmoController(ctx) {
     }
 
     try {
-      const { llmoConfig } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { llmoConfig } = siteValidation;
       // Construct the sheet URL based on which parameters are provided
       let sheetURL;
       if (sheetType && week) {
@@ -349,7 +361,8 @@ function LlmoController(ctx) {
     try {
       log.info(`validating LLMO global sheet data for siteId: ${siteId}, configName: ${configName}`);
       // Validate LLMO access but don't use the site-specific dataFolder
-      await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
 
       // Use 'llmo-global' folder
       const sheetURL = `llmo-global/${configName}.json`;
@@ -403,7 +416,8 @@ function LlmoController(ctx) {
     const version = context.data?.version;
     try {
       // Validate site and LLMO access
-      await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
 
       if (!s3 || !s3.s3Client) {
         return badRequest('LLMO config storage is not configured for this environment');
@@ -436,7 +450,6 @@ function LlmoController(ctx) {
     const {
       log,
       s3,
-      data,
       pathInfo,
     } = context;
     const { siteId } = context.params;
@@ -445,7 +458,16 @@ function LlmoController(ctx) {
 
     try {
       // Validate site and LLMO access
-      await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+
+      // Support gzip-compressed request bodies (Content-Type: application/gzip)
+      let { data } = context;
+      const contentType = context.request?.headers?.get?.('content-type');
+      if (contentType === 'application/gzip') {
+        const compressed = Buffer.from(await context.request.arrayBuffer());
+        data = JSON.parse(gunzipSync(compressed).toString());
+      }
 
       if (!isObject(data)) {
         return badRequest('LLMO config update must be provided as an object');
@@ -519,7 +541,9 @@ function LlmoController(ctx) {
 
   // Handles requests to the LLMO questions endpoint, returns both human and ai questions
   const getLlmoQuestions = async (context) => {
-    const { llmoConfig } = await getSiteAndValidateLlmo(context);
+    const siteValidation = await getSiteAndValidateLlmo(context);
+    if (siteValidation.status) return siteValidation;
+    const { llmoConfig } = siteValidation;
     return ok(llmoConfig.questions || {});
   };
 
@@ -530,7 +554,9 @@ function LlmoController(ctx) {
       return forbidden('Only LLMO administrators can add questions');
     }
     const { log } = context;
-    const { site, config } = await getSiteAndValidateLlmo(context);
+    const siteValidation = await getSiteAndValidateLlmo(context);
+    if (siteValidation.status) return siteValidation;
+    const { site, config } = siteValidation;
 
     // add the question to the llmoConfig
     const newQuestions = context.data;
@@ -574,7 +600,9 @@ function LlmoController(ctx) {
     }
     const { log } = context;
     const { questionKey } = context.params;
-    const { site, config } = await getSiteAndValidateLlmo(context);
+    const siteValidation = await getSiteAndValidateLlmo(context);
+    if (siteValidation.status) return siteValidation;
+    const { site, config } = siteValidation;
 
     validateQuestionKey(config, questionKey);
 
@@ -595,7 +623,9 @@ function LlmoController(ctx) {
     const { log } = context;
     const { questionKey } = context.params;
     const { data } = context;
-    const { site, config } = await getSiteAndValidateLlmo(context);
+    const siteValidation = await getSiteAndValidateLlmo(context);
+    if (siteValidation.status) return siteValidation;
+    const { site, config } = siteValidation;
 
     validateQuestionKey(config, questionKey);
 
@@ -611,7 +641,9 @@ function LlmoController(ctx) {
   // Handles requests to the LLMO customer intent endpoint, returns customer intent array
   const getLlmoCustomerIntent = async (context) => {
     try {
-      const { llmoConfig } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { llmoConfig } = siteValidation;
       return ok(llmoConfig.customerIntent || []);
     } catch (error) {
       if (error.message === 'Only users belonging to the organization can view its sites') {
@@ -629,7 +661,9 @@ function LlmoController(ctx) {
     }
 
     try {
-      const { site, config } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { site, config } = siteValidation;
 
       const newCustomerIntent = context.data;
       if (!Array.isArray(newCustomerIntent)) {
@@ -677,7 +711,9 @@ function LlmoController(ctx) {
     const { intentKey } = context.params;
 
     try {
-      const { site, config } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { site, config } = siteValidation;
 
       validateCustomerIntentKey(config, intentKey);
 
@@ -703,7 +739,9 @@ function LlmoController(ctx) {
     const { data } = context;
 
     try {
-      const { site, config } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { site, config } = siteValidation;
 
       validateCustomerIntentKey(config, intentKey);
 
@@ -742,7 +780,9 @@ function LlmoController(ctx) {
         return forbidden('Only LLMO administrators can update the CDN logs filter');
       }
 
-      const { site, config } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { site, config } = siteValidation;
 
       if (!isObject(data)) {
         return badRequest('Update data must be provided as an object');
@@ -772,7 +812,9 @@ function LlmoController(ctx) {
         return forbidden('Only LLMO administrators can update the CDN bucket config');
       }
 
-      const { site, config } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { site, config } = siteValidation;
 
       if (!isObject(data)) {
         return badRequest('Update data must be provided as an object');
@@ -903,7 +945,9 @@ function LlmoController(ctx) {
       log.info(`Starting LLMO offboarding for site ${siteId}`);
 
       // Validate site and LLMO access
-      const { site, config } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { site, config } = siteValidation;
 
       // Perform the complete offboarding process
       const result = await performLlmoOffboarding(site, config, context);
@@ -928,7 +972,9 @@ function LlmoController(ctx) {
     const { log } = context;
     const { siteId } = context.params;
     try {
-      const { llmoConfig } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { llmoConfig } = siteValidation;
       const { data, headers } = await queryLlmoFiles(context, llmoConfig);
       return ok(data, headers);
     } catch (error) {
@@ -943,12 +989,30 @@ function LlmoController(ctx) {
     const { siteId } = context.params;
     try {
       // Validate site and LLMO access
-      await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
 
       // Delegate to the rationale handler for the actual processing
       return await handleLlmoRationale(context);
     } catch (error) {
       log.error(`Error getting LLMO rationale for site ${siteId}: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
+  // Handles requests to the brand claims endpoint
+  const getBrandClaims = async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+    try {
+      // Validate site and LLMO access
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+
+      // Delegate to the brand claims handler for the actual processing
+      return await handleBrandClaims(context);
+    } catch (error) {
+      log.error(`Error getting brand claims for site ${siteId}: ${error.message}`);
       return badRequest(error.message);
     }
   };
@@ -962,7 +1026,7 @@ function LlmoController(ctx) {
    * @returns {Promise<Response>} Created/updated edge config
    */
   const createOrUpdateEdgeConfig = async (context) => {
-    const { log, dataAccess } = context;
+    const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { authInfo: { profile } } = context.attributes;
     const { Site } = dataAccess;
@@ -1008,6 +1072,10 @@ function LlmoController(ctx) {
         return forbidden('User does not have access to this site');
       }
 
+      if (!await accessControlUtil.isOwnerOfSite(site)) {
+        return forbidden('User does not own this site');
+      }
+
       const baseURL = site.getBaseURL();
       const tokowakaClient = TokowakaClient.createFrom(context);
 
@@ -1047,12 +1115,36 @@ function LlmoController(ctx) {
 
       const currentConfig = site.getConfig();
       const existingEdgeConfig = currentConfig.getEdgeOptimizeConfig() || {};
+      const isNewlyOpted = !existingEdgeConfig.opted;
       currentConfig.updateEdgeOptimizeConfig({
         ...existingEdgeConfig,
         opted: existingEdgeConfig.opted ?? Date.now(),
       });
       await saveSiteConfig(site, currentConfig, log, 'updating edge optimize config');
       log.info(`[edge-optimize-config] Updated edge optimize config for site ${siteId} by ${lastModifiedBy}`);
+
+      // Send Slack notification only when opted field is being added
+      if (isNewlyOpted) {
+        try {
+          const llmoTeamUserIds = env.SLACK_LLMO_EDGE_OPTIMIZE_TEAM;
+
+          // Build user mentions from comma-separated user IDs
+          let userMentions = '';
+          if (hasText(llmoTeamUserIds)) {
+            const userIds = llmoTeamUserIds.split(',').map((id) => id.trim()).filter((id) => id);
+            userMentions = userIds.map((userId) => `<@${userId}>`).join(' ');
+          }
+
+          const message = `:gear: Site has opted for edge optimization\n\n• Site: ${baseURL}${userMentions ? `\n\ncc: ${userMentions}` : ''}`;
+
+          await postLlmoAlert(message, context);
+          log.info(`[edge-optimize-config] Slack notification sent for site ${siteId}`);
+        } catch (slackError) {
+          // Log error but don't fail the request
+          log.error(`[edge-optimize-config] Failed to send Slack notification for site ${siteId}:`, slackError);
+        }
+      }
+
       return ok({
         ...metaconfig,
       });
@@ -1143,12 +1235,15 @@ function LlmoController(ctx) {
 
   /**
    * PUT /sites/{siteId}/llmo/strategy
-   * Saves LLMO strategy data to S3
+   * Saves LLMO strategy data to S3.
+   * Status changes trigger email notifications (when enabled).
    * @param {object} context - Request context
    * @returns {Promise<Response>} Version of the saved strategy
    */
   const saveStrategy = async (context) => {
-    const { log, s3, data } = context;
+    const {
+      log, s3, data, dataAccess,
+    } = context;
     const { siteId } = context.params;
 
     try {
@@ -1164,13 +1259,52 @@ function LlmoController(ctx) {
         return badRequest('LLMO strategy storage is not configured for this environment');
       }
 
+      // Read previous strategy for diff (best-effort, null if not found)
+      let prevData = null;
+      let skipNotifications = false;
+      try {
+        const prev = await readStrategy(siteId, s3.s3Client, { s3Bucket: s3.s3Bucket });
+        if (prev.exists) {
+          prevData = prev.data;
+        }
+      } catch (readError) {
+        skipNotifications = true;
+        log.warn(`Could not read previous strategy for site ${siteId} (notifications will be skipped): ${readError.message}`);
+      }
+
       log.info(`Writing LLMO strategy to S3 for siteId: ${siteId}`);
       const { version } = await writeStrategy(siteId, data, s3.s3Client, {
         s3Bucket: s3.s3Bucket,
       });
 
       log.info(`Successfully saved LLMO strategy for siteId: ${siteId}, version: ${version}`);
-      return ok({ version });
+
+      // Await notifications and include summary in response for debugging
+      let siteBaseUrl = '';
+      if (dataAccess?.Site) {
+        const site = await dataAccess.Site.findById(siteId);
+        siteBaseUrl = site?.getBaseURL?.() || '';
+      }
+      let notificationSummary = {
+        sent: 0, failed: 0, skipped: 0, changes: 0,
+      };
+      if (!skipNotifications) {
+        try {
+          notificationSummary = await notifyStrategyChanges(context, {
+            prevData,
+            nextData: data,
+            siteId,
+            siteBaseUrl,
+          });
+          if (notificationSummary.changes > 0) {
+            log.info(`Strategy notification summary for site ${siteId}: ${JSON.stringify(notificationSummary)}`);
+          }
+        } catch (err) {
+          log.error(`Strategy notification error for site ${siteId}: ${err.message}`);
+        }
+      }
+
+      return ok({ version, notifications: notificationSummary });
     } catch (error) {
       log.error(`Error saving llmo strategy for siteId: ${siteId}, error: ${error.message}`);
       return badRequest(error.message);
@@ -1398,6 +1532,161 @@ function LlmoController(ctx) {
     }
   };
 
+  const markOpportunitiesReviewed = async (context) => {
+    const { log } = context;
+
+    try {
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { site, config } = siteValidation;
+      const OPPORTUNITIES_REVIEWED_TAG = 'opportunitiesReviewed';
+      const tags = config.getLlmoConfig().tags || [];
+
+      if (tags.includes(OPPORTUNITIES_REVIEWED_TAG)) {
+        log.info(`Site ${site.getId()} already has '${OPPORTUNITIES_REVIEWED_TAG}' tag, skipping`);
+        return ok(tags);
+      }
+
+      const userId = context.attributes?.authInfo?.getProfile()?.sub || 'system';
+      config.addLlmoTag(OPPORTUNITIES_REVIEWED_TAG);
+
+      await saveSiteConfig(site, config, log, 'marking opportunities as reviewed');
+
+      log.info(`User ${userId} marked opportunities as reviewed for site ${site.getId()}, added '${OPPORTUNITIES_REVIEWED_TAG}' tag`);
+
+      return ok(config.getLlmoConfig().tags || []);
+    } catch (error) {
+      log.error(`Error marking opportunities as reviewed: ${error.message}`);
+
+      if (error.message === 'Only users belonging to the organization can view its sites') {
+        return forbidden(error.message);
+      }
+      return badRequest(error.message);
+    }
+  };
+
+  /**
+   * Check if all URLs in urlList have the same base domain as prodBaseURL.
+   * @param {string[]} urlList the list of URLs/domains to check.
+   * @param {string} prodBaseURL the production base URL to match against.
+   * @returns {boolean} true if all URLs share the same domain as prodBaseURL
+   */
+  function areDomainsSameAsBase(urlList, prodBaseURL) {
+    const prodDomain = getDomain(prodBaseURL);
+    return urlList.every((stageBaseURL) => getDomain(stageBaseURL) === prodDomain);
+  }
+
+  /**
+   * POST /sites/{siteId}/llmo/edge-optimize-config/stage
+   * Adds staging domains for edge optimize (stage environment support).
+   * Creates or finds stage sites in Spacecat (same org), creates Tokowaka metaconfig per stage site
+   * with prerender for whole domain, and persists stagingDomains on prod site's edgeOptimizeConfig.
+   * Returns the complete S3 metaconfig for each stage site in an array.
+   * @param {object} context - Request context
+   * @returns {Promise<Response>} 200 with stageConfigs array (full S3 metaconfig per stage)
+   */
+  const createOrUpdateStageEdgeConfig = async (context) => {
+    const { log, dataAccess } = context;
+    const { siteId } = context.params;
+    const { authInfo: { profile } } = context.attributes;
+    const { Site } = dataAccess;
+    const { stagingDomains: rawStagingDomains } = context.data || {};
+
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can add staging domains');
+    }
+
+    if (!Array.isArray(rawStagingDomains) || rawStagingDomains.length === 0) {
+      return badRequest('stagingDomains must be a non-empty array');
+    }
+
+    const stagingDomains = rawStagingDomains
+      .map((d) => (typeof d === 'string' ? d.trim() : ''))
+      .filter((d) => hasText(d));
+    if (stagingDomains.length === 0) {
+      return badRequest('stagingDomains must contain at least one non-empty domain string');
+    }
+
+    try {
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('User does not have access to this site');
+      }
+
+      if (!areDomainsSameAsBase(stagingDomains, site.getBaseURL())) {
+        return badRequest('Staging domains must belong to the same base domain as the production site');
+      }
+
+      const tokowakaClient = TokowakaClient.createFrom(context);
+      const lastModifiedBy = profile?.email || 'tokowaka-stage-edge-optimize-config';
+      const organizationId = site.getOrganizationId();
+      const newEntries = [];
+      const stageConfigs = [];
+
+      /* eslint-disable no-await-in-loop */
+      for (const domain of stagingDomains) {
+        const stageBaseURL = composeBaseURL(domain);
+        let stageSite = await Site.findByBaseURL(stageBaseURL);
+        if (!stageSite) {
+          stageSite = await Site.create({
+            baseURL: stageBaseURL,
+            organizationId,
+          });
+        }
+
+        let metaconfig = await tokowakaClient.fetchMetaconfig(stageBaseURL);
+        if (!metaconfig || !Array.isArray(metaconfig?.apiKeys) || metaconfig.apiKeys.length === 0) {
+          metaconfig = await tokowakaClient.createMetaconfig(
+            stageBaseURL,
+            stageSite.getId(),
+            {
+              tokowakaEnabled: true,
+            },
+            { lastModifiedBy, isStageDomain: true },
+          );
+        } else {
+          await tokowakaClient.updateMetaconfig(
+            stageBaseURL,
+            stageSite.getId(),
+            {},
+            { lastModifiedBy, isStageDomain: true },
+          );
+          metaconfig = await tokowakaClient.fetchMetaconfig(stageBaseURL);
+        }
+
+        newEntries.push({ domain, id: stageSite.getId() });
+        stageConfigs.push({
+          domain,
+          ...metaconfig,
+        });
+      }
+      /* eslint-enable no-await-in-loop */
+
+      const currentConfig = site.getConfig();
+      const existingEdgeConfig = currentConfig.getEdgeOptimizeConfig() || {};
+      const existingList = existingEdgeConfig.stagingDomains || [];
+      const byDomain = new Map(existingList.map((e) => [e.domain, e]));
+      for (const entry of newEntries) {
+        byDomain.set(entry.domain, { domain: entry.domain, id: entry.id });
+      }
+      const mergedStagingDomains = [...byDomain.values()];
+
+      currentConfig.updateEdgeOptimizeConfig({
+        ...existingEdgeConfig,
+        stagingDomains: mergedStagingDomains,
+      });
+      await saveSiteConfig(site, currentConfig, log, 'updating edge optimize staging domains');
+      log.info(`[edge-optimize-config/stage] Updated staging domains for site ${siteId}, count=${mergedStagingDomains.length}`);
+      return ok(stageConfigs);
+    } catch (error) {
+      log.error(`Failed to add staging domains for site ${siteId}:`, error);
+      return badRequest(error.message);
+    }
+  };
+
   return {
     getLlmoSheetData,
     queryLlmoSheetData,
@@ -1418,12 +1707,15 @@ function LlmoController(ctx) {
     offboardCustomer,
     queryFiles,
     getLlmoRationale,
+    getBrandClaims,
     createOrUpdateEdgeConfig,
     getEdgeConfig,
+    createOrUpdateStageEdgeConfig,
     getStrategy,
     saveStrategy,
     checkEdgeOptimizeStatus,
     updateEdgeOptimizeCDNRouting,
+    markOpportunitiesReviewed,
   };
 }
 

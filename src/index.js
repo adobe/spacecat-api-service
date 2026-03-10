@@ -12,7 +12,7 @@
 
 import wrap from '@adobe/helix-shared-wrap';
 import { helixStatus } from '@adobe/helix-status';
-import secrets from '@adobe/helix-shared-secrets';
+import vaultSecrets from '@adobe/spacecat-shared-vault-secrets';
 import bodyData from '@adobe/helix-shared-body-data';
 import {
   badRequest,
@@ -32,7 +32,7 @@ import {
   elevatedSlackClientWrapper,
   SLACK_TARGETS,
 } from '@adobe/spacecat-shared-slack-client';
-import { hasText, resolveSecretsName, logWrapper } from '@adobe/spacecat-shared-utils';
+import { hasText, logWrapper } from '@adobe/spacecat-shared-utils';
 
 import dataAccess from './support/data-access.js';
 import sqs from './support/sqs.js';
@@ -82,6 +82,7 @@ import PTA2Controller from './controllers/paid/pta2.js';
 import TrafficToolsController from './controllers/paid/traffic-tools.js';
 import BotBlockerController from './controllers/bot-blocker.js';
 import SentimentController from './controllers/sentiment.js';
+import ConsumersController from './controllers/consumers.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -207,6 +208,7 @@ async function run(request, context) {
     const trafficToolsController = TrafficToolsController(context, log, context.env);
     const botBlockerController = BotBlockerController(context, log);
     const sentimentController = SentimentController(context, log);
+    const consumersController = ConsumersController(context);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -247,6 +249,7 @@ async function run(request, context) {
       trafficToolsController,
       botBlockerController,
       sentimentController,
+      consumersController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -262,6 +265,7 @@ async function run(request, context) {
         return badRequest('Organization Id is invalid. Please provide a valid UUID.');
       }
       context.params = params;
+      context.request = request;
 
       return await handler(context);
     } else {
@@ -292,5 +296,5 @@ export const main = wrappedMain
   .with(s3ClientWrapper)
   .with(imsClientWrapper)
   .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
-  .with(secrets, { name: resolveSecretsName })
+  .with(vaultSecrets)
   .with(helixStatus);
