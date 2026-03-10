@@ -1,3 +1,10 @@
+# [1.342.0](https://github.com/adobe/spacecat-api-service/compare/v1.341.0...v1.342.0) (2026-03-10)
+
+
+### Features
+
+* add timesCited to SentimentTopic and reject duplicate topic names ([#1896](https://github.com/adobe/spacecat-api-service/issues/1896)) ([be0c598](https://github.com/adobe/spacecat-api-service/commit/be0c598a40bc684d36302e712ca23a257983a8d1))
+
 # [1.341.0](https://github.com/adobe/spacecat-api-service/compare/v1.340.1...v1.341.0) (2026-03-10)
 
 
