@@ -1,3 +1,10 @@
+# [1.341.0](https://github.com/adobe/spacecat-api-service/compare/v1.340.1...v1.341.0) (2026-03-10)
+
+
+### Features
+
+* Apply s2s auth wrapper ([#1914](https://github.com/adobe/spacecat-api-service/issues/1914)) ([9224c18](https://github.com/adobe/spacecat-api-service/commit/9224c186bebb61f4259586a27d173e051a21d1b9))
+
 ## [1.340.1](https://github.com/adobe/spacecat-api-service/compare/v1.340.0...v1.340.1) (2026-03-10)
 
 
