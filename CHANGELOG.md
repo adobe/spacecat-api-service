@@ -1,3 +1,10 @@
+# [1.343.0](https://github.com/adobe/spacecat-api-service/compare/v1.342.1...v1.343.0) (2026-03-10)
+
+
+### Features
+
+* add related-urls audit type support ([#1933](https://github.com/adobe/spacecat-api-service/issues/1933)) ([c33f149](https://github.com/adobe/spacecat-api-service/commit/c33f149d5a66bd89b58621fe812d5a357aef615e))
+
 ## [1.342.1](https://github.com/adobe/spacecat-api-service/compare/v1.342.0...v1.342.1) (2026-03-10)
 
 
