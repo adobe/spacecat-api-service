@@ -5492,43 +5492,107 @@ PreflightJobResponse:
       type: object
       description: The error of the preflight job if it failed
 
+PreflightOpportunityElementSelector:
+  type: object
+  description: DOM element selector for locating the issue on the page (e.g. for link audits). CSS selector for use with document.querySelector.
+  properties:
+    selector:
+      type: string
+      description: CSS selector string (e.g. body > a, cq[data-path="..."], or data-aue-resource for Universal Editor).
+  required: [selector]
+
+PreflightOpportunityIssueItem:
+  type: object
+  description: |
+    A single occurrence when the opportunity groups multiple items. Used when opportunity.issue is an array.
+    - Links audit (broken-internal-links, broken-external-links): url, issue, seoImpact, seoRecommendation, elements, aiSuggestion, aiRationale.
+    - Alt-text audit: src, alt, issue, seoImpact, seoRecommendation.
+    All properties are optional; presence depends on audit type.
+  properties:
+    url:
+      type: string
+      description: Affected URL (e.g. broken link target). Used by links audit.
+    issue:
+      type: string
+      description: Human-readable description for this occurrence (e.g. "Status 404" for links, or alt-text issue message).
+    seoImpact:
+      type: string
+      description: SEO impact of this occurrence.
+    seoRecommendation:
+      type: string
+      description: Recommendation to fix this occurrence.
+    src:
+      type: string
+      description: Image source URL. Used by alt-text audit.
+    alt:
+      type: string
+      description: Current alt attribute value. Used by alt-text audit.
+    elements:
+      type: array
+      description: DOM element selectors for this occurrence. Used by links audit; format matches PreflightOpportunityElementSelector.
+      items:
+        $ref: '#/PreflightOpportunityElementSelector'
+    aiSuggestion:
+      type: string
+      description: AI-generated suggestion for this occurrence (e.g. suggested fix URL from suggest step). Used by links audit.
+    aiRationale:
+      type: string
+      description: AI rationale for the suggestion. Used by links audit.
+
 PreflightResultItem:
   type: object
+  description: One page's preflight result; each item in the job result array corresponds to one audited page URL.
   properties:
     audits:
       type: array
+      description: Audits run for this page (e.g. links, alt-text, metatags, body-size, h1-count).
       items:
         type: object
         properties:
           name:
             type: string
-            description: The name of the audit
+            description: The name of the audit (e.g. links, alt-text, metatags).
           opportunities:
             type: array
+            description: Findings for this audit. Each opportunity has a check and an issue (string or array of issue items).
             items:
               type: object
+              description: |
+                One finding. issue is either a single string (single-summary audits like body-size, lorem-ipsum, h1-count)
+                or an array of PreflightOpportunityIssueItem (links, alt-text) with per-item url/issue, and for links
+                optionally elements, aiSuggestion, aiRationale.
               properties:
                 check:
                   type: string
-                  description: The title of the opportunity
+                  description: The title of the opportunity (e.g. broken-internal-links, missing-alt, meta-description).
                 issue:
-                  type: string
-                  description: The description of the opportunity
+                  oneOf:
+                    - type: string
+                      description: |
+                        Single issue description. Used when the opportunity has one summary (e.g. body-size,
+                        lorem-ipsum, h1-count, headings, metatags).
+                    - type: array
+                      description: |
+                        List of structured issue occurrences. Used by links audit (broken-internal-links,
+                        broken-external-links) and alt-text audit; each item is a PreflightOpportunityIssueItem
+                        with url/issue/elements/aiSuggestion/aiRationale for links or src/alt/issue for alt-text.
+                      items:
+                        $ref: '#/PreflightOpportunityIssueItem'
                 seoImpact:
                   type: string
-                  description: The SEO impact of the opportunity
+                  description: SEO impact of the opportunity (when issue is a string).
                 seoRecommendation:
                   type: string
-                  description: The SEO recommendation of the opportunity
+                  description: SEO recommendation for the opportunity (when issue is a string).
                 aiSuggestion:
                   type: string
-                  description: The AI suggestion of the opportunity
+                  description: AI suggestion at opportunity level (when issue is a string).
                 aiRationale:
                   type: string
-                  description: The AI rationale of the opportunity
+                  description: AI rationale at opportunity level (when issue is a string).
           type:
             type: string
-            description: The type of the audit
+            description: The type/category of the audit (e.g. seo, accessibility).
     pageUrl:
       type: string
       format: uri
