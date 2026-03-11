@@ -1,3 +1,10 @@
+## [1.344.3](https://github.com/adobe/spacecat-api-service/compare/v1.344.2...v1.344.3) (2026-03-11)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-data-access to v3.15.1 ([#1943](https://github.com/adobe/spacecat-api-service/issues/1943)) ([b8e2d6f](https://github.com/adobe/spacecat-api-service/commit/b8e2d6fcce32a5be779075af9f77cab1441aaef4))
+
 ## [1.344.2](https://github.com/adobe/spacecat-api-service/compare/v1.344.1...v1.344.2) (2026-03-11)
 
 
