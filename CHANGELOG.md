@@ -1,3 +1,10 @@
+## [1.344.1](https://github.com/adobe/spacecat-api-service/compare/v1.344.0...v1.344.1) (2026-03-11)
+
+
+### Bug Fixes
+
+* Restrict opportunities to 3 for freemium plan in spacecat-api-service. ([#1940](https://github.com/adobe/spacecat-api-service/issues/1940)) ([dd84146](https://github.com/adobe/spacecat-api-service/commit/dd84146902f02e4a4380a33fa921680f02fbf6a7))
+
 # [1.344.0](https://github.com/adobe/spacecat-api-service/compare/v1.343.1...v1.344.0) (2026-03-10)
 
 
