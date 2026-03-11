@@ -22,15 +22,19 @@ import {
   hasText,
   isNonEmptyObject,
   isValidUUID,
-  llmoConfig,
 } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode, getImsUserToken } from '../support/utils.js';
+import {
+  readCustomerConfigV2FromPostgres,
+  writeCustomerConfigV2ToPostgres,
+} from '../support/customer-config-v2-storage.js';
 import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { mergeCustomerConfigV2 } from '../support/customer-config-v2-metadata.js';
+import { syncBrandConfig } from '../support/brand-presence-sync.js';
 
 const HEADER_ERROR = 'x-error';
 
@@ -71,22 +75,37 @@ function BrandsController(ctx, log, env) {
   }
 
   /**
-   * Loads customer config from S3 with error handling.
+   * Returns 503 if PostgREST client is not available (v2 config requires Postgres).
    * @param {object} context - Request context
+   * @returns {Response|null} 503 response or null if postgrestClient is available
+   */
+  function requirePostgrestForV2Config(context) {
+    const postgrestClient = context.dataAccess?.services?.postgrestClient;
+    if (!postgrestClient?.from) {
+      return createResponse(
+        { message: 'V2 customer config requires Postgres (DATA_SERVICE_PROVIDER=postgres)' },
+        503,
+      );
+    }
+    return null;
+  }
+
+  /**
+   * Loads customer config from Postgres.
+   * @param {object} context - Request context (must have postgrestClient)
    * @param {string} orgId - Organization ID
    * @returns {Promise<object|null>} Customer config or null if not found/error
    */
-  async function loadCustomerConfigFromS3(context, orgId) {
+  async function loadCustomerConfig(context, orgId) {
+    const postgrestClient = context.dataAccess?.services?.postgrestClient;
     try {
-      const config = await llmoConfig.readCustomerConfigV2(
-        orgId,
-        context.s3.s3Client,
-        { s3Bucket: context.s3.s3Bucket },
-      );
-      log.info(`Customer config loaded from S3 for organization: ${orgId}`);
+      const config = await readCustomerConfigV2FromPostgres(orgId, postgrestClient);
+      if (config) {
+        log.info(`Customer config loaded from Postgres for organization: ${orgId}`);
+      }
       return config;
-    } catch (s3Error) {
-      log.warn(`Failed to load customer config from S3 for organization: ${orgId}`, s3Error);
+    } catch (err) {
+      log.warn(`Failed to load customer config from Postgres for organization: ${orgId}`, err);
       return null;
     }
   }
@@ -255,8 +274,10 @@ function BrandsController(ctx, log, env) {
         return forbidden('User does not have access to this organization');
       }
 
-      // Try to get from S3 first
-      const customerConfig = await loadCustomerConfigFromS3(context, spaceCatId);
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) return unavailable;
+
+      const customerConfig = await loadCustomerConfig(context, spaceCatId);
       if (!customerConfig) {
         return notFound('Customer configuration not found for organization');
       }
@@ -304,8 +325,10 @@ function BrandsController(ctx, log, env) {
       const organization = await getOrganizationOrNotFound(spaceCatId);
       if (organization.status) return organization; // Return if it's an error response
 
-      // Try to get from S3 first
-      const customerConfig = await loadCustomerConfigFromS3(context, spaceCatId);
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) return unavailable;
+
+      const customerConfig = await loadCustomerConfig(context, spaceCatId);
       if (!customerConfig) {
         return notFound('Customer configuration not found');
       }
@@ -377,20 +400,10 @@ function BrandsController(ctx, log, env) {
       const organization = await getOrganizationOrNotFound(spaceCatId);
       if (organization.status) return organization; // Return if it's an error response
 
-      // Get config
-      let customerConfig = null;
-      if (context.s3?.s3Client && context.s3?.s3Bucket) {
-        try {
-          customerConfig = await llmoConfig.readCustomerConfigV2(
-            spaceCatId,
-            context.s3.s3Client,
-            { s3Bucket: context.s3.s3Bucket },
-          );
-        } catch (s3Error) {
-          log.warn(`Failed to load customer config from S3 for organization: ${spaceCatId}`, s3Error);
-        }
-      }
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) return unavailable;
 
+      const customerConfig = await loadCustomerConfig(context, spaceCatId);
       if (!customerConfig) {
         return notFound('Customer configuration not found');
       }
@@ -446,20 +459,10 @@ function BrandsController(ctx, log, env) {
       const organization = await getOrganizationOrNotFound(spaceCatId);
       if (organization.status) return organization; // Return if it's an error response
 
-      // Get config
-      let customerConfig = null;
-      if (context.s3?.s3Client && context.s3?.s3Bucket) {
-        try {
-          customerConfig = await llmoConfig.readCustomerConfigV2(
-            spaceCatId,
-            context.s3.s3Client,
-            { s3Bucket: context.s3.s3Bucket },
-          );
-        } catch (s3Error) {
-          log.warn(`Failed to load customer config from S3 for organization: ${spaceCatId}`, s3Error);
-        }
-      }
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) return unavailable;
 
+      const customerConfig = await loadCustomerConfig(context, spaceCatId);
       if (!customerConfig) {
         return notFound('Customer configuration not found');
       }
@@ -545,15 +548,28 @@ function BrandsController(ctx, log, env) {
         return badRequest('Invalid customer configuration structure: customer.customerName is required');
       }
 
-      // Save to S3
-      await llmoConfig.writeCustomerConfigV2(
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) return unavailable;
+
+      const { postgrestClient } = context.dataAccess.services;
+      const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
+
+      await writeCustomerConfigV2ToPostgres(
         spaceCatId,
         customerConfig,
-        context.s3.s3Client,
-        { s3Bucket: context.s3.s3Bucket },
+        postgrestClient,
+        updatedBy,
       );
 
-      log.info(`Customer config saved to S3 for organization: ${spaceCatId}`);
+      await syncBrandConfig({
+        customerConfig,
+        organizationId: spaceCatId,
+        postgrestClient,
+        log,
+        updatedBy,
+      });
+
+      log.info(`Customer config saved to Postgres for organization: ${spaceCatId}`);
 
       return ok({ message: 'Customer configuration saved successfully' });
     } catch (error) {
@@ -590,17 +606,12 @@ function BrandsController(ctx, log, env) {
         return badRequest('Customer configuration updates are required');
       }
 
-      // Get existing config
-      let existingConfig = null;
-      try {
-        existingConfig = await llmoConfig.readCustomerConfigV2(
-          spaceCatId,
-          context.s3.s3Client,
-          { s3Bucket: context.s3.s3Bucket },
-        );
-      } catch (s3Error) {
-        log.warn(`Failed to load existing config from S3 for organization: ${spaceCatId}`, s3Error);
-      }
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) return unavailable;
+
+      const { postgrestClient } = context.dataAccess.services;
+
+      const existingConfig = await loadCustomerConfig(context, spaceCatId);
 
       // Merge updates with existing config
       const { mergedConfig, stats } = mergeCustomerConfigV2(
@@ -617,13 +628,20 @@ function BrandsController(ctx, log, env) {
         return badRequest('Invalid customer configuration: customer.customerName and customer.imsOrgID are required');
       }
 
-      // Save merged config to S3
-      await llmoConfig.writeCustomerConfigV2(
+      await writeCustomerConfigV2ToPostgres(
         spaceCatId,
         mergedConfig,
-        context.s3.s3Client,
-        { s3Bucket: context.s3.s3Bucket },
+        postgrestClient,
+        userId,
       );
+
+      await syncBrandConfig({
+        customerConfig: mergedConfig,
+        organizationId: spaceCatId,
+        postgrestClient,
+        log,
+        updatedBy: userId,
+      });
 
       log.info(`Customer config patched for organization: ${spaceCatId} by ${userId}. Stats:`, stats);
 
