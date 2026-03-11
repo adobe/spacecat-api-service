@@ -84,6 +84,7 @@ import TrafficToolsController from './controllers/paid/traffic-tools.js';
 import BotBlockerController from './controllers/bot-blocker.js';
 import SentimentController from './controllers/sentiment.js';
 import ConsumersController from './controllers/consumers.js';
+import TokensController from './controllers/tokens.js';
 import routeRequiredCapabilities from './routes/required-capabilities.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -211,6 +212,7 @@ async function run(request, context) {
     const botBlockerController = BotBlockerController(context, log);
     const sentimentController = SentimentController(context, log);
     const consumersController = ConsumersController(context);
+    const tokensController = TokensController(context);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -252,6 +254,7 @@ async function run(request, context) {
       botBlockerController,
       sentimentController,
       consumersController,
+      tokensController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
