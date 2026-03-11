@@ -14,9 +14,11 @@
  * Immutable baseline sentiment topics for IT tests.
  * All under SITE_1 (accessible).
  *
- * - TOPIC_1: enabled, 2 subPrompts
- * - TOPIC_2: enabled, 0 subPrompts
+ * - TOPIC_1: enabled, 2 urls
+ * - TOPIC_2: enabled, 0 urls
  * - TOPIC_3: disabled
+ *
+ * Note: urls field is postgrestIgnore so not included here.
  *
  * Format: snake_case (v3 / PostgreSQL / PostgREST)
  */
@@ -26,7 +28,6 @@ export const sentimentTopics = [
     topic_id: 'a1111111-1111-4111-b111-111111111111',
     name: 'Product Quality',
     description: 'Tracks sentiment about product quality',
-    sub_prompts: ['How is build quality?', 'Is the product reliable?'],
     enabled: true,
     created_by: 'seed@test.com',
   },
@@ -35,7 +36,6 @@ export const sentimentTopics = [
     topic_id: 'a2222222-2222-4222-a222-222222222222',
     name: 'Customer Service',
     description: 'Tracks sentiment about customer service',
-    sub_prompts: [],
     enabled: true,
     created_by: 'seed@test.com',
   },
@@ -44,7 +44,6 @@ export const sentimentTopics = [
     topic_id: 'a3333333-3333-4333-b333-333333333333',
     name: 'Pricing',
     description: 'Tracks sentiment about pricing',
-    sub_prompts: ['Is it affordable?'],
     enabled: false,
     created_by: 'seed@test.com',
   },

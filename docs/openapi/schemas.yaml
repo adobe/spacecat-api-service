@@ -150,6 +150,7 @@ AuditType:
     - 'experimentation-opportunities'
     - 'llm-error-pages'
     - 'prerender'
+    - 'related-urls'
     - 'summarization'
     - 'faqs'
   example: 'cwv'
@@ -1143,6 +1144,30 @@ AuditResult:
                 description: A list of prompts for this URL and topic
                 items:
                   type: string
+    - type: object
+      description: The result of related-urls audit (brand presence prompts by region)
+      properties:
+        success:
+          type: boolean
+          description: Whether the audit was successful
+        baseURL:
+          type: string
+          description: Base URL of the site (present when success is true)
+        fanoutCount:
+          type: integer
+          description: Number of URLs to fan out for related-urls processing (present when success is true)
+        promptRegions:
+          type: array
+          description: List of prompt and region pairs used for related-urls
+          items:
+            type: object
+            properties:
+              prompt:
+                type: string
+                description: The brand presence prompt
+              region:
+                type: string
+                description: Region for the prompt (e.g. GLOBAL or region code)
 AuditList:
   type: array
   items:
@@ -2890,6 +2915,15 @@ SuggestionStatus:
     - 'PENDING_VALIDATION'
     - 'REJECTED'
   example: 'NEW'
+SuggestionSkipReason:
+  description: Reason for skipping a suggestion when status is SKIPPED
+  type: string
+  enum:
+    - ALREADY_IMPLEMENTED
+    - INACCURATE_OR_INCOMPLETE
+    - TOO_RISKY
+    - NO_REASON
+    - OTHER
 SuggestionType:
   description: |
     Type of suggestion:
@@ -2936,12 +2970,34 @@ Suggestion:
     status:
       description: Status of this suggestion; status reflects overall fix execution, flagged here for optimization
       $ref: '#/SuggestionStatus'
+    skipReason:
+      description: Reason for skipping when status is SKIPPED
+      $ref: '#/SuggestionSkipReason'
+    skipDetail:
+      description: Optional detail for skip reason, max 500 characters
+      type: string
+      maxLength: 500
     createdAt:
       description: UTC timestamp of when the suggestion was created
       $ref: '#/DateTime'
     updatedAt:
       description: UTC timestamp of when the suggestion was last updated
       $ref: '#/DateTime'
+  example:
+    id: '123e4567-e89b-12d3-a456-426614174000'
+    opportunityId: '123e4567-e89b-12d3-a456-426614174000'
+    type: 'REDIRECT_UPDATE'
+    rank: 45600
+    data:
+      title: 'Fix broken backlink from example.com'
+      url_from: 'https://www.example.com/old-page'
+      url_to: 'https://www.example.com/broken-link'
+      urls_suggested:
+        - 'https://www.example.com/new-page'
+    kpiDeltas: {}
+    status: 'NEW'
+    createdAt: '2024-01-19T14:20:30Z'
+    updatedAt: '2024-01-19T14:20:30Z'
   required:
     - id
     - opportunityId
@@ -3246,6 +3302,16 @@ SuggestionUpdate:
       oneOf:
         - $ref: '#/BrokenBacklinksKpiDeltas'
         - $ref: '#/BrokenInternalLinksKpiDeltas'
+    status:
+      description: Status of this suggestion; when set to SKIPPED, skipReason and skipDetail may be provided
+      $ref: '#/SuggestionStatus'
+    skipReason:
+      description: Reason for skipping when status is SKIPPED; required when status is SKIPPED if provided
+      $ref: '#/SuggestionSkipReason'
+    skipDetail:
+      description: Optional detail for skip reason, max 500 characters
+      type: string
+      maxLength: 500
 SuggestionStatusUpdate:
   type: array
   items:
@@ -3258,6 +3324,13 @@ SuggestionStatusUpdate:
       status:
         description: Status of this suggestion; status reflects overall fix execution, flagged here for optimization
         $ref: '#/SuggestionStatus'
+      skipReason:
+        description: Reason for skipping when status is SKIPPED
+        $ref: '#/SuggestionSkipReason'
+      skipDetail:
+        description: Optional detail for skip reason, max 500 characters
+        type: string
+        maxLength: 500
     required:
       - id
       - status
@@ -5910,12 +5983,35 @@ SentimentTopic:
     description:
       type: string
       description: Optional description for context
-    subPrompts:
+    urls:
       type: array
+      description: URLs associated with this topic, each with citation data and sub-prompts
+      default: []
       items:
-        type: string
-      description: Additional prompts/questions for deeper analysis
-      example: ["What do people say about performance?", "Price sentiment?"]
+        type: object
+        required:
+          - url
+          - timesCited
+        properties:
+          url:
+            type: string
+            description: The URL where the topic was cited
+            example: "https://en.wikipedia.org/wiki/BMW_XM"
+          timesCited:
+            type: integer
+            description: Number of times cited on this URL
+            example: 12
+          category:
+            type: string
+            description: Classification category for this URL
+            example: "automotive"
+          subPrompts:
+            type: array
+            items:
+              type: string
+            description: Sub-prompts specific to this URL
+            default: []
+            example: ["What do people say about performance?"]
     enabled:
       type: boolean
       description: Whether topic is active
@@ -5946,12 +6042,30 @@ SentimentTopicInput:
       type: string
       description: Optional description for context
       example: "Track sentiment about the latest Corvette model"
-    subPrompts:
+    urls:
       type: array
+      description: URLs associated with this topic
+      default: []
       items:
-        type: string
-      description: Additional prompts/questions for deeper analysis
-      example: ["What do people say about performance?", "Price sentiment?"]
+        type: object
+        required:
+          - url
+          - timesCited
+        properties:
+          url:
+            type: string
+            example: "https://en.wikipedia.org/wiki/BMW_XM"
+          timesCited:
+            type: integer
+            example: 0
+          category:
+            type: string
+            example: "automotive"
+          subPrompts:
+            type: array
+            items:
+              type: string
+            example: ["What do people say about performance?"]
     enabled:
       type: boolean
       default: true
@@ -5964,10 +6078,24 @@ SentimentTopicUpdate:
       type: string
     description:
       type: string
-    subPrompts:
+    urls:
       type: array
       items:
-        type: string
+        type: object
+        required:
+          - url
+          - timesCited
+        properties:
+          url:
+            type: string
+          timesCited:
+            type: integer
+          category:
+            type: string
+          subPrompts:
+            type: array
+            items:
+              type: string
     enabled:
       type: boolean
 

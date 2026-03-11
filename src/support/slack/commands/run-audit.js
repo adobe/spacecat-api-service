@@ -47,6 +47,7 @@ const ALL_AUDITS = [
   'prerender',
   'summarization',
   'faqs',
+  'related-urls',
 ];
 
 /**
