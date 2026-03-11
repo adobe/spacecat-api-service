@@ -27,10 +27,8 @@ import {
 } from '@adobe/spacecat-shared-utils';
 import { OpportunityDto } from '../dto/opportunity.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { getIsSummitPlgEnabled } from '../support/utils.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
-const SUMMIT_PLG_ALLOWED_TYPES = ['broken-backlinks', 'cwv', 'alt-text'];
 
 /**
  * Opportunities controller.
@@ -54,21 +52,6 @@ function OpportunitiesController(ctx) {
   const { Site } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
-
-  /**
-   * Filters opportunities to only PLG-allowed types when summit PLG is enabled for the site.
-   * @param {Object} site - Site entity
-   * @param {Array} opportunities - Array of opportunity entities
-   * @returns {Promise<Array>} Filtered (or unfiltered) opportunities
-   */
-  async function filterForSummitPlg(site, opportunities) {
-    if (await getIsSummitPlgEnabled(site, ctx)) {
-      return opportunities.filter(
-        (oppty) => SUMMIT_PLG_ALLOWED_TYPES.includes(oppty.getType()),
-      );
-    }
-    return opportunities;
-  }
 
   /**
    * returns a response for a data access error.
@@ -108,8 +91,7 @@ function OpportunitiesController(ctx) {
       return forbidden('Only users belonging to the organization of the site can view its opportunities');
     }
 
-    const allOpptys = await Opportunity.allBySiteId(siteId);
-    const opptys = (await filterForSummitPlg(site, allOpptys))
+    const opptys = (await Opportunity.allBySiteId(siteId))
       .map((oppty) => OpportunityDto.toJSON(oppty));
 
     return ok(opptys);
@@ -139,8 +121,7 @@ function OpportunitiesController(ctx) {
       return forbidden('Only users belonging to the organization of the site can view its opportunities');
     }
 
-    const allOpptys = await Opportunity.allBySiteIdAndStatus(siteId, status);
-    const opptys = (await filterForSummitPlg(site, allOpptys))
+    const opptys = (await Opportunity.allBySiteIdAndStatus(siteId, status))
       .map((oppty) => OpportunityDto.toJSON(oppty));
 
     return ok(opptys);
