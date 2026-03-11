@@ -383,6 +383,9 @@ const routeRequiredCapabilities = {
 
   // Sentiment - Config
   'GET /sites/:siteId/sentiment/config': 'sentimentTopic:read',
+
+  // Tokens
+  'GET /sites/:siteId/tokens/by-type/:tokenType': 'token:read',
 };
 
 export default routeRequiredCapabilities;

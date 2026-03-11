@@ -350,6 +350,10 @@ describe('getRouteHandlers', () => {
     revoke: sinon.stub(),
   };
 
+  const mockTokensController = {
+    getByTokenType: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -391,6 +395,7 @@ describe('getRouteHandlers', () => {
       mockBotBlockerController,
       mockSentimentController,
       mockConsumersController,
+      mockTokensController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -693,6 +698,7 @@ describe('getRouteHandlers', () => {
       'GET /consumers/by-client-id/:clientId',
       'PATCH /consumers/:consumerId',
       'POST /consumers/:consumerId/revoke',
+      'GET /sites/:siteId/tokens/by-type/:tokenType',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
