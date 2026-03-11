@@ -148,7 +148,7 @@ topic-by-id:
     summary: Update a topic
     description: |
       Updates a sentiment topic. Only provided fields are updated.
-      Note: subPrompts array is replaced entirely, not merged.
+      Note: urls array is replaced entirely, not merged.
     operationId: updateSentimentTopic
     requestBody:
       required: true
