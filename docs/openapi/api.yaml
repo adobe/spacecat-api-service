@@ -482,10 +482,6 @@ paths:
     $ref: './guidelines-api.yaml#/topics-list'
   /sites/{siteId}/sentiment/topics/{topicId}:
     $ref: './guidelines-api.yaml#/topic-by-id'
-  /sites/{siteId}/sentiment/topics/{topicId}/prompts:
-    $ref: './guidelines-api.yaml#/topic-prompts'
-  /sites/{siteId}/sentiment/topics/{topicId}/prompts/remove:
-    $ref: './guidelines-api.yaml#/topic-prompts-remove'
   /sites/{siteId}/sentiment/guidelines:
     $ref: './guidelines-api.yaml#/guidelines-list'
   /sites/{siteId}/sentiment/guidelines/{guidelineId}:

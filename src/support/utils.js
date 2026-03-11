@@ -583,6 +583,28 @@ export async function resolveWwwUrl(site, context) {
 }
 
 /**
+ * Returns whether the summit-plg audit handler is enabled for the site in configuration.
+ * No entitlement check; use when the site was already resolved via TierClient (e.g. sites-resolve).
+ * @param {Object} site - Site entity
+ * @param {Object} context - Request context with dataAccess, log
+ * @returns {Promise<boolean>}
+ */
+export async function getIsSummitPlgEnabled(site, context) {
+  try {
+    const { Configuration } = context.dataAccess || {};
+    if (!Configuration) return false;
+    const configuration = await Configuration.findLatest();
+    if (!configuration || typeof configuration.isHandlerEnabledForSite !== 'function') {
+      return false;
+    }
+    return configuration.isHandlerEnabledForSite('summit-plg', site);
+  } catch (err) {
+    context.log?.error?.('Error checking audit summit-plg for site:', err);
+    return false;
+  }
+}
+
+/**
  * Get the IMS user token from the context.
  * @param {object} context - The context of the request.
  * @returns {string} imsUserToken - The IMS User access token.

@@ -41,7 +41,7 @@ import { SiteDto } from '../dto/site.js';
 import { OrganizationDto } from '../dto/organization.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
-import { wwwUrlResolver, resolveWwwUrl } from '../support/utils.js';
+import { wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 
@@ -1090,9 +1090,11 @@ function SitesController(ctx, log, env) {
               const { entitlement, enrollments } = await tierClient.getAllEnrollment();
 
               if (entitlement && enrollments?.length) {
+                const isSummitPlgEnabled = await getIsSummitPlgEnabled(site, context);
                 const data = {
                   organization: OrganizationDto.toJSON(organization),
                   site: SiteDto.toJSON(site),
+                  isSummitPlgEnabled,
                 };
 
                 return ok({ data });
@@ -1109,9 +1111,11 @@ function SitesController(ctx, log, env) {
           const { site: enrolledSite } = await tierClient.getFirstEnrollment();
 
           if (enrolledSite) {
+            const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
             const data = {
               organization: OrganizationDto.toJSON(organization),
               site: SiteDto.toJSON(enrolledSite),
+              isSummitPlgEnabled,
             };
 
             return ok({ data });
@@ -1124,9 +1128,11 @@ function SitesController(ctx, log, env) {
           const { site: enrolledSite } = await tierClient.getFirstEnrollment();
 
           if (enrolledSite) {
+            const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
             const data = {
               organization: OrganizationDto.toJSON(organization),
               site: SiteDto.toJSON(enrolledSite),
+              isSummitPlgEnabled,
             };
 
             return ok({ data });
