@@ -5913,6 +5913,56 @@ CustomerConfigBrand:
       items:
         $ref: '#/CustomerConfigPrompt'
       description: Flat list of all prompts for this brand with category/topic facets
+    customerIntent:
+      type: array
+      items:
+        $ref: '#/CustomerConfigCustomerIntentItem'
+      description: Key-value pairs for customer targeting and goals (site-level in v1, per-brand in v2)
+      example:
+        - key: "target_audience"
+          value: "small business owners"
+        - key: "primary_goal"
+          value: "increase conversions"
+    tags:
+      type: array
+      items:
+        type: string
+      description: String labels/flags (e.g. opportunitiesReviewed); site-level in v1, per-brand in v2
+      example: ["opportunitiesReviewed"]
+    cdnlogsFilter:
+      type: array
+      description: CDN logs filter rules (key, value[], type include/exclude); site-level in v1, per-brand in v2
+      items:
+        type: object
+        required: [key, value]
+        properties:
+          key:
+            type: string
+            example: "user-agent"
+          value:
+            type: array
+            items: { type: string }
+            example: ["bot", "crawler"]
+          type:
+            type: string
+            enum: [include, exclude]
+            example: "exclude"
+CustomerConfigCustomerIntentItem:
+  type: object
+  description: A single customer intent key-value pair (per brand/site)
+  required:
+    - key
+    - value
+  properties:
+    key:
+      type: string
+      description: Intent key identifier
+      example: "target_audience"
+    value:
+      type: string
+      description: Intent value
+      example: "small business owners"
+  additionalProperties: false
 CustomerConfigCustomer:
   type: object
   description: Complete customer configuration including brands and verticals

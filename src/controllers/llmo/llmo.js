@@ -54,6 +54,7 @@ import {
 } from './llmo-onboarding.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
+import { syncV1ToV2 } from '../../support/llmo-config-sync.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
 import { handleBrandClaims } from './brand-claims.js';
 import { notifyStrategyChanges } from '../../support/opportunity-workspace-notifications.js';
@@ -502,6 +503,17 @@ function LlmoController(ctx) {
         s3.s3Client,
         { s3Bucket: s3.s3Bucket },
       );
+
+      // Sync to V2 customer config for the org/brand linked to this site
+      if (context.dataAccess && s3?.s3Client) {
+        await syncV1ToV2(siteId, parsedConfig, {
+          dataAccess: context.dataAccess,
+          s3Client: s3.s3Client,
+          s3Bucket: s3.s3Bucket,
+          log,
+          userId,
+        });
+      }
 
       // Only send audit job message if X-Trigger-Audits header is present
       if (pathInfo?.headers?.['x-trigger-audits']) {

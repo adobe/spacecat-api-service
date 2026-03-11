@@ -304,6 +304,84 @@ describe('Customer Config Mapper', () => {
       expect(result.customer.brands[0].name).to.equal('Alias Name');
     });
 
+    it('expands multiple alias strings into multiple v2 brandAlias entries (v1→v2)', () => {
+      const llmoConfig = {
+        brands: {
+          aliases: [{ aliases: ['Adobe', 'Adobe Inc'], region: ['us'] }],
+        },
+        categories: {},
+        topics: {},
+      };
+
+      const v2 = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
+      expect(v2.customer.brands[0].brandAliases).to.have.lengthOf(2);
+      expect(v2.customer.brands[0].brandAliases[0].name).to.equal('Adobe');
+      expect(v2.customer.brands[0].brandAliases[0].regions).to.deep.equal(['us']);
+      expect(v2.customer.brands[0].brandAliases[1].name).to.equal('Adobe Inc');
+      expect(v2.customer.brands[0].brandAliases[1].regions).to.deep.equal(['us']);
+
+      const backToV1 = convertV2ToV1(v2);
+      expect(backToV1.brands.aliases).to.have.lengthOf(2);
+      expect(backToV1.brands.aliases[0].aliases).to.deep.equal(['Adobe']);
+      expect(backToV1.brands.aliases[1].aliases).to.deep.equal(['Adobe Inc']);
+    });
+
+    it('carries customerIntent per brand (v1 site-level → v2 brand.customerIntent)', () => {
+      const llmoConfig = {
+        brands: {
+          aliases: [{ name: 'Test' }],
+        },
+        categories: {},
+        topics: {},
+        customerIntent: [
+          { key: 'target_audience', value: 'small business' },
+          { key: 'primary_goal', value: 'conversions' },
+        ],
+      };
+
+      const v2 = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
+      expect(v2.customer.brands[0].customerIntent).to.deep.equal(llmoConfig.customerIntent);
+
+      const backToV1 = convertV2ToV1(v2);
+      expect(backToV1.customerIntent).to.deep.equal(llmoConfig.customerIntent);
+    });
+
+    it('carries tags per brand (v1 site-level → v2 brand.tags)', () => {
+      const llmoConfig = {
+        brands: {
+          aliases: [{ name: 'Test' }],
+        },
+        categories: {},
+        topics: {},
+        tags: ['opportunitiesReviewed', 'otherFlag'],
+      };
+
+      const v2 = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
+      expect(v2.customer.brands[0].tags).to.deep.equal(llmoConfig.tags);
+
+      const backToV1 = convertV2ToV1(v2);
+      expect(backToV1.tags).to.deep.equal(llmoConfig.tags);
+    });
+
+    it('carries cdnlogsFilter per brand (v1 site-level → v2 brand.cdnlogsFilter)', () => {
+      const llmoConfig = {
+        brands: {
+          aliases: [{ name: 'Test' }],
+        },
+        categories: {},
+        topics: {},
+        cdnlogsFilter: [
+          { key: 'user-agent', value: ['bot', 'crawler'], type: 'exclude' },
+        ],
+      };
+
+      const v2 = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
+      expect(v2.customer.brands[0].cdnlogsFilter).to.deep.equal(llmoConfig.cdnlogsFilter);
+
+      const backToV1 = convertV2ToV1(v2);
+      expect(backToV1.cdnlogsFilter).to.deep.equal(llmoConfig.cdnlogsFilter);
+    });
+
     it('uses brandName fallback when both name and aliases are missing', () => {
       const llmoConfig = {
         brands: {
@@ -606,6 +684,203 @@ describe('Customer Config Mapper', () => {
       expect(deletedTopic.status).to.equal('deleted');
     });
 
+    it('handles ignored prompts (status "ignored" in V2, same pattern as deleted)', () => {
+      const llmoConfig = {
+        brands: {
+          aliases: [{ name: 'Test' }],
+        },
+        categories: {},
+        topics: {},
+        ignored: {
+          prompts: {
+            'ign-1': {
+              prompt: 'Ignored prompt text',
+              region: 'us',
+              source: 'gsc',
+              updatedBy: 'user',
+              updatedAt: '2024-01-01T00:00:00.000Z',
+            },
+          },
+        },
+      };
+
+      const result = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
+      const ignoredPrompt = result.customer.brands[0].prompts.find((p) => p.id === 'ign-1');
+      expect(ignoredPrompt).to.exist;
+      expect(ignoredPrompt.status).to.equal('ignored');
+      expect(ignoredPrompt.prompt).to.equal('Ignored prompt text');
+      expect(ignoredPrompt.regions).to.deep.equal(['us']);
+      expect(ignoredPrompt.source).to.equal('gsc');
+
+      const backToV1 = convertV2ToV1(result);
+      expect(backToV1.ignored.prompts['ign-1']).to.exist;
+      expect(backToV1.ignored.prompts['ign-1'].prompt).to.equal('Ignored prompt text');
+      expect(backToV1.ignored.prompts['ign-1'].region).to.equal('us');
+    });
+
+    it('uses alias.aliases array when present (branch coverage)', () => {
+      const llmoConfig = {
+        brands: {
+          aliases: [
+            { aliases: ['Acme', 'Acme Corp'], regions: ['us'] },
+          ],
+        },
+        categories: {},
+        topics: {},
+      };
+      const result = convertV1ToV2(llmoConfig, 'Fallback', 'test@org');
+      expect(result.customer.brands[0].brandAliases).to.have.lengthOf(2);
+      expect(result.customer.brands[0].brandAliases[0].name).to.equal('Acme');
+      expect(result.customer.brands[0].brandAliases[1].name).to.equal('Acme Corp');
+    });
+
+    it('uses [alias.name] when alias.aliases is empty (branch coverage)', () => {
+      const llmoConfig = {
+        brands: {
+          aliases: [
+            { aliases: [], name: 'Solo', regions: ['us'] },
+          ],
+        },
+        categories: {},
+        topics: {},
+      };
+      const result = convertV1ToV2(llmoConfig, 'Fallback', 'test@org');
+      expect(result.customer.brands[0].brandAliases).to.have.lengthOf(1);
+      expect(result.customer.brands[0].brandAliases[0].name).to.equal('Solo');
+    });
+
+    it('uses [brandName] when alias has no aliases and no name (branch coverage)', () => {
+      const llmoConfig = {
+        brands: {
+          aliases: [
+            { regions: ['us'] },
+          ],
+        },
+        categories: {},
+        topics: {},
+      };
+      const result = convertV1ToV2(llmoConfig, 'FallbackBrand', 'test@org');
+      expect(result.customer.brands[0].brandAliases).to.have.lengthOf(1);
+      expect(result.customer.brands[0].brandAliases[0].name).to.equal('FallbackBrand');
+    });
+
+    it('uses alias.aliases when aliases is explicit null (branch coverage)', () => {
+      const llmoConfig = {
+        brands: {
+          aliases: [
+            { aliases: null, name: 'Named', regions: ['us'] },
+          ],
+        },
+        categories: {},
+        topics: {},
+      };
+      const result = convertV1ToV2(llmoConfig, 'Fallback', 'test@org');
+      expect(result.customer.brands[0].brandAliases).to.have.lengthOf(1);
+      expect(result.customer.brands[0].brandAliases[0].name).to.equal('Named');
+    });
+
+    it('uses prompt.regions for ignored prompt when present (branch coverage)', () => {
+      const llmoConfig = {
+        brands: { aliases: [{ name: 'Test' }] },
+        categories: {},
+        topics: {},
+        ignored: {
+          prompts: {
+            'ign-2': {
+              prompt: 'Ignored with regions array',
+              regions: ['us', 'gb'],
+              source: 'gsc',
+            },
+          },
+        },
+      };
+      const result = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
+      const ignoredPrompt = result.customer.brands[0].prompts.find((p) => p.id === 'ign-2');
+      expect(ignoredPrompt).to.exist;
+      expect(ignoredPrompt.regions).to.deep.equal(['us', 'gb']);
+    });
+
+    it('uses [region] for ignored prompt when regions is not an array (branch coverage)', () => {
+      const llmoConfig = {
+        brands: { aliases: [{ name: 'Test' }] },
+        categories: {},
+        topics: {},
+        ignored: {
+          prompts: {
+            'ign-3': {
+              prompt: 'Ignored with region only',
+              region: 'eu',
+              source: 'gsc',
+            },
+          },
+        },
+      };
+      const result = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
+      const ignoredPrompt = result.customer.brands[0].prompts.find((p) => p.id === 'ign-3');
+      expect(ignoredPrompt).to.exist;
+      expect(ignoredPrompt.regions).to.deep.equal(['eu']);
+    });
+
+    it('uses gl for ignored prompt when region and regions missing (branch coverage)', () => {
+      const llmoConfig = {
+        brands: { aliases: [{ name: 'Test' }] },
+        categories: {},
+        topics: {},
+        ignored: {
+          prompts: {
+            'ign-4': { prompt: 'No region', source: 'gsc' },
+          },
+        },
+      };
+      const result = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
+      const ignoredPrompt = result.customer.brands[0].prompts.find((p) => p.id === 'ign-4');
+      expect(ignoredPrompt).to.exist;
+      expect(ignoredPrompt.regions).to.deep.equal(['gl']);
+    });
+
+    it('uses [region] when ignored prompt has regions as non-array (branch coverage)', () => {
+      const llmoConfig = {
+        brands: { aliases: [{ name: 'Test' }] },
+        categories: {},
+        topics: {},
+        ignored: {
+          prompts: {
+            'ign-5': {
+              prompt: 'Ignored',
+              region: 'apac',
+              regions: 'not-array',
+              source: 'gsc',
+            },
+          },
+        },
+      };
+      const result = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
+      const ignoredPrompt = result.customer.brands[0].prompts.find((p) => p.id === 'ign-5');
+      expect(ignoredPrompt).to.exist;
+      expect(ignoredPrompt.regions).to.deep.equal(['apac']);
+    });
+
+    it('uses prompt.regions array when present for ignored (branch coverage)', () => {
+      const llmoConfig = {
+        brands: { aliases: [{ name: 'Test' }] },
+        categories: {},
+        topics: {},
+        ignored: {
+          prompts: {
+            'ign-6': {
+              prompt: 'Ignored',
+              regions: ['eu', 'apac'],
+              source: 'gsc',
+            },
+          },
+        },
+      };
+      const result = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
+      const ignoredPrompt = result.customer.brands[0].prompts.find((p) => p.id === 'ign-6');
+      expect(ignoredPrompt).to.exist;
+      expect(ignoredPrompt.regions).to.deep.equal(['eu', 'apac']);
+    });
+
     it('avoids duplicate topic entries when processing multiple prompts', () => {
       const llmoConfig = {
         brands: {
@@ -891,6 +1166,189 @@ describe('Customer Config Mapper', () => {
 
       const result = convertV2ToV1(customerConfig);
       expect(Object.keys(result.topics)).to.have.lengthOf(0);
+    });
+
+    it('ignored prompt with regions array uses p.regions[0] for region (branch coverage)', () => {
+      const customerConfig = {
+        customer: {
+          customerName: 'Test',
+          brands: [
+            {
+              id: 'test-brand',
+              name: 'Test Brand',
+              brandAliases: [{ name: 'Test', regions: ['us'] }],
+              competitors: [],
+              prompts: [
+                {
+                  id: 'ign-with-regions',
+                  prompt: 'Ignored with regions',
+                  status: 'ignored',
+                  categoryId: 'ignored-prompts',
+                  topicId: 'ignored-prompts',
+                  regions: ['eu', 'apac'],
+                  source: 'gsc',
+                },
+              ],
+            },
+          ],
+          categories: [
+            { id: 'ignored-prompts', name: 'Ignored', origin: 'human' },
+          ],
+          topics: [
+            { id: 'ignored-prompts', name: 'Ignored', categoryId: 'ignored-prompts' },
+          ],
+        },
+      };
+
+      const result = convertV2ToV1(customerConfig);
+      expect(result.ignored.prompts['ign-with-regions']).to.exist;
+      expect(result.ignored.prompts['ign-with-regions'].region).to.equal('eu');
+    });
+
+    it('ignored prompt without regions uses default gl (branch coverage)', () => {
+      const customerConfig = {
+        customer: {
+          customerName: 'Test',
+          brands: [
+            {
+              id: 'test-brand',
+              name: 'Test Brand',
+              brandAliases: [{ name: 'Test', regions: ['us'] }],
+              competitors: [],
+              prompts: [
+                {
+                  id: 'ign-no-regions',
+                  prompt: 'Ignored no regions',
+                  status: 'ignored',
+                  categoryId: 'ignored-prompts',
+                  topicId: 'ignored-prompts',
+                },
+              ],
+            },
+          ],
+          categories: [
+            { id: 'ignored-prompts', name: 'Ignored', origin: 'human' },
+          ],
+          topics: [
+            { id: 'ignored-prompts', name: 'Ignored', categoryId: 'ignored-prompts' },
+          ],
+        },
+      };
+
+      const result = convertV2ToV1(customerConfig);
+      expect(result.ignored.prompts['ign-no-regions']).to.exist;
+      expect(result.ignored.prompts['ign-no-regions'].region).to.equal('gl');
+    });
+
+    it('category with empty v1Regions uses prompts[0].regions (branch coverage)', () => {
+      const customerConfig = {
+        customer: {
+          customerName: 'Test',
+          brands: [
+            {
+              id: 'test-brand',
+              name: 'Test Brand',
+              brandAliases: [{ name: 'Test', regions: ['us'] }],
+              competitors: [],
+              prompts: [
+                {
+                  id: 'p1',
+                  prompt: 'Prompt',
+                  status: 'active',
+                  categoryId: 'cat-1',
+                  topicId: 'topic-1',
+                  regions: ['eu'],
+                  origin: 'human',
+                  source: 'config',
+                },
+              ],
+            },
+          ],
+          categories: [
+            { id: 'cat-1', name: 'Category 1', v1Regions: [] },
+          ],
+          topics: [
+            { id: 'topic-1', name: 'Topic 1', categoryId: 'cat-1' },
+          ],
+        },
+      };
+
+      const result = convertV2ToV1(customerConfig);
+      expect(result.categories['cat-1'].region).to.deep.equal(['eu']);
+    });
+
+    it('category without v1CategoryUrls uses empty urls array (branch coverage)', () => {
+      const customerConfig = {
+        customer: {
+          customerName: 'Test',
+          brands: [
+            {
+              id: 'test-brand',
+              name: 'Test Brand',
+              brandAliases: [{ name: 'Test', regions: ['us'] }],
+              competitors: [],
+              prompts: [
+                {
+                  id: 'p1',
+                  prompt: 'Prompt',
+                  status: 'active',
+                  categoryId: 'cat-1',
+                  topicId: 'topic-1',
+                  regions: ['us'],
+                  origin: 'human',
+                  source: 'config',
+                },
+              ],
+            },
+          ],
+          categories: [
+            { id: 'cat-1', name: 'Category 1' },
+          ],
+          topics: [
+            { id: 'topic-1', name: 'Topic 1', categoryId: 'cat-1' },
+          ],
+        },
+      };
+
+      const result = convertV2ToV1(customerConfig);
+      expect(result.categories['cat-1'].urls).to.deep.equal([]);
+    });
+
+    it('category with v1CategoryUrls array preserves urls (branch coverage)', () => {
+      const customerConfig = {
+        customer: {
+          customerName: 'Test',
+          brands: [
+            {
+              id: 'test-brand',
+              name: 'Test Brand',
+              brandAliases: [{ name: 'Test', regions: ['us'] }],
+              competitors: [],
+              prompts: [
+                {
+                  id: 'p1',
+                  prompt: 'Prompt',
+                  status: 'active',
+                  categoryId: 'cat-1',
+                  topicId: 'topic-1',
+                  regions: ['us'],
+                  origin: 'human',
+                  source: 'config',
+                },
+              ],
+            },
+          ],
+          categories: [
+            { id: 'cat-1', name: 'Category 1', v1CategoryUrls: ['https://a.com', 'https://b.com'] },
+          ],
+          topics: [
+            { id: 'topic-1', name: 'Topic 1', categoryId: 'cat-1' },
+          ],
+        },
+      };
+
+      const result = convertV2ToV1(customerConfig);
+      expect(result.categories['cat-1'].urls).to.deep.equal(['https://a.com', 'https://b.com']);
     });
 
     it('finds first active category for brand aliases', () => {
