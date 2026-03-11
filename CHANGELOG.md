@@ -1,3 +1,10 @@
+## [1.344.2](https://github.com/adobe/spacecat-api-service/compare/v1.344.1...v1.344.2) (2026-03-11)
+
+
+### Bug Fixes
+
+* clean up stale prompts references and enable urls for PostgreSQL ([#1944](https://github.com/adobe/spacecat-api-service/issues/1944)) ([c7d9878](https://github.com/adobe/spacecat-api-service/commit/c7d9878d03c3358c7fa7f9419d2961aa654d006f))
+
 ## [1.344.1](https://github.com/adobe/spacecat-api-service/compare/v1.344.0...v1.344.1) (2026-03-11)
 
 
