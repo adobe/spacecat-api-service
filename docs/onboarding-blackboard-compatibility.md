@@ -8,6 +8,10 @@ LLMO and ASO onboarding commands in spacecat-api-service create sites/orgs and t
 initial audits. As individual audits migrate from the legacy stack (spacecat-audit-worker)
 to mysticat's blackboard (fact-based producers), we need to understand compatibility.
 
+**Terminology:** Mysticat is the product/platform name. Mystique is the service/codebase
+that implements the blackboard (fact-based audit system). This document uses "blackboard"
+to refer to the Mystique-powered audit execution engine.
+
 **Key insight:** Migration is per-audit, not per-site. A site can have some audits running
 on legacy and others on the blackboard simultaneously. Sites exist in a shared Aurora
 database independent of which stack executes their audits.
@@ -77,13 +81,7 @@ producers execute.
 
 ## What Works (No Changes Needed)
 
-| Concern | Status | Why |
-|---------|--------|-----|
-| Org/Site creation | OK | Both stacks read from shared Aurora |
-| Entitlement + SiteEnrollment | OK | Product code + tier used by both stacks |
-| DRS (llmo-data-retrieval) | OK | Reads site config via SpaceCat API, no audit dependency |
-| Site config fields (llmoBrand, fetchConfig) | OK | Stored on SpaceCat site document |
-| Brand profile agent | OK | Runs via Step Functions, independent of audit stack |
+See [Compatibility Analysis](#compatibility-analysis) below for the full compatibility matrix.
 
 ## Legacy Dispatch Pipeline (spacecat-jobs-dispatcher)
 
@@ -193,7 +191,10 @@ Options to resolve:
 1. **Add API key auth** to Control API (preferred - matches SpaceCat patterns)
 2. **Add JWT/service account** support to Control API
 3. **Shared SQS queue** - Control API consumes scan-request messages (avoids HTTP auth)
-4. **Direct DB write** - spacecat-api-service writes to control tables directly (tight coupling)
+4. **Direct DB write** - NOT RECOMMENDED. spacecat-api-service writes to control tables
+   directly. Bypasses Mystique validation logic, creates dual-writer risk (two services
+   owning the same tables), and expands the attack surface by requiring direct DB
+   credentials in spacecat-api-service
 
 ## Compatibility Analysis
 
@@ -260,6 +261,56 @@ to pass when calling scan-now.
 **Impact:** Mapping needed for targeted scan-now calls. Without it, onboarding would
 need to trigger a full scan (all goals) which may be heavier than needed.
 
+**4. ASO Step Functions workflow depends on opportunity projections**
+
+The ASO onboarding flow starts a Step Functions workflow (step 10) after triggering
+initial audits. The `opportunity-status-processor` waits for a configurable period
+(`WORKFLOW_WAIT_TIME_IN_SECONDS`), then checks for opportunities via
+`site.getOpportunities()`. It maps audit types to expected opportunity types (e.g.,
+cwv -> [cwv], forms-opportunities -> [form-accessibility, forms-opportunities]) and
+also checks external dependencies (RUM, AHREFS, Scraping, GSC).
+
+In the blackboard architecture, opportunities come from the projector service
+(`mysticat-projector-service`) rather than from LatestAudit. If projector timing
+differs from legacy audit timing, this processor may time out or report false
+"missing opportunities."
+
+The other three processors (`disable-import-audit-processor`, `demo-url-processor`,
+`cwv-demo-suggestions-processor`) have no audit result dependency and are unaffected.
+
+**Solution:** Ensure the projector service completes its fact-to-opportunity projection
+within the configured `WORKFLOW_WAIT_TIME_IN_SECONDS`. If blackboard scans take longer
+than legacy audits, the wait time may need to be increased.
+
+### Audit Result Storage Compatibility
+
+**LatestAudit no longer exists in the blackboard architecture.** The blackboard uses a
+CQRS (Command Query Responsibility Segregation) pattern:
+
+- **Write model:** Blackboard writes exclusively to `blackboard_fact` table (JSONB facts).
+  Facts are the system of record.
+- **Read model:** A separate projector service (`mysticat-projector-service`, TypeScript
+  Lambda) listens to fact events via SNS/SQS and projects them into typed tables:
+  - `projection_opportunity` - scoped by site/brand, typed by opportunity type
+    (h1_optimization, broken_links, etc.), lifecycle status (active/resolved)
+  - `projection_suggestion` - linked to opportunity, deterministic key, data/guidance/autofix
+    as namespaced JSONB
+  - `projection_lineage` - tracks which facts contributed to which suggestions
+- **No LatestAudit write path exists** - there is no sync or fallback from facts to
+  LatestAudit. The projector is the mandatory bridge.
+
+**Legacy consumers that must migrate:**
+- Slack `run-audit` / `site-info` commands - currently display LatestAudit results
+- `opportunity-status-processor` (Step Functions) - checks for opportunities after
+  ASO onboarding (already reads via `site.getOpportunities()`, but timing may change)
+- Opportunity/suggestion pipeline - must read from projection tables instead
+- LLMO dashboards - must read from projection tables instead
+
+**Impact:** This is a significant migration concern. All consumers reading LatestAudit
+need to be updated to read from the projection tables for migrated audit types. During
+the transition period, consumers may need dual-read logic (LatestAudit for legacy types,
+projection tables for blackboard types).
+
 ### What's low risk
 
 | Concern | Risk | Notes |
@@ -303,13 +354,21 @@ Source: `src/controllers/llmo/llmo-onboarding.js`
    summarization, prerender, llm-error-pages, llmo-customer-analysis, wikipedia-analysis
 7. Enable import: top-pages
 8. Set site config: llmoBrand, llmoDataFolder, fetchConfig
-9. Enqueue audit triggers to SQS
+9. Enqueue audit triggers to SQS (includes `trigger:llmo-onboarding-publish` sent to
+   audits queue - note: this handler may not exist in spacecat-audit-worker; verify
+   before assuming it runs)
 10. Submit DRS prompt generation (non-blocking)
-11. Trigger brand-profile agent (non-blocking)
+
+**Notes:**
+- `llmo-customer-analysis` is enabled (step 6) but NOT triggered in step 9. It runs only
+  after DRS prompt generation completes (triggered via SNS -> audit-worker, LLMO-1819)
+- `brand-profile` agent is triggered by the Slack modal handler (`onboard-llmo-modal.js`)
+  or the ASO controller wrapper, not by `performLlmoOnboarding` itself
 
 ### ASO (Slack /onboard site)
 
-Source: `src/support/utils.js` (onboardSingleSite)
+Source: `src/support/utils.js` (onboardSingleSite). See also [docs/onboard-workflow.md](onboard-workflow.md)
+for the full onboarding workflow diagram.
 
 1. Create/find site and org
 2. Create ASO entitlement + enrollment (configurable tier)
@@ -320,6 +379,17 @@ Source: `src/support/utils.js` (onboardSingleSite)
 7. Enable audits from profile (apex, cwv, canonical, etc.)
 8. Trigger audit runs via SQS
 9. Trigger brand-profile agent (non-blocking)
+10. Start Step Functions workflow (`ONBOARD_WORKFLOW_STATE_MACHINE_ARN`) with four
+    post-onboarding processors:
+    - `opportunity-status-processor` - waits for audits to complete, then checks for
+      expected opportunities via `site.getOpportunities()`. Maps audit types to expected
+      opportunity types. Also checks external dependencies (RUM, AHREFS, Scraping, GSC).
+      Compatibility concern: relies on opportunity projections (see issue #4 above).
+    - `disable-import-audit-processor` - disables imports and audits that were enabled
+      during onboarding (for non-scheduled runs). Prevents ongoing resource consumption.
+    - `demo-url-processor` - generates Experience Cloud demo URL for the onboarded site.
+    - `cwv-demo-suggestions-processor` - adds generic CWV suggestions to opportunities.
+    - All processors run after a configurable wait time (`WORKFLOW_WAIT_TIME_IN_SECONDS`)
 
 ## Migration Path
 
@@ -346,6 +416,9 @@ Source: `src/support/utils.js` (onboardSingleSite)
 
 ```js
 // Pseudocode for onboarding
+// NOTE: BLACKBOARD_MAPPING must be resolved before implementation. The authoritative
+// mapping from legacy audit types to blackboard goal keys does not exist yet - it needs
+// to be published by the blackboard team (see Open Questions #3).
 const legacyTypes = [];
 const blackboardGoals = {};
 
@@ -389,6 +462,23 @@ For sites that need scheduled blackboard scans (not just on-demand):
 
 The immediate timing gap is solved by Phase 1. The blackboard scheduler handles
 ongoing runs once SiteConfig exists.
+
+## Credential Lifecycle
+
+When spacecat-api-service gains service-to-service access to the Control API, the
+credential lifecycle must be managed:
+
+- **Storage**: API keys or service account credentials stored in AWS Secrets Manager
+  (SpaceCat pattern) or HashiCorp Vault (Adobe standard). Must not be committed to
+  source code or environment variables directly.
+- **Scope**: Credentials should be scoped to scan-triggering operations only (POST
+  to scan endpoints). No broader Control API access (e.g., tier management, site config
+  modification) should be granted.
+- **Rotation cadence**: Follow Adobe security policy for key rotation. API keys should
+  have an expiration and be rotatable without service downtime (e.g., support two active
+  keys during rotation window).
+- **Ownership**: The credential is owned by the spacecat-api-service team. The Control
+  API team provisions the credential; the consumer team manages rotation and storage.
 
 ## Open Questions
 
