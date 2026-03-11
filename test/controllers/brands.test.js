@@ -2662,6 +2662,1104 @@ describe('Brands Controller', () => {
     });
   });
 
+  describe('getLlmoConfigForBrand', () => {
+    const BRAND_ID_V2 = 'brand-1';
+    const SPACE_CAT_ID = ORGANIZATION_ID;
+
+    function createMockS3Context() {
+      return {
+        s3: { s3Client: {}, s3Bucket: 'test-bucket' },
+      };
+    }
+
+    function createCustomerConfigWithBrand(brandId, urls = []) {
+      return {
+        customer: {
+          customerName: 'Adobe',
+          brands: [
+            {
+              id: brandId,
+              name: 'Test Brand',
+              urls,
+              prompts: [],
+            },
+          ],
+        },
+      };
+    }
+
+    const llmoAdminAuthContext = {
+      attributes: {
+        authInfo: new AuthInfo()
+          .withType('jwt')
+          .withScopes([{ name: 'admin' }])
+          .withProfile({ is_admin: true, is_llmo_administrator: true })
+          .withAuthenticated(true),
+      },
+    };
+
+    let llmoAdminContext;
+    let llmoAdminController;
+
+    beforeEach(() => {
+      llmoAdminContext = {
+        pathInfo: {
+          headers: {
+            authorization: 'Bearer token123',
+            'x-product': 'abcd',
+          },
+        },
+        dataAccess: mockDataAccess,
+        ...llmoAdminAuthContext,
+      };
+      llmoAdminController = BrandsController(llmoAdminContext, loggerStub, mockEnv);
+    });
+
+    it('returns bad request if organization ID is missing', async () => {
+      const response = await llmoAdminController.getLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: {},
+        ...createMockS3Context(),
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns bad request if brand ID is missing', async () => {
+      const response = await llmoAdminController.getLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID },
+        ...createMockS3Context(),
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns not found if organization does not exist', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+
+      const response = await llmoAdminController.getLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        ...createMockS3Context(),
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns forbidden if user is not LLMO administrator', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const nonAdminController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+
+      const response = await nonAdminController.getLlmoConfigForBrand({
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        ...createMockS3Context(),
+      });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns forbidden if LLMO admin does not have access to organization', async () => {
+      const llmoOnlyAuth = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false, is_llmo_administrator: true })
+            .withAuthenticated(true),
+        },
+      };
+      const llmoOnlyController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...llmoOnlyAuth,
+      }, loggerStub, mockEnv);
+
+      const response = await llmoOnlyController.getLlmoConfigForBrand({
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        ...createMockS3Context(),
+      });
+
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns bad request if S3 is not configured', async () => {
+      const response = await llmoAdminController.getLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        s3: {},
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns not found if customer config does not exist in S3', async () => {
+      const mockReadConfig = sinon.stub().resolves(null);
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '@adobe/spacecat-shared-utils': {
+          llmoConfig: {
+            readCustomerConfigV2: mockReadConfig,
+          },
+        },
+      });
+
+      const controller = brandsControllerWithMock(llmoAdminContext, loggerStub, mockEnv);
+      const response = await controller.getLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        ...createMockS3Context(),
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns not found if brand does not exist in config', async () => {
+      const mockReadConfig = sinon.stub().resolves({
+        customer: {
+          customerName: 'Adobe',
+          brands: [{
+            id: 'other-brand', name: 'Other', urls: [], prompts: [],
+          }],
+        },
+      });
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '@adobe/spacecat-shared-utils': {
+          llmoConfig: {
+            readCustomerConfigV2: mockReadConfig,
+          },
+        },
+      });
+
+      const controller = brandsControllerWithMock(llmoAdminContext, loggerStub, mockEnv);
+      const response = await controller.getLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: 'nonexistent-brand' },
+        ...createMockS3Context(),
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns not found if no brand URLs resolve to sites', async () => {
+      const customerConfig = createCustomerConfigWithBrand(BRAND_ID_V2, [
+        { value: 'https://unknown.example.com' },
+      ]);
+
+      mockDataAccess.Site.findByBaseURL = sinon.stub().resolves(null);
+
+      const mockReadConfigV2 = sinon.stub().resolves(customerConfig);
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '@adobe/spacecat-shared-utils': {
+          llmoConfig: {
+            readCustomerConfigV2: mockReadConfigV2,
+          },
+          composeBaseURL: (url) => url,
+        },
+      });
+
+      const controller = brandsControllerWithMock(llmoAdminContext, loggerStub, mockEnv);
+      const response = await controller.getLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        ...createMockS3Context(),
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns v1 configs for resolved brand URLs', async () => {
+      const siteObj = {
+        getId: () => SITE_ID,
+        getBaseURL: () => 'https://site1.com',
+      };
+      const customerConfig = createCustomerConfigWithBrand(BRAND_ID_V2, [
+        { value: 'https://site1.com' },
+      ]);
+
+      mockDataAccess.Site.findByBaseURL = sinon.stub().resolves(siteObj);
+
+      const mockReadConfigV2 = sinon.stub().resolves(customerConfig);
+      const mockReadConfig = sinon.stub().resolves({
+        config: { some: 'v1-config' },
+        exists: true,
+      });
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '@adobe/spacecat-shared-utils': {
+          llmoConfig: {
+            readCustomerConfigV2: mockReadConfigV2,
+            readConfig: mockReadConfig,
+          },
+          composeBaseURL: (url) => url,
+        },
+      });
+
+      const controller = brandsControllerWithMock(llmoAdminContext, loggerStub, mockEnv);
+      const response = await controller.getLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        ...createMockS3Context(),
+      });
+
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+      expect(result).to.be.an('array').with.lengthOf(1);
+      expect(result[0].siteId).to.equal(SITE_ID);
+      expect(result[0].config).to.deep.equal({ some: 'v1-config' });
+    });
+
+    it('returns null config when v1 config does not exist', async () => {
+      const siteObj = {
+        getId: () => SITE_ID,
+        getBaseURL: () => 'https://site1.com',
+      };
+      const customerConfig = createCustomerConfigWithBrand(BRAND_ID_V2, [
+        { value: 'https://site1.com' },
+      ]);
+
+      mockDataAccess.Site.findByBaseURL = sinon.stub().resolves(siteObj);
+
+      const mockReadConfigV2 = sinon.stub().resolves(customerConfig);
+      const mockReadConfig = sinon.stub().resolves({
+        config: null,
+        exists: false,
+      });
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '@adobe/spacecat-shared-utils': {
+          llmoConfig: {
+            readCustomerConfigV2: mockReadConfigV2,
+            readConfig: mockReadConfig,
+          },
+          composeBaseURL: (url) => url,
+        },
+      });
+
+      const controller = brandsControllerWithMock(llmoAdminContext, loggerStub, mockEnv);
+      const response = await controller.getLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        ...createMockS3Context(),
+      });
+
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+      expect(result[0].config).to.be.null;
+    });
+
+    it('returns null config when v1 readConfig throws', async () => {
+      const siteObj = {
+        getId: () => SITE_ID,
+        getBaseURL: () => 'https://site1.com',
+      };
+      const customerConfig = createCustomerConfigWithBrand(BRAND_ID_V2, [
+        { value: 'https://site1.com' },
+      ]);
+
+      mockDataAccess.Site.findByBaseURL = sinon.stub().resolves(siteObj);
+
+      const mockReadConfigV2 = sinon.stub().resolves(customerConfig);
+      const mockReadConfig = sinon.stub().rejects(new Error('S3 read failed'));
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '@adobe/spacecat-shared-utils': {
+          llmoConfig: {
+            readCustomerConfigV2: mockReadConfigV2,
+            readConfig: mockReadConfig,
+          },
+          composeBaseURL: (url) => url,
+        },
+      });
+
+      const controller = brandsControllerWithMock(llmoAdminContext, loggerStub, mockEnv);
+      const response = await controller.getLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        ...createMockS3Context(),
+      });
+
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+      expect(result[0].config).to.be.null;
+    });
+
+    it('logs warning for unresolved URLs', async () => {
+      const resolvedSite = {
+        getId: () => SITE_ID,
+        getBaseURL: () => 'https://resolved.com',
+      };
+      const customerConfig = createCustomerConfigWithBrand(BRAND_ID_V2, [
+        { value: 'https://resolved.com' },
+        { value: 'https://unresolved.com' },
+      ]);
+
+      mockDataAccess.Site.findByBaseURL = sinon.stub();
+      mockDataAccess.Site.findByBaseURL.withArgs('https://resolved.com').resolves(resolvedSite);
+      mockDataAccess.Site.findByBaseURL.withArgs('https://unresolved.com').resolves(null);
+
+      const mockReadConfigV2 = sinon.stub().resolves(customerConfig);
+      const mockReadConfig = sinon.stub().resolves({ config: {}, exists: true });
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '@adobe/spacecat-shared-utils': {
+          llmoConfig: {
+            readCustomerConfigV2: mockReadConfigV2,
+            readConfig: mockReadConfig,
+          },
+          composeBaseURL: (url) => url,
+        },
+      });
+
+      const controller = brandsControllerWithMock(llmoAdminContext, loggerStub, mockEnv);
+      const response = await controller.getLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        ...createMockS3Context(),
+      });
+
+      expect(response.status).to.equal(200);
+      expect(loggerStub.warn).to.have.been.calledWithMatch(/Could not resolve 1 brand URL/);
+    });
+
+    it('handles error and returns error response', async () => {
+      const errorMockDataAccess = {
+        Organization: {
+          findById: sinon.stub().rejects(new Error('DB error')),
+        },
+        Site: { findById: sinon.stub(), findByBaseURL: sinon.stub() },
+      };
+
+      const errorContext = { ...llmoAdminContext, dataAccess: errorMockDataAccess };
+      const errorBrandsController = BrandsController(errorContext, loggerStub, mockEnv);
+
+      const response = await errorBrandsController.getLlmoConfigForBrand({
+        ...errorContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        ...createMockS3Context(),
+      });
+
+      expect(response.status).to.equal(500);
+    });
+
+    it('handles missing context.params gracefully', async () => {
+      const response = await llmoAdminController.getLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: undefined,
+        ...createMockS3Context(),
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns not found when brand has no urls property', async () => {
+      const customerConfig = {
+        customer: {
+          customerName: 'Adobe',
+          brands: [{
+            id: BRAND_ID_V2,
+            name: 'Test Brand',
+            prompts: [],
+          }],
+        },
+      };
+
+      const mockReadConfigV2 = sinon.stub().resolves(customerConfig);
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '@adobe/spacecat-shared-utils': {
+          llmoConfig: {
+            readCustomerConfigV2: mockReadConfigV2,
+          },
+          composeBaseURL: (url) => url,
+        },
+      });
+
+      const controller = brandsControllerWithMock(llmoAdminContext, loggerStub, mockEnv);
+      const response = await controller.getLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        ...createMockS3Context(),
+      });
+
+      expect(response.status).to.equal(404);
+      const result = await response.json();
+      expect(result.message).to.include('No brand URLs could be resolved');
+    });
+
+    it('handles brand config with null brands array', async () => {
+      const mockReadConfig = sinon.stub().resolves({
+        customer: {
+          customerName: 'Adobe',
+          brands: null,
+        },
+      });
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '@adobe/spacecat-shared-utils': {
+          llmoConfig: {
+            readCustomerConfigV2: mockReadConfig,
+          },
+        },
+      });
+
+      const controller = brandsControllerWithMock(llmoAdminContext, loggerStub, mockEnv);
+      const response = await controller.getLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        ...createMockS3Context(),
+      });
+      expect(response.status).to.equal(404);
+    });
+  });
+
+  describe('patchLlmoConfigForBrand', () => {
+    const BRAND_ID_V2 = 'brand-1';
+    const SPACE_CAT_ID = ORGANIZATION_ID;
+
+    const llmoAdminAuthContext = {
+      attributes: {
+        authInfo: new AuthInfo()
+          .withType('jwt')
+          .withScopes([{ name: 'admin' }])
+          .withProfile({ is_admin: true, is_llmo_administrator: true })
+          .withAuthenticated(true),
+      },
+    };
+
+    let llmoAdminContext;
+    let llmoAdminController;
+
+    beforeEach(() => {
+      llmoAdminContext = {
+        pathInfo: {
+          headers: {
+            authorization: 'Bearer token123',
+            'x-product': 'abcd',
+          },
+        },
+        dataAccess: mockDataAccess,
+        ...llmoAdminAuthContext,
+      };
+      llmoAdminController = BrandsController(llmoAdminContext, loggerStub, mockEnv);
+    });
+
+    function createMockS3Context() {
+      return {
+        s3: { s3Client: {}, s3Bucket: 'test-bucket' },
+      };
+    }
+
+    it('returns bad request if organization ID is missing', async () => {
+      const response = await llmoAdminController.patchLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: {},
+        data: [],
+        ...createMockS3Context(),
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns bad request if brand ID is missing', async () => {
+      const response = await llmoAdminController.patchLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID },
+        data: [],
+        ...createMockS3Context(),
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns not found if organization does not exist', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+
+      const response = await llmoAdminController.patchLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        data: [{ siteId: SITE_ID, config: {} }],
+        ...createMockS3Context(),
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns forbidden if user is not LLMO administrator', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const nonAdminController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+
+      const response = await nonAdminController.patchLlmoConfigForBrand({
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        data: [{ siteId: SITE_ID, config: {} }],
+        ...createMockS3Context(),
+      });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns forbidden if LLMO admin does not have access to organization', async () => {
+      const llmoOnlyAuth = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false, is_llmo_administrator: true })
+            .withAuthenticated(true),
+        },
+      };
+      const llmoOnlyController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...llmoOnlyAuth,
+      }, loggerStub, mockEnv);
+
+      const response = await llmoOnlyController.patchLlmoConfigForBrand({
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        data: [{ siteId: SITE_ID, config: {} }],
+        ...createMockS3Context(),
+      });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns bad request if S3 is not configured', async () => {
+      const response = await llmoAdminController.patchLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        data: [{ siteId: SITE_ID, config: {} }],
+        s3: {},
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns bad request if data is not a non-empty array', async () => {
+      const response = await llmoAdminController.patchLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        data: [],
+        ...createMockS3Context(),
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns bad request if data is not an array', async () => {
+      const response = await llmoAdminController.patchLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        data: { siteId: SITE_ID, config: {} },
+        ...createMockS3Context(),
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns not found if customer config does not exist', async () => {
+      const mockReadConfigV2 = sinon.stub().resolves(null);
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '@adobe/spacecat-shared-utils': {
+          llmoConfig: {
+            readCustomerConfigV2: mockReadConfigV2,
+          },
+        },
+      });
+
+      const controller = brandsControllerWithMock(llmoAdminContext, loggerStub, mockEnv);
+      const response = await controller.patchLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        data: [{ siteId: SITE_ID, config: {} }],
+        ...createMockS3Context(),
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns not found if brand does not exist in config', async () => {
+      const mockReadConfigV2 = sinon.stub().resolves({
+        customer: {
+          customerName: 'Adobe',
+          brands: [{
+            id: 'other-brand', name: 'Other', urls: [], prompts: [],
+          }],
+        },
+      });
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '@adobe/spacecat-shared-utils': {
+          llmoConfig: {
+            readCustomerConfigV2: mockReadConfigV2,
+          },
+        },
+      });
+
+      const controller = brandsControllerWithMock(llmoAdminContext, loggerStub, mockEnv);
+      const response = await controller.patchLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: 'nonexistent-brand' },
+        data: [{ siteId: SITE_ID, config: {} }],
+        ...createMockS3Context(),
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns error for entry with missing siteId', async () => {
+      const customerConfig = {
+        customer: {
+          customerName: 'Adobe',
+          brands: [{
+            id: BRAND_ID_V2,
+            name: 'Test Brand',
+            urls: [{ value: 'https://site1.com' }],
+            prompts: [],
+          }],
+        },
+      };
+
+      const mockReadConfigV2 = sinon.stub().resolves(customerConfig);
+      const mockUpdateLlmoConfig = sinon.stub().resolves(
+        new Response(JSON.stringify({ version: 2 }), { status: 200 }),
+      );
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '@adobe/spacecat-shared-utils': {
+          llmoConfig: {
+            readCustomerConfigV2: mockReadConfigV2,
+          },
+          composeBaseURL: (url) => url,
+        },
+        '../../src/controllers/llmo/llmo.js': {
+          default: () => ({ updateLlmoConfig: mockUpdateLlmoConfig }),
+        },
+      });
+
+      const controller = brandsControllerWithMock(llmoAdminContext, loggerStub, mockEnv);
+      const response = await controller.patchLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        data: [{ config: {} }],
+        ...createMockS3Context(),
+      });
+
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+      expect(result.results[0].status).to.equal('error');
+      expect(result.results[0].message).to.equal('siteId is required');
+    });
+
+    it('returns error if site not found', async () => {
+      const customerConfig = {
+        customer: {
+          customerName: 'Adobe',
+          brands: [{
+            id: BRAND_ID_V2,
+            name: 'Test Brand',
+            urls: [{ value: 'https://site1.com' }],
+            prompts: [],
+          }],
+        },
+      };
+
+      mockDataAccess.Site.findById.resolves(null);
+
+      const mockReadConfigV2 = sinon.stub().resolves(customerConfig);
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '@adobe/spacecat-shared-utils': {
+          llmoConfig: {
+            readCustomerConfigV2: mockReadConfigV2,
+          },
+          composeBaseURL: (url) => url,
+        },
+        '../../src/controllers/llmo/llmo.js': {
+          default: () => ({ updateLlmoConfig: sinon.stub() }),
+        },
+      });
+
+      const controller = brandsControllerWithMock(llmoAdminContext, loggerStub, mockEnv);
+      const response = await controller.patchLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        data: [{ siteId: SITE_ID, config: {} }],
+        ...createMockS3Context(),
+      });
+
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+      expect(result.results[0].status).to.equal('error');
+      expect(result.results[0].message).to.include('Site not found');
+    });
+
+    it('returns error if site does not belong to organization', async () => {
+      const OTHER_ORG_ID = '9999554c-de8a-44ac-a356-09b51af8cc28';
+      const customerConfig = {
+        customer: {
+          customerName: 'Adobe',
+          brands: [{
+            id: BRAND_ID_V2,
+            name: 'Test Brand',
+            urls: [{ value: 'https://site1.com' }],
+            prompts: [],
+          }],
+        },
+      };
+
+      const siteInOtherOrg = {
+        getId: () => SITE_ID,
+        getOrganizationId: () => OTHER_ORG_ID,
+        getBaseURL: () => 'https://site1.com',
+      };
+      mockDataAccess.Site.findById.resolves(siteInOtherOrg);
+
+      const mockReadConfigV2 = sinon.stub().resolves(customerConfig);
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '@adobe/spacecat-shared-utils': {
+          llmoConfig: {
+            readCustomerConfigV2: mockReadConfigV2,
+          },
+          composeBaseURL: (url) => url,
+        },
+        '../../src/controllers/llmo/llmo.js': {
+          default: () => ({ updateLlmoConfig: sinon.stub() }),
+        },
+      });
+
+      const controller = brandsControllerWithMock(llmoAdminContext, loggerStub, mockEnv);
+      const response = await controller.patchLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        data: [{ siteId: SITE_ID, config: {} }],
+        ...createMockS3Context(),
+      });
+
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+      expect(result.results[0].status).to.equal('error');
+      expect(result.results[0].message).to.include('does not belong to this organization');
+    });
+
+    it('returns error if site URL is not associated with brand', async () => {
+      const customerConfig = {
+        customer: {
+          customerName: 'Adobe',
+          brands: [{
+            id: BRAND_ID_V2,
+            name: 'Test Brand',
+            urls: [{ value: 'https://brand-site.com' }],
+            prompts: [],
+          }],
+        },
+      };
+
+      const siteWithDifferentUrl = {
+        getId: () => SITE_ID,
+        getOrganizationId: () => SPACE_CAT_ID,
+        getBaseURL: () => 'https://other-site.com',
+      };
+      mockDataAccess.Site.findById.resolves(siteWithDifferentUrl);
+
+      const mockReadConfigV2 = sinon.stub().resolves(customerConfig);
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '@adobe/spacecat-shared-utils': {
+          llmoConfig: {
+            readCustomerConfigV2: mockReadConfigV2,
+          },
+          composeBaseURL: (url) => url,
+        },
+        '../../src/controllers/llmo/llmo.js': {
+          default: () => ({ updateLlmoConfig: sinon.stub() }),
+        },
+      });
+
+      const controller = brandsControllerWithMock(llmoAdminContext, loggerStub, mockEnv);
+      const response = await controller.patchLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        data: [{ siteId: SITE_ID, config: {} }],
+        ...createMockS3Context(),
+      });
+
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+      expect(result.results[0].status).to.equal('error');
+      expect(result.results[0].message).to.include('not associated with this brand');
+    });
+
+    it('successfully delegates to updateLlmoConfig and returns results', async () => {
+      const customerConfig = {
+        customer: {
+          customerName: 'Adobe',
+          brands: [{
+            id: BRAND_ID_V2,
+            name: 'Test Brand',
+            urls: [{ value: 'https://site1.com' }],
+            prompts: [],
+          }],
+        },
+      };
+
+      const siteObj = {
+        getId: () => SITE_ID,
+        getOrganizationId: () => SPACE_CAT_ID,
+        getBaseURL: () => 'https://site1.com',
+      };
+      mockDataAccess.Site.findById.resolves(siteObj);
+
+      const mockReadConfigV2 = sinon.stub().resolves(customerConfig);
+      const mockUpdateLlmoConfig = sinon.stub().resolves(
+        new Response(JSON.stringify({ version: 3 }), { status: 200 }),
+      );
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '@adobe/spacecat-shared-utils': {
+          llmoConfig: {
+            readCustomerConfigV2: mockReadConfigV2,
+          },
+          composeBaseURL: (url) => url,
+        },
+        '../../src/controllers/llmo/llmo.js': {
+          default: () => ({ updateLlmoConfig: mockUpdateLlmoConfig }),
+        },
+      });
+
+      const controller = brandsControllerWithMock(llmoAdminContext, loggerStub, mockEnv);
+      const response = await controller.patchLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        data: [{ siteId: SITE_ID, config: { some: 'v1-data' } }],
+        ...createMockS3Context(),
+      });
+
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+      expect(result.results).to.have.lengthOf(1);
+      expect(result.results[0].status).to.equal('success');
+      expect(result.results[0].version).to.equal(3);
+    });
+
+    it('handles updateLlmoConfig returning non-200 status', async () => {
+      const customerConfig = {
+        customer: {
+          customerName: 'Adobe',
+          brands: [{
+            id: BRAND_ID_V2,
+            name: 'Test Brand',
+            urls: [{ value: 'https://site1.com' }],
+            prompts: [],
+          }],
+        },
+      };
+
+      const siteObj = {
+        getId: () => SITE_ID,
+        getOrganizationId: () => SPACE_CAT_ID,
+        getBaseURL: () => 'https://site1.com',
+      };
+      mockDataAccess.Site.findById.resolves(siteObj);
+
+      const mockReadConfigV2 = sinon.stub().resolves(customerConfig);
+      const mockUpdateLlmoConfig = sinon.stub().resolves(
+        new Response(JSON.stringify({ message: 'LLMO not enabled' }), { status: 400 }),
+      );
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '@adobe/spacecat-shared-utils': {
+          llmoConfig: {
+            readCustomerConfigV2: mockReadConfigV2,
+          },
+          composeBaseURL: (url) => url,
+        },
+        '../../src/controllers/llmo/llmo.js': {
+          default: () => ({ updateLlmoConfig: mockUpdateLlmoConfig }),
+        },
+      });
+
+      const controller = brandsControllerWithMock(llmoAdminContext, loggerStub, mockEnv);
+      const response = await controller.patchLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        data: [{ siteId: SITE_ID, config: {} }],
+        ...createMockS3Context(),
+      });
+
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+      expect(result.results[0].status).to.equal('error');
+      expect(result.results[0].message).to.equal('LLMO not enabled');
+    });
+
+    it('handles updateLlmoConfig throwing an error', async () => {
+      const customerConfig = {
+        customer: {
+          customerName: 'Adobe',
+          brands: [{
+            id: BRAND_ID_V2,
+            name: 'Test Brand',
+            urls: [{ value: 'https://site1.com' }],
+            prompts: [],
+          }],
+        },
+      };
+
+      const siteObj = {
+        getId: () => SITE_ID,
+        getOrganizationId: () => SPACE_CAT_ID,
+        getBaseURL: () => 'https://site1.com',
+      };
+      mockDataAccess.Site.findById.resolves(siteObj);
+
+      const mockReadConfigV2 = sinon.stub().resolves(customerConfig);
+      const mockUpdateLlmoConfig = sinon.stub().rejects(new Error('Network timeout'));
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '@adobe/spacecat-shared-utils': {
+          llmoConfig: {
+            readCustomerConfigV2: mockReadConfigV2,
+          },
+          composeBaseURL: (url) => url,
+        },
+        '../../src/controllers/llmo/llmo.js': {
+          default: () => ({ updateLlmoConfig: mockUpdateLlmoConfig }),
+        },
+      });
+
+      const controller = brandsControllerWithMock(llmoAdminContext, loggerStub, mockEnv);
+      const response = await controller.patchLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        data: [{ siteId: SITE_ID, config: {} }],
+        ...createMockS3Context(),
+      });
+
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+      expect(result.results[0].status).to.equal('error');
+      expect(result.results[0].message).to.include('Network timeout');
+    });
+
+    it('handles brand with no urls', async () => {
+      const customerConfig = {
+        customer: {
+          customerName: 'Adobe',
+          brands: [{
+            id: BRAND_ID_V2,
+            name: 'Test Brand',
+            prompts: [],
+          }],
+        },
+      };
+
+      const siteObj = {
+        getId: () => SITE_ID,
+        getOrganizationId: () => SPACE_CAT_ID,
+        getBaseURL: () => 'https://site1.com',
+      };
+      mockDataAccess.Site.findById.resolves(siteObj);
+
+      const mockReadConfigV2 = sinon.stub().resolves(customerConfig);
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '@adobe/spacecat-shared-utils': {
+          llmoConfig: {
+            readCustomerConfigV2: mockReadConfigV2,
+          },
+          composeBaseURL: (url) => url,
+        },
+        '../../src/controllers/llmo/llmo.js': {
+          default: () => ({ updateLlmoConfig: sinon.stub() }),
+        },
+      });
+
+      const controller = brandsControllerWithMock(llmoAdminContext, loggerStub, mockEnv);
+      const response = await controller.patchLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        data: [{ siteId: SITE_ID, config: {} }],
+        ...createMockS3Context(),
+      });
+
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+      expect(result.results[0].status).to.equal('error');
+      expect(result.results[0].message).to.include('not associated with this brand');
+    });
+
+    it('handles error and returns error response', async () => {
+      const errorMockDataAccess = {
+        Organization: {
+          findById: sinon.stub().rejects(new Error('DB error')),
+        },
+        Site: { findById: sinon.stub() },
+      };
+
+      const errorContext = { ...llmoAdminContext, dataAccess: errorMockDataAccess };
+      const errorBrandsController = BrandsController(errorContext, loggerStub, mockEnv);
+
+      const response = await errorBrandsController.patchLlmoConfigForBrand({
+        ...errorContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        data: [{ siteId: SITE_ID, config: {} }],
+        ...createMockS3Context(),
+      });
+
+      expect(response.status).to.equal(500);
+    });
+
+    it('handles missing context.params gracefully', async () => {
+      const response = await llmoAdminController.patchLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: undefined,
+        data: [{ siteId: SITE_ID, config: {} }],
+        ...createMockS3Context(),
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('handles non-200 response without message in body', async () => {
+      const customerConfig = {
+        customer: {
+          customerName: 'Adobe',
+          brands: [{
+            id: BRAND_ID_V2,
+            name: 'Test Brand',
+            urls: [{ value: 'https://site1.com' }],
+            prompts: [],
+          }],
+        },
+      };
+
+      const siteObj = {
+        getId: () => SITE_ID,
+        getOrganizationId: () => SPACE_CAT_ID,
+        getBaseURL: () => 'https://site1.com',
+      };
+      mockDataAccess.Site.findById.resolves(siteObj);
+
+      const mockReadConfigV2 = sinon.stub().resolves(customerConfig);
+      const mockUpdateLlmoConfig = sinon.stub().resolves(
+        new Response(JSON.stringify({}), { status: 500 }),
+      );
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '@adobe/spacecat-shared-utils': {
+          llmoConfig: {
+            readCustomerConfigV2: mockReadConfigV2,
+          },
+          composeBaseURL: (url) => url,
+        },
+        '../../src/controllers/llmo/llmo.js': {
+          default: () => ({ updateLlmoConfig: mockUpdateLlmoConfig }),
+        },
+      });
+
+      const controller = brandsControllerWithMock(llmoAdminContext, loggerStub, mockEnv);
+      const response = await controller.patchLlmoConfigForBrand({
+        ...llmoAdminContext,
+        params: { spaceCatId: SPACE_CAT_ID, brandId: BRAND_ID_V2 },
+        data: [{ siteId: SITE_ID, config: {} }],
+        ...createMockS3Context(),
+      });
+
+      expect(response.status).to.equal(200);
+      const result = await response.json();
+      expect(result.results[0].status).to.equal('error');
+      expect(result.results[0].message).to.include('v1 update failed with status 500');
+    });
+  });
+
   describe('filterByStatus (exported for testing)', () => {
     it('should return empty array when items is null', () => {
       const controller = BrandsController(context, loggerStub, mockEnv);

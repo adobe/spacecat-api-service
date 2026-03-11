@@ -156,6 +156,12 @@ describe('getRouteHandlers', () => {
     getBrandGuidelinesForSite: sinon.stub(),
     getCustomerConfig: sinon.stub(),
     saveCustomerConfig: sinon.stub(),
+    getCustomerConfigLean: sinon.stub(),
+    getTopics: sinon.stub(),
+    getPrompts: sinon.stub(),
+    patchCustomerConfig: sinon.stub(),
+    getLlmoConfigForBrand: sinon.stub(),
+    patchLlmoConfigForBrand: sinon.stub(),
   };
 
   const mockPreflightController = {
@@ -464,6 +470,8 @@ describe('getRouteHandlers', () => {
       'GET /v2/orgs/:spaceCatId/llmo-prompts',
       'PATCH /v2/orgs/:spaceCatId/llmo-customer-config',
       'POST /v2/orgs/:spaceCatId/llmo-customer-config',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/llmo/config',
+      'PATCH /v2/orgs/:spaceCatId/brands/:brandId/llmo/config',
       'GET /organizations/:organizationId/projects',
       'GET /organizations/:organizationId/projects/:projectId/sites',
       'GET /organizations/:organizationId/by-project-name/:projectName/sites',
@@ -940,5 +948,9 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['PATCH /sites/:siteId/url-store'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['POST /sites/:siteId/url-store/delete'].handler).to.equal(mockUrlStoreController.deleteUrls);
     expect(dynamicRoutes['POST /sites/:siteId/url-store/delete'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /v2/orgs/:spaceCatId/brands/:brandId/llmo/config'].handler).to.equal(mockBrandsController.getLlmoConfigForBrand);
+    expect(dynamicRoutes['GET /v2/orgs/:spaceCatId/brands/:brandId/llmo/config'].paramNames).to.deep.equal(['spaceCatId', 'brandId']);
+    expect(dynamicRoutes['PATCH /v2/orgs/:spaceCatId/brands/:brandId/llmo/config'].handler).to.equal(mockBrandsController.patchLlmoConfigForBrand);
+    expect(dynamicRoutes['PATCH /v2/orgs/:spaceCatId/brands/:brandId/llmo/config'].paramNames).to.deep.equal(['spaceCatId', 'brandId']);
   });
 });

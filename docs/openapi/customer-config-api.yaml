@@ -357,6 +357,191 @@ llmo-topics-by-space-cat-id-v2:
       '500':
         $ref: './responses.yaml#/500'
 
+llmo-brand-config-by-space-cat-id-v2:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+        example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    - name: brandId
+      in: path
+      required: true
+      description: Brand identifier within the customer configuration (not a UUID)
+      schema:
+        type: string
+        example: 'adobe'
+  get:
+    tags:
+      - customer-config
+    summary: Retrieves v1 LLMO configs for all sites in a brand
+    description: |
+      Uses the v2 customer config as a directory to resolve brand URLs to SpaceCat sites,
+      then fetches the v1 LLMO configuration for each resolved site.
+
+      The flow:
+      1. Loads the v2 customer config for the organization
+      2. Finds the brand matching the brandId
+      3. Maps each URL in the brand's urls array to a SpaceCat site via findByBaseURL
+      4. Fetches the v1 LLMO config from S3 for each resolved site
+
+      At least one brand URL must resolve to a site. URLs that cannot be resolved are
+      silently skipped. Sites that have no v1 config yet return config: null.
+
+      Requires LLMO administrator access and organization membership.
+    operationId: getLlmoConfigForBrand
+    security:
+      - ims_key: []
+      - api_key: []
+    responses:
+      '200':
+        description: V1 LLMO configs for all resolved sites in the brand
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                properties:
+                  siteId:
+                    type: string
+                    format: uuid
+                    description: SpaceCat site ID
+                  baseURL:
+                    type: string
+                    description: Normalized base URL of the site
+                    example: 'https://adobe.com'
+                  config:
+                    oneOf:
+                      - $ref: './schemas.yaml#/LlmoConfig'
+                      - type: "null"
+                    description: V1 LLMO config for this site, or null if none exists
+                required:
+                  - siteId
+                  - baseURL
+                  - config
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        description: Organization, brand, or customer configuration not found; or no URLs could be resolved
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      '500':
+        $ref: './responses.yaml#/500'
+  patch:
+    tags:
+      - customer-config
+    summary: Updates v1 LLMO configs for specified sites in a brand
+    description: |
+      Writes v1 LLMO configurations for specified sites that belong to a brand.
+      Uses the v2 customer config to validate that each siteId belongs to the
+      correct organization and brand.
+
+      For each site entry, the endpoint applies the same write pipeline as the v1
+      LLMO config endpoint:
+      - Reads the previous config version
+      - Applies modification metadata tracking (updatedBy, updatedAt)
+      - Validates against the LLMO config schema
+      - Writes to S3
+
+      Partial failures are handled gracefully: if one site's config write fails,
+      the remaining sites are still processed. The response contains per-site results.
+
+      Set the X-Trigger-Audits header to trigger llmo-customer-analysis audit jobs
+      for each successfully written site.
+
+      Requires LLMO administrator access and organization membership.
+    operationId: patchLlmoConfigForBrand
+    security:
+      - ims_key: []
+      - api_key: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: array
+            items:
+              type: object
+              properties:
+                siteId:
+                  type: string
+                  format: uuid
+                  description: SpaceCat site ID to update
+                config:
+                  $ref: './schemas.yaml#/LlmoConfig'
+              required:
+                - siteId
+                - config
+            minItems: 1
+          examples:
+            singleSite:
+              summary: Update config for a single site
+              value:
+                - siteId: "a1b2c3d4-5678-90ab-cdef-1234567890ab"
+                  config:
+                    entities: {}
+                    categories: {}
+                    topics: {}
+                    aiTopics: {}
+                    brands:
+                      aliases: []
+                    competitors:
+                      competitors: []
+    responses:
+      '200':
+        description: Per-site write results
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                results:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      siteId:
+                        type: string
+                        format: uuid
+                      status:
+                        type: string
+                        enum: [success, error]
+                      version:
+                        type: string
+                        description: S3 version ID (present on success)
+                      message:
+                        type: string
+                        description: Error message (present on error)
+                    required:
+                      - siteId
+                      - status
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        description: Organization, brand, or customer configuration not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      '500':
+        $ref: './responses.yaml#/500'
+
 llmo-prompts-by-space-cat-id-v2:
   parameters:
     - name: spaceCatId
