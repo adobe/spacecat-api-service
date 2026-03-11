@@ -335,8 +335,6 @@ describe('getRouteHandlers', () => {
     createTopics: sinon.stub(),
     updateTopic: sinon.stub(),
     deleteTopic: sinon.stub(),
-    addSubPrompts: sinon.stub(),
-    removeSubPrompts: sinon.stub(),
     linkAudits: sinon.stub(),
     unlinkAudits: sinon.stub(),
     listGuidelines: sinon.stub(),

@@ -371,8 +371,6 @@ const routeRequiredCapabilities = {
   'POST /sites/:siteId/sentiment/topics': 'sentimentTopic:write',
   'PATCH /sites/:siteId/sentiment/topics/:topicId': 'sentimentTopic:write',
   'DELETE /sites/:siteId/sentiment/topics/:topicId': 'sentimentTopic:write',
-  'POST /sites/:siteId/sentiment/topics/:topicId/prompts': 'sentimentTopic:write',
-  'POST /sites/:siteId/sentiment/topics/:topicId/prompts/remove': 'sentimentTopic:write',
 
   // Sentiment - Guidelines
   'GET /sites/:siteId/sentiment/guidelines': 'sentimentGuideline:read',
