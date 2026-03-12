@@ -23,7 +23,6 @@ import {
   isNonEmptyObject,
   isValidUUID,
   llmoConfig,
-  llmoConfig as llmo,
   composeBaseURL,
 } from '@adobe/spacecat-shared-utils';
 
@@ -640,7 +639,7 @@ function BrandsController(ctx, log, env) {
     }
   };
 
-  const { readConfig } = llmo;
+  const { readConfig } = llmoConfig;
 
   /**
    * Finds a brand by ID within a customer config. Returns the brand or a notFound response.
@@ -664,12 +663,10 @@ function BrandsController(ctx, log, env) {
    * @returns {Promise<{resolved: Array, unresolved: Array}>}
    */
   async function resolveBrandUrlsToSites(urls) {
-    log.info(`resolveBrandUrlsToSites: input urls = ${JSON.stringify(urls)}`);
     const results = await Promise.all(
       (urls || []).map(async (urlEntry) => {
         const normalized = composeBaseURL(urlEntry.value);
         const site = await Site.findByBaseURL(normalized);
-        log.info(`resolveBrandUrlsToSites: urlEntry.value="${urlEntry.value}" -> normalized="${normalized}" -> site=${site ? site.getId() : 'null'}`);
         return { url: urlEntry.value, normalized, site };
       }),
     );
@@ -679,7 +676,7 @@ function BrandsController(ctx, log, env) {
     const unresolved = results
       .filter((r) => !r.site)
       .map((r) => r.url);
-    log.info(`resolveBrandUrlsToSites: resolved=${resolved.length}, unresolved=${unresolved.length} (${unresolved.join(', ')})`);
+    log.debug(`resolveBrandUrlsToSites: resolved=${resolved.length}, unresolved=${unresolved.length}`);
     return { resolved, unresolved };
   }
 
