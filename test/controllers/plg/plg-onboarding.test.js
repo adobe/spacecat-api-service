@@ -933,7 +933,7 @@ describe('PlgOnboardingController', () => {
       controller = PlgOnboardingController({ log: mockLog });
     });
 
-    it('returns 409 when site belongs to another customer org', async () => {
+    it('returns WAITLISTED when site belongs to another customer org', async () => {
       const existingSite = createMockSite({ orgId: OTHER_CUSTOMER_ORG_ID });
       mockDataAccess.Site.findByBaseURL.resolves(existingSite);
 
@@ -941,15 +941,18 @@ describe('PlgOnboardingController', () => {
 
       const res = await controller.onboard(context);
 
-      expect(res.status).to.equal(409);
-      expect(res.value.message).to.include('already assigned to another organization');
+      expect(res.status).to.equal(200);
       // Should NOT modify the site
       expect(existingSite.setOrganizationId).to.not.have.been.called;
       expect(existingSite.save).to.not.have.been.called;
-      // Verify onboarding record was set to ERROR
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('ERROR');
-      expect(mockOnboarding.setError).to.have.been.called;
+      // Verify onboarding record was set to WAITLISTED with reason
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason)
+        .to.have.been.calledWithMatch(/already assigned to another organization/);
+      expect(mockOnboarding.setSiteId).to.have.been.calledWith(existingSite.getId());
       expect(mockOnboarding.save).to.have.been.called;
+      // Should NOT proceed to bot blocker or site creation
+      expect(detectBotBlockerStub).to.not.have.been.called;
     });
   });
 

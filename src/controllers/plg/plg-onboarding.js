@@ -207,10 +207,12 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
 
       if (existingOrgId !== organizationId
         && !isInternalOrg(existingOrgId, env)) {
-        throw Object.assign(
-          new Error(`Domain ${domain} is ${DOMAIN_ALREADY_ASSIGNED}`),
-          { conflict: true },
-        );
+        onboarding.setStatus(STATUSES.WAITLISTED);
+        onboarding.setWaitlistReason(`Domain ${domain} is ${DOMAIN_ALREADY_ASSIGNED}`);
+        onboarding.setSiteId(site.getId());
+        onboarding.setSteps(steps);
+        await onboarding.save();
+        return onboarding;
       }
 
       // Move from internal org to customer's org if needed
