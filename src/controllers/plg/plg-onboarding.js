@@ -327,6 +327,17 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
     await enableAudits(site, context, auditTypes);
     steps.auditsEnabled = true;
 
+    // Step 7b: Enroll site in summit-plg config handler
+    try {
+      const { Configuration } = dataAccess;
+      const configuration = await Configuration.findLatest();
+      configuration.enableHandlerForSite('summit-plg', site);
+      await configuration.save();
+      log.info(`Enrolled site ${site.getId()} in summit-plg config`);
+    } catch (error) {
+      log.warn(`Failed to enroll site in summit-plg config: ${error.message}`);
+    }
+
     // Step 8: Add ASO entitlement
     await ensureAsoEntitlement(site, context);
     steps.entitlementCreated = true;

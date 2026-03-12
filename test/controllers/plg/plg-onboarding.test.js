@@ -1015,6 +1015,41 @@ describe('PlgOnboardingController', () => {
     });
   });
 
+  // --- Summit PLG config enrollment ---
+
+  describe('onboard - summit-plg config enrollment', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    it('enrolls site in summit-plg config handler', async () => {
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      const config = await mockDataAccess.Configuration.findLatest();
+      expect(config.enableHandlerForSite).to.have.been.calledWith('summit-plg', mockSite);
+    });
+
+    it('continues onboarding when summit-plg enrollment fails', async () => {
+      mockDataAccess.Configuration.findLatest.resolves({
+        enableHandlerForSite: sandbox.stub().throws(new Error('Config write failed')),
+        save: sandbox.stub().resolves(),
+        getQueues: sandbox.stub().returns({ audits: 'audit-queue-url' }),
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to enroll site in summit-plg/);
+    });
+  });
+
   // --- Brand profile ---
 
   describe('onboard - brand profile trigger', () => {
