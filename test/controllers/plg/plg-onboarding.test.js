@@ -523,6 +523,19 @@ describe('PlgOnboardingController', () => {
         /Failed to persist error state/,
       );
     });
+
+    it('returns 409 when error has conflict flag', async () => {
+      const conflictError = new Error('Domain ownership conflict');
+      conflictError.conflict = true;
+      createOrFindOrganizationStub.rejects(conflictError);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(409);
+      expect(res.value).to.deep.equal({ message: 'Domain ownership conflict' });
+    });
   });
 
   // --- Happy path: new site ---
