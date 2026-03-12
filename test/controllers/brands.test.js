@@ -18,6 +18,7 @@ import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/models/or
 import SiteSchema from '@adobe/spacecat-shared-data-access/src/models/site/site.schema.js';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 
+import { brotliDecompressSync } from 'zlib';
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
@@ -25,6 +26,11 @@ import sinon, { stub } from 'sinon';
 import esmock from 'esmock';
 
 import BrandsController from '../../src/controllers/brands.js';
+
+async function readCompressedJson(response) {
+  const buf = await response.buffer();
+  return JSON.parse(brotliDecompressSync(buf).toString());
+}
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -2905,7 +2911,8 @@ describe('Brands Controller', () => {
       });
 
       expect(response.status).to.equal(200);
-      const result = await response.json();
+      expect(response.headers.get('Content-Encoding')).to.equal('br');
+      const result = await readCompressedJson(response);
       expect(result).to.be.an('array').with.lengthOf(1);
       expect(result[0].siteId).to.equal(SITE_ID);
       expect(result[0].config).to.deep.equal({ some: 'v1-config' });
@@ -2945,7 +2952,8 @@ describe('Brands Controller', () => {
       });
 
       expect(response.status).to.equal(200);
-      const result = await response.json();
+      expect(response.headers.get('Content-Encoding')).to.equal('br');
+      const result = await readCompressedJson(response);
       expect(result[0].config).to.be.null;
     });
 
@@ -2980,7 +2988,8 @@ describe('Brands Controller', () => {
       });
 
       expect(response.status).to.equal(200);
-      const result = await response.json();
+      expect(response.headers.get('Content-Encoding')).to.equal('br');
+      const result = await readCompressedJson(response);
       expect(result[0].config).to.be.null;
     });
 

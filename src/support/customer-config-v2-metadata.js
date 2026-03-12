@@ -15,16 +15,38 @@
 import { deepEqual } from '@adobe/spacecat-shared-utils';
 
 /**
- * Removes metadata fields (updatedBy, updatedAt, status) from an object.
+ * Fields to strip when comparing objects for changes. Includes metadata fields
+ * (updatedBy, updatedAt, status) and enrichment/computed fields that are added
+ * by GET endpoints (getPrompts, getCustomerConfigLean) but not stored in S3.
+ */
+const STRIP_FIELDS = new Set([
+  'updatedAt',
+  'updatedBy',
+  'status',
+  // Enrichment fields added by getPrompts
+  'brandId',
+  'brandName',
+  'category',
+  'topic',
+  // Computed fields added by getCustomerConfigLean
+  'totalCategories',
+  'totalTopics',
+  'totalPrompts',
+]);
+
+/**
+ * Removes metadata and enrichment fields from an object for comparison purposes.
  * @param {object} obj - The object to clean.
- * @returns {object} A new object without metadata fields.
+ * @returns {object} A new object without metadata/enrichment fields.
  */
 const stripMetadata = (obj) => {
   if (!obj || typeof obj !== 'object') return obj;
-  const {
-    // eslint-disable-next-line no-unused-vars
-    updatedAt, updatedBy, status, ...rest
-  } = obj;
+  const rest = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (!STRIP_FIELDS.has(key)) {
+      rest[key] = value;
+    }
+  }
   return rest;
 };
 

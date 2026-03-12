@@ -652,9 +652,9 @@ function BrandsController(ctx, log, env) {
     const brands = customerConfig?.customer?.brands || [];
     const brand = brands.find((b) => b.id === brandId);
     if (!brand) {
-      return notFound(`Brand not found: ${brandId}`);
+      return { notFoundResponse: notFound(`Brand not found: ${brandId}`) };
     }
-    return brand;
+    return { brand };
   }
 
   /**
@@ -664,10 +664,12 @@ function BrandsController(ctx, log, env) {
    * @returns {Promise<{resolved: Array, unresolved: Array}>}
    */
   async function resolveBrandUrlsToSites(urls) {
+    log.info(`resolveBrandUrlsToSites: input urls = ${JSON.stringify(urls)}`);
     const results = await Promise.all(
       (urls || []).map(async (urlEntry) => {
         const normalized = composeBaseURL(urlEntry.value);
         const site = await Site.findByBaseURL(normalized);
+        log.info(`resolveBrandUrlsToSites: urlEntry.value="${urlEntry.value}" -> normalized="${normalized}" -> site=${site ? site.getId() : 'null'}`);
         return { url: urlEntry.value, normalized, site };
       }),
     );
@@ -677,6 +679,7 @@ function BrandsController(ctx, log, env) {
     const unresolved = results
       .filter((r) => !r.site)
       .map((r) => r.url);
+    log.info(`resolveBrandUrlsToSites: resolved=${resolved.length}, unresolved=${unresolved.length} (${unresolved.join(', ')})`);
     return { resolved, unresolved };
   }
 
@@ -715,8 +718,9 @@ function BrandsController(ctx, log, env) {
         return notFound('Customer configuration not found for organization');
       }
 
-      const brand = findBrandOrNotFound(customerConfig, brandId);
-      if (brand.status) return brand;
+      const brandResult = findBrandOrNotFound(customerConfig, brandId);
+      if (brandResult.notFoundResponse) return brandResult.notFoundResponse;
+      const { brand } = brandResult;
 
       const { resolved, unresolved } = await resolveBrandUrlsToSites(brand.urls);
       if (resolved.length === 0) {
@@ -740,7 +744,9 @@ function BrandsController(ctx, log, env) {
         }),
       );
 
-      return ok(configs);
+      return ok(configs, {
+        'Content-Encoding': 'br',
+      });
     } catch (error) {
       log.error(`Error getting LLMO config for brand ${brandId} in org ${spaceCatId}`, error);
       return createErrorResponse(error);
@@ -789,8 +795,9 @@ function BrandsController(ctx, log, env) {
         return notFound('Customer configuration not found for organization');
       }
 
-      const brand = findBrandOrNotFound(customerConfig, brandId);
-      if (brand.status) return brand;
+      const brandResult = findBrandOrNotFound(customerConfig, brandId);
+      if (brandResult.notFoundResponse) return brandResult.notFoundResponse;
+      const { brand } = brandResult;
 
       const normalizedBrandUrls = new Set(
         (brand.urls || []).map((u) => composeBaseURL(u.value)),
