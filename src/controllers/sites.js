@@ -41,7 +41,7 @@ import { SiteDto } from '../dto/site.js';
 import { OrganizationDto } from '../dto/organization.js';
 import { AuditDto } from '../dto/audit.js';
 import { validateRepoUrl } from '../utils/validations.js';
-import { wwwUrlResolver, resolveWwwUrl } from '../support/utils.js';
+import { wwwUrlResolver, resolveWwwUrl, getIsSummitPlgEnabled } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { triggerBrandProfileAgent } from '../support/brand-profile-trigger.js';
 
@@ -848,7 +848,6 @@ function SitesController(ctx, log, env) {
     }
 
     const rumAPIClient = RUMAPIClient.createFrom(context);
-    const domain = await resolveWwwUrl(site, context);
 
     try {
       const now = new Date();
@@ -864,20 +863,28 @@ function SitesController(ctx, log, env) {
       const thirtyDaysAgo = new Date(todayUTC.getTime() - MONTH_DAYS * 24 * 60 * 60 * 1000);
       const sixtyDaysAgo = new Date(todayUTC.getTime() - 2 * MONTH_DAYS * 24 * 60 * 60 * 1000);
 
-      const current = await rumAPIClient.query(TOTAL_METRICS, {
-        domain,
-        startTime: thirtyDaysAgo.toISOString(),
-        endTime: todayUTC.toISOString(),
-      });
-      const previous = await rumAPIClient.query(TOTAL_METRICS, {
-        domain,
-        startTime: sixtyDaysAgo.toISOString(),
-        endTime: thirtyDaysAgo.toISOString(),
-      });
-      const organicTraffic = await getStoredMetrics(
-        { siteId, metric: ORGANIC_TRAFFIC, source: AHREFS },
-        context,
-      );
+      // Resolve domain and fetch S3 metrics in parallel (independent calls)
+      const [domain, organicTraffic] = await Promise.all([
+        resolveWwwUrl(site, context),
+        getStoredMetrics(
+          { siteId, metric: ORGANIC_TRAFFIC, source: AHREFS },
+          context,
+        ),
+      ]);
+
+      // Fetch current and previous RUM metrics in parallel
+      const [current, previous] = await Promise.all([
+        rumAPIClient.query(TOTAL_METRICS, {
+          domain,
+          startTime: thirtyDaysAgo.toISOString(),
+          endTime: todayUTC.toISOString(),
+        }),
+        rumAPIClient.query(TOTAL_METRICS, {
+          domain,
+          startTime: sixtyDaysAgo.toISOString(),
+          endTime: thirtyDaysAgo.toISOString(),
+        }),
+      ]);
 
       const pageViewsChange = previous.totalPageViews !== 0
         ? ((current.totalPageViews - previous.totalPageViews) / previous.totalPageViews) * 100
@@ -918,7 +925,7 @@ function SitesController(ctx, log, env) {
         previousConversion,
       });
     } catch (error) {
-      log.error(`Error getting RUM metrics for site ${siteId}: ${error.message}`);
+      log.error(`Error getting latest metrics for site ${siteId}: ${error.message}`);
     }
 
     return ok({
@@ -1083,9 +1090,11 @@ function SitesController(ctx, log, env) {
               const { entitlement, enrollments } = await tierClient.getAllEnrollment();
 
               if (entitlement && enrollments?.length) {
+                const isSummitPlgEnabled = await getIsSummitPlgEnabled(site, context);
                 const data = {
                   organization: OrganizationDto.toJSON(organization),
                   site: SiteDto.toJSON(site),
+                  isSummitPlgEnabled,
                 };
 
                 return ok({ data });
@@ -1102,9 +1111,11 @@ function SitesController(ctx, log, env) {
           const { site: enrolledSite } = await tierClient.getFirstEnrollment();
 
           if (enrolledSite) {
+            const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
             const data = {
               organization: OrganizationDto.toJSON(organization),
               site: SiteDto.toJSON(enrolledSite),
+              isSummitPlgEnabled,
             };
 
             return ok({ data });
@@ -1117,9 +1128,11 @@ function SitesController(ctx, log, env) {
           const { site: enrolledSite } = await tierClient.getFirstEnrollment();
 
           if (enrolledSite) {
+            const isSummitPlgEnabled = await getIsSummitPlgEnabled(enrolledSite, context);
             const data = {
               organization: OrganizationDto.toJSON(organization),
               site: SiteDto.toJSON(enrolledSite),
+              isSummitPlgEnabled,
             };
 
             return ok({ data });

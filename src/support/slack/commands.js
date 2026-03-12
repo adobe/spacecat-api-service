@@ -47,6 +47,7 @@ import detectBotBlocker from './commands/detect-bot-blocker.js';
 import runPageCitability from './commands/run-page-citability.js';
 import runA11yCodefix from './commands/run-a11y-codefix.js';
 import identifyRedirects from './commands/identify-redirects.js';
+import identifyAndUpdateRedirects from './commands/identify-and-update-redirects.js';
 
 /**
  * Returns all commands.
@@ -92,4 +93,5 @@ export default (context) => [
   runPageCitability(context),
   runA11yCodefix(context),
   identifyRedirects(context),
+  identifyAndUpdateRedirects(context),
 ];
