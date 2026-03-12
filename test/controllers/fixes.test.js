@@ -87,7 +87,7 @@ describe('Fixes Controller', () => {
     sandbox.stub(fixEntityCollection, 'findById');
     sandbox.stub(fixEntityCollection, 'setSuggestionsForFixEntity');
     sandbox.stub(fixEntityCollection, 'getAllFixesWithSuggestionByCreatedAt');
-    sandbox.stub(fixEntityCollection, 'rollbackFixWithSuggestionUpdates');
+    sandbox.stub(fixEntityCollection, 'updateFixAndSuggestionsStatus');
     sandbox.stub(suggestionCollection, 'allByIndexKeys');
     sandbox.stub(suggestionCollection, 'findById');
     sandbox.stub(fixEntitySuggestionCollection, 'createMany');
@@ -1688,7 +1688,7 @@ describe('Fixes Controller', () => {
       await createFixWithStatus(fixId, 'FAILED');
       const validationError = new Error('No suggestions found for the fix entity');
       validationError.name = 'ValidationError';
-      fixEntityCollection.rollbackFixWithSuggestionUpdates.rejects(validationError);
+      fixEntityCollection.updateFixAndSuggestionsStatus.rejects(validationError);
 
       const response = await fixesController.rollbackFailedFix(requestContext);
       expect(response).includes({ status: 400 });
@@ -1705,7 +1705,7 @@ describe('Fixes Controller', () => {
       const suggestion2 = await createSuggestionWithStatus('ERROR');
 
       // Mock the transaction result with model instances
-      // (as returned by rollbackFixWithSuggestionUpdates)
+      // (as returned by updateFixAndSuggestionsStatus)
       const mockFixEntity = {
         getId: () => fixId,
         getStatus: () => 'ROLLED_BACK',
@@ -1763,8 +1763,7 @@ describe('Fixes Controller', () => {
         },
       };
 
-      fixEntityCollection.rollbackFixWithSuggestionUpdates.resolves({
-        canceled: false,
+      fixEntityCollection.updateFixAndSuggestionsStatus.resolves({
         fix: mockFixEntity,
         suggestions: [mockSuggestion1Model, mockSuggestion2Model],
       });
@@ -1847,8 +1846,7 @@ describe('Fixes Controller', () => {
         },
       };
 
-      fixEntityCollection.rollbackFixWithSuggestionUpdates.resolves({
-        canceled: false,
+      fixEntityCollection.updateFixAndSuggestionsStatus.resolves({
         fix: mockFixEntity,
         suggestions: [mockSuggestion1Model],
       });
@@ -1874,7 +1872,7 @@ describe('Fixes Controller', () => {
       requestContext.params.fixId = fixId;
 
       await createFixWithStatus(fixId, 'FAILED');
-      fixEntityCollection.rollbackFixWithSuggestionUpdates.rejects(new Error('Database connection failed'));
+      fixEntityCollection.updateFixAndSuggestionsStatus.rejects(new Error('Database connection failed'));
 
       const response = await fixesController.rollbackFailedFix(requestContext);
       expect(response).includes({ status: 500 });
@@ -1888,7 +1886,7 @@ describe('Fixes Controller', () => {
       requestContext.params.fixId = fixId;
 
       await createFixWithStatus(fixId, 'FAILED');
-      fixEntityCollection.rollbackFixWithSuggestionUpdates.rejects(
+      fixEntityCollection.updateFixAndSuggestionsStatus.rejects(
         new Error('Transaction canceled: condition check failed for fix'),
       );
 

@@ -32,6 +32,7 @@ import {
 import {
   hasText, isArray, isIsoDate, isNonEmptyObject, isValidUUID,
 } from '@adobe/spacecat-shared-utils';
+import { FixEntity as FixEntityModel } from '@adobe/spacecat-shared-data-access';
 import AccessControlUtil from '../support/access-control-util.js';
 import { FixDto } from '../dto/fix.js';
 import { SuggestionDto } from '../dto/suggestion.js';
@@ -467,10 +468,11 @@ export class FixesController {
     try {
       // Use atomic transact write to update fix and all suggestions together
       // The function returns the updated entities directly from the transaction response
-      const result = await this.#FixEntity.rollbackFixWithSuggestionUpdates(
+      const result = await this.#FixEntity.updateFixAndSuggestionsStatus(
         fixId,
         opportunityId,
         'SKIPPED', // newSuggestionStatus
+        FixEntityModel.STATUSES.ROLLED_BACK, // newFixEntityStatus
       );
 
       // Use model instances with DTOs - consistent with codebase patterns
