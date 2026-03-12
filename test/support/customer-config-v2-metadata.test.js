@@ -1699,6 +1699,129 @@ describe('Customer Config V2 Metadata', () => {
       expect(stats.prompts.modified).to.equal(1);
     });
 
+    it('should preserve prompt metadata when prompts have enrichment fields from getPrompts', () => {
+      const existingConfig = {
+        customer: {
+          customerName: 'Test Customer',
+          imsOrgID: 'TEST123@AdobeOrg',
+          categories: [
+            {
+              id: 'cat-1', name: 'Adobe', status: 'active', origin: 'system',
+            },
+          ],
+          topics: [
+            {
+              id: 'topic-1', name: 'Existing Topic', categoryId: 'cat-1', status: 'active',
+            },
+          ],
+          brands: [
+            {
+              id: 'brand-1',
+              name: 'helpx',
+              status: 'active',
+              updatedBy: 'old-user@example.com',
+              updatedAt: '2026-01-01T00:00:00.000Z',
+              prompts: [
+                {
+                  id: 'p1',
+                  prompt: 'What is Firefly?',
+                  categoryId: 'cat-1',
+                  topicId: 'topic-1',
+                  regions: ['US'],
+                  status: 'active',
+                  updatedBy: 'old-user@example.com',
+                  updatedAt: '2026-01-01T00:00:00.000Z',
+                },
+                {
+                  id: 'p2',
+                  prompt: 'How does Acrobat work?',
+                  categoryId: 'cat-1',
+                  topicId: 'topic-1',
+                  regions: ['US'],
+                  status: 'active',
+                  updatedBy: 'old-user@example.com',
+                  updatedAt: '2026-01-01T00:00:00.000Z',
+                },
+              ],
+            },
+          ],
+        },
+      };
+
+      // UI sends back prompts with enrichment fields from getPrompts + a new topic added
+      const updates = {
+        customer: {
+          categories: [
+            {
+              id: 'cat-1', name: 'Adobe', status: 'active', origin: 'system',
+            },
+          ],
+          topics: [
+            {
+              id: 'topic-1', name: 'Existing Topic', categoryId: 'cat-1', status: 'active',
+            },
+            {
+              id: 'topic-2', name: '01 IG Topic', categoryId: 'cat-1', status: 'active',
+            },
+          ],
+          brands: [
+            {
+              id: 'brand-1',
+              name: 'helpx',
+              status: 'active',
+              prompts: [
+                {
+                  id: 'p1',
+                  prompt: 'What is Firefly?',
+                  categoryId: 'cat-1',
+                  topicId: 'topic-1',
+                  regions: ['US'],
+                  status: 'active',
+                  brandId: 'brand-1',
+                  brandName: 'helpx',
+                  category: { id: 'cat-1', name: 'Adobe', origin: 'system' },
+                  topic: { id: 'topic-1', name: 'Existing Topic', categoryId: 'cat-1' },
+                },
+                {
+                  id: 'p2',
+                  prompt: 'How does Acrobat work?',
+                  categoryId: 'cat-1',
+                  topicId: 'topic-1',
+                  regions: ['US'],
+                  status: 'active',
+                  brandId: 'brand-1',
+                  brandName: 'helpx',
+                  category: { id: 'cat-1', name: 'Adobe', origin: 'system' },
+                  topic: { id: 'topic-1', name: 'Existing Topic', categoryId: 'cat-1' },
+                },
+                {
+                  id: 'p3',
+                  prompt: 'New prompt under new topic',
+                  categoryId: 'cat-1',
+                  topicId: 'topic-2',
+                  regions: ['AU'],
+                  status: 'active',
+                },
+              ],
+            },
+          ],
+        },
+      };
+
+      const { mergedConfig, stats } = mergeCustomerConfigV2(updates, existingConfig, userId);
+
+      // Existing prompts should preserve their metadata (enrichment fields stripped during compare)
+      expect(mergedConfig.customer.brands[0].prompts[0].updatedBy).to.equal('old-user@example.com');
+      expect(mergedConfig.customer.brands[0].prompts[0].updatedAt).to.equal('2026-01-01T00:00:00.000Z');
+      expect(mergedConfig.customer.brands[0].prompts[1].updatedBy).to.equal('old-user@example.com');
+      expect(mergedConfig.customer.brands[0].prompts[1].updatedAt).to.equal('2026-01-01T00:00:00.000Z');
+
+      // Only the new prompt and new topic should be marked as modified
+      expect(mergedConfig.customer.brands[0].prompts[2].updatedBy).to.equal(userId);
+      expect(stats.prompts.modified).to.equal(1);
+      expect(stats.topics.modified).to.equal(1);
+    });
+
     it('should handle undefined oldBrands triggering || [] fallback', () => {
       const existingConfig = {
         customer: {
@@ -1755,6 +1878,40 @@ describe('Customer Config V2 Metadata', () => {
       };
       const result = stripMetadata(obj);
       expect(result).to.deep.equal({ id: 'test-id', name: 'Test' });
+    });
+
+    it('should strip enrichment fields added by getPrompts', async () => {
+      const { stripMetadata } = await import('../../src/support/customer-config-v2-metadata.js');
+      const obj = {
+        id: 'prompt-1',
+        prompt: 'What is this?',
+        categoryId: 'cat-1',
+        topicId: 'topic-1',
+        brandId: 'brand-1',
+        brandName: 'Test Brand',
+        category: { id: 'cat-1', name: 'Category 1', origin: 'system' },
+        topic: { id: 'topic-1', name: 'Topic 1', categoryId: 'cat-1' },
+      };
+      const result = stripMetadata(obj);
+      expect(result).to.deep.equal({
+        id: 'prompt-1',
+        prompt: 'What is this?',
+        categoryId: 'cat-1',
+        topicId: 'topic-1',
+      });
+    });
+
+    it('should strip computed fields added by getCustomerConfigLean', async () => {
+      const { stripMetadata } = await import('../../src/support/customer-config-v2-metadata.js');
+      const obj = {
+        id: 'brand-1',
+        name: 'Brand One',
+        totalCategories: 5,
+        totalTopics: 10,
+        totalPrompts: 20,
+      };
+      const result = stripMetadata(obj);
+      expect(result).to.deep.equal({ id: 'brand-1', name: 'Brand One' });
     });
   });
 });

@@ -163,6 +163,8 @@ export default function getRouteHandlers(
     'GET /v2/orgs/:spaceCatId/llmo-prompts': brandsController.getPrompts,
     'POST /v2/orgs/:spaceCatId/llmo-customer-config': brandsController.saveCustomerConfig,
     'PATCH /v2/orgs/:spaceCatId/llmo-customer-config': brandsController.patchCustomerConfig,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/llmo/config': brandsController.getLlmoConfigForBrand,
+    'PATCH /v2/orgs/:spaceCatId/brands/:brandId/llmo/config': brandsController.patchLlmoConfigForBrand,
     'GET /organizations/:organizationId/projects': organizationsController.getProjectsByOrganizationId,
     'GET /organizations/:organizationId/projects/:projectId/sites': organizationsController.getSitesByProjectIdAndOrganizationId,
     'GET /organizations/:organizationId/by-project-name/:projectName/sites': organizationsController.getSitesByProjectNameAndOrganizationId,

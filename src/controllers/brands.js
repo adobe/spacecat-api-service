@@ -23,6 +23,7 @@ import {
   isNonEmptyObject,
   isValidUUID,
   llmoConfig,
+  composeBaseURL,
 } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode, getImsUserToken } from '../support/utils.js';
@@ -31,6 +32,7 @@ import {
 } from '../utils/constants.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { mergeCustomerConfigV2 } from '../support/customer-config-v2-metadata.js';
+import LlmoController from './llmo/llmo.js';
 
 const HEADER_ERROR = 'x-error';
 
@@ -637,6 +639,226 @@ function BrandsController(ctx, log, env) {
     }
   };
 
+  const { readConfig } = llmoConfig;
+
+  /**
+   * Finds a brand by ID within a customer config. Returns the brand or a notFound response.
+   * @param {object} customerConfig - The v2 customer config.
+   * @param {string} brandId - The brand ID to find.
+   * @returns {object|Response} Brand object or notFound response.
+   */
+  function findBrandOrNotFound(customerConfig, brandId) {
+    const brands = customerConfig?.customer?.brands || [];
+    const brand = brands.find((b) => b.id === brandId);
+    if (!brand) {
+      return { notFoundResponse: notFound(`Brand not found: ${brandId}`) };
+    }
+    return { brand };
+  }
+
+  /**
+   * Resolves brand URLs to SpaceCat sites. Returns resolved sites and any URLs
+   * that could not be mapped.
+   * @param {Array} urls - Brand URL objects with a `value` field.
+   * @returns {Promise<{resolved: Array, unresolved: Array}>}
+   */
+  async function resolveBrandUrlsToSites(urls) {
+    const results = await Promise.all(
+      (urls || []).map(async (urlEntry) => {
+        const normalized = composeBaseURL(urlEntry.value);
+        const site = await Site.findByBaseURL(normalized);
+        return { url: urlEntry.value, normalized, site };
+      }),
+    );
+    const resolved = results
+      .filter((r) => r.site)
+      .map((r) => ({ siteId: r.site.getId(), baseURL: r.normalized, site: r.site }));
+    const unresolved = results
+      .filter((r) => !r.site)
+      .map((r) => r.url);
+    log.debug(`resolveBrandUrlsToSites: resolved=${resolved.length}, unresolved=${unresolved.length}`);
+    return { resolved, unresolved };
+  }
+
+  /**
+   * Gets v1 LLMO configs for all sites in a brand, using the v2 customer config
+   * as a directory to map brand URLs to site IDs.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Array of site configs.
+   */
+  const getLlmoConfigForBrand = async (context) => {
+    const { spaceCatId, brandId } = context.params || {};
+    try {
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!hasText(brandId)) {
+        return badRequest('Brand ID required');
+      }
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) return organization;
+
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can access LLMO config');
+      }
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      if (!context.s3?.s3Client) {
+        return badRequest('S3 storage is not configured for this environment');
+      }
+
+      const customerConfig = await loadCustomerConfigFromS3(context, spaceCatId);
+      if (!customerConfig) {
+        return notFound('Customer configuration not found for organization');
+      }
+
+      const brandResult = findBrandOrNotFound(customerConfig, brandId);
+      if (brandResult.notFoundResponse) return brandResult.notFoundResponse;
+      const { brand } = brandResult;
+
+      const { resolved, unresolved } = await resolveBrandUrlsToSites(brand.urls);
+      if (resolved.length === 0) {
+        return notFound('No brand URLs could be resolved to SpaceCat sites');
+      }
+      if (unresolved.length > 0) {
+        log.warn(`Could not resolve ${unresolved.length} brand URL(s) to sites: ${unresolved.join(', ')}`);
+      }
+
+      const configs = await Promise.all(
+        resolved.map(async ({ siteId, baseURL }) => {
+          try {
+            const { config, exists } = await readConfig(siteId, context.s3.s3Client, {
+              s3Bucket: context.s3.s3Bucket,
+            });
+            return { siteId, baseURL, config: exists ? config : null };
+          } catch (err) {
+            log.warn(`Failed to read v1 config for site ${siteId}: ${err.message}`);
+            return { siteId, baseURL, config: null };
+          }
+        }),
+      );
+
+      return ok(configs, {
+        'Content-Encoding': 'br',
+      });
+    } catch (error) {
+      log.error(`Error getting LLMO config for brand ${brandId} in org ${spaceCatId}`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  /**
+   * Updates v1 LLMO configs for specified sites in a brand, validating that each
+   * site belongs to the organization and brand. Delegates to the v1
+   * updateLlmoConfig endpoint per site so the write pipeline is identical.
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Per-site write results.
+   */
+  const patchLlmoConfigForBrand = async (context) => {
+    const { spaceCatId, brandId } = context.params || {};
+
+    try {
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!hasText(brandId)) {
+        return badRequest('Brand ID required');
+      }
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) return organization;
+
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can update LLMO config');
+      }
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      if (!context.s3?.s3Client) {
+        return badRequest('S3 storage is not configured for this environment');
+      }
+
+      const entries = context.data;
+      if (!Array.isArray(entries) || entries.length === 0) {
+        return badRequest('Request body must be a non-empty array of {siteId, config} objects');
+      }
+
+      const customerConfig = await loadCustomerConfigFromS3(context, spaceCatId);
+      if (!customerConfig) {
+        return notFound('Customer configuration not found for organization');
+      }
+
+      const brandResult = findBrandOrNotFound(customerConfig, brandId);
+      if (brandResult.notFoundResponse) return brandResult.notFoundResponse;
+      const { brand } = brandResult;
+
+      const normalizedBrandUrls = new Set(
+        (brand.urls || []).map((u) => composeBaseURL(u.value)),
+      );
+
+      const llmoController = LlmoController(ctx);
+
+      const results = await Promise.all(
+        entries.map(async (entry) => {
+          const { siteId, config: configData } = entry;
+          try {
+            if (!hasText(siteId)) {
+              return { siteId, status: 'error', message: 'siteId is required' };
+            }
+
+            // Verify the site belongs to this org and brand before delegating.
+            // updateLlmoConfig handles site existence, LLMO enablement, and entitlement checks.
+            const site = await Site.findById(siteId);
+            if (!site) {
+              return { siteId, status: 'error', message: `Site not found: ${siteId}` };
+            }
+            if (site.getOrganizationId() !== spaceCatId) {
+              return { siteId, status: 'error', message: 'Site does not belong to this organization' };
+            }
+            const siteBaseURL = composeBaseURL(site.getBaseURL());
+            if (!normalizedBrandUrls.has(siteBaseURL)) {
+              return { siteId, status: 'error', message: 'Site URL is not associated with this brand' };
+            }
+
+            const response = await llmoController.updateLlmoConfig({
+              ...context,
+              params: { siteId },
+              data: configData,
+            });
+
+            if (response.status === 200) {
+              const body = await response.json();
+              return { siteId, status: 'success', version: body.version };
+            }
+
+            const errorBody = await response.json();
+            return {
+              siteId,
+              status: 'error',
+              message: errorBody.message || `v1 update failed with status ${response.status}`,
+            };
+          } catch (err) {
+            log.error(`Error writing v1 config for site ${siteId}: ${err.message}`);
+            return {
+              siteId,
+              status: 'error',
+              message: `Failed to write config: ${err.message}`,
+            };
+          }
+        }),
+      );
+
+      return ok({ results });
+    } catch (error) {
+      log.error(`Error patching LLMO config for brand ${brandId} in org ${spaceCatId}`, error);
+      return createErrorResponse(error);
+    }
+  };
+
   return {
     getBrandsForOrganization,
     getBrandGuidelinesForSite,
@@ -646,6 +868,8 @@ function BrandsController(ctx, log, env) {
     getPrompts,
     saveCustomerConfig,
     patchCustomerConfig,
+    getLlmoConfigForBrand,
+    patchLlmoConfigForBrand,
     // Exported for testing
     filterByStatus,
   };

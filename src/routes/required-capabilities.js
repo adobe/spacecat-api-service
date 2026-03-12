@@ -123,6 +123,8 @@ const routeRequiredCapabilities = {
   'GET /v2/orgs/:spaceCatId/llmo-prompts': 'organization:read',
   'POST /v2/orgs/:spaceCatId/llmo-customer-config': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/llmo-customer-config': 'organization:write',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/llmo/config': 'organization:read',
+  'PATCH /v2/orgs/:spaceCatId/brands/:brandId/llmo/config': 'organization:write',
   'GET /organizations/:organizationId/projects': 'project:read',
   'GET /organizations/:organizationId/projects/:projectId/sites': 'site:read',
   'GET /organizations/:organizationId/by-project-name/:projectName/sites': 'site:read',
