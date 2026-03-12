@@ -1,0 +1,109 @@
+{
+  "metadata": {
+    "repo": "https://github.com/adobe/spacecat-api-service/",
+    "evaluatedAt": "2026-02-27T00:00:00.000Z",
+    "scorecardType": "software-dev",
+    "evaluatorModel": "claude-opus-4-6"
+  },
+  "evaluation": {
+    "architecture_and_design": {
+      "score": 3,
+      "reasoning": "The repository demonstrates advanced AI readiness at the architecture and design level. A comprehensive CLAUDE.md exists at the repo root providing detailed architectural guidance covering request flow, routing, controller patterns, data access, DTOs, access control, and queue-based async patterns — far beyond a simple context file. A dedicated project constitution (.specify/memory/constitution.md) with version tracking, ratification date, and six enumerated principles (API-First Design, Use Case-Driven Data Modeling, Test Coverage, Security, Performance Standards, Code Organization) functions as a living governance document. The .cursor/rules/ directory contains always-applied MDC rules (api-design-implementation.mdc, openapi-api-specification-implementation.mdc) that constrain AI behavior during development. A structured spec-driven workflow exists in .specify/ with templates for plans, specs, tasks, and checklists. The .github/copilot-instructions.md file encodes deep repo-specific knowledge — routing invariants, access control checks, DTO rules, SQS patterns, Slack retry handling — as AI review guidance. A Cursor custom mode prompt (docs/cursor/add-mcp-tool.prompt) guides AI-assisted MCP tool scaffolding. ADRs are tracked in docs/decisions/. The repo also has a single plan artifact in .cursor/plans/ demonstrating that the speckit workflow has been exercised to produce a Cursor-consumable skill plan. The one gap relative to a perfect advanced score is the absence of a living active_context.md or context_summary.md to capture current session state, and no evidence that prompt libraries are explicitly versioned or metrics tracked.",
+      "evidence": [
+        "CLAUDE.md at repo root with exhaustive architectural documentation including request flow, controller patterns, DTO rules, access control patterns, testing requirements, and step-by-step guides for adding endpoints, Slack commands, and data models",
+        ".specify/memory/constitution.md — versioned project constitution (v1.0.0, ratified 2026-01-22) with six governance principles and a sync impact report",
+        ".cursor/rules/api-design-implementation.mdc — always-applied Cursor rule with clarification-phase questions and evaluation criteria for API design",
+        ".cursor/rules/openapi-api-specification-implementation.mdc — contextual Cursor rule for OpenAPI spec/implementation synchronization",
+        ".github/copilot-instructions.md — 270+ line repo-specific AI review policy covering bugs, security, routing, DTO usage, SQS, Slack, multipart, performance, cost, and config/docs requirements",
+        ".cursor/commands/ directory with 10 speckit workflow commands (speckit.specify, speckit.plan, speckit.tasks, speckit.implement, speckit.checklist, speckit.clarify, speckit.analyze, speckit.constitution, branch-review, speckit.taskstoissues)",
+        ".specify/templates/ with plan-template.md, spec-template.md, tasks-template.md, checklist-template.md structured to enforce constitution compliance gates",
+        "docs/cursor/add-mcp-tool.prompt — domain-specific prompt for guided MCP tool scaffolding",
+        "docs/decisions/001-bulk-delete-via-post.md — ADR with status, context, decision, and consequences",
+        ".cursor/plans/spacecat_api_cursor_skill_63d62efb.plan.md — evidence of speckit workflow in active use"
+      ],
+      "recommendations": [
+        "Add a context_summary.md (or active_context.md) at the repo root to capture current focus, active decisions, architectural gotchas, and cross-cutting concerns across sessions — the constitution covers governance but there is no living session-boundary context file",
+        "Version prompt artifacts (CLAUDE.md, copilot-instructions.md, .cursor/rules/*.mdc) with a changelog or last-updated header so drift is visible over time",
+        "Establish a prompt library with reusable snippets for common code generation scenarios (new controller, new DTO, new integration test) to further reduce per-feature scaffolding cost"
+      ]
+    },
+    "development_and_coding": {
+      "score": 3,
+      "reasoning": "The repository demonstrates advanced AI-embedded development workflows. Multiple AI tools are explicitly supported: Claude Code (CLAUDE.md), GitHub Copilot (copilot-instructions.md), and Cursor (comprehensive .cursor/ directory with rules, commands, and plans). AI is embedded across all major coding workflows: spec generation (speckit.specify), implementation planning (speckit.plan), task breakdown (speckit.tasks), code review (branch-review, copilot-instructions.md), and MCP tool scaffolding (add-mcp-tool.prompt). The .cursor/rules/*.mdc files are alwaysApply: true, meaning every AI coding session in Cursor is constrained by documented patterns. The speckit workflow (.specify/ + .cursor/commands/speckit.*) represents a custom AI-assisted SDLC pipeline covering clarification, specification, planning, implementation, and task tracking phases. A domain-specific AI agent framework exists in production code (src/agents/org-detector/ using @langchain/langgraph + @langchain/openai + Azure OpenAI), demonstrating that the team builds AI systems as product features — a strong indicator of AI fluency. The gpt-client package (@adobe/spacecat-shared-gpt-client) and agent-workflow.js (AWS Step Functions integration) provide infrastructure for AI-driven product features (LLMO rationale, brand profiling). Husky pre-commit hooks enforce linting and docs validation automatically. The one gap is no explicit tracking of AI-assisted lines of code or acceptance rate metrics.",
+      "evidence": [
+        "CLAUDE.md provides comprehensive Claude Code workflow guidance with step-by-step checklists for every development task type",
+        ".github/copilot-instructions.md provides Copilot PR review instructions with severity levels, core checks, and repo-specific patterns",
+        ".cursor/rules/api-design-implementation.mdc and openapi-api-specification-implementation.mdc — always-applied and context-triggered coding rules",
+        ".cursor/commands/ with 10 speckit workflow commands enabling AI-assisted spec-driven development end to end",
+        ".specify/ directory with constitution, templates, and bash scripts forming a complete AI-assisted SDLC pipeline",
+        "src/agents/org-detector/agent.js — production LangGraph agent using @langchain/langgraph + @langchain/openai with tool-calling loop (5 tools, StateGraph, MemorySaver)",
+        "src/agents/org-detector/instructions.js — stored system prompt with structured multi-step instructions and JSON output format specification",
+        "@langchain/core, @langchain/langgraph, @langchain/openai in package.json dependencies",
+        "@adobe/spacecat-shared-gpt-client dependency for LLM integrations",
+        "src/support/agent-workflow.js — AWS Step Functions integration for async AI workflows (brand-profile, org-detector)",
+        "src/controllers/llmo/ — 7-file LLM Optimizer controller suite with query handling, rationale generation, onboarding, config metadata",
+        ".husky/pre-commit enforcing lint-staged (eslint on all .js/.cjs) and docs:lint on every commit"
+      ],
+      "recommendations": [
+        "Introduce AI metrics tracking: instrument commit metadata or a lightweight log to capture frequency of AI-assisted commits, enabling data-driven refinement of prompts and rules",
+        "Create a prompt refinement backlog or versioned changelog for .cursor/rules and copilot-instructions.md to document what was changed and why, enabling continuous improvement",
+        "Expand .cursor/commands to cover common refactoring scenarios (e.g., migrate endpoint to v3 data access, add pagination to existing endpoint) to further reduce manual guidance overhead"
+      ]
+    },
+    "testing_and_quality": {
+      "score": 2,
+      "reasoning": "The repository has a mature, comprehensive test infrastructure that goes well beyond basic, but stops short of advanced AI-driven test generation or mutation testing. The testing system is extensive: 100% unit test coverage enforced via c8 with a protected .nycrc.json (a GitHub Actions step blocks PRs that modify coverage config), 36,000+ lines of unit tests across 30 controller test files, and a sophisticated dual-backend integration test suite (~540 test executions across DynamoDB and PostgreSQL). The CLAUDE.md and copilot-instructions.md both mandate that behavior changes without tests are Critical issues. Test patterns are deeply documented in CLAUDE.md (standard test structure, esmock patterns, IT architecture, seed data strategy, auth personas). However, there is no evidence of AI-generated test suites, mutation testing (Stryker absent from all config files), AI-driven coverage gap detection, or AI-driven regression identification. Test writing appears to be fully manual with AI providing guidance and enforcement through the copilot review instructions. The copilot-instructions.md does prompt AI to suggest missing tests and flag missing tests as Critical, which elevates this above Basic, but the AI role is advisory (flag/suggest during review) rather than generative (produce test suites). The exclusion of src/agents/org-detector/agent.js and instructions.js from coverage is a pragmatic but visible gap in the coverage configuration.",
+      "evidence": [
+        ".nycrc.json with 100% lines, branches, and statements coverage requirement across src/**/*.js",
+        ".github/actions/protect-nyc-config/action.yaml — GitHub Actions step that blocks PRs from modifying .nycrc.json, protecting coverage thresholds",
+        "test/it/ with dual-backend integration test suite: ~268 passing DynamoDB tests + ~272 passing PostgreSQL tests = ~540 executions",
+        "test/it/README.md — detailed IT architecture documentation covering shared factory pattern, auth personas, seed strategy, troubleshooting",
+        "test/controllers/ with 30 test files totaling 36,035 lines of unit tests",
+        "CLAUDE.md Test Requirements section mandating unit + integration tests for all behavior changes and new endpoints",
+        ".github/copilot-instructions.md section 3.4 marking 'behavior changes without tests' as Critical and requiring concrete test suggestions in PR review output",
+        "Mocha + Chai + Sinon + esmock + Nock toolchain configured and documented for consistent test patterns",
+        "No stryker, no fast-check, no mutation testing configuration found",
+        "No AI test generation tooling or scripts found in any workflow or package dependency"
+      ],
+      "recommendations": [
+        "Introduce AI-assisted test generation for new controllers/endpoints: add a speckit.tests command or Cursor rule that generates unit test scaffolding from controller source, reducing manual test writing overhead",
+        "Evaluate mutation testing with Stryker to detect superficial tests that pass due to coverage thresholds but do not actually assert correct behavior — the 100% line coverage requirement incentivizes coverage-gaming without mutation verification",
+        "Add AI-driven coverage gap analysis: when copilot-instructions.md flags missing tests as Critical, provide a prompt template that generates the missing test cases rather than just flagging their absence"
+      ]
+    },
+    "code_review": {
+      "score": 3,
+      "reasoning": "The repository demonstrates advanced AI integration in its code review process. The .github/copilot-instructions.md is a sophisticated, 270+ line AI review policy that instructs GitHub Copilot to perform automated pre-review checks on every PR. It defines three severity levels (Critical, Major, Minor), mandates a structured output format (Summary / Issues / Suggested Tests), and encodes deep repo-specific review logic: access control presence checks (AccessControlUtil instantiation), DTO leak detection, routing consistency (routes must appear in both src/index.js and src/routes/index.js), UUID validation, SQS payload structure, Slack retry handling, multipart limits, performance anti-patterns, and cost impact scanning. The .cursor/commands/branch-review.md command provides a local AI-assisted pre-review workflow that applies the same copilot-instructions.md rules via Cursor before submitting to GitHub. Together these form a two-stage AI review pipeline: local Cursor pre-review + GitHub Copilot automated PR review. PR templates enforce documentation checklists (OpenAPI spec updates, audit type schema updates). A semantic PR title validator (amannn/action-semantic-pull-request) enforces conventional commit compliance on every PR. The copilot instructions explicitly flag 'changed behavior without tests' as a Critical blocking issue and require test suggestions in every review output, creating a tight feedback loop between review and testing. The review system enforces policy (not just suggestions): Critical issues require 'This PR should not be merged until this is fixed' language.",
+      "evidence": [
+        ".github/copilot-instructions.md — 270-line structured AI review policy with severity definitions (Critical/Major/Minor), required output format, and 8 numbered review sections",
+        "copilot-instructions.md section 3.2: Security & Authorization — Critical flag if AccessControlUtil is absent, with specific code patterns and merge-blocking language",
+        "copilot-instructions.md section 3.3: Routing & Middleware — Critical flag for routes missing from either src/index.js or src/routes/index.js",
+        "copilot-instructions.md section 3.4: Required Tests — Critical flag for behavior changes without tests, with explicit test suggestion requirement",
+        "copilot-instructions.md sections 5-6: Performance and Cost Impact scans with explicit 'do not speculate without evidence' guard",
+        "copilot-instructions.md section 7: Config/Documentation — Major flag for missing env var docs, OpenAPI spec updates, README updates",
+        ".cursor/commands/branch-review.md — local AI pre-review command applying copilot-instructions.md rules via Cursor before GitHub submission",
+        ".github/pull_request_template.md — enforces OpenAPI spec update requirements, example requirements, and issue linking",
+        ".github/workflows/ci.yaml validate-pr-title job using amannn/action-semantic-pull-request@v6 for every PR",
+        ".github/workflows/semver-check.yaml using adobe-rnd/github-semantic-release-comment-action for semantic versioning feedback on branches"
+      ],
+      "recommendations": [
+        "Automate the Cursor branch-review as a CI step or GitHub App so that AI pre-review output is posted as a PR comment automatically, rather than requiring manual local execution",
+        "Add an AI review metrics dashboard tracking: how many Critical issues are found per PR, what types of issues are most common, and whether issue rates trend down over time as the team learns from AI feedback",
+        "Consider adding a second AI review pass targeting architecture-level concerns (data model decisions, API design tradeoffs) distinct from the current bug/security/test-focused review, using the constitution as reference"
+      ]
+    }
+  },
+  "overall_maturity": "advanced",
+  "overall_score": 2.8,
+  "overall_summary": "The spacecat-api-service repository demonstrates advanced AI readiness across all four SDLC dimensions evaluated. The team has invested substantially in AI tooling infrastructure: a dual-tool setup supporting both Claude Code (CLAUDE.md) and Cursor (.cursor/ with rules, commands, plans), a structured speckit workflow for spec-driven development, a deeply codified AI code review policy (copilot-instructions.md), and production AI agent code using LangGraph and Azure OpenAI. The architecture and design phase scores highest due to a project constitution, always-applied coding rules, and multiple custom AI command workflows. The development and coding phase is equally strong, with evidence that AI is embedded at every stage from requirement specification to implementation to task tracking, and the team ships AI as a product feature (OrgDetectorAgent, LLMO rationale generation, brand profiling via Step Functions). Code review is automated end-to-end: every PR triggers Copilot review against a 270-line policy document that flags security gaps, routing inconsistencies, missing tests, and DTO leaks as blocking Critical issues.\n\nThe testing phase is the relative weak point — not because testing is poor (100% enforced coverage, 540+ integration test executions across two database backends, 36,000+ lines of unit tests), but because AI plays a mostly advisory role in testing rather than a generative one. Tests are written manually; AI flags their absence during review but does not generate them. Mutation testing is absent, and there is no AI-driven coverage gap detection or test suite generation tooling. Elevating this from Intermediate to Advanced in testing would require incorporating AI test generation into the workflow.\n\nOverall, this codebase is a strong example of an engineering team that has made deliberate, systematic investments in AI tooling at the workflow level — not just using AI ad-hoc for individual tasks, but encoding team knowledge into reusable AI artifacts (rules, constitutions, prompt files, review policies) that constrain and guide AI behavior across the entire team's development lifecycle.",
+  "top_strengths": [
+    "Deeply codified AI review policy (.github/copilot-instructions.md) that encodes repo-specific patterns into merge-blocking Critical checks, with a complementary local Cursor pre-review command — creating a two-stage automated review pipeline before any human review",
+    "Comprehensive speckit workflow (.specify/ + .cursor/commands/) providing a complete AI-assisted SDLC pipeline from feature specification through planning, tasks, and implementation with a project constitution governing AI behavior",
+    "Production AI agent code (src/agents/org-detector/ with LangGraph + Azure OpenAI, src/support/agent-workflow.js with Step Functions) demonstrating deep organizational fluency with AI systems — the team both builds with AI tooling and ships AI as a product feature"
+  ],
+  "top_priorities": [
+    "Introduce AI-assisted test generation: add a Cursor command or speckit step that produces unit test scaffolding from controller source code, reducing the gap between AI's advisory role in testing (flag missing tests) and a generative role (produce the missing tests)",
+    "Add a living context_summary.md or active_context.md to the repo root capturing current architectural decisions, active work streams, and session-boundary handoff notes — filling the gap between the static constitution (governance) and the per-session context that survives compaction",
+    "Automate AI pre-review as a CI artifact: surface the output of branch-review.md as an automated PR comment rather than a local-only command, ensuring every PR receives AI pre-screening output regardless of whether the author manually runs the Cursor review workflow"
+  ]
+}
