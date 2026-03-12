@@ -244,9 +244,24 @@ describe('TopPaidOpportunitiesController', () => {
       expect(opportunities[0].system_type).to.equal('consent-banner');
     });
 
-    it('returns no-cta-above-the-fold opportunities in top paid opportunities', async () => {
+    it('returns no-cta-above-the-fold opportunities by type', async () => {
       const noctaOppty = createOpportunity({
         id: 'nocta-1',
+        type: 'no-cta-above-the-fold',
+      });
+      setupOpportunityMocks(mockContext.dataAccess.Opportunity, [noctaOppty]);
+
+      const response = await controller.getTopPaidOpportunities({
+        params: { siteId: SITE_ID }, data: {},
+      });
+      const opportunities = await response.json();
+      expect(opportunities).to.have.lengthOf(1);
+      expect(opportunities[0].system_type).to.equal('no-cta-above-the-fold');
+    });
+
+    it('returns no-cta-above-the-fold opportunities by data.opportunityType (backward compat)', async () => {
+      const noctaOppty = createOpportunity({
+        id: 'nocta-2',
         type: 'generic-opportunity',
         data: { opportunityType: 'no-cta-above-the-fold' },
       });

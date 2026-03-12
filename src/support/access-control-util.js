@@ -89,6 +89,10 @@ export default class AccessControlUtil {
     return this.authInfo.isAdmin();
   }
 
+  hasS2SAdminAccess() {
+    return this.authInfo.isS2SAdmin();
+  }
+
   isLLMOAdministrator() {
     return this.authInfo.isLLMOAdministrator();
   }
@@ -120,7 +124,7 @@ export default class AccessControlUtil {
       const profile = this.authInfo.getProfile();
       const trialUser = await this.TrialUser.findByEmailId(profile.trial_email);
 
-      if (!trialUser) {
+      if (!trialUser && !this.authInfo?.isS2SConsumer?.()) {
         await this.TrialUser.create({
           emailId: profile.trial_email,
           firstName: profile.first_name || '-',

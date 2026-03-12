@@ -18,7 +18,6 @@ are unaffected because they identify the target resource via path parameters.
 ## Decision
 Bulk deletion endpoints that require a request body use POST with an action suffix:
 - `POST /sites/:siteId/url-store/delete`
-- `POST /sites/:siteId/sentiment/topics/:topicId/prompts/remove`
 - `POST /sites/:siteId/sentiment/guidelines/:guidelineId/audits/unlink`
 
 ## Consequences

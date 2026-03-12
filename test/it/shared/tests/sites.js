@@ -187,6 +187,26 @@ export default function siteTests(getHttpClient, resetData) {
         const res = await http.user.get('/sites/by-delivery-type/aem_edge');
         expect(res.status).to.equal(403);
       });
+
+      it('admin: returns sites when delivery type is uppercase', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites/by-delivery-type/AEM_EDGE');
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(2);
+        res.body.forEach((site) => {
+          expect(site.deliveryType).to.equal('aem_edge');
+        });
+      });
+
+      it('admin: returns sites when delivery type is mixed-case', async () => {
+        const http = getHttpClient();
+        const res = await http.admin.get('/sites/by-delivery-type/Aem_Edge');
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(2);
+        res.body.forEach((site) => {
+          expect(site.deliveryType).to.equal('aem_edge');
+        });
+      });
     });
 
     // ── Write operations ──
