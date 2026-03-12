@@ -595,24 +595,6 @@ describe('PlgOnboardingController', () => {
       expect(existingOnboarding.save).to.have.been.called;
     });
 
-    it('resumes from WAITLISTED when RUM data is now available', async () => {
-      const existingOnboarding = createMockOnboarding({
-        status: 'WAITLISTED',
-        steps: { orgResolved: true },
-      });
-      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingOnboarding);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      expect(mockDataAccess.PlgOnboarding.create).to.not.have.been.called;
-      expect(existingOnboarding.setStatus).to.have.been.calledWith('IN_PROGRESS');
-      expect(existingOnboarding.setError).to.have.been.calledWith(null);
-      expect(existingOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-    });
-
     it('resumes from WAITING_FOR_IP_ALLOWLISTING when site is now crawlable', async () => {
       const existingOnboarding = createMockOnboarding({
         status: 'WAITING_FOR_IP_ALLOWLISTING',
@@ -854,15 +836,15 @@ describe('PlgOnboardingController', () => {
     });
   });
 
-  // --- RUM gate ---
+  // --- RUM check (informational, non-blocking) ---
 
-  describe('onboard - RUM gate', () => {
+  describe('onboard - RUM check', () => {
     let controller;
     beforeEach(() => {
       controller = PlgOnboardingController({ log: mockLog });
     });
 
-    it('returns WAITLISTED when no RUM data for domain', async () => {
+    it('continues onboarding when no RUM data for domain', async () => {
       rumRetrieveDomainkeyStub.rejects(new Error('No domainkey found'));
 
       const context = buildContext({ domain: TEST_DOMAIN });
@@ -870,16 +852,12 @@ describe('PlgOnboardingController', () => {
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(mockOnboarding.setStatus)
-        .to.have.been.calledWith('WAITLISTED');
-      expect(mockOnboarding.setWaitlistReason)
-        .to.have.been.calledWith('No RUM data available for this domain');
-      expect(mockOnboarding.setSteps).to.have.been.called;
-      expect(mockOnboarding.save).to.have.been.called;
-      // Should NOT proceed to bot blocker or site creation
-      expect(detectBotBlockerStub).to.not.have.been.called;
-      expect(mockDataAccess.Site.findByBaseURL).to.not.have.been.called;
-      expect(mockDataAccess.Site.create).to.not.have.been.called;
+      // Should NOT be waitlisted — onboarding continues
+      expect(mockOnboarding.setStatus).to.not.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      // Should proceed to bot blocker and site creation
+      expect(detectBotBlockerStub).to.have.been.called;
+      expect(mockDataAccess.Site.create).to.have.been.called;
     });
   });
 

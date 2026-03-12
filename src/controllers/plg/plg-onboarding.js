@@ -189,17 +189,14 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
     onboarding.setOrganizationId(organizationId);
     steps.orgResolved = true;
 
-    // Step 2: RUM check — gate onboarding if no RUM data
+    // Step 2: RUM check — informational, does not block onboarding
     const rumApiClient = RUMAPIClient.createFrom(context);
     try {
       await rumApiClient.retrieveDomainkey(domain);
       steps.rumVerified = true;
     } catch {
-      onboarding.setStatus(STATUSES.WAITLISTED);
-      onboarding.setWaitlistReason('No RUM data available for this domain');
-      onboarding.setSteps(steps);
-      await onboarding.save();
-      return onboarding;
+      steps.rumVerified = false;
+      log.info(`No RUM data for ${domain}, continuing onboarding`);
     }
 
     // Step 3: Check site ownership
