@@ -46,6 +46,18 @@ const PLG_PROFILE_KEY = 'aso_plg';
 
 const DOMAIN_ALREADY_ASSIGNED = 'already assigned to another organization';
 
+// RFC 1123 hostname: labels of 1-63 alphanumeric/hyphen chars, separated by dots, max 253 chars
+const HOSTNAME_RE = /^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
+
+/**
+ * Validates that a domain is a syntactically valid hostname (RFC 1123).
+ * @param {string} domain - The domain to validate.
+ * @returns {boolean} true if valid hostname, false otherwise.
+ */
+function isValidHostname(domain) {
+  return HOSTNAME_RE.test(domain);
+}
+
 /**
  * Validates that a domain is not a private/internal address to prevent SSRF.
  * @param {string} domain - The domain to validate.
@@ -125,6 +137,13 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
   const { dataAccess, log, env } = context;
   const { Site, PlgOnboarding } = dataAccess;
 
+  if (!isValidHostname(domain)) {
+    throw Object.assign(
+      new Error('Invalid domain: must be a valid hostname'),
+      { clientError: true },
+    );
+  }
+
   if (!isSafeDomain(domain)) {
     throw Object.assign(
       new Error('Invalid domain'),
@@ -161,7 +180,7 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
     log.info(`Resuming PlgOnboarding record ${onboarding.getId()}`);
   }
 
-  const steps = onboarding.getSteps() || {};
+  const steps = { ...(onboarding.getSteps() || {}) };
 
   try {
     // Step 1: Resolve organization
@@ -185,7 +204,6 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
 
     // Step 3: Check site ownership
     let site = await Site.findByBaseURL(baseURL);
-    let isNewSite = false;
 
     if (site) {
       const existingOrgId = site.getOrganizationId();
@@ -229,7 +247,6 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
 
     // Step 5: Create site if new
     if (!site) {
-      isNewSite = true;
       const deliveryType = await findDeliveryType(baseURL);
       site = await Site.create({
         baseURL,
@@ -239,7 +256,7 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
       log.info(`Created site ${site.getId()} for ${baseURL}`);
     }
     onboarding.setSiteId(site.getId());
-    steps.siteCreated = isNewSite;
+    steps.siteCreated = true;
     steps.siteResolved = true;
 
     // Step 6: Update configs

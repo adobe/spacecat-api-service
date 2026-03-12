@@ -398,7 +398,46 @@ describe('PlgOnboardingController', () => {
       controller = PlgOnboardingController({ log: mockLog });
     });
 
+    const invalidHostnames = [
+      '../../etc/passwd',
+      'domain.com:8080',
+      'http://domain.com',
+      '-invalid.com',
+      `${'a'.repeat(254)}.com`,
+      'domain..com',
+    ];
+
+    invalidHostnames.forEach((invalidDomain) => {
+      it(`returns 400 for invalid hostname: ${invalidDomain}`, async () => {
+        const context = buildContext({ domain: invalidDomain });
+
+        const res = await controller.onboard(context);
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.include('Invalid domain');
+      });
+    });
+
+    // These are valid hostnames syntactically but point to unsafe addresses
     const unsafeDomains = [
+      'myhost.local',
+      'service.internal',
+      'foo.private.adobe.io',
+    ];
+
+    unsafeDomains.forEach((unsafeDomain) => {
+      it(`returns 400 for unsafe domain: ${unsafeDomain}`, async () => {
+        const context = buildContext({ domain: unsafeDomain });
+
+        const res = await controller.onboard(context);
+
+        expect(res.status).to.equal(400);
+        expect(res.value).to.equal('Invalid domain');
+      });
+    });
+
+    // These fail hostname validation before reaching SSRF check
+    const invalidAsHostnames = [
       'localhost',
       '127.0.0.1',
       '10.0.0.1',
@@ -407,22 +446,16 @@ describe('PlgOnboardingController', () => {
       '169.254.169.254',
       '0.0.0.0',
       '[::1]',
-      'myhost.local',
-      'service.internal',
-      'foo.private.adobe.io',
     ];
 
-    unsafeDomains.forEach((unsafeDomain) => {
-      it(`returns 400 for unsafe domain: ${unsafeDomain}`, async () => {
-        const context = buildContext({
-          domain: unsafeDomain,
-          imsOrgId: TEST_IMS_ORG_ID,
-        });
+    invalidAsHostnames.forEach((domain) => {
+      it(`returns 400 for invalid/unsafe domain: ${domain}`, async () => {
+        const context = buildContext({ domain });
 
         const res = await controller.onboard(context);
 
         expect(res.status).to.equal(400);
-        expect(res.value).to.equal('Invalid domain');
+        expect(res.value).to.include('Invalid domain');
       });
     });
   });
@@ -560,6 +593,42 @@ describe('PlgOnboardingController', () => {
       expect(existingOnboarding.setError).to.have.been.calledWith(null);
       expect(existingOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
       expect(existingOnboarding.save).to.have.been.called;
+    });
+
+    it('resumes from WAITLISTED when RUM data is now available', async () => {
+      const existingOnboarding = createMockOnboarding({
+        status: 'WAITLISTED',
+        steps: { orgResolved: true },
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingOnboarding);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockDataAccess.PlgOnboarding.create).to.not.have.been.called;
+      expect(existingOnboarding.setStatus).to.have.been.calledWith('IN_PROGRESS');
+      expect(existingOnboarding.setError).to.have.been.calledWith(null);
+      expect(existingOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('resumes from WAITING_FOR_IP_ALLOWLISTING when site is now crawlable', async () => {
+      const existingOnboarding = createMockOnboarding({
+        status: 'WAITING_FOR_IP_ALLOWLISTING',
+        steps: { orgResolved: true, rumVerified: true },
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingOnboarding);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockDataAccess.PlgOnboarding.create).to.not.have.been.called;
+      expect(existingOnboarding.setStatus).to.have.been.calledWith('IN_PROGRESS');
+      expect(existingOnboarding.setError).to.have.been.calledWith(null);
+      expect(existingOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
     it('sets locale when detected', async () => {

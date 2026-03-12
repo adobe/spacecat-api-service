@@ -14,6 +14,7 @@ import { expect } from 'chai';
 import { expectISOTimestamp } from '../helpers/assertions.js';
 import {
   ORG_1_IMS_ORG_ID,
+  ORG_2_IMS_ORG_ID,
   PLG_ONBOARDING_1_ID,
   PLG_ONBOARDING_1_DOMAIN,
   NON_EXISTENT_IMS_ORG_ID,
@@ -62,25 +63,22 @@ export default function plgOnboardingTests(getHttpClient, resetData, options = {
 
       it('returns 400 for missing domain', async () => {
         const http = getHttpClient();
+        const res = await http.admin.post('/plg/onboard', {});
+        expect(res.status).to.equal(400);
+      });
+
+      it('returns 400 for invalid domain (not a hostname)', async () => {
+        const http = getHttpClient();
         const res = await http.admin.post('/plg/onboard', {
-          imsOrgId: ORG_1_IMS_ORG_ID,
+          domain: '../../etc/passwd',
         });
         expect(res.status).to.equal(400);
       });
 
-      it('returns 400 for missing imsOrgId', async () => {
+      it('returns 400 for unsafe domain', async () => {
         const http = getHttpClient();
         const res = await http.admin.post('/plg/onboard', {
-          domain: 'example.com',
-        });
-        expect(res.status).to.equal(400);
-      });
-
-      it('returns 400 for invalid imsOrgId', async () => {
-        const http = getHttpClient();
-        const res = await http.admin.post('/plg/onboard', {
-          domain: 'example.com',
-          imsOrgId: 'not-a-valid-ims-org',
+          domain: 'localhost',
         });
         expect(res.status).to.equal(400);
       });
@@ -93,6 +91,13 @@ export default function plgOnboardingTests(getHttpClient, resetData, options = {
         const http = getHttpClient();
         const res = await http.admin.get('/plg/onboard/status/not-valid');
         expect(res.status).to.equal(400);
+      });
+
+      it('returns 403 when caller org does not match requested org', async () => {
+        // admin token has ORG_1 tenant; requesting ORG_2 status should be forbidden
+        const http = getHttpClient();
+        const res = await http.admin.get(`/plg/onboard/status/${ORG_2_IMS_ORG_ID}`);
+        expect(res.status).to.equal(403);
       });
 
       // Tests below require PlgOnboarding model (v3/PostgreSQL only)
