@@ -10,24 +10,29 @@
  * governing permissions and limitations under the License.
  */
 
+import { gunzipSync } from 'zlib';
 import {
-  ok, badRequest, forbidden, createResponse, notFound,
+  ok, badRequest, forbidden, createResponse, notFound, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import {
   SPACECAT_USER_AGENT,
   tracingFetch as fetch,
   hasText,
   isObject,
+  isValidUUID,
   llmoConfig as llmo,
   llmoStrategy,
   schemas,
   composeBaseURL,
+  isValidUrl,
 } from '@adobe/spacecat-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
+import { getDomain } from 'tldts';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
-import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
+import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../../support/access-control-util.js';
+import { exchangePromiseToken } from '../../support/utils.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import {
   applyFilters,
@@ -36,6 +41,8 @@ import {
   applyGroups,
   applyMappings,
   LLMO_SHEETDATA_SOURCE_URL,
+  EDGE_OPTIMIZE_CDN_STRATEGIES,
+  EDGE_OPTIMIZE_CDN_TYPES,
 } from './llmo-utils.js';
 import { LLMO_SHEET_MAPPINGS } from './llmo-mappings.js';
 import {
@@ -43,10 +50,13 @@ import {
   generateDataFolder,
   performLlmoOnboarding,
   performLlmoOffboarding,
+  postLlmoAlert,
 } from './llmo-onboarding.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
+import { handleBrandClaims } from './brand-claims.js';
+import { notifyStrategyChanges } from '../../support/opportunity-workspace-notifications.js';
 
 const { readConfig, writeConfig } = llmo;
 const { readStrategy, writeStrategy } = llmoStrategy;
@@ -62,6 +72,9 @@ function LlmoController(ctx) {
     const { Site } = dataAccess;
 
     const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound(`Site not found: ${siteId}`);
+    }
     const config = site.getConfig();
     const llmoConfig = config.getLlmoConfig();
 
@@ -117,7 +130,9 @@ function LlmoController(ctx) {
     } = context.params;
     const { env } = context;
     try {
-      const { llmoConfig } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { llmoConfig } = siteValidation;
       // Construct the sheet URL based on which parameters are provided
       let sheetURL;
       if (sheetType && week) {
@@ -213,7 +228,9 @@ function LlmoController(ctx) {
     }
 
     try {
-      const { llmoConfig } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { llmoConfig } = siteValidation;
       // Construct the sheet URL based on which parameters are provided
       let sheetURL;
       if (sheetType && week) {
@@ -344,7 +361,8 @@ function LlmoController(ctx) {
     try {
       log.info(`validating LLMO global sheet data for siteId: ${siteId}, configName: ${configName}`);
       // Validate LLMO access but don't use the site-specific dataFolder
-      await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
 
       // Use 'llmo-global' folder
       const sheetURL = `llmo-global/${configName}.json`;
@@ -398,7 +416,8 @@ function LlmoController(ctx) {
     const version = context.data?.version;
     try {
       // Validate site and LLMO access
-      await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
 
       if (!s3 || !s3.s3Client) {
         return badRequest('LLMO config storage is not configured for this environment');
@@ -425,10 +444,12 @@ function LlmoController(ctx) {
   };
 
   async function updateLlmoConfig(context) {
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can update the LLMO config');
+    }
     const {
       log,
       s3,
-      data,
       pathInfo,
     } = context;
     const { siteId } = context.params;
@@ -437,7 +458,16 @@ function LlmoController(ctx) {
 
     try {
       // Validate site and LLMO access
-      await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+
+      // Support gzip-compressed request bodies (Content-Type: application/gzip)
+      let { data } = context;
+      const contentType = context.request?.headers?.get?.('content-type');
+      if (contentType === 'application/gzip') {
+        const compressed = Buffer.from(await context.request.arrayBuffer());
+        data = JSON.parse(gunzipSync(compressed).toString());
+      }
 
       if (!isObject(data)) {
         return badRequest('LLMO config update must be provided as an object');
@@ -495,6 +525,7 @@ function LlmoController(ctx) {
         `${stats.brandAliases.total} brand aliases${stats.brandAliases.modified ? ` (${stats.brandAliases.modified} modified)` : ''}`,
         `${stats.competitors.total} competitors${stats.competitors.modified ? ` (${stats.competitors.modified} modified)` : ''}`,
         `${stats.deletedPrompts.total} deleted prompts${stats.deletedPrompts.modified ? ` (${stats.deletedPrompts.modified} modified)` : ''}`,
+        `${stats.ignoredPrompts.total} ignored prompts${stats.ignoredPrompts.modified ? ` (${stats.ignoredPrompts.modified} modified)` : ''}`,
         `${stats.categoryUrls.total} category URLs`,
       ];
       const configSummary = summaryParts.join(', ');
@@ -510,15 +541,22 @@ function LlmoController(ctx) {
 
   // Handles requests to the LLMO questions endpoint, returns both human and ai questions
   const getLlmoQuestions = async (context) => {
-    const { llmoConfig } = await getSiteAndValidateLlmo(context);
+    const siteValidation = await getSiteAndValidateLlmo(context);
+    if (siteValidation.status) return siteValidation;
+    const { llmoConfig } = siteValidation;
     return ok(llmoConfig.questions || {});
   };
 
   // Handles requests to the LLMO questions endpoint, adds a new question
   // the body format is { Human: [question1, question2], AI: [question3, question4] }
   const addLlmoQuestion = async (context) => {
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can add questions');
+    }
     const { log } = context;
-    const { site, config } = await getSiteAndValidateLlmo(context);
+    const siteValidation = await getSiteAndValidateLlmo(context);
+    if (siteValidation.status) return siteValidation;
+    const { site, config } = siteValidation;
 
     // add the question to the llmoConfig
     const newQuestions = context.data;
@@ -557,9 +595,14 @@ function LlmoController(ctx) {
 
   // Handles requests to the LLMO questions endpoint, removes a question
   const removeLlmoQuestion = async (context) => {
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can remove questions');
+    }
     const { log } = context;
     const { questionKey } = context.params;
-    const { site, config } = await getSiteAndValidateLlmo(context);
+    const siteValidation = await getSiteAndValidateLlmo(context);
+    if (siteValidation.status) return siteValidation;
+    const { site, config } = siteValidation;
 
     validateQuestionKey(config, questionKey);
 
@@ -574,10 +617,15 @@ function LlmoController(ctx) {
 
   // Handles requests to the LLMO questions endpoint, updates a question
   const patchLlmoQuestion = async (context) => {
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can update questions');
+    }
     const { log } = context;
     const { questionKey } = context.params;
     const { data } = context;
-    const { site, config } = await getSiteAndValidateLlmo(context);
+    const siteValidation = await getSiteAndValidateLlmo(context);
+    if (siteValidation.status) return siteValidation;
+    const { site, config } = siteValidation;
 
     validateQuestionKey(config, questionKey);
 
@@ -593,7 +641,9 @@ function LlmoController(ctx) {
   // Handles requests to the LLMO customer intent endpoint, returns customer intent array
   const getLlmoCustomerIntent = async (context) => {
     try {
-      const { llmoConfig } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { llmoConfig } = siteValidation;
       return ok(llmoConfig.customerIntent || []);
     } catch (error) {
       if (error.message === 'Only users belonging to the organization can view its sites') {
@@ -606,9 +656,14 @@ function LlmoController(ctx) {
   // Handles requests to the LLMO customer intent endpoint, adds new customer intent items
   const addLlmoCustomerIntent = async (context) => {
     const { log } = context;
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can add customer intent');
+    }
 
     try {
-      const { site, config } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { site, config } = siteValidation;
 
       const newCustomerIntent = context.data;
       if (!Array.isArray(newCustomerIntent)) {
@@ -656,7 +711,9 @@ function LlmoController(ctx) {
     const { intentKey } = context.params;
 
     try {
-      const { site, config } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { site, config } = siteValidation;
 
       validateCustomerIntentKey(config, intentKey);
 
@@ -682,7 +739,9 @@ function LlmoController(ctx) {
     const { data } = context;
 
     try {
-      const { site, config } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { site, config } = siteValidation;
 
       validateCustomerIntentKey(config, intentKey);
 
@@ -717,7 +776,13 @@ function LlmoController(ctx) {
     const { siteId } = context.params;
 
     try {
-      const { site, config } = await getSiteAndValidateLlmo(context);
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can update the CDN logs filter');
+      }
+
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { site, config } = siteValidation;
 
       if (!isObject(data)) {
         return badRequest('Update data must be provided as an object');
@@ -743,7 +808,13 @@ function LlmoController(ctx) {
     const { siteId } = context.params;
 
     try {
-      const { site, config } = await getSiteAndValidateLlmo(context);
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can update the CDN bucket config');
+      }
+
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { site, config } = siteValidation;
 
       if (!isObject(data)) {
         return badRequest('Update data must be provided as an object');
@@ -774,6 +845,10 @@ function LlmoController(ctx) {
     const { data } = context;
 
     try {
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can onboard');
+      }
+
       // Validate required fields
       if (!data || typeof data !== 'object') {
         return badRequest('Onboarding data is required');
@@ -870,7 +945,9 @@ function LlmoController(ctx) {
       log.info(`Starting LLMO offboarding for site ${siteId}`);
 
       // Validate site and LLMO access
-      const { site, config } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { site, config } = siteValidation;
 
       // Perform the complete offboarding process
       const result = await performLlmoOffboarding(site, config, context);
@@ -895,7 +972,9 @@ function LlmoController(ctx) {
     const { log } = context;
     const { siteId } = context.params;
     try {
-      const { llmoConfig } = await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { llmoConfig } = siteValidation;
       const { data, headers } = await queryLlmoFiles(context, llmoConfig);
       return ok(data, headers);
     } catch (error) {
@@ -910,12 +989,30 @@ function LlmoController(ctx) {
     const { siteId } = context.params;
     try {
       // Validate site and LLMO access
-      await getSiteAndValidateLlmo(context);
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
 
       // Delegate to the rationale handler for the actual processing
       return await handleLlmoRationale(context);
     } catch (error) {
       log.error(`Error getting LLMO rationale for site ${siteId}: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
+  // Handles requests to the brand claims endpoint
+  const getBrandClaims = async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+    try {
+      // Validate site and LLMO access
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+
+      // Delegate to the brand claims handler for the actual processing
+      return await handleBrandClaims(context);
+    } catch (error) {
+      log.error(`Error getting brand claims for site ${siteId}: ${error.message}`);
       return badRequest(error.message);
     }
   };
@@ -929,13 +1026,17 @@ function LlmoController(ctx) {
    * @returns {Promise<Response>} Created/updated edge config
    */
   const createOrUpdateEdgeConfig = async (context) => {
-    const { log, dataAccess } = context;
+    const { log, dataAccess, env } = context;
     const { siteId } = context.params;
     const { authInfo: { profile } } = context.attributes;
     const { Site } = dataAccess;
     const {
       enhancements, tokowakaEnabled, forceFail, patches = {}, prerender,
     } = context.data || {};
+
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can update the edge optimize config');
+    }
 
     log.info(`createOrUpdateEdgeConfig request received for site ${siteId}, data=${JSON.stringify(context.data)}`);
 
@@ -971,11 +1072,16 @@ function LlmoController(ctx) {
         return forbidden('User does not have access to this site');
       }
 
+      if (!await accessControlUtil.isOwnerOfSite(site)) {
+        return forbidden('User does not own this site');
+      }
+
       const baseURL = site.getBaseURL();
       const tokowakaClient = TokowakaClient.createFrom(context);
 
       // Handle S3 metaconfig
       let metaconfig = await tokowakaClient.fetchMetaconfig(baseURL);
+      const lastModifiedBy = profile?.email || 'tokowaka-edge-optimize-config';
 
       if (!metaconfig || !Array.isArray(metaconfig.apiKeys) || metaconfig.apiKeys.length === 0) {
         // Create new metaconfig with generated API key
@@ -985,6 +1091,9 @@ function LlmoController(ctx) {
           {
             ...(tokowakaEnabled !== undefined && { tokowakaEnabled }),
             ...(enhancements !== undefined && { enhancements }),
+          },
+          {
+            lastModifiedBy,
           },
         );
       } else {
@@ -998,20 +1107,44 @@ function LlmoController(ctx) {
             forceFail,
             prerender,
           },
+          {
+            lastModifiedBy,
+          },
         );
       }
 
       const currentConfig = site.getConfig();
-      // Update site config only if tokowakaEnabled is provided
-      if (tokowakaEnabled !== undefined) {
-        currentConfig.updateEdgeOptimizeConfig({
-          ...(currentConfig.getEdgeOptimizeConfig() || {}),
-          enabled: tokowakaEnabled,
-        });
-        await saveSiteConfig(site, currentConfig, log, `updating edge optimize config to enabled=${tokowakaEnabled}`);
-        log.info(`Updated edgeOptimizeConfig enabled=${tokowakaEnabled} for site ${siteId}`);
+      const existingEdgeConfig = currentConfig.getEdgeOptimizeConfig() || {};
+      const isNewlyOpted = !existingEdgeConfig.opted;
+      currentConfig.updateEdgeOptimizeConfig({
+        ...existingEdgeConfig,
+        opted: existingEdgeConfig.opted ?? Date.now(),
+      });
+      await saveSiteConfig(site, currentConfig, log, 'updating edge optimize config');
+      log.info(`[edge-optimize-config] Updated edge optimize config for site ${siteId} by ${lastModifiedBy}`);
+
+      // Send Slack notification only when opted field is being added
+      if (isNewlyOpted) {
+        try {
+          const llmoTeamUserIds = env.SLACK_LLMO_EDGE_OPTIMIZE_TEAM;
+
+          // Build user mentions from comma-separated user IDs
+          let userMentions = '';
+          if (hasText(llmoTeamUserIds)) {
+            const userIds = llmoTeamUserIds.split(',').map((id) => id.trim()).filter((id) => id);
+            userMentions = userIds.map((userId) => `<@${userId}>`).join(' ');
+          }
+
+          const message = `:gear: Site has opted for edge optimization\n\n• Site: ${baseURL}${userMentions ? `\n\ncc: ${userMentions}` : ''}`;
+
+          await postLlmoAlert(message, context);
+          log.info(`[edge-optimize-config] Slack notification sent for site ${siteId}`);
+        } catch (slackError) {
+          // Log error but don't fail the request
+          log.error(`[edge-optimize-config] Failed to send Slack notification for site ${siteId}:`, slackError);
+        }
       }
-      log.info(`[edge-optimize-config] Updated edge optimize config for site ${siteId} by ${profile?.email || 'tokowaka-edge-optimize-config'}`);
+
       return ok({
         ...metaconfig,
       });
@@ -1044,6 +1177,10 @@ function LlmoController(ctx) {
 
       if (!await accessControlUtil.hasAccess(site)) {
         return forbidden('User does not have access to this site');
+      }
+
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can get the edge optimize config');
       }
 
       const baseURL = site.getBaseURL();
@@ -1098,15 +1235,22 @@ function LlmoController(ctx) {
 
   /**
    * PUT /sites/{siteId}/llmo/strategy
-   * Saves LLMO strategy data to S3
+   * Saves LLMO strategy data to S3.
+   * Status changes trigger email notifications (when enabled).
    * @param {object} context - Request context
    * @returns {Promise<Response>} Version of the saved strategy
    */
   const saveStrategy = async (context) => {
-    const { log, s3, data } = context;
+    const {
+      log, s3, data, dataAccess,
+    } = context;
     const { siteId } = context.params;
 
     try {
+      if (!accessControlUtil.isLLMOAdministrator()) {
+        return forbidden('Only LLMO administrators can save the LLMO strategy');
+      }
+
       if (!isObject(data)) {
         return badRequest('LLMO strategy must be provided as an object');
       }
@@ -1115,15 +1259,430 @@ function LlmoController(ctx) {
         return badRequest('LLMO strategy storage is not configured for this environment');
       }
 
+      // Read previous strategy for diff (best-effort, null if not found)
+      let prevData = null;
+      let skipNotifications = false;
+      try {
+        const prev = await readStrategy(siteId, s3.s3Client, { s3Bucket: s3.s3Bucket });
+        if (prev.exists) {
+          prevData = prev.data;
+        }
+      } catch (readError) {
+        skipNotifications = true;
+        log.warn(`Could not read previous strategy for site ${siteId} (notifications will be skipped): ${readError.message}`);
+      }
+
       log.info(`Writing LLMO strategy to S3 for siteId: ${siteId}`);
       const { version } = await writeStrategy(siteId, data, s3.s3Client, {
         s3Bucket: s3.s3Bucket,
       });
 
       log.info(`Successfully saved LLMO strategy for siteId: ${siteId}, version: ${version}`);
-      return ok({ version });
+
+      // Await notifications and include summary in response for debugging
+      let siteBaseUrl = '';
+      if (dataAccess?.Site) {
+        const site = await dataAccess.Site.findById(siteId);
+        siteBaseUrl = site?.getBaseURL?.() || '';
+      }
+      let notificationSummary = {
+        sent: 0, failed: 0, skipped: 0, changes: 0,
+      };
+      if (!skipNotifications) {
+        try {
+          notificationSummary = await notifyStrategyChanges(context, {
+            prevData,
+            nextData: data,
+            siteId,
+            siteBaseUrl,
+          });
+          if (notificationSummary.changes > 0) {
+            log.info(`Strategy notification summary for site ${siteId}: ${JSON.stringify(notificationSummary)}`);
+          }
+        } catch (err) {
+          log.error(`Strategy notification error for site ${siteId}: ${err.message}`);
+        }
+      }
+
+      return ok({ version, notifications: notificationSummary });
     } catch (error) {
       log.error(`Error saving llmo strategy for siteId: ${siteId}, error: ${error.message}`);
+      return badRequest(error.message);
+    }
+  };
+
+  const checkEdgeOptimizeStatus = async (context) => {
+    const { log, dataAccess } = context;
+    const { Site } = dataAccess;
+    const { siteId } = context.params;
+    const { path = '/' } = context.data || {};
+
+    // Validate siteId
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    log.info(`Checking Edge Optimize status for siteId: ${siteId} and path: ${path}`);
+
+    // Get site from database
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    // Check access control
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Access denied to this site');
+    }
+
+    try {
+      const tokowakaClient = TokowakaClient.createFrom(context);
+      const result = await tokowakaClient.checkEdgeOptimizeStatus(site, path);
+      return ok(result);
+    } catch (error) {
+      log.error(`Error checking edge optimize status: ${error.message} for site: ${siteId} and path: ${path}`);
+      if (error.status) {
+        return createResponse({ message: error.message }, error.status);
+      }
+      return internalServerError(error.message);
+    }
+  };
+
+  // Returns the hostname from a URL: lowercase with leading www. stripped.
+  function getHostnameWithoutWww(url, log) {
+    try {
+      const urlObj = new URL(url.startsWith('http') ? url : `https://${url}`);
+      let hostname = urlObj.hostname.toLowerCase();
+      if (hostname.startsWith('www.')) {
+        hostname = hostname.slice(4);
+      }
+      return hostname;
+    } catch (error) {
+      log.error(`Error getting hostname from URL ${url}: ${error.message}`);
+      throw new Error(`Error getting hostname from URL ${url}: ${error.message}`);
+    }
+  }
+
+  /**
+   * POST /sites/{siteId}/llmo/edge-optimize-routing
+   * Updates edge optimize routing for the site via the internal CDN API.
+   * - Requires x-promise-token header and request body cdnType.
+   * - Probes the site with custom User-Agent (2xx continues; 301: if Location domain
+   *   normalizes to same as probe URL domain, use Location domain for CDN API; otherwise break).
+   * - Exchanges promise token for IMS user token, then calls internal CDN API.
+   * @param {object} context - Request context (context.request for headers)
+   * @returns {Promise<Response>}
+   */
+  const updateEdgeOptimizeCDNRouting = async (context) => {
+    const { log, dataAccess, env } = context;
+    const { siteId } = context.params;
+    const { Site } = dataAccess;
+    const { cdnType, enabled = true } = context.data || {};
+    const promiseToken = context.request?.headers?.get?.('x-promise-token');
+    log.info(`Edge optimize routing update request received for site ${siteId}`);
+
+    if (env?.ENV && env.ENV !== 'prod') {
+      return createResponse(
+        { message: `API is not available in ${env?.ENV} environment` },
+        400,
+      );
+    }
+
+    if (!hasText(promiseToken)) {
+      return badRequest('x-promise-token header is required and must be a non-empty string');
+    }
+
+    if (!hasText(cdnType)) {
+      return badRequest('cdnType is required and must be a non-empty string');
+    }
+    const cdnTypeTrimmed = cdnType.toLowerCase().trim();
+    const cdnTypeNormalized = EDGE_OPTIMIZE_CDN_TYPES.includes(cdnTypeTrimmed)
+      ? cdnTypeTrimmed
+      : null;
+
+    if (!cdnTypeNormalized) {
+      return badRequest(`cdnType must be one of: ${EDGE_OPTIMIZE_CDN_TYPES.join(', ')}`);
+    }
+
+    let routingConfig;
+    try {
+      routingConfig = JSON.parse(env?.EDGE_OPTIMIZE_ROUTING_CONFIG);
+    } catch (parseError) {
+      log.error(`EDGE_OPTIMIZE_ROUTING_CONFIG invalid JSON: ${parseError.message}`);
+      return internalServerError('Failed to parse routing config.');
+    }
+
+    const cdnConfig = routingConfig[cdnTypeNormalized];
+    if (!isObject(cdnConfig) || !isValidUrl(cdnConfig.cdnRoutingUrl)) {
+      log.error(`EDGE_OPTIMIZE_ROUTING_CONFIG missing entry or invalid URL for cdnType: ${cdnTypeNormalized}`);
+      return createResponse(
+        { message: 'API is missing mandatory environment variable' },
+        503,
+      );
+    }
+
+    const strategy = EDGE_OPTIMIZE_CDN_STRATEGIES[cdnTypeNormalized];
+
+    if (enabled !== undefined && typeof enabled !== 'boolean') {
+      return badRequest('enabled field must be a boolean');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    const overrideBaseURL = site.getConfig()?.getFetchConfig?.()?.overrideBaseURL;
+    const effectiveBaseUrl = isValidUrl(overrideBaseURL) ? overrideBaseURL : site.getBaseURL();
+    log.info(`Effective base URL for site ${siteId}: ${effectiveBaseUrl}`);
+
+    const probeUrl = effectiveBaseUrl.startsWith('http') ? effectiveBaseUrl : `https://${effectiveBaseUrl}`;
+    let probeResponse;
+    try {
+      log.info(`Probing site ${probeUrl}`);
+      probeResponse = await fetch(probeUrl, {
+        method: 'GET',
+        headers: { 'User-Agent': 'AdobeEdgeOptimize-Test AdobeEdgeOptimize/1.0' },
+        signal: AbortSignal.timeout(5000),
+      });
+    } catch (probeError) {
+      log.error(`Error probing site ${siteId}: ${probeError.message}`);
+      return badRequest(`Error probing site: ${probeError.message}`);
+    }
+    let domain;
+    if (probeResponse.ok) {
+      domain = calculateForwardedHost(probeUrl, log);
+    } else if (probeResponse.status === 301) {
+      const locationValue = probeResponse.headers.get('location');
+      let probeHostname;
+      let locationHostname;
+      try {
+        probeHostname = getHostnameWithoutWww(probeUrl, log);
+        locationHostname = getHostnameWithoutWww(locationValue, log);
+      } catch (hostError) {
+        log.error(`Invalid URL for 301 domain check: ${hostError.message}`);
+        return badRequest(hostError.message);
+      }
+      if (probeHostname !== locationHostname) {
+        const msg = `Site ${probeUrl} returned 301 to ${locationValue}; domain `
+          + `(${locationHostname}) does not match probe domain (${probeHostname})`;
+        log.error(`CDN routing update failed: ${msg}`);
+        return badRequest(msg);
+      }
+      domain = calculateForwardedHost(locationValue, log);
+      log.info(`Probe returned 301; using Location domain ${domain} for CDN API`);
+    } else {
+      const msg = `Site ${probeUrl} did not return 2xx or 301 for`
+        + ` User-Agent AdobeEdgeOptimize-Test (got ${probeResponse.status})`;
+      log.error(`CDN routing update failed: ${msg}, url=${probeUrl}`);
+      return badRequest(msg);
+    }
+
+    let imsUserToken;
+    try {
+      log.debug(`Getting IMS user token for site ${siteId}`);
+      imsUserToken = await exchangePromiseToken(context, promiseToken);
+      log.info('IMS user token obtained successfully');
+    } catch (tokenError) {
+      log.warn(`Fetching IMS user token for site ${siteId} failed: ${tokenError.status} ${tokenError.message}`);
+      return createResponse({ message: 'Authentication failed with upstream IMS service' }, 401);
+    }
+
+    try {
+      const cdnUrl = strategy.buildUrl(cdnConfig, domain);
+      const cdnBody = strategy.buildBody(enabled);
+      log.info(`Calling CDN API for domain ${domain} at ${cdnUrl} with enabled: ${enabled}`);
+      const cdnResponse = await fetch(cdnUrl, {
+        method: strategy.method,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${imsUserToken}`,
+        },
+        body: JSON.stringify(cdnBody),
+        signal: AbortSignal.timeout(5000),
+      });
+
+      if (!cdnResponse.ok) {
+        const body = await cdnResponse.text();
+        log.error(`CDN API failed for site ${siteId}, domain ${domain}: ${cdnResponse.status} ${body}`);
+        if (cdnResponse.status === 401 || cdnResponse.status === 403) {
+          return createResponse(
+            { message: 'User is not authorized to update CDN routing' },
+            cdnResponse.status,
+          );
+        }
+        return createResponse(
+          { message: `Upstream call failed with status ${cdnResponse.status}` },
+          500,
+        );
+      }
+
+      log.info(`Edge optimize routing updated for site ${siteId}, domain ${domain}`);
+      return ok({ enabled, domain, cdnType: cdnTypeNormalized });
+    } catch (error) {
+      log.error(`Edge optimize routing update failed for site ${siteId}: ${error.message}`);
+      if (error.status) {
+        return createResponse({ message: error.message }, error.status);
+      }
+      return internalServerError(error.message);
+    }
+  };
+
+  const markOpportunitiesReviewed = async (context) => {
+    const { log } = context;
+
+    try {
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) return siteValidation;
+      const { site, config } = siteValidation;
+      const OPPORTUNITIES_REVIEWED_TAG = 'opportunitiesReviewed';
+      const tags = config.getLlmoConfig().tags || [];
+
+      if (tags.includes(OPPORTUNITIES_REVIEWED_TAG)) {
+        log.info(`Site ${site.getId()} already has '${OPPORTUNITIES_REVIEWED_TAG}' tag, skipping`);
+        return ok(tags);
+      }
+
+      const userId = context.attributes?.authInfo?.getProfile()?.sub || 'system';
+      config.addLlmoTag(OPPORTUNITIES_REVIEWED_TAG);
+
+      await saveSiteConfig(site, config, log, 'marking opportunities as reviewed');
+
+      log.info(`User ${userId} marked opportunities as reviewed for site ${site.getId()}, added '${OPPORTUNITIES_REVIEWED_TAG}' tag`);
+
+      return ok(config.getLlmoConfig().tags || []);
+    } catch (error) {
+      log.error(`Error marking opportunities as reviewed: ${error.message}`);
+
+      if (error.message === 'Only users belonging to the organization can view its sites') {
+        return forbidden(error.message);
+      }
+      return badRequest(error.message);
+    }
+  };
+
+  /**
+   * Check if all URLs in urlList have the same base domain as prodBaseURL.
+   * @param {string[]} urlList the list of URLs/domains to check.
+   * @param {string} prodBaseURL the production base URL to match against.
+   * @returns {boolean} true if all URLs share the same domain as prodBaseURL
+   */
+  function areDomainsSameAsBase(urlList, prodBaseURL) {
+    const prodDomain = getDomain(prodBaseURL);
+    return urlList.every((stageBaseURL) => getDomain(stageBaseURL) === prodDomain);
+  }
+
+  /**
+   * POST /sites/{siteId}/llmo/edge-optimize-config/stage
+   * Adds staging domains for edge optimize (stage environment support).
+   * Creates or finds stage sites in Spacecat (same org), creates Tokowaka metaconfig per stage site
+   * with prerender for whole domain, and persists stagingDomains on prod site's edgeOptimizeConfig.
+   * Returns the complete S3 metaconfig for each stage site in an array.
+   * @param {object} context - Request context
+   * @returns {Promise<Response>} 200 with stageConfigs array (full S3 metaconfig per stage)
+   */
+  const createOrUpdateStageEdgeConfig = async (context) => {
+    const { log, dataAccess } = context;
+    const { siteId } = context.params;
+    const { authInfo: { profile } } = context.attributes;
+    const { Site } = dataAccess;
+    const { stagingDomains: rawStagingDomains } = context.data || {};
+
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can add staging domains');
+    }
+
+    if (!Array.isArray(rawStagingDomains) || rawStagingDomains.length === 0) {
+      return badRequest('stagingDomains must be a non-empty array');
+    }
+
+    const stagingDomains = rawStagingDomains
+      .map((d) => (typeof d === 'string' ? d.trim() : ''))
+      .filter((d) => hasText(d));
+    if (stagingDomains.length === 0) {
+      return badRequest('stagingDomains must contain at least one non-empty domain string');
+    }
+
+    try {
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('User does not have access to this site');
+      }
+
+      if (!areDomainsSameAsBase(stagingDomains, site.getBaseURL())) {
+        return badRequest('Staging domains must belong to the same base domain as the production site');
+      }
+
+      const tokowakaClient = TokowakaClient.createFrom(context);
+      const lastModifiedBy = profile?.email || 'tokowaka-stage-edge-optimize-config';
+      const organizationId = site.getOrganizationId();
+      const newEntries = [];
+      const stageConfigs = [];
+
+      /* eslint-disable no-await-in-loop */
+      for (const domain of stagingDomains) {
+        const stageBaseURL = composeBaseURL(domain);
+        let stageSite = await Site.findByBaseURL(stageBaseURL);
+        if (!stageSite) {
+          stageSite = await Site.create({
+            baseURL: stageBaseURL,
+            organizationId,
+          });
+        }
+
+        let metaconfig = await tokowakaClient.fetchMetaconfig(stageBaseURL);
+        if (!metaconfig || !Array.isArray(metaconfig?.apiKeys) || metaconfig.apiKeys.length === 0) {
+          metaconfig = await tokowakaClient.createMetaconfig(
+            stageBaseURL,
+            stageSite.getId(),
+            {
+              tokowakaEnabled: true,
+            },
+            { lastModifiedBy, isStageDomain: true },
+          );
+        } else {
+          await tokowakaClient.updateMetaconfig(
+            stageBaseURL,
+            stageSite.getId(),
+            {},
+            { lastModifiedBy, isStageDomain: true },
+          );
+          metaconfig = await tokowakaClient.fetchMetaconfig(stageBaseURL);
+        }
+
+        newEntries.push({ domain, id: stageSite.getId() });
+        stageConfigs.push({
+          domain,
+          ...metaconfig,
+        });
+      }
+      /* eslint-enable no-await-in-loop */
+
+      const currentConfig = site.getConfig();
+      const existingEdgeConfig = currentConfig.getEdgeOptimizeConfig() || {};
+      const existingList = existingEdgeConfig.stagingDomains || [];
+      const byDomain = new Map(existingList.map((e) => [e.domain, e]));
+      for (const entry of newEntries) {
+        byDomain.set(entry.domain, { domain: entry.domain, id: entry.id });
+      }
+      const mergedStagingDomains = [...byDomain.values()];
+
+      currentConfig.updateEdgeOptimizeConfig({
+        ...existingEdgeConfig,
+        stagingDomains: mergedStagingDomains,
+      });
+      await saveSiteConfig(site, currentConfig, log, 'updating edge optimize staging domains');
+      log.info(`[edge-optimize-config/stage] Updated staging domains for site ${siteId}, count=${mergedStagingDomains.length}`);
+      return ok(stageConfigs);
+    } catch (error) {
+      log.error(`Failed to add staging domains for site ${siteId}:`, error);
       return badRequest(error.message);
     }
   };
@@ -1148,10 +1707,15 @@ function LlmoController(ctx) {
     offboardCustomer,
     queryFiles,
     getLlmoRationale,
+    getBrandClaims,
     createOrUpdateEdgeConfig,
     getEdgeConfig,
+    createOrUpdateStageEdgeConfig,
     getStrategy,
     saveStrategy,
+    checkEdgeOptimizeStatus,
+    updateEdgeOptimizeCDNRouting,
+    markOpportunitiesReviewed,
   };
 }
 

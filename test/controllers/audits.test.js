@@ -356,6 +356,7 @@ describe('Audits Controller', () => {
 
       // Ensure the mock site has the organization properly set up
       mockDataAccess.Site.findById.resolves(mockSite);
+      mockDataAccess.Organization.findById.resolves(mockOrganization);
       mockDataAccess.Audit.allBySiteId.resolves(mockAudits);
       const result = await controller.getAllForSite({ params: { siteId } });
       expect(result.status).to.equal(403);
@@ -447,6 +448,7 @@ describe('Audits Controller', () => {
       });
 
       mockDataAccess.Site.findById.resolves(mockSite);
+      mockDataAccess.Organization.findById.resolves(mockOrganization);
       mockDataAccess.LatestAudit.allBySiteId.resolves(mockLatestAudits);
       const result = await controller.getAllLatestForSite({ params: { siteId } });
       expect(result.status).to.equal(403);
@@ -512,6 +514,7 @@ describe('Audits Controller', () => {
       });
 
       mockDataAccess.Site.findById.resolves(mockSite);
+      mockDataAccess.Organization.findById.resolves(mockOrganization);
       mockDataAccess.LatestAudit.allBySiteIdAndAuditType.resolves(mockLatestAudits);
       const result = await controller.getLatestForSite({ params: { siteId, auditType: 'lhs-mobile' } });
       expect(result.status).to.equal(403);
@@ -554,6 +557,7 @@ describe('Audits Controller', () => {
       const auditType = 'broken-backlinks';
 
       mockDataAccess.Site.findById.resolves(mockSite);
+      mockDataAccess.Organization.findById.resolves(mockOrganization);
 
       const result = await controller.patchAuditForSite(
         { params: { siteId, auditType }, data: {} },

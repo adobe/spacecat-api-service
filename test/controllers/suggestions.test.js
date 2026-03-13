@@ -120,6 +120,9 @@ describe('Suggestions Controller', () => {
         getSiteId() {
           return SITE_ID;
         },
+        getType() {
+          return 'test-opportunity-type';
+        },
       };
     },
     save() {
@@ -136,6 +139,18 @@ describe('Suggestions Controller', () => {
     },
     setUpdatedBy(value) {
       suggData.updatedBy = value;
+    },
+    getSkipReason() {
+      return suggData.skipReason;
+    },
+    setSkipReason(value) {
+      suggData.skipReason = value;
+    },
+    getSkipDetail() {
+      return suggData.skipDetail;
+    },
+    setSkipDetail(value) {
+      suggData.skipDetail = value;
     },
     remove: removeStub,
   });
@@ -188,6 +203,11 @@ describe('Suggestions Controller', () => {
           .withProfile({ is_admin: true, email: 'test@test.com' })
           .withAuthenticated(true),
       },
+      log: {
+        info: sandbox.stub(),
+        warn: sandbox.stub(),
+        error: sandbox.stub(),
+      },
     };
     apikeyAuthAttributes = {
       attributes: {
@@ -235,6 +255,8 @@ describe('Suggestions Controller', () => {
         },
         updatedBy: 'test@test.com',
         updatedAt: new Date(),
+        skipReason: undefined,
+        skipDetail: undefined,
       },
       {
         id: SUGGESTION_IDS[1],
@@ -571,6 +593,148 @@ describe('Suggestions Controller', () => {
     expect(error).to.have.property('message', 'Site not found');
   });
 
+  it('gets all suggestions for an opportunity returns bad request for invalid view parameter', async () => {
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { view: 'invalid-view' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid view. Must be one of: minimal, summary, full');
+  });
+
+  it('gets all suggestions for an opportunity with minimal view', async () => {
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { view: 'minimal' },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    const suggestions = await response.json();
+    expect(suggestions).to.be.an('array').with.lengthOf(1);
+    expect(suggestions[0]).to.have.property('id');
+    expect(suggestions[0]).to.have.property('status');
+    // Minimal view now includes data with URL-related fields only
+    expect(suggestions[0]).to.not.have.property('kpiDeltas');
+    expect(suggestions[0]).to.not.have.property('opportunityId');
+    expect(suggestions[0]).to.not.have.property('type');
+  });
+
+  it('gets all suggestions for an opportunity filtered by single status', async () => {
+    const suggWithStatus = { ...suggs[0], status: 'NEW' };
+    mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggWithStatus)]);
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { status: 'NEW' },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(mockSuggestion.allByOpportunityId).to.have.been.calledWith(OPPORTUNITY_ID);
+    const suggestions = await response.json();
+    expect(suggestions).to.be.an('array').with.lengthOf(1);
+  });
+
+  it('gets all suggestions for an opportunity filtered by multiple statuses (comma-separated)', async () => {
+    const sugg1 = { ...suggs[0], status: 'NEW' };
+    const sugg2 = { ...suggs[0], id: 'different-id', status: 'APPROVED' };
+    const sugg3 = { ...suggs[0], id: 'another-id', status: 'COMPLETED' };
+    mockSuggestion.allByOpportunityId.resolves([
+      mockSuggestionEntity(sugg1),
+      mockSuggestionEntity(sugg2),
+      mockSuggestionEntity(sugg3),
+    ]);
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { status: 'NEW,APPROVED' },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    const suggestions = await response.json();
+    // Should only return NEW and APPROVED, not COMPLETED
+    expect(suggestions).to.be.an('array').with.lengthOf(2);
+  });
+
+  it('gets all suggestions for an opportunity with status and view filters', async () => {
+    const suggWithStatus = { ...suggs[0], status: 'NEW' };
+    mockSuggestion.allByOpportunityId.resolves([mockSuggestionEntity(suggWithStatus)]);
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { status: 'NEW', view: 'minimal' },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    const suggestions = await response.json();
+    expect(suggestions).to.be.an('array').with.lengthOf(1);
+    expect(suggestions[0]).to.have.property('id');
+    expect(suggestions[0]).to.have.property('status');
+    // Minimal view now includes data with URL-related fields only
+    expect(suggestions[0]).to.not.have.property('kpiDeltas');
+    expect(suggestions[0]).to.not.have.property('opportunityId');
+    expect(suggestions[0]).to.not.have.property('type');
+  });
+
+  it('returns bad request for invalid status values', async () => {
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { status: 'INVALID_STATUS' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error.message).to.include('Invalid status value(s): INVALID_STATUS');
+    expect(error.message).to.include('Valid:');
+  });
+
+  it('returns bad request for multiple invalid status values', async () => {
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { status: 'NEW,INVALID,APPROVED,BOGUS' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error.message).to.include('INVALID');
+    expect(error.message).to.include('BOGUS');
+  });
+
+  it('returns all suggestions when status param is empty commas', async () => {
+    mockSuggestion.allByOpportunityId.resolves(suggs.map(mockSuggestionEntity));
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: { status: ',,,' },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    const suggestions = await response.json();
+    // Should return all suggestions since no valid statuses were provided
+    expect(suggestions).to.be.an('array').with.lengthOf(suggs.length);
+  });
+
   it('gets paged suggestions returns bad request if limit is less than 1', async () => {
     const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
@@ -649,6 +813,21 @@ describe('Suggestions Controller', () => {
     expect(error).to.have.property('message', 'Opportunity not found');
   });
 
+  it('gets paged suggestions returns bad request for invalid view parameter', async () => {
+    const response = await suggestionsController.getAllForOpportunityPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        limit: 10,
+      },
+      data: { view: 'invalid-view' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid view. Must be one of: minimal, summary, full');
+  });
+
   it('gets paged suggestions for an opportunity successfully', async () => {
     const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
@@ -668,12 +847,35 @@ describe('Suggestions Controller', () => {
     expect(result.pagination).to.have.property('hasMore', false);
   });
 
+
   it('gets paged suggestions returns empty array when no suggestions exist', async () => {
     const emptyResults = {
       data: [],
       cursor: undefined,
     };
     mockSuggestion.allByOpportunityId.resolves(emptyResults);
+    const response = await suggestionsController.getAllForOpportunityPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        limit: 10,
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    const result = await response.json();
+    expect(result).to.have.property('suggestions');
+    expect(result.suggestions).to.be.an('array').with.lengthOf(0);
+    expect(result.pagination).to.have.property('limit', 10);
+    expect(result.pagination).to.have.property('cursor', null);
+    expect(result.pagination).to.have.property('hasMore', false);
+  });
+
+  it('gets paged suggestions handles undefined data property gracefully', async () => {
+    const resultsWithoutData = {
+      cursor: undefined,
+    };
+    mockSuggestion.allByOpportunityId.resolves(resultsWithoutData);
     const response = await suggestionsController.getAllForOpportunityPaged({
       params: {
         siteId: SITE_ID,
@@ -872,6 +1074,21 @@ describe('Suggestions Controller', () => {
     expect(error).to.have.property('message', 'Status is required');
   });
 
+  it('gets all suggestions for an opportunity by status returns bad request for invalid view parameter', async () => {
+    const response = await suggestionsController.getByStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+      },
+      data: { view: 'invalid-view' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid view. Must be one of: minimal, summary, full');
+  });
+
   it('gets all suggestions for a site does not exist', async () => {
     const response = await suggestionsController.getByStatus({
       params: {
@@ -1023,6 +1240,21 @@ describe('Suggestions Controller', () => {
     expect(response.status).to.equal(404);
     const error = await response.json();
     expect(error).to.have.property('message', 'Opportunity not found');
+  });
+
+  it('gets paged suggestions by status returns bad request for invalid view parameter', async () => {
+    const response = await suggestionsController.getByStatusPaged({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        status: 'NEW',
+      },
+      data: { view: 'invalid-view' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid view. Must be one of: minimal, summary, full');
   });
 
   it('gets paged suggestions by status successfully', async () => {
@@ -1297,6 +1529,21 @@ describe('Suggestions Controller', () => {
     expect(response.status).to.equal(400);
     const error = await response.json();
     expect(error).to.have.property('message', 'Suggestion ID required');
+  });
+
+  it('gets suggestion by ID returns bad request for invalid view parameter', async () => {
+    const response = await suggestionsController.getByID({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: { view: 'invalid-view' },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid view. Must be one of: minimal, summary, full');
   });
 
   it('gets suggestion by ID returns not found if suggestion is not found', async () => {
@@ -1877,6 +2124,377 @@ describe('Suggestions Controller', () => {
     expect(error).to.have.property('message', 'Error updating suggestion');
   });
 
+  it('patches a suggestion with status SKIPPED and skipReason/skipDetail', async () => {
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'SKIPPED',
+        skipReason: 'ALREADY_IMPLEMENTED',
+        skipDetail: 'Fix was applied manually',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(suggs[0].status).to.equal('SKIPPED');
+    expect(suggs[0].skipReason).to.equal('ALREADY_IMPLEMENTED');
+    expect(suggs[0].skipDetail).to.equal('Fix was applied manually');
+  });
+
+  it('patches a suggestion returns 400 for invalid skipReason when status is SKIPPED', async () => {
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'SKIPPED',
+        skipReason: 'invalid_reason',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error.message).to.include('Invalid skipReason');
+  });
+
+  it('patches a suggestion updates skipReason/skipDetail when already SKIPPED', async () => {
+    // First set the suggestion to SKIPPED
+    suggs[0].status = 'SKIPPED';
+    suggs[0].skipReason = 'NO_REASON';
+    suggs[0].skipDetail = null;
+
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'SKIPPED',
+        skipReason: 'TOO_RISKY',
+        skipDetail: 'Changed my mind',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(suggs[0].skipReason).to.equal('TOO_RISKY');
+    expect(suggs[0].skipDetail).to.equal('Changed my mind');
+  });
+
+  it('patches a suggestion updates only skipReason when already SKIPPED without providing skipDetail', async () => {
+    suggs[0].status = 'SKIPPED';
+    suggs[0].skipReason = 'NO_REASON';
+    suggs[0].skipDetail = 'old detail';
+
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'SKIPPED',
+        skipReason: 'TOO_RISKY',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(suggs[0].skipReason).to.equal('TOO_RISKY');
+    expect(suggs[0].skipDetail).to.be.null;
+  });
+
+  it('patches a suggestion updates only skipDetail when already SKIPPED without providing skipReason', async () => {
+    suggs[0].status = 'SKIPPED';
+    suggs[0].skipReason = 'NO_REASON';
+    suggs[0].skipDetail = null;
+
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'SKIPPED',
+        skipDetail: 'Only updating detail',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(suggs[0].skipReason).to.be.null;
+    expect(suggs[0].skipDetail).to.equal('Only updating detail');
+  });
+
+  it('patches a suggestion logs warning when already SKIPPED and setSkipReason unavailable', async () => {
+    suggs[0].status = 'SKIPPED';
+    const entity = mockSuggestionEntity(suggs[0]);
+    delete entity.setSkipReason;
+    delete entity.setSkipDetail;
+    mockSuggestion.findById.callsFake((id) => {
+      if (id === SUGGESTION_IDS[0]) return Promise.resolve(entity);
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'SKIPPED',
+        skipReason: 'OTHER',
+      },
+      ...context,
+    });
+    // Skip fields silently dropped with warning when model doesn't support them
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error.message).to.include('No updates provided');
+    expect(context.log.warn.calledWithMatch('Suggestion model does not support skip fields')).to.be.true;
+    // Restore
+    mockSuggestion.findById.callsFake((id) => {
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+  });
+
+  it('patches a suggestion returns 400 for invalid skipReason when already SKIPPED and updating skip fields', async () => {
+    suggs[0].status = 'SKIPPED';
+    suggs[0].skipReason = 'NO_REASON';
+
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'SKIPPED',
+        skipReason: 'invalid_reason',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error.message).to.include('Invalid skipReason');
+  });
+
+  it('patches a suggestion to SKIPPED without providing skipReason or skipDetail', async () => {
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'SKIPPED',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(suggs[0].status).to.equal('SKIPPED');
+    expect(suggs[0].skipReason).to.be.null;
+    expect(suggs[0].skipDetail).to.be.null;
+  });
+
+  it('patches a suggestion changes from SKIPPED to APPROVED without setSkipReason on model', async () => {
+    suggs[0].status = 'SKIPPED';
+    const entity = mockSuggestionEntity(suggs[0]);
+    delete entity.setSkipReason;
+    delete entity.setSkipDetail;
+    mockSuggestion.findById.callsFake((id) => {
+      if (id === SUGGESTION_IDS[0]) return Promise.resolve(entity);
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'APPROVED',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(suggs[0].status).to.equal('APPROVED');
+    // Restore
+    mockSuggestion.findById.callsFake((id) => {
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+  });
+
+  it('patches a suggestion to SKIPPED gracefully when setSkipReason is not available', async () => {
+    const entity = mockSuggestionEntity(suggs[0]);
+    delete entity.setSkipReason;
+    delete entity.setSkipDetail;
+    mockSuggestion.findById.callsFake((id) => {
+      if (id === SUGGESTION_IDS[0]) return Promise.resolve(entity);
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'SKIPPED',
+        skipReason: 'TOO_RISKY',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(suggs[0].status).to.equal('SKIPPED');
+    expect(context.log.warn.calledWithMatch('Suggestion model does not support skip fields')).to.be.true;
+    // Restore findById
+    mockSuggestion.findById.callsFake((id) => {
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+  });
+
+  it('patches a suggestion clears skip fields when changing from SKIPPED to another status', async () => {
+    suggs[0].status = 'SKIPPED';
+    suggs[0].skipReason = 'TOO_RISKY';
+    suggs[0].skipDetail = 'Some detail';
+
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'APPROVED',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(suggs[0].status).to.equal('APPROVED');
+    expect(suggs[0].skipReason).to.be.null;
+    expect(suggs[0].skipDetail).to.be.null;
+  });
+
+  it('patches a suggestion returns 400 when skipDetail exceeds 500 chars and status is SKIPPED', async () => {
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'SKIPPED',
+        skipReason: 'OTHER',
+        skipDetail: 'x'.repeat(501),
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error.message).to.include('500');
+  });
+
+  it('patches a suggestion returns 400 when skipReason provided with non-SKIPPED status', async () => {
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'APPROVED',
+        skipReason: 'TOO_RISKY',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error.message).to.include('skipReason and skipDetail can only be provided when status is SKIPPED');
+  });
+
+  it('patches a suggestion returns 400 when skipDetail provided with non-SKIPPED status', async () => {
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'APPROVED',
+        skipDetail: 'Some detail',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error.message).to.include('skipReason and skipDetail can only be provided when status is SKIPPED');
+  });
+
+  it('patches a suggestion returns 400 when skipDetail is not a string', async () => {
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'SKIPPED',
+        skipReason: 'OTHER',
+        skipDetail: 12345,
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error.message).to.include('skipDetail must be a string');
+  });
+
+  it('patches a suggestion logs warning when model does not support skip fields on status change to SKIPPED', async () => {
+    suggs[0].status = 'NEW';
+    const entity = mockSuggestionEntity(suggs[0]);
+    delete entity.setSkipReason;
+    delete entity.setSkipDetail;
+    mockSuggestion.findById.callsFake((id) => {
+      if (id === SUGGESTION_IDS[0]) return Promise.resolve(entity);
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+
+    const response = await suggestionsController.patchSuggestion({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      data: {
+        status: 'SKIPPED',
+        skipReason: 'TOO_RISKY',
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(context.log.warn.calledWithMatch('Suggestion model does not support skip fields')).to.be.true;
+    // Restore findById
+    mockSuggestion.findById.callsFake((id) => {
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+  });
+
   it('bulk patches suggestion status 2 successes', async () => {
     const response = await suggestionsController.patchSuggestionsStatus({
       params: {
@@ -2115,6 +2733,303 @@ describe('Suggestions Controller', () => {
     expect(bulkPatchResponse.suggestions[1].suggestion).to.not.exist;
     expect(bulkPatchResponse.suggestions[0]).to.have.property('message', 'No updates provided');
     expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'No updates provided');
+  });
+
+  it('bulk patches suggestion status with skipReason and skipDetail when status is SKIPPED', async () => {
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [
+        { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'TOO_RISKY', skipDetail: 'Low confidence' },
+      ],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.success).to.equal(1);
+    expect(bulkPatchResponse.suggestions[0].statusCode).to.equal(200);
+    expect(suggs[0].status).to.equal('SKIPPED');
+    expect(suggs[0].skipReason).to.equal('TOO_RISKY');
+    expect(suggs[0].skipDetail).to.equal('Low confidence');
+  });
+
+  it('bulk patches suggestion status accepts only id and status (non-breaking)', async () => {
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [{ id: SUGGESTION_IDS[0], status: 'SKIPPED' }],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    expect((await response.json()).metadata.success).to.equal(1);
+  });
+
+  it('bulk patches suggestion status clears skip fields when changing from SKIPPED to another status', async () => {
+    suggs[0].status = 'SKIPPED';
+    suggs[0].skipReason = 'TOO_RISKY';
+    suggs[0].skipDetail = 'Some detail';
+
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [
+        { id: SUGGESTION_IDS[0], status: 'APPROVED' },
+      ],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.success).to.equal(1);
+    expect(suggs[0].status).to.equal('APPROVED');
+    expect(suggs[0].skipReason).to.be.null;
+    expect(suggs[0].skipDetail).to.be.null;
+  });
+
+  it('bulk patches suggestion status to SKIPPED without skipReason or skipDetail', async () => {
+    suggs[0].status = 'NEW';
+    suggs[0].skipReason = undefined;
+    suggs[0].skipDetail = undefined;
+
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [
+        { id: SUGGESTION_IDS[0], status: 'SKIPPED' },
+      ],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.success).to.equal(1);
+    expect(suggs[0].status).to.equal('SKIPPED');
+    expect(suggs[0].skipReason).to.be.null;
+    expect(suggs[0].skipDetail).to.be.null;
+  });
+
+  it('bulk patches suggestion status changes from SKIPPED to APPROVED without setSkipReason on model', async () => {
+    suggs[0].status = 'SKIPPED';
+    const entity = mockSuggestionEntity(suggs[0]);
+    delete entity.setSkipReason;
+    delete entity.setSkipDetail;
+    mockSuggestion.findById.callsFake((id) => {
+      if (id === SUGGESTION_IDS[0]) return Promise.resolve(entity);
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [
+        { id: SUGGESTION_IDS[0], status: 'APPROVED' },
+      ],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.success).to.equal(1);
+    expect(suggs[0].status).to.equal('APPROVED');
+    // Restore
+    mockSuggestion.findById.callsFake((id) => {
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+  });
+
+  it('bulk patches suggestion status handles SKIPPED without setSkipReason on model', async () => {
+    suggs[0].status = 'NEW';
+    const entity = mockSuggestionEntity(suggs[0]);
+    delete entity.setSkipReason;
+    delete entity.setSkipDetail;
+    mockSuggestion.findById.callsFake((id) => {
+      if (id === SUGGESTION_IDS[0]) return Promise.resolve(entity);
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [
+        { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'TOO_RISKY' },
+      ],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.success).to.equal(1);
+    expect(suggs[0].status).to.equal('SKIPPED');
+    // Restore
+    mockSuggestion.findById.callsFake((id) => {
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+  });
+
+  it('bulk patches suggestion status updates only skipReason when already SKIPPED without providing skipDetail', async () => {
+    suggs[0].status = 'SKIPPED';
+    suggs[0].skipReason = 'NO_REASON';
+    suggs[0].skipDetail = 'old detail';
+
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [
+        { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'OTHER' },
+      ],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.success).to.equal(1);
+    expect(suggs[0].skipReason).to.equal('OTHER');
+    expect(suggs[0].skipDetail).to.be.null;
+  });
+
+  it('bulk patches suggestion status updates only skipDetail when already SKIPPED without providing skipReason', async () => {
+    suggs[0].status = 'SKIPPED';
+    suggs[0].skipReason = 'NO_REASON';
+    suggs[0].skipDetail = null;
+
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [
+        { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipDetail: 'Only detail' },
+      ],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.success).to.equal(1);
+    expect(suggs[0].skipReason).to.be.null;
+    expect(suggs[0].skipDetail).to.equal('Only detail');
+  });
+
+  it('bulk patches suggestion status logs warning when already SKIPPED without setSkipReason and updating skip fields', async () => {
+    suggs[0].status = 'SKIPPED';
+    const entity = mockSuggestionEntity(suggs[0]);
+    delete entity.setSkipReason;
+    delete entity.setSkipDetail;
+    mockSuggestion.findById.callsFake((id) => {
+      if (id === SUGGESTION_IDS[0]) return Promise.resolve(entity);
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [
+        { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'OTHER' },
+      ],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.success).to.equal(1);
+    expect(bulkPatchResponse.suggestions[0].statusCode).to.equal(200);
+    expect(context.log.warn.calledWithMatch('Suggestion model does not support skip fields')).to.be.true;
+    // Restore
+    mockSuggestion.findById.callsFake((id) => {
+      const s = suggs.find((sg) => sg.id === id);
+      return Promise.resolve(s ? mockSuggestionEntity(s, removeStub) : null);
+    });
+  });
+
+  it('bulk patches suggestion status updates skipReason/skipDetail when already SKIPPED', async () => {
+    suggs[0].status = 'SKIPPED';
+    suggs[0].skipReason = 'NO_REASON';
+    suggs[0].skipDetail = null;
+
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [
+        { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'OTHER', skipDetail: 'Updated reason' },
+      ],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.success).to.equal(1);
+    expect(bulkPatchResponse.suggestions[0].statusCode).to.equal(200);
+    expect(suggs[0].skipReason).to.equal('OTHER');
+    expect(suggs[0].skipDetail).to.equal('Updated reason');
+  });
+
+  it('bulk patches suggestion status returns 400 for invalid skipReason when status is SKIPPED', async () => {
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [
+        { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipReason: 'invalid_reason' },
+      ],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.failed).to.equal(1);
+    expect(bulkPatchResponse.suggestions[0].statusCode).to.equal(400);
+    expect(bulkPatchResponse.suggestions[0].message).to.include('Invalid skipReason');
+  });
+
+  it('bulk patches suggestion status returns 400 when skipReason provided with non-SKIPPED status', async () => {
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [
+        { id: SUGGESTION_IDS[0], status: 'APPROVED', skipReason: 'TOO_RISKY' },
+      ],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.failed).to.equal(1);
+    expect(bulkPatchResponse.suggestions[0].statusCode).to.equal(400);
+    expect(bulkPatchResponse.suggestions[0].message).to.include('skipReason and skipDetail can only be provided when status is SKIPPED');
+  });
+
+  it('bulk patches suggestion status returns 400 when skipDetail is not a string', async () => {
+    const response = await suggestionsController.patchSuggestionsStatus({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      data: [
+        { id: SUGGESTION_IDS[0], status: 'SKIPPED', skipDetail: 12345 },
+      ],
+      ...context,
+    });
+    expect(response.status).to.equal(207);
+    const bulkPatchResponse = await response.json();
+    expect(bulkPatchResponse.metadata.failed).to.equal(1);
+    expect(bulkPatchResponse.suggestions[0].statusCode).to.equal(400);
+    expect(bulkPatchResponse.suggestions[0].message).to.include('skipDetail must be a string');
   });
 
   it('bulk patches suggestion status fails if validation error in set status', async () => {
@@ -2414,6 +3329,141 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[1].suggestion).to.exist;
       expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'IN_PROGRESS');
       expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'IN_PROGRESS');
+    });
+
+    it('skips bulkUpdateStatus when action is assess and still sends SQS message', async () => {
+      opportunity.getType = sandbox.stub().returns('alt-text');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(altTextSuggs[0]),
+          mockSuggestionEntity(altTextSuggs[1])],
+      );
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]], action: 'assess' },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const bulkPatchResponse = await response.json();
+      expect(bulkPatchResponse).to.have.property('suggestions');
+      expect(bulkPatchResponse).to.have.property('metadata');
+      expect(bulkPatchResponse.metadata).to.have.property('total', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('success', 2);
+      expect(bulkPatchResponse.metadata).to.have.property('failed', 0);
+      expect(bulkPatchResponse.suggestions).to.have.property('length', 2);
+      expect(bulkPatchResponse.suggestions[0].suggestion).to.have.property('status', 'NEW');
+      expect(bulkPatchResponse.suggestions[1].suggestion).to.have.property('status', 'NEW');
+
+      expect(mockSuggestion.bulkUpdateStatus).to.not.have.been.called;
+
+      // alt-text is grouped by URL, so 2 suggestions with different URLs = 2 SQS calls
+      expect(mockSqs.sendMessage).to.have.been.calledTwice;
+      const allSqsCalls = mockSqs.sendMessage.getCalls();
+      allSqsCalls.forEach((call) => {
+        expect(call.args[1]).to.have.property('action', 'assess');
+        expect(call.args[1]).to.have.property('siteId', SITE_ID);
+        expect(call.args[1]).to.have.property('opportunityId', OPPORTUNITY_ID);
+        expect(call.args[1]).to.have.property('url').that.is.a('string');
+      });
+      const allSentIds = allSqsCalls.flatMap((call) => call.args[1].suggestionIds);
+      expect(allSentIds).to.have.members([SUGGESTION_IDS[0], SUGGESTION_IDS[1]]);
+    });
+
+    it('forwards precheckOnly to worker when action is assess', async () => {
+      opportunity.getType = sandbox.stub().returns('alt-text');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(altTextSuggs[0])],
+      );
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          action: 'assess',
+          precheckOnly: true,
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload).to.have.property('precheckOnly', true);
+      expect(payload).to.have.property('action', 'assess');
+    });
+
+    it('does not include precheckOnly in SQS payload when precheckOnly is false', async () => {
+      opportunity.getType = sandbox.stub().returns('alt-text');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(altTextSuggs[0])],
+      );
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          action: 'assess',
+          precheckOnly: false,
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload).to.not.have.property('precheckOnly');
+    });
+
+    it('does not call getIMSPromiseToken when action is assess and precheckOnly is true', async () => {
+      const getIMSPromiseTokenStub = sandbox.stub().resolves({ promise_token: 'unused' });
+      const ControllerWithSpy = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/utils.js': {
+          getIMSPromiseToken: getIMSPromiseTokenStub,
+        },
+      });
+      const controller = ControllerWithSpy({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'abcd' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      opportunity.getType = sandbox.stub().returns('alt-text');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(altTextSuggs[0])],
+      );
+
+      const response = await controller.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          action: 'assess',
+          precheckOnly: true,
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(getIMSPromiseTokenStub).to.not.have.been.called;
+    });
+
+    it('returns 400 when precheckOnly is not a boolean', async () => {
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          action: 'assess',
+          precheckOnly: 'yes',
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'precheckOnly must be a boolean');
     });
 
     it('triggers autofixSuggestion for form-accessibility (non-grouped)', async () => {
@@ -2852,6 +3902,179 @@ describe('Suggestions Controller', () => {
     });
   });
 
+  describe('auto-fix with action assess-urls', () => {
+    let assessUrlsConfig;
+    beforeEach(() => {
+      opportunity.getType = sandbox.stub().returns('alt-text');
+      assessUrlsConfig = { isHandlerEnabledForSite: sandbox.stub().returns(true) };
+      mockConfiguration.findLatest.resolves(assessUrlsConfig);
+    });
+
+    it('queues assess-urls job and returns 202', async () => {
+      const pages = ['https://example.com/page1', 'https://example.com/page2'];
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { action: 'assess-urls', pages },
+        ...context,
+      });
+
+      expect(response.status).to.equal(202);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Assess-urls job queued');
+      expect(body).to.have.property('siteId', SITE_ID);
+      expect(body).to.have.property('pagesCount', 2);
+
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload).to.have.property('siteId', SITE_ID);
+      expect(payload).to.have.property('action', 'assess-urls');
+      expect(payload).to.deep.include({ pages });
+    });
+
+    it('forwards precheckOnly to worker when action is assess-urls', async () => {
+      const pages = ['https://example.com/page1'];
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { action: 'assess-urls', pages, precheckOnly: true },
+        ...context,
+      });
+
+      expect(response.status).to.equal(202);
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload).to.have.property('precheckOnly', true);
+    });
+
+    it('accepts pages as array of objects with pageUrl and imageUrls', async () => {
+      const pages = [
+        {
+          pageUrl: 'https://example.com/page1',
+          imageUrls: [
+            'https://example.com/img1.jpg',
+            'https://example.com/img2.jpg',
+          ],
+        },
+        { pageUrl: 'https://example.com/page2' },
+      ];
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { action: 'assess-urls', pages },
+        ...context,
+      });
+
+      expect(response.status).to.equal(202);
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload).to.have.property('pages').that.deep.equals(pages);
+      expect(payload).to.have.property('action', 'assess-urls');
+    });
+
+    it('returns 400 when action is assess-urls but pages is missing', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { action: 'assess-urls' },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Request body must contain a non-empty array of pages (URLs) when action is assess-urls');
+    });
+
+    it('returns 400 when action is assess-urls but pages is empty', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { action: 'assess-urls', pages: [] },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'Request body must contain a non-empty array of pages (URLs) when action is assess-urls');
+    });
+
+    it('returns 400 when action is assess-urls but a page is not a valid URL', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { action: 'assess-urls', pages: ['https://valid.com/p', 'not-a-url'] },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message').that.includes('valid URL');
+    });
+
+    it('returns 400 when action is assess-urls and page object has invalid pageUrl or imageUrls', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          action: 'assess-urls',
+          pages: [
+            { pageUrl: 'https://valid.com/p', imageUrls: ['https://ok.jpg', 'not-a-url'] },
+          ],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message').that.includes('valid URL');
+    });
+
+    it('returns 400 when action is assess-urls and page object has invalid or missing pageUrl', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          action: 'assess-urls',
+          pages: [
+            { imageUrls: ['https://example.com/img.jpg'] },
+          ],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message').that.includes('valid URL');
+    });
+
+    it('returns 400 when action is assess-urls and page object has imageUrls that is not an array', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          action: 'assess-urls',
+          pages: [
+            { pageUrl: 'https://valid.com/p', imageUrls: 'https://single-url.com' },
+          ],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message').that.includes('valid URL');
+    });
+
+    it('returns 400 when action is assess-urls but a page entry is not a string or page object', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: {
+          action: 'assess-urls',
+          pages: ['https://valid.com/p', 123],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message').that.includes('valid URL');
+    });
+
+    it('returns 400 when action is assess-urls but handler is not enabled for site', async () => {
+      assessUrlsConfig.isHandlerEnabledForSite.returns(false);
+      const response = await suggestionsController.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { action: 'assess-urls', pages: ['https://example.com/p'] },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message').that.includes('Handler is not enabled for site');
+    });
+  });
+
   describe('auto-fix suggestions for CS', function () {
     this.timeout(10000);
     let spySqs;
@@ -3025,6 +4248,104 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(500);
       const error = await response.json();
       expect(error).to.have.property('message', 'Error getting promise token');
+    });
+
+    it('uses x-promise-token header when present instead of IMS', async () => {
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0]),
+          mockSuggestionEntity(suggs[2]),
+        ],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
+
+      const getIMSPromiseTokenStub = sandbox.stub();
+      const SuggestionsControllerWithStub = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/utils.js': {
+          getIMSPromiseToken: getIMSPromiseTokenStub,
+        },
+      });
+      const controllerWithStub = SuggestionsControllerWithStub({
+        dataAccess: mockSuggestionDataAccess,
+        pathInfo: { headers: { 'x-product': 'abcd' } },
+        ...authContext,
+      }, spySqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithStub.autofixSuggestions({
+        env: {
+          AUTOFIX_CRYPT_SECRET: 'superSecret',
+          AUTOFIX_CRYPT_SALT: 'salt',
+        },
+        pathInfo: {
+          headers: {
+            authorization: 'Bearer token123',
+            'x-promise-token': 'header-promise-token',
+          },
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(sqsSpy.firstCall.args[1]).to.have.property('promiseToken');
+      expect(sqsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token', 'header-promise-token');
+      expect(getIMSPromiseTokenStub).to.not.have.been.called;
+    });
+
+    it('falls back to IMS when x-promise-token header is absent', async () => {
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0]),
+          mockSuggestionEntity(suggs[2]),
+        ],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
+      const response = await suggestionsControllerWithIms.autofixSuggestions({
+        pathInfo: {
+          headers: {
+            authorization: 'Bearer token123',
+          },
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(sqsSpy.firstCall.args[1]).to.have.property('promiseToken');
+      expect(sqsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token', 'promiseTokenExample');
+    });
+
+    it('falls back to IMS when x-promise-token header is empty', async () => {
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0]),
+          mockSuggestionEntity(suggs[2]),
+        ],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+        mockSuggestionEntity({ ...suggs[2], status: 'IN_PROGRESS' })]);
+      const response = await suggestionsControllerWithIms.autofixSuggestions({
+        pathInfo: {
+          headers: {
+            authorization: 'Bearer token123',
+            'x-promise-token': '',
+          },
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(sqsSpy.firstCall.args[1]).to.have.property('promiseToken');
+      expect(sqsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token', 'promiseTokenExample');
     });
   });
 
@@ -3332,6 +4653,10 @@ describe('Suggestions Controller', () => {
     let headingsOpportunity;
 
     beforeEach(() => {
+      // Default: allow LLMO administrator access (can be overridden in specific tests)
+      sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(true);
+      sandbox.stub(AccessControlUtil.prototype, 'isOwnerOfSite').resolves(true);
+
       tokowakaSuggestions = [
         {
           getId: () => SUGGESTION_IDS[0],
@@ -3449,6 +4774,23 @@ describe('Suggestions Controller', () => {
       };
     });
 
+    it('uses base URL fallback when getHostName returns null (deploy)', async () => {
+      site.getBaseURL = sandbox.stub().returns('');
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+        },
+      });
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata).to.have.property('total');
+    });
+
     it('should deploy headings suggestions successfully', async () => {
       const response = await suggestionsController.deploySuggestionToEdge({
         ...context,
@@ -3492,10 +4834,10 @@ describe('Suggestions Controller', () => {
       expect(firstSugg.setData.calledOnce).to.be.true;
       expect(secondSugg.setData.calledOnce).to.be.true;
 
-      // Verify tokowakaDeployed field was added
+      // Verify edgeDeployed field was added
       const firstCallArgs = firstSugg.setData.firstCall.args[0];
-      expect(firstCallArgs).to.have.property('tokowakaDeployed');
-      expect(firstCallArgs.tokowakaDeployed).to.be.a('number');
+      expect(firstCallArgs).to.have.property('edgeDeployed');
+      expect(firstCallArgs.edgeDeployed).to.be.a('number');
 
       // Verify updatedBy was set
       expect(firstSugg.setUpdatedBy.calledWith('test@test.com')).to.be.true;
@@ -3549,8 +4891,8 @@ describe('Suggestions Controller', () => {
 
       expect(firstCallArgs).to.not.have.property('edgeOptimizeStatus');
       expect(secondCallArgs).to.not.have.property('edgeOptimizeStatus');
-      expect(firstCallArgs).to.have.property('tokowakaDeployed');
-      expect(secondCallArgs).to.have.property('tokowakaDeployed');
+      expect(firstCallArgs).to.have.property('edgeDeployed');
+      expect(secondCallArgs).to.have.property('edgeDeployed');
     });
 
     it('should preserve edgeOptimizeStatus when not STALE during deployment', async () => {
@@ -3596,8 +4938,8 @@ describe('Suggestions Controller', () => {
 
       expect(firstCallArgs).to.have.property('edgeOptimizeStatus', 'ACTIVE');
       expect(secondCallArgs).to.have.property('edgeOptimizeStatus', 'PENDING');
-      expect(firstCallArgs).to.have.property('tokowakaDeployed');
-      expect(secondCallArgs).to.have.property('tokowakaDeployed');
+      expect(firstCallArgs).to.have.property('edgeDeployed');
+      expect(secondCallArgs).to.have.property('edgeDeployed');
     });
 
     it('uses tokowaka-deployment when profile email is missing', async () => {
@@ -3673,6 +5015,27 @@ describe('Suggestions Controller', () => {
       expect(body.message).to.equal('No data provided');
     });
 
+    it('should return 403 if user is not an LLMO administrator', async () => {
+      // Restore the default stub and create a new one that returns false
+      AccessControlUtil.prototype.isLLMOAdministrator.restore();
+      sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(false);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.equal('Only LLMO administrators can deploy suggestions to edge');
+    });
+
     it('should return 400 if suggestionIds is empty', async () => {
       const response = await suggestionsController.deploySuggestionToEdge({
         ...context,
@@ -3728,6 +5091,25 @@ describe('Suggestions Controller', () => {
       expect(body.message).to.equal('User does not belong to the organization');
     });
 
+    it('should return 403 if user cannot deploy for site', async () => {
+      AccessControlUtil.prototype.isOwnerOfSite.resolves(false);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.equal('User does not have access to deploy edge optimize fixes for this site');
+    });
+
     it('should return 404 if opportunity not found', async () => {
       mockOpportunity.findById.withArgs(OPPORTUNITY_ID).resolves(null);
 
@@ -3780,12 +5162,21 @@ describe('Suggestions Controller', () => {
               getConfig: sandbox.stub().returns({
                 getTokowakaConfig: sandbox.stub().returns({}),
               }),
+              getBaseURL: () => 'https://example.com',
             }),
           },
         },
         pathInfo: { headers: { 'x-product': 'llmo' } },
         ...authContext,
       }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+      // Make S3 fetchMetaconfig fail so deployment throws and controller returns 207 with failed: 1, 500
+      const originalSend = context.s3.s3Client.send;
+      context.s3.s3Client.send = sandbox.stub().callsFake((cmd) => {
+        if (cmd.constructor.name === 'GetObjectCommand') {
+          return Promise.reject(new Error('Internal server error'));
+        }
+        return originalSend(cmd);
+      });
       const response = await suggestionsController2.deploySuggestionToEdge({
         ...context,
         params: {
@@ -4106,8 +5497,8 @@ describe('Suggestions Controller', () => {
         // Verify domain-wide suggestion was marked as deployed
         expect(domainWideSuggestion.setData.calledOnce).to.be.true;
         const setDataArgs = domainWideSuggestion.setData.firstCall.args[0];
-        expect(setDataArgs).to.have.property('tokowakaDeployed');
-        expect(setDataArgs.tokowakaDeployed).to.be.a('number');
+        expect(setDataArgs).to.have.property('edgeDeployed');
+        expect(setDataArgs.edgeDeployed).to.be.a('number');
         expect(domainWideSuggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
         expect(domainWideSuggestion.save.calledOnce).to.be.true;
       });
@@ -4136,7 +5527,7 @@ describe('Suggestions Controller', () => {
         expect(regularSuggestions[1].setData.calledOnce).to.be.true;
 
         const firstRegularData = regularSuggestions[0].setData.firstCall.args[0];
-        expect(firstRegularData).to.have.property('tokowakaDeployed');
+        expect(firstRegularData).to.have.property('edgeDeployed');
         expect(firstRegularData).to.have.property('coveredByDomainWide');
         expect(firstRegularData).to.have.property('skippedInDeployment', true);
       });
@@ -4280,7 +5671,7 @@ describe('Suggestions Controller', () => {
           getRank: () => 5,
           getData: () => ({
             url: 'https://example.com/page4',
-            tokowakaDeployed: Date.now() - 10000,
+            edgeDeployed: Date.now() - 10000,
           }),
           getKpiDeltas: () => ({}),
           getCreatedAt: () => '2025-01-15T10:00:00Z',
@@ -4454,8 +5845,9 @@ describe('Suggestions Controller', () => {
       });
 
       it('should handle errors at the start of domain-wide deployment', async () => {
-        // Make site.getBaseURL throw an error
-        site.getBaseURL.throws(new Error('Cannot get base URL'));
+        // First call (apexBaseUrl) succeeds; second call (domain-wide baseURL) throws
+        site.getBaseURL.onFirstCall().returns('https://example.com');
+        site.getBaseURL.onSecondCall().throws(new Error('Cannot get base URL'));
 
         const response = await suggestionsController.deploySuggestionToEdge({
           ...context,
@@ -4751,7 +6143,12 @@ describe('Suggestions Controller', () => {
     let headingsOpportunity;
 
     beforeEach(() => {
+      // Default: allow LLMO administrator access (can be overridden in specific tests)
+      sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(true);
+      sandbox.stub(AccessControlUtil.prototype, 'isOwnerOfSite').resolves(true);
+
       // Mock suggestions with tokowakaDeployed timestamp
+      // Mock suggestions with edgeDeployed timestamp
       tokowakaSuggestions = [
         {
           getId: () => SUGGESTION_IDS[0],
@@ -4767,7 +6164,7 @@ describe('Suggestions Controller', () => {
               action: 'replace',
               selector: 'h1.test-selector',
             },
-            tokowakaDeployed: '2025-01-01T00:00:00.000Z',
+            edgeDeployed: '2025-01-01T00:00:00.000Z',
           }),
           getKpiDeltas: () => ({}),
           getCreatedAt: () => '2025-01-15T10:00:00Z',
@@ -4791,7 +6188,7 @@ describe('Suggestions Controller', () => {
               action: 'replace',
               selector: 'h2.test-selector',
             },
-            tokowakaDeployed: '2025-01-01T00:00:00.000Z',
+            edgeDeployed: '2025-01-01T00:00:00.000Z',
           }),
           getKpiDeltas: () => ({}),
           getCreatedAt: () => '2025-01-15T10:00:00Z',
@@ -4929,6 +6326,44 @@ describe('Suggestions Controller', () => {
       expect(error).to.have.property('message', 'Request body must contain a non-empty array of suggestionIds');
     });
 
+    it('uses base URL fallback when getHostName returns null (rollback)', async () => {
+      site.getBaseURL = sandbox.stub().returns('');
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata).to.have.property('total');
+    });
+
+    it('should return 403 when user is not an LLMO administrator', async () => {
+      // Restore the default stub and create a new one that returns false
+      AccessControlUtil.prototype.isLLMOAdministrator.restore();
+      sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(false);
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(403);
+      const error = await response.json();
+      expect(error).to.have.property('message', 'Only LLMO administrators can rollback suggestions');
+    });
+
     it('should return 404 when site not found', async () => {
       mockSite.findById.withArgs('non-existent-site').resolves(null);
 
@@ -5007,11 +6442,11 @@ describe('Suggestions Controller', () => {
       expect(body.metadata.success).to.equal(1);
       expect(body.metadata.failed).to.equal(0);
 
-      // Verify tokowakaDeployed was removed
+      // Verify edgeDeployed was removed
       const suggestion = tokowakaSuggestions[0];
       expect(suggestion.setData.calledOnce).to.be.true;
       const dataArg = suggestion.setData.firstCall.args[0];
-      expect(dataArg).to.not.have.property('tokowakaDeployed');
+      expect(dataArg).to.not.have.property('edgeDeployed');
 
       // Verify setUpdatedBy was called
       expect(suggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
@@ -5042,8 +6477,8 @@ describe('Suggestions Controller', () => {
       expect(tokowakaSuggestions[0].setUpdatedBy.calledWith('tokowaka-rollback')).to.be.true;
     });
 
-    it('should return 400 for suggestions without tokowakaDeployed during rollback', async () => {
-      // Remove tokowakaDeployed from suggestion
+    it('should return 400 for suggestions without edgeDeployed during rollback', async () => {
+      // Remove edgeDeployed from suggestion
       tokowakaSuggestions[0].getData = () => ({
         type: 'headings',
         checkType: 'heading-empty',
@@ -5073,6 +6508,45 @@ describe('Suggestions Controller', () => {
       expect(body.metadata.success).to.equal(0);
       expect(body.metadata.failed).to.equal(1);
       expect(body.suggestions[0].message).to.include('has not been deployed');
+    });
+
+    it('should support backward compatibility with legacy tokowakaDeployed property during rollback', async () => {
+      // Set up suggestion with legacy tokowakaDeployed property (no edgeDeployed)
+      const legacyTimestamp = Date.now() - 10000;
+      tokowakaSuggestions[0].getData = () => ({
+        type: 'headings',
+        checkType: 'heading-empty',
+        url: 'https://example.com/page1', // URL is required for rollback
+        edgeDeployed: legacyTimestamp,
+        tokowakaDeployed: legacyTimestamp, // Legacy property
+        recommendedAction: 'New Heading Title',
+        transformRules: {
+          action: 'replace',
+          selector: 'h1:nth-of-type(1)',
+        },
+      });
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+
+      expect(body.metadata.success).to.equal(1);
+      expect(body.metadata.failed).to.equal(0);
+
+      // Verify both properties are removed
+      const dataArg = tokowakaSuggestions[0].setData.getCall(0).args[0];
+      expect(dataArg).to.not.have.property('edgeDeployed');
+      expect(dataArg).to.not.have.property('tokowakaDeployed');
     });
 
     it('should handle multiple suggestions rollback', async () => {
@@ -5186,6 +6660,25 @@ describe('Suggestions Controller', () => {
       expect(failedSuggestion.statusCode).to.equal(400);
       expect(failedSuggestion.message).to.include('invalid configuration');
     });
+
+    it('should return 403 if user cannot deploy for site', async () => {
+      AccessControlUtil.prototype.isOwnerOfSite.resolves(false);
+
+      const response = await suggestionsController.rollbackSuggestionFromEdge({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+        },
+      });
+
+      expect(response.status).to.equal(403);
+      const body = await response.json();
+      expect(body.message).to.equal('User does not have access to rollback edge optimize fixes for this site');
+    });
   });
 
   describe('rollbackSuggestionFromEdge - domain-wide rollback', () => {
@@ -5195,6 +6688,10 @@ describe('Suggestions Controller', () => {
     let tokowakaClientStub;
 
     beforeEach(() => {
+      // Default: allow LLMO administrator access (can be overridden in specific tests)
+      sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(true);
+      sandbox.stub(AccessControlUtil.prototype, 'isOwnerOfSite').resolves(true);
+
       // Create a domain-wide suggestion that has been deployed
       domainWideSuggestion = {
         getId: () => SUGGESTION_IDS[0],
@@ -5208,7 +6705,7 @@ describe('Suggestions Controller', () => {
           allowedRegexPatterns: ['/*'],
           pathPattern: '/*',
           scope: 'domain-wide',
-          tokowakaDeployed: Date.now(),
+          edgeDeployed: Date.now(),
         }),
         getKpiDeltas: () => ({}),
         getCreatedAt: () => '2025-01-15T10:00:00Z',
@@ -5229,7 +6726,7 @@ describe('Suggestions Controller', () => {
           getRank: () => 2,
           getData: () => ({
             url: 'https://example.com/page1',
-            tokowakaDeployed: Date.now(),
+            edgeDeployed: Date.now(),
             coveredByDomainWide: SUGGESTION_IDS[0],
           }),
           getKpiDeltas: () => ({}),
@@ -5248,7 +6745,7 @@ describe('Suggestions Controller', () => {
           getRank: () => 3,
           getData: () => ({
             url: 'https://example.com/page2',
-            tokowakaDeployed: Date.now(),
+            edgeDeployed: Date.now(),
             coveredByDomainWide: SUGGESTION_IDS[0],
           }),
           getKpiDeltas: () => ({}),
@@ -5341,7 +6838,7 @@ describe('Suggestions Controller', () => {
       // Verify domain-wide suggestion data was updated
       expect(domainWideSuggestion.setData.calledOnce).to.be.true;
       const domainWideData = domainWideSuggestion.setData.firstCall.args[0];
-      expect(domainWideData).to.not.have.property('tokowakaDeployed');
+      expect(domainWideData).to.not.have.property('edgeDeployed');
       expect(domainWideSuggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
       expect(domainWideSuggestion.save.calledOnce).to.be.true;
 
@@ -5349,7 +6846,7 @@ describe('Suggestions Controller', () => {
       coveredSuggestions.forEach((suggestion) => {
         expect(suggestion.setData.calledOnce).to.be.true;
         const suggestionData = suggestion.setData.firstCall.args[0];
-        expect(suggestionData).to.not.have.property('tokowakaDeployed');
+        expect(suggestionData).to.not.have.property('edgeDeployed');
         expect(suggestionData).to.not.have.property('coveredByDomainWide');
         expect(suggestion.setUpdatedBy.calledWith('test@test.com')).to.be.true;
         expect(suggestion.save.calledOnce).to.be.true;
@@ -5630,6 +7127,23 @@ describe('Suggestions Controller', () => {
       };
     });
 
+    it('uses base URL fallback when getHostName returns null (preview)', async function () {
+      site.getBaseURL = sandbox.stub().returns('');
+      const response = await suggestionsController.previewSuggestions({
+        ...context,
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+        },
+      });
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata).to.have.property('total');
+    });
+
     it('should preview headings suggestions successfully', async function () {
       const response = await suggestionsController.previewSuggestions({
         ...context,
@@ -5868,7 +7382,7 @@ describe('Suggestions Controller', () => {
       expect(body.suggestions[0].message).to.include('Preview generation failed');
     });
 
-    it('should handle missing and invalid status suggestions', async function () {
+    it('should handle missing suggestions and allow any status', async function () {
       tokowakaSuggestions[1].getStatus = () => 'IN_PROGRESS';
 
       const response = await suggestionsController.previewSuggestions({
@@ -5886,16 +7400,16 @@ describe('Suggestions Controller', () => {
       const body = await response.json();
 
       expect(body.metadata.total).to.equal(3);
-      expect(body.metadata.success).to.equal(1);
-      expect(body.metadata.failed).to.equal(2);
+      expect(body.metadata.success).to.equal(2);
+      expect(body.metadata.failed).to.equal(1);
 
       const notFoundSuggestion = body.suggestions.find((s) => s.uuid === 'not-found-id');
       expect(notFoundSuggestion.statusCode).to.equal(404);
       expect(notFoundSuggestion.message).to.include('not found');
 
-      const invalidStatusSuggestion = body.suggestions.find((s) => s.uuid === SUGGESTION_IDS[1]);
-      expect(invalidStatusSuggestion.statusCode).to.equal(400);
-      expect(invalidStatusSuggestion.message).to.include('not in NEW status');
+      // Suggestion with IN_PROGRESS status should now succeed
+      const inProgressSuggestion = body.suggestions.find((s) => s.uuid === SUGGESTION_IDS[1]);
+      expect(inProgressSuggestion.statusCode).to.equal(200);
     });
 
     it('should validate preview config structure uses preview path', async function () {
@@ -6267,7 +7781,7 @@ describe('Suggestions Controller', () => {
       expect(fetchStub).to.have.been.calledOnce;
       const fetchArgs = fetchStub.getCall(0).args;
       expect(fetchArgs[0]).to.equal('https://www.lovesac.com/sactionals');
-      expect(fetchArgs[1].headers['User-Agent']).to.equal('Tokowaka-AI Tokowaka/1.0');
+      expect(fetchArgs[1].headers['User-Agent']).to.equal('Tokowaka-AI Tokowaka/1.0 AdobeEdgeOptimize-AI AdobeEdgeOptimize/1.0');
     });
 
     it('should handle fetch failure with 404', async () => {
@@ -6474,6 +7988,10 @@ describe('Suggestions Controller', () => {
   });
 
   describe('previewSuggestions with domain-wide suggestions', () => {
+    beforeEach(() => {
+      site.getBaseURL = sandbox.stub().returns('https://example.com');
+    });
+
     it('should reject preview for domain-wide suggestions', async () => {
       const domainWideSuggestion = {
         getId: () => SUGGESTION_IDS[0],
@@ -6600,6 +8118,8 @@ describe('Suggestions Controller', () => {
           default: {
             fromContext: () => ({
               hasAccess: sandbox.stub().resolves(true),
+              isLLMOAdministrator: sandbox.stub().returns(true),
+              isOwnerOfSite: sandbox.stub().resolves(true),
             }),
           },
         },

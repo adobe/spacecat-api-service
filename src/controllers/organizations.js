@@ -63,10 +63,15 @@ function OrganizationsController(ctx, env) {
     if (!accessControlUtil.hasAdminAccess()) {
       return forbidden('Only admins can create new Organizations');
     }
+    // check if the organization already exists
+    const organization = await Organization.findByImsOrgId(context.data.imsOrgId);
+    if (organization) {
+      return createResponse(OrganizationDto.toJSON(organization), 200);
+    }
 
     try {
-      const organization = await Organization.create(context.data);
-      return createResponse(OrganizationDto.toJSON(organization), 201);
+      const organizationCreated = await Organization.create(context.data);
+      return createResponse(OrganizationDto.toJSON(organizationCreated), 201);
     } catch (e) {
       return badRequest(e.message);
     }

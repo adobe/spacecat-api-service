@@ -17,6 +17,7 @@ import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-acc
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import { composeBaseURL, tracingFetch as fetch, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
 import AhrefsAPIClient from '@adobe/spacecat-shared-ahrefs-client';
+import DrsClient from '@adobe/spacecat-shared-drs-client';
 import { parse as parseDomain } from 'tldts';
 import { postSlackMessage } from '../../utils/slack/base.js';
 
@@ -38,25 +39,8 @@ export const BASIC_AUDITS = [
 
 export const ASO_DEMO_ORG = '66331367-70e6-4a49-8445-4f6d9c265af9';
 
-export const ASO_CRITICAL_SITES = [
-  'bed9197a-bd50-442d-93d4-ce7b39f6b8ad',
-  'd9bd3ce3-8266-40bd-9ba7-00ee1ec0e5a3',
-  '99f358de-fed1-47ea-a3a8-eb64c3ed9b0e',
-  '5a3449d9-94ed-4c0f-9249-c1f592c13a28',
-  '8836462f-3819-4f31-afc0-aa57fd326f67',
-  'c61a0556-8c4a-42a1-be43-7d9297138cbb',
-  '014af735-2399-460a-8d0a-2d99a62c8d31',
-  '536d9335-0389-41f1-9f1e-19f533f1b7a5',
-  'd9c82ee0-1c3f-492f-b9c6-2b66c2314da6',
-  '635c5051-1491-49ca-ae22-02ea2c3929db',
-  '3c4e9f11-59e9-4b1a-ab84-42442eef4624',
-  '32424aff-0084-42a5-9b5d-1bd46e75224c',
-  '3d020e61-ce89-48ad-b539-ae052bac3aee',
-  'd30cce24-5222-49aa-ba1f-97304f5400b1',
-  '256c9e72-692d-4234-bf0e-c5d144fb6616',
-  '430343e7-ddda-48f2-a5ee-74f05446c8e0',
-  'ae3db999-a749-4fbd-a21b-2318094808b5',
-];
+export const ASO_CRITICAL_SITES = [];
+const LLMO_ONBOARDING_PUBLISH_TRIGGER = 'trigger:llmo-onboarding-publish';
 
 /**
  * Generates the data folder name from a domain.
@@ -77,7 +61,7 @@ export function generateDataFolder(baseURL, env = 'dev') {
  * @param {object} context - The request context containing env and log
  * @returns {Promise<void>}
  */
-async function postLlmoAlert(message, context) {
+export async function postLlmoAlert(message, context) {
   const { env, log } = context;
   const slackChannel = env.SLACK_LLMO_ALERTS_CHANNEL_ID;
   const slackToken = env.SLACK_BOT_TOKEN;
@@ -269,53 +253,6 @@ export async function validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, co
       isValid: false,
       error: `Unable to validate onboarding status: ${error.message}`,
     };
-  }
-}
-
-/**
- * Publishes a file to admin.hlx.page.
- * @param {string} filename - The filename to publish
- * @param {string} outputLocation - The output location
- * @param {object} log - Logger instance
- */
-async function publishToAdminHlx(filename, outputLocation, log) {
-  try {
-    const org = 'adobe';
-    const site = 'project-elmo-ui-data';
-    const ref = 'main';
-    const jsonFilename = `${filename.replace(/\.[^/.]+$/, '')}.json`;
-    const path = `${outputLocation}/${jsonFilename}`;
-    const headers = { Cookie: `auth_token=${process.env.HLX_ADMIN_TOKEN}` };
-
-    if (!process.env.HLX_ADMIN_TOKEN) {
-      log.warn('LLMO onboarding: HLX_ADMIN_TOKEN is not set');
-    }
-
-    const baseUrl = 'https://admin.hlx.page';
-    const endpoints = [
-      { name: 'preview', url: `${baseUrl}/preview/${org}/${site}/${ref}/${path}` },
-      { name: 'live', url: `${baseUrl}/live/${org}/${site}/${ref}/${path}` },
-    ];
-
-    for (const [index, endpoint] of endpoints.entries()) {
-      log.debug(`Publishing Excel report via admin API (${endpoint.name}): ${endpoint.url}`);
-
-      // eslint-disable-next-line no-await-in-loop
-      const response = await fetch(endpoint.url, { method: 'POST', headers });
-
-      if (!response.ok) {
-        throw new Error(`${endpoint.name} failed: ${response.status} ${response.statusText}`);
-      }
-
-      log.debug(`Excel report successfully published to ${endpoint.name}`);
-
-      if (index === 0) {
-        // eslint-disable-next-line no-await-in-loop,max-statements-per-line
-        await new Promise((resolve) => { setTimeout(resolve, 2000); });
-      }
-    }
-  } catch (publishError) {
-    log.error(`Failed to publish via admin.hlx.page: ${publishError.message}`);
   }
 }
 
@@ -563,9 +500,6 @@ export async function copyFilesToSharepoint(dataFolder, context, say = () => {})
     log.warn(`Warning: Query index at ${dataFolder} already exists. Skipping creation.`);
     await say(`Query index in ${dataFolder} already exists. Skipping creation.`);
   }
-
-  log.debug('Publishing query-index to admin.hlx.page');
-  await publishToAdminHlx('query-index', dataFolder, log);
 }
 
 /**
@@ -901,6 +835,8 @@ export async function removeLlmoConfig(site, config, context) {
     'geo-brand-presence-paid',
     'geo-brand-presence-daily',
     'wikipedia-analysis',
+    // geo-brand-presence-free splits
+    ...Array.from({ length: 23 }, (_, i) => `geo-brand-presence-free-${i + 1}`),
   ];
 
   // Update configuration to disable audits
@@ -947,28 +883,54 @@ export async function createEntitlementAndEnrollment(site, context, say = () => 
   }
 }
 
-export async function enableAudits(site, context, audits = []) {
-  const { dataAccess } = context;
+/**
+ * Enables audits for a site. Continues processing if individual audits fail.
+ * @param {object} site - The site object
+ * @param {object} context - The request context
+ * @param {Array<string>} [audits=[]] - List of audit types to enable
+ * @param {Function} [say] - Optional callback for sending messages (e.g., Slack)
+ */
+export async function enableAudits(site, context, audits = [], say = () => {}) {
+  const { dataAccess, log } = context;
   const { Configuration } = dataAccess;
 
   const configuration = await Configuration.findLatest();
+
   audits.forEach((audit) => {
-    configuration.enableHandlerForSite(audit, site);
+    try {
+      configuration.enableHandlerForSite(audit, site);
+    } catch (error) {
+      log.warn(`Failed to enable audit '${audit}' for site ${site.getId()}: ${error.message}`);
+      say(`:warning: Failed to enable audit '${audit}': ${error.message}`);
+    }
   });
+
   await configuration.save();
 }
 
-export async function enableImports(siteConfig, imports = []) {
+/**
+ * Enables imports for a site config. Continues processing if individual imports fail.
+ * @param {object} siteConfig - The site configuration object
+ * @param {Array<{type: string, options?: object}>} imports - List of imports to enable
+ * @param {object} log - Logger instance
+ * @param {Function} [say] - Optional callback for sending messages (e.g., Slack)
+ */
+export async function enableImports(siteConfig, imports, log, say = () => {}) {
   const existingImports = siteConfig.getImports();
 
   imports.forEach(({ type, options }) => {
-    // Check if import is already enabled
-    const isEnabled = existingImports?.find(
-      (imp) => imp.type === type && imp.enabled,
-    );
+    try {
+      // Check if import is already enabled
+      const isEnabled = existingImports?.find(
+        (imp) => imp.type === type && imp.enabled,
+      );
 
-    if (!isEnabled) {
-      siteConfig.enableImport(type, options);
+      if (!isEnabled) {
+        siteConfig.enableImport(type, options);
+      }
+    } catch (error) {
+      log.warn(`Failed to enable import '${type}': ${error.message}`);
+      say(`:warning: Failed to enable import '${type}': ${error.message}`);
     }
   });
 }
@@ -987,6 +949,22 @@ export async function triggerAudits(audits, context, site) {
       });
     }),
   );
+}
+
+export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
+  const { sqs, dataAccess, log } = context;
+  const { Configuration } = dataAccess;
+  const configuration = await Configuration.findLatest();
+
+  await sqs.sendMessage(configuration.getQueues().audits, {
+    type: LLMO_ONBOARDING_PUBLISH_TRIGGER,
+    siteId: site.getId(),
+    auditContext: {
+      dataFolder,
+    },
+  });
+
+  log.info(`Queued ${LLMO_ONBOARDING_PUBLISH_TRIGGER} for site ${site.getId()}`);
 }
 
 /**
@@ -1029,19 +1007,28 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     // Copy files to SharePoint
     await copyFilesToSharepoint(dataFolder, context, say);
 
+    try {
+      await enqueueLlmoOnboardingPublish(context, site, dataFolder);
+    } catch (error) {
+      log.warn(`Failed to enqueue ${LLMO_ONBOARDING_PUBLISH_TRIGGER} for site ${site.getId()}: ${error.message}`);
+    }
+
     // Update index config
     await updateIndexConfig(dataFolder, context, say);
 
-    // Enable audits
-    await enableAudits(site, context, [...BASIC_AUDITS, 'llm-error-pages', 'llmo-customer-analysis', 'wikipedia-analysis']);
+    // Enable audits (continues on partial failure, logs warnings)
+    await enableAudits(
+      site,
+      context,
+      [...BASIC_AUDITS, 'llm-error-pages', 'llmo-customer-analysis', 'wikipedia-analysis'],
+      say,
+    );
 
     // Get current site config
     const siteConfig = site.getConfig();
 
-    // Enable imports
-    await enableImports(siteConfig, [
-      { type: 'top-pages' },
-    ]);
+    // Enable imports (continues on partial failure, logs warnings)
+    await enableImports(siteConfig, [{ type: 'top-pages' }], log, say);
 
     // Update brand and data directory
     siteConfig.updateLlmoBrand(brandName.trim());
@@ -1070,8 +1057,37 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     site.setConfig(Config.toDynamoItem(siteConfig));
     await site.save();
 
-    // Trigger audits
-    await triggerAudits([...BASIC_AUDITS, 'llmo-customer-analysis', 'wikipedia-analysis'], context, site);
+    // Trigger audits (llmo-customer-analysis is NOT triggered here; it will be triggered
+    // after the DRS prompt generation job completes, via SNS → audit-worker. LLMO-1819)
+    await triggerAudits([...BASIC_AUDITS, 'wikipedia-analysis'], context, site);
+
+    // Submit DRS prompt generation job (non-blocking)
+    try {
+      const drsClient = DrsClient.createFrom(context);
+      if (drsClient.isConfigured()) {
+        // Try to get audience from brand profile, fall back to default
+        const brandProfile = siteConfig.getBrandProfile?.();
+        const audience = brandProfile?.main_profile?.target_audience
+          || `General consumers interested in ${brandName} products and services`;
+
+        const drsJob = await drsClient.submitPromptGenerationJob({
+          baseUrl: baseURL,
+          brandName: brandName.trim(),
+          audience,
+          region: 'US',
+          numPrompts: 50,
+          siteId: site.getId(),
+          imsOrgId,
+        });
+        log.info(`Started DRS prompt generation: job=${drsJob.job_id}`);
+        say(`:robot_face: Started DRS prompt generation job: ${drsJob.job_id}`);
+      } else {
+        log.debug('DRS client not configured, skipping prompt generation');
+      }
+    } catch (drsError) {
+      log.error(`Failed to start DRS prompt generation: ${drsError.message}`);
+      say(':warning: Failed to start DRS prompt generation (will need manual trigger)');
+    }
 
     return {
       site,

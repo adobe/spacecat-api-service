@@ -9,6 +9,7 @@ logs
 test-results.xml
 admin-idp-p*.json
 *.env
+!.env.example
 .idea
 *.code-workspace
 .prettierrc
@@ -19,3 +20,7 @@ admin-idp-p*.json
 !.cursor/rules/
 !.cursor/commands/
 .cursor/commands/speckit.*
+
+# V1 to V2 migration scripts and test data (local only)
+scripts/
+docs/index.html

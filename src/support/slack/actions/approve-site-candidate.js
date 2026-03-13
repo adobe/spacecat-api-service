@@ -11,7 +11,6 @@
  */
 
 import {
-  KeyEvent as KeyEventModel,
   Site as SiteModel,
   SiteCandidate as SiteCandidateModel,
 } from '@adobe/spacecat-shared-data-access';
@@ -39,7 +38,7 @@ async function announceSiteDiscovery(context, baseURL, source, hlxConfig) {
 
 export default function approveSiteCandidate(lambdaContext) {
   const { dataAccess, log } = lambdaContext;
-  const { KeyEvent, Site, SiteCandidate } = dataAccess;
+  const { Site, SiteCandidate } = dataAccess;
   const { ORGANIZATION_ID_FRIENDS_FAMILY: friendsFamilyOrgId } = lambdaContext.env;
   const { DEFAULT_ORGANIZATION_ID: defaultOrgId } = lambdaContext.env;
 
@@ -87,12 +86,6 @@ export default function approveSiteCandidate(lambdaContext) {
       siteCandidate.setUpdatedBy(user.username);
 
       await siteCandidate.save();
-
-      await KeyEvent.create({
-        name: 'Go Live',
-        siteId: site.getId(),
-        type: KeyEventModel.KEY_EVENT_TYPES.STATUS_CHANGE,
-      });
 
       const reply = composeReply({
         blocks,

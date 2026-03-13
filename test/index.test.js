@@ -16,11 +16,19 @@ import { Request } from '@adobe/fetch';
 import { expect, use } from 'chai';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
+import esmock from 'esmock';
+import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import AccessControlUtil from '../src/support/access-control-util.js';
 
-import { main } from './utils.js';
-
 use(sinonChai);
+
+const s2sAuthWrapperStub = (fn) => fn;
+
+const { main } = await esmock('../src/index.js', {
+  '@adobe/spacecat-shared-http-utils': {
+    s2sAuthWrapper: s2sAuthWrapperStub,
+  },
+});
 
 const baseUrl = 'https://base.spacecat';
 
@@ -76,6 +84,12 @@ describe('Index Tests', () => {
       },
       pathInfo: {
         suffix: '',
+      },
+      attributes: {
+        authInfo: new AuthInfo()
+          .withType('api-key')
+          .withAuthenticated(true)
+          .withProfile({ user_id: 'test-user' }),
       },
       env: {
         USER_API_KEY: apiKey,

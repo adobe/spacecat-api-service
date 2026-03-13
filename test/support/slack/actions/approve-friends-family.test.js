@@ -50,9 +50,6 @@ describe('approveSiteCandidate', () => {
 
     context = {
       dataAccess: {
-        KeyEvent: {
-          create: sinon.stub(),
-        },
         SiteCandidate: {
           findByBaseURL: sinon.stub(),
         },
@@ -123,11 +120,6 @@ describe('approveSiteCandidate', () => {
     })).to.be.true;
     expect(respondMock.calledOnceWith(expectedApprovedFnFReply)).to.be.true;
     expect(slackClient.postMessage.calledOnceWith(expectedAnnouncedMessage)).to.be.true;
-    expect(context.dataAccess.KeyEvent.create).to.have.been.calledWith({
-      name: 'Go Live',
-      siteId: site.getId(),
-      type: 'STATUS CHANGE',
-    });
   });
 
   it('logs and throws the error again if something goes wrong', async () => {

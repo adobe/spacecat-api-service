@@ -1,0 +1,36 @@
+bot-blocker:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    tags:
+      - site
+    summary: Check if a site is bot blocked
+    description: |
+      This endpoint checks if a site is bot blocked by analyzing the response from the site's base URL.
+      It detects various bot blocking technologies including Cloudflare, Imperva, Akamai, Fastly, and CloudFront.
+      The endpoint returns whether the site is crawlable, the type of blocking detected (if any), and a confidence level.
+    operationId: checkBotBlocker
+    responses:
+      '200':
+        description: Successful operation with bot blocker detection result
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/BotBlockerResult'
+            examples:
+              blocked:
+                $ref: './examples.yaml#/BotBlockerResultBlocked'
+              allowed:
+                $ref: './examples.yaml#/BotBlockerResultAllowed'
+      '400':
+        $ref: './responses.yaml#/400-no-site-id'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403-site-access-forbidden'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]

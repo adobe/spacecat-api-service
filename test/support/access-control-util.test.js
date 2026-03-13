@@ -14,9 +14,6 @@
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import {
-  Site,
-  Organization,
-  Project,
   Entitlement as EntitlementModel,
   TrialUser as TrialUserModel,
 } from '@adobe/spacecat-shared-data-access';
@@ -64,6 +61,29 @@ describe('Access Control Util', () => {
 
     const accessControlUtil = AccessControlUtil.fromContext(context);
     expect(accessControlUtil.hasAdminAccess()).to.be.true;
+  });
+
+  it('should delegate hasS2SAdminAccess to authInfo.isS2SAdmin', () => {
+    const authInfo = new AuthInfo()
+      .withType('jwt')
+      .withProfile({ is_admin: true });
+    authInfo.isS2SAdmin = sinon.stub().returns(true);
+
+    const context = {
+      pathInfo: {
+        headers: { 'x-product': 'llmo' },
+      },
+      attributes: { authInfo },
+      dataAccess: {
+        Entitlement: { findByOrganizationIdAndProductCode: sinon.stub() },
+        TrialUser: {},
+        OrganizationIdentityProvider: {},
+      },
+    };
+
+    const accessControlUtil = AccessControlUtil.fromContext(context);
+    expect(accessControlUtil.hasS2SAdminAccess()).to.be.true;
+    expect(authInfo.isS2SAdmin).to.have.been.calledOnce;
   });
 
   it('should throw an error if entity is not provided', async () => {
@@ -180,8 +200,7 @@ describe('Access Control Util', () => {
     const site = {
       getOrganization: async () => null,
     };
-    // Make site instanceof Site return true
-    Object.setPrototypeOf(site, Site.prototype);
+    site.constructor = { ENTITY_NAME: 'Site' };
 
     await expect(util.hasAccess(site)).to.be.rejectedWith('Missing organization for site');
   });
@@ -195,13 +214,13 @@ describe('Access Control Util', () => {
         getImsOrgId: () => 'test-org-id',
       }),
     };
-    Object.setPrototypeOf(site, Site.prototype);
+    site.constructor = { ENTITY_NAME: 'Site' };
 
     // Test with Organization entity
     const org = {
       getImsOrgId: () => 'test-org-id',
     };
-    Object.setPrototypeOf(org, Organization.prototype);
+    org.constructor = { ENTITY_NAME: 'Organization' };
 
     const siteResult = await util.hasAccess(site);
     const orgResult = await util.hasAccess(org);
@@ -217,7 +236,7 @@ describe('Access Control Util', () => {
     const org = {
       getImsOrgId: () => 'test-org-id',
     };
-    Object.setPrototypeOf(org, Organization.prototype);
+    org.constructor = { ENTITY_NAME: 'Organization' };
 
     // Mock the authInfo.hasOrganization to return true for test-org-id
     util.authInfo.hasOrganization = sinon.stub().returns(true);
@@ -248,7 +267,7 @@ describe('Access Control Util', () => {
       getImsOrgId: () => 'test-org-id',
       getId: () => 'test-org-id',
     };
-    Object.setPrototypeOf(org, Organization.prototype);
+    org.constructor = { ENTITY_NAME: 'Organization' };
 
     // Mock the authInfo.hasOrganization to return true for test-org-id
     util.authInfo.hasOrganization = sinon.stub().returns(true);
@@ -321,7 +340,7 @@ describe('Access Control Util', () => {
           getImsOrgId: () => 'test-org-id',
         }),
       };
-      Object.setPrototypeOf(site, Site.prototype);
+      site.constructor = { ENTITY_NAME: 'Site' };
 
       mockAuthInfo.hasOrganization.returns(true);
       mockAuthInfo.hasScope.returns(true);
@@ -339,7 +358,7 @@ describe('Access Control Util', () => {
           getImsOrgId: () => 'test-org-id',
         }),
       };
-      Object.setPrototypeOf(site, Site.prototype);
+      site.constructor = { ENTITY_NAME: 'Site' };
 
       mockAuthInfo.hasOrganization.returns(true);
       mockAuthInfo.hasScope.returns(true);
@@ -357,7 +376,7 @@ describe('Access Control Util', () => {
           getImsOrgId: () => 'test-org-id',
         }),
       };
-      Object.setPrototypeOf(site, Site.prototype);
+      site.constructor = { ENTITY_NAME: 'Site' };
 
       mockAuthInfo.hasOrganization.returns(true);
       mockAuthInfo.hasScope.returns(false);
@@ -375,7 +394,7 @@ describe('Access Control Util', () => {
           getImsOrgId: () => 'test-org-id',
         }),
       };
-      Object.setPrototypeOf(site, Site.prototype);
+      site.constructor = { ENTITY_NAME: 'Site' };
 
       mockAuthInfo.hasOrganization.returns(false);
       mockAuthInfo.hasScope.returns(false);
@@ -438,7 +457,7 @@ describe('Access Control Util', () => {
           getImsOrgId: () => 'org-2',
         }),
       };
-      Object.setPrototypeOf(site, Site.prototype);
+      site.constructor = { ENTITY_NAME: 'Site' };
 
       const hasAccess = await accessControl.hasAccess(site);
       expect(hasAccess).to.be.false;
@@ -449,7 +468,7 @@ describe('Access Control Util', () => {
           getImsOrgId: () => 'org-1',
         }),
       };
-      Object.setPrototypeOf(siteFromSameOrg, Site.prototype);
+      siteFromSameOrg.constructor = { ENTITY_NAME: 'Site' };
 
       const hasAccessToSameOrg = await accessControl.hasAccess(siteFromSameOrg);
       expect(hasAccessToSameOrg).to.be.true;
@@ -493,7 +512,7 @@ describe('Access Control Util', () => {
       const org = {
         getImsOrgId: () => 'org-1',
       };
-      Object.setPrototypeOf(org, Organization.prototype);
+      org.constructor = { ENTITY_NAME: 'Organization' };
 
       const hasAccess = await accessControl.hasAccess(org);
       expect(hasAccess).to.be.true;
@@ -502,7 +521,7 @@ describe('Access Control Util', () => {
       const differentOrg = {
         getImsOrgId: () => 'org-2',
       };
-      Object.setPrototypeOf(differentOrg, Organization.prototype);
+      differentOrg.constructor = { ENTITY_NAME: 'Organization' };
 
       const hasAccessToDifferentOrg = await accessControl.hasAccess(differentOrg);
       expect(hasAccessToDifferentOrg).to.be.true;
@@ -544,7 +563,7 @@ describe('Access Control Util', () => {
       const org = {
         getImsOrgId: () => 'org-1',
       };
-      Object.setPrototypeOf(org, Organization.prototype);
+      org.constructor = { ENTITY_NAME: 'Organization' };
 
       const hasAccess = await accessControl.hasAccess(org);
       expect(hasAccess).to.be.true;
@@ -553,10 +572,64 @@ describe('Access Control Util', () => {
       const differentOrg = {
         getImsOrgId: () => 'org-2',
       };
-      Object.setPrototypeOf(differentOrg, Organization.prototype);
+      differentOrg.constructor = { ENTITY_NAME: 'Organization' };
 
       const hasAccessToDifferentOrg = await accessControl.hasAccess(differentOrg);
       expect(hasAccessToDifferentOrg).to.be.true;
+    });
+
+    it('should return true when user is LLMO administrator', () => {
+      const mockAuthInfo = {
+        getType: () => 'ims',
+        isAuthenticated: () => true,
+        getProfile: () => ({ is_llmo_administrator: true }),
+        isLLMOAdministrator: () => true,
+      };
+
+      const contextWithLLMOAdmin = {
+        log: {
+          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
+        pathInfo: {
+          headers: { 'x-product': 'llmo' },
+        },
+        attributes: { authInfo: mockAuthInfo },
+        dataAccess: {
+          Entitlement: {},
+          TrialUser: {},
+          OrganizationIdentityProvider: {},
+        },
+      };
+
+      const accessControl = AccessControlUtil.fromContext(contextWithLLMOAdmin);
+      expect(accessControl.isLLMOAdministrator()).to.be.true;
+    });
+
+    it('should return false when user is not LLMO administrator', () => {
+      const mockAuthInfo = {
+        getType: () => 'ims',
+        isAuthenticated: () => true,
+        getProfile: () => ({ is_llmo_administrator: false }),
+        isLLMOAdministrator: () => false,
+      };
+
+      const contextWithoutLLMOAdmin = {
+        log: {
+          info: logSpy, error: logSpy, warn: logSpy, debug: logSpy,
+        },
+        pathInfo: {
+          headers: { 'x-product': 'llmo' },
+        },
+        attributes: { authInfo: mockAuthInfo },
+        dataAccess: {
+          Entitlement: {},
+          TrialUser: {},
+          OrganizationIdentityProvider: {},
+        },
+      };
+
+      const accessControl = AccessControlUtil.fromContext(contextWithoutLLMOAdmin);
+      expect(accessControl.isLLMOAdministrator()).to.be.false;
     });
   });
 
@@ -585,7 +658,7 @@ describe('Access Control Util', () => {
         getId: () => 'org-123',
         getImsOrgId: () => 'org-123',
       };
-      Object.setPrototypeOf(mockOrg, Organization.prototype);
+      mockOrg.constructor = { ENTITY_NAME: 'Organization' };
 
       mockEntitlement = {
         findByOrganizationIdAndProductCode: sinon.stub(),
@@ -703,7 +776,7 @@ describe('Access Control Util', () => {
       const mockSite = {
         getId: () => 'site-123',
       };
-      Object.setPrototypeOf(mockSite, Site.prototype);
+      mockSite.constructor = { ENTITY_NAME: 'Site' };
 
       await expect(util.validateEntitlement(mockOrg, mockSite, 'llmo')).to.not.be.rejected;
     });
@@ -720,7 +793,7 @@ describe('Access Control Util', () => {
       const mockSite = {
         getId: () => 'site-123',
       };
-      Object.setPrototypeOf(mockSite, Site.prototype);
+      mockSite.constructor = { ENTITY_NAME: 'Site' };
 
       await expect(util.validateEntitlement(mockOrg, mockSite, 'llmo'))
         .to.be.rejectedWith('Missing enrollment for site');
@@ -738,7 +811,7 @@ describe('Access Control Util', () => {
       const mockSite = {
         getId: () => 'site-123',
       };
-      Object.setPrototypeOf(mockSite, Site.prototype);
+      mockSite.constructor = { ENTITY_NAME: 'Site' };
 
       await expect(util.validateEntitlement(mockOrg, mockSite, 'llmo'))
         .to.be.rejectedWith('Missing enrollment for site');
@@ -756,7 +829,7 @@ describe('Access Control Util', () => {
       const mockSite = {
         getId: () => 'site-123',
       };
-      Object.setPrototypeOf(mockSite, Site.prototype);
+      mockSite.constructor = { ENTITY_NAME: 'Site' };
 
       await expect(util.validateEntitlement(mockOrg, mockSite, 'llmo'))
         .to.be.rejectedWith('Missing enrollment for site');
@@ -976,6 +1049,30 @@ describe('Access Control Util', () => {
       expect(mockTrialUser.create).to.not.have.been.called;
     });
 
+    it('should not create trial user when tier is free_trial, trial user does not exist, but user is S2S consumer', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'llmo',
+        getTier: () => 'free_trial',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
+
+      mockTrialUser.findByEmailId.resolves(null);
+
+      mockAuthInfo.getProfile.returns({
+        trial_email: 'trial@example.com',
+        email: 'user@example.com',
+        first_name: 'John',
+        last_name: 'Doe',
+        is_s2s_consumer: true,
+      });
+      mockAuthInfo.isS2SConsumer = sinon.stub().returns(true);
+
+      await util.validateEntitlement(mockOrg, null, 'llmo');
+
+      expect(mockTrialUser.create).to.not.have.been.called;
+    });
+
     it('should throw error when x-product header does not match productCode', async () => {
       const entitlement = {
         getId: () => 'entitlement-123',
@@ -989,8 +1086,7 @@ describe('Access Control Util', () => {
         getId: () => 'org-123',
         getImsOrgId: () => 'org-123',
       };
-      // Make it pass instanceof Organization check
-      Object.setPrototypeOf(mockOrgInstance, Organization.prototype);
+      mockOrgInstance.constructor = { ENTITY_NAME: 'Organization' };
 
       // Set up context with x-product header
       const testContextWithHeader = {
@@ -1042,8 +1138,7 @@ describe('Access Control Util', () => {
         getId: () => 'org-123',
         getImsOrgId: () => 'org-123',
       };
-      // Make it pass instanceof Organization check
-      Object.setPrototypeOf(mockOrgInstance, Organization.prototype);
+      mockOrgInstance.constructor = { ENTITY_NAME: 'Organization' };
 
       // Set up context with matching x-product header
       const testContextWithHeader = {
@@ -1157,7 +1252,7 @@ describe('Access Control Util', () => {
         getOrganization: async () => mockOrg,
         getId: () => 'site-123',
       };
-      Object.setPrototypeOf(site, Site.prototype);
+      site.constructor = { ENTITY_NAME: 'Site' };
 
       const entitlement = {
         getId: () => 'entitlement-123',
@@ -1178,7 +1273,7 @@ describe('Access Control Util', () => {
       const site = {
         getOrganization: async () => mockOrg,
       };
-      Object.setPrototypeOf(site, Site.prototype);
+      site.constructor = { ENTITY_NAME: 'Site' };
 
       const result = await util.hasAccess(site, '', '');
 
@@ -1191,7 +1286,7 @@ describe('Access Control Util', () => {
         getOrganization: async () => mockOrg,
         getId: () => 'site-123',
       };
-      Object.setPrototypeOf(site, Site.prototype);
+      site.constructor = { ENTITY_NAME: 'Site' };
 
       mockTierClient.checkValidEntitlement.resolves({});
 
@@ -1203,7 +1298,7 @@ describe('Access Control Util', () => {
         getOrganization: async () => mockOrg,
         getId: () => 'site-123',
       };
-      Object.setPrototypeOf(site, Site.prototype);
+      site.constructor = { ENTITY_NAME: 'Site' };
 
       const entitlement = {
         getId: () => 'entitlement-123',
@@ -1226,7 +1321,7 @@ describe('Access Control Util', () => {
         getOrganization: async () => mockOrg,
         getId: () => 'site-123',
       };
-      Object.setPrototypeOf(site, Site.prototype);
+      site.constructor = { ENTITY_NAME: 'Site' };
 
       const entitlement = {
         getId: () => 'entitlement-123',
@@ -1257,7 +1352,7 @@ describe('Access Control Util', () => {
           getImsOrgId: () => 'project-org-id',
         }),
       };
-      Object.setPrototypeOf(project, Project.prototype);
+      project.constructor = { ENTITY_NAME: 'Project' };
 
       util.authInfo.hasOrganization = sinon.stub().returns(true);
 
@@ -1274,7 +1369,7 @@ describe('Access Control Util', () => {
           getImsOrgId: () => 'project-org-id',
         }),
       };
-      Object.setPrototypeOf(project, Project.prototype);
+      project.constructor = { ENTITY_NAME: 'Project' };
 
       util.authInfo.hasOrganization = sinon.stub().returns(false);
 
@@ -1282,6 +1377,86 @@ describe('Access Control Util', () => {
 
       expect(result).to.be.false;
       expect(util.authInfo.hasOrganization).to.have.been.calledWith('project-org-id');
+    });
+  });
+
+  describe('isOwnerOfSite', () => {
+    it('throws error when entity is missing', async () => {
+      const util = AccessControlUtil.fromContext(context);
+      await expect(util.isOwnerOfSite(null)).to.be.rejectedWith('Missing entity');
+      await expect(util.isOwnerOfSite(undefined)).to.be.rejectedWith('Missing entity');
+      await expect(util.isOwnerOfSite({})).to.be.rejectedWith('Missing entity');
+    });
+
+    it('returns true when user has org access for a Site entity', async () => {
+      const util = AccessControlUtil.fromContext(context);
+      util.authInfo.hasOrganization = sinon.stub().returns(true);
+
+      const site = {
+        getOrganization: async () => ({ getImsOrgId: () => 'org-1' }),
+      };
+      site.constructor = { ENTITY_NAME: 'Site' };
+
+      const result = await util.isOwnerOfSite(site);
+      expect(result).to.be.true;
+      expect(util.authInfo.hasOrganization).to.have.been.calledWith('org-1');
+    });
+
+    it('returns false when user lacks org access for a Site entity', async () => {
+      const util = AccessControlUtil.fromContext(context);
+      util.authInfo.hasOrganization = sinon.stub().returns(false);
+
+      const site = {
+        getOrganization: async () => ({ getImsOrgId: () => 'org-1' }),
+      };
+      site.constructor = { ENTITY_NAME: 'Site' };
+
+      const result = await util.isOwnerOfSite(site);
+      expect(result).to.be.false;
+    });
+
+    it('throws error when Site has no organization', async () => {
+      const util = AccessControlUtil.fromContext(context);
+
+      const site = {
+        getOrganization: async () => null,
+      };
+      site.constructor = { ENTITY_NAME: 'Site' };
+
+      await expect(util.isOwnerOfSite(site)).to.be.rejectedWith('Missing organization for site');
+    });
+
+    it('returns true when user has org access for an Organization entity', async () => {
+      const util = AccessControlUtil.fromContext(context);
+      util.authInfo.hasOrganization = sinon.stub().returns(true);
+
+      const org = { getImsOrgId: () => 'org-1' };
+      org.constructor = { ENTITY_NAME: 'Organization' };
+
+      const result = await util.isOwnerOfSite(org);
+      expect(result).to.be.true;
+      expect(util.authInfo.hasOrganization).to.have.been.calledWith('org-1');
+    });
+
+    it('returns false when user lacks org access for an Organization entity', async () => {
+      const util = AccessControlUtil.fromContext(context);
+      util.authInfo.hasOrganization = sinon.stub().returns(false);
+
+      const org = { getImsOrgId: () => 'org-1' };
+      org.constructor = { ENTITY_NAME: 'Organization' };
+
+      const result = await util.isOwnerOfSite(org);
+      expect(result).to.be.false;
+    });
+
+    it('returns false for unknown entity types', async () => {
+      const util = AccessControlUtil.fromContext(context);
+
+      const unknown = { someField: 'value' };
+      unknown.constructor = { ENTITY_NAME: 'Unknown' };
+
+      const result = await util.isOwnerOfSite(unknown);
+      expect(result).to.be.false;
     });
   });
 

@@ -93,6 +93,7 @@ describe('LLMO Config Metadata Utils', () => {
         brandAliases: { total: 0, modified: 0 },
         competitors: { total: 0, modified: 0 },
         deletedPrompts: { total: 0, modified: 0 },
+        ignoredPrompts: { total: 0, modified: 0 },
         categoryUrls: { total: 0 },
       });
     });
@@ -369,6 +370,75 @@ describe('LLMO Config Metadata Utils', () => {
       expect(newConfig.deleted.prompts['del-1'].updatedAt).to.equal('2023');
       expect(newConfig.deleted.prompts['del-2'].updatedBy).to.equal(userId);
       expect(stats.deletedPrompts.modified).to.equal(1);
+    });
+
+    it('should handle ignored prompts', () => {
+      const inputConfig = {
+        ignored: {
+          prompts: {
+            'ign-1': { prompt: 'Ignored', region: 'us', source: 'gsc' },
+          },
+        },
+      };
+      const oldConfig = {};
+
+      const { newConfig, stats } = updateModifiedByDetails(inputConfig, oldConfig, userId);
+
+      expect(newConfig.ignored.prompts['ign-1'].updatedBy).to.equal(userId);
+      expect(stats.ignoredPrompts.modified).to.equal(1);
+    });
+
+    it('should handle ignored prompts when old config has no ignored section', () => {
+      const inputConfig = {
+        ignored: {
+          prompts: {
+            'ign-1': { prompt: 'Ignored', region: 'us', source: 'gsc' },
+          },
+        },
+      };
+      const oldConfig = { categories: {} }; // No ignored section
+
+      const { newConfig, stats } = updateModifiedByDetails(inputConfig, oldConfig, userId);
+
+      expect(newConfig.ignored.prompts['ign-1'].updatedBy).to.equal(userId);
+      expect(stats.ignoredPrompts.modified).to.equal(1);
+    });
+
+    it('should update metadata when adding a new ignored prompt', () => {
+      const oldConfig = {
+        ignored: {
+          prompts: {
+            'ign-1': {
+              prompt: 'Ignored',
+              region: 'us',
+              source: 'gsc',
+              updatedBy: 'old',
+              updatedAt: '2023',
+            },
+          },
+        },
+      };
+      const inputConfig = {
+        ignored: {
+          prompts: {
+            'ign-1': {
+              prompt: 'Ignored',
+              region: 'us',
+              source: 'gsc',
+              updatedBy: 'old',
+              updatedAt: '2023',
+            },
+            'ign-2': { prompt: 'New Ignored', region: 'gb', source: 'gsc' },
+          },
+        },
+      };
+
+      const { newConfig, stats } = updateModifiedByDetails(inputConfig, oldConfig, userId);
+
+      expect(newConfig.ignored.prompts['ign-1'].updatedBy).to.equal('old');
+      expect(newConfig.ignored.prompts['ign-1'].updatedAt).to.equal('2023');
+      expect(newConfig.ignored.prompts['ign-2'].updatedBy).to.equal(userId);
+      expect(stats.ignoredPrompts.modified).to.equal(1);
     });
 
     it('should handle brand aliases', () => {

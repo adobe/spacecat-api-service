@@ -21,13 +21,19 @@ use(sinonChai);
 
 let RunA11yCodefixCommand;
 let triggerA11yCodefixStub;
+let buildAggregationKeyFromSuggestionStub;
 
 before(async () => {
   triggerA11yCodefixStub = sinon.stub();
+  buildAggregationKeyFromSuggestionStub = sinon.stub();
 
   RunA11yCodefixCommand = await esmock('../../../../src/support/slack/commands/run-a11y-codefix.js', {
     '../../../../src/support/utils.js': {
       triggerA11yCodefixForOpportunity: triggerA11yCodefixStub,
+    },
+    '@adobe/spacecat-shared-utils': {
+      hasText: (val) => typeof val === 'string' && val.trim().length > 0,
+      buildAggregationKeyFromSuggestion: buildAggregationKeyFromSuggestionStub,
     },
   });
 });
@@ -42,8 +48,8 @@ describe('RunA11yCodefixCommand', () => {
 
   beforeEach(() => {
     mockSuggestions = [
-      { getId: () => 'sugg-1' },
-      { getId: () => 'sugg-2' },
+      { getId: () => 'sugg-1', getStatus: () => 'NEW', getData: () => ({ url: 'https://example.com/page1' }) },
+      { getId: () => 'sugg-2', getStatus: () => 'NEW', getData: () => ({ url: 'https://example.com/page2' }) },
     ];
 
     mockOpportunity = {
@@ -83,9 +89,10 @@ describe('RunA11yCodefixCommand', () => {
 
     slackContext = { say: sinon.spy() };
 
-    // Reset stub
     triggerA11yCodefixStub.reset();
     triggerA11yCodefixStub.resolves();
+    buildAggregationKeyFromSuggestionStub.reset();
+    buildAggregationKeyFromSuggestionStub.returns('default-agg-key');
   });
 
   describe('Initialization and BaseCommand Integration', () => {
@@ -309,6 +316,7 @@ describe('RunA11yCodefixCommand', () => {
         mockSite,
         'opp-newer',
         'a11y-assistive',
+        null,
         slackContext,
         context,
       );
@@ -336,11 +344,11 @@ describe('RunA11yCodefixCommand', () => {
 
       await command.handleExecution(['example.com'], slackContext);
 
-      // oppWithNullUpdatedAt should be selected because createdAt (Jan 25) > updatedAt (Jan 20)
       expect(triggerA11yCodefixStub).to.have.been.calledWith(
         mockSite,
         'opp-null-updated',
         'a11y-assistive',
+        null,
         slackContext,
         context,
       );
@@ -368,11 +376,11 @@ describe('RunA11yCodefixCommand', () => {
 
       await command.handleExecution(['example.com'], slackContext);
 
-      // newerOppNullUpdated should be selected because createdAt (Jan 25) > createdAt (Jan 15)
       expect(triggerA11yCodefixStub).to.have.been.calledWith(
         mockSite,
         'opp-newer-null',
         'a11y-assistive',
+        null,
         slackContext,
         context,
       );
@@ -389,6 +397,7 @@ describe('RunA11yCodefixCommand', () => {
         mockSite,
         'opp-123',
         'a11y-assistive',
+        null,
         slackContext,
         context,
       );
@@ -422,6 +431,7 @@ describe('RunA11yCodefixCommand', () => {
         mockSite,
         'opp-color',
         'a11y-color-contrast',
+        null,
         slackContext,
         context,
       );
@@ -449,6 +459,7 @@ describe('RunA11yCodefixCommand', () => {
         mockSite,
         'opp-123',
         'a11y-assistive',
+        null,
         slackContext,
         context,
       );
@@ -498,6 +509,164 @@ describe('RunA11yCodefixCommand', () => {
         sinon.match(/Something went wrong.*SQS send failed/),
       );
       expect(context.log.error).to.have.been.called;
+    });
+  });
+
+  describe('Aggregation Key Filtering', () => {
+    it('passes aggregation key to trigger function when provided', async () => {
+      buildAggregationKeyFromSuggestionStub.returns('agg-key-123');
+      const command = RunA11yCodefixCommand(context);
+
+      await command.handleExecution(['example.com', 'assistive', 'agg-key-123'], slackContext);
+
+      expect(triggerA11yCodefixStub).to.have.been.calledWith(
+        mockSite,
+        'opp-123',
+        'a11y-assistive',
+        'agg-key-123',
+        slackContext,
+        context,
+      );
+    });
+
+    it('shows matching suggestion count when aggregation key provided', async () => {
+      buildAggregationKeyFromSuggestionStub.returns('agg-key-123');
+      const command = RunA11yCodefixCommand(context);
+
+      await command.handleExecution(['example.com', 'assistive', 'agg-key-123'], slackContext);
+
+      expect(slackContext.say).to.have.been.calledWith(
+        sinon.match(/Aggregation Key:.*agg-key-123/),
+      );
+    });
+
+    it('reports error when no suggestions match aggregation key', async () => {
+      buildAggregationKeyFromSuggestionStub.returns('different-key');
+      mockOpportunity.getSuggestions = sinon.stub().resolves([
+        { getId: () => 'sugg-1', getStatus: () => 'NEW', getData: () => ({ url: 'https://example.com/page1' }) },
+      ]);
+      const command = RunA11yCodefixCommand(context);
+
+      await command.handleExecution(['example.com', 'assistive', 'nonexistent-key'], slackContext);
+
+      expect(slackContext.say).to.have.been.calledWith(
+        sinon.match(/No suggestions found matching aggregation key/),
+      );
+      expect(triggerA11yCodefixStub).not.to.have.been.called;
+    });
+
+    it('excludes suggestions with FIXED status from count', async () => {
+      mockOpportunity.getSuggestions = sinon.stub().resolves([
+        { getId: () => 'sugg-1', getStatus: () => 'FIXED', getData: () => ({ url: 'https://example.com/page1' }) },
+        { getId: () => 'sugg-2', getStatus: () => 'NEW', getData: () => ({ url: 'https://example.com/page2' }) },
+      ]);
+      const command = RunA11yCodefixCommand(context);
+
+      await command.handleExecution(['example.com'], slackContext);
+
+      expect(slackContext.say).to.have.been.calledWith(sinon.match(/Suggestions: 1/));
+    });
+
+    it('excludes suggestions with SKIPPED status from count', async () => {
+      mockOpportunity.getSuggestions = sinon.stub().resolves([
+        { getId: () => 'sugg-1', getStatus: () => 'SKIPPED', getData: () => ({ url: 'https://example.com/page1' }) },
+        { getId: () => 'sugg-2', getStatus: () => 'APPROVED', getData: () => ({ url: 'https://example.com/page2' }) },
+      ]);
+      const command = RunA11yCodefixCommand(context);
+
+      await command.handleExecution(['example.com'], slackContext);
+
+      expect(slackContext.say).to.have.been.calledWith(sinon.match(/Suggestions: 1/));
+    });
+
+    it('excludes invalid status suggestions when filtering by aggregation key', async () => {
+      buildAggregationKeyFromSuggestionStub.returns('agg-key-123');
+      mockOpportunity.getSuggestions = sinon.stub().resolves([
+        { getId: () => 'sugg-1', getStatus: () => 'FIXED', getData: () => ({ url: 'https://example.com/page1' }) },
+        { getId: () => 'sugg-2', getStatus: () => 'NEW', getData: () => ({ url: 'https://example.com/page2' }) },
+      ]);
+      const command = RunA11yCodefixCommand(context);
+
+      await command.handleExecution(['example.com', 'assistive', 'agg-key-123'], slackContext);
+
+      expect(slackContext.say).to.have.been.calledWith(sinon.match(/Matching Suggestions: 1/));
+    });
+
+    it('trims whitespace from aggregation key', async () => {
+      buildAggregationKeyFromSuggestionStub.returns('agg-key-123');
+      const command = RunA11yCodefixCommand(context);
+
+      await command.handleExecution(['example.com', 'assistive', '  agg-key-123  '], slackContext);
+
+      expect(triggerA11yCodefixStub).to.have.been.calledWith(
+        mockSite,
+        'opp-123',
+        'a11y-assistive',
+        'agg-key-123',
+        slackContext,
+        context,
+      );
+    });
+
+    it('shows filter note in success message when aggregation key provided', async () => {
+      buildAggregationKeyFromSuggestionStub.returns('agg-key-123');
+      const command = RunA11yCodefixCommand(context);
+
+      await command.handleExecution(['example.com', 'assistive', 'agg-key-123'], slackContext);
+
+      expect(slackContext.say).to.have.been.calledWith(
+        sinon.match(/Only suggestions matching aggregation key/),
+      );
+    });
+
+    it('extracts aggregation key from Slack link format with URL|text', async () => {
+      const slackFormattedKey = '<https://www.example.com/page.html|link-name>';
+      buildAggregationKeyFromSuggestionStub.returns('https://www.example.com/page.html|link-name');
+      const command = RunA11yCodefixCommand(context);
+
+      await command.handleExecution(['example.com', 'assistive', slackFormattedKey], slackContext);
+
+      expect(triggerA11yCodefixStub).to.have.been.calledWith(
+        mockSite,
+        'opp-123',
+        'a11y-assistive',
+        'https://www.example.com/page.html|link-name',
+        slackContext,
+        context,
+      );
+    });
+
+    it('extracts aggregation key from Slack link format with URL only', async () => {
+      const slackFormattedUrl = '<https://www.example.com/page.html>';
+      buildAggregationKeyFromSuggestionStub.returns('https://www.example.com/page.html');
+      const command = RunA11yCodefixCommand(context);
+
+      await command.handleExecution(['example.com', 'assistive', slackFormattedUrl], slackContext);
+
+      expect(triggerA11yCodefixStub).to.have.been.calledWith(
+        mockSite,
+        'opp-123',
+        'a11y-assistive',
+        'https://www.example.com/page.html',
+        slackContext,
+        context,
+      );
+    });
+
+    it('preserves plain aggregation key without Slack formatting', async () => {
+      buildAggregationKeyFromSuggestionStub.returns('plain-aggregation-key');
+      const command = RunA11yCodefixCommand(context);
+
+      await command.handleExecution(['example.com', 'assistive', 'plain-aggregation-key'], slackContext);
+
+      expect(triggerA11yCodefixStub).to.have.been.calledWith(
+        mockSite,
+        'opp-123',
+        'a11y-assistive',
+        'plain-aggregation-key',
+        slackContext,
+        context,
+      );
     });
   });
 });

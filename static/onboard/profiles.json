@@ -21,6 +21,23 @@
 		},
 		"integrations": {}
 	},
+	"aso_plg": {
+		"audits": {
+			"alt-text": {},
+			"cwv": {},
+			"broken-backlinks": {},
+			"scrape-top-pages": {}
+		},
+		"imports": {
+			"organic-traffic": {},
+			"top-pages": {},
+			"all-traffic": {}
+		},
+		"config": {
+			"scheduledRun": false
+		},
+		"integrations": {}
+	},
 	"plg":  {
 		"audits": {
 			"scrape-top-pages": {},
@@ -94,7 +111,6 @@
 			"broken-internal-links": {},
 			"experimentation-opportunities": {},
 			"meta-tags": {},
-			"sitemap": {},
 			"redirect-chains": {},
 			"cwv": {},
 			"alt-text": {},
@@ -117,7 +133,8 @@
 			"all-traffic": {},
             "traffic-analysis": {},
 			"user-engagement": {},
-			"cwv-weekly": {}
+			"cwv-weekly": {},
+			"ahref-paid-pages": {}
 		},
 		"config": {
 			"scheduledRun": true
