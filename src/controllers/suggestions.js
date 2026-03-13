@@ -914,7 +914,8 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('No updates provided');
     }
     const {
-      suggestionIds, variations, action, customData, url: requestUrl, precheckOnly, pages, fixTargetGroups,
+      suggestionIds, variations, action, customData, url: requestUrl,
+      precheckOnly, pages, fixTargetGroups,
     } = context.data;
     const isAssessAction = action === 'assess';
     const isAssessUrlsAction = action === 'assess-urls';
