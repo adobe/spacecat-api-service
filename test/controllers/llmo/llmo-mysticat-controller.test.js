@@ -25,12 +25,7 @@ describe('LlmoMysticatController', () => {
 
   beforeEach(async () => {
     sandbox = sinon.createSandbox();
-    const mockLlmoConfig = { dataFolder: 'test-folder' };
-    const mockConfig = { getLlmoConfig: sandbox.stub().returns(mockLlmoConfig) };
-    const mockSite = {
-      getConfig: sandbox.stub().returns(mockConfig),
-      getId: sandbox.stub().returns('site-123'),
-    };
+    const mockOrganization = { getId: sandbox.stub().returns('org-123') };
 
     const chainableMock = () => {
       const c = {};
@@ -39,21 +34,19 @@ describe('LlmoMysticatController', () => {
       c.eq = sandbox.stub().returns(c);
       c.gte = sandbox.stub().returns(c);
       c.lte = sandbox.stub().returns(c);
-      c.order = sandbox.stub().returns(c);
-      c.ilike = sandbox.stub().returns(c);
-      c.in = sandbox.stub().returns(c);
       c.limit = sandbox.stub().resolves({ data: [], error: null });
-      c.range = sandbox.stub().resolves({ data: [], error: null });
       c.then = (resolve) => Promise.resolve({ data: [], error: null }).then(resolve);
       return c;
     };
 
     mockContext = {
-      params: { siteId: '0178a3f0-1234-7000-8000-000000000001' },
+      params: { spaceCatId: '0178a3f0-1234-7000-8000-000000000001', brandId: 'all' },
       dataAccess: {
         Site: {
-          findById: sandbox.stub().resolves(mockSite),
           postgrestService: chainableMock(),
+        },
+        Organization: {
+          findById: sandbox.stub().resolves(mockOrganization),
         },
       },
       log: { info: sandbox.stub(), error: sandbox.stub(), warn: sandbox.stub() },
@@ -74,44 +67,22 @@ describe('LlmoMysticatController', () => {
     sandbox.restore();
   });
 
-  it('returns all brand presence handler methods', () => {
+  it('returns getFilterDimensions handler', () => {
     const controller = LlmoMysticatController(mockContext);
 
     expect(controller.getFilterDimensions).to.be.a('function');
-    expect(controller.getWeeks).to.be.a('function');
-    expect(controller.getMetadata).to.be.a('function');
-    expect(controller.getStats).to.be.a('function');
-    expect(controller.getSentimentOverview).to.be.a('function');
-    expect(controller.getWeeklyTrends).to.be.a('function');
-    expect(controller.getTopics).to.be.a('function');
-    expect(controller.getTopicPrompts).to.be.a('function');
-    expect(controller.getSearch).to.be.a('function');
-    expect(controller.getShareOfVoice).to.be.a('function');
-    expect(controller.getCompetitorTrends).to.be.a('function');
-    expect(controller.getPrompts).to.be.a('function');
-    expect(controller.getSources).to.be.a('function');
   });
 
-  it('getFilterDimensions validates site and returns data', async () => {
+  it('getFilterDimensions validates org and returns data', async () => {
     const controller = LlmoMysticatController(mockContext);
     const result = await controller.getFilterDimensions(mockContext);
 
-    expect(mockContext.dataAccess.Site.findById).to.have.been.calledWith(mockContext.params.siteId);
+    expect(mockContext.dataAccess.Organization.findById)
+      .to.have.been.calledWith(mockContext.params.spaceCatId);
     expect(result.status).to.equal(200);
   });
 
-  it('getSiteAndValidateLlmo throws when LLMO not enabled', async () => {
-    const mockConfigNoLlmo = { getLlmoConfig: sandbox.stub().returns({}) };
-    const mockSiteNoLlmo = { getConfig: sandbox.stub().returns(mockConfigNoLlmo) };
-    mockContext.dataAccess.Site.findById.resolves(mockSiteNoLlmo);
-
-    const controller = LlmoMysticatController(mockContext);
-    const result = await controller.getFilterDimensions(mockContext);
-
-    expect(result.status).to.equal(400);
-  });
-
-  it('getSiteAndValidateLlmo throws when user has no org access', async () => {
+  it('getFilterDimensions returns 403 when user has no org access', async () => {
     LlmoMysticatController = await esmock('../../../src/controllers/llmo/llmo-mysticat-controller.js', {
       '../../../src/support/access-control-util.js': {
         default: {
@@ -126,5 +97,14 @@ describe('LlmoMysticatController', () => {
     const result = await controller.getFilterDimensions(mockContext);
 
     expect(result.status).to.equal(403);
+  });
+
+  it('getFilterDimensions returns 400 when organization not found', async () => {
+    mockContext.dataAccess.Organization.findById.resolves(null);
+
+    const controller = LlmoMysticatController(mockContext);
+    const result = await controller.getFilterDimensions(mockContext);
+
+    expect(result.status).to.equal(400);
   });
 });

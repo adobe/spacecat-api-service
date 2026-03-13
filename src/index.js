@@ -25,7 +25,6 @@ import {
   ScopedApiKeyHandler,
   AdobeImsHandler,
   JwtHandler,
-  s2sAuthWrapper,
 } from '@adobe/spacecat-shared-http-utils';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import { imsClientWrapper } from '@adobe/spacecat-shared-ims-client';
@@ -33,7 +32,7 @@ import {
   elevatedSlackClientWrapper,
   SLACK_TARGETS,
 } from '@adobe/spacecat-shared-slack-client';
-import { hasText, logWrapper } from '@adobe/spacecat-shared-utils';
+import { hasText, isValidUUID, logWrapper } from '@adobe/spacecat-shared-utils';
 
 import dataAccess from './support/data-access.js';
 import sqs from './support/sqs.js';
@@ -84,12 +83,6 @@ import PTA2Controller from './controllers/paid/pta2.js';
 import TrafficToolsController from './controllers/paid/traffic-tools.js';
 import BotBlockerController from './controllers/bot-blocker.js';
 import SentimentController from './controllers/sentiment.js';
-import ConsumersController from './controllers/consumers.js';
-import routeRequiredCapabilities from './routes/required-capabilities.js';
-
-const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-const isValidUUIDV4 = (uuid) => uuidRegex.test(uuid);
 
 /**
  * LOCAL DEVELOPMENT ONLY - CORS middleware wrapper
@@ -212,7 +205,6 @@ async function run(request, context) {
     const trafficToolsController = TrafficToolsController(context, log, context.env);
     const botBlockerController = BotBlockerController(context, log);
     const sentimentController = SentimentController(context, log);
-    const consumersController = ConsumersController(context);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -254,7 +246,6 @@ async function run(request, context) {
       trafficToolsController,
       botBlockerController,
       sentimentController,
-      consumersController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -262,15 +253,20 @@ async function run(request, context) {
     if (routeMatch) {
       const { handler, params } = routeMatch;
 
-      if (params.siteId && !isValidUUIDV4(params.siteId)) {
+      if (params.siteId && !isValidUUID(params.siteId)) {
         return badRequest('Site Id is invalid. Please provide a valid UUID.');
       }
       if (params.organizationId
-        && (!isValidUUIDV4(params.organizationId) && params.organizationId !== 'default')) {
+        && (!isValidUUID(params.organizationId) && params.organizationId !== 'default')) {
         return badRequest('Organization Id is invalid. Please provide a valid UUID.');
       }
+      if (params.spaceCatId && !isValidUUID(params.spaceCatId)) {
+        return badRequest('Organization Id (spaceCatId) is invalid. Please provide a valid UUID.');
+      }
+      if (params.brandId && params.brandId !== 'all' && !isValidUUID(params.brandId)) {
+        return badRequest('Brand Id is invalid. Please provide a valid UUID or "all".');
+      }
       context.params = params;
-      context.request = request;
 
       return await handler(context);
     } else {
@@ -286,14 +282,9 @@ async function run(request, context) {
 
 const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 
-// Wrapper execution order (helix-shared-wrap: last .with() = outermost = runs first):
-// 1. s2sAuthWrapper — intercepts S2S JWT bearer tokens, passes through non-S2S to authWrapper
-// 2. authWrapper — handles JWT, IMS, scoped API key, legacy API key
-const wrappedMain = wrap(run)
-  .with(authWrapper, {
-    authHandlers: [JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler],
-  })
-  .with(s2sAuthWrapper, { routeCapabilities: routeRequiredCapabilities });
+const wrappedMain = wrap(run).with(authWrapper, {
+  authHandlers: [JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler],
+});
 
 export const main = wrappedMain
   .with(localCORSWrapper)

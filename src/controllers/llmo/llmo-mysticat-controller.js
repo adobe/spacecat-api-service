@@ -10,56 +10,35 @@
  * governing permissions and limitations under the License.
  */
 
-import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import AccessControlUtil from '../../support/access-control-util.js';
-import { createBrandPresenceHandlers } from './llmo-brand-presence.js';
+import { createFilterDimensionsHandler } from './llmo-brand-presence.js';
 
 /**
  * Controller for LLMO + Mysticat (mysticat-data-service / PostgreSQL) endpoints.
- * Handles Brand Presence APIs that query PostgREST tables.
+ * Handles Brand Presence filter-dimensions API that queries PostgREST.
  */
 function LlmoMysticatController(ctx) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
-  const getSiteAndValidateLlmo = async (context) => {
-    const { siteId } = context.params;
+  const getOrgAndValidateAccess = async (context) => {
+    const { spaceCatId } = context.params;
     const { dataAccess } = context;
-    const { Site } = dataAccess;
+    const { Organization } = dataAccess;
 
-    const site = await Site.findById(siteId);
-    const config = site.getConfig();
-    const llmoConfig = config.getLlmoConfig();
-
-    if (!llmoConfig?.dataFolder) {
-      throw new Error('LLM Optimizer is not enabled for this site, add llmo config to the site');
+    const organization = await Organization.findById(spaceCatId);
+    if (!organization) {
+      throw new Error(`Organization not found: ${spaceCatId}`);
     }
-    const hasAccessToElmo = await accessControlUtil.hasAccess(
-      site,
-      '',
-      EntitlementModel.PRODUCT_CODES.LLMO,
-    );
-    if (!hasAccessToElmo) {
-      throw new Error('Only users belonging to the organization can view its sites');
+    if (!await accessControlUtil.hasAccess(organization, '', 'LLMO')) {
+      throw new Error('Only users belonging to the organization can view brand presence data');
     }
-    return { site, config, llmoConfig };
+    return { organization };
   };
 
-  const brandPresence = createBrandPresenceHandlers(getSiteAndValidateLlmo);
+  const getFilterDimensions = createFilterDimensionsHandler(getOrgAndValidateAccess);
 
   return {
-    getFilterDimensions: brandPresence.getFilterDimensions,
-    getWeeks: brandPresence.getWeeks,
-    getMetadata: brandPresence.getMetadata,
-    getStats: brandPresence.getStats,
-    getSentimentOverview: brandPresence.getSentimentOverview,
-    getWeeklyTrends: brandPresence.getWeeklyTrends,
-    getTopics: brandPresence.getTopics,
-    getTopicPrompts: brandPresence.getTopicPrompts,
-    getSearch: brandPresence.getSearch,
-    getShareOfVoice: brandPresence.getShareOfVoice,
-    getCompetitorTrends: brandPresence.getCompetitorTrends,
-    getPrompts: brandPresence.getPrompts,
-    getSources: brandPresence.getSources,
+    getFilterDimensions,
   };
 }
 
