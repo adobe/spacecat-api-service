@@ -82,7 +82,7 @@ function EntitlementsController(ctx) {
       return ok(orgEntitlements);
     } catch (e) {
       context.log.error(`Error getting entitlements for organization ${organizationId}: ${e.message}`);
-      return internalServerError(e.message);
+      return internalServerError('Failed to retrieve entitlements');
     }
   };
 
@@ -100,8 +100,8 @@ function EntitlementsController(ctx) {
     if (!isValidUUID(organizationId)) {
       return badRequest('Organization ID required');
     }
-    if (!VALID_PRODUCT_CODES.has(productCode)) {
-      return badRequest(`Invalid product code: ${productCode}. Must be one of: ${[...VALID_PRODUCT_CODES].join(', ')}`);
+    if (typeof productCode !== 'string' || !VALID_PRODUCT_CODES.has(productCode)) {
+      return badRequest(`Invalid product code. Must be one of: ${[...VALID_PRODUCT_CODES].join(', ')}`);
     }
     try {
       const organization = await Organization.findById(organizationId);
@@ -117,7 +117,7 @@ function EntitlementsController(ctx) {
       return created(EntitlementDto.toJSON(entitlement));
     } catch (e) {
       context.log.error(`Error creating entitlement for organization ${organizationId}: ${e.message}`);
-      return internalServerError(e.message);
+      return internalServerError('Failed to create entitlement');
     }
   };
 
