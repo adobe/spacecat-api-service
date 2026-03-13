@@ -17,6 +17,7 @@ import {
   badRequest, internalServerError, notFound, ok, accepted,
 } from '@adobe/spacecat-shared-http-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
+import { getCookieValue } from '@adobe/spacecat-shared-http-utils/src/auth/handlers/utils/cookie.js';
 import { getIMSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
 
 export const AUDIT_STEP_IDENTIFY = 'identify';
@@ -86,15 +87,16 @@ function PreflightController(ctx, log, env) {
 
   /**
    * Creates a new preflight job. For promise-based authoring types (CS, CS_CW, AMS),
-   * the promise token is resolved from the x-promise-token request header if present,
-   * otherwise falls back to creating one from the Authorization header via IMS.
+   * the promise token is resolved from the promiseToken cookie sent by the browser
+   * (set via /auth/promise endpoint), otherwise falls back to creating one from
+   * the Authorization header via IMS.
    * @param {Object} context - The request context
    * @param {Object} context.data - The request data
    * @param {string[]} context.data.urls - Array of URLs to process
    * @param {string} context.data.step - The audit step
    * @param {string} context.data.siteId - The siteId, if it's an AMS site
    * @param {Object} [context.pathInfo] - The path info object
-   * @param {Object} [context.pathInfo.headers] - Request headers (x-promise-token preferred)
+   * @param {Object} [context.pathInfo.headers] - Request headers (including cookie)
    * @returns {Promise<Object>} The HTTP response object
    */
   const createPreflightJob = async (context) => {
@@ -138,10 +140,9 @@ function PreflightController(ctx, log, env) {
 
       let promiseTokenResponse;
       if (promiseBasedTypes.includes(site.getAuthoringType())) {
-        const { pathInfo } = context;
-        const headerToken = pathInfo?.headers?.['x-promise-token'];
-        if (hasText(headerToken)) {
-          promiseTokenResponse = { promise_token: headerToken };
+        const cookieToken = getCookieValue(context, 'promiseToken');
+        if (hasText(cookieToken)) {
+          promiseTokenResponse = { promise_token: cookieToken };
         } else {
           try {
             promiseTokenResponse = await getIMSPromiseToken(context);
