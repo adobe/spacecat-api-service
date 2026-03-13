@@ -12,15 +12,22 @@ The Brand Sentiment Guidelines Store allows customers to define and configure to
 
 ### SentimentTopic
 
-Represents a subject/topic for sentiment analysis with optional sub-prompts.
+Represents a subject/topic for sentiment analysis with associated URLs.
 
 ```typescript
+interface SentimentTopicUrl {
+  url: string;              // URL being tracked
+  timesCited: number;       // Number of times this URL was cited
+  category?: string;        // Optional category for the URL
+  subPrompts?: string[];    // Optional sub-prompts scoped to this URL
+}
+
 interface SentimentTopic {
   siteId: string;           // Parent site identifier (partition key)
   topicId: string;          // Unique topic identifier (sort key, auto-generated UUID)
   name: string;             // Topic name/subject to analyze (required, e.g., "2026 Corvette Stingray")
   description?: string;     // Optional description for context
-  subPrompts: string[];     // Additional prompts/questions for deeper analysis
+  urls: SentimentTopicUrl[];// URLs with citation data and per-URL sub-prompts
   enabled: boolean;         // Whether topic is active (default: true)
   createdAt: string;        // ISO 8601 timestamp
   updatedAt: string;        // ISO 8601 timestamp
@@ -36,10 +43,22 @@ interface SentimentTopic {
   "topicId": "topic-001",
   "name": "2026 Corvette Stingray",
   "description": "Track sentiment about the latest Corvette model",
-  "subPrompts": [
-    "What do people say about performance?",
-    "How is the design being received?",
-    "Price sentiment?"
+  "urls": [
+    {
+      "url": "https://en.wikipedia.org/wiki/Corvette_Stingray",
+      "timesCited": 12,
+      "category": "automotive",
+      "subPrompts": [
+        "What do people say about performance?",
+        "How is the design being received?"
+      ]
+    },
+    {
+      "url": "https://www.reddit.com/r/corvette",
+      "timesCited": 8,
+      "category": "forums",
+      "subPrompts": ["Price sentiment?"]
+    }
   ],
   "enabled": true,
   "createdAt": "2026-01-15T10:00:00Z",
@@ -94,7 +113,7 @@ interface SentimentGuideline {
 
 ## API Endpoints
 
-### Topics (7 endpoints)
+### Topics (5 endpoints)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -103,8 +122,6 @@ interface SentimentGuideline {
 | `POST` | `/sites/:siteId/sentiment/topics` | Create topics (bulk) |
 | `PATCH` | `/sites/:siteId/sentiment/topics/:topicId` | Update a topic |
 | `DELETE` | `/sites/:siteId/sentiment/topics/:topicId` | Delete a topic |
-| `POST` | `/sites/:siteId/sentiment/topics/:topicId/prompts` | Add sub-prompts to a topic |
-| `DELETE` | `/sites/:siteId/sentiment/topics/:topicId/prompts` | Remove sub-prompts from a topic |
 
 ### Guidelines (7 endpoints)
 
@@ -149,7 +166,14 @@ POST /sites/:siteId/sentiment/topics
   {
     "name": "BMW XM 2026",
     "description": "Track sentiment about the latest BMW XM luxury SUV",
-    "subPrompts": ["Performance feedback?", "Interior quality?", "Price perception?"],
+    "urls": [
+      {
+        "url": "https://en.wikipedia.org/wiki/BMW_XM",
+        "timesCited": 0,
+        "category": "automotive",
+        "subPrompts": ["Performance feedback?", "Interior quality?"]
+      }
+    ],
     "enabled": true
   }
 ]
@@ -278,7 +302,7 @@ This provides:
 1. **Setup Topics:**
    ```
    POST /sites/:siteId/sentiment/topics
-   Body: [{ name: "2026 Corvette Stingray", subPrompts: ["Performance?", "Price?"] }]
+   Body: [{ name: "2026 Corvette Stingray", urls: [{ url: "https://example.com", timesCited: 0, subPrompts: ["Performance?", "Price?"] }] }]
    ```
 
 2. **Setup Guidelines with Audit Associations:**
