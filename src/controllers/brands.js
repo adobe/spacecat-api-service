@@ -34,13 +34,14 @@ import {
 } from '../utils/constants.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { mergeCustomerConfigV2 } from '../support/customer-config-v2-metadata.js';
-import { syncBrandConfig } from '../support/brand-presence-sync.js';
+import { syncBrandConfig, syncCategoriesConfig, syncTopicsConfig } from '../support/brand-presence-sync.js';
 import {
   listPrompts,
   getPromptById,
   upsertPrompts,
   updatePromptById,
   deletePromptById,
+  bulkDeletePrompts,
   resolveBrandUuid,
 } from '../support/prompts-storage.js';
 
@@ -131,7 +132,8 @@ function BrandsController(ctx, log, env) {
     rawQueryString.split('&').forEach((param) => {
       const [key, value] = param.split('=');
       if (key && value) {
-        params[decodeURIComponent(key)] = decodeURIComponent(value);
+        const decode = (s) => decodeURIComponent(s.replace(/\+/g, ' '));
+        params[decode(key)] = decode(value);
       }
     });
     return params;
@@ -261,7 +263,8 @@ function BrandsController(ctx, log, env) {
   };
 
   /**
-   * Gets customer configuration for an organization (full config with prompts).
+   * Gets customer configuration for an organization (brands without prompts).
+   * Prompts are retrieved via the dedicated prompts endpoints.
    * @param {object} context - Context of the request.
    * @returns {Promise<Response>} Customer configuration.
    */
@@ -285,10 +288,8 @@ function BrandsController(ctx, log, env) {
       const unavailable = requirePostgrestForV2Config(context);
       if (unavailable) return unavailable;
 
-      const customerConfig = await loadCustomerConfig(context, spaceCatId);
-      if (!customerConfig) {
-        return notFound('Customer configuration not found for organization');
-      }
+      const customerConfig = await loadCustomerConfig(context, spaceCatId)
+        || { customer: { brands: [] } };
 
       // Filter by status if needed
       const filteredConfig = {
@@ -300,12 +301,8 @@ function BrandsController(ctx, log, env) {
           ...(customerConfig.customer.topics && {
             topics: filterByStatus(customerConfig.customer.topics, status),
           }),
-          brands: customerConfig.customer.brands.map((brand) => ({
-            ...brand,
-            ...(brand.prompts && {
-              prompts: filterByStatus(brand.prompts, status),
-            }),
-          })),
+          // eslint-disable-next-line no-unused-vars
+          brands: customerConfig.customer.brands.map(({ prompts, ...brand }) => brand),
         },
       };
       return ok(filteredConfig);
@@ -336,10 +333,8 @@ function BrandsController(ctx, log, env) {
       const unavailable = requirePostgrestForV2Config(context);
       if (unavailable) return unavailable;
 
-      const customerConfig = await loadCustomerConfig(context, spaceCatId);
-      if (!customerConfig) {
-        return notFound('Customer configuration not found');
-      }
+      const customerConfig = await loadCustomerConfig(context, spaceCatId)
+        || { customer: { brands: [] } };
 
       // Build maps for counting
       const categoriesMap = new Map();
@@ -411,10 +406,8 @@ function BrandsController(ctx, log, env) {
       const unavailable = requirePostgrestForV2Config(context);
       if (unavailable) return unavailable;
 
-      const customerConfig = await loadCustomerConfig(context, spaceCatId);
-      if (!customerConfig) {
-        return notFound('Customer configuration not found');
-      }
+      const customerConfig = await loadCustomerConfig(context, spaceCatId)
+        || { customer: { brands: [], topics: [] } };
 
       // Filter topics by status and optionally by brand
       let topics = customerConfig.customer.topics || [];
@@ -470,10 +463,8 @@ function BrandsController(ctx, log, env) {
       const unavailable = requirePostgrestForV2Config(context);
       if (unavailable) return unavailable;
 
-      const customerConfig = await loadCustomerConfig(context, spaceCatId);
-      if (!customerConfig) {
-        return notFound('Customer configuration not found');
-      }
+      const customerConfig = await loadCustomerConfig(context, spaceCatId)
+        || { customer: { brands: [], categories: [], topics: [] } };
 
       // Build lookup maps for enrichment
       const categoriesMap = new Map();
@@ -562,20 +553,44 @@ function BrandsController(ctx, log, env) {
       const { postgrestClient } = context.dataAccess.services;
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
 
-      await writeCustomerConfigV2ToPostgres(
-        spaceCatId,
-        customerConfig,
-        postgrestClient,
-        updatedBy,
-      );
+      try {
+        await writeCustomerConfigV2ToPostgres(
+          spaceCatId,
+          customerConfig,
+          postgrestClient,
+          updatedBy,
+        );
+      } catch (writeErr) {
+        log.warn(`Config blob write failed for ${spaceCatId} — proceeding with relational sync`, writeErr);
+      }
 
-      await syncBrandConfig({
-        customerConfig,
-        organizationId: spaceCatId,
-        postgrestClient,
-        log,
-        updatedBy,
-      });
+      const syncErrors = [];
+      const syncOps = [
+        ['brands', () => syncBrandConfig({
+          customerConfig, organizationId: spaceCatId, postgrestClient, log, updatedBy,
+        })],
+        ['categories', () => syncCategoriesConfig({
+          customerConfig, organizationId: spaceCatId, postgrestClient, log, updatedBy,
+        })],
+        ['topics', () => syncTopicsConfig({
+          customerConfig, organizationId: spaceCatId, postgrestClient, log, updatedBy,
+        })],
+      ];
+
+      // eslint-disable-next-line no-await-in-loop
+      for (const [label, op] of syncOps) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await op();
+        } catch (syncErr) {
+          log.error(`${label} sync failed for ${spaceCatId}`, syncErr);
+          syncErrors.push(label);
+        }
+      }
+
+      if (syncErrors.length > 0) {
+        log.warn(`Partial sync failures for ${spaceCatId}: ${syncErrors.join(', ')}`);
+      }
 
       log.info(`Customer config saved to Postgres for organization: ${spaceCatId}`);
 
@@ -636,20 +651,55 @@ function BrandsController(ctx, log, env) {
         return badRequest('Invalid customer configuration: customer.customerName and customer.imsOrgID are required');
       }
 
-      await writeCustomerConfigV2ToPostgres(
-        spaceCatId,
-        mergedConfig,
-        postgrestClient,
-        userId,
-      );
+      try {
+        await writeCustomerConfigV2ToPostgres(
+          spaceCatId,
+          mergedConfig,
+          postgrestClient,
+          userId,
+        );
+      } catch (writeErr) {
+        log.warn(`Config blob write failed for ${spaceCatId} — proceeding with relational sync`, writeErr);
+      }
 
-      await syncBrandConfig({
-        customerConfig: mergedConfig,
-        organizationId: spaceCatId,
-        postgrestClient,
-        log,
-        updatedBy: userId,
-      });
+      const patchSyncErrors = [];
+      const patchSyncOps = [
+        ['brands', () => syncBrandConfig({
+          customerConfig: mergedConfig,
+          organizationId: spaceCatId,
+          postgrestClient,
+          log,
+          updatedBy: userId,
+        })],
+        ['categories', () => syncCategoriesConfig({
+          customerConfig: mergedConfig,
+          organizationId: spaceCatId,
+          postgrestClient,
+          log,
+          updatedBy: userId,
+        })],
+        ['topics', () => syncTopicsConfig({
+          customerConfig: mergedConfig,
+          organizationId: spaceCatId,
+          postgrestClient,
+          log,
+          updatedBy: userId,
+        })],
+      ];
+
+      for (const [label, op] of patchSyncOps) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await op();
+        } catch (syncErr) {
+          log.error(`${label} sync failed for ${spaceCatId}`, syncErr);
+          patchSyncErrors.push(label);
+        }
+      }
+
+      if (patchSyncErrors.length > 0) {
+        log.warn(`Partial sync failures for ${spaceCatId}: ${patchSyncErrors.join(', ')}`);
+      }
 
       log.info(`Customer config patched for organization: ${spaceCatId} by ${userId}. Stats:`, stats);
 
@@ -669,6 +719,7 @@ function BrandsController(ctx, log, env) {
     const { spaceCatId, brandId } = context.params || {};
     const {
       limit, page, categoryId, topicId, status,
+      search, region, origin, sort, order,
     } = getQueryParams(context);
 
     try {
@@ -698,6 +749,11 @@ function BrandsController(ctx, log, env) {
         categoryId,
         topicId,
         status,
+        search,
+        region,
+        origin,
+        sort,
+        order,
         limit,
         page,
         postgrestClient,
@@ -880,6 +936,53 @@ function BrandsController(ctx, log, env) {
     }
   };
 
+  const bulkDeletePromptsByBrand = async (context) => {
+    const { spaceCatId, brandId } = context.params || {};
+    const body = context.data || {};
+
+    try {
+      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
+      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
+      if (!hasText(brandId)) return badRequest('Brand ID required');
+
+      const { promptIds } = body;
+      if (!Array.isArray(promptIds) || promptIds.length === 0) {
+        return badRequest('promptIds array required (min 1, max 100)');
+      }
+      if (promptIds.length > 100) return badRequest('Maximum 100 prompt IDs per request');
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) return organization;
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) return unavailable;
+
+      const { postgrestClient } = context.dataAccess.services;
+      const customerConfig = await loadCustomerConfig(context, spaceCatId);
+      const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
+
+      // eslint-disable-next-line max-len
+      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient, customerConfig);
+      if (!brandUuid) return notFound(`Brand not found: ${brandId}`);
+
+      const result = await bulkDeletePrompts({
+        organizationId: spaceCatId,
+        brandUuid,
+        promptIds,
+        postgrestClient,
+        updatedBy,
+      });
+
+      return ok(result);
+    } catch (error) {
+      log.error(`Error bulk deleting prompts for brand ${brandId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
   return {
     getBrandsForOrganization,
     getBrandGuidelinesForSite,
@@ -894,6 +997,7 @@ function BrandsController(ctx, log, env) {
     createPromptsByBrand,
     updatePromptByBrandAndId,
     deletePromptByBrandAndId,
+    bulkDeletePromptsByBrand,
     // Exported for testing
     filterByStatus,
   };

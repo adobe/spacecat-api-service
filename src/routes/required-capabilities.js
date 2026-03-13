@@ -132,6 +132,7 @@ const routeRequiredCapabilities = {
   'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'organization:write',
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'organization:write',
+  'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete': 'organization:write',
   'GET /organizations/:organizationId/projects': 'project:read',
   'GET /organizations/:organizationId/projects/:projectId/sites': 'site:read',
   'GET /organizations/:organizationId/by-project-name/:projectName/sites': 'site:read',

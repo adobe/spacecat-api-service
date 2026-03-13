@@ -523,7 +523,7 @@ describe('Brands Controller', () => {
 
       expect(response.status).to.equal(200);
       const config = await response.json();
-      expect(config.customer.brands[0].prompts).to.have.lengthOf(1);
+      expect(config.customer.brands[0]).to.not.have.property('prompts');
       expect(config.customer.categories).to.have.lengthOf(1);
       expect(config.customer.topics).to.have.lengthOf(1);
     });
@@ -572,9 +572,7 @@ describe('Brands Controller', () => {
 
       expect(response.status).to.equal(200);
       const config = await response.json();
-      // Should only have active items, deleted items filtered out
-      expect(config.customer.brands[0].prompts).to.have.lengthOf(1);
-      expect(config.customer.brands[0].prompts[0].id).to.equal('p1');
+      expect(config.customer.brands[0]).to.not.have.property('prompts');
       expect(config.customer.categories).to.have.lengthOf(1);
       expect(config.customer.categories[0].id).to.equal('c1');
       expect(config.customer.topics).to.have.lengthOf(1);
@@ -739,8 +737,7 @@ describe('Brands Controller', () => {
 
       expect(response.status).to.equal(200);
       const config = await response.json();
-      // When input has null values, they get spread from the original object
-      expect(config.customer.brands[0].prompts).to.equal(null);
+      expect(config.customer.brands[0]).to.not.have.property('prompts');
       expect(config.customer.categories).to.equal(null);
       expect(config.customer.topics).to.equal(null);
     });
@@ -2806,6 +2803,8 @@ describe('Brands Controller', () => {
             neq: sandbox.stub().returnsThis(),
             order: sandbox.stub().returnsThis(),
             update: sandbox.stub().returnsThis(),
+            or: sandbox.stub().returnsThis(),
+            contains: sandbox.stub().returnsThis(),
             range: sandbox.stub().resolves({
               data: table === 'prompts' ? [promptRow] : [],
               error: null,
@@ -2947,6 +2946,8 @@ describe('Brands Controller', () => {
           neq: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
+          or: sandbox.stub().returnsThis(),
+          contains: sandbox.stub().returnsThis(),
           range: sandbox.stub().rejects(new Error('DB connection lost')),
           maybeSingle: sandbox.stub().callsFake(() => {
             if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
@@ -3381,6 +3382,281 @@ describe('Brands Controller', () => {
       });
 
       expect(response.status).to.equal(500);
+    });
+  });
+
+  describe('bulkDeletePromptsByBrand', () => {
+    const BRAND_UUID = 'd1111111-1111-4111-b111-111111111111';
+
+    beforeEach(() => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake((table) => {
+          const chain = {
+            select: sandbox.stub().returnsThis(),
+            eq: sandbox.stub().returnsThis(),
+            neq: sandbox.stub().returnsThis(),
+            order: sandbox.stub().returnsThis(),
+            update: sandbox.stub().returnsThis(),
+            range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
+            maybeSingle: sandbox.stub().callsFake(() => {
+              if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+              if (table === 'llmo_customer_config') {
+                return Promise.resolve({
+                  data: { config: { customer: { brands: [] } } },
+                  error: null,
+                });
+              }
+              if (table === 'prompts') return Promise.resolve({ data: { id: 'row-id' }, error: null });
+              return Promise.resolve({ data: null, error: null });
+            }),
+          };
+          return chain;
+        }),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+    });
+
+    it('returns 400 when promptIds is missing', async () => {
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: {},
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('promptIds');
+    });
+
+    it('returns 400 when promptIds is empty', async () => {
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { promptIds: [] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when promptIds exceeds 100', async () => {
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { promptIds: Array.from({ length: 101 }, (_, i) => `p${i}`) },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when spaceCatId is missing', async () => {
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: { brandId: BRAND_UUID },
+        data: { promptIds: ['p1'] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when brandId is missing', async () => {
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { promptIds: ['p1'] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 200 with bulk delete result', async () => {
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { promptIds: ['p1', 'p2'] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('metadata');
+      expect(body.metadata).to.have.property('total', 2);
+      expect(body.metadata).to.have.property('success');
+      expect(body).to.have.property('failures').that.is.an('array');
+    });
+
+    it('returns 404 when brand not found', async () => {
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
+          maybeSingle: sandbox.stub().callsFake(() => {
+            if (table === 'brands') return Promise.resolve({ data: null, error: null });
+            if (table === 'llmo_customer_config') {
+              return Promise.resolve({
+                data: { config: { customer: { brands: [] } } },
+                error: null,
+              });
+            }
+            return Promise.resolve({ data: null, error: null });
+          }),
+        };
+        return chain;
+      });
+
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: 'nonexistent' },
+        data: { promptIds: ['p1'] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 503 when postgrestClient is not available', async () => {
+      mockDataAccess.services.postgrestClient = null;
+
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { promptIds: ['p1'] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('returns 403 when user lacks access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+
+      const response = await unauthorizedController.bulkDeletePromptsByBrand({
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { promptIds: ['p1'] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(403);
+    });
+  });
+
+  describe('listPromptsByBrand - query params forwarding', () => {
+    const BRAND_UUID = 'd1111111-1111-4111-b111-111111111111';
+
+    beforeEach(() => {
+      const promptRow = {
+        id: BRAND_UUID,
+        prompt_id: 'prompt-1',
+        name: 'Test Prompt',
+        text: 'What is the best product?',
+        regions: ['us'],
+        status: 'active',
+        origin: 'human',
+        source: 'config',
+        updated_at: '2026-01-01T00:00:00Z',
+        updated_by: 'system',
+        brands: { id: BRAND_UUID, name: 'Test Brand' },
+        categories: null,
+        topics: null,
+      };
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake((table) => {
+          const chain = {
+            select: sandbox.stub().returnsThis(),
+            eq: sandbox.stub().returnsThis(),
+            neq: sandbox.stub().returnsThis(),
+            order: sandbox.stub().returnsThis(),
+            update: sandbox.stub().returnsThis(),
+            or: sandbox.stub().returnsThis(),
+            contains: sandbox.stub().returnsThis(),
+            range: sandbox.stub().resolves({
+              data: table === 'prompts' ? [promptRow] : [],
+              error: null,
+              count: 1,
+            }),
+            maybeSingle: sandbox.stub().callsFake(() => {
+              if (table === 'brands') {
+                return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+              }
+              if (table === 'llmo_customer_config') {
+                return Promise.resolve({
+                  data: { config: { customer: { brands: [] } } },
+                  error: null,
+                });
+              }
+              return Promise.resolve({ data: null, error: null });
+            }),
+          };
+          return chain;
+        }),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+    });
+
+    it('forwards search param and returns 200', async () => {
+      const response = await brandsController.listPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        invocation: { event: { rawQueryString: 'search=product' } },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.items).to.be.an('array');
+    });
+
+    it('forwards sort and order params and returns 200', async () => {
+      const response = await brandsController.listPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        invocation: { event: { rawQueryString: 'sort=topic&order=asc' } },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+    });
+
+    it('forwards region param and returns 200', async () => {
+      const response = await brandsController.listPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        invocation: { event: { rawQueryString: 'region=us' } },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+    });
+
+    it('forwards origin param and returns 200', async () => {
+      const response = await brandsController.listPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        invocation: { event: { rawQueryString: 'origin=ai' } },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+    });
+
+    it('includes source field in response items', async () => {
+      const response = await brandsController.listPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.items[0]).to.have.property('source', 'config');
     });
   });
 

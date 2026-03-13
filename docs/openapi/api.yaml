@@ -131,6 +131,8 @@ paths:
     $ref: './customer-config-api.yaml#/v2-prompts-by-brand'
   /v2/orgs/{spaceCatId}/brands/{brandId}/prompts/{promptId}:
     $ref: './customer-config-api.yaml#/v2-prompts-by-brand-and-id'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/prompts/delete:
+    $ref: './customer-config-api.yaml#/v2-prompts-by-brand-bulk-delete'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:

@@ -114,3 +114,120 @@ export async function syncBrandConfig({
 
   log.info(`Synced ${rows.length} brand(s) to Postgres for organization: ${organizationId}`);
 }
+
+/**
+ * Syncs V2 customer config categories to the Postgres categories table.
+ *
+ * @param {object} params
+ * @param {object} params.customerConfig - Full V2 customer config
+ * @param {string} params.organizationId - SpaceCat organization UUID
+ * @param {object} params.postgrestClient - PostgREST client
+ * @param {object} params.log - Logger
+ * @param {string} [params.updatedBy] - User who performed the update
+ * @returns {Promise<void>}
+ * @throws {Error} When PostgREST upsert fails
+ */
+export async function syncCategoriesConfig({
+  customerConfig,
+  organizationId,
+  postgrestClient,
+  log,
+  updatedBy = 'system',
+}) {
+  if (!postgrestClient?.from) return;
+
+  const categories = customerConfig?.customer?.categories;
+  if (!isNonEmptyArray(categories)) {
+    log.debug(`No categories to sync for organization: ${organizationId}`);
+    return;
+  }
+
+  const catsWithoutName = categories.filter((c) => !hasText(c?.name));
+  if (catsWithoutName.length > 0) {
+    log.error(
+      `Category(ies) without name skipped for organization ${organizationId}:`,
+      catsWithoutName.map((c) => c?.id ?? '(no id)'),
+    );
+  }
+
+  const rows = categories
+    .filter((c) => hasText(c?.name) && hasText(c?.id))
+    .map((c) => ({
+      organization_id: organizationId,
+      category_id: c.id,
+      name: c.name,
+      origin: c.origin || 'human',
+      updated_by: updatedBy,
+    }));
+
+  if (rows.length === 0) return;
+
+  const { error } = await postgrestClient
+    .from('categories')
+    .upsert(rows, { onConflict: 'organization_id,category_id' });
+
+  if (error) {
+    log.error(`Category sync failed for organization ${organizationId}`, { error });
+    throw new Error(`Category sync failed: ${error.message}`);
+  }
+
+  log.info(`Synced ${rows.length} category(ies) to Postgres for organization: ${organizationId}`);
+}
+
+/**
+ * Syncs V2 customer config topics to the Postgres topics table.
+ *
+ * @param {object} params
+ * @param {object} params.customerConfig - Full V2 customer config
+ * @param {string} params.organizationId - SpaceCat organization UUID
+ * @param {object} params.postgrestClient - PostgREST client
+ * @param {object} params.log - Logger
+ * @param {string} [params.updatedBy] - User who performed the update
+ * @returns {Promise<void>}
+ * @throws {Error} When PostgREST upsert fails
+ */
+export async function syncTopicsConfig({
+  customerConfig,
+  organizationId,
+  postgrestClient,
+  log,
+  updatedBy = 'system',
+}) {
+  if (!postgrestClient?.from) return;
+
+  const topics = customerConfig?.customer?.topics;
+  if (!isNonEmptyArray(topics)) {
+    log.debug(`No topics to sync for organization: ${organizationId}`);
+    return;
+  }
+
+  const topicsWithoutName = topics.filter((t) => !hasText(t?.name));
+  if (topicsWithoutName.length > 0) {
+    log.error(
+      `Topic(s) without name skipped for organization ${organizationId}:`,
+      topicsWithoutName.map((t) => t?.id ?? '(no id)'),
+    );
+  }
+
+  const rows = topics
+    .filter((t) => hasText(t?.name) && hasText(t?.id))
+    .map((t) => ({
+      organization_id: organizationId,
+      topic_id: t.id,
+      name: t.name,
+      updated_by: updatedBy,
+    }));
+
+  if (rows.length === 0) return;
+
+  const { error } = await postgrestClient
+    .from('topics')
+    .upsert(rows, { onConflict: 'organization_id,topic_id' });
+
+  if (error) {
+    log.error(`Topic sync failed for organization ${organizationId}`, { error });
+    throw new Error(`Topic sync failed: ${error.message}`);
+  }
+
+  log.info(`Synced ${rows.length} topic(s) to Postgres for organization: ${organizationId}`);
+}

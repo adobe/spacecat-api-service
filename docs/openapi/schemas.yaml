@@ -5749,6 +5749,11 @@ V2Prompt:
       type: string
       enum: [ai, human]
       default: human
+    source:
+      type: string
+      description: The source system or process that created the prompt
+      example: "config"
+      default: "config"
     updatedAt:
       $ref: '#/DateTime'
     updatedBy:
@@ -5810,6 +5815,50 @@ V2PromptInput:
       type: string
       enum: [ai, human]
       default: human
+    source:
+      type: string
+      description: The source system or process that created the prompt
+      default: "config"
+
+V2PromptBulkDeleteRequest:
+  type: object
+  description: Request body for bulk-deleting prompts
+  required:
+    - promptIds
+  properties:
+    promptIds:
+      type: array
+      items:
+        type: string
+      minItems: 1
+      maxItems: 100
+      description: Array of prompt business keys to soft-delete
+
+V2PromptBulkDeleteResponse:
+  type: object
+  description: Response from bulk-deleting prompts
+  properties:
+    metadata:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total number of prompt IDs in request
+        success:
+          type: integer
+          description: Number of successfully deleted prompts
+        failure:
+          type: integer
+          description: Number of failed deletions
+    failures:
+      type: array
+      items:
+        type: object
+        properties:
+          promptId:
+            type: string
+          reason:
+            type: string
 
 CustomerConfigPrompt:
   type: object

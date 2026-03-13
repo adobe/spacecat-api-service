@@ -94,6 +94,35 @@ export async function resolveTopicUuid(organizationId, topicId, postgrestClient)
   return !error && data?.id ? data.id : null;
 }
 
+/**
+ * Builds in-memory lookup maps for category and topic business keys to UUIDs.
+ * Fetches all categories/topics for the org in two bulk queries, replacing
+ * per-prompt DB round-trips with O(1) Map lookups.
+ */
+async function buildLookupMaps(organizationId, postgrestClient) {
+  const [catResult, topicResult] = await Promise.all([
+    postgrestClient.from('categories').select('id,category_id').eq('organization_id', organizationId),
+    postgrestClient.from('topics').select('id,topic_id').eq('organization_id', organizationId),
+  ]);
+
+  const categoryMap = new Map();
+  (catResult.data || []).forEach((c) => categoryMap.set(c.category_id, c.id));
+
+  const topicMap = new Map();
+  (topicResult.data || []).forEach((t) => topicMap.set(t.topic_id, t.id));
+
+  return { categoryMap, topicMap };
+}
+
+const SORT_COLUMN_MAP = {
+  topic: 'topics(name)',
+  prompt: 'text',
+  category: 'categories(name)',
+  origin: 'origin',
+  status: 'status',
+  updatedAt: 'updated_at',
+};
+
 function mapRowToPrompt(row) {
   const brand = row.brands;
   const category = row.categories;
@@ -121,9 +150,8 @@ function mapRowToPrompt(row) {
 }
 
 /**
- * Lists prompts for an organization with optional filters.
+ * Lists prompts for an organization with optional filters and sorting.
  * Joins brands, categories, topics for enrichment.
- * When limit/page provided, returns paginated { items, total, limit, page }.
  *
  * @param {object} params
  * @param {string} params.organizationId - SpaceCat organization UUID
@@ -131,11 +159,18 @@ function mapRowToPrompt(row) {
  * @param {string} [params.categoryId] - Filter by category business key
  * @param {string} [params.topicId] - Filter by topic business key
  * @param {string} [params.status] - Filter by status (active, pending, deleted)
+ * @param {string} [params.search] - Free-text search across prompt text, name,
+ * topic name, category name
+ * @param {string} [params.region] - Filter by region (array containment)
+ * @param {string} [params.origin] - Filter by origin (ai, human)
+ * @param {string} [params.sort] - Sort column (topic, prompt, category, origin,
+ * status, updatedAt)
+ * @param {string} [params.order] - Sort direction (asc, desc). Default desc
  * @param {number} [params.limit] - Page size (default 100, max 500)
  * @param {number} [params.page] - Page number, 1-based (default 1)
  * @param {object} params.postgrestClient - PostgREST client
  * @param {object} [params.customerConfig] - Optional config for brand resolution
- * @returns {Promise<object[]|{items:object[],total:number,limit:number,page:number}>}
+ * @returns {Promise<{items:object[],total:number,limit:number,page:number}>}
  */
 export async function listPrompts({
   organizationId,
@@ -143,6 +178,11 @@ export async function listPrompts({
   categoryId,
   topicId,
   status,
+  search,
+  region,
+  origin,
+  sort,
+  order,
   limit = 100,
   page = 1,
   postgrestClient,
@@ -179,15 +219,43 @@ export async function listPrompts({
   let baseQuery = postgrestClient
     .from('prompts')
     .select(select, { count: 'exact' })
-    .eq('organization_id', organizationId)
-    .order('updated_at', { ascending: false })
-    .order('id', { ascending: true });
+    .eq('organization_id', organizationId);
+
+  // Sorting
+  const sortCol = SORT_COLUMN_MAP[sort];
+  if (sortCol) {
+    const ascending = order === 'asc';
+    if (sortCol.includes('(')) {
+      const [foreignTable, col] = sortCol.replace(')', '').split('(');
+      baseQuery = baseQuery.order(col, { ascending, foreignTable });
+    } else {
+      baseQuery = baseQuery.order(sortCol, { ascending });
+    }
+    baseQuery = baseQuery.order('id', { ascending: true });
+  } else {
+    baseQuery = baseQuery
+      .order('updated_at', { ascending: false })
+      .order('id', { ascending: true });
+  }
 
   if (brandUuid) baseQuery = baseQuery.eq('brand_id', brandUuid);
   if (hasText(status)) {
     baseQuery = baseQuery.eq('status', status);
   } else {
     baseQuery = baseQuery.neq('status', 'deleted');
+  }
+
+  if (hasText(origin)) {
+    baseQuery = baseQuery.eq('origin', origin);
+  }
+
+  if (hasText(region)) {
+    baseQuery = baseQuery.contains('regions', JSON.stringify([region]));
+  }
+
+  if (hasText(search)) {
+    const term = `%${search}%`;
+    baseQuery = baseQuery.or(`text.ilike.${term},name.ilike.${term}`);
   }
 
   if (hasText(categoryId) || hasText(topicId)) {
@@ -287,11 +355,26 @@ export async function upsertPrompts({
     throw new Error('PostgREST client is required for prompts');
   }
 
-  const { data: existing } = await postgrestClient
+  const incomingIds = prompts
+    .map((p) => p.id || p.prompt_id)
+    .filter(hasText);
+
+  const existingQuery = postgrestClient
     .from('prompts')
     .select('id,prompt_id,text,regions')
     .eq('organization_id', organizationId)
     .eq('brand_id', brandUuid);
+
+  if (incomingIds.length > 0) {
+    existingQuery.in('prompt_id', incomingIds);
+  }
+
+  const [{ data: existing }, lookups] = await Promise.all([
+    existingQuery,
+    buildLookupMaps(organizationId, postgrestClient),
+  ]);
+
+  const { categoryMap, topicMap } = lookups;
 
   const getKey = (p) => {
     const norm = (p.regions || []).map((r) => String(r).toLowerCase()).sort();
@@ -317,14 +400,8 @@ export async function upsertPrompts({
     // eslint-disable-next-line max-len
     const match = existingById.get(promptId) || existingByKey.get(getKey({ prompt: text, regions }));
 
-    const categoryUuid = hasText(p.categoryId)
-      // eslint-disable-next-line no-await-in-loop
-      ? await resolveCategoryUuid(organizationId, p.categoryId, postgrestClient)
-      : null;
-    const topicUuid = hasText(p.topicId)
-      // eslint-disable-next-line no-await-in-loop
-      ? await resolveTopicUuid(organizationId, p.topicId, postgrestClient)
-      : null;
+    const categoryUuid = hasText(p.categoryId) ? (categoryMap.get(p.categoryId) || null) : null;
+    const topicUuid = hasText(p.topicId) ? (topicMap.get(p.topicId) || null) : null;
 
     const row = {
       organization_id: organizationId,
@@ -475,4 +552,58 @@ export async function deletePromptById({
 
   if (error) throw new Error(`Failed to delete prompt: ${error.message}`);
   return !!data;
+}
+
+/**
+ * Bulk soft-deletes prompts by setting status to 'deleted'.
+ *
+ * @param {object} params
+ * @param {string} params.organizationId - SpaceCat organization UUID
+ * @param {string} params.brandUuid - brands.id (uuid)
+ * @param {string[]} params.promptIds - Array of prompt_id business keys
+ * @param {object} params.postgrestClient - PostgREST client
+ * @param {string} params.updatedBy - User performing the delete
+ * @returns {Promise<{metadata:{total:number,success:number,failure:number},failures:object[]}>}
+ */
+export async function bulkDeletePrompts({
+  organizationId,
+  brandUuid,
+  promptIds,
+  postgrestClient,
+  updatedBy = 'system',
+}) {
+  if (!postgrestClient?.from) throw new Error('PostgREST client is required');
+
+  const total = promptIds.length;
+  let success = 0;
+  const failures = [];
+
+  for (const promptId of promptIds) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const { data, error } = await postgrestClient
+        .from('prompts')
+        .update({ status: 'deleted', updated_by: updatedBy })
+        .eq('organization_id', organizationId)
+        .eq('brand_id', brandUuid)
+        .eq('prompt_id', promptId)
+        .select('id')
+        .maybeSingle();
+
+      if (error) {
+        failures.push({ promptId, reason: error.message });
+      } else if (!data) {
+        failures.push({ promptId, reason: 'Prompt not found' });
+      } else {
+        success += 1;
+      }
+    } catch (err) {
+      failures.push({ promptId, reason: err.message });
+    }
+  }
+
+  return {
+    metadata: { total, success, failure: failures.length },
+    failures,
+  };
 }

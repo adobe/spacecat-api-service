@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { expect, use } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
@@ -25,6 +23,7 @@ import {
   upsertPrompts,
   updatePromptById,
   deletePromptById,
+  bulkDeletePrompts,
 } from '../../src/support/prompts-storage.js';
 
 use(chaiAsPromised);
@@ -45,6 +44,8 @@ describe('prompts-storage', () => {
       order: () => chain,
       update: () => chain,
       ilike: () => chain,
+      or: () => chain,
+      contains: () => chain,
       insert: () => ({ select: () => thenable(result) }),
       range: () => thenable(result),
       maybeSingle: () => thenable(result),
@@ -405,6 +406,7 @@ describe('prompts-storage', () => {
       expect(result.regions).to.deep.equal([]);
       expect(result.status).to.equal('active');
       expect(result.origin).to.equal('human');
+      expect(result.source).to.equal('config');
       expect(result.categoryId).to.be.null;
       expect(result.topicId).to.be.null;
       expect(result.category).to.be.null;
@@ -789,6 +791,260 @@ describe('prompts-storage', () => {
           postgrestClient: client,
         }),
       ).to.be.rejectedWith('Failed to delete prompt');
+    });
+  });
+
+  describe('listPrompts - search, sort, region, origin', () => {
+    const sampleRow = {
+      prompt_id: PROMPT_ID,
+      name: 'Test',
+      text: 'Prompt text',
+      regions: ['us'],
+      status: 'active',
+      origin: 'human',
+      source: 'config',
+      updated_at: '2026-01-01T00:00:00Z',
+      updated_by: 'system',
+      brands: { id: BRAND_UUID, name: 'Brand' },
+      categories: null,
+      topics: null,
+    };
+
+    it('passes search param through to query', async () => {
+      const client = {
+        from: (table) => {
+          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          return makeChain({ data: [sampleRow], error: null, count: 1 });
+        },
+      };
+      const result = await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        search: 'photo',
+        postgrestClient: client,
+      });
+      expect(result.items).to.have.lengthOf(1);
+      expect(result.items[0].source).to.equal('config');
+    });
+
+    it('applies origin filter', async () => {
+      const client = {
+        from: (table) => {
+          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          return makeChain({ data: [sampleRow], error: null, count: 1 });
+        },
+      };
+      const result = await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        origin: 'human',
+        postgrestClient: client,
+      });
+      expect(result.items).to.have.lengthOf(1);
+    });
+
+    it('applies region filter', async () => {
+      const client = {
+        from: (table) => {
+          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          return makeChain({ data: [sampleRow], error: null, count: 1 });
+        },
+      };
+      const result = await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        region: 'us',
+        postgrestClient: client,
+      });
+      expect(result.items).to.have.lengthOf(1);
+    });
+
+    it('applies sort and order params', async () => {
+      const client = {
+        from: (table) => {
+          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          return makeChain({ data: [sampleRow], error: null, count: 1 });
+        },
+      };
+      const result = await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        sort: 'prompt',
+        order: 'asc',
+        postgrestClient: client,
+      });
+      expect(result.items).to.have.lengthOf(1);
+    });
+
+    it('uses default sort when invalid sort column', async () => {
+      const client = {
+        from: (table) => {
+          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          return makeChain({ data: [sampleRow], error: null, count: 1 });
+        },
+      };
+      const result = await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        sort: 'invalid_column',
+        postgrestClient: client,
+      });
+      expect(result.items).to.have.lengthOf(1);
+    });
+
+    it('sorts by foreign table column (topic)', async () => {
+      const client = {
+        from: (table) => {
+          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          return makeChain({ data: [sampleRow], error: null, count: 1 });
+        },
+      };
+      const result = await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        sort: 'topic',
+        order: 'desc',
+        postgrestClient: client,
+      });
+      expect(result.items).to.have.lengthOf(1);
+    });
+
+    it('maps source field from row', async () => {
+      const rowWithSource = { ...sampleRow, source: 'sheet' };
+      const client = {
+        from: (table) => {
+          if (table === 'brands') return makeChain({ data: { id: BRAND_UUID }, error: null });
+          return makeChain({ data: [rowWithSource], error: null, count: 1 });
+        },
+      };
+      const result = await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        postgrestClient: client,
+      });
+      expect(result.items[0].source).to.equal('sheet');
+    });
+  });
+
+  describe('upsertPrompts - source field', () => {
+    it('includes source field in upserted prompt output', async () => {
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'New prompt', regions: ['us'], source: 'sheet' }],
+        postgrestClient: client,
+      });
+      expect(result.prompts[0].source).to.equal('sheet');
+    });
+
+    it('defaults source to config when not provided', async () => {
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: () => ({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) }),
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{ prompt: 'New prompt', regions: ['us'] }],
+        postgrestClient: client,
+      });
+      expect(result.prompts[0].source).to.equal('config');
+    });
+  });
+
+  describe('bulkDeletePrompts', () => {
+    it('throws when postgrestClient has no from', async () => {
+      await expect(
+        bulkDeletePrompts({
+          organizationId: ORG_ID,
+          brandUuid: BRAND_UUID,
+          promptIds: ['p1'],
+          postgrestClient: null,
+        }),
+      ).to.be.rejectedWith('PostgREST client is required');
+    });
+
+    it('soft-deletes all prompts successfully', async () => {
+      const client = { from: () => makeChain({ data: { id: 'row-id' }, error: null }) };
+      const result = await bulkDeletePrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptIds: ['p1', 'p2', 'p3'],
+        postgrestClient: client,
+      });
+      expect(result.metadata.total).to.equal(3);
+      expect(result.metadata.success).to.equal(3);
+      expect(result.metadata.failure).to.equal(0);
+      expect(result.failures).to.deep.equal([]);
+    });
+
+    it('reports not found prompts as failures', async () => {
+      const client = { from: () => makeChain({ data: null, error: null }) };
+      const result = await bulkDeletePrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptIds: ['p1', 'p2'],
+        postgrestClient: client,
+      });
+      expect(result.metadata.total).to.equal(2);
+      expect(result.metadata.success).to.equal(0);
+      expect(result.metadata.failure).to.equal(2);
+      expect(result.failures).to.have.lengthOf(2);
+      expect(result.failures[0].reason).to.equal('Prompt not found');
+    });
+
+    it('reports DB errors as failures', async () => {
+      const client = { from: () => makeChain({ data: null, error: { message: 'DB error' } }) };
+      const result = await bulkDeletePrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptIds: ['p1'],
+        postgrestClient: client,
+      });
+      expect(result.metadata.total).to.equal(1);
+      expect(result.metadata.success).to.equal(0);
+      expect(result.metadata.failure).to.equal(1);
+      expect(result.failures[0].reason).to.equal('DB error');
+    });
+
+    it('handles mix of success and failure', async () => {
+      let callCount = 0;
+      const client = {
+        from: () => {
+          callCount += 1;
+          if (callCount === 1) return makeChain({ data: { id: 'row-id' }, error: null });
+          return makeChain({ data: null, error: null });
+        },
+      };
+      const result = await bulkDeletePrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptIds: ['p1', 'p2'],
+        postgrestClient: client,
+      });
+      expect(result.metadata.total).to.equal(2);
+      expect(result.metadata.success).to.equal(1);
+      expect(result.metadata.failure).to.equal(1);
     });
   });
 });

@@ -511,6 +511,40 @@ v2-prompts-by-brand:
         type: string
         enum: [active, pending, deleted]
       description: Filter by status; default excludes deleted
+    - name: search
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Free-text search across prompt text and name (ILIKE match)
+    - name: region
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Filter by region (matches prompts whose regions array contains this value)
+    - name: origin
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [ai, human]
+      description: Filter by origin (ai or human)
+    - name: sort
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [topic, prompt, category, origin, status, updatedAt]
+      description: Sort column. Default is updatedAt descending
+    - name: order
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [asc, desc]
+        default: desc
+      description: Sort direction. Default is desc
   get:
     tags:
       - customer-config
@@ -662,6 +696,55 @@ v2-prompts-by-brand-and-id:
         description: Prompt deleted
       '404':
         description: Organization, brand, or prompt not found
+      '503':
+        description: PostgREST unavailable
+      '500':
+        $ref: './responses.yaml#/500'
+
+v2-prompts-by-brand-bulk-delete:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID, config id, or brand name)
+      schema:
+        type: string
+  post:
+    tags:
+      - customer-config
+    summary: Bulk soft-delete prompts
+    description: |
+      Soft-deletes multiple prompts by setting their status to 'deleted'.
+      Uses POST instead of DELETE because the body-data middleware does not parse DELETE request bodies.
+      See ADR-001 for details.
+    operationId: bulkDeletePromptsByBrand
+    security:
+      - ims_key: [ ]
+      - api_key: [ ]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/V2PromptBulkDeleteRequest'
+    responses:
+      '200':
+        description: Bulk delete completed
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2PromptBulkDeleteResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        description: Organization or brand not found
       '503':
         description: PostgREST unavailable
       '500':
