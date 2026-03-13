@@ -1,3 +1,10 @@
+# [1.347.0](https://github.com/adobe/spacecat-api-service/compare/v1.346.2...v1.347.0) (2026-03-13)
+
+
+### Features
+
+* Adding support for providing product code in createEntitlement API ([#1910](https://github.com/adobe/spacecat-api-service/issues/1910)) ([23b1238](https://github.com/adobe/spacecat-api-service/commit/23b12381ed9601ccdded86eab2ccc03035d3e93d))
+
 ## [1.346.2](https://github.com/adobe/spacecat-api-service/compare/v1.346.1...v1.346.2) (2026-03-13)
 
 
