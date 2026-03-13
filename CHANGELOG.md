@@ -1,3 +1,10 @@
+# [1.346.0](https://github.com/adobe/spacecat-api-service/compare/v1.345.1...v1.346.0) (2026-03-13)
+
+
+### Features
+
+* add PLG ASO onboarding endpoint ([#1918](https://github.com/adobe/spacecat-api-service/issues/1918)) ([ca91363](https://github.com/adobe/spacecat-api-service/commit/ca91363122c3beb10b50baf4bc0ba4152ab5cef7))
+
 ## [1.345.1](https://github.com/adobe/spacecat-api-service/compare/v1.345.0...v1.345.1) (2026-03-13)
 
 
