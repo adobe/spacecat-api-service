@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-/* eslint-env mocha */
-
 import { expect } from 'chai';
 import sinon from 'sinon';
 import getRouteHandlers from '../../src/routes/index.js';
@@ -470,6 +468,12 @@ describe('getRouteHandlers', () => {
       'GET /v2/orgs/:spaceCatId/llmo-prompts',
       'PATCH /v2/orgs/:spaceCatId/llmo-customer-config',
       'POST /v2/orgs/:spaceCatId/llmo-customer-config',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId',
+      'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId',
+      'DELETE /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete',
       'GET /organizations/:organizationId/projects',
       'GET /organizations/:organizationId/projects/:projectId/sites',
       'GET /organizations/:organizationId/by-project-name/:projectName/sites',

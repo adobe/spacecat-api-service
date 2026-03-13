@@ -15,7 +15,7 @@ import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import chaiAsPromised from 'chai-as-promised';
-import { syncBrandConfig } from '../../src/support/brand-presence-sync.js';
+import { syncBrandConfig, syncCategoriesConfig, syncTopicsConfig } from '../../src/support/brand-presence-sync.js';
 
 use(sinonChai);
 use(chaiAsPromised);
@@ -242,6 +242,215 @@ describe('brand-presence-sync', () => {
         `Brand presence sync failed for organization ${ORG_ID}`,
         { error: { message: 'Conflict' }, organizationId: ORG_ID, customerConfig },
       );
+    });
+  });
+
+  describe('syncCategoriesConfig', () => {
+    it('returns early when postgrestClient is missing', async () => {
+      const log = { debug: sinon.stub(), info: sinon.stub() };
+      await syncCategoriesConfig({
+        customerConfig: { customer: { categories: [{ id: 'cat-1', name: 'Cat' }] } },
+        organizationId: ORG_ID,
+        postgrestClient: null,
+        log,
+      });
+      expect(log.info).to.not.have.been.called;
+    });
+
+    it('returns early when no categories in config', async () => {
+      const log = { debug: sinon.stub(), info: sinon.stub() };
+      const fromStub = sinon.stub();
+      await syncCategoriesConfig({
+        customerConfig: { customer: { categories: [] } },
+        organizationId: ORG_ID,
+        postgrestClient: { from: fromStub },
+        log,
+      });
+      expect(fromStub).to.not.have.been.called;
+    });
+
+    it('upserts categories when postgrestClient is available', async () => {
+      const log = { debug: sinon.stub(), info: sinon.stub() };
+      const upsertStub = sinon.stub().resolves({ error: null });
+      const fromStub = sinon.stub().returns({ upsert: upsertStub });
+
+      await syncCategoriesConfig({
+        customerConfig: {
+          customer: {
+            categories: [
+              {
+                id: 'photoshop', name: 'Photoshop', origin: 'human',
+              },
+              {
+                id: 'lightroom', name: 'Lightroom', origin: 'ai',
+              },
+            ],
+          },
+        },
+        organizationId: ORG_ID,
+        postgrestClient: { from: fromStub },
+        log,
+        updatedBy: 'user@example.com',
+      });
+
+      expect(fromStub).to.have.been.calledWith('categories');
+      expect(upsertStub).to.have.been.calledOnce;
+      const [rows, options] = upsertStub.firstCall.args;
+      expect(rows).to.have.lengthOf(2);
+      expect(rows[0]).to.deep.include({
+        organization_id: ORG_ID,
+        category_id: 'photoshop',
+        name: 'Photoshop',
+        origin: 'human',
+        updated_by: 'user@example.com',
+      });
+      expect(options).to.deep.equal({ onConflict: 'organization_id,category_id' });
+    });
+
+    it('skips categories without name or id', async () => {
+      const log = {
+        debug: sinon.stub(), info: sinon.stub(), error: sinon.stub(),
+      };
+      const upsertStub = sinon.stub().resolves({ error: null });
+      const fromStub = sinon.stub().returns({ upsert: upsertStub });
+
+      await syncCategoriesConfig({
+        customerConfig: {
+          customer: {
+            categories: [
+              { id: 'valid', name: 'Valid' },
+              { id: '', name: 'No ID' },
+              { id: 'no-name', name: '' },
+            ],
+          },
+        },
+        organizationId: ORG_ID,
+        postgrestClient: { from: fromStub },
+        log,
+      });
+
+      const [rows] = upsertStub.firstCall.args;
+      expect(rows).to.have.lengthOf(1);
+      expect(rows[0].category_id).to.equal('valid');
+    });
+
+    it('throws on PostgREST error', async () => {
+      const log = {
+        debug: sinon.stub(), info: sinon.stub(), error: sinon.stub(),
+      };
+      const upsertStub = sinon.stub().resolves({ error: { message: 'DB error' } });
+      const fromStub = sinon.stub().returns({ upsert: upsertStub });
+
+      await expect(
+        syncCategoriesConfig({
+          customerConfig: { customer: { categories: [{ id: 'cat-1', name: 'Cat' }] } },
+          organizationId: ORG_ID,
+          postgrestClient: { from: fromStub },
+          log,
+        }),
+      ).to.be.rejectedWith('Category sync failed: DB error');
+    });
+  });
+
+  describe('syncTopicsConfig', () => {
+    it('returns early when postgrestClient is missing', async () => {
+      const log = { debug: sinon.stub(), info: sinon.stub() };
+      await syncTopicsConfig({
+        customerConfig: { customer: { topics: [{ id: 't-1', name: 'Topic' }] } },
+        organizationId: ORG_ID,
+        postgrestClient: null,
+        log,
+      });
+      expect(log.info).to.not.have.been.called;
+    });
+
+    it('returns early when no topics in config', async () => {
+      const log = { debug: sinon.stub(), info: sinon.stub() };
+      const fromStub = sinon.stub();
+      await syncTopicsConfig({
+        customerConfig: { customer: { topics: [] } },
+        organizationId: ORG_ID,
+        postgrestClient: { from: fromStub },
+        log,
+      });
+      expect(fromStub).to.not.have.been.called;
+    });
+
+    it('upserts topics when postgrestClient is available', async () => {
+      const log = { debug: sinon.stub(), info: sinon.stub() };
+      const upsertStub = sinon.stub().resolves({ error: null });
+      const fromStub = sinon.stub().returns({ upsert: upsertStub });
+
+      await syncTopicsConfig({
+        customerConfig: {
+          customer: {
+            topics: [
+              { id: 'photo-editing', name: 'Photo Editing' },
+              { id: 'video-editing', name: 'Video Editing' },
+            ],
+          },
+        },
+        organizationId: ORG_ID,
+        postgrestClient: { from: fromStub },
+        log,
+        updatedBy: 'user@example.com',
+      });
+
+      expect(fromStub).to.have.been.calledWith('topics');
+      expect(upsertStub).to.have.been.calledOnce;
+      const [rows, options] = upsertStub.firstCall.args;
+      expect(rows).to.have.lengthOf(2);
+      expect(rows[0]).to.deep.include({
+        organization_id: ORG_ID,
+        topic_id: 'photo-editing',
+        name: 'Photo Editing',
+        updated_by: 'user@example.com',
+      });
+      expect(options).to.deep.equal({ onConflict: 'organization_id,topic_id' });
+    });
+
+    it('skips topics without name or id', async () => {
+      const log = {
+        debug: sinon.stub(), info: sinon.stub(), error: sinon.stub(),
+      };
+      const upsertStub = sinon.stub().resolves({ error: null });
+      const fromStub = sinon.stub().returns({ upsert: upsertStub });
+
+      await syncTopicsConfig({
+        customerConfig: {
+          customer: {
+            topics: [
+              { id: 'valid', name: 'Valid' },
+              { id: '', name: 'No ID' },
+              { id: 'no-name', name: '' },
+            ],
+          },
+        },
+        organizationId: ORG_ID,
+        postgrestClient: { from: fromStub },
+        log,
+      });
+
+      const [rows] = upsertStub.firstCall.args;
+      expect(rows).to.have.lengthOf(1);
+      expect(rows[0].topic_id).to.equal('valid');
+    });
+
+    it('throws on PostgREST error', async () => {
+      const log = {
+        debug: sinon.stub(), info: sinon.stub(), error: sinon.stub(),
+      };
+      const upsertStub = sinon.stub().resolves({ error: { message: 'DB error' } });
+      const fromStub = sinon.stub().returns({ upsert: upsertStub });
+
+      await expect(
+        syncTopicsConfig({
+          customerConfig: { customer: { topics: [{ id: 't-1', name: 'Topic' }] } },
+          organizationId: ORG_ID,
+          postgrestClient: { from: fromStub },
+          log,
+        }),
+      ).to.be.rejectedWith('Topic sync failed: DB error');
     });
   });
 });

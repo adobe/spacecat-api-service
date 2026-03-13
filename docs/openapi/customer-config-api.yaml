@@ -457,3 +457,295 @@ llmo-prompts-by-space-cat-id-v2:
                   example: "Customer configuration not found"
       '500':
         $ref: './responses.yaml#/500'
+
+# ── Brand-scoped prompts CRUD (Aurora) ──
+
+v2-prompts-by-brand:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID, config id, or brand name)
+      schema:
+        type: string
+    - name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 100
+      description: Page size
+    - name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+      description: Page number (1-based)
+    - name: categoryId
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Filter by category business key
+    - name: topicId
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Filter by topic business key
+    - name: status
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [active, pending, deleted]
+      description: Filter by status; default excludes deleted
+    - name: search
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Free-text search across prompt text and name (ILIKE match)
+    - name: region
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Filter by region (matches prompts whose regions array contains this value)
+    - name: origin
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [ai, human]
+      description: Filter by origin (ai or human)
+    - name: sort
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [topic, prompt, category, origin, status, updatedAt]
+      description: Sort column. Default is updatedAt descending
+    - name: order
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [asc, desc]
+        default: desc
+      description: Sort direction. Default is desc
+  get:
+    tags:
+      - customer-config
+    summary: List prompts for a brand
+    description: |
+      Returns a paginated list of prompts for the given brand.
+      Upsert uniqueness: match by id or by (text, regions).
+    operationId: listPromptsByBrand
+    security:
+      - ims_key: [ ]
+      - api_key: [ ]
+    responses:
+      '200':
+        description: Prompts retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2PromptListResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        description: Organization or brand not found
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
+      '500':
+        $ref: './responses.yaml#/500'
+  post:
+    tags:
+      - customer-config
+    summary: Create or upsert prompts (bulk)
+    description: |
+      Upserts prompts. Match by id or by (text, regions). If match found, update; else insert.
+    operationId: createPromptsByBrand
+    security:
+      - ims_key: [ ]
+      - api_key: [ ]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: array
+            minItems: 1
+            maxItems: 100
+            items:
+              $ref: './schemas.yaml#/V2PromptInput'
+    responses:
+      '201':
+        description: Prompts created/updated
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                created:
+                  type: integer
+                updated:
+                  type: integer
+                prompts:
+                  type: array
+                  items:
+                    $ref: './schemas.yaml#/V2Prompt'
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        description: Organization or brand not found
+      '503':
+        description: PostgREST unavailable
+      '500':
+        $ref: './responses.yaml#/500'
+
+v2-prompts-by-brand-and-id:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: promptId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: prompt_id (business key)
+  get:
+    tags:
+      - customer-config
+    summary: Get a single prompt
+    operationId: getPromptByBrandAndId
+    security:
+      - ims_key: [ ]
+      - api_key: [ ]
+    responses:
+      '200':
+        description: Prompt retrieved
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2Prompt'
+      '404':
+        description: Organization, brand, or prompt not found
+      '503':
+        description: PostgREST unavailable
+      '500':
+        $ref: './responses.yaml#/500'
+  patch:
+    tags:
+      - customer-config
+    summary: Update a single prompt
+    operationId: updatePromptByBrandAndId
+    security:
+      - ims_key: [ ]
+      - api_key: [ ]
+    requestBody:
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/V2PromptInput'
+    responses:
+      '200':
+        description: Prompt updated
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2Prompt'
+      '404':
+        description: Organization, brand, or prompt not found
+      '503':
+        description: PostgREST unavailable
+      '500':
+        $ref: './responses.yaml#/500'
+  delete:
+    tags:
+      - customer-config
+    summary: Soft-delete a prompt
+    description: Sets status to 'deleted'.
+    operationId: deletePromptByBrandAndId
+    security:
+      - ims_key: [ ]
+      - api_key: [ ]
+    responses:
+      '204':
+        description: Prompt deleted
+      '404':
+        description: Organization, brand, or prompt not found
+      '503':
+        description: PostgREST unavailable
+      '500':
+        $ref: './responses.yaml#/500'
+
+v2-prompts-by-brand-bulk-delete:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID, config id, or brand name)
+      schema:
+        type: string
+  post:
+    tags:
+      - customer-config
+    summary: Bulk soft-delete prompts
+    description: |
+      Soft-deletes multiple prompts by setting their status to 'deleted'.
+      Uses POST instead of DELETE because the body-data middleware does not parse DELETE request bodies.
+      See ADR-001 for details.
+    operationId: bulkDeletePromptsByBrand
+    security:
+      - ims_key: [ ]
+      - api_key: [ ]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/V2PromptBulkDeleteRequest'
+    responses:
+      '200':
+        description: Bulk delete completed
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2PromptBulkDeleteResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '404':
+        description: Organization or brand not found
+      '503':
+        description: PostgREST unavailable
+      '500':
+        $ref: './responses.yaml#/500'

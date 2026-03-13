@@ -230,6 +230,27 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('Organization Id is invalid. Please provide a valid UUID.');
   });
 
+  it('handles spaceCatId not correctly formatted error', async () => {
+    context.pathInfo.suffix = '/v2/orgs/not-a-uuid/brands/brand-1/prompts';
+    context.dataAccess.services = {
+      postgrestClient: {
+        from: () => ({
+          // eslint-disable-next-line max-len
+          select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) }) }),
+        }),
+      },
+    };
+
+    // eslint-disable-next-line max-len
+    const url = `${baseUrl}/v2/orgs/not-a-uuid/brands/brand-1/prompts`;
+    request = new Request(url, { headers: { 'x-api-key': apiKey } });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('Organization Id (spaceCatId) is invalid. Please provide a valid UUID.');
+  });
+
   it('handles dynamic route errors', async () => {
     context.pathInfo.suffix = '/sites/e730ec12-4325-4bdd-ac71-0f4aa5b18cff';
 
