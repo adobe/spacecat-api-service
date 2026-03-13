@@ -131,10 +131,11 @@ async function createOrFindProject(baseURL, organizationId, context) {
  * @param {object} params
  * @param {string} params.domain - The domain to onboard
  * @param {string} params.imsOrgId - The IMS Organization ID
+ * @param {boolean} [params.preonboard=false] - If true, skip entitlement and set PRE_ONBOARDING
  * @param {object} context - The request context
  * @returns {Promise<object>} PlgOnboarding record
  */
-async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
+async function performAsoPlgOnboarding({ domain, imsOrgId, preonboard = false }, context) {
   const { dataAccess, log, env } = context;
   const { Site, PlgOnboarding } = dataAccess;
 
@@ -338,9 +339,11 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
       log.warn(`Failed to enroll site in summit-plg config: ${error.message}`);
     }
 
-    // Step 8: Add ASO entitlement
-    await ensureAsoEntitlement(site, context);
-    steps.entitlementCreated = true;
+    // Step 8: Add ASO entitlement (skip during preonboarding)
+    if (!preonboard) {
+      await ensureAsoEntitlement(site, context);
+      steps.entitlementCreated = true;
+    }
 
     // Step 9: Trigger audit runs
     await triggerAudits(auditTypes, context, site);
@@ -354,10 +357,14 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
       log.warn(`Failed to trigger brand-profile for site ${site.getId()}: ${error.message}`);
     }
 
-    // Mark as completed
-    onboarding.setStatus(STATUSES.ONBOARDED);
+    // Mark as completed or pre-onboarded
+    if (preonboard) {
+      onboarding.setStatus(STATUSES.PRE_ONBOARDING);
+    } else {
+      onboarding.setStatus(STATUSES.ONBOARDED);
+      onboarding.setCompletedAt(new Date().toISOString());
+    }
     onboarding.setSteps(steps);
-    onboarding.setCompletedAt(new Date().toISOString());
     await onboarding.save();
 
     return onboarding;
@@ -394,7 +401,7 @@ function PlgOnboardingController(ctx) {
       return badRequest('Request body is required');
     }
 
-    const { domain, imsOrgId: requestedImsOrgId } = data;
+    const { domain, imsOrgId: requestedImsOrgId, preonboard } = data;
 
     if (!hasText(domain)) {
       return badRequest('domain is required');
@@ -426,7 +433,10 @@ function PlgOnboardingController(ctx) {
     }
 
     try {
-      const onboarding = await performAsoPlgOnboarding({ domain, imsOrgId }, context);
+      const onboarding = await performAsoPlgOnboarding(
+        { domain, imsOrgId, preonboard: preonboard === true },
+        context,
+      );
       return ok(PlgOnboardingDto.toJSON(onboarding));
     } catch (error) {
       log.error(`PLG onboarding failed for domain ${domain}: ${error.message}`);

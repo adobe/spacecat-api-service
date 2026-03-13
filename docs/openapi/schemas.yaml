@@ -6419,6 +6419,7 @@ PlgOnboarding:
       type: string
       description: Current onboarding status
       enum:
+        - PRE_ONBOARDING
         - IN_PROGRESS
         - ONBOARDED
         - ERROR

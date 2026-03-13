@@ -29,6 +29,14 @@ plg-onboard:
                   Optional IMS Organization ID hint. When provided, must match one of the
                   caller's token tenants. Use this when the caller belongs to multiple orgs.
                   If omitted, the first tenant from the token is used.
+              preonboard:
+                type: boolean
+                description: |
+                  When true, performs preonboarding: creates org, site, runs audits and
+                  configures imports, but skips entitlement creation. The record is set to
+                  PRE_ONBOARDING status. A subsequent call without this flag completes
+                  the full onboarding including entitlement.
+                default: false
     responses:
       '200':
         description: PLG onboarding completed or in progress
