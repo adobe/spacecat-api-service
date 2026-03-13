@@ -23,6 +23,14 @@ const SKIP_VALUES = new Set(['all', '', undefined, null, '*']);
 const IN_FILTER_CHUNK_SIZE = 50;
 const QUERY_LIMIT = 5000;
 
+/**
+ * Expected error message substrings from getOrgAndValidateAccess (see llmo-mysticat-controller).
+ * Used for error classification; string matching is intentional until a shared error type exists.
+ * @see llmo-mysticat-controller.js
+ */
+const ERR_ORG_ACCESS = 'belonging to the organization';
+const ERR_NOT_FOUND = 'not found';
+
 /** @internal Exported for testing null/undefined fallbacks */
 export const strCompare = (a, b) => (a || '').localeCompare(b || '');
 
@@ -99,6 +107,23 @@ function buildExecutionsQuery(client, organizationId, params, defaults, filterBy
   }
 
   return q.limit(QUERY_LIMIT);
+}
+
+/**
+ * Validates that the given site belongs to the organization.
+ * Used to prevent cross-tenant access when siteId is used in page_intents query.
+ * @returns {Promise<boolean>} true if site exists in org, false otherwise
+ * @internal Exported for testing early-return paths
+ */
+export async function validateSiteBelongsToOrg(client, organizationId, siteId) {
+  if (!shouldApplyFilter(siteId) || siteId === '*') return true;
+  const { data, error } = await client
+    .from('sites')
+    .select('id')
+    .eq('id', siteId)
+    .eq('organization_id', organizationId)
+    .limit(1);
+  return !error && data?.length === 1;
 }
 
 async function resolveSiteIds(client, organizationId, siteId, filterByBrandId, rows) {
@@ -181,11 +206,10 @@ function buildDimensionOptions(rows) {
   const topicVals = [...new Set(rows.map((r) => r.topics).filter(Boolean))];
   const topics = topicVals.toSorted(strCompare).map((t) => toFilterOption(t, t));
 
-  const originVals = [...new Set(rows.map((r) => r.origin).filter(Boolean))];
-  const origins = originVals
-    .map((o) => o.toLowerCase())
-    .toSorted(strCompare)
-    .map((o) => toFilterOption(o, o));
+  const originVals = [...new Set(
+    rows.map((r) => r.origin).filter(Boolean).map((o) => o.toLowerCase()),
+  )];
+  const origins = originVals.toSorted(strCompare).map((o) => toFilterOption(o, o));
 
   const regionVals = [...new Set(rows.map((r) => r.region_code).filter(Boolean))];
   const regions = regionVals.toSorted(strCompare).map((r) => toFilterOption(r, r));
@@ -216,10 +240,10 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
     try {
       await getOrgAndValidateAccess(context);
     } catch (error) {
-      if (error.message?.includes('belonging to the organization')) {
+      if (error.message?.includes(ERR_ORG_ACCESS)) {
         return forbidden('Only users belonging to the organization can view brand presence data');
       }
-      if (error.message?.includes('not found')) {
+      if (error.message?.includes(ERR_NOT_FOUND)) {
         return badRequest(error.message);
       }
       log.error(`Brand presence filter-dimensions error: ${error.message}`);
@@ -242,6 +266,12 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
 
     const rows = data || [];
     const siteFilter = params.siteId;
+    if (shouldApplyFilter(siteFilter) && siteFilter !== '*') {
+      const siteBelongsToOrg = await validateSiteBelongsToOrg(client, organizationId, siteFilter);
+      if (!siteBelongsToOrg) {
+        return forbidden('Site does not belong to the organization');
+      }
+    }
     const siteIds = await resolveSiteIds(client, organizationId, siteFilter, filterByBrandId, rows);
     const pageIntents = await fetchPageIntents(
       client,

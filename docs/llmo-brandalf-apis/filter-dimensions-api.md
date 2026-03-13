@@ -28,7 +28,7 @@ Returns available filter options (brands, categories, topics, origins, regions, 
 | `categoryId` | `category_id` | string (UUID or name) | — | Filter by category. If UUID → `category_id`; if not UUID (e.g. "Acrobat") → `category_name` |
 | `topicId` | `topic_id`, `topic`, `topics` | string | — | Filter by topic (exact match on `topics` column) |
 | `regionCode` | `region_code`, `region` | string | — | Filter by region code (e.g. US, DE, WW) |
-| `origin` | — | string | — | Filter by origin (case-insensitive via `ilike`; e.g. human, ai) |
+| `origin` | — | string | — | Filter by origin (exact match, case-insensitive; e.g. `human`, `ai`) |
 
 **Parameters accepted for future schema support** (not yet applied):
 - `user_intent` / `userIntent`
@@ -110,14 +110,14 @@ client
   .eq('category_name', categoryId)          // if categoryId is NOT valid UUID (e.g. "Acrobat")
   .eq('topics', topicId)                    // if topicId
   .eq('region_code', regionCode)            // if regionCode
-  .ilike('origin', origin)                  // if origin (case-insensitive)
+  .ilike('origin', origin)                  // if origin (exact match, case-insensitive)
 
   .limit(5000)
 ```
 
 **Equivalent PostgREST HTTP request** (example with all filters):
 ```
-GET /brand_presence_executions?select=brand_id,brand_name,category_name,topics,origin,region_code&organization_id=eq.44568c3e-efd4-4a7f-8ecd-8caf615f836c&execution_date=gte.2025-09-27&execution_date=lte.2025-09-30&model=eq.google-ai-mode&site_id=eq.c2473d89-e997-458d-a86d-b4096649c12b&category_name=eq.Acrobat&topics=eq.combine%20pdf&region_code=eq.US&origin=ilike.*AI*&limit=5000
+GET /brand_presence_executions?select=brand_id,brand_name,category_name,topics,origin,region_code&organization_id=eq.44568c3e-efd4-4a7f-8ecd-8caf615f836c&execution_date=gte.2025-09-27&execution_date=lte.2025-09-30&model=eq.google-ai-mode&site_id=eq.c2473d89-e997-458d-a86d-b4096649c12b&category_name=eq.Acrobat&topics=eq.combine%20pdf&region_code=eq.US&origin=ilike.ai&limit=5000
 ```
 
 **Response processing:** The API deduplicates and sorts the results to build `brands`, `categories`, `topics`, `origins`, `regions`, and `page_intents` arrays. Each array is an array of `{ id, label }` objects.

@@ -18,6 +18,7 @@ import {
   createFilterDimensionsHandler,
   strCompare,
   toFilterOption,
+  validateSiteBelongsToOrg,
 } from '../../../src/controllers/llmo/llmo-brand-presence.js';
 
 use(sinonChai);
@@ -121,6 +122,43 @@ describe('llmo-brand-presence', () => {
 
     it('returns id and label when both provided', () => {
       expect(toFilterOption('id-1', 'Label')).to.deep.equal({ id: 'id-1', label: 'Label' });
+    });
+  });
+
+  describe('validateSiteBelongsToOrg', () => {
+    it('returns true when siteId is null (skips validation)', async () => {
+      const client = createChainableMock();
+      const result = await validateSiteBelongsToOrg(client, 'org-1', null);
+      expect(result).to.be.true;
+      expect(client.from).not.to.have.been.called;
+    });
+
+    it('returns true when siteId is undefined (skips validation)', async () => {
+      const client = createChainableMock();
+      const result = await validateSiteBelongsToOrg(client, 'org-1', undefined);
+      expect(result).to.be.true;
+      expect(client.from).not.to.have.been.called;
+    });
+
+    it('returns true when siteId is empty string (skips validation)', async () => {
+      const client = createChainableMock();
+      const result = await validateSiteBelongsToOrg(client, 'org-1', '');
+      expect(result).to.be.true;
+      expect(client.from).not.to.have.been.called;
+    });
+
+    it('returns true when siteId is "all" (skips validation)', async () => {
+      const client = createChainableMock();
+      const result = await validateSiteBelongsToOrg(client, 'org-1', 'all');
+      expect(result).to.be.true;
+      expect(client.from).not.to.have.been.called;
+    });
+
+    it('returns true when siteId is "*" (skips validation)', async () => {
+      const client = createChainableMock();
+      const result = await validateSiteBelongsToOrg(client, 'org-1', '*');
+      expect(result).to.be.true;
+      expect(client.from).not.to.have.been.called;
     });
   });
 
@@ -393,11 +431,16 @@ describe('llmo-brand-presence', () => {
 
     it('includes page_intents from page_intents table when siteId is provided', async () => {
       const brandData = { data: [], error: null };
+      const sitesValidation = { data: [{ id: 'cccdac43-1a22-4659-9086-b762f59b9928' }], error: null };
       const pageIntentsData = {
         data: [{ page_intent: 'TRANSACTIONAL' }, { page_intent: 'INFORMATIONAL' }],
         error: null,
       };
-      const chainMock = createChainableMock(brandData, [brandData, pageIntentsData]);
+      const chainMock = createChainableMock(brandData, [
+        brandData,
+        sitesValidation,
+        pageIntentsData,
+      ]);
       mockContext.data = { siteId: 'cccdac43-1a22-4659-9086-b762f59b9928' };
       mockContext.dataAccess.Site.postgrestService = chainMock;
 
@@ -408,6 +451,69 @@ describe('llmo-brand-presence', () => {
       const body = await result.json();
       expect(body.page_intents).to.have.lengthOf(2);
       expect(chainMock.eq).to.have.been.calledWith('site_id', 'cccdac43-1a22-4659-9086-b762f59b9928');
+    });
+
+    it('returns 403 when siteId does not belong to the organization', async () => {
+      const brandData = { data: [], error: null };
+      const sitesValidation = { data: [], error: null };
+      const chainMock = createChainableMock(brandData, [brandData, sitesValidation]);
+      mockContext.data = { siteId: 'cccdac43-1a22-4659-9086-b762f59b9928' };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+      const body = await result.json();
+      expect(body.message).to.equal('Site does not belong to the organization');
+    });
+
+    it('dedupes origins after lowercasing (Human and human become one)', async () => {
+      const brandData = {
+        data: [
+          {
+            brand_id: 'b1',
+            brand_name: 'B1',
+            category_name: 'C1',
+            topics: 't1',
+            region_code: 'US',
+            origin: 'Human',
+            site_id: 's1',
+          },
+          {
+            brand_id: 'b2',
+            brand_name: 'B2',
+            category_name: 'C2',
+            topics: 't2',
+            region_code: 'DE',
+            origin: 'human',
+            site_id: 's1',
+          },
+          {
+            brand_id: 'b3',
+            brand_name: 'B3',
+            category_name: 'C3',
+            topics: 't3',
+            region_code: 'WW',
+            origin: 'ai',
+            site_id: 's1',
+          },
+        ],
+        error: null,
+      };
+      const sitesData = { data: [{ id: 's1' }], error: null };
+      const pageIntentsData = { data: [{ page_intent: 'TRANSACTIONAL' }], error: null };
+      const chainMock = createChainableMock(brandData, [brandData, sitesData, pageIntentsData]);
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.origins).to.have.lengthOf(2);
+      const originIds = body.origins.map((o) => o.id).sort();
+      expect(originIds).to.deep.equal(['ai', 'human']);
     });
   });
 });
