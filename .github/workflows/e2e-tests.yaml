@@ -28,4 +28,5 @@ jobs:
           ENVIRONMENT: ${{ matrix.environment }}
           AEM_E2E_IMPORT_API_KEY_PROD: ${{ secrets.AEM_E2E_IMPORT_API_KEY_PROD }}
           AEM_E2E_IMPORT_API_KEY_DEV: ${{ secrets.AEM_E2E_IMPORT_API_KEY_DEV }}
+          USER_API_KEY: ${{ secrets.USER_API_KEY }}
         run: npm run test-e2e
