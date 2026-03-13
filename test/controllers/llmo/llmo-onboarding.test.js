@@ -2563,6 +2563,7 @@ describe('LLMO Onboarding Functions', () => {
       // Verify audits were disabled
       expect(mockDataAccess.Configuration.findLatest).to.have.been.called;
       expect(mockConfiguration.disableHandlerForSite).to.have.been.calledWith('llmo-customer-analysis', mockSite);
+      expect(mockConfiguration.disableHandlerForSite).to.have.been.calledWith('page-intent', mockSite);
       expect(mockConfiguration.disableHandlerForSite).to.have.been.calledWith('llm-blocked', mockSite);
       expect(mockConfiguration.disableHandlerForSite).to.have.been.calledWith('llm-error-pages', mockSite);
       expect(mockConfiguration.save).to.have.been.called;
@@ -2693,6 +2694,7 @@ describe('LLMO Onboarding Functions', () => {
       // Verify audits were disabled
       expect(mockDataAccess.Configuration.findLatest).to.have.been.called;
       expect(mockConfiguration.disableHandlerForSite).to.have.been.calledWith('llmo-customer-analysis', mockSite);
+      expect(mockConfiguration.disableHandlerForSite).to.have.been.calledWith('page-intent', mockSite);
       expect(mockConfiguration.disableHandlerForSite).to.have.been.calledWith('llm-blocked', mockSite);
       expect(mockConfiguration.disableHandlerForSite).to.have.been.calledWith('llm-error-pages', mockSite);
       expect(mockConfiguration.save).to.have.been.called;

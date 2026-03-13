@@ -826,6 +826,7 @@ export async function removeLlmoConfig(site, config, context) {
   // LLMO-only audits we can disable safely
   const AUDITS_TO_DISABLE = [
     'llmo-customer-analysis',
+    'page-intent',
     'llm-blocked',
     'llm-error-pages',
     'cdn-logs-analysis',
@@ -844,7 +845,11 @@ export async function removeLlmoConfig(site, config, context) {
   const { Configuration } = dataAccess;
   const configuration = await Configuration.findLatest();
   AUDITS_TO_DISABLE.forEach((audit) => {
-    configuration.disableHandlerForSite(audit, site);
+    try {
+      configuration.disableHandlerForSite(audit, site);
+    } catch (error) {
+      log.warn(`Failed to disable audit '${audit}' for site ${siteId}: ${error.message}`);
+    }
   });
   await configuration.save();
 
