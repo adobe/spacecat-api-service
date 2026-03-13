@@ -65,7 +65,9 @@ Technical Contact:
 - Slack Handle:
 ```
 
-> ⚠️ **IMPORTANT**: Every permission is subject to approval. The SpaceCat Security Team reserves the right to grant or deny access based on security requirements and business justification.
+> ⚠️ **IMPORTANT**:
+- Share ticket on channel [#aem-sites-optimizer-engineering](https://adobe.enterprise.slack.com/archives/C05A45JBP9N) with taging group `@mysticat-s2s-admin`.
+- Permission is subject to approval. The SpaceCat Security Team reserves the right to grant or deny access based on security requirements and business justification.
 
 ### Step 2: Capability Review & Approval
 
