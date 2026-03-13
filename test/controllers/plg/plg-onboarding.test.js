@@ -280,7 +280,6 @@ describe('PlgOnboardingController', () => {
         '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js': {
           default: {
             STATUSES: {
-              PRE_ONBOARDING: 'PRE_ONBOARDING',
               IN_PROGRESS: 'IN_PROGRESS',
               ONBOARDED: 'ONBOARDED',
               ERROR: 'ERROR',
@@ -1134,56 +1133,6 @@ describe('PlgOnboardingController', () => {
       expect(detectLocaleStub).to.not.have.been.called;
       expect(mockSite.setLanguage).to.not.have.been.called;
       expect(mockSite.setRegion).to.not.have.been.called;
-    });
-  });
-
-  // --- preonboarding ---
-
-  describe('onboard - preonboarding', () => {
-    let controller;
-    beforeEach(() => {
-      controller = PlgOnboardingController({ log: mockLog });
-    });
-
-    it('sets PRE_ONBOARDING status and skips entitlement when preonboard=true', async () => {
-      const context = buildContext({ domain: TEST_DOMAIN, preonboard: true });
-
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      expect(tierClientCreateForSiteStub).to.not.have.been.called;
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('PRE_ONBOARDING');
-      expect(mockOnboarding.setCompletedAt).to.not.have.been.called;
-      expect(triggerAuditsStub).to.have.been.called;
-      expect(enableAuditsStub).to.have.been.called;
-    });
-
-    it('ignores preonboard when value is not boolean true', async () => {
-      const context = buildContext({ domain: TEST_DOMAIN, preonboard: 'yes' });
-
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      expect(tierClientCreateForSiteStub).to.have.been.called;
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-    });
-
-    it('resumes from PRE_ONBOARDING to ONBOARDED when preonboard is not set', async () => {
-      const preOnboardedRecord = createMockOnboarding({ status: 'PRE_ONBOARDING' });
-      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preOnboardedRecord);
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      // Should reset to IN_PROGRESS first (resume logic)
-      expect(preOnboardedRecord.setStatus).to.have.been.calledWith('IN_PROGRESS');
-      // Then set to ONBOARDED at the end
-      expect(preOnboardedRecord.setStatus).to.have.been.calledWith('ONBOARDED');
-      // Entitlement should be created on full onboarding
-      expect(tierClientCreateForSiteStub).to.have.been.called;
-      expect(preOnboardedRecord.setCompletedAt).to.have.been.called;
     });
   });
 
