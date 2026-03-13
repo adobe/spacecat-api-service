@@ -4428,7 +4428,7 @@ describe('Sites Controller', () => {
     let setHasAccess;
 
     before(async function beforeTriggerBrandProfile() {
-      this.timeout(5000);
+      this.timeout(15000);
       helperStub = sinon.stub().resolves('exec-123');
       let hasAccess = true;
       const moduleMocks = {

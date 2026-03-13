@@ -2900,6 +2900,30 @@ describe('Brands Controller', () => {
       expect(body.message).to.include('Brand ID');
     });
 
+    it('listPromptsByBrand returns 403 when user lacks access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+
+      const response = await unauthorizedController.listPromptsByBrand({
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(403);
+    });
+
     it('returns 200 with paginated prompts when brand exists', async () => {
       const response = await brandsController.listPromptsByBrand({
         ...context,
@@ -2940,6 +2964,30 @@ describe('Brands Controller', () => {
       });
 
       expect(response.status).to.equal(500);
+    });
+
+    it('getPromptByBrandAndId returns 403 when user lacks access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+
+      const response = await unauthorizedController.getPromptByBrandAndId({
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(403);
     });
 
     it('getPromptByBrandAndId returns 200 when prompt exists', async () => {
@@ -3005,6 +3053,31 @@ describe('Brands Controller', () => {
       });
 
       expect(response.status).to.equal(500);
+    });
+
+    it('createPromptsByBrand returns 403 when user lacks access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+
+      const response = await unauthorizedController.createPromptsByBrand({
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [{ prompt: 'New', regions: [] }],
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(403);
     });
 
     it('createPromptsByBrand returns 201 with created/updated counts', async () => {
@@ -3143,6 +3216,31 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(200);
     });
 
+    it('updatePromptByBrandAndId returns 403 when user lacks access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+
+      const response = await unauthorizedController.updatePromptByBrandAndId({
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        data: { prompt: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(403);
+    });
+
     it('updatePromptByBrandAndId returns 404 when prompt not found', async () => {
       mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => ({
         select: sandbox.stub().returnsThis(),
@@ -3177,6 +3275,30 @@ describe('Brands Controller', () => {
       });
 
       expect(response.status).to.equal(204);
+    });
+
+    it('deletePromptByBrandAndId returns 403 when user lacks access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+
+      const response = await unauthorizedController.deletePromptByBrandAndId({
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(403);
     });
 
     it('deletePromptByBrandAndId returns 404 when prompt not found', async () => {
