@@ -43,7 +43,7 @@ plg-onboard:
       '403':
         $ref: './responses.yaml#/403'
       '409':
-        description: Conflict - domain is already assigned to another organization
+        description: Conflict - organization creation conflict
       '500':
         $ref: './responses.yaml#/500'
     security:

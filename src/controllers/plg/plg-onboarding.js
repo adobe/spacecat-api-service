@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+// TODO: re-export from @adobe/spacecat-shared-data-access package root
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 import PlgOnboardingModel from '@adobe/spacecat-shared-data-access/src/models/plg-onboarding/plg-onboarding.model.js';
@@ -460,8 +461,9 @@ function PlgOnboardingController(ctx) {
       return badRequest('User profile or organization ID not found in authentication token');
     }
 
-    const callerImsOrgId = `${profile.tenants[0].id}@AdobeOrg`;
-    if (callerImsOrgId !== requestedImsOrgId) {
+    const matchedTenant = profile.tenants
+      .find((t) => `${t.id}@AdobeOrg` === requestedImsOrgId);
+    if (!matchedTenant) {
       return forbidden('Not authorized for this IMS org');
     }
 

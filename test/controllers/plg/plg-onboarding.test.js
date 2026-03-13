@@ -1175,6 +1175,28 @@ describe('PlgOnboardingController', () => {
       expect(res.status).to.equal(403);
     });
 
+    it('allows access when requested org matches a non-first tenant', async () => {
+      const secondOrgId = 'BBBBBBBBBBBBBBBBBBBBBBBB@AdobeOrg';
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([createMockOnboarding()]);
+
+      const res = await controller.getStatus({
+        dataAccess: mockDataAccess,
+        params: { imsOrgId: secondOrgId },
+        attributes: {
+          authInfo: {
+            getProfile: sandbox.stub().returns({
+              tenants: [
+                { id: 'ABC123' },
+                { id: 'BBBBBBBBBBBBBBBBBBBBBBBB' },
+              ],
+            }),
+          },
+        },
+      });
+
+      expect(res.status).to.equal(200);
+    });
+
     it('returns 400 when authInfo is missing', async () => {
       const res = await controller.getStatus({
         dataAccess: mockDataAccess,
