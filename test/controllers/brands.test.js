@@ -137,6 +137,16 @@ describe('Brands Controller', () => {
       Site: {
         findById: sinon.stub().resolves(sites[0]),
       },
+      services: {
+        postgrestClient: {
+          from: sinon.stub().returns({
+            select: sinon.stub().returnsThis(),
+            eq: sinon.stub().returnsThis(),
+            maybeSingle: sinon.stub().resolves({ data: null, error: null }),
+            upsert: sinon.stub().resolves({ error: null }),
+          }),
+        },
+      },
     };
 
     mockEnv = {
@@ -423,10 +433,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockS3Config);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -448,10 +456,8 @@ describe('Brands Controller', () => {
     it('returns 404 when S3 config does not exist', async () => {
       const mockGetFromS3 = sinon.stub().resolves(null);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -495,10 +501,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -551,10 +555,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -582,10 +584,8 @@ describe('Brands Controller', () => {
     it('handles S3 error and still returns 404 when config not found', async () => {
       const mockGetFromS3 = sinon.stub().rejects(new Error('S3 read error'));
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -601,6 +601,25 @@ describe('Brands Controller', () => {
 
       expect(response.status).to.equal(404);
       expect(loggerStub.warn).to.have.been.called;
+    });
+
+    it('returns 503 when postgrestClient is not available', async () => {
+      const contextWithoutPostgres = {
+        ...context,
+        dataAccess: {
+          ...mockDataAccess,
+          services: {},
+        },
+      };
+
+      const response = await brandsController.getCustomerConfig({
+        ...contextWithoutPostgres,
+        params: { spaceCatId: ORGANIZATION_ID },
+      });
+
+      expect(response.status).to.equal(503);
+      const error = await response.json();
+      expect(error.message).to.include('Postgres');
     });
 
     it('returns bad request if organization ID is not provided', async () => {
@@ -703,10 +722,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -746,10 +763,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -791,10 +806,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockS3Config);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -811,6 +824,25 @@ describe('Brands Controller', () => {
       expect(config.customer.brands[0]).to.have.property('totalPrompts', 1);
       expect(config.customer.brands[0]).to.have.property('totalCategories', 1);
       expect(config.customer.brands[0]).to.have.property('totalTopics', 1);
+    });
+
+    it('returns 503 when postgrestClient is not available', async () => {
+      const contextWithoutPostgres = {
+        ...context,
+        dataAccess: {
+          ...mockDataAccess,
+          services: {},
+        },
+      };
+
+      const response = await brandsController.getCustomerConfigLean({
+        ...contextWithoutPostgres,
+        params: { spaceCatId: ORGANIZATION_ID },
+      });
+
+      expect(response.status).to.equal(503);
+      const error = await response.json();
+      expect(error.message).to.include('Postgres');
     });
 
     it('returns bad request if organization ID is missing', async () => {
@@ -864,10 +896,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -906,10 +936,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockS3Config);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -928,10 +956,8 @@ describe('Brands Controller', () => {
     it('returns 404 when S3 config does not exist', async () => {
       const mockGetFromS3 = sinon.stub().resolves(null);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -948,10 +974,8 @@ describe('Brands Controller', () => {
     it('handles S3 error and still returns 404 when config not found', async () => {
       const mockGetFromS3 = sinon.stub().rejects(new Error('S3 read error'));
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -1018,10 +1042,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockS3Config);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -1066,10 +1088,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockS3Config);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -1104,10 +1124,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockS3Config);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -1122,6 +1140,25 @@ describe('Brands Controller', () => {
       const result = await response.json();
       expect(result.topics).to.have.lengthOf(1);
       expect(result.topics[0].id).to.equal('t1');
+    });
+
+    it('returns 503 when postgrestClient is not available', async () => {
+      const contextWithoutPostgres = {
+        ...context,
+        dataAccess: {
+          ...mockDataAccess,
+          services: {},
+        },
+      };
+
+      const response = await brandsController.getTopics({
+        ...contextWithoutPostgres,
+        params: { spaceCatId: ORGANIZATION_ID },
+      });
+
+      expect(response.status).to.equal(503);
+      const error = await response.json();
+      expect(error.message).to.include('Postgres');
     });
 
     it('returns bad request if organization ID is missing', async () => {
@@ -1163,10 +1200,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -1202,10 +1237,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -1238,10 +1271,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -1271,10 +1302,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockS3Config);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -1293,10 +1322,8 @@ describe('Brands Controller', () => {
     it('returns 404 when S3 config does not exist', async () => {
       const mockGetFromS3 = sinon.stub().resolves(null);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -1313,10 +1340,8 @@ describe('Brands Controller', () => {
     it('handles S3 error and still returns 404 when config not found', async () => {
       const mockGetFromS3 = sinon.stub().rejects(new Error('S3 read error'));
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -1377,10 +1402,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -1415,10 +1438,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -1441,6 +1462,25 @@ describe('Brands Controller', () => {
   });
 
   describe('getPrompts', () => {
+    it('returns 503 when postgrestClient is not available', async () => {
+      const contextWithoutPostgres = {
+        ...context,
+        dataAccess: {
+          ...mockDataAccess,
+          services: {},
+        },
+      };
+
+      const response = await brandsController.getPrompts({
+        ...contextWithoutPostgres,
+        params: { spaceCatId: ORGANIZATION_ID },
+      });
+
+      expect(response.status).to.equal(503);
+      const error = await response.json();
+      expect(error.message).to.include('Postgres');
+    });
+
     it('loads config from S3 and returns prompts', async () => {
       const mockCustomerConfig = {
         customer: {
@@ -1467,10 +1507,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -1566,10 +1604,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -1617,10 +1653,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -1670,10 +1704,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -1717,10 +1749,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -1774,10 +1804,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -1835,10 +1863,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -1893,10 +1919,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -1951,10 +1975,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -2004,10 +2026,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockCustomerConfig);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -2055,10 +2075,8 @@ describe('Brands Controller', () => {
 
       const mockGetFromS3 = sinon.stub().resolves(mockS3Config);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -2077,10 +2095,8 @@ describe('Brands Controller', () => {
     it('returns 404 when S3 config does not exist', async () => {
       const mockGetFromS3 = sinon.stub().resolves(null);
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -2097,10 +2113,8 @@ describe('Brands Controller', () => {
     it('handles S3 error and still returns 404 when config not found', async () => {
       const mockGetFromS3 = sinon.stub().rejects(new Error('S3 read error'));
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockGetFromS3,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockGetFromS3,
         },
       });
 
@@ -2139,6 +2153,28 @@ describe('Brands Controller', () => {
   });
 
   describe('saveCustomerConfig', () => {
+    it('returns 503 when postgrestClient is not available', async () => {
+      const contextWithoutPostgres = {
+        ...context,
+        dataAccess: {
+          ...mockDataAccess,
+          services: {},
+        },
+        data: {
+          customer: { customerName: 'Test', imsOrgID: 'B@123' },
+        },
+      };
+
+      const response = await brandsController.saveCustomerConfig({
+        ...contextWithoutPostgres,
+        params: { spaceCatId: ORGANIZATION_ID },
+      });
+
+      expect(response.status).to.equal(503);
+      const error = await response.json();
+      expect(error.message).to.include('Postgres');
+    });
+
     it('saves customer config to S3', async () => {
       const mockS3Client = { send: sinon.stub().resolves({}) };
       const mockConfig = {
@@ -2161,6 +2197,35 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(200);
       const result = await response.json();
       expect(result.message).to.include('saved successfully');
+    });
+
+    it('syncs brands to Postgres when postgrestClient is available', async () => {
+      const mockS3Client = { send: sinon.stub().resolves({}) };
+      const upsertStub = sinon.stub().resolves({ data: null, error: null });
+      const fromStub = sinon.stub().returns({ upsert: upsertStub });
+      const mockConfig = {
+        customer: {
+          customerName: 'Adobe',
+          imsOrgID: IMS_ORG_ID,
+          brands: [{ name: 'Adobe', status: 'active' }],
+        },
+      };
+
+      const response = await brandsController.saveCustomerConfig({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: mockConfig,
+        s3: { s3Client: mockS3Client, s3Bucket: 'test-bucket' },
+        dataAccess: {
+          ...mockDataAccess,
+          services: { postgrestClient: { from: fromStub } },
+        },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(fromStub).to.have.been.calledWith('llmo_customer_config');
+      expect(fromStub).to.have.been.calledWith('brands');
+      expect(upsertStub).to.have.been.calledTwice;
     });
 
     it('returns bad request if organization ID is missing', async () => {
@@ -2226,10 +2291,8 @@ describe('Brands Controller', () => {
     it('handles S3 save error', async () => {
       const mockS3Save = sinon.stub().rejects(new Error('S3 error'));
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            writeCustomerConfigV2: mockS3Save,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          writeCustomerConfigV2ToPostgres: mockS3Save,
         },
       });
 
@@ -2268,6 +2331,26 @@ describe('Brands Controller', () => {
   });
 
   describe('patchCustomerConfig', () => {
+    it('returns 503 when postgrestClient is not available', async () => {
+      const contextWithoutPostgres = {
+        ...context,
+        dataAccess: {
+          ...mockDataAccess,
+          services: {},
+        },
+        data: { customer: { customerName: 'Test' } },
+      };
+
+      const response = await brandsController.patchCustomerConfig({
+        ...contextWithoutPostgres,
+        params: { spaceCatId: ORGANIZATION_ID },
+      });
+
+      expect(response.status).to.equal(503);
+      const error = await response.json();
+      expect(error.message).to.include('Postgres');
+    });
+
     it('successfully patches customer config', async () => {
       const existingConfig = {
         customer: {
@@ -2286,11 +2369,9 @@ describe('Brands Controller', () => {
       const mockS3Get = sinon.stub().resolves(existingConfig);
       const mockS3Save = sinon.stub().resolves();
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockS3Get,
-            writeCustomerConfigV2: mockS3Save,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockS3Get,
+          writeCustomerConfigV2ToPostgres: mockS3Save,
         },
       });
 
@@ -2324,15 +2405,53 @@ describe('Brands Controller', () => {
       expect(mockS3Save).to.have.been.calledOnce;
     });
 
+    it('syncs brands to Postgres when postgrestClient is available', async () => {
+      const existingConfig = {
+        customer: {
+          customerName: 'Adobe',
+          imsOrgID: IMS_ORG_ID,
+          brands: [{ id: 'brand-1', name: 'Brand One', status: 'active' }],
+        },
+      };
+      const mockS3Get = sinon.stub().resolves(existingConfig);
+      const mockS3Save = sinon.stub().resolves();
+      const upsertStub = sinon.stub().resolves({ data: null, error: null });
+      const fromStub = sinon.stub().returns({ upsert: upsertStub });
+      const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockS3Get,
+          writeCustomerConfigV2ToPostgres: mockS3Save,
+        },
+      });
+
+      const controller = brandsControllerWithMock(context, loggerStub, mockEnv);
+      const response = await controller.patchCustomerConfig({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: {
+          customer: {
+            brands: [{ id: 'brand-2', name: 'Brand Two', status: 'active' }],
+          },
+        },
+        s3: { s3Client: {}, s3Bucket: 'test-bucket' },
+        dataAccess: {
+          ...mockDataAccess,
+          services: { postgrestClient: { from: fromStub } },
+        },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(fromStub).to.have.been.calledWith('brands');
+      expect(upsertStub).to.have.been.calledOnce;
+    });
+
     it('creates new config when no existing config exists', async () => {
       const mockS3Get = sinon.stub().resolves(null);
       const mockS3Save = sinon.stub().resolves();
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockS3Get,
-            writeCustomerConfigV2: mockS3Save,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockS3Get,
+          writeCustomerConfigV2ToPostgres: mockS3Save,
         },
       });
 
@@ -2498,11 +2617,9 @@ describe('Brands Controller', () => {
       const mockS3Get = sinon.stub().rejects(new Error('S3 get error'));
       const mockS3Save = sinon.stub().resolves();
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockS3Get,
-            writeCustomerConfigV2: mockS3Save,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockS3Get,
+          writeCustomerConfigV2ToPostgres: mockS3Save,
         },
       });
 
@@ -2545,11 +2662,9 @@ describe('Brands Controller', () => {
       const mockS3Get = sinon.stub().resolves(existingConfig);
       const mockS3Save = sinon.stub().rejects(new Error('S3 save error'));
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockS3Get,
-            writeCustomerConfigV2: mockS3Save,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockS3Get,
+          writeCustomerConfigV2ToPostgres: mockS3Save,
         },
       });
 
@@ -2597,11 +2712,9 @@ describe('Brands Controller', () => {
       const mockS3Get = sinon.stub().resolves(existingConfig);
       const mockS3Save = sinon.stub().resolves();
       const brandsControllerWithMock = await esmock('../../src/controllers/brands.js', {
-        '@adobe/spacecat-shared-utils': {
-          llmoConfig: {
-            readCustomerConfigV2: mockS3Get,
-            writeCustomerConfigV2: mockS3Save,
-          },
+        '../../src/support/customer-config-v2-storage.js': {
+          readCustomerConfigV2FromPostgres: mockS3Get,
+          writeCustomerConfigV2ToPostgres: mockS3Save,
         },
       });
 
