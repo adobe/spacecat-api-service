@@ -35,6 +35,14 @@ import {
 import AccessControlUtil from '../support/access-control-util.js';
 import { mergeCustomerConfigV2 } from '../support/customer-config-v2-metadata.js';
 import { syncBrandConfig } from '../support/brand-presence-sync.js';
+import {
+  listPrompts,
+  getPromptById,
+  upsertPrompts,
+  updatePromptById,
+  deletePromptById,
+  resolveBrandUuid,
+} from '../support/prompts-storage.js';
 
 const HEADER_ERROR = 'x-error';
 
@@ -655,6 +663,223 @@ function BrandsController(ctx, log, env) {
     }
   };
 
+  // ── Brand-scoped prompts CRUD (Aurora) ──
+
+  const listPromptsByBrand = async (context) => {
+    const { spaceCatId, brandId } = context.params || {};
+    const {
+      limit, page, categoryId, topicId, status,
+    } = getQueryParams(context);
+
+    try {
+      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
+      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
+      if (!hasText(brandId)) return badRequest('Brand ID required');
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) return organization;
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) return unavailable;
+
+      const { postgrestClient } = context.dataAccess.services;
+      const customerConfig = await loadCustomerConfig(context, spaceCatId);
+
+      // eslint-disable-next-line max-len
+      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient, customerConfig);
+      if (!brandUuid) return notFound(`Brand not found: ${brandId}`);
+
+      const result = await listPrompts({
+        organizationId: spaceCatId,
+        brandId: brandUuid,
+        categoryId,
+        topicId,
+        status,
+        limit,
+        page,
+        postgrestClient,
+        customerConfig,
+      });
+
+      return ok(result);
+    } catch (error) {
+      log.error(`Error listing prompts for brand ${brandId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  const getPromptByBrandAndId = async (context) => {
+    const { spaceCatId, brandId, promptId } = context.params || {};
+
+    try {
+      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
+      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
+      if (!hasText(brandId)) return badRequest('Brand ID required');
+      if (!hasText(promptId)) return badRequest('Prompt ID required');
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) return organization;
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) return unavailable;
+
+      const { postgrestClient } = context.dataAccess.services;
+      const customerConfig = await loadCustomerConfig(context, spaceCatId);
+
+      // eslint-disable-next-line max-len
+      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient, customerConfig);
+      if (!brandUuid) return notFound(`Brand not found: ${brandId}`);
+
+      const prompt = await getPromptById({
+        organizationId: spaceCatId,
+        brandUuid,
+        promptId,
+        postgrestClient,
+      });
+
+      if (!prompt) return notFound(`Prompt not found: ${promptId}`);
+      return ok(prompt);
+    } catch (error) {
+      log.error(`Error getting prompt ${promptId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  const createPromptsByBrand = async (context) => {
+    const { spaceCatId, brandId } = context.params || {};
+    const prompts = context.data;
+
+    try {
+      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
+      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
+      if (!hasText(brandId)) return badRequest('Brand ID required');
+      if (!Array.isArray(prompts) || prompts.length === 0) return badRequest('Prompts array required (min 1, max 100)');
+      if (prompts.length > 100) return badRequest('Maximum 100 prompts per request');
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) return organization;
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) return unavailable;
+
+      const { postgrestClient } = context.dataAccess.services;
+      const customerConfig = await loadCustomerConfig(context, spaceCatId);
+      const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
+
+      // eslint-disable-next-line max-len
+      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient, customerConfig);
+      if (!brandUuid) return notFound(`Brand not found: ${brandId}`);
+
+      const { created, updated, prompts: outPrompts } = await upsertPrompts({
+        organizationId: spaceCatId,
+        brandUuid,
+        prompts,
+        postgrestClient,
+        updatedBy,
+      });
+
+      return createResponse({ created, updated, prompts: outPrompts }, 201);
+    } catch (error) {
+      log.error(`Error creating prompts for brand ${brandId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  const updatePromptByBrandAndId = async (context) => {
+    const { spaceCatId, brandId, promptId } = context.params || {};
+    const updates = context.data || {};
+
+    try {
+      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
+      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
+      if (!hasText(brandId)) return badRequest('Brand ID required');
+      if (!hasText(promptId)) return badRequest('Prompt ID required');
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) return organization;
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) return unavailable;
+
+      const { postgrestClient } = context.dataAccess.services;
+      const customerConfig = await loadCustomerConfig(context, spaceCatId);
+      const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
+
+      // eslint-disable-next-line max-len
+      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient, customerConfig);
+      if (!brandUuid) return notFound(`Brand not found: ${brandId}`);
+
+      const prompt = await updatePromptById({
+        organizationId: spaceCatId,
+        brandUuid,
+        promptId,
+        updates,
+        postgrestClient,
+        updatedBy,
+      });
+
+      if (!prompt) return notFound(`Prompt not found: ${promptId}`);
+      return ok(prompt);
+    } catch (error) {
+      log.error(`Error updating prompt ${promptId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  const deletePromptByBrandAndId = async (context) => {
+    const { spaceCatId, brandId, promptId } = context.params || {};
+
+    try {
+      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
+      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
+      if (!hasText(brandId)) return badRequest('Brand ID required');
+      if (!hasText(promptId)) return badRequest('Prompt ID required');
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) return organization;
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) return unavailable;
+
+      const { postgrestClient } = context.dataAccess.services;
+      const customerConfig = await loadCustomerConfig(context, spaceCatId);
+      const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
+
+      // eslint-disable-next-line max-len
+      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient, customerConfig);
+      if (!brandUuid) return notFound(`Brand not found: ${brandId}`);
+
+      const deleted = await deletePromptById({
+        organizationId: spaceCatId,
+        brandUuid,
+        promptId,
+        postgrestClient,
+        updatedBy,
+      });
+
+      if (!deleted) return notFound(`Prompt not found: ${promptId}`);
+      return createResponse(null, 204);
+    } catch (error) {
+      log.error(`Error deleting prompt ${promptId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
   return {
     getBrandsForOrganization,
     getBrandGuidelinesForSite,
@@ -664,6 +889,11 @@ function BrandsController(ctx, log, env) {
     getPrompts,
     saveCustomerConfig,
     patchCustomerConfig,
+    listPromptsByBrand,
+    getPromptByBrandAndId,
+    createPromptsByBrand,
+    updatePromptByBrandAndId,
+    deletePromptByBrandAndId,
     // Exported for testing
     filterByStatus,
   };

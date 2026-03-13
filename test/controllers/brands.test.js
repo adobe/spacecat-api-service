@@ -2775,6 +2775,493 @@ describe('Brands Controller', () => {
     });
   });
 
+  describe('listPromptsByBrand (brand-scoped prompts CRUD)', () => {
+    const BRAND_UUID = 'd1111111-1111-4111-b111-111111111111';
+    const PROMPT_ID = 'prompt-1';
+
+    beforeEach(() => {
+      const promptRow = {
+        id: BRAND_UUID,
+        prompt_id: PROMPT_ID,
+        name: 'Test Prompt',
+        text: 'What is the best product?',
+        regions: ['us'],
+        status: 'active',
+        origin: 'human',
+        updated_at: '2026-01-01T00:00:00Z',
+        updated_by: 'system',
+        brands: { id: BRAND_UUID, name: 'Test Brand' },
+        categories: {
+          id: 'cat-uuid', category_id: 'cat-1', name: 'Category', origin: 'human',
+        },
+        topics: {
+          id: 'topic-uuid', topic_id: 'topic-1', name: 'Topic', category_id: 'cat-1',
+        },
+      };
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake((table) => {
+          const chain = {
+            select: sandbox.stub().returnsThis(),
+            eq: sandbox.stub().returnsThis(),
+            neq: sandbox.stub().returnsThis(),
+            order: sandbox.stub().returnsThis(),
+            update: sandbox.stub().returnsThis(),
+            range: sandbox.stub().resolves({
+              data: table === 'prompts' ? [promptRow] : [],
+              error: null,
+              count: 1,
+            }),
+            maybeSingle: sandbox.stub().callsFake(() => {
+              if (table === 'brands') {
+                return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+              }
+              if (table === 'llmo_customer_config') {
+                return Promise.resolve({
+                  data: {
+                    config: {
+                      customer: {
+                        brands: [{ id: 'chevrolet', name: 'Chevrolet' }],
+                      },
+                    },
+                  },
+                  error: null,
+                });
+              }
+              if (table === 'prompts') {
+                return Promise.resolve({
+                  data: {
+                    prompt_id: PROMPT_ID,
+                    name: 'Test',
+                    text: 'Prompt text',
+                    regions: [],
+                    status: 'active',
+                    origin: 'human',
+                    updated_at: '2026-01-01T00:00:00Z',
+                    updated_by: 'system',
+                    brands: { id: BRAND_UUID, name: 'Test Brand' },
+                    categories: null,
+                    topics: null,
+                  },
+                  error: null,
+                });
+              }
+              return Promise.resolve({ data: null, error: null });
+            }),
+          };
+          return chain;
+        }),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+    });
+
+    it('returns 503 when postgrestClient is not available', async () => {
+      mockDataAccess.services.postgrestClient = null;
+
+      const response = await brandsController.listPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(503);
+    });
+
+    it('returns bad request when spaceCatId is missing', async () => {
+      const response = await brandsController.listPromptsByBrand({
+        ...context,
+        params: { brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('Organization ID');
+    });
+
+    it('returns bad request when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.listPromptsByBrand({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns bad request when brandId is missing', async () => {
+      const response = await brandsController.listPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.include('Brand ID');
+    });
+
+    it('returns 200 with paginated prompts when brand exists', async () => {
+      const response = await brandsController.listPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.have.property('items').that.is.an('array');
+      expect(body).to.have.property('total');
+      expect(body).to.have.property('limit');
+      expect(body).to.have.property('page');
+    });
+
+    it('listPromptsByBrand returns 500 when storage throws', async () => {
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          range: sandbox.stub().rejects(new Error('DB connection lost')),
+          maybeSingle: sandbox.stub().callsFake(() => {
+            if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+            if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
+            return Promise.resolve({ data: null, error: null });
+          }),
+        };
+        return chain;
+      });
+
+      const response = await brandsController.listPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(500);
+    });
+
+    it('getPromptByBrandAndId returns 200 when prompt exists', async () => {
+      const response = await brandsController.getPromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.id).to.equal(PROMPT_ID);
+      expect(body.prompt).to.equal('Prompt text');
+    });
+
+    it('getPromptByBrandAndId returns 404 when prompt not found', async () => {
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => ({
+        select: sandbox.stub().returnsThis(),
+        eq: sandbox.stub().returnsThis(),
+        neq: sandbox.stub().returnsThis(),
+        order: sandbox.stub().returnsThis(),
+        range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
+        maybeSingle: sandbox.stub().callsFake(() => {
+          if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
+          if (table === 'prompts') return Promise.resolve({ data: null, error: null });
+          return Promise.resolve({ data: null, error: null });
+        }),
+      }));
+
+      const response = await brandsController.getPromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: 'nonexistent' },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(404);
+    });
+
+    it('getPromptByBrandAndId returns 500 when storage throws', async () => {
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
+          maybeSingle: sandbox.stub().callsFake(() => {
+            if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+            if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
+            if (table === 'prompts') return Promise.reject(new Error('DB connection lost'));
+            return Promise.resolve({ data: null, error: null });
+          }),
+        };
+        return chain;
+      });
+
+      const response = await brandsController.getPromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(500);
+    });
+
+    it('createPromptsByBrand returns 201 with created/updated counts', async () => {
+      const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+      const contextWithEmail = {
+        ...context,
+        attributes: { authInfo: { profile: { email: 'user@test.com' } } },
+      };
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        if (table === 'prompts') {
+          const insertChain = { select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) };
+          return {
+            select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+            insert: () => insertChain,
+            update: () => ({ eq: () => thenable({ error: null }) }),
+          };
+        }
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
+        };
+        if (table === 'brands') chain.maybeSingle = sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null });
+        if (table === 'llmo_customer_config') chain.maybeSingle = sandbox.stub().resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        return chain;
+      });
+
+      const response = await brandsController.createPromptsByBrand({
+        ...contextWithEmail,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [{ prompt: 'New prompt text', regions: ['us'] }],
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(201);
+      const body = await response.json();
+      expect(body).to.have.property('created');
+      expect(body).to.have.property('updated');
+      expect(body).to.have.property('prompts');
+    });
+
+    it('createPromptsByBrand returns 400 when prompts not an array', async () => {
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: {},
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(400);
+    });
+
+    it('createPromptsByBrand returns 400 when prompts is empty array', async () => {
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [],
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(400);
+    });
+
+    it('createPromptsByBrand returns 400 when prompts exceed 100', async () => {
+      const manyPrompts = Array.from({ length: 101 }, (_, i) => ({ prompt: `Prompt ${i}`, regions: [] }));
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: manyPrompts,
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(400);
+    });
+
+    it('createPromptsByBrand returns 500 when storage throws', async () => {
+      const rejectingThenable = { then: (resolve, reject) => reject(new Error('Insert failed')) };
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        if (table === 'prompts') {
+          return {
+            select: () => ({ eq: () => ({ eq: () => rejectingThenable }) }),
+            insert: () => ({ select: () => rejectingThenable }),
+            update: () => ({ eq: () => rejectingThenable }),
+          };
+        }
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+        };
+        if (table === 'llmo_customer_config') chain.maybeSingle = sandbox.stub().resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        return chain;
+      });
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [{ prompt: 'New', regions: [] }],
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(500);
+    });
+
+    it('updatePromptByBrandAndId returns 200 when prompt updated', async () => {
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        data: { prompt: 'Updated text' },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.id).to.equal(PROMPT_ID);
+    });
+
+    it('updatePromptByBrandAndId uses empty object when data is undefined', async () => {
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        data: undefined,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+    });
+
+    it('updatePromptByBrandAndId uses system when no auth email', async () => {
+      const contextNoEmail = { ...context, attributes: undefined };
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...contextNoEmail,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        data: { prompt: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+    });
+
+    it('updatePromptByBrandAndId returns 404 when prompt not found', async () => {
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => ({
+        select: sandbox.stub().returnsThis(),
+        eq: sandbox.stub().returnsThis(),
+        neq: sandbox.stub().returnsThis(),
+        order: sandbox.stub().returnsThis(),
+        update: sandbox.stub().returnsThis(),
+        range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
+        maybeSingle: sandbox.stub().callsFake(() => {
+          if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
+          if (table === 'prompts') return Promise.resolve({ data: null, error: null });
+          return Promise.resolve({ data: null, error: null });
+        }),
+      }));
+
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: 'nonexistent' },
+        data: { prompt: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(404);
+    });
+
+    it('deletePromptByBrandAndId returns 204 when prompt deleted', async () => {
+      const response = await brandsController.deletePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(204);
+    });
+
+    it('deletePromptByBrandAndId returns 404 when prompt not found', async () => {
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => ({
+        select: sandbox.stub().returnsThis(),
+        eq: sandbox.stub().returnsThis(),
+        neq: sandbox.stub().returnsThis(),
+        order: sandbox.stub().returnsThis(),
+        update: sandbox.stub().returnsThis(),
+        range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
+        maybeSingle: sandbox.stub().callsFake(() => {
+          if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+          if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
+          if (table === 'prompts') return Promise.resolve({ data: null, error: null });
+          return Promise.resolve({ data: null, error: null });
+        }),
+      }));
+
+      const response = await brandsController.deletePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: 'nonexistent' },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(404);
+    });
+
+    it('updatePromptByBrandAndId returns 500 when storage throws', async () => {
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
+          maybeSingle: sandbox.stub().callsFake(() => {
+            if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+            if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
+            if (table === 'prompts') return Promise.reject(new Error('DB connection lost'));
+            return Promise.resolve({ data: null, error: null });
+          }),
+        };
+        return chain;
+      });
+
+      const response = await brandsController.updatePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        data: { prompt: 'Updated' },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(500);
+    });
+
+    it('deletePromptByBrandAndId returns 500 when storage throws', async () => {
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          update: sandbox.stub().returnsThis(),
+          range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
+          maybeSingle: sandbox.stub().callsFake(() => {
+            if (table === 'brands') return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+            if (table === 'llmo_customer_config') return Promise.resolve({ data: { config: { customer: { brands: [] } } }, error: null });
+            if (table === 'prompts') return Promise.reject(new Error('DB connection lost'));
+            return Promise.resolve({ data: null, error: null });
+          }),
+        };
+        return chain;
+      });
+
+      const response = await brandsController.deletePromptByBrandAndId({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID, promptId: PROMPT_ID },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(500);
+    });
+  });
+
   describe('filterByStatus (exported for testing)', () => {
     it('should return empty array when items is null', () => {
       const controller = BrandsController(context, loggerStub, mockEnv);
