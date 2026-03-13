@@ -1,3 +1,24 @@
+# [1.346.0](https://github.com/adobe/spacecat-api-service/compare/v1.345.1...v1.346.0) (2026-03-13)
+
+
+### Features
+
+* add PLG ASO onboarding endpoint ([#1918](https://github.com/adobe/spacecat-api-service/issues/1918)) ([ca91363](https://github.com/adobe/spacecat-api-service/commit/ca91363122c3beb10b50baf4bc0ba4152ab5cef7))
+
+## [1.345.1](https://github.com/adobe/spacecat-api-service/compare/v1.345.0...v1.345.1) (2026-03-13)
+
+
+### Bug Fixes
+
+* Update CONSUMER_INTEGRATION_GUIDE.md ([#1952](https://github.com/adobe/spacecat-api-service/issues/1952)) ([9520c0d](https://github.com/adobe/spacecat-api-service/commit/9520c0d88c3174eb6308a386d8bbe3e2e12c6cfa))
+
+# [1.345.0](https://github.com/adobe/spacecat-api-service/compare/v1.344.7...v1.345.0) (2026-03-13)
+
+
+### Features
+
+* write v2 LLMO config to Aurora ([#1939](https://github.com/adobe/spacecat-api-service/issues/1939)) ([9b8db07](https://github.com/adobe/spacecat-api-service/commit/9b8db0724bb608baa9acf331b6be9877d48b36ad))
+
 ## [1.344.7](https://github.com/adobe/spacecat-api-service/compare/v1.344.6...v1.344.7) (2026-03-12)
 
 

@@ -56,6 +56,10 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/llmo/edge-optimize-routing',
   'PUT /sites/:siteId/llmo/opportunities-reviewed',
 
+  // PLG onboarding - IMS token auth, self-service flow, not S2S
+  'POST /plg/onboard',
+  'GET /plg/onboard/status/:imsOrgId',
+
   // Tier-specific - user activities, trial users, user details: end-user/admin flows only
   'GET /sites/:siteId/user-activities',
   'POST /sites/:siteId/user-activities',
