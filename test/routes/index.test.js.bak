@@ -255,6 +255,18 @@ describe('getRouteHandlers', () => {
 
   const mockLlmoMysticatController = {
     getFilterDimensions: () => null,
+    getWeeks: () => null,
+    getMetadata: () => null,
+    getStats: () => null,
+    getSentimentOverview: () => null,
+    getWeeklyTrends: () => null,
+    getTopics: () => null,
+    getTopicPrompts: () => null,
+    getSearch: () => null,
+    getShareOfVoice: () => null,
+    getCompetitorTrends: () => null,
+    getPrompts: () => null,
+    getSources: () => null,
   };
 
   const mockLlmoController = {
@@ -454,7 +466,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
     expect(staticRoutes['POST /llmo/onboard']).to.equal(mockLlmoController.onboardCustomer);
     expect(staticRoutes['POST /plg/onboard']).to.equal(mockPlgOnboardingController.onboard);
-    expect(staticRoutes['GET /sites-resolve']).to.equal(mockSitesController.resolveSite);
+    expect(staticRoutes['GET /sites/resolve']).to.equal(mockSitesController.resolveSite);
     expect(staticRoutes['GET /trial-users/email-preferences']).to.equal(mockTrialUserController.getEmailPreferences);
     expect(staticRoutes['PATCH /trial-users/email-preferences']).to.equal(mockTrialUserController.updateEmailPreferences);
 
@@ -473,8 +485,6 @@ describe('getRouteHandlers', () => {
       'GET /v2/orgs/:spaceCatId/llmo-customer-config-lean',
       'GET /v2/orgs/:spaceCatId/llmo-topics',
       'GET /v2/orgs/:spaceCatId/llmo-prompts',
-      'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions',
-      'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions',
       'PATCH /v2/orgs/:spaceCatId/llmo-customer-config',
       'POST /v2/orgs/:spaceCatId/llmo-customer-config',
       'GET /organizations/:organizationId/projects',
@@ -675,6 +685,19 @@ describe('getRouteHandlers', () => {
       'PUT /sites/:siteId/llmo/opportunities-reviewed',
       'GET /sites/:siteId/llmo/strategy',
       'PUT /sites/:siteId/llmo/strategy',
+      'GET /sites/:siteId/llmo/brand-presence/filter-dimensions',
+      'GET /sites/:siteId/llmo/brand-presence/weeks',
+      'GET /sites/:siteId/llmo/brand-presence/metadata',
+      'GET /sites/:siteId/llmo/brand-presence/stats',
+      'GET /sites/:siteId/llmo/brand-presence/sentiment-overview',
+      'GET /sites/:siteId/llmo/brand-presence/weekly-trends',
+      'GET /sites/:siteId/llmo/brand-presence/topics',
+      'GET /sites/:siteId/llmo/brand-presence/topics/:topic/prompts',
+      'GET /sites/:siteId/llmo/brand-presence/search',
+      'GET /sites/:siteId/llmo/brand-presence/share-of-voice',
+      'GET /sites/:siteId/llmo/brand-presence/competitor-trends',
+      'GET /sites/:siteId/llmo/brand-presence/prompts',
+      'GET /sites/:siteId/llmo/brand-presence/sources',
       'GET /consent-banner/:jobId',
       'PATCH /sites/:siteId/llmo/cdn-logs-filter',
       'POST /sites/:siteId/sandbox/audit',
