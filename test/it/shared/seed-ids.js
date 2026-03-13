@@ -127,6 +127,11 @@ export const CONSUMER_1_CLIENT_ID = '111111111111111111111111';
 export const CONSUMER_1_TECHNICAL_ACCOUNT_ID = '111111111111111111111111@techacct.adobe.com';
 export const CONSUMER_1_IMS_ORG_ID = ORG_1_IMS_ORG_ID;
 
+// ── PlgOnboardings ──
+
+export const PLG_ONBOARDING_1_ID = 'd1111111-1111-4111-b111-111111111111';
+export const PLG_ONBOARDING_1_DOMAIN = 'site1.example.com';
+
 // ── Non-existent IDs for 404 tests ──
 
 export const NON_EXISTENT_ORG_ID = '99999999-9999-4999-b999-999999999999';
