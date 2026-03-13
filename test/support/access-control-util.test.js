@@ -63,6 +63,29 @@ describe('Access Control Util', () => {
     expect(accessControlUtil.hasAdminAccess()).to.be.true;
   });
 
+  it('should delegate hasS2SAdminAccess to authInfo.isS2SAdmin', () => {
+    const authInfo = new AuthInfo()
+      .withType('jwt')
+      .withProfile({ is_admin: true });
+    authInfo.isS2SAdmin = sinon.stub().returns(true);
+
+    const context = {
+      pathInfo: {
+        headers: { 'x-product': 'llmo' },
+      },
+      attributes: { authInfo },
+      dataAccess: {
+        Entitlement: { findByOrganizationIdAndProductCode: sinon.stub() },
+        TrialUser: {},
+        OrganizationIdentityProvider: {},
+      },
+    };
+
+    const accessControlUtil = AccessControlUtil.fromContext(context);
+    expect(accessControlUtil.hasS2SAdminAccess()).to.be.true;
+    expect(authInfo.isS2SAdmin).to.have.been.calledOnce;
+  });
+
   it('should throw an error if entity is not provided', async () => {
     const context = {
       pathInfo: {
@@ -1020,6 +1043,30 @@ describe('Access Control Util', () => {
         { provider: 'GOOGLE', getProvider: () => 'GOOGLE' },
       ];
       mockIdentityProvider.allByOrganizationId.resolves(identityProviders);
+
+      await util.validateEntitlement(mockOrg, null, 'llmo');
+
+      expect(mockTrialUser.create).to.not.have.been.called;
+    });
+
+    it('should not create trial user when tier is free_trial, trial user does not exist, but user is S2S consumer', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'llmo',
+        getTier: () => 'free_trial',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
+
+      mockTrialUser.findByEmailId.resolves(null);
+
+      mockAuthInfo.getProfile.returns({
+        trial_email: 'trial@example.com',
+        email: 'user@example.com',
+        first_name: 'John',
+        last_name: 'Doe',
+        is_s2s_consumer: true,
+      });
+      mockAuthInfo.isS2SConsumer = sinon.stub().returns(true);
 
       await util.validateEntitlement(mockOrg, null, 'llmo');
 

@@ -17,6 +17,7 @@ import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-acc
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import { composeBaseURL, tracingFetch as fetch, isNonEmptyArray } from '@adobe/spacecat-shared-utils';
 import AhrefsAPIClient from '@adobe/spacecat-shared-ahrefs-client';
+import DrsClient from '@adobe/spacecat-shared-drs-client';
 import { parse as parseDomain } from 'tldts';
 import { postSlackMessage } from '../../utils/slack/base.js';
 
@@ -39,6 +40,7 @@ export const BASIC_AUDITS = [
 export const ASO_DEMO_ORG = '66331367-70e6-4a49-8445-4f6d9c265af9';
 
 export const ASO_CRITICAL_SITES = [];
+const LLMO_ONBOARDING_PUBLISH_TRIGGER = 'trigger:llmo-onboarding-publish';
 
 /**
  * Generates the data folder name from a domain.
@@ -251,53 +253,6 @@ export async function validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, co
       isValid: false,
       error: `Unable to validate onboarding status: ${error.message}`,
     };
-  }
-}
-
-/**
- * Publishes a file to admin.hlx.page.
- * @param {string} filename - The filename to publish
- * @param {string} outputLocation - The output location
- * @param {object} log - Logger instance
- */
-async function publishToAdminHlx(filename, outputLocation, log) {
-  try {
-    const org = 'adobe';
-    const site = 'project-elmo-ui-data';
-    const ref = 'main';
-    const jsonFilename = `${filename.replace(/\.[^/.]+$/, '')}.json`;
-    const path = `${outputLocation}/${jsonFilename}`;
-    const headers = { Cookie: `auth_token=${process.env.HLX_ADMIN_TOKEN}` };
-
-    if (!process.env.HLX_ADMIN_TOKEN) {
-      log.warn('LLMO onboarding: HLX_ADMIN_TOKEN is not set');
-    }
-
-    const baseUrl = 'https://admin.hlx.page';
-    const endpoints = [
-      { name: 'preview', url: `${baseUrl}/preview/${org}/${site}/${ref}/${path}` },
-      { name: 'live', url: `${baseUrl}/live/${org}/${site}/${ref}/${path}` },
-    ];
-
-    for (const [index, endpoint] of endpoints.entries()) {
-      log.debug(`Publishing Excel report via admin API (${endpoint.name}): ${endpoint.url}`);
-
-      // eslint-disable-next-line no-await-in-loop
-      const response = await fetch(endpoint.url, { method: 'POST', headers });
-
-      if (!response.ok) {
-        throw new Error(`${endpoint.name} failed: ${response.status} ${response.statusText}`);
-      }
-
-      log.debug(`Excel report successfully published to ${endpoint.name}`);
-
-      if (index === 0) {
-        // eslint-disable-next-line no-await-in-loop,max-statements-per-line
-        await new Promise((resolve) => { setTimeout(resolve, 2000); });
-      }
-    }
-  } catch (publishError) {
-    log.error(`Failed to publish via admin.hlx.page: ${publishError.message}`);
   }
 }
 
@@ -545,9 +500,6 @@ export async function copyFilesToSharepoint(dataFolder, context, say = () => {})
     log.warn(`Warning: Query index at ${dataFolder} already exists. Skipping creation.`);
     await say(`Query index in ${dataFolder} already exists. Skipping creation.`);
   }
-
-  log.debug('Publishing query-index to admin.hlx.page');
-  await publishToAdminHlx('query-index', dataFolder, log);
 }
 
 /**
@@ -999,6 +951,22 @@ export async function triggerAudits(audits, context, site) {
   );
 }
 
+export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
+  const { sqs, dataAccess, log } = context;
+  const { Configuration } = dataAccess;
+  const configuration = await Configuration.findLatest();
+
+  await sqs.sendMessage(configuration.getQueues().audits, {
+    type: LLMO_ONBOARDING_PUBLISH_TRIGGER,
+    siteId: site.getId(),
+    auditContext: {
+      dataFolder,
+    },
+  });
+
+  log.info(`Queued ${LLMO_ONBOARDING_PUBLISH_TRIGGER} for site ${site.getId()}`);
+}
+
 /**
  * Complete LLMO onboarding process.
  * @param {object} params - Onboarding parameters
@@ -1038,6 +1006,12 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
 
     // Copy files to SharePoint
     await copyFilesToSharepoint(dataFolder, context, say);
+
+    try {
+      await enqueueLlmoOnboardingPublish(context, site, dataFolder);
+    } catch (error) {
+      log.warn(`Failed to enqueue ${LLMO_ONBOARDING_PUBLISH_TRIGGER} for site ${site.getId()}: ${error.message}`);
+    }
 
     // Update index config
     await updateIndexConfig(dataFolder, context, say);
@@ -1083,8 +1057,37 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     site.setConfig(Config.toDynamoItem(siteConfig));
     await site.save();
 
-    // Trigger audits
-    await triggerAudits([...BASIC_AUDITS, 'llmo-customer-analysis', 'wikipedia-analysis'], context, site);
+    // Trigger audits (llmo-customer-analysis is NOT triggered here; it will be triggered
+    // after the DRS prompt generation job completes, via SNS → audit-worker. LLMO-1819)
+    await triggerAudits([...BASIC_AUDITS, 'wikipedia-analysis'], context, site);
+
+    // Submit DRS prompt generation job (non-blocking)
+    try {
+      const drsClient = DrsClient.createFrom(context);
+      if (drsClient.isConfigured()) {
+        // Try to get audience from brand profile, fall back to default
+        const brandProfile = siteConfig.getBrandProfile?.();
+        const audience = brandProfile?.main_profile?.target_audience
+          || `General consumers interested in ${brandName} products and services`;
+
+        const drsJob = await drsClient.submitPromptGenerationJob({
+          baseUrl: baseURL,
+          brandName: brandName.trim(),
+          audience,
+          region: 'US',
+          numPrompts: 50,
+          siteId: site.getId(),
+          imsOrgId,
+        });
+        log.info(`Started DRS prompt generation: job=${drsJob.job_id}`);
+        say(`:robot_face: Started DRS prompt generation job: ${drsJob.job_id}`);
+      } else {
+        log.debug('DRS client not configured, skipping prompt generation');
+      }
+    } catch (drsError) {
+      log.error(`Failed to start DRS prompt generation: ${drsError.message}`);
+      say(':warning: Failed to start DRS prompt generation (will need manual trigger)');
+    }
 
     return {
       site,

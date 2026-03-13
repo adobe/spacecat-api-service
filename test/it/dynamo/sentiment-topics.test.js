@@ -14,4 +14,4 @@ import { ctx } from './harness.js';
 import { resetDynamo } from './seed.js';
 import sentimentTopicTests from '../shared/tests/sentiment-topics.js';
 
-sentimentTopicTests(() => ctx.httpClient, resetDynamo, { skipV2Mutations: true });
+sentimentTopicTests(() => ctx.httpClient, resetDynamo);
