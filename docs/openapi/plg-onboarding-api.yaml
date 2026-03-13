@@ -23,6 +23,12 @@ plg-onboard:
                 format: hostname
                 description: The domain name to onboard (without protocol)
                 example: "example.com"
+              imsOrgId:
+                $ref: './schemas.yaml#/ImsOrganizationId'
+                description: |
+                  Optional IMS Organization ID hint. When provided, must match one of the
+                  caller's token tenants. Use this when the caller belongs to multiple orgs.
+                  If omitted, the first tenant from the token is used.
     responses:
       '200':
         description: PLG onboarding completed or in progress
@@ -34,6 +40,8 @@ plg-onboard:
         $ref: './responses.yaml#/400'
       '401':
         $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
       '409':
         description: Conflict - domain is already assigned to another organization
       '500':

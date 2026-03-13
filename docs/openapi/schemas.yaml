@@ -6432,9 +6432,33 @@ PlgOnboarding:
     steps:
       type: object
       description: Progress tracking for individual onboarding steps
-      additionalProperties: true
+      properties:
+        orgResolved:
+          type: boolean
+          description: Whether the organization was resolved or created
+        rumVerified:
+          type: boolean
+          description: Whether RUM domain key was verified
+        siteCreated:
+          type: boolean
+          description: Whether a new site was created
+        siteResolved:
+          type: boolean
+          description: Whether the site was resolved (created or found)
+        configUpdated:
+          type: boolean
+          description: Whether site configuration was updated
+        auditsEnabled:
+          type: boolean
+          description: Whether audits were enabled for the site
+        entitlementCreated:
+          type: boolean
+          description: Whether the ASO entitlement was provisioned
+      additionalProperties: false
       example:
         orgResolved: true
+        rumVerified: true
+        siteCreated: true
         siteResolved: true
         configUpdated: true
         auditsEnabled: true

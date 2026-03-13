@@ -388,6 +388,36 @@ describe('PlgOnboardingController', () => {
       expect(res.status).to.equal(400);
       expect(res.value).to.equal('User profile or organization ID not found in authentication token');
     });
+
+    it('returns 403 when requested imsOrgId does not match token tenants', async () => {
+      const context = buildContext(
+        { domain: TEST_DOMAIN, imsOrgId: 'XXXXXXXXXXXXXXXXXXXXXXXX@AdobeOrg' },
+      );
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(403);
+      expect(res.value).to.equal('Requested imsOrgId does not match any tenant in authentication token');
+    });
+
+    it('uses requested imsOrgId when it matches a token tenant', async () => {
+      const secondOrgId = 'BBBBBBBBBBBBBBBBBBBBBBBB@AdobeOrg';
+      const context = buildContext(
+        { domain: TEST_DOMAIN, imsOrgId: secondOrgId },
+        {
+          authInfo: {
+            getProfile: sandbox.stub().returns({
+              tenants: [
+                { id: 'ABC123' },
+                { id: 'BBBBBBBBBBBBBBBBBBBBBBBB' },
+              ],
+            }),
+          },
+        },
+      );
+      const res = await controller.onboard(context);
+      expect(res.status).to.equal(200);
+      // Verify the org was resolved with the requested imsOrgId
+      expect(createOrFindOrganizationStub).to.have.been.calledWith(secondOrgId, sinon.match.any);
+    });
   });
 
   // --- SSRF protection ---
@@ -612,6 +642,25 @@ describe('PlgOnboardingController', () => {
       const existingOnboarding = createMockOnboarding({
         status: 'WAITING_FOR_IP_ALLOWLISTING',
         steps: { orgResolved: true, rumVerified: true },
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingOnboarding);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockDataAccess.PlgOnboarding.create).to.not.have.been.called;
+      expect(existingOnboarding.setStatus).to.have.been.calledWith('IN_PROGRESS');
+      expect(existingOnboarding.setError).to.have.been.calledWith(null);
+      expect(existingOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('resumes from WAITLISTED when domain ownership is resolved', async () => {
+      const existingOnboarding = createMockOnboarding({
+        status: 'WAITLISTED',
+        steps: { orgResolved: true },
+        waitlistReason: `Domain ${TEST_DOMAIN} is already assigned to another organization`,
       });
       mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(existingOnboarding);
 

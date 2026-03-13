@@ -253,9 +253,9 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
         ...(deliveryType && { deliveryType }),
       });
       log.info(`Created site ${site.getId()} for ${baseURL}`);
+      steps.siteCreated = true;
     }
     onboarding.setSiteId(site.getId());
-    steps.siteCreated = true;
     steps.siteResolved = true;
 
     // Step 6: Update configs
@@ -385,6 +385,7 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
 function PlgOnboardingController(ctx) {
   const { log } = ctx;
 
+  // Authorization: any authenticated org member can onboard their own domains.
   const onboard = async (context) => {
     const { data, attributes } = context;
 
@@ -392,7 +393,7 @@ function PlgOnboardingController(ctx) {
       return badRequest('Request body is required');
     }
 
-    const { domain } = data;
+    const { domain, imsOrgId: requestedImsOrgId } = data;
 
     if (!hasText(domain)) {
       return badRequest('domain is required');
@@ -406,11 +407,22 @@ function PlgOnboardingController(ctx) {
 
     const profile = authInfo.getProfile();
 
-    if (!profile || !profile.tenants?.[0]?.id) {
+    if (!profile?.tenants?.[0]?.id) {
       return badRequest('User profile or organization ID not found in authentication token');
     }
 
-    const imsOrgId = `${profile.tenants[0].id}@AdobeOrg`;
+    // If caller specifies an imsOrgId, validate it matches one of their token's tenants
+    let imsOrgId;
+    if (hasText(requestedImsOrgId)) {
+      const matchedTenant = profile.tenants
+        .find((t) => `${t.id}@AdobeOrg` === requestedImsOrgId);
+      if (!matchedTenant) {
+        return forbidden('Requested imsOrgId does not match any tenant in authentication token');
+      }
+      imsOrgId = requestedImsOrgId;
+    } else {
+      imsOrgId = `${profile.tenants[0].id}@AdobeOrg`;
+    }
 
     try {
       const onboarding = await performAsoPlgOnboarding({ domain, imsOrgId }, context);
@@ -444,7 +456,7 @@ function PlgOnboardingController(ctx) {
 
     const profile = authInfo.getProfile();
 
-    if (!profile || !profile.tenants?.[0]?.id) {
+    if (!profile?.tenants?.[0]?.id) {
       return badRequest('User profile or organization ID not found in authentication token');
     }
 
