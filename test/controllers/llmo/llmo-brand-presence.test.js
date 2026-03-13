@@ -14,7 +14,11 @@
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
-import { createFilterDimensionsHandler } from '../../../src/controllers/llmo/llmo-brand-presence.js';
+import {
+  createFilterDimensionsHandler,
+  strCompare,
+  toFilterOption,
+} from '../../../src/controllers/llmo/llmo-brand-presence.js';
 
 use(sinonChai);
 
@@ -74,6 +78,52 @@ describe('llmo-brand-presence', () => {
     sandbox.restore();
   });
 
+  describe('strCompare', () => {
+    it('handles null/undefined first arg (uses empty string fallback)', () => {
+      expect(strCompare(null, 'b')).to.be.lessThan(0);
+      expect(strCompare(undefined, 'b')).to.be.lessThan(0);
+      expect(strCompare('', 'b')).to.be.lessThan(0);
+    });
+
+    it('handles null/undefined second arg (uses empty string fallback)', () => {
+      expect(strCompare('a', null)).to.be.greaterThan(0);
+      expect(strCompare('a', undefined)).to.be.greaterThan(0);
+      expect(strCompare('a', '')).to.be.greaterThan(0);
+    });
+
+    it('handles both null/undefined (both become empty string)', () => {
+      expect(strCompare(null, null)).to.equal(0);
+      expect(strCompare(undefined, undefined)).to.equal(0);
+    });
+
+    it('compares truthy strings normally', () => {
+      expect(strCompare('a', 'b')).to.be.lessThan(0);
+      expect(strCompare('b', 'a')).to.be.greaterThan(0);
+    });
+  });
+
+  describe('toFilterOption', () => {
+    it('handles null id (uses empty string fallback)', () => {
+      expect(toFilterOption(null, 'Label')).to.deep.equal({ id: '', label: 'Label' });
+    });
+
+    it('handles null label (uses id fallback)', () => {
+      expect(toFilterOption('id-1', null)).to.deep.equal({ id: 'id-1', label: 'id-1' });
+    });
+
+    it('handles both null (uses empty string fallbacks)', () => {
+      expect(toFilterOption(null, null)).to.deep.equal({ id: '', label: '' });
+    });
+
+    it('handles undefined id and label', () => {
+      expect(toFilterOption(undefined, undefined)).to.deep.equal({ id: '', label: '' });
+    });
+
+    it('returns id and label when both provided', () => {
+      expect(toFilterOption('id-1', 'Label')).to.deep.equal({ id: 'id-1', label: 'Label' });
+    });
+  });
+
   describe('createFilterDimensionsHandler', () => {
     it('returns badRequest when postgrestService is missing', async () => {
       mockContext.dataAccess.Site.postgrestService = null;
@@ -113,6 +163,85 @@ describe('llmo-brand-presence', () => {
 
       expect(result.status).to.equal(400);
       expect(mockContext.log.error).to.have.been.calledWith('Brand presence filter-dimensions error: Database connection failed');
+    });
+
+    it('returns badRequest when executions query returns error', async () => {
+      const queryError = { message: 'relation "brand_presence_executions" does not exist' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(
+        { data: [], error: queryError },
+      );
+
+      const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('relation "brand_presence_executions" does not exist');
+    });
+
+    it('handles executions query returning data: null (uses empty rows fallback)', async () => {
+      const emptySites = { data: [], error: null };
+      const emptyPageIntents = { data: [], error: null };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(
+        { data: [], error: null },
+        [{ data: null, error: null }, emptySites, emptyPageIntents],
+      );
+
+      const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.brands).to.deep.equal([]);
+      expect(body.categories).to.deep.equal([]);
+      expect(body.page_intents).to.deep.equal([]);
+    });
+
+    it('skips filter when categoryId is "all" (SKIP_VALUES)', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.data = { categoryId: 'all' };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.eq).not.to.have.been.calledWith('category_id', sinon.match.any);
+      expect(chainMock.eq).not.to.have.been.calledWith('category_name', sinon.match.any);
+    });
+
+    it('handles null/undefined context.data (uses empty object fallback)', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.data = null;
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+    });
+
+    it('accepts snake_case params (start_date, end_date, model, site_id, etc.)', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.data = {
+        start_date: '2025-01-01',
+        end_date: '2025-01-31',
+        model: 'gemini',
+        site_id: 'cccdac43-1a22-4659-9086-b762f59b9928',
+        category_id: '0178a3f0-1234-7000-8000-000000000099',
+        topic_id: 't1',
+        region_code: 'US',
+        user_intent: 'TRANSACTIONAL',
+        prompt_branding: 'true',
+      };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.gte).to.have.been.calledWith('execution_date', '2025-01-01');
+      expect(chainMock.lte).to.have.been.calledWith('execution_date', '2025-01-31');
+      expect(chainMock.eq).to.have.been.calledWith('model', 'gemini');
+      expect(chainMock.eq).to.have.been.calledWith('site_id', 'cccdac43-1a22-4659-9086-b762f59b9928');
     });
 
     it('returns ok with brands, categories, topics, origins, regions, page_intents', async () => {

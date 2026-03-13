@@ -33,7 +33,7 @@ import {
   elevatedSlackClientWrapper,
   SLACK_TARGETS,
 } from '@adobe/spacecat-shared-slack-client';
-import { hasText, logWrapper } from '@adobe/spacecat-shared-utils';
+import { hasText, isValidUUID, logWrapper } from '@adobe/spacecat-shared-utils';
 
 import dataAccess from './support/data-access.js';
 import sqs from './support/sqs.js';
@@ -272,10 +272,10 @@ async function run(request, context) {
         && (!isValidUUIDV4(params.organizationId) && params.organizationId !== 'default')) {
         return badRequest('Organization Id is invalid. Please provide a valid UUID.');
       }
-      if (params.spaceCatId && !isValidUUIDV4(params.spaceCatId)) {
+      if (params.spaceCatId && !isValidUUID(params.spaceCatId)) {
         return badRequest('Organization Id (spaceCatId) is invalid. Please provide a valid UUID.');
       }
-      if (params.brandId && params.brandId !== 'all' && !isValidUUIDV4(params.brandId)) {
+      if (params.brandId && params.brandId !== 'all' && !isValidUUID(params.brandId)) {
         return badRequest('Brand Id is invalid. Please provide a valid UUID or "all".');
       }
       context.params = params;

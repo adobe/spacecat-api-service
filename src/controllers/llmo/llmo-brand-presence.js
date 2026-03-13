@@ -20,11 +20,21 @@ import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
  */
 
 const SKIP_VALUES = new Set(['all', '', undefined, null, '*']);
+const IN_FILTER_CHUNK_SIZE = 50;
+const QUERY_LIMIT = 5000;
+
+/** @internal Exported for testing null/undefined fallbacks */
+export const strCompare = (a, b) => (a || '').localeCompare(b || '');
 
 function shouldApplyFilter(value) {
   if (value == null) return false;
   if (typeof value === 'string' && SKIP_VALUES.has(value.trim())) return false;
   return hasText(String(value));
+}
+
+/** @internal Exported for testing null/undefined fallbacks */
+export function toFilterOption(id, label) {
+  return { id: id ?? '', label: label ?? id ?? '' };
 }
 
 function parseFilterDimensionsParams(context) {
@@ -53,8 +63,140 @@ function defaultDateRange() {
   };
 }
 
-function toFilterOption(id, label) {
-  return { id: id ?? '', label: label ?? id ?? '' };
+function buildExecutionsQuery(client, organizationId, params, defaults, filterByBrandId) {
+  const startDate = params.startDate || defaults.startDate;
+  const endDate = params.endDate || defaults.endDate;
+  const model = params.platform || 'chatgpt';
+  const {
+    siteId, categoryId, topicId, regionCode, origin,
+  } = params;
+
+  let q = client
+    .from('brand_presence_executions')
+    .select('brand_id, brand_name, category_name, topics, origin, region_code, site_id')
+    .eq('organization_id', organizationId)
+    .gte('execution_date', startDate)
+    .lte('execution_date', endDate)
+    .eq('model', model);
+
+  if (shouldApplyFilter(siteId) && siteId !== '*') {
+    q = q.eq('site_id', siteId);
+  }
+  if (filterByBrandId) {
+    q = q.eq('brand_id', filterByBrandId);
+  }
+  if (shouldApplyFilter(categoryId)) {
+    q = isValidUUID(categoryId) ? q.eq('category_id', categoryId) : q.eq('category_name', categoryId);
+  }
+  if (shouldApplyFilter(topicId)) {
+    q = q.eq('topics', topicId);
+  }
+  if (shouldApplyFilter(regionCode)) {
+    q = q.eq('region_code', regionCode);
+  }
+  if (shouldApplyFilter(origin)) {
+    q = q.ilike('origin', origin);
+  }
+
+  return q.limit(QUERY_LIMIT);
+}
+
+async function resolveSiteIds(client, organizationId, siteId, filterByBrandId, rows) {
+  if (shouldApplyFilter(siteId) && siteId !== '*') {
+    return [siteId];
+  }
+  if (filterByBrandId) {
+    return [...new Set(rows.map((r) => r.site_id).filter(Boolean))];
+  }
+  const { data: sitesData, error: sitesError } = await client
+    .from('sites')
+    .select('id')
+    .eq('organization_id', organizationId)
+    .limit(QUERY_LIMIT);
+  if (!sitesError && sitesData?.length) {
+    return sitesData.map((s) => s.id).filter(Boolean);
+  }
+  return [];
+}
+
+async function fetchPageIntents(client, organizationId, siteId, filterByBrandId, siteIds) {
+  if (shouldApplyFilter(siteId) && siteId !== '*') {
+    const { data: piData, error: piError } = await client
+      .from('page_intents')
+      .select('page_intent')
+      .eq('site_id', siteId)
+      .limit(QUERY_LIMIT);
+    if (!piError && piData?.length) {
+      const intents = [...new Set(piData.map((r) => r.page_intent).filter(Boolean))];
+      const sorted = intents.toSorted(strCompare);
+      return sorted.map((p) => toFilterOption(p, p));
+    }
+  } else if (!filterByBrandId) {
+    const { data: piData, error: piError } = await client
+      .from('page_intents')
+      .select('page_intent,sites!inner(organization_id)')
+      .eq('sites.organization_id', organizationId)
+      .limit(QUERY_LIMIT);
+    if (!piError && piData?.length) {
+      const intents = [...new Set(piData.map((r) => r.page_intent).filter(Boolean))];
+      const sorted = intents.toSorted(strCompare);
+      return sorted.map((p) => toFilterOption(p, p));
+    }
+  } else if (siteIds.length > 0) {
+    const chunks = [];
+    for (let i = 0; i < siteIds.length; i += IN_FILTER_CHUNK_SIZE) {
+      chunks.push(siteIds.slice(i, i + IN_FILTER_CHUNK_SIZE));
+    }
+    const results = await Promise.all(chunks.map((chunk) => client
+      .from('page_intents')
+      .select('page_intent')
+      .in('site_id', chunk)
+      .limit(QUERY_LIMIT)));
+    const allIntents = new Set();
+    results.forEach(({ data: piData, error: piError }) => {
+      if (!piError && piData?.length) {
+        piData.forEach((r) => r.page_intent && allIntents.add(r.page_intent));
+      }
+    });
+    const sorted = [...allIntents].toSorted(strCompare);
+    return sorted.map((p) => toFilterOption(p, p));
+  }
+  return [];
+}
+
+function buildDimensionOptions(rows) {
+  const brands = [];
+  const brandIds = new Set();
+  rows.forEach((r) => {
+    if (r.brand_id && r.brand_name && !brandIds.has(r.brand_id)) {
+      brandIds.add(r.brand_id);
+      brands.push(toFilterOption(r.brand_id, r.brand_name));
+    }
+  });
+  const sortedBrands = brands.toSorted((a, b) => strCompare(a.label, b.label));
+
+  const catNames = [...new Set(rows.map((r) => r.category_name).filter(Boolean))];
+  const categories = catNames.toSorted(strCompare).map((c) => toFilterOption(c, c));
+
+  const topicVals = [...new Set(rows.map((r) => r.topics).filter(Boolean))];
+  const topics = topicVals.toSorted(strCompare).map((t) => toFilterOption(t, t));
+
+  const originVals = [...new Set(rows.map((r) => r.origin).filter(Boolean))];
+  const origins = originVals
+    .map((o) => o.toLowerCase())
+    .toSorted(strCompare)
+    .map((o) => toFilterOption(o, o));
+
+  const regionVals = [...new Set(rows.map((r) => r.region_code).filter(Boolean))];
+  const regions = regionVals.toSorted(strCompare).map((r) => toFilterOption(r, r));
+
+  return {
+    brands: sortedBrands,
+    categories,
+    topics,
+    origins,
+    regions,
+  };
 }
 
 /**
@@ -88,138 +230,33 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
     const { spaceCatId, brandId } = context.params;
     const params = parseFilterDimensionsParams(context);
     const defaults = defaultDateRange();
-
     const organizationId = spaceCatId;
-    const startDate = params.startDate || defaults.startDate;
-    const endDate = params.endDate || defaults.endDate;
-    const model = params.platform || 'chatgpt';
-    const {
-      siteId, categoryId, topicId, regionCode, origin,
-    } = params;
     const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
 
-    let q = client
-      .from('brand_presence_executions')
-      .select('brand_id, brand_name, category_name, topics, origin, region_code, site_id')
-      .eq('organization_id', organizationId)
-      .gte('execution_date', startDate)
-      .lte('execution_date', endDate)
-      .eq('model', model);
+    const q = buildExecutionsQuery(client, organizationId, params, defaults, filterByBrandId);
+    const { data, error } = await q;
 
-    if (shouldApplyFilter(siteId) && siteId !== '*') {
-      q = q.eq('site_id', siteId);
+    if (error) {
+      return badRequest(error.message);
     }
-    if (filterByBrandId) {
-      q = q.eq('brand_id', filterByBrandId);
-    }
-    if (shouldApplyFilter(categoryId)) {
-      q = isValidUUID(categoryId) ? q.eq('category_id', categoryId) : q.eq('category_name', categoryId);
-    }
-    if (shouldApplyFilter(topicId)) {
-      q = q.eq('topics', topicId);
-    }
-    if (shouldApplyFilter(regionCode)) {
-      q = q.eq('region_code', regionCode);
-    }
-    if (shouldApplyFilter(origin)) {
-      q = q.ilike('origin', origin);
-    }
-    // user_intent and branding accepted as optional params for future schema support
-    // (brand_presence_executions does not yet have these columns)
-
-    const { data, error } = await q.limit(5000);
-
-    if (error) return badRequest(error.message);
 
     const rows = data || [];
-
-    let siteIds = [];
-    if (shouldApplyFilter(siteId) && siteId !== '*') {
-      siteIds = [siteId];
-    } else if (filterByBrandId) {
-      siteIds = [...new Set(rows.map((r) => r.site_id).filter(Boolean))];
-    } else {
-      const { data: sitesData, error: sitesError } = await client
-        .from('sites')
-        .select('id')
-        .eq('organization_id', organizationId)
-        .limit(5000);
-      if (!sitesError && sitesData?.length) {
-        siteIds = sitesData.map((s) => s.id).filter(Boolean);
-      }
-    }
-
-    let pageIntents = [];
-    // Avoid URL length limits (~2–8KB) when passing many UUIDs to .in()
-    const IN_FILTER_CHUNK_SIZE = 50;
-
-    if (shouldApplyFilter(siteId) && siteId !== '*') {
-      // Explicit site filter: single site, no URL length issue
-      const { data: piData, error: piError } = await client
-        .from('page_intents')
-        .select('page_intent')
-        .eq('site_id', siteId)
-        .limit(5000);
-      if (!piError && piData?.length) {
-        const strCompare = (a, b) => (a || '').localeCompare(b || '');
-        const intents = [...new Set(piData.map((r) => r.page_intent).filter(Boolean))];
-        pageIntents = intents.sort(strCompare).map((p) => toFilterOption(p, p));
-      }
-    } else if (!filterByBrandId) {
-      // brands/all: use org-based join to avoid URL length limits with 100+ site IDs
-      const { data: piData, error: piError } = await client
-        .from('page_intents')
-        .select('page_intent,sites!inner(organization_id)')
-        .eq('sites.organization_id', organizationId)
-        .limit(5000);
-      if (!piError && piData?.length) {
-        const strCompare = (a, b) => (a || '').localeCompare(b || '');
-        const intents = [...new Set(piData.map((r) => r.page_intent).filter(Boolean))];
-        pageIntents = intents.sort(strCompare).map((p) => toFilterOption(p, p));
-      }
-    } else if (siteIds.length > 0) {
-      // specific brand: batch .in() to avoid URL length limits
-      const chunks = [];
-      for (let i = 0; i < siteIds.length; i += IN_FILTER_CHUNK_SIZE) {
-        chunks.push(siteIds.slice(i, i + IN_FILTER_CHUNK_SIZE));
-      }
-      const results = await Promise.all(chunks.map((chunk) => client
-        .from('page_intents')
-        .select('page_intent')
-        .in('site_id', chunk)
-        .limit(5000)));
-      const allIntents = new Set();
-      results.forEach(({ data: piData, error: piError }) => {
-        if (!piError && piData?.length) {
-          piData.forEach((r) => r.page_intent && allIntents.add(r.page_intent));
-        }
-      });
-      const strCompare = (a, b) => (a || '').localeCompare(b || '');
-      pageIntents = [...allIntents].sort(strCompare).map((p) => toFilterOption(p, p));
-    }
-
-    const brands = [];
-    const brandIds = new Set();
-    rows.forEach((r) => {
-      if (r.brand_id && r.brand_name && !brandIds.has(r.brand_id)) {
-        brandIds.add(r.brand_id);
-        brands.push(toFilterOption(r.brand_id, r.brand_name));
-      }
-    });
-    brands.sort((a, b) => (a.label || '').localeCompare(b.label || ''));
-
-    const strCompare = (a, b) => (a || '').localeCompare(b || '');
-    const catNames = [...new Set(rows.map((r) => r.category_name).filter(Boolean))];
-    const categories = catNames.sort(strCompare).map((c) => toFilterOption(c, c));
-    const topicVals = [...new Set(rows.map((r) => r.topics).filter(Boolean))];
-    const topics = topicVals.sort(strCompare).map((t) => toFilterOption(t, t));
-    const originVals = [...new Set(rows.map((r) => r.origin).filter(Boolean))];
-    const origins = originVals
-      .map((o) => o.toLowerCase())
-      .sort(strCompare)
-      .map((o) => toFilterOption(o, o));
-    const regionVals = [...new Set(rows.map((r) => r.region_code).filter(Boolean))];
-    const regions = regionVals.sort(strCompare).map((r) => toFilterOption(r, r));
+    const siteFilter = params.siteId;
+    const siteIds = await resolveSiteIds(client, organizationId, siteFilter, filterByBrandId, rows);
+    const pageIntents = await fetchPageIntents(
+      client,
+      organizationId,
+      siteFilter,
+      filterByBrandId,
+      siteIds,
+    );
+    const {
+      brands,
+      categories,
+      topics,
+      origins,
+      regions,
+    } = buildDimensionOptions(rows);
 
     return ok({
       brands,
