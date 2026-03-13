@@ -119,16 +119,23 @@ llmo-customer-config-by-space-cat-id-v2:
       Merges the provided partial configuration with the existing configuration in S3.
       This allows incremental updates without sending the entire config.
       
+      **Merge Behavior:**
       - Only the fields provided in the request will be updated
-      - Arrays (brands, categories, topics) are merged by ID
+      - Top-level arrays (brands, categories, topics) are merged by ID
+      - Within a brand, if you provide an array field (brandAliases, competitors, urls, socialAccounts, prompts), it **replaces** the entire array
+      - To add items to an existing array, include all existing items plus new ones
       - Unchanged items preserve their metadata (updatedBy, updatedAt)
       - Modified or new items get updated metadata with current user and timestamp
       
-      Use this endpoint to:
+      **Use Cases:**
       - Add new brands without affecting existing ones
-      - Update specific categories or topics
+      - Update specific brand fields (description, vertical, aliases, competitors, URLs, etc.)
       - Add prompts to existing brands
-      - Update brand metadata
+      - Update categories or topics
+      
+      **Array Replacement Example:**
+      If a brand has `brandAliases: [{name: "PS"}]` and you PATCH with `brandAliases: [{name: "Photoshop"}]`,
+      the result will be `brandAliases: [{name: "Photoshop"}]` (not both).
       
       The endpoint tracks and returns statistics about what was modified.
     operationId: patchCustomerConfigBySpaceCatIdV2
@@ -158,15 +165,20 @@ llmo-customer-config-by-space-cat-id-v2:
                         - value: "https://example.com"
                           regions: ["US"]
                       prompts: []
+            updateSingleBrand:
+              $ref: './examples.yaml#/customer-config-v2-patch-update-single-brand'
+            addPromptsToBrand:
+              $ref: './examples.yaml#/customer-config-v2-patch-add-prompts-to-brand'
+            updateBrandAliases:
+              $ref: './examples.yaml#/customer-config-v2-patch-update-brand-aliases'
+            updateBrandCompetitors:
+              $ref: './examples.yaml#/customer-config-v2-patch-update-brand-competitors'
+            updateBrandUrls:
+              $ref: './examples.yaml#/customer-config-v2-patch-update-brand-urls'
+            updateMultipleBrandFields:
+              $ref: './examples.yaml#/customer-config-v2-patch-update-multiple-brand-fields'
             updateCategory:
-              summary: Update specific categories
-              value:
-                customer:
-                  categories:
-                    - id: "category-1"
-                      name: "Updated Category Name"
-                      status: "active"
-                      origin: "human"
+              $ref: './examples.yaml#/customer-config-v2-patch-update-category'
     responses:
       '200':
         description: Customer configuration updated successfully
