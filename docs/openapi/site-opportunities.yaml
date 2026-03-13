@@ -594,6 +594,30 @@ site-opportunity-suggestions-auto-fix:
                       description: |
                         Optional. Meaningful for action assess or assess-urls. When true, worker
                         runs only no-AEM checks; for assess, promise token is not required.
+                    fixTargetGroups:
+                      type: array
+                      description: |
+                        Optional override for fix-target grouping. When provided, suggestions
+                        are grouped by the given fixTargetPageId (an AEM page UUID) instead of
+                        by each suggestion's detected page URL. The worker applies the fix to
+                        the specified page directly. Typically populated by the UI when the
+                        page-relationship dialog resolves a source (blueprint/language-master)
+                        page. When absent, the API falls back to grouping by suggestion URL.
+                      items:
+                        type: object
+                        required:
+                          - suggestionIds
+                          - fixTargetPageId
+                        properties:
+                          suggestionIds:
+                            type: array
+                            items:
+                              $ref: './schemas.yaml#/Id'
+                          fixTargetPageId:
+                            type: string
+                            format: uuid
+                            description: AEM page UUID of the source page where the fix should be applied.
+                            example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
                     customData:
                       description: Additional custom data to forward to the autofix worker
 

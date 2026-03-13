@@ -86,6 +86,7 @@ function isStaticRoute(routePattern) {
 * @param {Object} botBlockerController - The bot blocker controller.
  * @param {Object} sentimentController - The sentiment controller.
  * @param {Object} consumersController - The consumers controller.
+ * @param {Object} pageRelationshipsController - The page relationships controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -128,6 +129,7 @@ export default function getRouteHandlers(
   botBlockerController,
   sentimentController,
   consumersController,
+  pageRelationshipsController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -211,6 +213,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/opportunities/top-paid': topPaidOpportunitiesController.getTopPaidOpportunities,
     'GET /sites/:siteId/opportunities/by-status/:status': opportunitiesController.getByStatus,
     'GET /sites/:siteId/opportunities/:opportunityId': opportunitiesController.getByID,
+    'POST /sites/:siteId/page-relationships/search': pageRelationshipsController.search,
     'POST /sites/:siteId/opportunities': opportunitiesController.createOpportunity,
     'PATCH /sites/:siteId/opportunities/:opportunityId': opportunitiesController.patchOpportunity,
     'DELETE /sites/:siteId/opportunities/:opportunityId': opportunitiesController.removeOpportunity,

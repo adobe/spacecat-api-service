@@ -653,3 +653,84 @@ customer-config-v2-patch:
               source: "api"
               categoryId: "859b91c5-0420-4f3b-a464-8d6f6ac34f64"
               topicId: "topic-acrobat-features"
+
+page-relationships-search-request:
+  description: Example request body for on-demand page relationship search
+  value:
+    pages:
+      - key: "row-1"
+        pageUrl: "/de/de/adventures"
+        suggestionType: "Missing Title"
+      - key: "row-2"
+        pageUrl: "/us/en/adventures/camping"
+        suggestionType: "Missing Description"
+
+page-relationships-search-response:
+  description: Relationship lookup response with resolved relationships
+  value:
+    supported: true
+    relationships:
+      "row-1":
+        pagePath: "/de/de/adventures"
+        pageId: "123e4567-e89b-12d3-a456-426614174000"
+        chain:
+          - pageId: "123e4567-e89b-12d3-a456-426614174010"
+            pagePath: "/content/site/language-masters/de/adventures"
+            metadata:
+              sourceType: "liveCopyOf"
+          - pageId: "123e4567-e89b-12d3-a456-426614174011"
+            pagePath: "/content/site/language-masters/en/adventures"
+            metadata:
+              sourceType: "langCopyOf"
+      "row-2":
+        pagePath: "/us/en/adventures/camping"
+        pageId: "123e4567-e89b-12d3-a456-426614174001"
+        chain:
+          - pageId: "123e4567-e89b-12d3-a456-426614174012"
+            pagePath: "/content/site/us/adventures"
+            metadata:
+              sourceType: "liveCopyOf"
+          - pageId: "123e4567-e89b-12d3-a456-426614174013"
+            pagePath: "/content/site/global/adventures"
+            metadata:
+              sourceType: "langCopyOf"
+    errors: {}
+
+page-relationships-search-no-relationship-response:
+  description: Relationship lookup response where no source relationship is detected for a page
+  value:
+    supported: true
+    relationships:
+      "row-1":
+        pagePath: "/de/de/adventures"
+        pageId: "123e4567-e89b-12d3-a456-426614174000"
+        chain: []
+    errors: {}
+
+page-relationships-search-partial-response:
+  description: Relationship lookup response with partial per-page failures
+  value:
+    supported: true
+    relationships:
+      "row-2":
+        pagePath: "/us/en/adventures/camping"
+        pageId: "123e4567-e89b-12d3-a456-426614174002"
+        chain:
+          - pageId: "123e4567-e89b-12d3-a456-426614174020"
+            pagePath: "/content/site/language-masters/de/adventures"
+            metadata:
+              sourceType: "langCopyOf"
+          - pageId: "123e4567-e89b-12d3-a456-426614174021"
+            pagePath: "/content/site/language-masters/en/adventures"
+            metadata:
+              sourceType: "langCopyOf"
+    errors:
+      "row-1":
+        error: "Could not determine page ID"
+
+page-relationships-search-unsupported-response:
+  description: Response when page relationships are not supported for a site
+  value:
+    supported: false
+    relationships: {}
+    errors: {}
