@@ -82,6 +82,14 @@ export default function plgOnboardingTests(getHttpClient, resetData, options = {
         });
         expect(res.status).to.equal(400);
       });
+
+      it('returns 400 for invalid domain via non-admin user', async () => {
+        const http = getHttpClient();
+        const res = await http.user.post('/plg/onboard', {
+          domain: '../../etc/passwd',
+        });
+        expect(res.status).to.equal(400);
+      });
     });
 
     // ── GET /plg/onboard/status/:imsOrgId ──
@@ -97,6 +105,12 @@ export default function plgOnboardingTests(getHttpClient, resetData, options = {
         // admin token has ORG_1 tenant; requesting ORG_2 status should be forbidden
         const http = getHttpClient();
         const res = await http.admin.get(`/plg/onboard/status/${ORG_2_IMS_ORG_ID}`);
+        expect(res.status).to.equal(403);
+      });
+
+      it('returns 403 for non-admin user with mismatched org', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/plg/onboard/status/${ORG_2_IMS_ORG_ID}`);
         expect(res.status).to.equal(403);
       });
 
@@ -122,6 +136,13 @@ export default function plgOnboardingTests(getHttpClient, resetData, options = {
           expect(record.status).to.equal('ONBOARDED');
           expect(record.siteId).to.be.a('string');
           expect(record.organizationId).to.be.a('string');
+        });
+
+        it('returns 200 for non-admin user with matching org', async () => {
+          const http = getHttpClient();
+          const res = await http.user.get(`/plg/onboard/status/${ORG_1_IMS_ORG_ID}`);
+          expect(res.status).to.equal(200);
+          expect(res.body).to.be.an('array').with.lengthOf(1);
         });
       }
     });
