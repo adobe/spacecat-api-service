@@ -41,10 +41,16 @@ Content-Type: application/json
   {
     "name": "2026 Corvette Stingray",
     "description": "Track sentiment about the latest Corvette model",
-    "subPrompts": [
-      "What do people say about performance?",
-      "How is the design being received?",
-      "Price sentiment?"
+    "urls": [
+      {
+        "url": "https://en.wikipedia.org/wiki/Corvette_Stingray",
+        "timesCited": 0,
+        "category": "automotive",
+        "subPrompts": [
+          "What do people say about performance?",
+          "How is the design being received?"
+        ]
+      }
     ],
     "enabled": true
   }
@@ -59,13 +65,19 @@ Content-Type: application/json
   {
     "name": "BMW XM 2026",
     "description": "Track sentiment about BMW XM luxury SUV",
-    "subPrompts": ["Performance feedback?", "Interior quality?"],
+    "urls": [
+      {
+        "url": "https://en.wikipedia.org/wiki/BMW_XM",
+        "timesCited": 0,
+        "subPrompts": ["Performance feedback?", "Interior quality?"]
+      }
+    ],
     "enabled": true
   },
   {
     "name": "Mediterranean Cruises",
     "description": "Monitor cruise line sentiment",
-    "subPrompts": ["Service quality?", "Value for money?"],
+    "urls": [],
     "enabled": true
   },
   {
@@ -117,33 +129,6 @@ Content-Type: application/json
 ### Delete a topic
 DELETE {{baseUrl}}/sites/{{siteId}}/sentiment/topics/{{topicId}}
 x-api-key: {{apiKey}}
-
-# =============================================================================
-# TOPICS - Sub-Prompts Management
-# =============================================================================
-
-### Add sub-prompts to a topic
-POST {{baseUrl}}/sites/{{siteId}}/sentiment/topics/{{topicId}}/prompts
-x-api-key: {{apiKey}}
-Content-Type: application/json
-
-{
-  "prompts": [
-    "What are users saying about reliability?",
-    "How does it compare to competitors?"
-  ]
-}
-
-### Remove sub-prompts from a topic
-POST {{baseUrl}}/sites/{{siteId}}/sentiment/topics/{{topicId}}/prompts/remove
-x-api-key: {{apiKey}}
-Content-Type: application/json
-
-{
-  "prompts": [
-    "What are users saying about reliability?"
-  ]
-}
 
 # =============================================================================
 # GUIDELINES - List & Create
@@ -348,15 +333,14 @@ Content-Type: application/json
 # 2. Create topics (create test data)
 # 3. List topics (verify added)
 # 4. Get specific topic (verify details)
-# 5. Add sub-prompts to topic
-# 6. Update topic (modify)
-# 7. List guidelines (should be empty or show existing)
-# 8. Create guidelines with audit associations
-# 9. Get specific guideline (verify details)
-# 10. Link/unlink audits
-# 11. Get config (verify combined response)
-# 12. Get config with audit filter (verify filtering)
-# 13. Delete topics and guidelines (cleanup)
+# 5. Update topic (modify name, urls, etc.)
+# 6. List guidelines (should be empty or show existing)
+# 7. Create guidelines with audit associations
+# 8. Get specific guideline (verify details)
+# 9. Link/unlink audits
+# 10. Get config (verify combined response)
+# 11. Get config with audit filter (verify filtering)
+# 12. Delete topics and guidelines (cleanup)
 
 # =============================================================================
 # VALID AUDIT TYPES

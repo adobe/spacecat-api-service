@@ -309,6 +309,7 @@ describe('getRouteHandlers', () => {
 
   const mockEntitlementController = {
     getByOrganizationID: () => null,
+    createEntitlement: () => null,
   };
 
   const mockReportsController = {
@@ -329,8 +330,6 @@ describe('getRouteHandlers', () => {
     createTopics: sinon.stub(),
     updateTopic: sinon.stub(),
     deleteTopic: sinon.stub(),
-    addSubPrompts: sinon.stub(),
-    removeSubPrompts: sinon.stub(),
     linkAudits: sinon.stub(),
     unlinkAudits: sinon.stub(),
     listGuidelines: sinon.stub(),
@@ -348,6 +347,11 @@ describe('getRouteHandlers', () => {
     register: sinon.stub(),
     update: sinon.stub(),
     revoke: sinon.stub(),
+  };
+
+  const mockPlgOnboardingController = {
+    onboard: sinon.stub(),
+    getStatus: sinon.stub(),
   };
 
   it('segregates static and dynamic routes', () => {
@@ -391,6 +395,7 @@ describe('getRouteHandlers', () => {
       mockBotBlockerController,
       mockSentimentController,
       mockConsumersController,
+      mockPlgOnboardingController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -419,6 +424,7 @@ describe('getRouteHandlers', () => {
       'POST /tools/scrape/jobs',
       'POST /consent-banner',
       'POST /llmo/onboard',
+      'POST /plg/onboard',
       'GET /sites-resolve',
       'GET /trial-users/email-preferences',
       'PATCH /trial-users/email-preferences',
@@ -443,6 +449,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['POST /consent-banner']).to.equal(mockConsentBannerController.takeScreenshots);
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
     expect(staticRoutes['POST /llmo/onboard']).to.equal(mockLlmoController.onboardCustomer);
+    expect(staticRoutes['POST /plg/onboard']).to.equal(mockPlgOnboardingController.onboard);
     expect(staticRoutes['GET /sites/resolve']).to.equal(mockSitesController.resolveSite);
     expect(staticRoutes['GET /trial-users/email-preferences']).to.equal(mockTrialUserController.getEmailPreferences);
     expect(staticRoutes['PATCH /trial-users/email-preferences']).to.equal(mockTrialUserController.updateEmailPreferences);
@@ -693,6 +700,7 @@ describe('getRouteHandlers', () => {
       'GET /consumers/by-client-id/:clientId',
       'PATCH /consumers/:consumerId',
       'POST /consumers/:consumerId/revoke',
+      'GET /plg/onboard/status/:imsOrgId',
     );
 
     expect(dynamicRoutes['GET /audits/latest/:auditType'].handler).to.equal(mockAuditsController.getAllLatest);
@@ -711,6 +719,10 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /organizations/by-ims-org-id/:imsOrgId'].paramNames).to.deep.equal(['imsOrgId']);
     expect(dynamicRoutes['GET /organizations/by-ims-org-id/:imsOrgId/slack-config'].handler).to.equal(mockOrganizationsController.getSlackConfigByImsOrgID);
     expect(dynamicRoutes['GET /organizations/by-ims-org-id/:imsOrgId/slack-config'].paramNames).to.deep.equal(['imsOrgId']);
+    expect(dynamicRoutes['GET /organizations/:organizationId/entitlements'].handler).to.equal(mockEntitlementController.getByOrganizationID);
+    expect(dynamicRoutes['GET /organizations/:organizationId/entitlements'].paramNames).to.deep.equal(['organizationId']);
+    expect(dynamicRoutes['POST /organizations/:organizationId/entitlements'].handler).to.equal(mockEntitlementController.createEntitlement);
+    expect(dynamicRoutes['POST /organizations/:organizationId/entitlements'].paramNames).to.deep.equal(['organizationId']);
     expect(dynamicRoutes['GET /sites/:siteId'].handler).to.equal(mockSitesController.getByID);
     expect(dynamicRoutes['GET /sites/:siteId'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/by-delivery-type/:deliveryType'].handler).to.equal(mockSitesController.getAllByDeliveryType);
