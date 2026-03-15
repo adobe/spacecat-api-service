@@ -1545,13 +1545,11 @@ function SuggestionsController(ctx, sqs, env) {
         return suggestion.save();
       }));
 
-      const isDev = env.AWS_ENV === 'dev';
       return accepted({
         jobId: job.getId(),
         status: 'pre_analysis_submitted',
         experimentId,
         experimentBatchId: drsResult.experiment_batch_id,
-        pollUrl: `https://spacecat.experiencecloud.live/api/${isDev ? 'ci' : 'v1'}/sites/${siteId}/opportunities/${opportunityId}/suggestions/edge-deploy/${job.getId()}/status`,
         metadata: {
           total: suggestionIds.length,
           accepted: validSuggestionIds.length,
