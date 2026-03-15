@@ -504,6 +504,171 @@ site-opportunity-suggestions-status:
     security:
       - ims_key: [ ]
 
+site-opportunity-suggestions-edge-deploy:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+  post:
+    operationId: deploySuggestionsToEdge
+    summary: Deploy suggestions to edge with experiment pre/post analysis
+    description: |
+      Initiates an asynchronous edge deployment with DRS experiment analysis.
+      First submits a pre-analysis to DRS, creates an AsyncJob to track progress,
+      and returns a 202 Accepted with a poll URL for status updates.
+      The deployment proceeds through: pre-analysis -> edge deploy -> post-analysis.
+    tags:
+      - opportunity-suggestions
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+              - suggestionIds
+            properties:
+              suggestionIds:
+                type: array
+                items:
+                  type: string
+                  format: uuid
+                minItems: 1
+                description: Array of suggestion UUIDs to deploy
+    responses:
+      '202':
+        description: Experiment deployment initiated
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                jobId:
+                  type: string
+                  format: uuid
+                  description: AsyncJob ID for tracking
+                status:
+                  type: string
+                  enum: [pre_analysis_submitted]
+                experimentId:
+                  type: string
+                  description: Experiment identifier linking pre and post phases
+                experimentBatchId:
+                  type: string
+                  description: DRS batch ID for the pre-analysis
+                pollUrl:
+                  type: string
+                  format: uri
+                  description: URL to poll for deployment status
+                metadata:
+                  type: object
+                  properties:
+                    total:
+                      type: integer
+                    accepted:
+                      type: integer
+                    failed:
+                      type: integer
+                failedSuggestions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      uuid:
+                        type: string
+                      index:
+                        type: integer
+                      message:
+                        type: string
+                      statusCode:
+                        type: integer
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]
+
+site-opportunity-suggestions-edge-deploy-status:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+    - name: jobId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: The AsyncJob ID returned from edge-deploy
+  get:
+    operationId: getEdgeDeployStatus
+    summary: Get edge deployment experiment status
+    description: |
+      Returns the current status of an asynchronous edge deployment experiment,
+      including the deploy phase, experiment IDs, and any errors.
+    tags:
+      - opportunity-suggestions
+    responses:
+      '200':
+        description: Edge deploy job status
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                jobId:
+                  type: string
+                  format: uuid
+                status:
+                  type: string
+                  enum: [IN_PROGRESS, COMPLETED, FAILED, CANCELLED]
+                deployStatus:
+                  type: string
+                  enum:
+                    - pre_analysis_submitted
+                    - pre_analysis_done
+                    - deployed
+                    - post_analysis_submitted
+                    - post_analysis_done
+                    - failed
+                    - deployed_post_analysis_failed
+                experimentId:
+                  type: string
+                experimentIds:
+                  type: array
+                  items:
+                    type: string
+                  description: DRS experiment batch IDs (pre and/or post)
+                startedAt:
+                  type: string
+                  format: date-time
+                endedAt:
+                  type:
+                    - string
+                    - 'null'
+                  format: date-time
+                error:
+                  type:
+                    - object
+                    - 'null'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - ims_key: [ ]
+
 site-opportunity-suggestions-auto-fix:
   parameters:
     - $ref: './parameters.yaml#/siteId'
