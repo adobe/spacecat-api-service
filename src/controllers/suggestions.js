@@ -21,14 +21,12 @@ import {
 import {
   hasText,
   isArray, isNonEmptyArray,
-  isGranted,
   isNonEmptyObject,
   isObject,
   isInteger,
   isValidUUID,
   isValidUrl,
 } from '@adobe/spacecat-shared-utils';
-
 import { Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
@@ -188,20 +186,6 @@ function SuggestionsController(ctx, sqs, env) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
-   * When the organization is freemium, returns only suggestions that have been granted (unlocked).
-   * Otherwise returns the same list unchanged.
-   * @param {Object} site - Site model (must have getOrganizationId()).
-   * @param {Array} suggestionEntities - List of suggestion entities.
-   * @returns {Array} Filtered list when freemium, otherwise unchanged.
-   */
-  const filterGrantedIfFreemium = (site, suggestionEntities) => {
-    if (!suggestionEntities || suggestionEntities.length === 0) return suggestionEntities;
-    const organizationId = typeof site?.getOrganizationId === 'function' ? site.getOrganizationId() : undefined;
-    if (!organizationId || !Entitlement?.isFreemium(organizationId)) return suggestionEntities;
-    return suggestionEntities.filter((s) => isGranted(s));
-  };
-
-  /**
    * Gets all suggestions for a given site and opportunity
    * @param {Object} context of the request
    * @returns {Promise<Response>} Array of suggestions response.
@@ -254,8 +238,10 @@ function SuggestionsController(ctx, sqs, env) {
         (sugg) => statuses.includes(sugg.getStatus()),
       );
     }
-    const filtered = filterGrantedIfFreemium(site, suggestionEntities);
-    const suggestions = filtered.map(
+    const suggestionIds = suggestionEntities.map((s) => s.getId());
+    const { grantedIds } = await Suggestion.splitSuggestionsByGrantStatus(suggestionIds);
+    const grantedEntities = suggestionEntities.filter((s) => grantedIds.includes(s.getId()));
+    const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
     );
     return ok(suggestions);
@@ -313,8 +299,10 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
-    const filtered = filterGrantedIfFreemium(site, suggestionEntities);
-    const suggestions = filtered.map(
+    const suggestionIds = suggestionEntities.map((s) => s.getId());
+    const { grantedIds } = await Suggestion.splitSuggestionsByGrantStatus(suggestionIds);
+    const grantedEntities = suggestionEntities.filter((s) => grantedIds.includes(s.getId()));
+    const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
     );
 
@@ -369,8 +357,10 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
-    const filtered = filterGrantedIfFreemium(site, suggestionEntities);
-    const suggestions = filtered.map(
+    const suggestionIds = suggestionEntities.map((s) => s.getId());
+    const { grantedIds } = await Suggestion.splitSuggestionsByGrantStatus(suggestionIds);
+    const grantedEntities = suggestionEntities.filter((s) => grantedIds.includes(s.getId()));
+    const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
     );
     return ok(suggestions);
@@ -428,8 +418,10 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
-    const filtered = filterGrantedIfFreemium(site, suggestionEntities);
-    const suggestions = filtered.map(
+    const suggestionIds = suggestionEntities.map((s) => s.getId());
+    const { grantedIds } = await Suggestion.splitSuggestionsByGrantStatus(suggestionIds);
+    const grantedEntities = suggestionEntities.filter((s) => grantedIds.includes(s.getId()));
+    const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
     );
     return ok({
@@ -487,7 +479,9 @@ function SuggestionsController(ctx, sqs, env) {
     }
     // Freemium: only allow access to granted suggestions
     const organizationId = typeof site?.getOrganizationId === 'function' ? site.getOrganizationId() : undefined;
-    if (organizationId && Entitlement?.isFreemium(organizationId) && !isGranted(suggestion)) {
+    const isFreemium = organizationId
+      && Entitlement?.isFreemium(organizationId);
+    if (isFreemium && !(await Suggestion.isSuggestionGranted(suggestion.getId()))) {
       return notFound('Suggestion not found');
     }
     return ok(SuggestionDto.toJSON(suggestion, view, opportunity));
@@ -1011,6 +1005,14 @@ function SuggestionsController(ctx, sqs, env) {
     const suggestions = await Suggestion.allByOpportunityId(
       opportunityId,
     );
+    const requestedSuggestions = suggestions.filter((s) => suggestionIds.includes(s.getId()));
+    if (requestedSuggestions.length > 0) {
+      const requestedIds = requestedSuggestions.map((s) => s.getId());
+      const { notGrantedIds } = await Suggestion.splitSuggestionsByGrantStatus(requestedIds);
+      if (notGrantedIds.length > 0) {
+        return badRequest('All suggestion IDs must be granted before autofix can be executed');
+      }
+    }
     const validSuggestions = [];
     const failedSuggestions = [];
     suggestions.forEach((suggestion) => {

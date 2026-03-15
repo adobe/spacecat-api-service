@@ -362,6 +362,107 @@ describe('Opportunities Controller', () => {
     expect(error).to.have.property('message', 'Opportunity not found');
   });
 
+  it('gets opportunity by ID invokes grant suggestions handler when Token is in dataAccess', async () => {
+    const mockToken = {
+      findBySiteIdAndTokenType: sandbox.stub().resolves({ getRemaining: () => 1 }),
+    };
+    const ctxWithToken = {
+      ...mockContext,
+      dataAccess: { ...mockOpportunityDataAccess, Token: mockToken },
+    };
+    const controllerWithToken = OpportunitiesController(ctxWithToken);
+    const previousType = opptys[0].type;
+    opptys[0].type = 'cwv';
+    try {
+      const response = await controllerWithToken.getByID({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      });
+      expect(response.status).to.equal(200);
+      if (mockToken.findBySiteIdAndTokenType.called) {
+        expect(mockToken.findBySiteIdAndTokenType).to.have.been.calledOnceWith(
+          SITE_ID,
+          'monthly_suggestion_cwv',
+        );
+      }
+    } finally {
+      opptys[0].type = previousType;
+    }
+  });
+
+  it('getByID catches grant suggestions handler errors gracefully', async () => {
+    const mockSuggestion = {
+      allByOpportunityIdAndStatus: sandbox.stub()
+        .rejects(new Error('db failure')),
+    };
+    const mockToken = {
+      findBySiteIdAndTokenType: sandbox.stub(),
+    };
+    const ctxWithToken = {
+      ...mockContext,
+      dataAccess: {
+        ...mockOpportunityDataAccess,
+        Suggestion: mockSuggestion,
+        Token: mockToken,
+      },
+    };
+    const controllerWithToken = OpportunitiesController(ctxWithToken);
+    const previousType = opptys[0].type;
+    opptys[0].type = 'cwv';
+    try {
+      const response = await controllerWithToken.getByID({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+      });
+      expect(response.status).to.equal(200);
+      expect(mockContext.log.warn).to.have.been.calledOnce;
+    } finally {
+      opptys[0].type = previousType;
+    }
+  });
+
+  it('getByID catches grant suggestions handler errors gracefully when error has no message', async () => {
+    const mockSuggestion = {
+      allByOpportunityIdAndStatus: sandbox.stub()
+        // eslint-disable-next-line prefer-promise-reject-errors
+        .callsFake(() => Promise.reject(null)),
+    };
+    const mockToken = {
+      findBySiteIdAndTokenType: sandbox.stub(),
+    };
+    const mockSiteEntity = {
+      getId: () => SITE_ID,
+    };
+    const ctxWithToken = {
+      ...mockContext,
+      dataAccess: {
+        ...mockOpportunityDataAccess,
+        Site: { findById: sandbox.stub().resolves(mockSiteEntity) },
+        Suggestion: mockSuggestion,
+        Token: mockToken,
+      },
+    };
+    const controllerWithToken = OpportunitiesController(ctxWithToken);
+    const previousType = opptys[0].type;
+    opptys[0].type = 'cwv';
+    try {
+      const response = await controllerWithToken.getByID({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+      });
+      expect(response.status).to.equal(200);
+      expect(mockContext.log.warn).to.have.been.calledOnceWith(
+        'Grant suggestions handler failed',
+        null,
+      );
+    } finally {
+      opptys[0].type = previousType;
+    }
+  });
+
   // TODO: Complete tests for OpportunitiesController
   it('creates an opportunity', async () => {
     const response = await opportunitiesController.createOpportunity({

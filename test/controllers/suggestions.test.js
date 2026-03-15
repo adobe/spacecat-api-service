@@ -462,6 +462,10 @@ describe('Suggestions Controller', () => {
         return Promise.resolve(mockSuggestionEntity(suggData));
       }),
       getFixEntitiesBySuggestionId: sandbox.stub(),
+      splitSuggestionsByGrantStatus: sandbox.stub().callsFake((suggestionIds) => {
+        const ids = suggestionIds || [];
+        return Promise.resolve({ grantedIds: ids, notGrantedIds: [], grantIds: ids.map((id) => `grant-${id}`) });
+      }),
     };
 
     mockSuggestionDataAccess = {
@@ -1590,6 +1594,38 @@ describe('Suggestions Controller', () => {
     expect(response.status).to.equal(404);
     const error = await response.json();
     expect(error).to.have.property('message', 'not found');
+  });
+
+  it('getByID returns not found for freemium org with ungranted suggestion', async () => {
+    const ORG_ID = 'org-uuid';
+    const freemiumSite = {
+      getId: sandbox.stub().returns(SITE_ID),
+      getOrganizationId: sandbox.stub().returns(ORG_ID),
+      getDeliveryType: sandbox.stub().returns('aem_edge'),
+    };
+    const mockEntitlement = {
+      isFreemium: sandbox.stub().returns(true),
+    };
+    mockSite.findById.withArgs(SITE_ID).resolves(freemiumSite);
+    mockSuggestionDataAccess.Entitlement = mockEntitlement;
+    mockSuggestionDataAccess.Suggestion.isSuggestionGranted = sandbox.stub()
+      .resolves(false);
+    const ctrl = SuggestionsController({
+      dataAccess: mockSuggestionDataAccess,
+      pathInfo: { headers: { 'x-product': 'llmo' } },
+      ...authContext,
+    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+    const response = await ctrl.getByID({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+        suggestionId: SUGGESTION_IDS[0],
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(404);
+    delete mockSuggestionDataAccess.Entitlement;
+    delete mockSuggestionDataAccess.Suggestion.isSuggestionGranted;
   });
 
   describe('getSuggestionFixes', () => {
@@ -3259,6 +3295,26 @@ describe('Suggestions Controller', () => {
 
     afterEach(() => {
       sandbox.restore();
+    });
+
+    it('returns bad request when any suggestion ID is not granted for autofix', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      const requestedEntities = [mockSuggestionEntity(suggs[0]), mockSuggestionEntity(suggs[2])];
+      mockSuggestion.allByOpportunityId.resolves(requestedEntities);
+      mockSuggestion.splitSuggestionsByGrantStatus.resolves({
+        grantedIds: [requestedEntities[0].getId()],
+        notGrantedIds: [requestedEntities[1].getId()],
+        grantIds: ['grant-1'],
+      });
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]] },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body).to.have.property('message', 'All suggestion IDs must be granted before autofix can be executed');
+      expect(mockSuggestion.bulkUpdateStatus).to.not.have.been.called;
     });
 
     it('triggers autofixSuggestion and sets suggestions to in-progress', async () => {

@@ -27,7 +27,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 import { OpportunityDto } from '../dto/opportunity.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { grantCompleteSuggestionsForOpportunity } from '../support/grant-complete-suggestions.js';
+import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 
@@ -157,7 +157,11 @@ function OpportunitiesController(ctx) {
     if (!oppty || oppty.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
     }
-    await grantCompleteSuggestionsForOpportunity(dataAccess, site, oppty);
+    try {
+      await grantSuggestionsForOpportunity(dataAccess, site, oppty);
+    /* c8 ignore next */ } catch (err) {
+      ctx.log?.warn?.('Grant suggestions handler failed', err?.message ?? err);
+    }
     return ok(OpportunityDto.toJSON(oppty));
   };
 
