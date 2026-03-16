@@ -173,7 +173,7 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   const {
-    Opportunity, Suggestion, Site, Configuration,
+    Opportunity, Suggestion, SuggestionGrant, Site, Configuration,
   } = dataAccess;
 
   if (!isObject(Opportunity)) {
@@ -195,9 +195,14 @@ function SuggestionsController(ctx, sqs, env) {
    */
   const filterByGrantStatus = async (site, suggestions) => {
     if (!await getIsSummitPlgEnabled(site, ctx)) return suggestions;
-    const ids = suggestions.map((s) => s.getId());
-    const { grantedIds } = await Suggestion.splitSuggestionsByGrantStatus(ids);
-    return suggestions.filter((s) => grantedIds.includes(s.getId()));
+    try {
+      const ids = suggestions.map((s) => s.getId());
+      const { grantedIds } = await SuggestionGrant.splitSuggestionsByGrantStatus(ids);
+      return suggestions.filter((s) => grantedIds.includes(s.getId()));
+    /* c8 ignore next */ } catch (err) {
+      ctx.log?.error?.('Failed to filter suggestions by grant status', err?.message ?? err);
+      return [];
+    }
   };
 
   /**
@@ -485,7 +490,7 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound();
     }
     if (await getIsSummitPlgEnabled(site, ctx)
-      && !(await Suggestion.isSuggestionGranted(suggestion.getId()))) {
+      && !(await SuggestionGrant.isSuggestionGranted(suggestion.getId()))) {
       return notFound('Suggestion not found');
     }
     return ok(SuggestionDto.toJSON(suggestion, view, opportunity));
@@ -1012,7 +1017,7 @@ function SuggestionsController(ctx, sqs, env) {
     const requestedSuggestions = suggestions.filter((s) => suggestionIds.includes(s.getId()));
     if (await getIsSummitPlgEnabled(site, ctx) && requestedSuggestions.length > 0) {
       const requestedIds = requestedSuggestions.map((s) => s.getId());
-      const { notGrantedIds } = await Suggestion.splitSuggestionsByGrantStatus(requestedIds);
+      const { notGrantedIds } = await SuggestionGrant.splitSuggestionsByGrantStatus(requestedIds);
       if (notGrantedIds.length > 0) {
         return badRequest('All suggestion IDs must be granted before autofix can be executed');
       }

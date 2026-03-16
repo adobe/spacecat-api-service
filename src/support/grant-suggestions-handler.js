@@ -79,6 +79,7 @@ export function getTopSuggestions(suggestions, opportunityName) {
  */
 export async function grantSuggestionsForOpportunity(dataAccess, site, opportunity) {
   const Suggestion = dataAccess?.Suggestion;
+  const SuggestionGrant = dataAccess?.SuggestionGrant;
   const Token = dataAccess?.Token;
   const siteId = site?.getId();
   const opptyId = opportunity?.getId();
@@ -87,7 +88,7 @@ export async function grantSuggestionsForOpportunity(dataAccess, site, opportuni
     ? getTokenGrantConfigByOpportunity(oppType) : null;
   const tokenType = config?.tokenType;
 
-  if (!Suggestion || !Token || !siteId || !opptyId || !config) return;
+  if (!Suggestion || !SuggestionGrant || !Token || !siteId || !opptyId || !config) return;
 
   const { STATUSES } = SuggestionModel;
   const newSuggestions = await Suggestion
@@ -97,7 +98,7 @@ export async function grantSuggestionsForOpportunity(dataAccess, site, opportuni
 
   let token = await Token.findBySiteIdAndTokenType(siteId, tokenType);
   if (!token) {
-    const { grantIds } = await Suggestion
+    const { grantIds } = await SuggestionGrant
       .splitSuggestionsByGrantStatus(newSuggestionIds);
     const suppliedTotal = Math.max(1, config.tokensPerCycle - (grantIds?.length ?? 0));
     token = await Token.findBySiteIdAndTokenType(siteId, tokenType, {
@@ -109,7 +110,7 @@ export async function grantSuggestionsForOpportunity(dataAccess, site, opportuni
   const remaining = token.getRemaining();
   if (remaining <= 0) return;
 
-  const { notGrantedIds } = await Suggestion
+  const { notGrantedIds } = await SuggestionGrant
     .splitSuggestionsByGrantStatus(newSuggestionIds);
   const notGrantedEntities = newSuggestions
     .filter((s) => notGrantedIds.includes(s.getId()));
@@ -119,7 +120,7 @@ export async function grantSuggestionsForOpportunity(dataAccess, site, opportuni
     topGroups.map((group) => {
       const ids = group.map((s) => s.getId()).filter(Boolean);
       return ids.length > 0
-        ? Suggestion.grantSuggestions(ids, siteId, tokenType)
+        ? SuggestionGrant.grantSuggestions(ids, siteId, tokenType)
         : Promise.resolve();
     }),
   );

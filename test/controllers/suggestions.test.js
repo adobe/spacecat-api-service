@@ -175,6 +175,7 @@ describe('Suggestions Controller', () => {
 
   let mockSuggestionDataAccess;
   let mockSuggestion;
+  let mockSuggestionGrant;
   let mockOpportunity;
   let mockSite;
   let mockConfiguration;
@@ -463,6 +464,9 @@ describe('Suggestions Controller', () => {
         return Promise.resolve(mockSuggestionEntity(suggData));
       }),
       getFixEntitiesBySuggestionId: sandbox.stub(),
+    };
+
+    mockSuggestionGrant = {
       splitSuggestionsByGrantStatus: sandbox.stub().callsFake((suggestionIds) => {
         const ids = suggestionIds || [];
         return Promise.resolve({ grantedIds: ids, notGrantedIds: [], grantIds: ids.map((id) => `grant-${id}`) });
@@ -473,6 +477,7 @@ describe('Suggestions Controller', () => {
     mockSuggestionDataAccess = {
       Opportunity: mockOpportunity,
       Suggestion: mockSuggestion,
+      SuggestionGrant: mockSuggestionGrant,
       Site: mockSite,
       Configuration: mockConfiguration,
     };
@@ -534,13 +539,8 @@ describe('Suggestions Controller', () => {
     expect(suggestions[0]).to.have.property('opportunityId', OPPORTUNITY_ID);
   });
 
-  it('returns all suggestions without grant filtering when summit-plg is not enabled', async () => {
-    const nonPlgSite = {
-      getId: sandbox.stub().returns(SITE_ID),
-      getDeliveryType: sandbox.stub().returns('aem_edge'),
-    };
-    mockSite.findById.withArgs(SITE_ID).resolves(nonPlgSite);
-    mockSuggestion.splitSuggestionsByGrantStatus.resetHistory();
+  it('returns empty array when grant filtering throws an error', async () => {
+    mockSuggestionGrant.splitSuggestionsByGrantStatus.rejects(new Error('db failure'));
     const response = await suggestionsController.getAllForOpportunity({
       params: {
         siteId: SITE_ID,
@@ -549,7 +549,26 @@ describe('Suggestions Controller', () => {
       ...context,
     });
     expect(response.status).to.equal(200);
-    expect(mockSuggestion.splitSuggestionsByGrantStatus).to.not.have.been.called;
+    const suggestions = await response.json();
+    expect(suggestions).to.be.an('array').with.lengthOf(0);
+  });
+
+  it('returns all suggestions without grant filtering when summit-plg is not enabled', async () => {
+    const nonPlgSite = {
+      getId: sandbox.stub().returns(SITE_ID),
+      getDeliveryType: sandbox.stub().returns('aem_edge'),
+    };
+    mockSite.findById.withArgs(SITE_ID).resolves(nonPlgSite);
+    mockSuggestionGrant.splitSuggestionsByGrantStatus.resetHistory();
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(mockSuggestionGrant.splitSuggestionsByGrantStatus).to.not.have.been.called;
     mockSite.findById.withArgs(SITE_ID).resolves(site);
   });
 
@@ -1618,7 +1637,7 @@ describe('Suggestions Controller', () => {
   });
 
   it('getByID returns not found for summit-plg enabled site with ungranted suggestion', async () => {
-    mockSuggestion.isSuggestionGranted.resolves(false);
+    mockSuggestionGrant.isSuggestionGranted.resolves(false);
     const response = await suggestionsController.getByID({
       params: {
         siteId: SITE_ID,
@@ -3304,7 +3323,7 @@ describe('Suggestions Controller', () => {
       opportunity.getType = sandbox.stub().returns('meta-tags');
       const requestedEntities = [mockSuggestionEntity(suggs[0]), mockSuggestionEntity(suggs[2])];
       mockSuggestion.allByOpportunityId.resolves(requestedEntities);
-      mockSuggestion.splitSuggestionsByGrantStatus.resolves({
+      mockSuggestionGrant.splitSuggestionsByGrantStatus.resolves({
         grantedIds: [requestedEntities[0].getId()],
         notGrantedIds: [requestedEntities[1].getId()],
         grantIds: ['grant-1'],

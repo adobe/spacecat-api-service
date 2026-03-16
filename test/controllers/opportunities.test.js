@@ -374,7 +374,10 @@ describe('Opportunities Controller', () => {
     const ctxWithToken = {
       ...mockContext,
       dataAccess: {
-        ...mockOpportunityDataAccess, Token: mockToken, Configuration: mockConfig,
+        ...mockOpportunityDataAccess,
+        SuggestionGrant: {},
+        Token: mockToken,
+        Configuration: mockConfig,
       },
     };
     const controllerWithToken = OpportunitiesController(ctxWithToken);
@@ -401,6 +404,7 @@ describe('Opportunities Controller', () => {
       allByOpportunityIdAndStatus: sandbox.stub()
         .rejects(new Error('db failure')),
     };
+    const mockSuggestionGrant = {};
     const mockToken = {
       findBySiteIdAndTokenType: sandbox.stub(),
     };
@@ -414,6 +418,7 @@ describe('Opportunities Controller', () => {
       dataAccess: {
         ...mockOpportunityDataAccess,
         Suggestion: mockSuggestion,
+        SuggestionGrant: mockSuggestionGrant,
         Token: mockToken,
         Configuration: mockConfig,
       },
@@ -458,6 +463,7 @@ describe('Opportunities Controller', () => {
         ...mockOpportunityDataAccess,
         Site: { findById: sandbox.stub().resolves(mockSiteEntity) },
         Suggestion: mockSuggestion,
+        SuggestionGrant: {},
         Token: mockToken,
         Configuration: mockConfig,
       },

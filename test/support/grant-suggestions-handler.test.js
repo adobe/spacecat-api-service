@@ -106,16 +106,24 @@ describe('grant-suggestions-handler', () => {
       expect(true).to.be.true;
     });
 
-    it('returns early when Token or Suggestion is missing from dataAccess', async () => {
+    it('returns early when Token, Suggestion, or SuggestionGrant is missing from dataAccess', async () => {
       const Suggestion = { allByOpportunityIdAndStatus: sandbox.stub() };
-      await grantSuggestionsForOpportunity({ Suggestion, Token: null }, site, opportunity);
-      await grantSuggestionsForOpportunity({ Suggestion: null, Token: {} }, site, opportunity);
+      const SuggestionGrant = {};
+      await grantSuggestionsForOpportunity({
+        Suggestion, SuggestionGrant, Token: null,
+      }, site, opportunity);
+      await grantSuggestionsForOpportunity({
+        Suggestion: null, SuggestionGrant, Token: {},
+      }, site, opportunity);
+      await grantSuggestionsForOpportunity({
+        Suggestion, SuggestionGrant: null, Token: {},
+      }, site, opportunity);
       expect(Suggestion.allByOpportunityIdAndStatus).to.not.have.been.called;
     });
 
     it('returns early when opportunity type has no token type mapping', async () => {
       const Token = { findBySiteIdAndTokenType: sandbox.stub() };
-      const dataAccess = { Suggestion: {}, Token };
+      const dataAccess = { Suggestion: {}, SuggestionGrant: {}, Token };
       const oppNoMapping = { getId: () => opptyId, getType: () => 'unknown-type' };
       await grantSuggestionsForOpportunity(dataAccess, site, oppNoMapping);
       expect(Token.findBySiteIdAndTokenType).to.not.have.been.called;
@@ -126,7 +134,7 @@ describe('grant-suggestions-handler', () => {
         allByOpportunityIdAndStatus: sandbox.stub().resolves([]),
       };
       const Token = { findBySiteIdAndTokenType: sandbox.stub() };
-      const dataAccess = { Suggestion, Token };
+      const dataAccess = { Suggestion, SuggestionGrant: {}, Token };
       await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
       expect(Token.findBySiteIdAndTokenType).to.not.have.been.called;
     });
@@ -136,17 +144,19 @@ describe('grant-suggestions-handler', () => {
       const existingToken = { getRemaining: () => 0 };
       const Suggestion = {
         allByOpportunityIdAndStatus: sandbox.stub().resolves([mockSugg]),
+      };
+      const SuggestionGrant = {
         splitSuggestionsByGrantStatus: sandbox.stub(),
         grantSuggestions: sandbox.stub(),
       };
       const Token = {
         findBySiteIdAndTokenType: sandbox.stub().resolves(existingToken),
       };
-      const dataAccess = { Suggestion, Token };
+      const dataAccess = { Suggestion, SuggestionGrant, Token };
       await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
-      expect(Suggestion.splitSuggestionsByGrantStatus)
+      expect(SuggestionGrant.splitSuggestionsByGrantStatus)
         .to.not.have.been.called;
-      expect(Suggestion.grantSuggestions).to.not.have.been.called;
+      expect(SuggestionGrant.grantSuggestions).to.not.have.been.called;
     });
 
     it('creates token when none exists and grants top suggestions', async () => {
@@ -155,11 +165,13 @@ describe('grant-suggestions-handler', () => {
       const createdToken = { getRemaining: () => 2 };
       const Suggestion = {
         allByOpportunityIdAndStatus: sandbox.stub().resolves([s1, s2]),
+      };
+      const SuggestionGrant = {
         splitSuggestionsByGrantStatus: sandbox.stub(),
         grantSuggestions: sandbox.stub().resolves({ success: true }),
       };
       // First call: no token, second call: create
-      Suggestion.splitSuggestionsByGrantStatus
+      SuggestionGrant.splitSuggestionsByGrantStatus
         .onFirstCall().resolves({ grantIds: [] })
         .onSecondCall().resolves({
           notGrantedIds: ['sugg-1', 'sugg-2'],
@@ -170,14 +182,14 @@ describe('grant-suggestions-handler', () => {
       Token.findBySiteIdAndTokenType
         .onFirstCall().resolves(null)
         .onSecondCall().resolves(createdToken);
-      const dataAccess = { Suggestion, Token };
+      const dataAccess = { Suggestion, SuggestionGrant, Token };
 
       await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
 
       expect(Token.findBySiteIdAndTokenType).to.have.been.calledTwice;
       expect(Token.findBySiteIdAndTokenType.secondCall.args[2])
         .to.deep.include({ createIfNotFound: true });
-      expect(Suggestion.grantSuggestions).to.have.been.calledTwice;
+      expect(SuggestionGrant.grantSuggestions).to.have.been.calledTwice;
     });
 
     it('grants only up to remaining token count', async () => {
@@ -186,6 +198,8 @@ describe('grant-suggestions-handler', () => {
       const existingToken = { getRemaining: () => 1 };
       const Suggestion = {
         allByOpportunityIdAndStatus: sandbox.stub().resolves([s1, s2]),
+      };
+      const SuggestionGrant = {
         splitSuggestionsByGrantStatus: sandbox.stub().resolves({
           notGrantedIds: ['sugg-1', 'sugg-2'],
         }),
@@ -195,13 +209,13 @@ describe('grant-suggestions-handler', () => {
         findBySiteIdAndTokenType: sandbox.stub()
           .resolves(existingToken),
       };
-      const dataAccess = { Suggestion, Token };
+      const dataAccess = { Suggestion, SuggestionGrant, Token };
 
       await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
 
       // Only 1 remaining, so only 1 grant call
-      expect(Suggestion.grantSuggestions).to.have.been.calledOnce;
-      expect(Suggestion.grantSuggestions.firstCall.args[0])
+      expect(SuggestionGrant.grantSuggestions).to.have.been.calledOnce;
+      expect(SuggestionGrant.grantSuggestions.firstCall.args[0])
         .to.deep.equal(['sugg-1']);
     });
 
@@ -210,10 +224,12 @@ describe('grant-suggestions-handler', () => {
       const createdToken = { getRemaining: () => 1 };
       const Suggestion = {
         allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
+      };
+      const SuggestionGrant = {
         splitSuggestionsByGrantStatus: sandbox.stub(),
         grantSuggestions: sandbox.stub().resolves({ success: true }),
       };
-      Suggestion.splitSuggestionsByGrantStatus
+      SuggestionGrant.splitSuggestionsByGrantStatus
         .onFirstCall().resolves({ grantIds: ['g1', 'g2'] })
         .onSecondCall().resolves({ notGrantedIds: ['sugg-1'] });
       const Token = {
@@ -222,7 +238,7 @@ describe('grant-suggestions-handler', () => {
       Token.findBySiteIdAndTokenType
         .onFirstCall().resolves(null)
         .onSecondCall().resolves(createdToken);
-      const dataAccess = { Suggestion, Token };
+      const dataAccess = { Suggestion, SuggestionGrant, Token };
 
       await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
 
@@ -236,10 +252,12 @@ describe('grant-suggestions-handler', () => {
       const createdToken = { getRemaining: () => 1 };
       const Suggestion = {
         allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
+      };
+      const SuggestionGrant = {
         splitSuggestionsByGrantStatus: sandbox.stub(),
         grantSuggestions: sandbox.stub().resolves({ success: true }),
       };
-      Suggestion.splitSuggestionsByGrantStatus
+      SuggestionGrant.splitSuggestionsByGrantStatus
         .onFirstCall().resolves({})
         .onSecondCall().resolves({ notGrantedIds: ['sugg-1'] });
       const Token = {
@@ -248,7 +266,7 @@ describe('grant-suggestions-handler', () => {
       Token.findBySiteIdAndTokenType
         .onFirstCall().resolves(null)
         .onSecondCall().resolves(createdToken);
-      const dataAccess = { Suggestion, Token };
+      const dataAccess = { Suggestion, SuggestionGrant, Token };
 
       await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
 
@@ -261,6 +279,8 @@ describe('grant-suggestions-handler', () => {
       const existingToken = { getRemaining: () => 1 };
       const Suggestion = {
         allByOpportunityIdAndStatus: sandbox.stub().resolves([s1]),
+      };
+      const SuggestionGrant = {
         splitSuggestionsByGrantStatus: sandbox.stub().resolves({
           notGrantedIds: [''],
         }),
@@ -270,11 +290,11 @@ describe('grant-suggestions-handler', () => {
         findBySiteIdAndTokenType: sandbox.stub()
           .resolves(existingToken),
       };
-      const dataAccess = { Suggestion, Token };
+      const dataAccess = { Suggestion, SuggestionGrant, Token };
 
       await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
 
-      expect(Suggestion.grantSuggestions).to.not.have.been.called;
+      expect(SuggestionGrant.grantSuggestions).to.not.have.been.called;
     });
   });
 });
