@@ -32,6 +32,7 @@ import {
 import {
   hasText, isArray, isIsoDate, isNonEmptyObject, isValidUUID,
 } from '@adobe/spacecat-shared-utils';
+import { FixEntity as FixEntityModel } from '@adobe/spacecat-shared-data-access';
 import AccessControlUtil from '../support/access-control-util.js';
 import { FixDto } from '../dto/fix.js';
 import { SuggestionDto } from '../dto/suggestion.js';
@@ -430,6 +431,92 @@ export class FixesController {
       return noContent();
     } catch (e) {
       return createResponse({ message: `Error removing fix: ${e.message}` }, 500);
+    }
+  }
+
+  /**
+   * Rolls back a failed fix: marks the Fix as ROLLED_BACK and all linked
+   * suggestions as SKIPPED. Uses two sequential updates (fix entity, then
+   * bulk suggestion status); no single transaction.
+   *
+   * @param {RequestContext} context - request context
+   * @returns {Promise<Response>} the updated fix and suggestions data
+   */
+  async rollbackFailedFix(context) {
+    const { siteId, opportunityId, fixId } = context.params;
+
+    // Validate request params and access
+    let res = checkRequestParams(siteId, opportunityId, fixId) ?? await this.#checkAccess(siteId);
+    if (res) return res;
+
+    // Find the fix
+    const fix = await this.#FixEntity.findById(fixId);
+    if (!fix) return notFound('Fix not found');
+
+    // Check ownership
+    res = await checkOwnership(fix, opportunityId, siteId, this.#Opportunity);
+    if (res) return res;
+
+    // Validate fix is in FAILED status
+    const currentFixStatus = fix.getStatus();
+    if (currentFixStatus !== FixEntityModel.STATUSES.FAILED) {
+      return badRequest(`Fix cannot be rolled back: current status is '${currentFixStatus}', expected 'FAILED'`);
+    }
+
+    try {
+      fix.setStatus(FixEntityModel.STATUSES.ROLLED_BACK);
+      await fix.save();
+
+      // Step 2: Get linked suggestions and bulk update their status to SKIPPED
+      const suggestions = await this.#FixEntity.getSuggestionsByFixEntityId(fixId);
+      if (Array.isArray(suggestions) && suggestions.length > 0) {
+        try {
+          await this.#Suggestion.bulkUpdateStatus(suggestions, 'SKIPPED');
+        } catch (bulkError) {
+          // Revert fix status so retry can succeed (same pattern as initial update)
+          try {
+            fix.setStatus(currentFixStatus);
+            await fix.save();
+          } catch (revertError) {
+            // Log but don't mask the original error
+            context.log?.error?.('Failed to revert fix status after suggestion update failure', {
+              fixId,
+              revertError: revertError?.message,
+            });
+          }
+          throw bulkError;
+        }
+      }
+
+      // suggestions already has updated status from bulkUpdateStatus when length > 0; else []
+      const updatedSuggestions = suggestions;
+      const updatedFix = fix;
+
+      return ok({
+        fix: {
+          index: 0,
+          uuid: updatedFix.getId(),
+          fix: FixDto.toJSON(updatedFix),
+          statusCode: 200,
+        },
+        suggestions: {
+          updated: updatedSuggestions.map((suggestion, index) => ({
+            index,
+            uuid: suggestion.getId(),
+            suggestion: SuggestionDto.toJSON(suggestion),
+            statusCode: 200,
+          })),
+        },
+        message: `Fix rolled back successfully. All ${updatedSuggestions.length} suggestion(s) marked as SKIPPED.`,
+      });
+    } catch (e) {
+      /* c8 ignore next 3 */
+      if (e?.name === VALIDATION_ERROR_NAME) {
+        return badRequest(e.message);
+      }
+      return createResponse({
+        message: `Error rolling back fix: ${e.message}`,
+      }, 500);
     }
   }
 

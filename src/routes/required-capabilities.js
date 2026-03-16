@@ -121,6 +121,8 @@ const routeRequiredCapabilities = {
   'DELETE /organizations/:organizationId': 'organization:write',
   'GET /organizations/:organizationId/sites': 'site:read',
   'GET /organizations/:organizationId/brands': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions': 'brand:read',
   'GET /v2/orgs/:spaceCatId/llmo-customer-config': 'organization:read',
   'GET /v2/orgs/:spaceCatId/llmo-customer-config-lean': 'organization:read',
   'GET /v2/orgs/:spaceCatId/llmo-topics': 'organization:read',
@@ -316,6 +318,7 @@ const routeRequiredCapabilities = {
   'POST /sites/:siteId/opportunities/:opportunityId/fixes': 'fix:write',
   'PATCH /sites/:siteId/opportunities/:opportunityId/status': 'opportunity:write',
   'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fix:write',
+  'POST /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/actions/rolled_back': 'fix:write',
   'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fix:write',
 
   // LLMO
