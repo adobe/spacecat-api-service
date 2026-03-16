@@ -81,7 +81,7 @@
     "@adobe/spacecat-shared-drs-client": "1.3.0",
     "@adobe/spacecat-shared-gpt-client": "1.6.19",
     "@adobe/spacecat-shared-http-utils": "1.22.2",
-    "@adobe/spacecat-shared-ims-client": "1.11.13",
+    "@adobe/spacecat-shared-ims-client": "https://gist.github.com/ravverma/73fbd39cad0536f360791528e21c3857/raw/5e6a2e41ab46b1c46e463a0021af72930b456152/adobe-spacecat-shared-ims-client-1.11.12.tgz",
     "@adobe/spacecat-shared-rum-api-client": "2.40.9",
     "@adobe/spacecat-shared-scrape-client": "2.5.3",
     "@adobe/spacecat-shared-slack-client": "1.6.3",
