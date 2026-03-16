@@ -435,11 +435,9 @@ export class FixesController {
   }
 
   /**
-   * Rolls back a failed fix atomically using DynamoDB transact write:
-   * - Marks the Fix as ROLLED_BACK (only if currently FAILED)
-   * - Marks all associated suggestions with ERROR status as SKIPPED
-   *
-   * This operation is atomic: either all updates succeed or none are applied.
+   * Rolls back a failed fix: marks the Fix as ROLLED_BACK and all linked
+   * suggestions as SKIPPED. Uses two sequential updates (fix entity, then
+   * bulk suggestion status); no single transaction.
    *
    * @param {RequestContext} context - request context
    * @returns {Promise<Response>} the updated fix and suggestions data
@@ -461,48 +459,60 @@ export class FixesController {
 
     // Validate fix is in FAILED status
     const currentFixStatus = fix.getStatus();
-    if (currentFixStatus !== 'FAILED') {
+    if (currentFixStatus !== FixEntityModel.STATUSES.FAILED) {
       return badRequest(`Fix cannot be rolled back: current status is '${currentFixStatus}', expected 'FAILED'`);
     }
 
     try {
-      // Use atomic transact write to update fix and all suggestions together
-      // The function returns the updated entities directly from the transaction response
-      const result = await this.#FixEntity.updateFixAndSuggestionsStatus(
-        fixId,
-        opportunityId,
-        'SKIPPED', // newSuggestionStatus
-        FixEntityModel.STATUSES.ROLLED_BACK, // newFixEntityStatus
-      );
+      fix.setStatus(FixEntityModel.STATUSES.ROLLED_BACK);
+      await fix.save();
 
-      // Use model instances with DTOs - consistent with codebase patterns
-      const fixEntity = result.fix;
+      // Step 2: Get linked suggestions and bulk update their status to SKIPPED
+      const suggestions = await this.#FixEntity.getSuggestionsByFixEntityId(fixId);
+      if (Array.isArray(suggestions) && suggestions.length > 0) {
+        try {
+          await this.#Suggestion.bulkUpdateStatus(suggestions, 'SKIPPED');
+        } catch (bulkError) {
+          // Revert fix status so retry can succeed (same pattern as initial update)
+          try {
+            fix.setStatus(currentFixStatus);
+            await fix.save();
+          } catch (revertError) {
+            // Log but don't mask the original error
+            context.log?.error?.('Failed to revert fix status after suggestion update failure', {
+              fixId,
+              revertError: revertError?.message,
+            });
+          }
+          throw bulkError;
+        }
+      }
+
+      // suggestions already has updated status from bulkUpdateStatus when length > 0; else []
+      const updatedSuggestions = suggestions;
+      const updatedFix = fix;
 
       return ok({
         fix: {
           index: 0,
-          uuid: fixEntity.getId(),
-          fix: FixDto.toJSON(fixEntity),
+          uuid: updatedFix.getId(),
+          fix: FixDto.toJSON(updatedFix),
           statusCode: 200,
         },
         suggestions: {
-          updated: result.suggestions.map((suggestion, index) => ({
+          updated: updatedSuggestions.map((suggestion, index) => ({
             index,
             uuid: suggestion.getId(),
             suggestion: SuggestionDto.toJSON(suggestion),
             statusCode: 200,
           })),
         },
-        message: `Fix rolled back successfully. All ${result.suggestions.length} suggestion(s) marked as SKIPPED.`,
+        message: `Fix rolled back successfully. All ${updatedSuggestions.length} suggestion(s) marked as SKIPPED.`,
       });
     } catch (e) {
       /* c8 ignore next 3 */
       if (e?.name === VALIDATION_ERROR_NAME) {
         return badRequest(e.message);
-      }
-      // Check if the error is due to a condition check failure (transaction canceled)
-      if (e.message?.includes('Transaction canceled') || e.message?.includes('condition check failed')) {
-        return badRequest(`Rollback failed: ${e.message}`);
       }
       return createResponse({
         message: `Error rolling back fix: ${e.message}`,
