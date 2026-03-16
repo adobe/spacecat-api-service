@@ -63,6 +63,29 @@ describe('Access Control Util', () => {
     expect(accessControlUtil.hasAdminAccess()).to.be.true;
   });
 
+  it('should delegate hasS2SAdminAccess to authInfo.isS2SAdmin', () => {
+    const authInfo = new AuthInfo()
+      .withType('jwt')
+      .withProfile({ is_admin: true });
+    authInfo.isS2SAdmin = sinon.stub().returns(true);
+
+    const context = {
+      pathInfo: {
+        headers: { 'x-product': 'llmo' },
+      },
+      attributes: { authInfo },
+      dataAccess: {
+        Entitlement: { findByOrganizationIdAndProductCode: sinon.stub() },
+        TrialUser: {},
+        OrganizationIdentityProvider: {},
+      },
+    };
+
+    const accessControlUtil = AccessControlUtil.fromContext(context);
+    expect(accessControlUtil.hasS2SAdminAccess()).to.be.true;
+    expect(authInfo.isS2SAdmin).to.have.been.calledOnce;
+  });
+
   it('should throw an error if entity is not provided', async () => {
     const context = {
       pathInfo: {
@@ -1026,6 +1049,30 @@ describe('Access Control Util', () => {
       expect(mockTrialUser.create).to.not.have.been.called;
     });
 
+    it('should not create trial user when tier is free_trial, trial user does not exist, but user is S2S consumer', async () => {
+      const entitlement = {
+        getId: () => 'entitlement-123',
+        getProductCode: () => 'llmo',
+        getTier: () => 'free_trial',
+      };
+      mockTierClient.checkValidEntitlement.resolves({ entitlement });
+
+      mockTrialUser.findByEmailId.resolves(null);
+
+      mockAuthInfo.getProfile.returns({
+        trial_email: 'trial@example.com',
+        email: 'user@example.com',
+        first_name: 'John',
+        last_name: 'Doe',
+        is_s2s_consumer: true,
+      });
+      mockAuthInfo.isS2SConsumer = sinon.stub().returns(true);
+
+      await util.validateEntitlement(mockOrg, null, 'llmo');
+
+      expect(mockTrialUser.create).to.not.have.been.called;
+    });
+
     it('should throw error when x-product header does not match productCode', async () => {
       const entitlement = {
         getId: () => 'entitlement-123',
@@ -1330,6 +1377,86 @@ describe('Access Control Util', () => {
 
       expect(result).to.be.false;
       expect(util.authInfo.hasOrganization).to.have.been.calledWith('project-org-id');
+    });
+  });
+
+  describe('isOwnerOfSite', () => {
+    it('throws error when entity is missing', async () => {
+      const util = AccessControlUtil.fromContext(context);
+      await expect(util.isOwnerOfSite(null)).to.be.rejectedWith('Missing entity');
+      await expect(util.isOwnerOfSite(undefined)).to.be.rejectedWith('Missing entity');
+      await expect(util.isOwnerOfSite({})).to.be.rejectedWith('Missing entity');
+    });
+
+    it('returns true when user has org access for a Site entity', async () => {
+      const util = AccessControlUtil.fromContext(context);
+      util.authInfo.hasOrganization = sinon.stub().returns(true);
+
+      const site = {
+        getOrganization: async () => ({ getImsOrgId: () => 'org-1' }),
+      };
+      site.constructor = { ENTITY_NAME: 'Site' };
+
+      const result = await util.isOwnerOfSite(site);
+      expect(result).to.be.true;
+      expect(util.authInfo.hasOrganization).to.have.been.calledWith('org-1');
+    });
+
+    it('returns false when user lacks org access for a Site entity', async () => {
+      const util = AccessControlUtil.fromContext(context);
+      util.authInfo.hasOrganization = sinon.stub().returns(false);
+
+      const site = {
+        getOrganization: async () => ({ getImsOrgId: () => 'org-1' }),
+      };
+      site.constructor = { ENTITY_NAME: 'Site' };
+
+      const result = await util.isOwnerOfSite(site);
+      expect(result).to.be.false;
+    });
+
+    it('throws error when Site has no organization', async () => {
+      const util = AccessControlUtil.fromContext(context);
+
+      const site = {
+        getOrganization: async () => null,
+      };
+      site.constructor = { ENTITY_NAME: 'Site' };
+
+      await expect(util.isOwnerOfSite(site)).to.be.rejectedWith('Missing organization for site');
+    });
+
+    it('returns true when user has org access for an Organization entity', async () => {
+      const util = AccessControlUtil.fromContext(context);
+      util.authInfo.hasOrganization = sinon.stub().returns(true);
+
+      const org = { getImsOrgId: () => 'org-1' };
+      org.constructor = { ENTITY_NAME: 'Organization' };
+
+      const result = await util.isOwnerOfSite(org);
+      expect(result).to.be.true;
+      expect(util.authInfo.hasOrganization).to.have.been.calledWith('org-1');
+    });
+
+    it('returns false when user lacks org access for an Organization entity', async () => {
+      const util = AccessControlUtil.fromContext(context);
+      util.authInfo.hasOrganization = sinon.stub().returns(false);
+
+      const org = { getImsOrgId: () => 'org-1' };
+      org.constructor = { ENTITY_NAME: 'Organization' };
+
+      const result = await util.isOwnerOfSite(org);
+      expect(result).to.be.false;
+    });
+
+    it('returns false for unknown entity types', async () => {
+      const util = AccessControlUtil.fromContext(context);
+
+      const unknown = { someField: 'value' };
+      unknown.constructor = { ENTITY_NAME: 'Unknown' };
+
+      const result = await util.isOwnerOfSite(unknown);
+      expect(result).to.be.false;
     });
   });
 

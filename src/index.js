@@ -12,7 +12,7 @@
 
 import wrap from '@adobe/helix-shared-wrap';
 import { helixStatus } from '@adobe/helix-status';
-import secrets from '@adobe/helix-shared-secrets';
+import vaultSecrets from '@adobe/spacecat-shared-vault-secrets';
 import bodyData from '@adobe/helix-shared-body-data';
 import {
   badRequest,
@@ -25,6 +25,7 @@ import {
   ScopedApiKeyHandler,
   AdobeImsHandler,
   JwtHandler,
+  s2sAuthWrapper,
 } from '@adobe/spacecat-shared-http-utils';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import { imsClientWrapper } from '@adobe/spacecat-shared-ims-client';
@@ -32,7 +33,7 @@ import {
   elevatedSlackClientWrapper,
   SLACK_TARGETS,
 } from '@adobe/spacecat-shared-slack-client';
-import { hasText, resolveSecretsName, logWrapper } from '@adobe/spacecat-shared-utils';
+import { hasText, isValidUUID, logWrapper } from '@adobe/spacecat-shared-utils';
 
 import dataAccess from './support/data-access.js';
 import sqs from './support/sqs.js';
@@ -71,6 +72,8 @@ import ScrapeController from './controllers/scrape.js';
 import ScrapeJobController from './controllers/scrapeJob.js';
 import ReportsController from './controllers/reports.js';
 import LlmoController from './controllers/llmo/llmo.js';
+import LlmoMysticatController from './controllers/llmo/llmo-mysticat-controller.js';
+import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
 import UserActivitiesController from './controllers/user-activities.js';
 import SiteEnrollmentsController from './controllers/site-enrollments.js';
 import TrialUsersController from './controllers/trial-users.js';
@@ -82,6 +85,8 @@ import PTA2Controller from './controllers/paid/pta2.js';
 import TrafficToolsController from './controllers/paid/traffic-tools.js';
 import BotBlockerController from './controllers/bot-blocker.js';
 import SentimentController from './controllers/sentiment.js';
+import ConsumersController from './controllers/consumers.js';
+import routeRequiredCapabilities from './routes/required-capabilities.js';
 
 const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -195,6 +200,7 @@ async function run(request, context) {
     const scrapeJobController = ScrapeJobController(context);
     const reportsController = ReportsController(context, log, context.env);
     const llmoController = LlmoController(context);
+    const llmoMysticatController = LlmoMysticatController(context);
     const fixesController = new FixesController(context);
     const userActivitiesController = UserActivitiesController(context);
     const siteEnrollmentsController = SiteEnrollmentsController(context);
@@ -207,6 +213,8 @@ async function run(request, context) {
     const trafficToolsController = TrafficToolsController(context, log, context.env);
     const botBlockerController = BotBlockerController(context, log);
     const sentimentController = SentimentController(context, log);
+    const consumersController = ConsumersController(context);
+    const plgOnboardingController = PlgOnboardingController(context);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -235,6 +243,7 @@ async function run(request, context) {
       trafficController,
       fixesController,
       llmoController,
+      llmoMysticatController,
       userActivitiesController,
       siteEnrollmentsController,
       trialUsersController,
@@ -247,6 +256,8 @@ async function run(request, context) {
       trafficToolsController,
       botBlockerController,
       sentimentController,
+      consumersController,
+      plgOnboardingController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);
@@ -261,7 +272,14 @@ async function run(request, context) {
         && (!isValidUUIDV4(params.organizationId) && params.organizationId !== 'default')) {
         return badRequest('Organization Id is invalid. Please provide a valid UUID.');
       }
+      if (params.spaceCatId && !isValidUUID(params.spaceCatId)) {
+        return badRequest('Organization Id (spaceCatId) is invalid. Please provide a valid UUID.');
+      }
+      if (params.brandId && params.brandId !== 'all' && !isValidUUID(params.brandId)) {
+        return badRequest('Brand Id is invalid. Please provide a valid UUID or "all".');
+      }
       context.params = params;
+      context.request = request;
 
       return await handler(context);
     } else {
@@ -277,9 +295,14 @@ async function run(request, context) {
 
 const { WORKSPACE_EXTERNAL } = SLACK_TARGETS;
 
-const wrappedMain = wrap(run).with(authWrapper, {
-  authHandlers: [JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler],
-});
+// Wrapper execution order (helix-shared-wrap: last .with() = outermost = runs first):
+// 1. s2sAuthWrapper — intercepts S2S JWT bearer tokens, passes through non-S2S to authWrapper
+// 2. authWrapper — handles JWT, IMS, scoped API key, legacy API key
+const wrappedMain = wrap(run)
+  .with(authWrapper, {
+    authHandlers: [JwtHandler, AdobeImsHandler, ScopedApiKeyHandler, LegacyApiKeyHandler],
+  })
+  .with(s2sAuthWrapper, { routeCapabilities: routeRequiredCapabilities });
 
 export const main = wrappedMain
   .with(localCORSWrapper)
@@ -292,5 +315,5 @@ export const main = wrappedMain
   .with(s3ClientWrapper)
   .with(imsClientWrapper)
   .with(elevatedSlackClientWrapper, { slackTarget: WORKSPACE_EXTERNAL })
-  .with(secrets, { name: resolveSecretsName })
+  .with(vaultSecrets)
   .with(helixStatus);

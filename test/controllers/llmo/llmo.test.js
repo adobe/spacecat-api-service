@@ -44,12 +44,14 @@ const createMockResponse = (data, ok = true, status = 200) => ({
 });
 
 // eslint-disable-next-line max-len
-const createMockAccessControlUtil = (accessResult, hasAdminAccessResult = true, isLLMOAdministratorResult = true) => ({
+// eslint-disable-next-line max-len
+const createMockAccessControlUtil = (accessResult, hasAdminAccessResult = true, isLLMOAdministratorResult = true, isOwnerOfSiteResult = accessResult) => ({
   fromContext: (context) => ({
     log: context.log,
     hasAccess: async () => accessResult,
     hasAdminAccess: () => hasAdminAccessResult,
     isLLMOAdministrator: () => isLLMOAdministratorResult,
+    isOwnerOfSite: async () => isOwnerOfSiteResult,
   }),
 });
 
@@ -74,6 +76,7 @@ describe('LlmoController', () => {
   let mockTokowakaClient;
   let readStrategyStub;
   let writeStrategyStub;
+  let notifyStrategyChangesStub;
   let exchangePromiseTokenStub;
   let fetchWithTimeoutStub;
   let postLlmoAlertStub;
@@ -192,6 +195,9 @@ describe('LlmoController', () => {
       '../../../src/support/brand-profile-trigger.js': {
         triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
       },
+      '../../../src/support/opportunity-workspace-notifications.js': {
+        notifyStrategyChanges: (...args) => notifyStrategyChangesStub(...args),
+      },
       '../../../src/support/access-control-util.js': {
         default: {
           fromContext(context) {
@@ -204,6 +210,9 @@ describe('LlmoController', () => {
                 return true;
               },
               isLLMOAdministrator() {
+                return true;
+              },
+              async isOwnerOfSite() {
                 return true;
               },
             };
@@ -321,6 +330,8 @@ describe('LlmoController', () => {
       updateLlmoCustomerIntent: sinon.stub(),
       updateLlmoCdnlogsFilter: sinon.stub(),
       updateLlmoCdnBucketConfig: sinon.stub(),
+      addLlmoTag: sinon.stub(),
+      state: { llmo: mockLlmoConfig },
       getSlackConfig: sinon.stub().returns(null),
       getHandlers: sinon.stub().returns({}),
       getLlmoDataFolder: sinon.stub().returns(TEST_FOLDER),
@@ -357,6 +368,7 @@ describe('LlmoController', () => {
       setConfig: sinon.stub(),
       save: sinon.stub().resolves(),
       getOrganization: sinon.stub().resolves(mockOrganization),
+      getBaseURL: sinon.stub().returns('https://www.example.com'),
     };
 
     // Reset mockTokowakaClient
@@ -449,6 +461,9 @@ describe('LlmoController', () => {
     writeConfigStub = sinon.stub();
     readStrategyStub = sinon.stub();
     writeStrategyStub = sinon.stub();
+    notifyStrategyChangesStub = sinon.stub().resolves({
+      sent: 0, failed: 0, skipped: 0, changes: 0,
+    });
     llmoConfigSchemaStub = {
       safeParse: sinon.stub().returns({ success: true, data: {} }),
     };
@@ -655,6 +670,12 @@ describe('LlmoController', () => {
         sinon.match.object,
       );
     });
+
+    it('should return 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.getLlmoSheetData(mockContext);
+      expect(result.status).to.equal(404);
+    });
   });
 
   describe('getLlmoGlobalSheetData', () => {
@@ -716,6 +737,12 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       expect(await result.json()).to.deep.equal({ data: 'test-data' });
+    });
+
+    it('should return 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.getLlmoGlobalSheetData(mockContext);
+      expect(result.status).to.equal(404);
     });
   });
 
@@ -1180,6 +1207,12 @@ describe('LlmoController', () => {
         sinon.match.object,
       );
     });
+
+    it('should return 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.queryLlmoSheetData(mockContext);
+      expect(result.status).to.equal(404);
+    });
   });
 
   describe('getLlmoConfig', () => {
@@ -1287,6 +1320,12 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody.version).to.be.null;
     });
+
+    it('should return 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.getLlmoConfig(mockContext);
+      expect(result.status).to.equal(404);
+    });
   });
 
   describe('updateLlmoConfig', () => {
@@ -1347,6 +1386,33 @@ describe('LlmoController', () => {
     });
 
     it('should write config to S3 successfully', async () => {
+      const result = await controller.updateLlmoConfig(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.deep.equal({ version: 'v1' });
+      expect(writeConfigStub).to.have.been.calledWith(
+        TEST_SITE_ID,
+        testData,
+        s3Client,
+        { s3Bucket: TEST_BUCKET },
+      );
+    });
+
+    it('should decompress and write gzip-compressed config to S3', async () => {
+      const { gzipSync } = await import('zlib');
+      const compressed = gzipSync(Buffer.from(JSON.stringify(testData)));
+      mockContext.data = undefined;
+      mockContext.request = {
+        headers: {
+          get: (name) => (name === 'content-type' ? 'application/gzip' : null),
+        },
+        arrayBuffer: () => Promise.resolve(compressed.buffer.slice(
+          compressed.byteOffset,
+          compressed.byteOffset + compressed.byteLength,
+        )),
+      };
+
       const result = await controller.updateLlmoConfig(mockContext);
 
       expect(result.status).to.equal(200);
@@ -1738,6 +1804,12 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('Only LLMO administrators can update the LLMO config');
     });
+
+    it('should return 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.updateLlmoConfig(mockContext);
+      expect(result.status).to.equal(404);
+    });
   });
 
   describe('getLlmoQuestions', () => {
@@ -1757,6 +1829,12 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
       expect(responseBody).to.deep.equal({});
+    });
+
+    it('should return 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.getLlmoQuestions(mockContext);
+      expect(result.status).to.equal(404);
     });
   });
 
@@ -1817,6 +1895,12 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('Only LLMO administrators can add questions');
     });
+
+    it('should return 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.addLlmoQuestion(mockContext);
+      expect(result.status).to.equal(404);
+    });
   });
 
   describe('removeLlmoQuestion', () => {
@@ -1865,6 +1949,12 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('Only LLMO administrators can remove questions');
     });
+
+    it('should return 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.removeLlmoQuestion(mockContext);
+      expect(result.status).to.equal(404);
+    });
   });
 
   describe('patchLlmoQuestion', () => {
@@ -1891,6 +1981,12 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(403);
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('Only LLMO administrators can update questions');
+    });
+
+    it('should return 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.patchLlmoQuestion(mockContext);
+      expect(result.status).to.equal(404);
     });
   });
 
@@ -1929,6 +2025,12 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('Database error');
+    });
+
+    it('should return 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.getLlmoCustomerIntent(mockContext);
+      expect(result.status).to.equal(404);
     });
   });
 
@@ -2044,6 +2146,12 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody.message).to.equal('Only LLMO administrators can add customer intent');
     });
+
+    it('should return 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.addLlmoCustomerIntent(mockContext);
+      expect(result.status).to.equal(404);
+    });
   });
 
   describe('removeLlmoCustomerIntent', () => {
@@ -2107,6 +2215,12 @@ describe('LlmoController', () => {
       const result = await controller.removeLlmoCustomerIntent(mockContext);
 
       expect(result.status).to.equal(400);
+    });
+
+    it('should return 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.removeLlmoCustomerIntent(mockContext);
+      expect(result.status).to.equal(404);
     });
   });
 
@@ -2187,6 +2301,12 @@ describe('LlmoController', () => {
         expect(body).to.be.an('array');
       },
     );
+
+    it('should return 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.patchLlmoCustomerIntent(mockContext);
+      expect(result.status).to.equal(404);
+    });
   });
 
   describe('patchLlmoCdnLogsFilter', () => {
@@ -2324,6 +2444,18 @@ describe('LlmoController', () => {
         const responseBody = await result.json();
         expect(responseBody.message).to.equal('Only LLMO administrators can update the CDN bucket config');
       });
+
+      it('should return 404 when site is not found', async () => {
+        mockDataAccess.Site.findById.resolves(null);
+        const result = await controller.patchLlmoCdnBucketConfig(mockContext);
+        expect(result.status).to.equal(404);
+      });
+    });
+
+    it('should return 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.patchLlmoCdnLogsFilter(mockContext);
+      expect(result.status).to.equal(404);
     });
   });
 
@@ -2720,6 +2852,12 @@ describe('LlmoController', () => {
         'Error during LLMO offboarding for site site123: Offboarding failed',
       );
     });
+
+    it('should return 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.offboardCustomer(mockContext);
+      expect(result.status).to.equal(404);
+    });
   });
 
   describe('queryFiles', () => {
@@ -2783,6 +2921,13 @@ describe('LlmoController', () => {
       expect(mockLog.error).to.have.been.calledWith(
         `Error during LLMO cached query for site ${TEST_SITE_ID}: Cache query failed`,
       );
+    });
+
+    it('should return 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const { controller: cacheController } = await createControllerWithCacheStub({});
+      const result = await cacheController.queryFiles(mockContext);
+      expect(result.status).to.equal(404);
     });
   });
 
@@ -3314,7 +3459,7 @@ describe('LlmoController', () => {
       );
     });
 
-    it('should return 400 when site validation fails', async () => {
+    it('should return 404 when site is not found', async () => {
       const contextWithInvalidSite = {
         ...rationaleContext,
         dataAccess: {
@@ -3329,13 +3474,9 @@ describe('LlmoController', () => {
 
       const result = await controller.getLlmoRationale(contextWithInvalidSite);
 
-      expect(result.status).to.equal(400);
+      expect(result.status).to.equal(404);
       const responseBody = await result.json();
-      expect(responseBody.message).to.include('Cannot read properties of null');
-
-      expect(mockLog.error).to.have.been.calledWith(
-        sinon.match(`Error getting LLMO rationale for site ${TEST_SITE_ID}:`),
-      );
+      expect(responseBody.message).to.include('Site not found');
     });
 
     it('should handle empty JSON file correctly', async () => {
@@ -3491,6 +3632,110 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody).to.have.length(1);
       expect(responseBody[0].topic).to.equal('Search & Discovery Tools');
+    });
+  });
+
+  describe('getBrandClaims', () => {
+    let brandClaimsContext;
+    let mockGetSignedUrl;
+
+    beforeEach(() => {
+      mockGetSignedUrl = sinon.stub().resolves('https://s3.amazonaws.com/presigned-url');
+
+      brandClaimsContext = {
+        ...mockContext,
+        params: {
+          siteId: TEST_SITE_ID,
+        },
+        env: {
+          ...mockEnv,
+          ENV: 'dev',
+        },
+        s3: {
+          s3Client: {},
+          s3Bucket: 'test-bucket',
+          getSignedUrl: mockGetSignedUrl,
+          GetObjectCommand: function MockGetObjectCommand(params) {
+            this.params = params;
+          },
+        },
+        data: {},
+      };
+    });
+
+    it('should return presigned URL for default model', async () => {
+      const result = await controller.getBrandClaims(brandClaimsContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.siteId).to.equal(TEST_SITE_ID);
+      expect(responseBody.model).to.equal('default');
+      expect(responseBody.presignedUrl).to.equal('https://s3.amazonaws.com/presigned-url');
+      expect(responseBody.expiresAt).to.be.a('string');
+
+      const commandArg = mockGetSignedUrl.getCall(0).args[1];
+      expect(commandArg.params.Bucket).to.equal('test-bucket');
+      expect(commandArg.params.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/data.json.gz`);
+    });
+
+    it('should return presigned URL for specific model', async () => {
+      const context = {
+        ...brandClaimsContext,
+        data: { model: 'gpt-4.1' },
+      };
+
+      const result = await controller.getBrandClaims(context);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.model).to.equal('gpt-4.1');
+
+      const commandArg = mockGetSignedUrl.getCall(0).args[1];
+      expect(commandArg.params.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/gpt-4.1.json.gz`);
+    });
+
+    it('should return 400 when LLMO access validation fails', async () => {
+      const controllerDenied = controllerWithAccessDenied(mockContext);
+      const result = await controllerDenied.getBrandClaims(brandClaimsContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Only users belonging to the organization can view its sites');
+
+      expect(mockLog.error).to.have.been.calledWith(
+        `Error getting brand claims for site ${TEST_SITE_ID}: Only users belonging to the organization can view its sites`,
+      );
+    });
+
+    it('should return 400 when S3 is not configured', async () => {
+      const contextWithoutS3 = {
+        ...brandClaimsContext,
+        s3: null,
+      };
+
+      const result = await controller.getBrandClaims(contextWithoutS3);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('S3 storage is not configured for this environment');
+    });
+
+    it('should return 404 when S3 key not found', async () => {
+      const noSuchKeyError = new Error('The specified key does not exist');
+      noSuchKeyError.name = 'NoSuchKey';
+      mockGetSignedUrl.rejects(noSuchKeyError);
+
+      const result = await controller.getBrandClaims(brandClaimsContext);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal(`Brand claims data not found for site ${TEST_SITE_ID}`);
+    });
+
+    it('should return 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.getBrandClaims(brandClaimsContext);
+      expect(result.status).to.equal(404);
     });
   });
 
@@ -3776,6 +4021,21 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.include('S3 connection failed');
+    });
+
+    it('should return 403 when user is not owner of site', async () => {
+      const LlmoControllerNotOwner = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+        ...getCommonMocks(),
+      });
+
+      const controllerNotOwner = LlmoControllerNotOwner(mockContext);
+      const result = await controllerNotOwner.createOrUpdateEdgeConfig(edgeConfigContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('User does not own this site');
     });
 
     it('should create edge config when getEdgeOptimizeConfig returns null', async () => {
@@ -4219,6 +4479,258 @@ describe('LlmoController', () => {
     });
   });
 
+  describe('createOrUpdateStageEdgeConfig', () => {
+    const STAGE_SITE_ID = 'stage-site-uuid';
+    let stageConfigContext;
+    let mockStageSite;
+    const fullMetaconfig = { apiKeys: ['key1'], tokowakaEnabled: true, prerender: { allowList: ['/*'] } };
+
+    beforeEach(() => {
+      mockStageSite = {
+        getId: sinon.stub().returns(STAGE_SITE_ID),
+        getConfig: sinon.stub().returns(mockConfig),
+        getBaseURL: sinon.stub().returns('https://staging.lovesac.com'),
+        getOrganizationId: sinon.stub().returns(TEST_ORG_ID),
+        save: sinon.stub().resolves(),
+      };
+      mockSite.getBaseURL = sinon.stub().returns('https://www.lovesac.com');
+      mockSite.getOrganizationId = sinon.stub().returns(TEST_ORG_ID);
+      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({});
+      mockConfig.updateEdgeOptimizeConfig = sinon.stub();
+      mockDataAccess.Site.findById.resolves(mockSite);
+      mockDataAccess.Site.findByBaseURL = sinon.stub().resolves(null);
+      mockDataAccess.Site.create = sinon.stub().resolves(mockStageSite);
+      mockTokowakaClient.fetchMetaconfig.resolves(null);
+      mockTokowakaClient.createMetaconfig.resolves(fullMetaconfig);
+      mockTokowakaClient.updateMetaconfig.resolves({});
+
+      stageConfigContext = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        data: { stagingDomains: ['staging.lovesac.com'] },
+        attributes: { authInfo: { profile: { email: 'admin@example.com' } } },
+      };
+    });
+
+    it('should create stage site and metaconfig and return full S3 config array', async () => {
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.be.an('array').with.lengthOf(1);
+      expect(responseBody[0]).to.deep.include({
+        domain: 'staging.lovesac.com',
+        ...fullMetaconfig,
+      });
+      expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith('https://staging.lovesac.com');
+      expect(mockDataAccess.Site.create).to.have.been.calledWith({
+        baseURL: 'https://staging.lovesac.com',
+        organizationId: TEST_ORG_ID,
+      });
+      expect(mockTokowakaClient.createMetaconfig).to.have.been.calledWith(
+        'https://staging.lovesac.com',
+        STAGE_SITE_ID,
+        sinon.match({ tokowakaEnabled: true }),
+        sinon.match({ lastModifiedBy: 'admin@example.com', isStageDomain: true }),
+      );
+      expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(
+        sinon.match({ stagingDomains: sinon.match.array }),
+      );
+      expect(mockSite.save).to.have.been.called;
+    });
+
+    it('should use existing stage site when found and return full config after fetch', async () => {
+      mockDataAccess.Site.findByBaseURL.resolves(mockStageSite);
+      const existingMetaconfig = { apiKeys: ['existing-key'], tokowakaEnabled: true };
+      mockTokowakaClient.fetchMetaconfig
+        .onFirstCall().resolves(existingMetaconfig)
+        .onSecondCall().resolves({ ...existingMetaconfig, prerender: { allowList: ['/*'] } });
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockDataAccess.Site.create).to.not.have.been.called;
+      expect(mockTokowakaClient.updateMetaconfig).to.have.been.calledWith(
+        'https://staging.lovesac.com',
+        STAGE_SITE_ID,
+        {},
+        sinon.match({ lastModifiedBy: sinon.match.string, isStageDomain: true }),
+      );
+      const responseBody = await result.json();
+      expect(responseBody).to.be.an('array').with.lengthOf(1);
+      expect(responseBody[0]).to.have.property('domain', 'staging.lovesac.com');
+    });
+
+    it('should return 400 when stagingDomains is not an array', async () => {
+      stageConfigContext.data = { stagingDomains: 'staging.lovesac.com' };
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('non-empty array');
+    });
+
+    it('should return 400 when stagingDomains is empty array', async () => {
+      stageConfigContext.data = { stagingDomains: [] };
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('non-empty array');
+    });
+
+    it('should return 400 when staging domain apex does not match prod apex', async () => {
+      stageConfigContext.data = { stagingDomains: ['staging.otherdomain.com'] };
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('same base domain');
+    });
+
+    it('should return 403 when not LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true, true, false),
+        '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+      });
+      const controllerNoAdmin = LlmoControllerNoAdmin(mockContext);
+
+      const result = await controllerNoAdmin.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Only LLMO administrators');
+    });
+
+    it('should return 404 when prod site not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(404);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Site not found');
+    });
+
+    it('should return 403 when user does not have access to site', async () => {
+      const deniedController = controllerWithAccessDenied(mockContext);
+      const result = await deniedController.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(403);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('does not have access');
+    });
+
+    it('should merge with existing stagingDomains in config and return stageConfigs array', async () => {
+      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns({
+        stagingDomains: [
+          { domain: 'existing.stage.lovesac.com', id: 'existing-id' },
+        ],
+      });
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.be.an('array').with.lengthOf(1);
+      expect(responseBody[0].domain).to.equal('staging.lovesac.com');
+      expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.calledWith(
+        sinon.match({
+          stagingDomains: sinon.match.array,
+        }),
+      );
+    });
+
+    it('should return 400 when stagingDomains contains only empty/whitespace strings', async () => {
+      stageConfigContext.data = { stagingDomains: ['  ', '', '   \t  '] };
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('at least one non-empty domain string');
+    });
+
+    it('should return 400 when an error occurs during site creation', async () => {
+      mockDataAccess.Site.create.rejects(new Error('Database connection failed'));
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Database connection failed');
+    });
+
+    it('should return 400 when createMetaconfig fails', async () => {
+      mockTokowakaClient.createMetaconfig.rejects(new Error('Tokowaka service error'));
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Tokowaka service error');
+    });
+
+    it('should return 400 when updateEdgeOptimizeConfig throws', async () => {
+      mockConfig.updateEdgeOptimizeConfig.throws(new Error('Config update failed'));
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('Config update failed');
+    });
+
+    it('should return 400 when context.data is undefined', async () => {
+      stageConfigContext.data = undefined;
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('non-empty array');
+    });
+
+    it('should filter out non-string values from stagingDomains array', async () => {
+      stageConfigContext.data = { stagingDomains: ['staging.lovesac.com', 123, { domain: 'test' }, null, undefined] };
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.be.an('array').with.lengthOf(1);
+      expect(responseBody[0].domain).to.equal('staging.lovesac.com');
+    });
+
+    it('should use default lastModifiedBy when profile.email is missing', async () => {
+      stageConfigContext.attributes.authInfo = { profile: {} };
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockTokowakaClient.createMetaconfig).to.have.been.calledWith(
+        sinon.match.string,
+        sinon.match.string,
+        sinon.match.object,
+        sinon.match({ lastModifiedBy: 'tokowaka-stage-edge-optimize-config' }),
+      );
+    });
+
+    it('should handle when getEdgeOptimizeConfig returns null', async () => {
+      mockConfig.getEdgeOptimizeConfig = sinon.stub().returns(null);
+
+      const result = await controller.createOrUpdateStageEdgeConfig(stageConfigContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody).to.be.an('array').with.lengthOf(1);
+      expect(mockConfig.updateEdgeOptimizeConfig).to.have.been.called;
+    });
+  });
+
   describe('getEdgeConfig', () => {
     let edgeConfigContext;
 
@@ -4421,13 +4933,35 @@ describe('LlmoController', () => {
           name: 'Performance Optimization',
           status: 'pending',
           url: 'https://example.com/products',
-          opportunities: [{ opportunityId: 'opp-1', status: 'pending' }],
+          opportunities: [{ opportunityId: 'opp-1', status: 'pending', assignee: 'user@example.com' }],
+          createdBy: 'owner@example.com',
+        },
+      ],
+    };
+
+    const prevStrategyData = {
+      opportunities: [
+        { id: 'opp-1', name: 'Improve page speed', category: 'Performance' },
+      ],
+      strategies: [
+        {
+          id: 'strategy-1',
+          name: 'Performance Optimization',
+          status: 'new',
+          url: 'https://example.com/products',
+          opportunities: [{ opportunityId: 'opp-1', status: 'new', assignee: 'user@example.com' }],
+          createdBy: 'owner@example.com',
         },
       ],
     };
 
     beforeEach(() => {
       writeStrategyStub.resolves({ version: 'v1' });
+      readStrategyStub.resolves({ data: null, exists: false });
+      notifyStrategyChangesStub.resetHistory();
+      notifyStrategyChangesStub.resolves({
+        sent: 0, failed: 0, skipped: 0, changes: 0,
+      });
       mockContext.data = testStrategyData;
     });
 
@@ -4436,13 +4970,112 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
-      expect(responseBody).to.deep.equal({ version: 'v1' });
+      expect(responseBody.version).to.equal('v1');
+      expect(responseBody.notifications).to.deep.equal({
+        sent: 0, failed: 0, skipped: 0, changes: 0,
+      });
       expect(writeStrategyStub).to.have.been.calledWith(
         TEST_SITE_ID,
         testStrategyData,
         s3Client,
         { s3Bucket: TEST_BUCKET },
       );
+    });
+
+    it('should read previous strategy before writing', async () => {
+      readStrategyStub.resolves({ data: prevStrategyData, exists: true });
+
+      const result = await controller.saveStrategy(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(readStrategyStub).to.have.been.calledWith(
+        TEST_SITE_ID,
+        s3Client,
+        { s3Bucket: TEST_BUCKET },
+      );
+    });
+
+    it('should call notifyStrategyChanges with prev and next data', async () => {
+      readStrategyStub.resolves({ data: prevStrategyData, exists: true });
+
+      await controller.saveStrategy(mockContext);
+
+      expect(notifyStrategyChangesStub).to.have.been.calledOnce;
+      const [ctx, params] = notifyStrategyChangesStub.firstCall.args;
+      expect(ctx).to.equal(mockContext);
+      expect(params.prevData).to.deep.equal(prevStrategyData);
+      expect(params.nextData).to.deep.equal(testStrategyData);
+      expect(params.siteId).to.equal(TEST_SITE_ID);
+      expect(params.siteBaseUrl).to.equal('https://www.example.com');
+    });
+
+    it('should log strategy notification summary when changes > 0', async () => {
+      readStrategyStub.resolves({ data: prevStrategyData, exists: true });
+      notifyStrategyChangesStub.resolves({
+        sent: 1, failed: 0, skipped: 0, changes: 1,
+      });
+
+      const result = await controller.saveStrategy(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.notifications).to.deep.equal({
+        sent: 1, failed: 0, skipped: 0, changes: 1,
+      });
+      expect(mockLog.info).to.have.been.calledWith(
+        sinon.match(/Strategy notification summary for site .*: .*"changes":1/),
+      );
+    });
+
+    it('should pass null prevData when previous strategy does not exist', async () => {
+      readStrategyStub.resolves({ data: null, exists: false });
+
+      await controller.saveStrategy(mockContext);
+
+      expect(notifyStrategyChangesStub).to.have.been.calledOnce;
+      const [, params] = notifyStrategyChangesStub.firstCall.args;
+      expect(params.prevData).to.be.null;
+    });
+
+    it('should skip notifications when readStrategy fails (prevents email storm)', async () => {
+      readStrategyStub.rejects(new Error('S3 read error'));
+
+      const result = await controller.saveStrategy(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.notifications).to.deep.equal({
+        sent: 0, failed: 0, skipped: 0, changes: 0,
+      });
+
+      expect(notifyStrategyChangesStub).to.not.have.been.called;
+      expect(mockLog.warn).to.have.been.calledWith(
+        sinon.match(/Could not read previous strategy/),
+      );
+    });
+
+    it('should still return 200 when notification fails', async () => {
+      readStrategyStub.resolves({ data: prevStrategyData, exists: true });
+      notifyStrategyChangesStub.rejects(new Error('Email service down'));
+
+      const result = await controller.saveStrategy(mockContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.version).to.equal('v1');
+      expect(responseBody.notifications).to.deep.equal({
+        sent: 0, failed: 0, skipped: 0, changes: 0,
+      });
+    });
+
+    it('should use empty siteBaseUrl when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      readStrategyStub.resolves({ data: prevStrategyData, exists: true });
+
+      await controller.saveStrategy(mockContext);
+
+      const [, params] = notifyStrategyChangesStub.firstCall.args;
+      expect(params.siteBaseUrl).to.equal('');
     });
 
     it('should return bad request when payload is not an object', async () => {
@@ -5150,6 +5783,67 @@ describe('LlmoController', () => {
       expect(mockLog.error).to.have.been.called;
       const errorCall = mockLog.error.firstCall.args[0];
       expect(errorCall).to.match(/Error checking edge optimize status.*Service error/);
+    });
+  });
+
+  describe('markOpportunitiesReviewed', () => {
+    it('should mark opportunities as reviewed and return empty array when no tags', async () => {
+      const result = await controller.markOpportunitiesReviewed(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.deep.equal([]);
+      expect(mockConfig.addLlmoTag).to.have.been.calledOnceWith('opportunitiesReviewed');
+      expect(mockLog.info).to.have.been.calledWith(
+        `User test-user-id marked opportunities as reviewed for site ${TEST_SITE_ID}, added 'opportunitiesReviewed' tag`,
+      );
+    });
+
+    it('should log with "system" userId when authInfo is missing', async () => {
+      mockContext.attributes = {};
+
+      const result = await controller.markOpportunitiesReviewed(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockConfig.addLlmoTag).to.have.been.calledOnceWith('opportunitiesReviewed');
+      expect(mockLog.info).to.have.been.calledWith(
+        `User system marked opportunities as reviewed for site ${TEST_SITE_ID}, added 'opportunitiesReviewed' tag`,
+      );
+    });
+
+    it('should return existing tags after marking reviewed', async () => {
+      mockConfig.getLlmoConfig.returns({ ...mockLlmoConfig, tags: ['opportunitiesReviewed'] });
+
+      const result = await controller.markOpportunitiesReviewed(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body).to.deep.equal(['opportunitiesReviewed']);
+      expect(mockConfig.addLlmoTag).to.not.have.been.called;
+    });
+
+    it('should return forbidden when user has no access', async () => {
+      const deniedController = controllerWithAccessDenied(mockContext);
+
+      const result = await deniedController.markOpportunitiesReviewed(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('should return bad request on unexpected error', async () => {
+      mockDataAccess.Site.findById.rejects(new Error('Database connection failed'));
+
+      const result = await controller.markOpportunitiesReviewed(mockContext);
+
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.equal('Database connection failed');
+    });
+
+    it('should return 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.markOpportunitiesReviewed(mockContext);
+      expect(result.status).to.equal(404);
     });
   });
 });

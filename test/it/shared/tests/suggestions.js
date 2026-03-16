@@ -142,6 +142,40 @@ export default function suggestionTests(getHttpClient, resetData) {
         const res = await http.user.get(`${DENIED_BASE}/by-status/NEW`);
         expect(res.status).to.equal(403);
       });
+
+      it('user: returns suggestions when status is lowercase', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}/by-status/new`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(2);
+        res.body.forEach((s) => {
+          expectSuggestionDto(s);
+          expect(s.status).to.equal('NEW');
+        });
+      });
+
+      it('user: returns suggestions when status is mixed-case', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}/by-status/New`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(2);
+        res.body.forEach((s) => {
+          expectSuggestionDto(s);
+          expect(s.status).to.equal('NEW');
+        });
+      });
+
+      it('user: returns paged suggestions when status is lowercase', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${BASE}/by-status/new/paged/10`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('object');
+        expect(res.body.suggestions).to.be.an('array').with.lengthOf(2);
+        res.body.suggestions.forEach((s) => {
+          expectSuggestionDto(s);
+          expect(s.status).to.equal('NEW');
+        });
+      });
     });
 
     describe('GET .../suggestions/:suggestionId', () => {
@@ -277,6 +311,20 @@ export default function suggestionTests(getHttpClient, resetData) {
         expect(res.body.rank).to.equal(99);
       });
 
+      it('user: updates suggestion to SKIPPED with skipReason and skipDetail via PATCH', async () => {
+        const http = getHttpClient();
+        const res = await http.user.patch(`${BASE}/${testSuggId}`, {
+          status: 'SKIPPED',
+          skipReason: 'INACCURATE_OR_INCOMPLETE',
+          skipDetail: 'Data was outdated',
+        });
+        expect(res.status).to.equal(200);
+        expectSuggestionDto(res.body);
+        expect(res.body.status).to.equal('SKIPPED');
+        expect(res.body.skipReason).to.equal('INACCURATE_OR_INCOMPLETE');
+        expect(res.body.skipDetail).to.equal('Data was outdated');
+      });
+
       it('user: returns 403 for denied site', async () => {
         const http = getHttpClient();
         const res = await http.user.patch(`${DENIED_BASE}/${testSuggId}`, { rank: 1 });
@@ -315,6 +363,26 @@ export default function suggestionTests(getHttpClient, resetData) {
         expectBatch207(res, 1, 'suggestions');
         expect(res.body.metadata.success).to.equal(1);
         expect(res.body.suggestions[0].statusCode).to.equal(200);
+      });
+
+      it('user: updates suggestion to SKIPPED with skipReason and skipDetail', async () => {
+        const http = getHttpClient();
+        const res = await http.user.patch(`${BASE}/status`, [
+          {
+            id: testSuggId,
+            status: 'SKIPPED',
+            skipReason: 'ALREADY_IMPLEMENTED',
+            skipDetail: 'Fix was applied manually',
+          },
+        ]);
+        expectBatch207(res, 1, 'suggestions');
+        expect(res.body.metadata.success).to.equal(1);
+        expect(res.body.suggestions[0].statusCode).to.equal(200);
+        const updated = res.body.suggestions[0].suggestion;
+        expect(updated).to.be.an('object');
+        expect(updated.status).to.equal('SKIPPED');
+        expect(updated.skipReason).to.equal('ALREADY_IMPLEMENTED');
+        expect(updated.skipDetail).to.equal('Fix was applied manually');
       });
 
       it('user: returns 403 for denied site', async () => {

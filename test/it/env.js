@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+import { POSTGREST_WRITER_JWT } from './shared/postgrest-jwt.js';
+
 /**
  * Builds the full mandatory env matrix for the IT dev server.
  *
@@ -65,6 +67,9 @@ export function buildEnv(mode, publicKeyB64) {
     // Other middleware (dummy values, not called by Tier 1 routes)
     AUDIT_JOBS_QUEUE_URL: 'https://sqs.us-east-1.amazonaws.com/000000000000/dummy-audits',
     S3_CONFIG_BUCKET: 'dummy-config-bucket',
+
+    // Consumers (S2S) — allow ORG_1 IMS org for seeding and IT tests
+    S2S_ALLOWED_IMS_ORG_IDS: 'AAAAAAAABBBBBBBBCCCCCCCC@AdobeOrg',
   };
 
   if (mode === 'dynamo') {
@@ -77,6 +82,7 @@ export function buildEnv(mode, publicKeyB64) {
       DATA_SERVICE_PROVIDER: 'postgres',
       POSTGREST_URL: 'http://localhost:3300',
       POSTGREST_SCHEMA: 'public',
+      POSTGREST_API_KEY: POSTGREST_WRITER_JWT,
     });
   }
 

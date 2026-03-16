@@ -28,7 +28,7 @@ import {
   getLastNumberOfWeeks,
 } from '@adobe/spacecat-shared-utils';
 import TierClient from '@adobe/spacecat-shared-tier-client';
-import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
+import RUMAPIClient, { RUM_BUNDLER_API_HOST } from '@adobe/spacecat-shared-rum-api-client';
 import { iso6393 } from 'iso-639-3';
 import worldCountries from 'world-countries';
 
@@ -210,7 +210,7 @@ export const sendAutofixMessage = async (
   variations,
   action,
   customData,
-  { url } = {},
+  { url, precheckOnly } = {},
 ) => sqs.sendMessage(queueUrl, {
   opportunityId,
   siteId,
@@ -220,6 +220,7 @@ export const sendAutofixMessage = async (
   action,
   url,
   ...(customData && { customData }),
+  ...(precheckOnly === true && { precheckOnly: true }),
 });
 /* c8 ignore end */
 
@@ -582,6 +583,28 @@ export async function resolveWwwUrl(site, context) {
 }
 
 /**
+ * Returns whether the summit-plg audit handler is enabled for the site in configuration.
+ * No entitlement check; use when the site was already resolved via TierClient (e.g. sites-resolve).
+ * @param {Object} site - Site entity
+ * @param {Object} context - Request context with dataAccess, log
+ * @returns {Promise<boolean>}
+ */
+export async function getIsSummitPlgEnabled(site, context) {
+  try {
+    const { Configuration } = context.dataAccess || {};
+    if (!Configuration) return false;
+    const configuration = await Configuration.findLatest();
+    if (!configuration || typeof configuration.isHandlerEnabledForSite !== 'function') {
+      return false;
+    }
+    return configuration.isHandlerEnabledForSite('summit-plg', site);
+  } catch (err) {
+    context.log?.error?.('Error checking audit summit-plg for site:', err);
+    return false;
+  }
+}
+
+/**
  * Get the IMS user token from the context.
  * @param {object} context - The context of the request.
  * @returns {string} imsUserToken - The IMS User access token.
@@ -761,6 +784,124 @@ export const createProject = async (
   }
 };
 
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const AEM_CS_PUBLISH_HOST_PATTERN = /^publish-p(\d+)-e(\d+)\.adobeaemcloud\.(com|net)$/i;
+const EDS_HOST_PATTERN = /^([a-z0-9-]+)--([a-z0-9-]+)--([a-z0-9-]+)\.aem\.live$/i;
+
+/**
+ * Auto-resolves the author URL by fetching RUM bundles for the given domain
+ * and extracting the AEM Cloud Service publish host.
+ *
+ * Uses sharedWwwUrlResolver to determine the correct domain (handles www,
+ * subdomains, fetchConfig overrides, etc.) before querying RUM bundles.
+ *
+ * If the RUM bundle host matches publish-pXXX-eXXX.adobeaemcloud.com,
+ * constructs the corresponding author URL and returns delivery config details.
+ *
+ * @param {Object} site - The site object.
+ * @param {Object} context - The Lambda context containing log, env, etc.
+ * @returns {Promise<Object|null>} - Object with authorURL, programId, environmentId,
+ *                                    or null if not resolvable.
+ */
+export const autoResolveAuthorUrl = async (site, context) => {
+  const { log } = context;
+  const baseURL = site.getBaseURL();
+
+  try {
+    const rumApiClient = RUMAPIClient.createFrom(context);
+    const domain = await sharedWwwUrlResolver(site, rumApiClient, log);
+    const domainkey = await rumApiClient.retrieveDomainkey(domain);
+
+    // Fetch bundles for yesterday
+    const yesterday = new Date(Date.now() - ONE_DAY_MS);
+    const year = yesterday.getUTCFullYear();
+    const month = (yesterday.getUTCMonth() + 1).toString().padStart(2, '0');
+    const day = yesterday.getUTCDate().toString().padStart(2, '0');
+    const bundlesUrl = `${RUM_BUNDLER_API_HOST}/bundles/${domain}/${year}/${month}/${day}?domainkey=${domainkey}`;
+
+    const response = await fetch(bundlesUrl);
+    if (!response.ok) {
+      log.warn(`Failed to fetch RUM bundles for ${domain}: status ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json();
+    const rumBundles = data?.rumBundles || [];
+
+    if (rumBundles.length === 0) {
+      log.info(`No RUM bundles found for ${domain}, skipping author URL resolution`);
+      return null;
+    }
+
+    // Check the first bundle's host for the AEM CS publish pattern
+    const { host } = rumBundles[0];
+    const match = host?.match(AEM_CS_PUBLISH_HOST_PATTERN);
+    if (!match) {
+      log.info(`RUM bundle host '${host}' for ${domain} is not an AEM CS publish host, skipping author URL resolution`);
+      return { host };
+    }
+
+    const [, programId, environmentId] = match;
+    const authorURL = `https://author-p${programId}-e${environmentId}.adobeaemcloud.com`;
+    log.info(`Auto-resolved author URL from RUM bundle host: ${authorURL}`);
+    return {
+      authorURL, programId, environmentId, host,
+    };
+  } catch (error) {
+    log.warn(`Auto-resolve author URL failed for ${baseURL}: ${error.message}`);
+    return null;
+  }
+};
+
+/**
+ * Updates the code config on a site based on a given host.
+ * Currently supports EDS pattern (ref--repo--owner.aem.live) only.
+ * AEM CS pattern support will be added later.
+ *
+ * The caller is responsible for resolving the host to check
+ * (e.g. deliveryConfig.authorURL hostname or RUM bundle host).
+ * Does not save the site — caller is responsible for saving to avoid multiple saves.
+ *
+ * @param {Object} site - The site object.
+ * @param {string} host - The host to check for pattern matching.
+ * @param {Object} slackContext - The Slack context object with say function.
+ * @param {Object} log - The logger.
+ */
+export const updateCodeConfig = async (site, host, slackContext, log) => {
+  const { say } = slackContext;
+
+  const existingCode = site.getCode() || {};
+  if (existingCode.owner && existingCode.repo) {
+    log.debug(`Site ${site.getBaseURL()} already has code config (owner=${existingCode.owner}, repo=${existingCode.repo}), skipping`);
+    return;
+  }
+
+  if (!host) {
+    log.debug(`Site ${site.getBaseURL()} has no host to resolve code config from, skipping`);
+    return;
+  }
+
+  // Try EDS pattern: ref--repo--owner.aem.live
+  const edsMatch = host.match(EDS_HOST_PATTERN);
+  if (edsMatch) {
+    const [, ref, repo, owner] = edsMatch;
+    const code = {
+      type: 'github',
+      owner,
+      repo,
+      ref,
+      url: `https://github.com/${owner}/${repo}`,
+    };
+    site.setCode(code);
+    log.info(`Auto-resolved code config from host '${host}': owner=${owner}, repo=${repo}, ref=${ref}`);
+    await say(`:white_check_mark: Auto-resolved code config: owner=${owner}, repo=${repo}, ref=${ref}`);
+    return;
+  }
+
+  // TODO: Add AEM CS pattern code config resolution here
+  log.debug(`Host '${host}' does not match a supported pattern for code config resolution`);
+};
+
 /**
  * Creates or retrieves a site and its associated organization.
  *
@@ -796,7 +937,7 @@ const createSiteAndOrganization = async (
   if (site) {
     const siteOrgId = site.getOrganizationId();
     organizationId = siteOrgId; // Set organizationId for existing sites
-    const message = `:information_source: Site ${baseURL} already exists. Organization ID: ${siteOrgId}`;
+    const message = `:information_source: Site ${baseURL} already exists. Organization ID: ${siteOrgId}.`;
     await say(message);
   } else {
     // Check if the organization with IMS Org ID already exists; create if it doesn't
@@ -840,13 +981,59 @@ const createSiteAndOrganization = async (
   }
 
   // Set deliveryConfig and authoringType if provided (will be saved later with other site data)
+  let domainServingHost;
   if (deliveryConfig && Object.keys(deliveryConfig).length > 0) {
     site.setDeliveryConfig(deliveryConfig);
     if (authoringType) {
       site.setAuthoringType(authoringType);
     }
+    // Extract hostname from user-provided authorURL for code config resolution
+    if (deliveryConfig.authorURL) {
+      try {
+        domainServingHost = new URL(deliveryConfig.authorURL).hostname;
+      } catch {
+        log.debug(`Invalid authorURL '${deliveryConfig.authorURL}' in deliveryConfig`);
+      }
+    }
     await say(':white_check_mark: DeliveryConfig is added/updated to site configuration');
+  } else {
+    // Auto-resolve author URL from RUM bundles if deliveryConfig was not provided
+    const resolvedConfig = await autoResolveAuthorUrl(site, context);
+
+    if (resolvedConfig?.authorURL) {
+      const existingConfig = site.getDeliveryConfig() || {};
+      const { authorURL, programId, environmentId } = resolvedConfig;
+
+      if (existingConfig.authorURL || existingConfig.programId) {
+        // Check for mismatches with existing deliveryConfig
+        const authorURLMismatch = existingConfig.authorURL
+          && existingConfig.authorURL !== authorURL;
+        const programIdMismatch = existingConfig.programId
+          && existingConfig.programId !== programId;
+
+        if (authorURLMismatch || programIdMismatch) {
+          const warning = `:warning: RUM host resolved author URL (${authorURL}) does not match existing deliveryConfig authorURL (${existingConfig.authorURL}), programId: existing=${existingConfig.programId} vs resolved=${programId}`;
+          log.warn(warning);
+          await say(warning);
+        }
+      } else {
+        // Update deliveryConfig with resolved values, including imsOrgId
+        site.setDeliveryConfig({
+          ...existingConfig,
+          authorURL,
+          programId,
+          environmentId,
+          imsOrgId: imsOrgID || null,
+        });
+        await say(`:white_check_mark: Auto-resolved deliveryConfig from RUM data: authorURL=${authorURL}, programId=${programId}, environmentId=${environmentId}`);
+      }
+    }
+    // Use RUM bundle host for code config (covers both AEM CS and EDS hosts)
+    domainServingHost = resolvedConfig?.host;
   }
+
+  // Resolve code config from host (works for both user-provided and auto-resolved)
+  await updateCodeConfig(site, domainServingHost, slackContext, log);
 
   Object.assign(reportLine, localReportLine);
   return { site, organizationId };
@@ -1336,3 +1523,28 @@ export const filterSitesForProductCode = async (context, organization, sites, pr
   // Filter sites based on enrollment
   return sites.filter((site) => enrolledSiteIds.has(site.getId()));
 };
+
+/**
+ * Extracts and normalizes hostname from URL
+ * - Strips 'www.' prefix
+ * @param {URL} url - URL object
+ * @param {Object} logger - Logger instance
+ * @returns {string} - Normalized hostname
+ * @throws {Error} - If hostname extraction fails
+ */
+export function getHostName(url, logger = console) {
+  try {
+    let urlObj;
+    if (url instanceof URL) {
+      urlObj = url;
+    } else if (typeof url === 'string') {
+      urlObj = new URL(url);
+    } else {
+      throw new TypeError('Input must be a URL or a string');
+    }
+    return urlObj.hostname.replace(/^www\./, '');
+  } catch (error) {
+    logger.error(`Error extracting host name: ${error.message}`);
+    return null;
+  }
+}

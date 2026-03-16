@@ -11,10 +11,18 @@
  */
 
 /* eslint-env mocha */
-import { expect } from 'chai';
+import { use, expect } from 'chai';
+import chaiAsPromised from 'chai-as-promised';
+import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
+import nock from 'nock';
 
-import { createProject, deriveProjectName } from '../../src/support/utils.js';
+import {
+  createProject, deriveProjectName, autoResolveAuthorUrl, updateCodeConfig, getIsSummitPlgEnabled,
+} from '../../src/support/utils.js';
+
+use(chaiAsPromised);
+use(sinonChai);
 
 describe('utils', () => {
   describe('deriveProjectName', () => {
@@ -150,6 +158,380 @@ describe('utils', () => {
       await expect(createProject(context, slackContext, 'https://fr.example.com/', 'org123')).to.be.rejectedWith('Failed to create project');
       expect(context.log.error).to.have.been.calledWith('Error creating project: Failed to create project');
       expect(slackContext.say).to.have.been.calledWith(':x: Error creating project: Failed to create project');
+    });
+  });
+
+  describe('autoResolveAuthorUrl', () => {
+    let sandbox;
+    let context;
+    let rumApiClientStub;
+    let site;
+
+    // Build yesterday's date path for nock URL matching
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const datePath = `${yesterday.getUTCFullYear()}/${(yesterday.getUTCMonth() + 1).toString().padStart(2, '0')}/${yesterday.getUTCDate().toString().padStart(2, '0')}`;
+
+    beforeEach(() => {
+      sandbox = sinon.createSandbox();
+
+      rumApiClientStub = {
+        retrieveDomainkey: sandbox.stub(),
+      };
+
+      context = {
+        log: {
+          info: sandbox.stub(),
+          warn: sandbox.stub(),
+          error: sandbox.stub(),
+          debug: sandbox.stub(),
+        },
+        env: {
+          RUM_ADMIN_KEY: 'test-admin-key',
+        },
+        rumApiClient: rumApiClientStub,
+      };
+
+      site = {
+        getBaseURL: sandbox.stub().returns('https://www.example.com'),
+        getConfig: sandbox.stub().returns({
+          getFetchConfig: sandbox.stub().returns(null),
+        }),
+      };
+    });
+
+    afterEach(() => {
+      sandbox.restore();
+      nock.cleanAll();
+    });
+
+    it('returns resolved author URL when RUM bundle has an AEM CS publish host', async () => {
+      rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
+
+      nock('https://bundles.aem.page')
+        .get(`/bundles/example.com/${datePath}`)
+        .query({ domainkey: 'test-domainkey' })
+        .reply(200, {
+          rumBundles: [
+            {
+              id: '123',
+              host: 'publish-p12345-e67890.adobeaemcloud.com',
+              url: 'https://www.example.com/page1',
+            },
+          ],
+        });
+
+      const result = await autoResolveAuthorUrl(site, context);
+
+      expect(result).to.deep.equal({
+        authorURL: 'https://author-p12345-e67890.adobeaemcloud.com',
+        programId: '12345',
+        environmentId: '67890',
+        host: 'publish-p12345-e67890.adobeaemcloud.com',
+      });
+      expect(context.log.info).to.have.been.calledWith(
+        'Auto-resolved author URL from RUM bundle host: https://author-p12345-e67890.adobeaemcloud.com',
+      );
+    });
+
+    it('returns resolved author URL when RUM bundle has an AEM CS .net publish host', async () => {
+      rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
+
+      nock('https://bundles.aem.page')
+        .get(`/bundles/example.com/${datePath}`)
+        .query({ domainkey: 'test-domainkey' })
+        .reply(200, {
+          rumBundles: [
+            {
+              id: '123',
+              host: 'publish-p106488-e1080713.adobeaemcloud.net',
+              url: 'https://www.example.com/page1',
+            },
+          ],
+        });
+
+      const result = await autoResolveAuthorUrl(site, context);
+
+      expect(result).to.deep.equal({
+        authorURL: 'https://author-p106488-e1080713.adobeaemcloud.com',
+        programId: '106488',
+        environmentId: '1080713',
+        host: 'publish-p106488-e1080713.adobeaemcloud.net',
+      });
+    });
+
+    it('uses overrideBaseURL from fetchConfig when available', async () => {
+      site.getConfig.returns({
+        getFetchConfig: sandbox.stub().returns({
+          overrideBaseURL: 'https://custom.example.com',
+        }),
+      });
+      rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
+
+      nock('https://bundles.aem.page')
+        .get(`/bundles/custom.example.com/${datePath}`)
+        .query({ domainkey: 'test-domainkey' })
+        .reply(200, {
+          rumBundles: [
+            {
+              id: '123',
+              host: 'publish-p111-e222.adobeaemcloud.com',
+              url: 'https://custom.example.com/page1',
+            },
+          ],
+        });
+
+      const result = await autoResolveAuthorUrl(site, context);
+
+      expect(result).to.deep.equal({
+        authorURL: 'https://author-p111-e222.adobeaemcloud.com',
+        programId: '111',
+        environmentId: '222',
+        host: 'publish-p111-e222.adobeaemcloud.com',
+      });
+    });
+
+    it('returns host only when host is not an AEM CS publish host', async () => {
+      rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
+
+      nock('https://bundles.aem.page')
+        .get(`/bundles/example.com/${datePath}`)
+        .query({ domainkey: 'test-domainkey' })
+        .reply(200, {
+          rumBundles: [
+            {
+              id: '123',
+              host: 'main--mysite--org.aem.live',
+              url: 'https://www.example.com/page1',
+            },
+          ],
+        });
+
+      const result = await autoResolveAuthorUrl(site, context);
+
+      expect(result).to.deep.equal({ host: 'main--mysite--org.aem.live' });
+      expect(context.log.info).to.have.been.calledWithMatch(/is not an AEM CS publish host/);
+    });
+
+    it('returns null when no RUM bundles are returned', async () => {
+      rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
+
+      nock('https://bundles.aem.page')
+        .get(`/bundles/example.com/${datePath}`)
+        .query({ domainkey: 'test-domainkey' })
+        .reply(200, { rumBundles: [] });
+
+      const result = await autoResolveAuthorUrl(site, context);
+
+      expect(result).to.be.null;
+      expect(context.log.info).to.have.been.calledWithMatch(/No RUM bundles found/);
+    });
+
+    it('returns null when fetch fails', async () => {
+      rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
+
+      nock('https://bundles.aem.page')
+        .get(`/bundles/example.com/${datePath}`)
+        .query({ domainkey: 'test-domainkey' })
+        .reply(404);
+
+      const result = await autoResolveAuthorUrl(site, context);
+
+      expect(result).to.be.null;
+      expect(context.log.warn).to.have.been.calledWithMatch(/Failed to fetch RUM bundles/);
+    });
+
+    it('returns null when wwwUrlResolver fails', async () => {
+      rumApiClientStub.retrieveDomainkey.rejects(new Error('No domainkey'));
+
+      const result = await autoResolveAuthorUrl(site, context);
+
+      expect(result).to.be.null;
+      expect(context.log.warn).to.have.been.calledWithMatch(/Auto-resolve author URL failed/);
+    });
+
+    it('returns host object when first bundle host is undefined', async () => {
+      rumApiClientStub.retrieveDomainkey.resolves('test-domainkey');
+
+      nock('https://bundles.aem.page')
+        .get(`/bundles/example.com/${datePath}`)
+        .query({ domainkey: 'test-domainkey' })
+        .reply(200, {
+          rumBundles: [
+            {
+              id: '1',
+              url: 'https://www.example.com/page1',
+            },
+          ],
+        });
+
+      const result = await autoResolveAuthorUrl(site, context);
+
+      expect(result).to.deep.equal({ host: undefined });
+      expect(context.log.info).to.have.been.calledWithMatch(/is not an AEM CS publish host/);
+    });
+  });
+
+  describe('updateCodeConfig', () => {
+    let sandbox;
+    let log;
+    let slackContext;
+    let site;
+
+    beforeEach(() => {
+      sandbox = sinon.createSandbox();
+
+      log = {
+        info: sandbox.stub(),
+        warn: sandbox.stub(),
+        error: sandbox.stub(),
+        debug: sandbox.stub(),
+      };
+
+      slackContext = {
+        say: sandbox.stub(),
+      };
+
+      site = {
+        getBaseURL: sandbox.stub().returns('https://www.example.com'),
+        getCode: sandbox.stub(),
+        setCode: sandbox.stub(),
+      };
+    });
+
+    afterEach(() => {
+      sandbox.restore();
+    });
+
+    it('sets code config when host matches EDS pattern', async () => {
+      site.getCode.returns({});
+
+      await updateCodeConfig(site, 'main--maidenform--hanes-brands.aem.live', slackContext, log);
+
+      expect(site.setCode).to.have.been.calledWith({
+        type: 'github',
+        owner: 'hanes-brands',
+        repo: 'maidenform',
+        ref: 'main',
+        url: 'https://github.com/hanes-brands/maidenform',
+      });
+      expect(log.info).to.have.been.calledWithMatch(/Auto-resolved code config from host/);
+      expect(slackContext.say).to.have.been.calledWithMatch(/Auto-resolved code config/);
+    });
+
+    it('skips when host is not provided', async () => {
+      site.getCode.returns({});
+
+      await updateCodeConfig(site, undefined, slackContext, log);
+
+      expect(site.setCode).not.to.have.been.called;
+      expect(log.debug).to.have.been.calledWithMatch(/has no host to resolve code config from/);
+    });
+
+    it('skips when host is null', async () => {
+      site.getCode.returns({});
+
+      await updateCodeConfig(site, null, slackContext, log);
+
+      expect(site.setCode).not.to.have.been.called;
+      expect(log.debug).to.have.been.calledWithMatch(/has no host to resolve code config from/);
+    });
+
+    it('skips when host does not match any supported pattern', async () => {
+      site.getCode.returns({});
+
+      await updateCodeConfig(site, 'some-random-host.example.com', slackContext, log);
+
+      expect(site.setCode).not.to.have.been.called;
+      expect(log.debug).to.have.been.calledWithMatch(/does not match a supported pattern/);
+    });
+
+    it('skips when code config already has owner and repo', async () => {
+      site.getCode.returns({ owner: 'existing-owner', repo: 'existing-repo' });
+
+      await updateCodeConfig(site, 'main--maidenform--hanes-brands.aem.live', slackContext, log);
+
+      expect(site.setCode).not.to.have.been.called;
+      expect(log.debug).to.have.been.calledWithMatch(/already has code config/);
+    });
+
+    it('logs debug when AEM CS host does not match EDS pattern', async () => {
+      site.getCode.returns({});
+
+      await updateCodeConfig(site, 'author-p12345-e67890.adobeaemcloud.com', slackContext, log);
+
+      expect(site.setCode).not.to.have.been.called;
+      expect(log.debug).to.have.been.calledWithMatch(/does not match a supported pattern/);
+    });
+  });
+
+  describe('getIsSummitPlgEnabled', () => {
+    let sandbox;
+    let context;
+    let site;
+
+    beforeEach(() => {
+      sandbox = sinon.createSandbox();
+      site = { getId: sandbox.stub().returns('site-123') };
+      context = {
+        log: { error: sandbox.stub() },
+        dataAccess: {},
+      };
+    });
+
+    afterEach(() => {
+      sandbox.restore();
+    });
+
+    it('returns true when Configuration has summit-plg enabled for site', async () => {
+      const isHandlerEnabledForSite = sandbox.stub().withArgs('summit-plg', site).returns(true);
+      context.dataAccess.Configuration = {
+        findLatest: sandbox.stub().resolves({
+          isHandlerEnabledForSite,
+        }),
+      };
+
+      const result = await getIsSummitPlgEnabled(site, context);
+
+      expect(result).to.be.true;
+      expect(context.dataAccess.Configuration.findLatest).to.have.been.calledOnce;
+      expect(isHandlerEnabledForSite).to.have.been.calledWith('summit-plg', site);
+    });
+
+    it('returns false when Configuration has summit-plg disabled for site', async () => {
+      context.dataAccess.Configuration = {
+        findLatest: sandbox.stub().resolves({
+          isHandlerEnabledForSite: sandbox.stub().withArgs('summit-plg', site).returns(false),
+        }),
+      };
+
+      const result = await getIsSummitPlgEnabled(site, context);
+
+      expect(result).to.be.false;
+    });
+
+    it('returns false when context.dataAccess has no Configuration', async () => {
+      context.dataAccess = {};
+
+      const result = await getIsSummitPlgEnabled(site, context);
+
+      expect(result).to.be.false;
+    });
+
+    it('returns false when context.dataAccess is undefined', async () => {
+      context.dataAccess = undefined;
+
+      expect(await getIsSummitPlgEnabled(site, context)).to.be.false;
+    });
+
+    it('returns false and logs error when findLatest throws', async () => {
+      context.dataAccess.Configuration = {
+        findLatest: sandbox.stub().rejects(new Error('DB error')),
+      };
+
+      const result = await getIsSummitPlgEnabled(site, context);
+
+      expect(result).to.be.false;
+      expect(context.log.error).to.have.been.calledWithMatch(/Error checking audit summit-plg for site/, sinon.match.instanceOf(Error));
     });
   });
 });
