@@ -699,10 +699,10 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(200);
       const body = await result.json();
       expect(body.weeks).to.deep.equal([
-        { '2026-W11': { startDate: '2026-03-09', endDate: '2026-03-15' } },
-        { '2026-W10': { startDate: '2026-03-02', endDate: '2026-03-08' } },
-        { '2026-W09': { startDate: '2026-02-23', endDate: '2026-03-01' } },
-        { '2026-W07': { startDate: '2026-02-09', endDate: '2026-02-15' } },
+        { week: '2026-W11', startDate: '2026-03-09', endDate: '2026-03-15' },
+        { week: '2026-W10', startDate: '2026-03-02', endDate: '2026-03-08' },
+        { week: '2026-W09', startDate: '2026-02-23', endDate: '2026-03-01' },
+        { week: '2026-W07', startDate: '2026-02-09', endDate: '2026-02-15' },
       ]);
     });
 
@@ -724,13 +724,19 @@ describe('llmo-brand-presence', () => {
       const body = await result.json();
       expect(body.weeks).to.have.lengthOf(3);
       expect(body.weeks[0]).to.deep.equal({
-        invalid: { startDate: null, endDate: null },
+        week: 'invalid',
+        startDate: null,
+        endDate: null,
       });
       expect(body.weeks[1]).to.deep.equal({
-        '2026-W11': { startDate: '2026-03-09', endDate: '2026-03-15' },
+        week: '2026-W11',
+        startDate: '2026-03-09',
+        endDate: '2026-03-15',
       });
       expect(body.weeks[2]).to.deep.equal({
-        '2026-W00': { startDate: null, endDate: null },
+        week: '2026-W00',
+        startDate: null,
+        endDate: null,
       });
     });
 

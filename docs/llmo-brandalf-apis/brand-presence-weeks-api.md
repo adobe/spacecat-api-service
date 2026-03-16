@@ -40,7 +40,7 @@ client
   // + .eq('site_id', siteId)   when siteId query param provided
   // + .eq('brand_id', brandId)  when path has specific brand (not 'all')
   .order('week', { ascending: false })
-  .limit(100000);
+  .limit(200000);
 ```
 
 **Equivalent SQL:**
@@ -52,7 +52,7 @@ WHERE organization_id = :orgId
   -- AND site_id = :siteId   (when provided)
   -- AND brand_id = :brandId (when single brand route)
 ORDER BY week DESC
-LIMIT 100000;
+LIMIT 200000;
 ```
 
 **Parameter mapping:**
@@ -65,7 +65,7 @@ LIMIT 100000;
 
 **Response processing:** Distinct `week` values are deduplicated (multiple rows can share the same week across category/topic/region) and sorted descending.
 
-**Row limit:** 100,000 rows so all available weeks are returned. `brand_metrics_weekly` has many rows per week (site × brand × category × region × topic); a lower cap (e.g. 5,000) would truncate older weeks.
+**Row limit:** 200,000 rows so all available weeks are returned. `brand_metrics_weekly` has many rows per week (site × brand × category × region × topic); a lower cap (e.g. 5,000) would truncate older weeks.
 
 **Data source (brand_metrics_weekly):** Pre-aggregated weekly metrics. One row per (site_id, week, model, brand_name, category_name, region_code, topic). Example columns used: `organization_id`, `site_id`, `week`, `model`, `brand_id`.
 
@@ -77,28 +77,25 @@ LIMIT 100000;
 {
   "weeks": [
     {
-      "2026-W11": {
-        "startDate": "2026-03-09",
-        "endDate": "2026-03-15"
-      }
+      "week": "2026-W11",
+      "startDate": "2026-03-09",
+      "endDate": "2026-03-15"
     },
     {
-      "2026-W10": {
-        "startDate": "2026-03-02",
-        "endDate": "2026-03-08"
-      }
+      "week": "2026-W10",
+      "startDate": "2026-03-02",
+      "endDate": "2026-03-08"
     },
     {
-      "2026-W09": {
-        "startDate": "2026-02-23",
-        "endDate": "2026-03-01"
-      }
+      "week": "2026-W09",
+      "startDate": "2026-02-23",
+      "endDate": "2026-03-01"
     }
   ]
 }
 ```
 
-Each week is an object keyed by the ISO week string (YYYY-Wnn). The value is `startDate` (Monday) and `endDate` (Sunday) in YYYY-MM-DD format. Weeks are sorted descending (most recent first).
+Each item has `week` (ISO week string YYYY-Wnn), `startDate` (Monday), and `endDate` (Sunday) in YYYY-MM-DD format. Weeks are sorted descending (most recent first).
 
 ---
 

@@ -349,9 +349,9 @@ export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
     const weeks = sortedWeeks.map((weekStr) => {
       const range = getWeekDateRange(weekStr);
       return {
-        [weekStr]: range
-          ? { startDate: range.startDate, endDate: range.endDate }
-          : { startDate: null, endDate: null },
+        week: weekStr,
+        startDate: range?.startDate ?? null,
+        endDate: range?.endDate ?? null,
       };
     });
 
