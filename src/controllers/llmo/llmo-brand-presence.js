@@ -87,7 +87,7 @@ function buildExecutionsQuery(client, organizationId, params, defaults, filterBy
     .lte('execution_date', endDate)
     .eq('model', model);
 
-  if (shouldApplyFilter(siteId) && siteId !== '*') {
+  if (shouldApplyFilter(siteId)) {
     q = q.eq('site_id', siteId);
   }
   if (filterByBrandId) {
@@ -116,7 +116,7 @@ function buildExecutionsQuery(client, organizationId, params, defaults, filterBy
  * @internal Exported for testing early-return paths
  */
 export async function validateSiteBelongsToOrg(client, organizationId, siteId) {
-  if (!shouldApplyFilter(siteId) || siteId === '*') return true;
+  if (!shouldApplyFilter(siteId)) return true;
   const { data, error } = await client
     .from('sites')
     .select('id')
@@ -126,8 +126,9 @@ export async function validateSiteBelongsToOrg(client, organizationId, siteId) {
   return !error && data?.length === 1;
 }
 
-async function resolveSiteIds(client, organizationId, siteId, filterByBrandId, rows) {
-  if (shouldApplyFilter(siteId) && siteId !== '*') {
+/** @internal Exported for testing sites-query path coverage */
+export async function resolveSiteIds(client, organizationId, siteId, filterByBrandId, rows) {
+  if (shouldApplyFilter(siteId)) {
     return [siteId];
   }
   if (filterByBrandId) {
@@ -145,7 +146,7 @@ async function resolveSiteIds(client, organizationId, siteId, filterByBrandId, r
 }
 
 async function fetchPageIntents(client, organizationId, siteId, filterByBrandId, siteIds) {
-  if (shouldApplyFilter(siteId) && siteId !== '*') {
+  if (shouldApplyFilter(siteId)) {
     const { data: piData, error: piError } = await client
       .from('page_intents')
       .select('page_intent')
@@ -266,13 +267,15 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
 
     const rows = data || [];
     const siteFilter = params.siteId;
-    if (shouldApplyFilter(siteFilter) && siteFilter !== '*') {
+    if (shouldApplyFilter(siteFilter)) {
       const siteBelongsToOrg = await validateSiteBelongsToOrg(client, organizationId, siteFilter);
       if (!siteBelongsToOrg) {
         return forbidden('Site does not belong to the organization');
       }
     }
-    const siteIds = await resolveSiteIds(client, organizationId, siteFilter, filterByBrandId, rows);
+    const siteIds = (filterByBrandId || shouldApplyFilter(siteFilter))
+      ? await resolveSiteIds(client, organizationId, siteFilter, filterByBrandId, rows)
+      : [];
     const pageIntents = await fetchPageIntents(
       client,
       organizationId,

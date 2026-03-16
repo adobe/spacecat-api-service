@@ -16,6 +16,7 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import {
   createFilterDimensionsHandler,
+  resolveSiteIds,
   strCompare,
   toFilterOption,
   validateSiteBelongsToOrg,
@@ -159,6 +160,38 @@ describe('llmo-brand-presence', () => {
       const result = await validateSiteBelongsToOrg(client, 'org-1', '*');
       expect(result).to.be.true;
       expect(client.from).not.to.have.been.called;
+    });
+  });
+
+  describe('resolveSiteIds', () => {
+    it('queries sites table and returns site IDs when no siteId and no filterByBrandId', async () => {
+      const sitesData = {
+        data: [
+          { id: 'site-1' },
+          { id: 'site-2' },
+        ],
+        error: null,
+      };
+      const client = createChainableMock(sitesData);
+      const result = await resolveSiteIds(client, 'org-1', null, null, []);
+
+      expect(result).to.deep.equal(['site-1', 'site-2']);
+      expect(client.from).to.have.been.calledWith('sites');
+      expect(client.eq).to.have.been.calledWith('organization_id', 'org-1');
+    });
+
+    it('returns empty array when sites query returns error', async () => {
+      const client = createChainableMock({ data: null, error: { message: 'DB error' } });
+      const result = await resolveSiteIds(client, 'org-1', null, null, []);
+
+      expect(result).to.deep.equal([]);
+    });
+
+    it('returns empty array when sites query returns empty data', async () => {
+      const client = createChainableMock({ data: [], error: null });
+      const result = await resolveSiteIds(client, 'org-1', null, null, []);
+
+      expect(result).to.deep.equal([]);
     });
   });
 
@@ -306,17 +339,13 @@ describe('llmo-brand-presence', () => {
         ],
         error: null,
       };
-      const sitesData = {
-        data: [{ id: 'cccdac43-1a22-4659-9086-b762f59b9928' }],
-        error: null,
-      };
       const pageIntentsData = {
         data: [{ page_intent: 'TRANSACTIONAL' }, { page_intent: 'INFORMATIONAL' }],
         error: null,
       };
       mockContext.dataAccess.Site.postgrestService = createChainableMock(
         brandData,
-        [brandData, sitesData, pageIntentsData],
+        [brandData, pageIntentsData],
       );
 
       const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
@@ -501,9 +530,8 @@ describe('llmo-brand-presence', () => {
         ],
         error: null,
       };
-      const sitesData = { data: [{ id: 's1' }], error: null };
       const pageIntentsData = { data: [{ page_intent: 'TRANSACTIONAL' }], error: null };
-      const chainMock = createChainableMock(brandData, [brandData, sitesData, pageIntentsData]);
+      const chainMock = createChainableMock(brandData, [brandData, pageIntentsData]);
       mockContext.dataAccess.Site.postgrestService = chainMock;
 
       const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
