@@ -14,14 +14,35 @@ import { Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-acces
 import { getTokenGrantConfigByOpportunity } from '@adobe/spacecat-shared-utils';
 
 /**
- * Default sort: by rank ascending, then id ascending.
+ * Extracts rank from a suggestion entity or plain object.
+ */
+function getSuggestionRank(s) {
+  return typeof s?.getRank === 'function' ? s.getRank() : (s?.rank ?? 0);
+}
+
+/**
+ * Creates a suggestion group object.
+ * @param {Array} items - Suggestions in this group.
+ * @param {Function} [rankFn] - Custom rank function for the group.
+ *   Defaults to the rank of the first item.
+ * @returns {{ items: Array, getRank: Function }}
+ */
+function createGroup(items, rankFn) {
+  return {
+    items,
+    getRank: rankFn ?? (() => getSuggestionRank(items[0])),
+  };
+}
+
+/**
+ * Default sort: by group rank ascending, then first item id ascending.
  */
 function defaultSortFn(groupA, groupB) {
-  const a = groupA[0];
-  const b = groupB[0];
-  const rankA = typeof a?.getRank === 'function' ? a.getRank() : (a?.rank ?? 0);
-  const rankB = typeof b?.getRank === 'function' ? b.getRank() : (b?.rank ?? 0);
+  const rankA = groupA.getRank();
+  const rankB = groupB.getRank();
   if (rankA !== rankB) return rankA - rankB;
+  const a = groupA.items[0];
+  const b = groupB.items[0];
   const idA = typeof a?.getId === 'function' ? a.getId() : (a?.id ?? '');
   const idB = typeof b?.getId === 'function' ? b.getId() : (b?.id ?? '');
   return idA.localeCompare(idB);
@@ -29,16 +50,51 @@ function defaultSortFn(groupA, groupB) {
 
 /**
  * Per-opportunity grouping and sorting strategies.
- * Each entry can define `groupFn` and/or `sortFn`.
- * Opportunities not listed here use the defaults
- * (one group per suggestion, sorted by rank asc then id asc).
+ *
+ * Each entry is keyed by opportunity type and may define:
+ *
+ *   groupFn(suggestions) => Array<Group>
+ *     Groups suggestions into logical units. Each group is created via
+ *     createGroup(items, rankFn?) and consumes one token when granted.
+ *     Use this when multiple suggestions should be treated as a single
+ *     grantable unit (e.g. all backlinks pointing to the same broken URL).
+ *     The optional rankFn overrides how the group's rank is computed;
+ *     if omitted, the group rank defaults to the first item's rank.
+ *     Not needed when each suggestion should be granted independently
+ *     (the default is one group per suggestion).
+ *
+ *   sortFn(groupA, groupB) => number
+ *     Custom comparator for ordering groups. Receives group objects
+ *     with { items, getRank() }. Use this when the default sort
+ *     (rank ascending, then first item's id ascending) does not match
+ *     the desired grant priority for this opportunity type.
+ *     Not needed when the default ascending-rank order is correct.
+ *
+ * Opportunities not listed here use the defaults: one group per
+ * suggestion, sorted by rank ascending then id ascending.
  */
 const OPPORTUNITY_STRATEGIES = {
-  // Example: group broken-backlinks suggestions by source URL
-  // 'broken-backlinks': {
-  //   groupFn: (suggestions) => { ... },
-  //   sortFn: (groupA, groupB) => { ... },
-  // },
+  'broken-backlinks': {
+    groupFn: (suggestions) => {
+      const groups = new Map();
+      for (const suggestion of suggestions) {
+        const data = typeof suggestion?.getData === 'function'
+          ? suggestion.getData()
+          : suggestion?.data;
+        const urlTo = data?.url_to ?? data?.urlTo ?? '';
+        if (!groups.has(urlTo)) {
+          groups.set(urlTo, []);
+        }
+        groups.get(urlTo).push(suggestion);
+      }
+      return [...groups.values()].map(
+        (items) => createGroup(
+          items,
+          () => Math.max(...items.map(getSuggestionRank)),
+        ),
+      );
+    },
+  },
 };
 
 /**
@@ -50,7 +106,7 @@ const OPPORTUNITY_STRATEGIES = {
  * @param {Array} suggestions - Suggestion entities or plain objects.
  * @param {string} [opportunityName] - Opportunity name for
  *   strategy lookup.
- * @returns {Array<Array>} Sorted groups of suggestions.
+ * @returns {Array<{items: Array, getRank: Function}>} Sorted groups.
  */
 export function getTopSuggestions(suggestions, opportunityName) {
   if (!Array.isArray(suggestions) || suggestions.length === 0) {
@@ -61,7 +117,7 @@ export function getTopSuggestions(suggestions, opportunityName) {
   // c8 ignore: groupFn branch covered when strategies are added
   const groups = groupFn
     ? groupFn(suggestions) /* c8 ignore next */
-    : suggestions.map((s) => [s]);
+    : suggestions.map((s) => createGroup([s]));
   return [...groups].sort(sortFn ?? defaultSortFn);
 }
 
@@ -118,7 +174,7 @@ export async function grantSuggestionsForOpportunity(dataAccess, site, opportuni
     .slice(0, remaining);
   await Promise.all(
     topGroups.map((group) => {
-      const ids = group.map((s) => s.getId()).filter(Boolean);
+      const ids = group.items.map((s) => s.getId()).filter(Boolean);
       return ids.length > 0
         ? SuggestionGrant.grantSuggestions(ids, siteId, tokenType)
         : Promise.resolve();

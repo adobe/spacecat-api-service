@@ -43,10 +43,18 @@ describe('grant-suggestions-handler', () => {
       const s2 = { getId: () => 'id-2', getRank: () => 5 };
       const groups = getTopSuggestions([s1, s2]);
       expect(groups).to.have.lengthOf(2);
-      expect(groups.every((g) => Array.isArray(g) && g.length === 1)).to.be.true;
-      const flat = groups.flat();
-      expect(flat).to.include(s1);
-      expect(flat).to.include(s2);
+      expect(groups.every((g) => Array.isArray(g.items) && g.items.length === 1)).to.be.true;
+      const allItems = groups.flatMap((g) => g.items);
+      expect(allItems).to.include(s1);
+      expect(allItems).to.include(s2);
+    });
+
+    it('exposes getRank on default groups delegating to first item', () => {
+      const s1 = { getId: () => 'id-1', getRank: () => 10 };
+      const s2 = { getId: () => 'id-2', getRank: () => 5 };
+      const groups = getTopSuggestions([s1, s2]);
+      expect(groups[0].getRank()).to.equal(5);
+      expect(groups[1].getRank()).to.equal(10);
     });
 
     it('sorts groups by rank ascending then by id (default sort)', () => {
@@ -55,9 +63,9 @@ describe('grant-suggestions-handler', () => {
       const s3 = { getId: () => 'id-c', getRank: () => 10 };
       const groups = getTopSuggestions([s1, s2, s3]);
       expect(groups).to.have.lengthOf(3);
-      expect(groups[0][0]).to.equal(s2); // rank 5 first
-      expect(groups[1][0]).to.equal(s1); // rank 10, id-b before id-c
-      expect(groups[2][0]).to.equal(s3); // rank 10, id-c
+      expect(groups[0].items[0]).to.equal(s2); // rank 5 first
+      expect(groups[1].items[0]).to.equal(s1); // rank 10, id-b before id-c
+      expect(groups[2].items[0]).to.equal(s3); // rank 10, id-c
     });
 
     it('handles plain objects with id and rank', () => {
@@ -65,8 +73,8 @@ describe('grant-suggestions-handler', () => {
       const s2 = { id: 'y', rank: 0 };
       const groups = getTopSuggestions([s1, s2]);
       expect(groups).to.have.lengthOf(2);
-      expect(groups[0][0]).to.equal(s2);
-      expect(groups[1][0]).to.equal(s1);
+      expect(groups[0].items[0]).to.equal(s2);
+      expect(groups[1].items[0]).to.equal(s1);
     });
 
     it('uses default strategy for unknown opportunity name', () => {
@@ -74,8 +82,116 @@ describe('grant-suggestions-handler', () => {
       const s2 = { getId: () => 'id-2', getRank: () => 5 };
       const groups = getTopSuggestions([s1, s2], 'unknown-type');
       expect(groups).to.have.lengthOf(2);
-      expect(groups[0][0]).to.equal(s2);
-      expect(groups[1][0]).to.equal(s1);
+      expect(groups[0].items[0]).to.equal(s2);
+      expect(groups[1].items[0]).to.equal(s1);
+    });
+
+    it('groups broken-backlinks suggestions by data.url_to using getData()', () => {
+      const s1 = { getId: () => 'id-1', getRank: () => 10, getData: () => ({ url_to: 'https://example.com/a' }) };
+      const s2 = { getId: () => 'id-2', getRank: () => 5, getData: () => ({ url_to: 'https://example.com/a' }) };
+      const s3 = { getId: () => 'id-3', getRank: () => 8, getData: () => ({ url_to: 'https://example.com/b' }) };
+      const groups = getTopSuggestions([s1, s2, s3], 'broken-backlinks');
+      expect(groups).to.have.lengthOf(2);
+      const groupA = groups.find((g) => g.items[0].getData().url_to === 'https://example.com/a');
+      const groupB = groups.find((g) => g.items[0].getData().url_to === 'https://example.com/b');
+      expect(groupA.items).to.have.lengthOf(2);
+      expect(groupB.items).to.have.lengthOf(1);
+    });
+
+    it('broken-backlinks group getRank returns highest rank among items', () => {
+      const s1 = { getId: () => 'id-1', getRank: () => 10, getData: () => ({ url_to: 'https://example.com/a' }) };
+      const s2 = { getId: () => 'id-2', getRank: () => 5, getData: () => ({ url_to: 'https://example.com/a' }) };
+      const s3 = { getId: () => 'id-3', getRank: () => 8, getData: () => ({ url_to: 'https://example.com/b' }) };
+      const groups = getTopSuggestions([s1, s2, s3], 'broken-backlinks');
+      const groupA = groups.find((g) => g.items.includes(s1));
+      const groupB = groups.find((g) => g.items.includes(s3));
+      expect(groupA.getRank()).to.equal(10);
+      expect(groupB.getRank()).to.equal(8);
+    });
+
+    it('groups broken-backlinks suggestions by data.urlTo (camelCase fallback)', () => {
+      const s1 = { getId: () => 'id-1', getRank: () => 1, getData: () => ({ urlTo: 'https://example.com/x' }) };
+      const s2 = { getId: () => 'id-2', getRank: () => 2, getData: () => ({ urlTo: 'https://example.com/x' }) };
+      const groups = getTopSuggestions([s1, s2], 'broken-backlinks');
+      expect(groups).to.have.lengthOf(1);
+      expect(groups[0].items).to.have.lengthOf(2);
+    });
+
+    it('groups broken-backlinks suggestions using plain object data', () => {
+      const s1 = { id: 'id-1', rank: 1, data: { url_to: 'https://example.com/a' } };
+      const s2 = { id: 'id-2', rank: 2, data: { url_to: 'https://example.com/b' } };
+      const groups = getTopSuggestions([s1, s2], 'broken-backlinks');
+      expect(groups).to.have.lengthOf(2);
+      expect(groups[0].items).to.have.lengthOf(1);
+      expect(groups[1].items).to.have.lengthOf(1);
+    });
+
+    it('groups broken-backlinks suggestions with missing data under empty string key', () => {
+      const s1 = { getId: () => 'id-1', getRank: () => 1, getData: () => ({}) };
+      const s2 = { getId: () => 'id-2', getRank: () => 2, getData: () => null };
+      const groups = getTopSuggestions([s1, s2], 'broken-backlinks');
+      expect(groups).to.have.lengthOf(1);
+      expect(groups[0].items).to.have.lengthOf(2);
+    });
+
+    it('groups and ranks 10 broken-backlinks suggestions correctly', () => {
+      const mk = (id, rank, urlTo) => ({
+        getId: () => id, getRank: () => rank, getData: () => ({ url_to: urlTo }),
+      });
+      // 4 distinct url_to values across 10 suggestions
+      const suggestions = [
+        mk('s01', 100, 'https://example.com/page-a'), // group A
+        mk('s02', 500, 'https://example.com/page-b'), // group B
+        mk('s03', 200, 'https://example.com/page-a'), // group A
+        mk('s04', 50, 'https://example.com/page-c'), // group C
+        mk('s05', 800, 'https://example.com/page-b'), // group B (highest in B)
+        mk('s06', 300, 'https://example.com/page-d'), // group D
+        mk('s07', 150, 'https://example.com/page-c'), // group C
+        mk('s08', 900, 'https://example.com/page-a'), // group A (highest in A)
+        mk('s09', 700, 'https://example.com/page-d'), // group D (highest in D)
+        mk('s10', 400, 'https://example.com/page-c'), // group C (highest in C)
+      ];
+
+      const groups = getTopSuggestions(suggestions, 'broken-backlinks');
+
+      // 4 groups: A(s01,s03,s08), B(s02,s05), C(s04,s07,s10), D(s06,s09)
+      expect(groups).to.have.lengthOf(4);
+
+      // group ranks: A=900, B=800, D=700, C=400
+      // sorted ascending: C(400), D(700), B(800), A(900)
+      expect(groups[0].getRank()).to.equal(400);
+      expect(groups[1].getRank()).to.equal(700);
+      expect(groups[2].getRank()).to.equal(800);
+      expect(groups[3].getRank()).to.equal(900);
+
+      // verify group C (rank 400) — page-c items
+      const groupC = groups[0];
+      expect(groupC.items).to.have.lengthOf(3);
+      const groupCIds = groupC.items.map((s) => s.getId());
+      expect(groupCIds).to.include.members(['s04', 's07', 's10']);
+
+      // verify group D (rank 700) — page-d items
+      const groupD = groups[1];
+      expect(groupD.items).to.have.lengthOf(2);
+      const groupDIds = groupD.items.map((s) => s.getId());
+      expect(groupDIds).to.include.members(['s06', 's09']);
+
+      // verify group B (rank 800) — page-b items
+      const groupB = groups[2];
+      expect(groupB.items).to.have.lengthOf(2);
+      const groupBIds = groupB.items.map((s) => s.getId());
+      expect(groupBIds).to.include.members(['s02', 's05']);
+
+      // verify group A (rank 900) — page-a items
+      const groupA = groups[3];
+      expect(groupA.items).to.have.lengthOf(3);
+      const groupAIds = groupA.items.map((s) => s.getId());
+      expect(groupAIds).to.include.members(['s01', 's03', 's08']);
+
+      // slicing top 2 groups gives the two lowest-ranked groups
+      const top2 = groups.slice(0, 2);
+      expect(top2[0].getRank()).to.equal(400); // group C
+      expect(top2[1].getRank()).to.equal(700); // group D
     });
 
     it('falls back to defaults for objects missing rank and id', () => {
