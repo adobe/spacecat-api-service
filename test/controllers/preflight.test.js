@@ -686,6 +686,58 @@ describe('Preflight Controller', () => {
       );
     });
 
+    it('preserves full cookie value when token contains = characters (base64)', async () => {
+      const aemCsSite = {
+        getId: () => 'test-site-123',
+        getAuthoringType: () => SiteModel.AUTHORING_TYPES.CS,
+      };
+      mockDataAccess.Site.findByPreviewURL.resolves(aemCsSite);
+
+      const base64Token = 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dGVzdHNpZw==';
+      const getIMSPromiseTokenStub = sandbox.stub();
+      const PreflightControllerWithMock = await esmock('../../src/controllers/preflight.js', {
+        '../../src/support/utils.js': {
+          ...utils,
+          getIMSPromiseToken: getIMSPromiseTokenStub,
+          ErrorWithStatusCode: utils.ErrorWithStatusCode,
+        },
+      });
+
+      const preflightControllerWithMock = PreflightControllerWithMock(
+        { dataAccess: mockDataAccess, sqs: mockSqs },
+        loggerStub,
+        {
+          AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue',
+          AWS_ENV: 'prod',
+        },
+      );
+
+      const context = {
+        data: {
+          urls: ['https://example.com/test.html'],
+          step: 'identify',
+        },
+        pathInfo: {
+          headers: {
+            cookie: `promiseToken=${base64Token}`,
+          },
+        },
+      };
+
+      const response = await preflightControllerWithMock.createPreflightJob(context);
+      expect(response.status).to.equal(202);
+      expect(getIMSPromiseTokenStub).to.not.have.been.called;
+      expect(mockSqs.sendMessage).to.have.been.calledWith(
+        'https://sqs.test.amazonaws.com/audit-queue',
+        {
+          jobId,
+          siteId: 'test-site-123',
+          type: 'preflight',
+          promiseToken: { promise_token: base64Token },
+        },
+      );
+    });
+
     it('falls back to IMS when promiseToken cookie is absent', async () => {
       const aemCsSite = {
         getId: () => 'test-site-123',

@@ -17,8 +17,7 @@ import {
   badRequest, internalServerError, notFound, ok, accepted,
 } from '@adobe/spacecat-shared-http-utils';
 import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
-import { getCookieValue } from '@adobe/spacecat-shared-http-utils/src/auth/handlers/utils/cookie.js';
-import { getIMSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
+import { getCookieValue, getIMSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
 
 export const AUDIT_STEP_IDENTIFY = 'identify';
 export const AUDIT_STEP_SUGGEST = 'suggest';
@@ -96,7 +95,8 @@ function PreflightController(ctx, log, env) {
    * @param {string} context.data.step - The audit step
    * @param {string} context.data.siteId - The siteId, if it's an AMS site
    * @param {Object} [context.pathInfo] - The path info object
-   * @param {Object} [context.pathInfo.headers] - Request headers (including cookie)
+   * @param {Object} [context.pathInfo.headers] - Request headers; must include a
+   *   `cookie` header with `promiseToken=<token>` for CS/CS_CW/AMS authoring types
    * @returns {Promise<Object>} The HTTP response object
    */
   const createPreflightJob = async (context) => {
@@ -142,9 +142,11 @@ function PreflightController(ctx, log, env) {
       if (promiseBasedTypes.includes(site.getAuthoringType())) {
         const cookieToken = getCookieValue(context, 'promiseToken');
         if (hasText(cookieToken)) {
+          log.info(`Using promise token from cookie: ${cookieToken}`);
           promiseTokenResponse = { promise_token: cookieToken };
         } else {
           try {
+            log.info('Getting promise token from IMS');
             promiseTokenResponse = await getIMSPromiseToken(context);
           } catch (e) {
             log.error(`Failed to get promise token: ${e.message}`);

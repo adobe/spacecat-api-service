@@ -629,6 +629,33 @@ export function getImsUserToken(context) {
  * }>} - The promise token response.
  * @throws {ErrorWithStatusCode} - If the Authorization header is missing.
  */
+/**
+ * Parses and retrieves a specific cookie value by name from the request context.
+ * Uses indexOf-based splitting to correctly handle values containing '='
+ * (e.g. base64-encoded or encrypted tokens).
+ * @param {Object} context - The request context with pathInfo.headers.cookie
+ * @param {string} name - The cookie name to look up
+ * @returns {string|null} The cookie value, or null if not found
+ */
+export function getCookieValue(context, name) {
+  const cookieString = context.pathInfo?.headers?.cookie || '';
+  if (!cookieString) return null;
+
+  const cookies = cookieString.split(';');
+  for (const cookie of cookies) {
+    const trimmed = cookie.trim();
+    const idx = trimmed.indexOf('=');
+    if (idx !== -1) {
+      const cookieName = trimmed.substring(0, idx).trim();
+      const cookieValue = trimmed.substring(idx + 1).trim();
+      if (cookieName === name) {
+        return cookieValue;
+      }
+    }
+  }
+  return null;
+}
+
 export async function getIMSPromiseToken(context) {
   // get IMS promise token and attach to queue message
   let userToken;
