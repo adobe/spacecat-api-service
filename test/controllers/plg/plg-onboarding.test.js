@@ -856,19 +856,56 @@ describe('PlgOnboardingController', () => {
       });
     });
 
-    it('skips author URL resolution when deliveryConfig.authorURL already set', async () => {
-      mockSite = createMockSite({
-        deliveryConfig: { authorURL: 'https://existing-author.adobeaemcloud.com' },
-      });
+    it('handles null deliveryConfig when resolving author URL', async () => {
+      mockSite = createMockSite({ deliveryConfig: null });
+      mockSite.getDeliveryConfig.returns(null);
       mockDataAccess.Site.create.resolves(mockSite);
+
+      autoResolveAuthorUrlStub.resolves({
+        authorURL: 'https://author-p123-e456.adobeaemcloud.com',
+        programId: '123',
+        environmentId: '456',
+        host: 'publish-p123-e456.adobeaemcloud.net',
+      });
 
       const context = buildContext({ domain: TEST_DOMAIN });
 
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(autoResolveAuthorUrlStub).to.not.have.been.called;
+      expect(mockSite.setDeliveryConfig).to.have.been.calledWith({
+        authorURL: 'https://author-p123-e456.adobeaemcloud.com',
+        programId: '123',
+        environmentId: '456',
+        preferContentApi: true,
+        imsOrgId: TEST_IMS_ORG_ID,
+      });
+    });
+
+    it('skips setting deliveryConfig when authorURL already set but still resolves RUM host', async () => {
+      mockSite = createMockSite({
+        deliveryConfig: { authorURL: 'https://existing-author.adobeaemcloud.com' },
+      });
+      mockDataAccess.Site.create.resolves(mockSite);
+
+      autoResolveAuthorUrlStub.resolves({
+        host: 'main--my-site--adobe.aem.live',
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(autoResolveAuthorUrlStub).to.have.been.called;
       expect(mockSite.setDeliveryConfig).to.not.have.been.called;
+      // But RUM host is still passed to updateCodeConfig
+      expect(updateCodeConfigStub).to.have.been.calledWith(
+        mockSite,
+        'main--my-site--adobe.aem.live',
+        sinon.match.object,
+        sinon.match.object,
+      );
     });
 
     it('continues onboarding when author URL resolution fails', async () => {

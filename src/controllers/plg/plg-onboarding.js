@@ -264,28 +264,28 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
     onboarding.setSiteId(site.getId());
     steps.siteResolved = true;
 
-    // Step 5b: Auto-resolve author URL and RUM host if not already set
+    // Step 5b: Auto-resolve author URL and RUM host
     let rumHost = null;
-    const existingDeliveryConfig = site.getDeliveryConfig() || {};
-    if (!existingDeliveryConfig.authorURL) {
-      try {
-        const resolvedConfig = await autoResolveAuthorUrl(site, context);
-        rumHost = resolvedConfig?.host || null;
-        if (resolvedConfig?.authorURL) {
-          site.setDeliveryConfig({
-            ...existingDeliveryConfig,
-            authorURL: resolvedConfig.authorURL,
-            programId: resolvedConfig.programId,
-            environmentId: resolvedConfig.environmentId,
-            preferContentApi: true,
-            imsOrgId: imsOrgId || null,
-          });
-          log.info(`Auto-resolved author URL for site ${site.getId()}: ${resolvedConfig.authorURL}`);
-          steps.authorUrlResolved = true;
-        }
-      } catch (error) {
-        log.warn(`Failed to auto-resolve author URL for site ${site.getId()}: ${error.message}`);
+    try {
+      const resolvedConfig = await autoResolveAuthorUrl(site, context);
+      rumHost = resolvedConfig?.host || null;
+
+      // Only update deliveryConfig if authorURL is not already set
+      const existingDeliveryConfig = site.getDeliveryConfig() || {};
+      if (!existingDeliveryConfig.authorURL && resolvedConfig?.authorURL) {
+        site.setDeliveryConfig({
+          ...existingDeliveryConfig,
+          authorURL: resolvedConfig.authorURL,
+          programId: resolvedConfig.programId,
+          environmentId: resolvedConfig.environmentId,
+          preferContentApi: true,
+          imsOrgId,
+        });
+        log.info(`Auto-resolved author URL for site ${site.getId()}: ${resolvedConfig.authorURL}`);
+        steps.authorUrlResolved = true;
       }
+    } catch (error) {
+      log.warn(`Failed to auto-resolve author URL for site ${site.getId()}: ${error.message}`);
     }
 
     // Step 5c: Resolve EDS code config and hlxConfig from RUM host
