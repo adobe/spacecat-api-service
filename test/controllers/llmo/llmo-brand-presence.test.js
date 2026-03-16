@@ -139,6 +139,20 @@ describe('llmo-brand-presence', () => {
       expect(getWeekDateRange('2026-W00')).to.be.null;
       expect(getWeekDateRange('2026-W54')).to.be.null;
     });
+
+    it('returns valid range for ISO week 53 when year has 53 weeks (2020-W53)', () => {
+      expect(getWeekDateRange('2020-W53')).to.deep.equal({
+        startDate: '2020-12-28',
+        endDate: '2021-01-03',
+      });
+    });
+
+    it('returns range for week 53 when year has 52 weeks (2021-W53 overflow)', () => {
+      expect(getWeekDateRange('2021-W53')).to.deep.equal({
+        startDate: '2022-01-03',
+        endDate: '2022-01-09',
+      });
+    });
   });
 
   describe('toFilterOption', () => {
@@ -285,6 +299,9 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.equal('relation "brand_presence_executions" does not exist');
+      expect(mockContext.log.error).to.have.been.calledWith(
+        'Brand presence filter-dimensions PostgREST error: relation "brand_presence_executions" does not exist',
+      );
     });
 
     it('handles executions query returning data: null (uses empty rows fallback)', async () => {
@@ -350,6 +367,7 @@ describe('llmo-brand-presence', () => {
       expect(chainMock.lte).to.have.been.calledWith('execution_date', '2025-01-31');
       expect(chainMock.eq).to.have.been.calledWith('model', 'gemini');
       expect(chainMock.eq).to.have.been.calledWith('site_id', 'cccdac43-1a22-4659-9086-b762f59b9928');
+      expect(chainMock.limit).to.have.been.calledWith(5000);
     });
 
     it('returns ok with brands, categories, topics, origins, regions, page_intents', async () => {
@@ -641,6 +659,9 @@ describe('llmo-brand-presence', () => {
       expect(result.status).to.equal(400);
       const body = await result.json();
       expect(body.message).to.equal('relation "brand_metrics_weekly" does not exist');
+      expect(mockContext.log.error).to.have.been.calledWith(
+        'Brand presence weeks PostgREST error: relation "brand_metrics_weekly" does not exist',
+      );
     });
 
     it('returns empty weeks when no data', async () => {
@@ -828,7 +849,7 @@ describe('llmo-brand-presence', () => {
       expect(body.message).to.equal('Site does not belong to the organization');
     });
 
-    it('queries brand_metrics_weekly with select week', async () => {
+    it('queries brand_metrics_weekly with select week, order descending, limit 200000', async () => {
       const chainMock = createChainableMock({ data: [], error: null });
       mockContext.dataAccess.Site.postgrestService = chainMock;
 
@@ -838,6 +859,8 @@ describe('llmo-brand-presence', () => {
       expect(chainMock.from).to.have.been.calledWith('brand_metrics_weekly');
       expect(chainMock.select).to.have.been.calledWith('week');
       expect(chainMock.eq).to.have.been.calledWith('organization_id', mockContext.params.spaceCatId);
+      expect(chainMock.order).to.have.been.calledWith('week', { ascending: false });
+      expect(chainMock.limit).to.have.been.calledWith(200000);
     });
   });
 });

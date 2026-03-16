@@ -22,7 +22,7 @@ import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
 const SKIP_VALUES = new Set(['all', '', undefined, null, '*']);
 const IN_FILTER_CHUNK_SIZE = 50;
 const QUERY_LIMIT = 5000;
-/** No row limit for weeks query — we need all rows to extract every distinct week. */
+/** High row limit for weeks query — we need all rows to extract every distinct week (200K cap). */
 const WEEKS_QUERY_LIMIT = 200000;
 
 /**
@@ -267,8 +267,11 @@ function parseWeeksParams(context) {
   };
 }
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
 /**
  * Returns startDate (Monday) and endDate (Sunday) for an ISO week string (YYYY-Wnn).
+ * Uses Date.UTC for timezone-independent calendar dates.
  * @param {string} isoWeek - e.g. "2026-W11"
  * @returns {{ startDate: string, endDate: string } | null} - YYYY-MM-DD or null if invalid
  * @internal Exported for testing
@@ -279,24 +282,22 @@ export function getWeekDateRange(isoWeek) {
   const year = Number.parseInt(match[1], 10);
   const week = Number.parseInt(match[2], 10);
   if (week < 1 || week > 53) return null;
-  const jan4 = new Date(year, 0, 4);
-  const dayOfWeek = jan4.getDay();
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const dayOfWeek = jan4.getUTCDay();
   const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-  const week1Monday = new Date(jan4);
-  week1Monday.setDate(jan4.getDate() + mondayOffset);
-  const targetMonday = new Date(week1Monday);
-  targetMonday.setDate(week1Monday.getDate() + (week - 1) * 7);
-  const targetSunday = new Date(targetMonday);
-  targetSunday.setDate(targetMonday.getDate() + 6);
-  const toYMD = (d) => {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
+  const week1MondayMs = jan4.getTime() + mondayOffset * MS_PER_DAY;
+  const targetMondayMs = week1MondayMs + (week - 1) * 7 * MS_PER_DAY;
+  const targetSundayMs = targetMondayMs + 6 * MS_PER_DAY;
+  const toYMD = (ms) => {
+    const d = new Date(ms);
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
     return `${y}-${m}-${day}`;
   };
   return {
-    startDate: toYMD(targetMonday),
-    endDate: toYMD(targetSunday),
+    startDate: toYMD(targetMondayMs),
+    endDate: toYMD(targetSundayMs),
   };
 }
 
@@ -339,7 +340,7 @@ export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
 
-      if (siteId) {
+      if (shouldApplyFilter(siteId)) {
         const siteBelongsToOrg = await validateSiteBelongsToOrg(client, organizationId, siteId);
         if (!siteBelongsToOrg) {
           return forbidden('Site does not belong to the organization');
@@ -350,6 +351,7 @@ export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
       const { data, error } = await q;
 
       if (error) {
+        ctx.log.error(`Brand presence weeks PostgREST error: ${error.message}`);
         return badRequest(error.message);
       }
 
@@ -394,6 +396,7 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
       const { data, error } = await q;
 
       if (error) {
+        ctx.log.error(`Brand presence filter-dimensions PostgREST error: ${error.message}`);
         return badRequest(error.message);
       }
 
