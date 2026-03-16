@@ -254,7 +254,7 @@ java -version
 The PostgreSQL suite uses a Docker Compose stack with a private image from AWS ECR:
 
 - **Repository**: `682033462621.dkr.ecr.us-east-1.amazonaws.com/mysticat-data-service`
-- **Tag**: `v1.11.0` (override via `MYSTICAT_DATA_SERVICE_TAG` env var)
+- **Tag**: `v1.18.0` (pinned in `docker-compose.yml`)
 - **Account**: SpaceCat Development (AWS3338)
 
 **First-time setup:**

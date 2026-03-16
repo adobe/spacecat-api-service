@@ -18,7 +18,7 @@ import sinon from 'sinon';
 import nock from 'nock';
 
 import {
-  createProject, deriveProjectName, autoResolveAuthorUrl, updateCodeConfig,
+  createProject, deriveProjectName, autoResolveAuthorUrl, updateCodeConfig, getIsSummitPlgEnabled,
 } from '../../src/support/utils.js';
 
 use(chaiAsPromised);
@@ -461,6 +461,77 @@ describe('utils', () => {
 
       expect(site.setCode).not.to.have.been.called;
       expect(log.debug).to.have.been.calledWithMatch(/does not match a supported pattern/);
+    });
+  });
+
+  describe('getIsSummitPlgEnabled', () => {
+    let sandbox;
+    let context;
+    let site;
+
+    beforeEach(() => {
+      sandbox = sinon.createSandbox();
+      site = { getId: sandbox.stub().returns('site-123') };
+      context = {
+        log: { error: sandbox.stub() },
+        dataAccess: {},
+      };
+    });
+
+    afterEach(() => {
+      sandbox.restore();
+    });
+
+    it('returns true when Configuration has summit-plg enabled for site', async () => {
+      const isHandlerEnabledForSite = sandbox.stub().withArgs('summit-plg', site).returns(true);
+      context.dataAccess.Configuration = {
+        findLatest: sandbox.stub().resolves({
+          isHandlerEnabledForSite,
+        }),
+      };
+
+      const result = await getIsSummitPlgEnabled(site, context);
+
+      expect(result).to.be.true;
+      expect(context.dataAccess.Configuration.findLatest).to.have.been.calledOnce;
+      expect(isHandlerEnabledForSite).to.have.been.calledWith('summit-plg', site);
+    });
+
+    it('returns false when Configuration has summit-plg disabled for site', async () => {
+      context.dataAccess.Configuration = {
+        findLatest: sandbox.stub().resolves({
+          isHandlerEnabledForSite: sandbox.stub().withArgs('summit-plg', site).returns(false),
+        }),
+      };
+
+      const result = await getIsSummitPlgEnabled(site, context);
+
+      expect(result).to.be.false;
+    });
+
+    it('returns false when context.dataAccess has no Configuration', async () => {
+      context.dataAccess = {};
+
+      const result = await getIsSummitPlgEnabled(site, context);
+
+      expect(result).to.be.false;
+    });
+
+    it('returns false when context.dataAccess is undefined', async () => {
+      context.dataAccess = undefined;
+
+      expect(await getIsSummitPlgEnabled(site, context)).to.be.false;
+    });
+
+    it('returns false and logs error when findLatest throws', async () => {
+      context.dataAccess.Configuration = {
+        findLatest: sandbox.stub().rejects(new Error('DB error')),
+      };
+
+      const result = await getIsSummitPlgEnabled(site, context);
+
+      expect(result).to.be.false;
+      expect(context.log.error).to.have.been.calledWithMatch(/Error checking audit summit-plg for site/, sinon.match.instanceOf(Error));
     });
   });
 });
