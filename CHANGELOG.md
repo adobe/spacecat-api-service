@@ -1,3 +1,10 @@
+# [1.349.0](https://github.com/adobe/spacecat-api-service/compare/v1.348.1...v1.349.0) (2026-03-16)
+
+
+### Features
+
+* added an api to rolled back failed fix entity ([#1698](https://github.com/adobe/spacecat-api-service/issues/1698)) ([c565a65](https://github.com/adobe/spacecat-api-service/commit/c565a65afbc441098bb6100fdafc162e83f05b85))
+
 ## [1.348.1](https://github.com/adobe/spacecat-api-service/compare/v1.348.0...v1.348.1) (2026-03-16)
 
 
