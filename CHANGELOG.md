@@ -1,3 +1,10 @@
+# [1.348.0](https://github.com/adobe/spacecat-api-service/compare/v1.347.2...v1.348.0) (2026-03-16)
+
+
+### Features
+
+* llmo brandalf api - get brand presence filters ([#1954](https://github.com/adobe/spacecat-api-service/issues/1954)) ([d1518a3](https://github.com/adobe/spacecat-api-service/commit/d1518a39df764d3ab128e721fcb944caf761b571))
+
 ## [1.347.2](https://github.com/adobe/spacecat-api-service/compare/v1.347.1...v1.347.2) (2026-03-15)
 
 
