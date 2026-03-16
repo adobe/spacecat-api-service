@@ -939,8 +939,32 @@ function SuggestionsController(ctx, sqs, env) {
         if (!isArray(group?.suggestionIds) || group.suggestionIds.length === 0) {
           return badRequest('Each fixTargetGroup must have a non-empty suggestionIds array');
         }
-        if (!hasText(group?.fixTargetPageId)) {
-          return badRequest('Each fixTargetGroup must have a non-empty fixTargetPageId');
+        const { relationshipContext } = group || {};
+        if (!isObject(relationshipContext)) {
+          return badRequest('Each fixTargetGroup must have a relationshipContext object');
+        }
+
+        const {
+          fixTargetPageId,
+          fixTargetMode,
+          appliedOnPagePath,
+          cancelInheritance,
+        } = relationshipContext;
+        if (!hasText(fixTargetPageId)) {
+          return badRequest('Each fixTargetGroup relationshipContext.fixTargetPageId must be a non-empty string');
+        }
+        if (cancelInheritance !== undefined && typeof cancelInheritance !== 'boolean') {
+          return badRequest('Each fixTargetGroup relationshipContext.cancelInheritance must be a boolean');
+        }
+        if (
+          fixTargetMode !== undefined
+          && fixTargetMode !== 'source'
+          && fixTargetMode !== 'local'
+        ) {
+          return badRequest('Each fixTargetGroup relationshipContext.fixTargetMode must be "source" or "local"');
+        }
+        if (appliedOnPagePath !== undefined && !hasText(appliedOnPagePath)) {
+          return badRequest('Each fixTargetGroup relationshipContext.appliedOnPagePath must be a non-empty string');
         }
       }
     }
@@ -1188,7 +1212,11 @@ function SuggestionsController(ctx, sqs, env) {
     });
     if (shouldGroupSuggestionsForAutofix(opportunity.getType())) {
       await Promise.all(
-        suggestionGroups.map(({ groupedSuggestions, url, fixTargetPageId }) => sendAutofixMessage(
+        suggestionGroups.map(({
+          groupedSuggestions,
+          url,
+          relationshipContext,
+        }) => sendAutofixMessage(
           sqs,
           queueUrl,
           siteId,
@@ -1198,7 +1226,10 @@ function SuggestionsController(ctx, sqs, env) {
           variations,
           action,
           customData,
-          { ...autofixOptions(url), ...(fixTargetPageId && { fixTargetPageId }) },
+          {
+            ...autofixOptions(url),
+            ...(isObject(relationshipContext) && { relationshipContext }),
+          },
         )),
       );
     } else {

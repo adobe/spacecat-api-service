@@ -6580,6 +6580,7 @@ PlgOnboarding:
       $ref: '#/DateTime'
 
 PageRelationshipsSearchPage:
+  x-experimental: true
   type: object
   required:
     - pageUrl
@@ -6599,6 +6600,7 @@ PageRelationshipsSearchPage:
       example: 'row-1'
 
 PageRelationshipChainItem:
+  x-experimental: true
   type: object
   description: |
     A single step in the relationship lineage.
@@ -6619,6 +6621,7 @@ PageRelationshipChainItem:
       $ref: '#/PageRelationshipMetadata'
 
 PageRelationshipMetadata:
+  x-experimental: true
   type: object
   additionalProperties: true
   properties:
@@ -6631,6 +6634,7 @@ PageRelationshipMetadata:
         Value is provider-defined and intentionally not constrained.
 
 PageRelationship:
+  x-experimental: true
   type: object
   required:
     - pagePath
@@ -6655,6 +6659,7 @@ PageRelationship:
         $ref: '#/PageRelationshipChainItem'
 
 PageRelationshipError:
+  x-experimental: true
   type: object
   required:
     - error
@@ -6667,17 +6672,23 @@ PageRelationshipError:
       example: 'HTTP 404'
 
 PageRelationshipsMapping:
+  x-experimental: true
   type: object
   additionalProperties:
     $ref: '#/PageRelationship'
 
 PageRelationshipsErrorMapping:
+  x-experimental: true
   type: object
   additionalProperties:
     $ref: '#/PageRelationshipError'
 
 PageRelationshipsSearchRequest:
+  x-experimental: true
   type: object
+  description: |
+    Experimental request schema for the page-relationships proxy endpoint.
+    Used by UI-facing, on-demand relationship lookups backed by AEM Content API.
   required:
     - pages
   properties:
@@ -6687,7 +6698,11 @@ PageRelationshipsSearchRequest:
         $ref: '#/PageRelationshipsSearchPage'
 
 PageRelationshipsSearchResponse:
+  x-experimental: true
   type: object
+  description: |
+    Experimental response schema for the page-relationships proxy endpoint.
+    Returned by the API proxy over AEM Content API relationship lookup results.
   required:
     - supported
     - relationships

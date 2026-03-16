@@ -3950,7 +3950,7 @@ describe('Suggestions Controller', () => {
       expect(bulkPatchResponse.suggestions[1]).to.have.property('message', 'Suggestion is not in NEW status');
     });
 
-    it('groups by fixTargetPageId when fixTargetGroups is provided for a groupable type', async () => {
+    it('groups by relationshipContext.fixTargetPageId when fixTargetGroups is provided for a groupable type', async () => {
       opportunity.getType = sandbox.stub().returns('meta-tags');
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0]), mockSuggestionEntity(suggs[2])],
@@ -3970,7 +3970,9 @@ describe('Suggestions Controller', () => {
           fixTargetGroups: [
             {
               suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[2]],
-              fixTargetPageId: '/content/my-site/en/target-page',
+              relationshipContext: {
+                fixTargetPageId: '/content/my-site/en/target-page',
+              },
             },
           ],
         },
@@ -3984,8 +3986,54 @@ describe('Suggestions Controller', () => {
 
       expect(mockSqs.sendMessage).to.have.been.calledOnce;
       const sqsPayload = mockSqs.sendMessage.firstCall.args[1];
-      expect(sqsPayload).to.have.property('fixTargetPageId', '/content/my-site/en/target-page');
+      expect(sqsPayload).to.have.property('relationshipContext');
+      expect(sqsPayload.relationshipContext).to.have.property('fixTargetPageId', '/content/my-site/en/target-page');
       expect(sqsPayload.suggestionIds).to.have.members([SUGGESTION_IDS[0], SUGGESTION_IDS[2]]);
+    });
+
+    it('forwards relationshipContext and cancelInheritance to SQS when provided', async () => {
+      opportunity.getType = sandbox.stub().returns('meta-tags');
+      mockSuggestion.allByOpportunityId.resolves(
+        [mockSuggestionEntity(suggs[0])],
+      );
+      mockSuggestion.bulkUpdateStatus.resolves([
+        mockSuggestionEntity({ ...suggs[0], status: 'IN_PROGRESS' }),
+      ]);
+
+      const response = await suggestionsControllerWithMock.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              relationshipContext: {
+                fixTargetPageId: '/content/my-site/en/target-page',
+                cancelInheritance: true,
+                fixTargetMode: 'source',
+                appliedOnPagePath:
+                  '/content/wknd/language-masters/en/adventures/bali-surf-camp',
+              },
+            },
+          ],
+        },
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const sqsPayload = mockSqs.sendMessage.firstCall.args[1];
+      expect(sqsPayload).to.have.property('relationshipContext');
+      expect(sqsPayload.relationshipContext).to.deep.equal({
+        fixTargetPageId: '/content/my-site/en/target-page',
+        cancelInheritance: true,
+        fixTargetMode: 'source',
+        appliedOnPagePath:
+          '/content/wknd/language-masters/en/adventures/bali-surf-camp',
+      });
     });
 
     it('returns 400 when fixTargetGroups has invalid structure', async () => {
@@ -3996,7 +4044,10 @@ describe('Suggestions Controller', () => {
         },
         data: {
           suggestionIds: [SUGGESTION_IDS[0]],
-          fixTargetGroups: [{ suggestionIds: [], fixTargetPageId: '/content/page' }],
+          fixTargetGroups: [{
+            suggestionIds: [],
+            relationshipContext: { fixTargetPageId: '/content/page' },
+          }],
         },
         ...context,
       });
@@ -4022,7 +4073,7 @@ describe('Suggestions Controller', () => {
       expect(error).to.have.property('message', 'fixTargetGroups must be an array');
     });
 
-    it('returns 400 when fixTargetGroup has empty fixTargetPageId', async () => {
+    it('returns 400 when fixTargetGroup relationshipContext.fixTargetPageId is empty', async () => {
       const response = await suggestionsController.autofixSuggestions({
         params: {
           siteId: SITE_ID,
@@ -4031,7 +4082,10 @@ describe('Suggestions Controller', () => {
         data: {
           suggestionIds: [SUGGESTION_IDS[0]],
           fixTargetGroups: [
-            { suggestionIds: [SUGGESTION_IDS[0]], fixTargetPageId: '' },
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              relationshipContext: { fixTargetPageId: '' },
+            },
           ],
         },
         ...context,
@@ -4040,7 +4094,35 @@ describe('Suggestions Controller', () => {
       const error = await response.json();
       expect(error).to.have.property(
         'message',
-        'Each fixTargetGroup must have a non-empty fixTargetPageId',
+        'Each fixTargetGroup relationshipContext.fixTargetPageId must be a non-empty string',
+      );
+    });
+
+    it('returns 400 when fixTargetGroup relationshipContext.fixTargetMode is invalid', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              relationshipContext: {
+                fixTargetPageId: '/content/page',
+                fixTargetMode: 'invalid-mode',
+              },
+            },
+          ],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property(
+        'message',
+        'Each fixTargetGroup relationshipContext.fixTargetMode must be "source" or "local"',
       );
     });
 
@@ -4063,7 +4145,7 @@ describe('Suggestions Controller', () => {
           fixTargetGroups: [
             {
               suggestionIds: [SUGGESTION_IDS[0]],
-              fixTargetPageId: 'source-page-id',
+              relationshipContext: { fixTargetPageId: 'source-page-id' },
             },
           ],
         },
@@ -4073,7 +4155,7 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(207);
       expect(mockSqs.sendMessage).to.have.been.calledOnce;
       const sqsPayload = mockSqs.sendMessage.firstCall.args[1];
-      expect(sqsPayload).to.not.have.property('fixTargetPageId');
+      expect(sqsPayload).to.not.have.property('relationshipContext');
     });
 
     it('sends multiple SQS messages for multiple fixTargetGroups', async () => {
@@ -4096,11 +4178,11 @@ describe('Suggestions Controller', () => {
           fixTargetGroups: [
             {
               suggestionIds: [SUGGESTION_IDS[0]],
-              fixTargetPageId: 'source-page-A',
+              relationshipContext: { fixTargetPageId: 'source-page-A' },
             },
             {
               suggestionIds: [SUGGESTION_IDS[2]],
-              fixTargetPageId: 'source-page-B',
+              relationshipContext: { fixTargetPageId: 'source-page-B' },
             },
           ],
         },
@@ -4112,18 +4194,18 @@ describe('Suggestions Controller', () => {
 
       const allCalls = mockSqs.sendMessage.getCalls();
       const payloads = allCalls.map((call) => call.args[1]);
-      const pageIds = payloads.map((p) => p.fixTargetPageId);
+      const pageIds = payloads.map((p) => p.relationshipContext?.fixTargetPageId);
       expect(pageIds).to.include.members(
         ['source-page-A', 'source-page-B'],
       );
 
       const suggIdsA = payloads.find(
-        (p) => p.fixTargetPageId === 'source-page-A',
+        (p) => p.relationshipContext?.fixTargetPageId === 'source-page-A',
       ).suggestionIds;
       expect(suggIdsA).to.deep.equal([SUGGESTION_IDS[0]]);
 
       const suggIdsB = payloads.find(
-        (p) => p.fixTargetPageId === 'source-page-B',
+        (p) => p.relationshipContext?.fixTargetPageId === 'source-page-B',
       ).suggestionIds;
       expect(suggIdsB).to.deep.equal([SUGGESTION_IDS[2]]);
     });
@@ -4156,7 +4238,7 @@ describe('Suggestions Controller', () => {
           fixTargetGroups: [
             {
               suggestionIds: [SUGGESTION_IDS[0]],
-              fixTargetPageId: 'source-page-1',
+              relationshipContext: { fixTargetPageId: 'source-page-1' },
             },
           ],
         },
@@ -4170,7 +4252,7 @@ describe('Suggestions Controller', () => {
       const payloads = allCalls.map((call) => call.args[1]);
 
       const sourceGroupPayload = payloads.find(
-        (p) => p.fixTargetPageId === 'source-page-1',
+        (p) => p.relationshipContext?.fixTargetPageId === 'source-page-1',
       );
       expect(sourceGroupPayload).to.exist;
       expect(sourceGroupPayload.suggestionIds).to.deep.equal(
@@ -4178,7 +4260,7 @@ describe('Suggestions Controller', () => {
       );
 
       const urlFallbackPayload = payloads.find(
-        (p) => !p.fixTargetPageId,
+        (p) => !p.relationshipContext,
       );
       expect(urlFallbackPayload).to.exist;
       expect(urlFallbackPayload.suggestionIds).to.deep.equal(
@@ -4217,7 +4299,7 @@ describe('Suggestions Controller', () => {
           fixTargetGroups: [
             {
               suggestionIds: [SUGGESTION_IDS[0]],
-              fixTargetPageId: 'source-page-1',
+              relationshipContext: { fixTargetPageId: 'source-page-1' },
             },
           ],
         },
@@ -4227,7 +4309,7 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(207);
       const allCalls = mockSqs.sendMessage.getCalls();
       const payloads = allCalls.map((call) => call.args[1]);
-      const urlFallback = payloads.find((p) => !p.fixTargetPageId);
+      const urlFallback = payloads.find((p) => !p.relationshipContext);
       expect(urlFallback).to.exist;
       expect(urlFallback.url).to.equal('https://example.com/rec-url');
     });
@@ -4260,7 +4342,7 @@ describe('Suggestions Controller', () => {
           fixTargetGroups: [
             {
               suggestionIds: [SUGGESTION_IDS[0]],
-              fixTargetPageId: 'source-page-1',
+              relationshipContext: { fixTargetPageId: 'source-page-1' },
             },
           ],
         },
@@ -4270,7 +4352,7 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(207);
       const allCalls = mockSqs.sendMessage.getCalls();
       const payloads = allCalls.map((call) => call.args[1]);
-      const urlFallback = payloads.find((p) => !p.fixTargetPageId);
+      const urlFallback = payloads.find((p) => !p.relationshipContext);
       expect(urlFallback).to.exist;
       expect(urlFallback.url).to.equal('https://example.com/urlFrom-fallback');
     });
@@ -4304,7 +4386,7 @@ describe('Suggestions Controller', () => {
           fixTargetGroups: [
             {
               suggestionIds: [SUGGESTION_IDS[0]],
-              fixTargetPageId: 'source-page-1',
+              relationshipContext: { fixTargetPageId: 'source-page-1' },
             },
           ],
         },
@@ -4314,7 +4396,7 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(207);
       const allCalls = mockSqs.sendMessage.getCalls();
       const payloads = allCalls.map((call) => call.args[1]);
-      const urlFallback = payloads.find((p) => !p.fixTargetPageId);
+      const urlFallback = payloads.find((p) => !p.relationshipContext);
       expect(urlFallback).to.exist;
       expect(urlFallback.url).to.equal('https://example.com/opp-page');
     });
@@ -4348,7 +4430,7 @@ describe('Suggestions Controller', () => {
           fixTargetGroups: [
             {
               suggestionIds: [SUGGESTION_IDS[0]],
-              fixTargetPageId: 'source-page-1',
+              relationshipContext: { fixTargetPageId: 'source-page-1' },
             },
           ],
         },
@@ -4358,7 +4440,7 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(207);
       expect(mockSqs.sendMessage).to.have.been.calledOnce;
       const payload = mockSqs.sendMessage.firstCall.args[1];
-      expect(payload.fixTargetPageId).to.equal('source-page-1');
+      expect(payload.relationshipContext?.fixTargetPageId).to.equal('source-page-1');
     });
   });
 

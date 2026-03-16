@@ -154,13 +154,18 @@ site-page-relationships-search:
   parameters:
     - $ref: './parameters.yaml#/siteId'
   post:
+    x-experimental: true
     tags:
       - site
     summary: Search page relationships for caller-provided pages
     description: |
+      Experimental endpoint.
+
       Resolves page relationship context for the provided set of page paths/URLs.
       This endpoint is intended for on-demand UI flows (for example, fix-confirmation popups),
       where only specific pages need relationship context at request time.
+
+      Supported only for AEM-authored sites with Content API support.
       The returned `relationships[*].chain` is ordered from the immediate parent
       of the requested page to grandparent, and so on toward the root.
     operationId: searchSitePageRelationships

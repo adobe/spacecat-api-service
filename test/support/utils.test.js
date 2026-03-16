@@ -676,7 +676,7 @@ describe('utils', () => {
       mockSqs = { sendMessage: sinon.stub().resolves() };
     });
 
-    it('sends message with fixTargetPageId when provided', async () => {
+    it('sends message with relationshipContext.fixTargetPageId when provided', async () => {
       await sendAutofixMessage(
         mockSqs,
         'https://queue-url',
@@ -687,19 +687,56 @@ describe('utils', () => {
         null,
         null,
         null,
-        { url: 'https://example.com', fixTargetPageId: 'page-uuid-123' },
+        {
+          url: 'https://example.com',
+          relationshipContext: { fixTargetPageId: 'page-uuid-123' },
+        },
       );
 
       expect(mockSqs.sendMessage).to.have.been.calledOnce;
       const payload = mockSqs.sendMessage.firstCall.args[1];
-      expect(payload).to.have.property('fixTargetPageId', 'page-uuid-123');
+      expect(payload).to.have.property('relationshipContext');
+      expect(payload.relationshipContext).to.deep.equal({ fixTargetPageId: 'page-uuid-123' });
       expect(payload).to.have.property('url', 'https://example.com');
       expect(payload).to.have.property('siteId', 'site-1');
       expect(payload).to.have.property('opportunityId', 'opp-1');
       expect(payload.suggestionIds).to.deep.equal(['s-1', 's-2']);
     });
 
-    it('omits fixTargetPageId when not provided', async () => {
+    it('sends message with relationshipContext when additional fields are provided', async () => {
+      await sendAutofixMessage(
+        mockSqs,
+        'https://queue-url',
+        'site-1',
+        'opp-1',
+        ['s-1'],
+        'token',
+        null,
+        null,
+        null,
+        {
+          url: 'https://example.com',
+          relationshipContext: {
+            fixTargetPageId: 'page-uuid-123',
+            cancelInheritance: true,
+            fixTargetMode: 'source',
+            appliedOnPagePath: '/content/wknd/language-masters/en/adventures/bali-surf-camp',
+          },
+        },
+      );
+
+      expect(mockSqs.sendMessage).to.have.been.calledOnce;
+      const payload = mockSqs.sendMessage.firstCall.args[1];
+      expect(payload).to.have.property('relationshipContext');
+      expect(payload.relationshipContext).to.deep.equal({
+        fixTargetPageId: 'page-uuid-123',
+        cancelInheritance: true,
+        fixTargetMode: 'source',
+        appliedOnPagePath: '/content/wknd/language-masters/en/adventures/bali-surf-camp',
+      });
+    });
+
+    it('omits relationshipContext when not provided', async () => {
       await sendAutofixMessage(
         mockSqs,
         'https://queue-url',
@@ -715,11 +752,11 @@ describe('utils', () => {
 
       expect(mockSqs.sendMessage).to.have.been.calledOnce;
       const payload = mockSqs.sendMessage.firstCall.args[1];
-      expect(payload).to.not.have.property('fixTargetPageId');
+      expect(payload).to.not.have.property('relationshipContext');
       expect(payload).to.have.property('url', 'https://example.com');
     });
 
-    it('omits fixTargetPageId when it is falsy', async () => {
+    it('omits relationshipContext when it is undefined', async () => {
       await sendAutofixMessage(
         mockSqs,
         'https://queue-url',
@@ -730,15 +767,15 @@ describe('utils', () => {
         null,
         null,
         null,
-        { url: 'https://example.com', fixTargetPageId: undefined },
+        { url: 'https://example.com', relationshipContext: undefined },
       );
 
       expect(mockSqs.sendMessage).to.have.been.calledOnce;
       const payload = mockSqs.sendMessage.firstCall.args[1];
-      expect(payload).to.not.have.property('fixTargetPageId');
+      expect(payload).to.not.have.property('relationshipContext');
     });
 
-    it('includes customData when provided alongside fixTargetPageId', async () => {
+    it('includes customData when provided alongside relationshipContext', async () => {
       const customData = { key: 'value' };
       await sendAutofixMessage(
         mockSqs,
@@ -750,12 +787,15 @@ describe('utils', () => {
         null,
         null,
         customData,
-        { url: 'https://example.com', fixTargetPageId: 'page-123' },
+        {
+          url: 'https://example.com',
+          relationshipContext: { fixTargetPageId: 'page-123' },
+        },
       );
 
       expect(mockSqs.sendMessage).to.have.been.calledOnce;
       const payload = mockSqs.sendMessage.firstCall.args[1];
-      expect(payload).to.have.property('fixTargetPageId', 'page-123');
+      expect(payload.relationshipContext).to.deep.equal({ fixTargetPageId: 'page-123' });
       expect(payload).to.have.property('customData');
       expect(payload.customData).to.deep.equal({ key: 'value' });
     });
