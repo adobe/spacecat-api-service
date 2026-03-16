@@ -1,3 +1,10 @@
+## [1.348.1](https://github.com/adobe/spacecat-api-service/compare/v1.348.0...v1.348.1) (2026-03-16)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @adobe/spacecat-shared-ims-client to v1.12.0 ([#1960](https://github.com/adobe/spacecat-api-service/issues/1960)) ([43760eb](https://github.com/adobe/spacecat-api-service/commit/43760eba4e1b74be4afb28341d7e9dc8e0673ce5))
+
 # [1.348.0](https://github.com/adobe/spacecat-api-service/compare/v1.347.2...v1.348.0) (2026-03-16)
 
 
