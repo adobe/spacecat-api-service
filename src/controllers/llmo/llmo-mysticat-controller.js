@@ -11,7 +11,7 @@
  */
 
 import AccessControlUtil from '../../support/access-control-util.js';
-import { createFilterDimensionsHandler } from './llmo-brand-presence.js';
+import { createFilterDimensionsHandler, createBrandPresenceWeeksHandler } from './llmo-brand-presence.js';
 
 /**
  * Controller for LLMO + Mysticat (mysticat-data-service / PostgreSQL) endpoints.
@@ -36,9 +36,11 @@ function LlmoMysticatController(ctx) {
   };
 
   const getFilterDimensions = createFilterDimensionsHandler(getOrgAndValidateAccess);
+  const getBrandPresenceWeeks = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
 
   return {
     getFilterDimensions,
+    getBrandPresenceWeeks,
   };
 }
 

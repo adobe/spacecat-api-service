@@ -22,6 +22,8 @@ import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
 const SKIP_VALUES = new Set(['all', '', undefined, null, '*']);
 const IN_FILTER_CHUNK_SIZE = 50;
 const QUERY_LIMIT = 5000;
+/** High row limit for weeks query — we need all rows to extract every distinct week (200K cap). */
+const WEEKS_QUERY_LIMIT = 200000;
 
 /**
  * Expected error message substrings from getOrgAndValidateAccess (see llmo-mysticat-controller).
@@ -30,6 +32,39 @@ const QUERY_LIMIT = 5000;
  */
 const ERR_ORG_ACCESS = 'belonging to the organization';
 const ERR_NOT_FOUND = 'not found';
+
+/**
+ * Shared wrapper for Brand Presence handlers: PostgREST check + org access validation.
+ * @param {Object} context - Request context (log, dataAccess, params, data)
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ * @param {string} handlerName - For error logging (e.g. 'weeks', 'filter-dimensions')
+ * @param {Function} handlerFn - Async (context, client) => response. Receives PostgREST client.
+ * @returns {Promise<Response>}
+ */
+async function withBrandPresenceAuth(context, getOrgAndValidateAccess, handlerName, handlerFn) {
+  const { log, dataAccess } = context;
+  const { Site } = dataAccess;
+
+  if (!Site?.postgrestService) {
+    log.error('Brand presence APIs require PostgREST (DATA_SERVICE_PROVIDER=postgres)');
+    return badRequest('Brand presence data is not available. PostgreSQL data service is required.');
+  }
+
+  try {
+    await getOrgAndValidateAccess(context);
+  } catch (error) {
+    if (error.message?.includes(ERR_ORG_ACCESS)) {
+      return forbidden('Only users belonging to the organization can view brand presence data');
+    }
+    if (error.message?.includes(ERR_NOT_FOUND)) {
+      return badRequest(error.message);
+    }
+    log.error(`Brand presence ${handlerName} error: ${error.message}`);
+    return badRequest(error.message);
+  }
+
+  return handlerFn(context, Site.postgrestService);
+}
 
 /** @internal Exported for testing null/undefined fallbacks */
 export const strCompare = (a, b) => (a || '').localeCompare(b || '');
@@ -50,7 +85,7 @@ function parseFilterDimensionsParams(context) {
   return {
     startDate: q.startDate || q.start_date,
     endDate: q.endDate || q.end_date,
-    platform: q.platform || q.model,
+    model: q.model,
     siteId: q.siteId || q.site_id,
     categoryId: q.categoryId || q.category_id,
     topicId: q.topicId || q.topic_id || q.topic || q.topics,
@@ -74,7 +109,7 @@ function defaultDateRange() {
 function buildExecutionsQuery(client, organizationId, params, defaults, filterByBrandId) {
   const startDate = params.startDate || defaults.startDate;
   const endDate = params.endDate || defaults.endDate;
-  const model = params.platform || 'chatgpt';
+  const model = params.model || 'chatgpt';
   const {
     siteId, categoryId, topicId, regionCode, origin,
   } = params;
@@ -224,80 +259,181 @@ function buildDimensionOptions(rows) {
   };
 }
 
+function parseWeeksParams(context) {
+  const q = context.data || {};
+  return {
+    model: q.model,
+    siteId: q.siteId || q.site_id,
+  };
+}
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Returns startDate (Monday) and endDate (Sunday) for an ISO week string (YYYY-Wnn).
+ * Uses Date.UTC for timezone-independent calendar dates.
+ * @param {string} isoWeek - e.g. "2026-W11"
+ * @returns {{ startDate: string, endDate: string } | null} - YYYY-MM-DD or null if invalid
+ * @internal Exported for testing
+ */
+export function getWeekDateRange(isoWeek) {
+  const match = /^(\d{4})-W(\d{2})$/.exec(isoWeek);
+  if (!match) return null;
+  const year = Number.parseInt(match[1], 10);
+  const week = Number.parseInt(match[2], 10);
+  if (week < 1 || week > 53) return null;
+  const jan4 = new Date(Date.UTC(year, 0, 4));
+  const dayOfWeek = jan4.getUTCDay();
+  const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+  const week1MondayMs = jan4.getTime() + mondayOffset * MS_PER_DAY;
+  const targetMondayMs = week1MondayMs + (week - 1) * 7 * MS_PER_DAY;
+  const targetSundayMs = targetMondayMs + 6 * MS_PER_DAY;
+  const toYMD = (ms) => {
+    const d = new Date(ms);
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+  return {
+    startDate: toYMD(targetMondayMs),
+    endDate: toYMD(targetSundayMs),
+  };
+}
+
+/**
+ * Builds a query to fetch week values from brand_metrics_weekly.
+ * Table already has week in YYYY-Wnn format; filters: organization_id, model, site_id, brand_id.
+ */
+function buildWeeksQuery(client, organizationId, model, siteId, filterByBrandId) {
+  let q = client
+    .from('brand_metrics_weekly')
+    .select('week')
+    .eq('organization_id', organizationId)
+    .eq('model', model);
+
+  if (shouldApplyFilter(siteId)) {
+    q = q.eq('site_id', siteId);
+  }
+  if (filterByBrandId) {
+    q = q.eq('brand_id', filterByBrandId);
+  }
+
+  return q.order('week', { ascending: false }).limit(WEEKS_QUERY_LIMIT);
+}
+
+/**
+ * Creates the getBrandPresenceWeeks handler.
+ * Returns distinct ISO weeks (YYYY-Wnn) for the given model, optionally filtered by brand or site.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'weeks',
+    async (ctx, client) => {
+      const params = parseWeeksParams(ctx);
+      const { model: modelParam, siteId } = params;
+      const model = modelParam || 'chatgpt';
+      const { spaceCatId, brandId } = ctx.params;
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+
+      if (shouldApplyFilter(siteId)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(client, organizationId, siteId);
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
+      }
+
+      const q = buildWeeksQuery(client, organizationId, model, siteId, filterByBrandId);
+      const { data, error } = await q;
+
+      if (error) {
+        ctx.log.error(`Brand presence weeks PostgREST error: ${error.message}`);
+        return badRequest(error.message);
+      }
+
+      const rows = data || [];
+      const weekSet = new Set();
+      rows.forEach((r) => {
+        const w = r.week;
+        if (w && typeof w === 'string') weekSet.add(w);
+      });
+      const sortedWeeks = [...weekSet].sort((a, b) => b.localeCompare(a));
+      const weeks = sortedWeeks.map((weekStr) => {
+        const range = getWeekDateRange(weekStr);
+        return {
+          week: weekStr,
+          startDate: range?.startDate ?? null,
+          endDate: range?.endDate ?? null,
+        };
+      });
+
+      return ok({ weeks });
+    },
+  );
+}
+
 /**
  * Creates the getFilterDimensions handler.
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
  */
 export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
-  return async (context) => {
-    const { log, dataAccess } = context;
-    const { Site } = dataAccess;
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'filter-dimensions',
+    async (ctx, client) => {
+      const { spaceCatId, brandId } = ctx.params;
+      const params = parseFilterDimensionsParams(ctx);
+      const defaults = defaultDateRange();
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
 
-    if (!Site?.postgrestService) {
-      log.error('Brand presence APIs require PostgREST (DATA_SERVICE_PROVIDER=postgres)');
-      return badRequest('Brand presence data is not available. PostgreSQL data service is required.');
-    }
+      const q = buildExecutionsQuery(client, organizationId, params, defaults, filterByBrandId);
+      const { data, error } = await q;
 
-    try {
-      await getOrgAndValidateAccess(context);
-    } catch (error) {
-      if (error.message?.includes(ERR_ORG_ACCESS)) {
-        return forbidden('Only users belonging to the organization can view brand presence data');
-      }
-      if (error.message?.includes(ERR_NOT_FOUND)) {
+      if (error) {
+        ctx.log.error(`Brand presence filter-dimensions PostgREST error: ${error.message}`);
         return badRequest(error.message);
       }
-      log.error(`Brand presence filter-dimensions error: ${error.message}`);
-      return badRequest(error.message);
-    }
 
-    const client = Site.postgrestService;
-    const { spaceCatId, brandId } = context.params;
-    const params = parseFilterDimensionsParams(context);
-    const defaults = defaultDateRange();
-    const organizationId = spaceCatId;
-    const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
-
-    const q = buildExecutionsQuery(client, organizationId, params, defaults, filterByBrandId);
-    const { data, error } = await q;
-
-    if (error) {
-      return badRequest(error.message);
-    }
-
-    const rows = data || [];
-    const siteFilter = params.siteId;
-    if (shouldApplyFilter(siteFilter)) {
-      const siteBelongsToOrg = await validateSiteBelongsToOrg(client, organizationId, siteFilter);
-      if (!siteBelongsToOrg) {
-        return forbidden('Site does not belong to the organization');
+      const rows = data || [];
+      const siteFilter = params.siteId;
+      if (shouldApplyFilter(siteFilter)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(client, organizationId, siteFilter);
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
       }
-    }
-    const siteIds = (filterByBrandId || shouldApplyFilter(siteFilter))
-      ? await resolveSiteIds(client, organizationId, siteFilter, filterByBrandId, rows)
-      : [];
-    const pageIntents = await fetchPageIntents(
-      client,
-      organizationId,
-      siteFilter,
-      filterByBrandId,
-      siteIds,
-    );
-    const {
-      brands,
-      categories,
-      topics,
-      origins,
-      regions,
-    } = buildDimensionOptions(rows);
+      const siteIds = (filterByBrandId || shouldApplyFilter(siteFilter))
+        ? await resolveSiteIds(client, organizationId, siteFilter, filterByBrandId, rows)
+        : [];
+      const pageIntents = await fetchPageIntents(
+        client,
+        organizationId,
+        siteFilter,
+        filterByBrandId,
+        siteIds,
+      );
+      const {
+        brands,
+        categories,
+        topics,
+        origins,
+        regions,
+      } = buildDimensionOptions(rows);
 
-    return ok({
-      brands,
-      categories,
-      topics,
-      origins,
-      regions,
-      page_intents: pageIntents,
-    });
-  };
+      return ok({
+        brands,
+        categories,
+        topics,
+        origins,
+        regions,
+        page_intents: pageIntents,
+      });
+    },
+  );
 }

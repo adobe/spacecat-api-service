@@ -1,3 +1,17 @@
+# [1.351.0](https://github.com/adobe/spacecat-api-service/compare/v1.350.0...v1.351.0) (2026-03-16)
+
+
+### Features
+
+* llmo mysticat - introduce brand presence weeks api ([#1963](https://github.com/adobe/spacecat-api-service/issues/1963)) ([11e8180](https://github.com/adobe/spacecat-api-service/commit/11e818041f4389f76d1083ebbf34ffa223200efd))
+
+# [1.350.0](https://github.com/adobe/spacecat-api-service/compare/v1.349.1...v1.350.0) (2026-03-16)
+
+
+### Features
+
+* enhance PLG onboarding with auto-resolved configs and fast-track for preonboarded sites ([#1957](https://github.com/adobe/spacecat-api-service/issues/1957)) ([cba87f2](https://github.com/adobe/spacecat-api-service/commit/cba87f23e5948288e736d8b3e261343b6a7ea59e))
+
 ## [1.349.1](https://github.com/adobe/spacecat-api-service/compare/v1.349.0...v1.349.1) (2026-03-16)
 
 
