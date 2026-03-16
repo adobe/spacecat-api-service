@@ -35,7 +35,9 @@ import {
   triggerAudits,
   ASO_DEMO_ORG,
 } from '../llmo/llmo-onboarding.js';
-import { autoResolveAuthorUrl, findDeliveryType, deriveProjectName } from '../../support/utils.js';
+import {
+  autoResolveAuthorUrl, findDeliveryType, deriveProjectName, updateCodeConfig,
+} from '../../support/utils.js';
 import { loadProfileConfig } from '../../utils/slack/base.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import { PlgOnboardingDto } from '../../dto/plg-onboarding.js';
@@ -259,11 +261,13 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
     onboarding.setSiteId(site.getId());
     steps.siteResolved = true;
 
-    // Step 5b: Auto-resolve author URL if not already set
+    // Step 5b: Auto-resolve author URL and RUM host if not already set
+    let rumHost = null;
     const existingDeliveryConfig = site.getDeliveryConfig() || {};
     if (!existingDeliveryConfig.authorURL) {
       try {
         const resolvedConfig = await autoResolveAuthorUrl(site, context);
+        rumHost = resolvedConfig?.host || null;
         if (resolvedConfig?.authorURL) {
           site.setDeliveryConfig({
             ...existingDeliveryConfig,
@@ -277,6 +281,16 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
       } catch (error) {
         log.warn(`Failed to auto-resolve author URL for site ${site.getId()}: ${error.message}`);
       }
+    }
+
+    // Step 5c: Resolve EDS code config (owner/repo/ref) from RUM host
+    try {
+      await updateCodeConfig(site, rumHost, { say: () => {} }, log);
+      if (site.getCode()?.owner) {
+        steps.codeConfigResolved = true;
+      }
+    } catch (error) {
+      log.warn(`Failed to resolve code config for site ${site.getId()}: ${error.message}`);
     }
 
     // Step 6: Update configs

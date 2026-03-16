@@ -44,6 +44,7 @@ describe('PlgOnboardingController', () => {
   let enableImportsStub;
   let triggerAuditsStub;
   let autoResolveAuthorUrlStub;
+  let updateCodeConfigStub;
   let findDeliveryTypeStub;
   let deriveProjectNameStub;
   let loadProfileConfigStub;
@@ -90,6 +91,8 @@ describe('PlgOnboardingController', () => {
       setRegion: sandbox.stub(),
       getDeliveryConfig: sandbox.stub().returns(overrides.deliveryConfig || {}),
       setDeliveryConfig: sandbox.stub(),
+      getCode: sandbox.stub().returns(overrides.code || null),
+      setCode: sandbox.stub(),
       getProjectId: sandbox.stub().returns(overrides.projectId || null),
       setProjectId: sandbox.stub(),
       save: sandbox.stub().resolves(),
@@ -164,6 +167,7 @@ describe('PlgOnboardingController', () => {
 
     // Support utils stubs
     autoResolveAuthorUrlStub = sandbox.stub().resolves(null);
+    updateCodeConfigStub = sandbox.stub().resolves();
     findDeliveryTypeStub = sandbox.stub().resolves('aem_edge');
     deriveProjectNameStub = sandbox.stub().returns('example.com');
 
@@ -301,6 +305,7 @@ describe('PlgOnboardingController', () => {
         },
         '../../../src/support/utils.js': {
           autoResolveAuthorUrl: autoResolveAuthorUrlStub,
+          updateCodeConfig: updateCodeConfigStub,
           findDeliveryType: findDeliveryTypeStub,
           deriveProjectName: deriveProjectNameStub,
         },
@@ -893,6 +898,63 @@ describe('PlgOnboardingController', () => {
 
       expect(res.status).to.equal(200);
       expect(mockSite.setDeliveryConfig).to.not.have.been.called;
+    });
+
+    it('calls updateCodeConfig with RUM host from autoResolveAuthorUrl', async () => {
+      autoResolveAuthorUrlStub.resolves({
+        authorURL: 'https://author-p123-e456.adobeaemcloud.com',
+        programId: '123',
+        environmentId: '456',
+        host: 'publish-p123-e456.adobeaemcloud.net',
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      await controller.onboard(context);
+
+      expect(updateCodeConfigStub).to.have.been.calledWith(
+        mockSite,
+        'publish-p123-e456.adobeaemcloud.net',
+        sinon.match({ say: sinon.match.func }),
+        sinon.match.object,
+      );
+    });
+
+    it('passes null host to updateCodeConfig when autoResolveAuthorUrl returns null', async () => {
+      autoResolveAuthorUrlStub.resolves(null);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      await controller.onboard(context);
+
+      expect(updateCodeConfigStub).to.have.been.calledWith(
+        mockSite,
+        null,
+        sinon.match({ say: sinon.match.func }),
+        sinon.match.object,
+      );
+    });
+
+    it('sets codeConfigResolved step when code config is resolved', async () => {
+      mockSite.getCode.returns({ owner: 'adobe', repo: 'my-site', ref: 'main' });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      await controller.onboard(context);
+
+      const stepsCall = mockOnboarding.setSteps.lastCall.args[0];
+      expect(stepsCall.codeConfigResolved).to.be.true;
+    });
+
+    it('continues onboarding when updateCodeConfig fails', async () => {
+      updateCodeConfigStub.rejects(new Error('pattern match failed'));
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to resolve code config/);
     });
   });
 
