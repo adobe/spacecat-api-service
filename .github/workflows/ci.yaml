@@ -99,13 +99,6 @@ jobs:
           AWS_REGION: us-east-1
           AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID_PROD}}
 
-      - name: Set reserved concurrency (prod)
-        run: |
-          aws lambda put-function-concurrency \
-            --function-name spacecat-services--api-service \
-            --reserved-concurrent-executions 50
-        env:
-          AWS_REGION: us-east-1
 
   deploy-stage:
     runs-on: ubuntu-latest
@@ -133,13 +126,6 @@ jobs:
           AWS_REGION: us-east-1
           AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID_STAGE}}
 
-      - name: Set reserved concurrency (stage)
-        run: |
-          aws lambda put-function-concurrency \
-            --function-name spacecat-services--api-service \
-            --reserved-concurrent-executions 50
-        env:
-          AWS_REGION: us-east-1
 
   upload-build-artifacts:
     runs-on: ubuntu-latest
@@ -205,13 +191,6 @@ jobs:
           AWS_REGION: us-east-1
           AWS_ACCOUNT_ID: ${{secrets.AWS_ACCOUNT_ID_DEV}}
 
-      - name: Set reserved concurrency (dev)
-        run: |
-          aws lambda put-function-concurrency \
-            --function-name spacecat-services--api-service \
-            --reserved-concurrent-executions 50
-        env:
-          AWS_REGION: us-east-1
 
       - name: Post-Deployment Integration Test
         run: npm run test-postdeploy

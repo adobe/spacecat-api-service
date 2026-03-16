@@ -42,6 +42,7 @@
       "params-file": "secrets/dev-secrets.json"
     },
     "fastlyServiceId!important": "",
+    "awsReservedConcurrency": 50,
     "timeout": 900000,
     "nodeVersion": 24,
     "static": [
@@ -117,7 +118,7 @@
   },
   "devDependencies": {
     "@adobe/eslint-config-helix": "3.0.21",
-    "@adobe/helix-deploy": "13.4.1",
+    "@adobe/helix-deploy": "13.5.0",
     "@adobe/helix-universal": "5.4.0",
     "@adobe/helix-universal-devserver": "1.1.145",
     "@adobe/semantic-release-coralogix": "1.1.40",
