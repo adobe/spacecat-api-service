@@ -35,7 +35,7 @@ import {
   triggerAudits,
   ASO_DEMO_ORG,
 } from '../llmo/llmo-onboarding.js';
-import { findDeliveryType, deriveProjectName } from '../../support/utils.js';
+import { autoResolveAuthorUrl, findDeliveryType, deriveProjectName } from '../../support/utils.js';
 import { loadProfileConfig } from '../../utils/slack/base.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import { PlgOnboardingDto } from '../../dto/plg-onboarding.js';
@@ -258,6 +258,26 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
     }
     onboarding.setSiteId(site.getId());
     steps.siteResolved = true;
+
+    // Step 5b: Auto-resolve author URL if not already set
+    const existingDeliveryConfig = site.getDeliveryConfig() || {};
+    if (!existingDeliveryConfig.authorURL) {
+      try {
+        const resolvedConfig = await autoResolveAuthorUrl(site, context);
+        if (resolvedConfig?.authorURL) {
+          site.setDeliveryConfig({
+            ...existingDeliveryConfig,
+            authorURL: resolvedConfig.authorURL,
+            programId: resolvedConfig.programId,
+            environmentId: resolvedConfig.environmentId,
+          });
+          log.info(`Auto-resolved author URL for site ${site.getId()}: ${resolvedConfig.authorURL}`);
+          steps.authorUrlResolved = true;
+        }
+      } catch (error) {
+        log.warn(`Failed to auto-resolve author URL for site ${site.getId()}: ${error.message}`);
+      }
+    }
 
     // Step 6: Update configs
     const siteConfig = site.getConfig();

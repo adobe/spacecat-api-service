@@ -43,6 +43,7 @@ describe('PlgOnboardingController', () => {
   let enableAuditsStub;
   let enableImportsStub;
   let triggerAuditsStub;
+  let autoResolveAuthorUrlStub;
   let findDeliveryTypeStub;
   let deriveProjectNameStub;
   let loadProfileConfigStub;
@@ -87,6 +88,8 @@ describe('PlgOnboardingController', () => {
       setLanguage: sandbox.stub(),
       getRegion: sandbox.stub().returns(overrides.region || null),
       setRegion: sandbox.stub(),
+      getDeliveryConfig: sandbox.stub().returns(overrides.deliveryConfig || {}),
+      setDeliveryConfig: sandbox.stub(),
       getProjectId: sandbox.stub().returns(overrides.projectId || null),
       setProjectId: sandbox.stub(),
       save: sandbox.stub().resolves(),
@@ -160,6 +163,7 @@ describe('PlgOnboardingController', () => {
     triggerAuditsStub = sandbox.stub().resolves();
 
     // Support utils stubs
+    autoResolveAuthorUrlStub = sandbox.stub().resolves(null);
     findDeliveryTypeStub = sandbox.stub().resolves('aem_edge');
     deriveProjectNameStub = sandbox.stub().returns('example.com');
 
@@ -296,6 +300,7 @@ describe('PlgOnboardingController', () => {
           ASO_DEMO_ORG: DEMO_ORG_ID,
         },
         '../../../src/support/utils.js': {
+          autoResolveAuthorUrl: autoResolveAuthorUrlStub,
           findDeliveryType: findDeliveryTypeStub,
           deriveProjectName: deriveProjectNameStub,
         },
@@ -819,6 +824,75 @@ describe('PlgOnboardingController', () => {
       await controller.onboard(context);
 
       expect(mockSite.setProjectId).to.not.have.been.called;
+    });
+
+    it('auto-resolves author URL and sets deliveryConfig', async () => {
+      autoResolveAuthorUrlStub.resolves({
+        authorURL: 'https://author-p123-e456.adobeaemcloud.com',
+        programId: '123',
+        environmentId: '456',
+        host: 'publish-p123-e456.adobeaemcloud.net',
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(autoResolveAuthorUrlStub).to.have.been.calledWith(mockSite, context);
+      expect(mockSite.setDeliveryConfig).to.have.been.calledWith({
+        authorURL: 'https://author-p123-e456.adobeaemcloud.com',
+        programId: '123',
+        environmentId: '456',
+      });
+    });
+
+    it('skips author URL resolution when deliveryConfig.authorURL already set', async () => {
+      mockSite = createMockSite({
+        deliveryConfig: { authorURL: 'https://existing-author.adobeaemcloud.com' },
+      });
+      mockDataAccess.Site.create.resolves(mockSite);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(autoResolveAuthorUrlStub).to.not.have.been.called;
+      expect(mockSite.setDeliveryConfig).to.not.have.been.called;
+    });
+
+    it('continues onboarding when author URL resolution fails', async () => {
+      autoResolveAuthorUrlStub.rejects(new Error('RUM service down'));
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to auto-resolve author URL/);
+    });
+
+    it('skips setting deliveryConfig when autoResolveAuthorUrl returns null', async () => {
+      autoResolveAuthorUrlStub.resolves(null);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockSite.setDeliveryConfig).to.not.have.been.called;
+    });
+
+    it('skips setting deliveryConfig when autoResolveAuthorUrl returns no authorURL', async () => {
+      autoResolveAuthorUrlStub.resolves({ host: 'some-host.net' });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockSite.setDeliveryConfig).to.not.have.been.called;
     });
   });
 
