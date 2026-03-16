@@ -23,7 +23,7 @@ const SKIP_VALUES = new Set(['all', '', undefined, null, '*']);
 const IN_FILTER_CHUNK_SIZE = 50;
 const QUERY_LIMIT = 5000;
 /** No row limit for weeks query — we need all rows to extract every distinct week. */
-const WEEKS_QUERY_LIMIT = 100000;
+const WEEKS_QUERY_LIMIT = 200000;
 
 /**
  * Expected error message substrings from getOrgAndValidateAccess (see llmo-mysticat-controller).
@@ -235,6 +235,39 @@ function parseWeeksParams(context) {
 }
 
 /**
+ * Returns startDate (Monday) and endDate (Sunday) for an ISO week string (YYYY-Wnn).
+ * @param {string} isoWeek - e.g. "2026-W11"
+ * @returns {{ startDate: string, endDate: string } | null} - YYYY-MM-DD or null if invalid
+ * @internal Exported for testing
+ */
+export function getWeekDateRange(isoWeek) {
+  const match = /^(\d{4})-W(\d{2})$/.exec(isoWeek);
+  if (!match) return null;
+  const year = Number.parseInt(match[1], 10);
+  const week = Number.parseInt(match[2], 10);
+  if (week < 1 || week > 53) return null;
+  const jan4 = new Date(year, 0, 4);
+  const dayOfWeek = jan4.getDay();
+  const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+  const week1Monday = new Date(jan4);
+  week1Monday.setDate(jan4.getDate() + mondayOffset);
+  const targetMonday = new Date(week1Monday);
+  targetMonday.setDate(week1Monday.getDate() + (week - 1) * 7);
+  const targetSunday = new Date(targetMonday);
+  targetSunday.setDate(targetMonday.getDate() + 6);
+  const toYMD = (d) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+  return {
+    startDate: toYMD(targetMonday),
+    endDate: toYMD(targetSunday),
+  };
+}
+
+/**
  * Builds a query to fetch week values from brand_metrics_weekly.
  * Table already has week in YYYY-Wnn format; filters: organization_id, model, site_id, brand_id.
  */
@@ -312,7 +345,15 @@ export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
       const w = r.week;
       if (w && typeof w === 'string') weekSet.add(w);
     });
-    const weeks = [...weekSet].sort((a, b) => b.localeCompare(a));
+    const sortedWeeks = [...weekSet].sort((a, b) => b.localeCompare(a));
+    const weeks = sortedWeeks.map((weekStr) => {
+      const range = getWeekDateRange(weekStr);
+      return {
+        [weekStr]: range
+          ? { startDate: range.startDate, endDate: range.endDate }
+          : { startDate: null, endDate: null },
+      };
+    });
 
     return ok({ weeks });
   };

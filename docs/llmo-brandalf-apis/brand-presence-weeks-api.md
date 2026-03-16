@@ -75,11 +75,30 @@ LIMIT 100000;
 
 ```json
 {
-  "weeks": ["2026-W11", "2026-W10", "2026-W09"]
+  "weeks": [
+    {
+      "2026-W11": {
+        "startDate": "2026-03-09",
+        "endDate": "2026-03-15"
+      }
+    },
+    {
+      "2026-W10": {
+        "startDate": "2026-03-02",
+        "endDate": "2026-03-08"
+      }
+    },
+    {
+      "2026-W09": {
+        "startDate": "2026-02-23",
+        "endDate": "2026-03-01"
+      }
+    }
+  ]
 }
 ```
 
-Weeks are sorted descending (most recent first). Format is ISO 8601 week (YYYY-Wnn).
+Each week is an object keyed by the ISO week string (YYYY-Wnn). The value is `startDate` (Monday) and `endDate` (Sunday) in YYYY-MM-DD format. Weeks are sorted descending (most recent first).
 
 ---
 

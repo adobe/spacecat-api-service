@@ -17,6 +17,7 @@ import sinonChai from 'sinon-chai';
 import {
   createBrandPresenceWeeksHandler,
   createFilterDimensionsHandler,
+  getWeekDateRange,
   resolveSiteIds,
   strCompare,
   toFilterOption,
@@ -103,6 +104,40 @@ describe('llmo-brand-presence', () => {
     it('compares truthy strings normally', () => {
       expect(strCompare('a', 'b')).to.be.lessThan(0);
       expect(strCompare('b', 'a')).to.be.greaterThan(0);
+    });
+  });
+
+  describe('getWeekDateRange', () => {
+    it('returns startDate and endDate for valid ISO week', () => {
+      expect(getWeekDateRange('2026-W11')).to.deep.equal({
+        startDate: '2026-03-09',
+        endDate: '2026-03-15',
+      });
+    });
+
+    it('handles year where Jan 4 is Sunday (dayOfWeek 0)', () => {
+      expect(getWeekDateRange('2026-W01')).to.deep.equal({
+        startDate: '2025-12-29',
+        endDate: '2026-01-04',
+      });
+    });
+
+    it('handles year where Jan 4 is Monday (dayOfWeek 1)', () => {
+      expect(getWeekDateRange('2021-W01')).to.deep.equal({
+        startDate: '2021-01-04',
+        endDate: '2021-01-10',
+      });
+    });
+
+    it('returns null for invalid format', () => {
+      expect(getWeekDateRange('invalid')).to.be.null;
+      expect(getWeekDateRange('2026-11')).to.be.null;
+      expect(getWeekDateRange('W11')).to.be.null;
+    });
+
+    it('returns null for week out of range', () => {
+      expect(getWeekDateRange('2026-W00')).to.be.null;
+      expect(getWeekDateRange('2026-W54')).to.be.null;
     });
   });
 
@@ -663,7 +698,40 @@ describe('llmo-brand-presence', () => {
 
       expect(result.status).to.equal(200);
       const body = await result.json();
-      expect(body.weeks).to.deep.equal(['2026-W11', '2026-W10', '2026-W09', '2026-W07']);
+      expect(body.weeks).to.deep.equal([
+        { '2026-W11': { startDate: '2026-03-09', endDate: '2026-03-15' } },
+        { '2026-W10': { startDate: '2026-03-02', endDate: '2026-03-08' } },
+        { '2026-W09': { startDate: '2026-02-23', endDate: '2026-03-01' } },
+        { '2026-W07': { startDate: '2026-02-09', endDate: '2026-02-15' } },
+      ]);
+    });
+
+    it('returns startDate/endDate null for invalid week strings from DB', async () => {
+      const metricsData = {
+        data: [
+          { week: '2026-W11' },
+          { week: '2026-W00' },
+          { week: 'invalid' },
+        ],
+        error: null,
+      };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(metricsData);
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.weeks).to.have.lengthOf(3);
+      expect(body.weeks[0]).to.deep.equal({
+        invalid: { startDate: null, endDate: null },
+      });
+      expect(body.weeks[1]).to.deep.equal({
+        '2026-W11': { startDate: '2026-03-09', endDate: '2026-03-15' },
+      });
+      expect(body.weeks[2]).to.deep.equal({
+        '2026-W00': { startDate: null, endDate: null },
+      });
     });
 
     it('defaults model to chatgpt when not provided', async () => {
