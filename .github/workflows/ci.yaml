@@ -103,7 +103,7 @@ jobs:
         run: |
           aws lambda put-function-concurrency \
             --function-name spacecat-services--api-service \
-            --reserved-concurrent-executions 100
+            --reserved-concurrent-executions 50
         env:
           AWS_REGION: us-east-1
 
@@ -137,7 +137,7 @@ jobs:
         run: |
           aws lambda put-function-concurrency \
             --function-name spacecat-services--api-service \
-            --reserved-concurrent-executions 75
+            --reserved-concurrent-executions 50
         env:
           AWS_REGION: us-east-1
 
