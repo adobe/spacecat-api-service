@@ -15,6 +15,7 @@ import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import {
+  createBrandPresenceWeeksHandler,
   createFilterDimensionsHandler,
   resolveSiteIds,
   strCompare,
@@ -45,6 +46,7 @@ function createChainableMock(resolveValue = { data: [], error: null }, resolveSe
     not: sinon.stub().returnsThis(),
     or: sinon.stub().returnsThis(),
     filter: sinon.stub().returnsThis(),
+    order: sinon.stub().returnsThis(),
     limit: limitStub,
     then(resolve) { return Promise.resolve(resolveValue).then(resolve); },
   };
@@ -542,6 +544,237 @@ describe('llmo-brand-presence', () => {
       expect(body.origins).to.have.lengthOf(2);
       const originIds = body.origins.map((o) => o.id).sort();
       expect(originIds).to.deep.equal(['ai', 'human']);
+    });
+  });
+
+  describe('createBrandPresenceWeeksHandler', () => {
+    it('returns badRequest when postgrestService is missing', async () => {
+      mockContext.dataAccess.Site.postgrestService = null;
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      expect(getOrgAndValidateAccess).not.to.have.been.called;
+    });
+
+    it('returns forbidden when user has no org access', async () => {
+      mockContext.dataAccess.Site.postgrestService = mockClient;
+      getOrgAndValidateAccess.rejects(new Error('Only users belonging to the organization can view brand presence data'));
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns badRequest when organization not found', async () => {
+      mockContext.dataAccess.Site.postgrestService = mockClient;
+      getOrgAndValidateAccess.rejects(new Error('Organization not found: 0178a3f0-1234-7000-8000-000000000001'));
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Organization not found: 0178a3f0-1234-7000-8000-000000000001');
+    });
+
+    it('returns badRequest when generic error is thrown', async () => {
+      mockContext.dataAccess.Site.postgrestService = mockClient;
+      getOrgAndValidateAccess.rejects(new Error('Database connection failed'));
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Database connection failed');
+      expect(mockContext.log.error).to.have.been.calledWith(
+        'Brand presence weeks error: Database connection failed',
+      );
+    });
+
+    it('returns badRequest when brand_metrics_weekly query returns error', async () => {
+      const queryError = { message: 'relation "brand_metrics_weekly" does not exist' };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(
+        { data: [], error: queryError },
+      );
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('relation "brand_metrics_weekly" does not exist');
+    });
+
+    it('returns empty weeks when no data', async () => {
+      mockContext.dataAccess.Site.postgrestService = createChainableMock({ data: [], error: null });
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.weeks).to.deep.equal([]);
+    });
+
+    it('handles null/undefined context.data (uses empty object fallback)', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.data = null;
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.weeks).to.deep.equal([]);
+    });
+
+    it('handles weeks query with data: null (empty rows fallback)', async () => {
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(
+        { data: null, error: null },
+      );
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.weeks).to.deep.equal([]);
+    });
+
+    it('returns distinct weeks sorted descending', async () => {
+      const metricsData = {
+        data: [
+          { week: '2026-W11' },
+          { week: '2026-W10' },
+          { week: '2026-W11' },
+          { week: '2026-W09' },
+          { week: '2026-W07' },
+        ],
+        error: null,
+      };
+      mockContext.dataAccess.Site.postgrestService = createChainableMock(metricsData);
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.weeks).to.deep.equal(['2026-W11', '2026-W10', '2026-W09', '2026-W07']);
+    });
+
+    it('defaults model to chatgpt when not provided', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.eq).to.have.been.calledWith('model', 'chatgpt');
+    });
+
+    it('uses model from query param when provided', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.data = { model: 'openai' };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.eq).to.have.been.calledWith('model', 'openai');
+    });
+
+    it('accepts platform as alias for model', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.data = { platform: 'gemini' };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.eq).to.have.been.calledWith('model', 'gemini');
+    });
+
+    it('filters by brandId when single brand route', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.params.brandId = '0178a3f0-1234-7000-8000-000000000002';
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.eq).to.have.been.calledWith('brand_id', '0178a3f0-1234-7000-8000-000000000002');
+    });
+
+    it('does not filter by brand when brandId is "all"', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.params.brandId = 'all';
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      const brandIdCalls = chainMock.eq.getCalls().filter((c) => c.args[0] === 'brand_id');
+      expect(brandIdCalls).to.have.lengthOf(0);
+    });
+
+    it('filters by siteId when provided', async () => {
+      const siteValidation = { data: [{ id: 'cccdac43-1a22-4659-9086-b762f59b9928' }], error: null };
+      const execData = { data: [], error: null };
+      const chainMock = createChainableMock(execData, [siteValidation, execData]);
+      mockContext.data = { siteId: 'cccdac43-1a22-4659-9086-b762f59b9928' };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      const siteIdCalls = chainMock.eq.getCalls().filter((c) => c.args[0] === 'site_id');
+      expect(siteIdCalls).to.have.lengthOf.at.least(1);
+      expect(siteIdCalls.some((c) => c.args[1] === 'cccdac43-1a22-4659-9086-b762f59b9928')).to.be.true;
+    });
+
+    it('accepts site_id as alias for siteId', async () => {
+      const siteValidation = { data: [{ id: 'cccdac43-1a22-4659-9086-b762f59b9928' }], error: null };
+      const execData = { data: [], error: null };
+      const chainMock = createChainableMock(execData, [siteValidation, execData]);
+      mockContext.data = { site_id: 'cccdac43-1a22-4659-9086-b762f59b9928' };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      const siteIdCalls = chainMock.eq.getCalls().filter((c) => c.args[0] === 'site_id');
+      expect(siteIdCalls).to.have.lengthOf.at.least(1);
+      expect(siteIdCalls.some((c) => c.args[1] === 'cccdac43-1a22-4659-9086-b762f59b9928')).to.be.true;
+    });
+
+    it('returns 403 when siteId does not belong to the organization', async () => {
+      const sitesValidation = { data: [], error: null };
+      const chainMock = createChainableMock(sitesValidation);
+      mockContext.data = { siteId: 'cccdac43-1a22-4659-9086-b762f59b9928' };
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+      const body = await result.json();
+      expect(body.message).to.equal('Site does not belong to the organization');
+    });
+
+    it('queries brand_metrics_weekly with select week', async () => {
+      const chainMock = createChainableMock({ data: [], error: null });
+      mockContext.dataAccess.Site.postgrestService = chainMock;
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(chainMock.from).to.have.been.calledWith('brand_metrics_weekly');
+      expect(chainMock.select).to.have.been.calledWith('week');
+      expect(chainMock.eq).to.have.been.calledWith('organization_id', mockContext.params.spaceCatId);
     });
   });
 });

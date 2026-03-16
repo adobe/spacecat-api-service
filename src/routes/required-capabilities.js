@@ -123,6 +123,8 @@ const routeRequiredCapabilities = {
   'GET /organizations/:organizationId/brands': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions': 'brand:read',
+  'GET /org/:spaceCatId/brands/all/brand-presence/weeks': 'brand:read',
+  'GET /org/:spaceCatId/brands/:brandId/brand-presence/weeks': 'brand:read',
   'GET /v2/orgs/:spaceCatId/llmo-customer-config': 'organization:read',
   'GET /v2/orgs/:spaceCatId/llmo-customer-config-lean': 'organization:read',
   'GET /v2/orgs/:spaceCatId/llmo-topics': 'organization:read',

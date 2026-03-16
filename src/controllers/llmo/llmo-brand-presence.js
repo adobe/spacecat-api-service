@@ -22,6 +22,8 @@ import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
 const SKIP_VALUES = new Set(['all', '', undefined, null, '*']);
 const IN_FILTER_CHUNK_SIZE = 50;
 const QUERY_LIMIT = 5000;
+/** No row limit for weeks query — we need all rows to extract every distinct week. */
+const WEEKS_QUERY_LIMIT = 100000;
 
 /**
  * Expected error message substrings from getOrgAndValidateAccess (see llmo-mysticat-controller).
@@ -221,6 +223,98 @@ function buildDimensionOptions(rows) {
     topics,
     origins,
     regions,
+  };
+}
+
+function parseWeeksParams(context) {
+  const q = context.data || {};
+  return {
+    model: q.model || q.platform,
+    siteId: q.siteId || q.site_id,
+  };
+}
+
+/**
+ * Builds a query to fetch week values from brand_metrics_weekly.
+ * Table already has week in YYYY-Wnn format; filters: organization_id, model, site_id, brand_id.
+ */
+function buildWeeksQuery(client, organizationId, model, siteId, filterByBrandId) {
+  let q = client
+    .from('brand_metrics_weekly')
+    .select('week')
+    .eq('organization_id', organizationId)
+    .eq('model', model);
+
+  if (shouldApplyFilter(siteId)) {
+    q = q.eq('site_id', siteId);
+  }
+  if (filterByBrandId) {
+    q = q.eq('brand_id', filterByBrandId);
+  }
+
+  return q.order('week', { ascending: false }).limit(WEEKS_QUERY_LIMIT);
+}
+
+/**
+ * Creates the getBrandPresenceWeeks handler.
+ * Returns distinct ISO weeks (YYYY-Wnn) for the given model, optionally filtered by brand or site.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
+  return async (context) => {
+    const { log, dataAccess } = context;
+    const { Site } = dataAccess;
+
+    if (!Site?.postgrestService) {
+      log.error('Brand presence APIs require PostgREST (DATA_SERVICE_PROVIDER=postgres)');
+      return badRequest('Brand presence data is not available. PostgreSQL data service is required.');
+    }
+
+    try {
+      await getOrgAndValidateAccess(context);
+    } catch (error) {
+      if (error.message?.includes(ERR_ORG_ACCESS)) {
+        return forbidden('Only users belonging to the organization can view brand presence data');
+      }
+      if (error.message?.includes(ERR_NOT_FOUND)) {
+        return badRequest(error.message);
+      }
+      log.error(`Brand presence weeks error: ${error.message}`);
+      return badRequest(error.message);
+    }
+
+    const params = parseWeeksParams(context);
+    const { model: modelParam, siteId } = params;
+    const model = modelParam || 'chatgpt';
+    const { spaceCatId, brandId } = context.params;
+    const organizationId = spaceCatId;
+    const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+
+    if (siteId) {
+      const client = Site.postgrestService;
+      const siteBelongsToOrg = await validateSiteBelongsToOrg(client, organizationId, siteId);
+      if (!siteBelongsToOrg) {
+        return forbidden('Site does not belong to the organization');
+      }
+    }
+
+    const client = Site.postgrestService;
+    const q = buildWeeksQuery(client, organizationId, model, siteId, filterByBrandId);
+    const { data, error } = await q;
+
+    if (error) {
+      return badRequest(error.message);
+    }
+
+    const rows = data || [];
+    const weekSet = new Set();
+    rows.forEach((r) => {
+      const w = r.week;
+      if (w && typeof w === 'string') weekSet.add(w);
+    });
+    const weeks = [...weekSet].sort((a, b) => b.localeCompare(a));
+
+    return ok({ weeks });
   };
 }
 

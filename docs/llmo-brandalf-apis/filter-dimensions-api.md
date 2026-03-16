@@ -170,6 +170,12 @@ client.from('page_intents').select('page_intent').eq('site_id', siteId).limit(50
 
 ---
 
+## Related APIs
+
+- [Brand Presence Weeks API](brand-presence-weeks-api.md) — Returns applicable weeks for a given model, optionally filtered by brand or site.
+
+---
+
 ## Authentication
 
 Requires valid authentication (JWT, IMS, or API key) with access to the organization.
