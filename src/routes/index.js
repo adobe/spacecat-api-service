@@ -73,6 +73,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} trafficController - The traffic controller.
  * @param {FixesController} fixesController - The fixes controller.
  * @param {Object} llmoController - The LLMO controller.
+ * @param {Object} llmoMysticatController - The LLMO Mysticat controller (brand presence APIs).
  * @param {Object} userActivityController - The user activity controller.
  * @param {Object} siteEnrollmentController - The site enrollment controller.
  * @param {Object} trialUserController - The trial user controller.
@@ -86,6 +87,7 @@ function isStaticRoute(routePattern) {
 * @param {Object} botBlockerController - The bot blocker controller.
  * @param {Object} sentimentController - The sentiment controller.
  * @param {Object} consumersController - The consumers controller.
+ * @param {Object} plgOnboardingController - The PLG onboarding controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -115,6 +117,7 @@ export default function getRouteHandlers(
   trafficController,
   fixesController,
   llmoController,
+  llmoMysticatController,
   userActivityController,
   siteEnrollmentController,
   trialUserController,
@@ -381,6 +384,11 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,
     'POST /sites/:siteId/llmo/edge-optimize-routing': llmoController.updateEdgeOptimizeCDNRouting,
     'PUT /sites/:siteId/llmo/opportunities-reviewed': llmoController.markOpportunitiesReviewed,
+
+    // Brand Presence filter dimensions (PostgREST/mysticat-data-service)
+    // spaceCatId = organization_id. brandId = 'all' for all brands, or UUID for single brand.
+    'GET /org/:spaceCatId/brands/all/brand-presence/filter-dimensions': llmoMysticatController.getFilterDimensions,
+    'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions': llmoMysticatController.getFilterDimensions,
 
     // PLG Routes
     'POST /plg/onboard': plgOnboardingController.onboard,
