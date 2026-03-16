@@ -605,6 +605,9 @@ describe('Fixes Controller', () => {
         data: suggestions,
         unprocessed: [],
       });
+      fixEntityCollection.getSuggestionsByFixEntityId
+        .withArgs(fixId)
+        .resolves(suggestions);
       fixEntitySuggestionCollection.allByFixEntityId.resolves(suggestions.map((s) => ({
         getSuggestionId: () => s.getId(),
         getFixEntityId: () => fixId,
@@ -1226,6 +1229,9 @@ describe('Fixes Controller', () => {
         data: suggestions,
         unprocessed: [],
       });
+      fixEntityCollection.getSuggestionsByFixEntityId
+        .withArgs(fix.getId())
+        .resolves(suggestions);
 
       const executedAt = '2025-05-19T10:27:27.903Z';
       const publishedAt = '2025-05-19T11:27:27.903Z';
@@ -1272,6 +1278,9 @@ describe('Fixes Controller', () => {
         data: suggestions,
         unprocessed: [],
       });
+      fixEntityCollection.getSuggestionsByFixEntityId
+        .withArgs(fix.getId())
+        .resolves(suggestions);
 
       const newOrigin = FixEntity.ORIGINS.ASO;
       requestContext.data = {
