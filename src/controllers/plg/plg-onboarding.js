@@ -49,6 +49,9 @@ const PLG_PROFILE_KEY = 'aso_plg';
 
 const DOMAIN_ALREADY_ASSIGNED = 'already assigned to another organization';
 
+// EDS host pattern: ref--repo--owner.aem.live (or hlx.live)
+const EDS_HOST_PATTERN = /^([\w-]+)--([\w-]+)--([\w-]+)\.(aem\.live|hlx\.live)$/i;
+
 // RFC 1123 hostname: labels of 1-63 alphanumeric/hyphen chars, separated by dots, max 253 chars
 const HOSTNAME_RE = /^(?=.{1,253}$)([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/;
 
@@ -274,6 +277,8 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
             authorURL: resolvedConfig.authorURL,
             programId: resolvedConfig.programId,
             environmentId: resolvedConfig.environmentId,
+            preferContentApi: true,
+            imsOrgId: imsOrgId || null,
           });
           log.info(`Auto-resolved author URL for site ${site.getId()}: ${resolvedConfig.authorURL}`);
           steps.authorUrlResolved = true;
@@ -283,7 +288,7 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
       }
     }
 
-    // Step 5c: Resolve EDS code config (owner/repo/ref) from RUM host
+    // Step 5c: Resolve EDS code config and hlxConfig from RUM host
     try {
       await updateCodeConfig(site, rumHost, { say: () => {} }, log);
       if (site.getCode()?.owner) {
@@ -291,6 +296,22 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
       }
     } catch (error) {
       log.warn(`Failed to resolve code config for site ${site.getId()}: ${error.message}`);
+    }
+
+    // Step 5d: Set hlxConfig for EDS sites from RUM host
+    if (rumHost && !site.getHlxConfig()) {
+      const edsMatch = rumHost.match(EDS_HOST_PATTERN);
+      if (edsMatch) {
+        const [, ref, repo, owner, tld] = edsMatch;
+        site.setHlxConfig({
+          hlxVersion: 5,
+          rso: {
+            ref, site: repo, owner, tld,
+          },
+        });
+        log.info(`Set hlxConfig for site ${site.getId()}: ${ref}--${repo}--${owner}.${tld}`);
+        steps.hlxConfigSet = true;
+      }
     }
 
     // Step 6: Update configs

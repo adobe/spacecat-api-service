@@ -93,6 +93,8 @@ describe('PlgOnboardingController', () => {
       setDeliveryConfig: sandbox.stub(),
       getCode: sandbox.stub().returns(overrides.code || null),
       setCode: sandbox.stub(),
+      getHlxConfig: sandbox.stub().returns(overrides.hlxConfig || null),
+      setHlxConfig: sandbox.stub(),
       getProjectId: sandbox.stub().returns(overrides.projectId || null),
       setProjectId: sandbox.stub(),
       save: sandbox.stub().resolves(),
@@ -831,7 +833,7 @@ describe('PlgOnboardingController', () => {
       expect(mockSite.setProjectId).to.not.have.been.called;
     });
 
-    it('auto-resolves author URL and sets deliveryConfig', async () => {
+    it('auto-resolves author URL and sets deliveryConfig with preferContentApi and imsOrgId', async () => {
       autoResolveAuthorUrlStub.resolves({
         authorURL: 'https://author-p123-e456.adobeaemcloud.com',
         programId: '123',
@@ -849,6 +851,8 @@ describe('PlgOnboardingController', () => {
         authorURL: 'https://author-p123-e456.adobeaemcloud.com',
         programId: '123',
         environmentId: '456',
+        preferContentApi: true,
+        imsOrgId: TEST_IMS_ORG_ID,
       });
     });
 
@@ -955,6 +959,92 @@ describe('PlgOnboardingController', () => {
 
       expect(res.status).to.equal(200);
       expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to resolve code config/);
+    });
+
+    it('sets hlxConfig for EDS sites from RUM host', async () => {
+      autoResolveAuthorUrlStub.resolves({
+        host: 'main--my-site--adobe.aem.live',
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockSite.setHlxConfig).to.have.been.calledWith({
+        hlxVersion: 5,
+        rso: {
+          ref: 'main', site: 'my-site', owner: 'adobe', tld: 'aem.live',
+        },
+      });
+    });
+
+    it('sets hlxConfig for hlx.live hosts', async () => {
+      autoResolveAuthorUrlStub.resolves({
+        host: 'main--my-site--adobe.hlx.live',
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockSite.setHlxConfig).to.have.been.calledWith({
+        hlxVersion: 5,
+        rso: {
+          ref: 'main', site: 'my-site', owner: 'adobe', tld: 'hlx.live',
+        },
+      });
+    });
+
+    it('skips hlxConfig when already set', async () => {
+      mockSite = createMockSite({
+        hlxConfig: {
+          hlxVersion: 5,
+          rso: {
+            ref: 'main', site: 'existing', owner: 'org', tld: 'aem.live',
+          },
+        },
+      });
+      mockDataAccess.Site.create.resolves(mockSite);
+
+      autoResolveAuthorUrlStub.resolves({
+        host: 'main--my-site--adobe.aem.live',
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockSite.setHlxConfig).to.not.have.been.called;
+    });
+
+    it('skips hlxConfig when RUM host is not EDS pattern', async () => {
+      autoResolveAuthorUrlStub.resolves({
+        authorURL: 'https://author-p123-e456.adobeaemcloud.com',
+        programId: '123',
+        environmentId: '456',
+        host: 'publish-p123-e456.adobeaemcloud.net',
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockSite.setHlxConfig).to.not.have.been.called;
+    });
+
+    it('skips hlxConfig when no RUM host available', async () => {
+      autoResolveAuthorUrlStub.resolves(null);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockSite.setHlxConfig).to.not.have.been.called;
     });
   });
 
