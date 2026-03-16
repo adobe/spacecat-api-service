@@ -268,8 +268,16 @@ EdgeOptimizeConfig:
   description: Edge optimize configuration for a site
   properties:
     enabled:
-      description: Whether edge optimize is enabled for the site
-      type: boolean
+      description: Whether edge optimize is enabled for the site. Can be a boolean flag (deprecated, will be removed) or a timestamp (milliseconds since epoch) for scheduled enablement. New implementations should use timestamp format.
+      deprecated: false
+      oneOf:
+        - type: boolean
+          deprecated: true
+          example: true
+          description: Deprecated. Use timestamp format instead.
+        - type: number
+          example: 1772531669121
+          description: Timestamp (milliseconds since epoch) indicating when edge optimization was enabled for the site.
     opted:
       description: Timestamp (milliseconds since epoch) when the site opted into edge optimize
       type: number
