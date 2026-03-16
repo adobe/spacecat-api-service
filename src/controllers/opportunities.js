@@ -28,6 +28,7 @@ import {
 import { OpportunityDto } from '../dto/opportunity.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
+import { getIsSummitPlgEnabled } from '../support/utils.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 
@@ -157,10 +158,12 @@ function OpportunitiesController(ctx) {
     if (!oppty || oppty.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
     }
-    try {
-      await grantSuggestionsForOpportunity(dataAccess, site, oppty);
-    /* c8 ignore next */ } catch (err) {
-      ctx.log?.warn?.('Grant suggestions handler failed', err?.message ?? err);
+    if (await getIsSummitPlgEnabled(site, ctx)) {
+      try {
+        await grantSuggestionsForOpportunity(dataAccess, site, oppty);
+      /* c8 ignore next */ } catch (err) {
+        ctx.log?.warn?.('Grant suggestions handler failed', err?.message ?? err);
+      }
     }
     return ok(OpportunityDto.toJSON(oppty));
   };

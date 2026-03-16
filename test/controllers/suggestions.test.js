@@ -410,6 +410,7 @@ describe('Suggestions Controller', () => {
     isHandlerEnabledForSite.withArgs('meta-tags-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('form-accessibility-auto-fix', site).returns(true);
     isHandlerEnabledForSite.withArgs('product-metatags-auto-fix', site).returns(true);
+    isHandlerEnabledForSite.withArgs('summit-plg', site).returns(true);
     isHandlerEnabledForSite.withArgs('broken-backlinks-auto-fix', siteNotEnabled).returns(false);
     mockOpportunity = {
       findById: sandbox.stub(),
@@ -466,6 +467,7 @@ describe('Suggestions Controller', () => {
         const ids = suggestionIds || [];
         return Promise.resolve({ grantedIds: ids, notGrantedIds: [], grantIds: ids.map((id) => `grant-${id}`) });
       }),
+      isSuggestionGranted: sandbox.stub().resolves(true),
     };
 
     mockSuggestionDataAccess = {
@@ -530,6 +532,25 @@ describe('Suggestions Controller', () => {
     const suggestions = await response.json();
     expect(suggestions).to.be.an('array').with.lengthOf(1);
     expect(suggestions[0]).to.have.property('opportunityId', OPPORTUNITY_ID);
+  });
+
+  it('returns all suggestions without grant filtering when summit-plg is not enabled', async () => {
+    const nonPlgSite = {
+      getId: sandbox.stub().returns(SITE_ID),
+      getDeliveryType: sandbox.stub().returns('aem_edge'),
+    };
+    mockSite.findById.withArgs(SITE_ID).resolves(nonPlgSite);
+    mockSuggestion.splitSuggestionsByGrantStatus.resetHistory();
+    const response = await suggestionsController.getAllForOpportunity({
+      params: {
+        siteId: SITE_ID,
+        opportunityId: OPPORTUNITY_ID,
+      },
+      ...context,
+    });
+    expect(response.status).to.equal(200);
+    expect(mockSuggestion.splitSuggestionsByGrantStatus).to.not.have.been.called;
+    mockSite.findById.withArgs(SITE_ID).resolves(site);
   });
 
   it('gets all suggestions for an opportunity and a site for non belonging to the organization', async () => {
@@ -1596,26 +1617,9 @@ describe('Suggestions Controller', () => {
     expect(error).to.have.property('message', 'not found');
   });
 
-  it('getByID returns not found for freemium org with ungranted suggestion', async () => {
-    const ORG_ID = 'org-uuid';
-    const freemiumSite = {
-      getId: sandbox.stub().returns(SITE_ID),
-      getOrganizationId: sandbox.stub().returns(ORG_ID),
-      getDeliveryType: sandbox.stub().returns('aem_edge'),
-    };
-    const mockEntitlement = {
-      isFreemium: sandbox.stub().returns(true),
-    };
-    mockSite.findById.withArgs(SITE_ID).resolves(freemiumSite);
-    mockSuggestionDataAccess.Entitlement = mockEntitlement;
-    mockSuggestionDataAccess.Suggestion.isSuggestionGranted = sandbox.stub()
-      .resolves(false);
-    const ctrl = SuggestionsController({
-      dataAccess: mockSuggestionDataAccess,
-      pathInfo: { headers: { 'x-product': 'llmo' } },
-      ...authContext,
-    }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
-    const response = await ctrl.getByID({
+  it('getByID returns not found for summit-plg enabled site with ungranted suggestion', async () => {
+    mockSuggestion.isSuggestionGranted.resolves(false);
+    const response = await suggestionsController.getByID({
       params: {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
@@ -1624,8 +1628,6 @@ describe('Suggestions Controller', () => {
       ...context,
     });
     expect(response.status).to.equal(404);
-    delete mockSuggestionDataAccess.Entitlement;
-    delete mockSuggestionDataAccess.Suggestion.isSuggestionGranted;
   });
 
   describe('getSuggestionFixes', () => {
@@ -3284,6 +3286,7 @@ describe('Suggestions Controller', () => {
       const suggestionControllerWithMock = await esmock('../../src/controllers/suggestions.js', {
         '../../src/support/utils.js': {
           getIMSPromiseToken: async () => mockPromiseToken,
+          getIsSummitPlgEnabled: async () => true,
         },
       });
       suggestionsControllerWithMock = suggestionControllerWithMock({
@@ -3479,6 +3482,7 @@ describe('Suggestions Controller', () => {
       const ControllerWithSpy = await esmock('../../src/controllers/suggestions.js', {
         '../../src/support/utils.js': {
           getIMSPromiseToken: getIMSPromiseTokenStub,
+          getIsSummitPlgEnabled: async () => true,
         },
       });
       const controller = ControllerWithSpy({
@@ -4319,6 +4323,7 @@ describe('Suggestions Controller', () => {
       const SuggestionsControllerWithStub = await esmock('../../src/controllers/suggestions.js', {
         '../../src/support/utils.js': {
           getIMSPromiseToken: getIMSPromiseTokenStub,
+          getIsSummitPlgEnabled: async () => true,
         },
       });
       const controllerWithStub = SuggestionsControllerWithStub({
@@ -4588,6 +4593,7 @@ describe('Suggestions Controller', () => {
       const suggestionControllerWithMock = await esmock('../../src/controllers/suggestions.js', {
         '../../src/support/utils.js': {
           getIMSPromiseToken: async () => mockPromiseToken,
+          getIsSummitPlgEnabled: async () => true,
         },
       });
       suggestionsControllerWithMock = suggestionControllerWithMock({
@@ -7955,6 +7961,7 @@ describe('Suggestions Controller', () => {
       const suggestionControllerWithMock = await esmock('../../src/controllers/suggestions.js', {
         '../../src/support/utils.js': {
           getIMSPromiseToken: async () => mockPromiseToken,
+          getIsSummitPlgEnabled: async () => true,
         },
       });
       

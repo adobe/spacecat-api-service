@@ -36,6 +36,7 @@ import {
   getIMSPromiseToken,
   ErrorWithStatusCode,
   getHostName,
+  getIsSummitPlgEnabled,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 
@@ -172,7 +173,7 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   const {
-    Opportunity, Suggestion, Site, Configuration, Entitlement,
+    Opportunity, Suggestion, Site, Configuration,
   } = dataAccess;
 
   if (!isObject(Opportunity)) {
@@ -184,6 +185,20 @@ function SuggestionsController(ctx, sqs, env) {
   }
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
+
+  /**
+   * Filters suggestions to only granted ones when summit-plg is enabled for the site.
+   * Returns all suggestions unchanged when summit-plg is not enabled.
+   * @param {Object} site - Site entity.
+   * @param {Array} suggestions - Suggestion entities to filter.
+   * @returns {Promise<Array>} Filtered suggestion entities.
+   */
+  const filterByGrantStatus = async (site, suggestions) => {
+    if (!await getIsSummitPlgEnabled(site, ctx)) return suggestions;
+    const ids = suggestions.map((s) => s.getId());
+    const { grantedIds } = await Suggestion.splitSuggestionsByGrantStatus(ids);
+    return suggestions.filter((s) => grantedIds.includes(s.getId()));
+  };
 
   /**
    * Gets all suggestions for a given site and opportunity
@@ -238,9 +253,7 @@ function SuggestionsController(ctx, sqs, env) {
         (sugg) => statuses.includes(sugg.getStatus()),
       );
     }
-    const suggestionIds = suggestionEntities.map((s) => s.getId());
-    const { grantedIds } = await Suggestion.splitSuggestionsByGrantStatus(suggestionIds);
-    const grantedEntities = suggestionEntities.filter((s) => grantedIds.includes(s.getId()));
+    const grantedEntities = await filterByGrantStatus(site, suggestionEntities);
     const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
     );
@@ -299,9 +312,7 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
-    const suggestionIds = suggestionEntities.map((s) => s.getId());
-    const { grantedIds } = await Suggestion.splitSuggestionsByGrantStatus(suggestionIds);
-    const grantedEntities = suggestionEntities.filter((s) => grantedIds.includes(s.getId()));
+    const grantedEntities = await filterByGrantStatus(site, suggestionEntities);
     const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
     );
@@ -357,9 +368,7 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
-    const suggestionIds = suggestionEntities.map((s) => s.getId());
-    const { grantedIds } = await Suggestion.splitSuggestionsByGrantStatus(suggestionIds);
-    const grantedEntities = suggestionEntities.filter((s) => grantedIds.includes(s.getId()));
+    const grantedEntities = await filterByGrantStatus(site, suggestionEntities);
     const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
     );
@@ -418,9 +427,7 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
-    const suggestionIds = suggestionEntities.map((s) => s.getId());
-    const { grantedIds } = await Suggestion.splitSuggestionsByGrantStatus(suggestionIds);
-    const grantedEntities = suggestionEntities.filter((s) => grantedIds.includes(s.getId()));
+    const grantedEntities = await filterByGrantStatus(site, suggestionEntities);
     const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
     );
@@ -477,11 +484,8 @@ function SuggestionsController(ctx, sqs, env) {
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound();
     }
-    // Freemium: only allow access to granted suggestions
-    const organizationId = typeof site?.getOrganizationId === 'function' ? site.getOrganizationId() : undefined;
-    const isFreemium = organizationId
-      && Entitlement?.isFreemium(organizationId);
-    if (isFreemium && !(await Suggestion.isSuggestionGranted(suggestion.getId()))) {
+    if (await getIsSummitPlgEnabled(site, ctx)
+      && !(await Suggestion.isSuggestionGranted(suggestion.getId()))) {
       return notFound('Suggestion not found');
     }
     return ok(SuggestionDto.toJSON(suggestion, view, opportunity));
@@ -1006,7 +1010,7 @@ function SuggestionsController(ctx, sqs, env) {
       opportunityId,
     );
     const requestedSuggestions = suggestions.filter((s) => suggestionIds.includes(s.getId()));
-    if (requestedSuggestions.length > 0) {
+    if (await getIsSummitPlgEnabled(site, ctx) && requestedSuggestions.length > 0) {
       const requestedIds = requestedSuggestions.map((s) => s.getId());
       const { notGrantedIds } = await Suggestion.splitSuggestionsByGrantStatus(requestedIds);
       if (notGrantedIds.length > 0) {

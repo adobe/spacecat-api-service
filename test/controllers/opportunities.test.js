@@ -366,9 +366,16 @@ describe('Opportunities Controller', () => {
     const mockToken = {
       findBySiteIdAndTokenType: sandbox.stub().resolves({ getRemaining: () => 1 }),
     };
+    const mockConfig = {
+      findLatest: sandbox.stub().resolves({
+        isHandlerEnabledForSite: sandbox.stub().returns(true),
+      }),
+    };
     const ctxWithToken = {
       ...mockContext,
-      dataAccess: { ...mockOpportunityDataAccess, Token: mockToken },
+      dataAccess: {
+        ...mockOpportunityDataAccess, Token: mockToken, Configuration: mockConfig,
+      },
     };
     const controllerWithToken = OpportunitiesController(ctxWithToken);
     const previousType = opptys[0].type;
@@ -397,12 +404,18 @@ describe('Opportunities Controller', () => {
     const mockToken = {
       findBySiteIdAndTokenType: sandbox.stub(),
     };
+    const mockConfig = {
+      findLatest: sandbox.stub().resolves({
+        isHandlerEnabledForSite: sandbox.stub().returns(true),
+      }),
+    };
     const ctxWithToken = {
       ...mockContext,
       dataAccess: {
         ...mockOpportunityDataAccess,
         Suggestion: mockSuggestion,
         Token: mockToken,
+        Configuration: mockConfig,
       },
     };
     const controllerWithToken = OpportunitiesController(ctxWithToken);
@@ -434,6 +447,11 @@ describe('Opportunities Controller', () => {
     const mockSiteEntity = {
       getId: () => SITE_ID,
     };
+    const mockConfig = {
+      findLatest: sandbox.stub().resolves({
+        isHandlerEnabledForSite: sandbox.stub().returns(true),
+      }),
+    };
     const ctxWithToken = {
       ...mockContext,
       dataAccess: {
@@ -441,6 +459,7 @@ describe('Opportunities Controller', () => {
         Site: { findById: sandbox.stub().resolves(mockSiteEntity) },
         Suggestion: mockSuggestion,
         Token: mockToken,
+        Configuration: mockConfig,
       },
     };
     const controllerWithToken = OpportunitiesController(ctxWithToken);
