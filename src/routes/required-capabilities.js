@@ -320,6 +320,7 @@ const routeRequiredCapabilities = {
   'POST /sites/:siteId/opportunities/:opportunityId/fixes': 'fix:write',
   'PATCH /sites/:siteId/opportunities/:opportunityId/status': 'opportunity:write',
   'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fix:write',
+  'POST /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/actions/rolled_back': 'fix:write',
   'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fix:write',
 
   // LLMO
