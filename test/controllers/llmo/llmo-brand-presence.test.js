@@ -761,17 +761,6 @@ describe('llmo-brand-presence', () => {
       expect(chainMock.eq).to.have.been.calledWith('model', 'openai');
     });
 
-    it('accepts platform as alias for model', async () => {
-      const chainMock = createChainableMock({ data: [], error: null });
-      mockContext.data = { platform: 'gemini' };
-      mockContext.dataAccess.Site.postgrestService = chainMock;
-
-      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
-      await handler(mockContext);
-
-      expect(chainMock.eq).to.have.been.calledWith('model', 'gemini');
-    });
-
     it('filters by brandId when single brand route', async () => {
       const chainMock = createChainableMock({ data: [], error: null });
       mockContext.params.brandId = '0178a3f0-1234-7000-8000-000000000002';

@@ -23,7 +23,7 @@ Returns available filter options (brands, categories, topics, origins, regions, 
 |-----------|---------|------|---------|-------------|
 | `startDate` | `start_date` | string (YYYY-MM-DD) | 28 days ago | Start of date range |
 | `endDate` | `end_date` | string (YYYY-MM-DD) | today | End of date range |
-| `platform` | `model` | string | `chatgpt` | LLM platform (e.g. chatgpt, gemini, copilot) |
+| `model` | — | string | `chatgpt` | LLM model (e.g. chatgpt, gemini, copilot) |
 | `siteId` | `site_id` | string (UUID) | — | Filter by site |
 | `categoryId` | `category_id` | string (UUID or name) | — | Filter by category. If UUID → `category_id`; if not UUID (e.g. "Acrobat") → `category_name` |
 | `topicId` | `topic_id`, `topic`, `topics` | string | — | Filter by topic (exact match on `topics` column) |
@@ -42,19 +42,19 @@ Returns available filter options (brands, categories, topics, origins, regions, 
 |-----------|---------|
 | `startDate` | 28 days before today |
 | `endDate` | Today |
-| `platform` | `chatgpt` |
+| `model` | `chatgpt` |
 
 ---
 
 ## Sample URL (All Parameters)
 
 ```
-GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/filter-dimensions?startDate=2025-09-27&endDate=2025-09-30&platform=google-ai-mode&siteId=c2473d89-e997-458d-a86d-b4096649c12b&categoryId=Acrobat&topicId=combine%20pdf&regionCode=US&origin=AI
+GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/all/brand-presence/filter-dimensions?startDate=2025-09-27&endDate=2025-09-30&model=google-ai-mode&siteId=c2473d89-e997-458d-a86d-b4096649c12b&categoryId=Acrobat&topicId=combine%20pdf&regionCode=US&origin=AI
 ```
 
 **Single brand variant:**
 ```
-GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/019cb903-1184-7f92-8325-f9d1176af316/brand-presence/filter-dimensions?startDate=2025-09-27&endDate=2025-09-30&platform=chatgpt&siteId=c2473d89-e997-458d-a86d-b4096649c12b&categoryId=Acrobat&topicId=combine%20pdf&regionCode=US&origin=AI
+GET /org/44568c3e-efd4-4a7f-8ecd-8caf615f836c/brands/019cb903-1184-7f92-8325-f9d1176af316/brand-presence/filter-dimensions?startDate=2025-09-27&endDate=2025-09-30&model=chatgpt&siteId=c2473d89-e997-458d-a86d-b4096649c12b&categoryId=Acrobat&topicId=combine%20pdf&regionCode=US&origin=AI
 ```
 
 ---
@@ -101,7 +101,7 @@ client
   .eq('organization_id', organizationId)
   .gte('execution_date', startDate)
   .lte('execution_date', endDate)
-  .eq('model', platform)
+  .eq('model', model)
 
   // Optional filters (applied when param is provided and not empty)
   .eq('site_id', siteId)                    // if siteId

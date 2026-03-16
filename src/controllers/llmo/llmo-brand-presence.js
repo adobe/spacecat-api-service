@@ -85,7 +85,7 @@ function parseFilterDimensionsParams(context) {
   return {
     startDate: q.startDate || q.start_date,
     endDate: q.endDate || q.end_date,
-    platform: q.platform || q.model,
+    model: q.model,
     siteId: q.siteId || q.site_id,
     categoryId: q.categoryId || q.category_id,
     topicId: q.topicId || q.topic_id || q.topic || q.topics,
@@ -109,7 +109,7 @@ function defaultDateRange() {
 function buildExecutionsQuery(client, organizationId, params, defaults, filterByBrandId) {
   const startDate = params.startDate || defaults.startDate;
   const endDate = params.endDate || defaults.endDate;
-  const model = params.platform || 'chatgpt';
+  const model = params.model || 'chatgpt';
   const {
     siteId, categoryId, topicId, regionCode, origin,
   } = params;
@@ -262,7 +262,7 @@ function buildDimensionOptions(rows) {
 function parseWeeksParams(context) {
   const q = context.data || {};
   return {
-    model: q.model || q.platform,
+    model: q.model,
     siteId: q.siteId || q.site_id,
   };
 }

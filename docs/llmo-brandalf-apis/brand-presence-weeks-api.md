@@ -21,7 +21,7 @@ Returns applicable ISO weeks (YYYY-Wnn) for the given model, optionally filtered
 
 | Parameter | Aliases | Type | Default | Description |
 |-----------|---------|------|---------|-------------|
-| `model` | `platform` | string | `chatgpt` | LLM model (e.g. openai, chatgpt, gemini, copilot) |
+| `model` | — | string | `chatgpt` | LLM model (e.g. openai, chatgpt, gemini, copilot) |
 | `siteId` | `site_id` | string (UUID) | — | Filter weeks to a specific site |
 
 ---
@@ -59,7 +59,7 @@ LIMIT 200000;
 | Query/Path | Maps to |
 |------------|---------|
 | `spaceCatId` (path) | `organization_id` |
-| `model` / `platform` (query) | `model` |
+| `model` (query) | `model` |
 | `siteId` / `site_id` (query) | `site_id` |
 | `brandId` (path, when not `all`) | `brand_id` |
 
