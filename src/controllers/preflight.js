@@ -142,11 +142,9 @@ function PreflightController(ctx, log, env) {
       if (promiseBasedTypes.includes(site.getAuthoringType())) {
         const cookieToken = getCookieValue(context, 'promiseToken');
         if (hasText(cookieToken)) {
-          log.info(`Using promise token from cookie: ${cookieToken}`);
           promiseTokenResponse = { promise_token: cookieToken };
         } else {
           try {
-            log.info('Getting promise token from IMS');
             promiseTokenResponse = await getIMSPromiseToken(context);
           } catch (e) {
             log.error(`Failed to get promise token: ${e.message}`);
