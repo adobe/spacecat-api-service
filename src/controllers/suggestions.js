@@ -939,7 +939,7 @@ function SuggestionsController(ctx, sqs, env) {
         if (!isArray(group?.suggestionIds) || group.suggestionIds.length === 0) {
           return badRequest('Each fixTargetGroup must have a non-empty suggestionIds array');
         }
-        const { relationshipContext } = group || {};
+        const { relationshipContext } = group;
         if (!isObject(relationshipContext)) {
           return badRequest('Each fixTargetGroup must have a relationshipContext object');
         }

@@ -4098,6 +4098,86 @@ describe('Suggestions Controller', () => {
       );
     });
 
+    it('returns 400 when fixTargetGroup relationshipContext is missing', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+            },
+          ],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property(
+        'message',
+        'Each fixTargetGroup must have a relationshipContext object',
+      );
+    });
+
+    it('returns 400 when fixTargetGroup relationshipContext.cancelInheritance is not boolean', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              relationshipContext: {
+                fixTargetPageId: '/content/page',
+                cancelInheritance: 'true',
+              },
+            },
+          ],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property(
+        'message',
+        'Each fixTargetGroup relationshipContext.cancelInheritance must be a boolean',
+      );
+    });
+
+    it('returns 400 when fixTargetGroup relationshipContext.appliedOnPagePath is empty', async () => {
+      const response = await suggestionsController.autofixSuggestions({
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          suggestionIds: [SUGGESTION_IDS[0]],
+          fixTargetGroups: [
+            {
+              suggestionIds: [SUGGESTION_IDS[0]],
+              relationshipContext: {
+                fixTargetPageId: '/content/page',
+                appliedOnPagePath: '',
+              },
+            },
+          ],
+        },
+        ...context,
+      });
+      expect(response.status).to.equal(400);
+      const error = await response.json();
+      expect(error).to.have.property(
+        'message',
+        'Each fixTargetGroup relationshipContext.appliedOnPagePath must be a non-empty string',
+      );
+    });
+
     it('returns 400 when fixTargetGroup relationshipContext.fixTargetMode is invalid', async () => {
       const response = await suggestionsController.autofixSuggestions({
         params: {
