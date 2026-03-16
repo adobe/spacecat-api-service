@@ -215,6 +215,7 @@ describe('PlgOnboardingController', () => {
     mockDataAccess = {
       Site: {
         findByBaseURL: sandbox.stub().resolves(null),
+        findById: sandbox.stub().resolves(null),
         create: sandbox.stub().resolves(mockSite),
       },
       Organization: {
@@ -292,6 +293,7 @@ describe('PlgOnboardingController', () => {
             STATUSES: {
               IN_PROGRESS: 'IN_PROGRESS',
               ONBOARDED: 'ONBOARDED',
+              PRE_ONBOARDING: 'PRE_ONBOARDING',
               ERROR: 'ERROR',
               WAITING_FOR_IP_ALLOWLISTING: 'WAITING_FOR_IP_ALLOWLISTING',
               WAITLISTED: 'WAITLISTED',
@@ -1396,6 +1398,96 @@ describe('PlgOnboardingController', () => {
       expect(detectLocaleStub).to.not.have.been.called;
       expect(mockSite.setLanguage).to.not.have.been.called;
       expect(mockSite.setRegion).to.not.have.been.called;
+    });
+  });
+
+  // --- Fast path for preonboarded sites ---
+
+  describe('onboard - preonboarding fast path', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    it('fast-tracks preonboarded site: adds enrollment and sets ONBOARDED', async () => {
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        steps: { orgResolved: true, siteResolved: true, configUpdated: true },
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .resolves(preonboardedOnboarding);
+      mockDataAccess.Site.findById.resolves(mockSite);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      expect(tierClientCreateForSiteStub).to.have.been.called;
+      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(preonboardedOnboarding.setCompletedAt).to.have.been.called;
+      expect(preonboardedOnboarding.setSteps).to.have.been.calledWith(
+        sinon.match({
+          orgResolved: true,
+          siteResolved: true,
+          configUpdated: true,
+          entitlementCreated: true,
+        }),
+      );
+      // Should NOT run full onboarding steps
+      expect(createOrFindOrganizationStub).to.not.have.been.called;
+      expect(detectBotBlockerStub).to.not.have.been.called;
+    });
+
+    it('fast-tracks preonboarded site with null steps', async () => {
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        steps: null,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .resolves(preonboardedOnboarding);
+      mockDataAccess.Site.findById.resolves(mockSite);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(preonboardedOnboarding.setSteps).to.have.been.calledWith({ entitlementCreated: true });
+    });
+
+    it('falls through to full onboarding when preonboarded site not found', async () => {
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: 'missing-site-id',
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .resolves(preonboardedOnboarding);
+      mockDataAccess.Site.findById.resolves(null);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      // Falls through to full onboarding which succeeds
+      expect(response.status).to.equal(200);
+      expect(createOrFindOrganizationStub).to.have.been.called;
+    });
+
+    it('falls through to full onboarding when PRE_ONBOARDING but no siteId', async () => {
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: null,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .resolves(preonboardedOnboarding);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      // Falls through to full onboarding
+      expect(response.status).to.equal(200);
+      expect(createOrFindOrganizationStub).to.have.been.called;
     });
   });
 
