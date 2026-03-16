@@ -33,6 +33,39 @@ const WEEKS_QUERY_LIMIT = 200000;
 const ERR_ORG_ACCESS = 'belonging to the organization';
 const ERR_NOT_FOUND = 'not found';
 
+/**
+ * Shared wrapper for Brand Presence handlers: PostgREST check + org access validation.
+ * @param {Object} context - Request context (log, dataAccess, params, data)
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ * @param {string} handlerName - For error logging (e.g. 'weeks', 'filter-dimensions')
+ * @param {Function} handlerFn - Async (context, client) => response. Receives PostgREST client.
+ * @returns {Promise<Response>}
+ */
+async function withBrandPresenceAuth(context, getOrgAndValidateAccess, handlerName, handlerFn) {
+  const { log, dataAccess } = context;
+  const { Site } = dataAccess;
+
+  if (!Site?.postgrestService) {
+    log.error('Brand presence APIs require PostgREST (DATA_SERVICE_PROVIDER=postgres)');
+    return badRequest('Brand presence data is not available. PostgreSQL data service is required.');
+  }
+
+  try {
+    await getOrgAndValidateAccess(context);
+  } catch (error) {
+    if (error.message?.includes(ERR_ORG_ACCESS)) {
+      return forbidden('Only users belonging to the organization can view brand presence data');
+    }
+    if (error.message?.includes(ERR_NOT_FOUND)) {
+      return badRequest(error.message);
+    }
+    log.error(`Brand presence ${handlerName} error: ${error.message}`);
+    return badRequest(error.message);
+  }
+
+  return handlerFn(context, Site.postgrestService);
+}
+
 /** @internal Exported for testing null/undefined fallbacks */
 export const strCompare = (a, b) => (a || '').localeCompare(b || '');
 
@@ -294,69 +327,51 @@ function buildWeeksQuery(client, organizationId, model, siteId, filterByBrandId)
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
  */
 export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
-  return async (context) => {
-    const { log, dataAccess } = context;
-    const { Site } = dataAccess;
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'weeks',
+    async (ctx, client) => {
+      const params = parseWeeksParams(ctx);
+      const { model: modelParam, siteId } = params;
+      const model = modelParam || 'chatgpt';
+      const { spaceCatId, brandId } = ctx.params;
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
 
-    if (!Site?.postgrestService) {
-      log.error('Brand presence APIs require PostgREST (DATA_SERVICE_PROVIDER=postgres)');
-      return badRequest('Brand presence data is not available. PostgreSQL data service is required.');
-    }
-
-    try {
-      await getOrgAndValidateAccess(context);
-    } catch (error) {
-      if (error.message?.includes(ERR_ORG_ACCESS)) {
-        return forbidden('Only users belonging to the organization can view brand presence data');
+      if (siteId) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(client, organizationId, siteId);
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
       }
-      if (error.message?.includes(ERR_NOT_FOUND)) {
+
+      const q = buildWeeksQuery(client, organizationId, model, siteId, filterByBrandId);
+      const { data, error } = await q;
+
+      if (error) {
         return badRequest(error.message);
       }
-      log.error(`Brand presence weeks error: ${error.message}`);
-      return badRequest(error.message);
-    }
 
-    const params = parseWeeksParams(context);
-    const { model: modelParam, siteId } = params;
-    const model = modelParam || 'chatgpt';
-    const { spaceCatId, brandId } = context.params;
-    const organizationId = spaceCatId;
-    const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+      const rows = data || [];
+      const weekSet = new Set();
+      rows.forEach((r) => {
+        const w = r.week;
+        if (w && typeof w === 'string') weekSet.add(w);
+      });
+      const sortedWeeks = [...weekSet].sort((a, b) => b.localeCompare(a));
+      const weeks = sortedWeeks.map((weekStr) => {
+        const range = getWeekDateRange(weekStr);
+        return {
+          week: weekStr,
+          startDate: range?.startDate ?? null,
+          endDate: range?.endDate ?? null,
+        };
+      });
 
-    if (siteId) {
-      const client = Site.postgrestService;
-      const siteBelongsToOrg = await validateSiteBelongsToOrg(client, organizationId, siteId);
-      if (!siteBelongsToOrg) {
-        return forbidden('Site does not belong to the organization');
-      }
-    }
-
-    const client = Site.postgrestService;
-    const q = buildWeeksQuery(client, organizationId, model, siteId, filterByBrandId);
-    const { data, error } = await q;
-
-    if (error) {
-      return badRequest(error.message);
-    }
-
-    const rows = data || [];
-    const weekSet = new Set();
-    rows.forEach((r) => {
-      const w = r.week;
-      if (w && typeof w === 'string') weekSet.add(w);
-    });
-    const sortedWeeks = [...weekSet].sort((a, b) => b.localeCompare(a));
-    const weeks = sortedWeeks.map((weekStr) => {
-      const range = getWeekDateRange(weekStr);
-      return {
-        week: weekStr,
-        startDate: range?.startDate ?? null,
-        endDate: range?.endDate ?? null,
-      };
-    });
-
-    return ok({ weeks });
-  };
+      return ok({ weeks });
+    },
+  );
 }
 
 /**
@@ -364,75 +379,58 @@ export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
  */
 export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
-  return async (context) => {
-    const { log, dataAccess } = context;
-    const { Site } = dataAccess;
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'filter-dimensions',
+    async (ctx, client) => {
+      const { spaceCatId, brandId } = ctx.params;
+      const params = parseFilterDimensionsParams(ctx);
+      const defaults = defaultDateRange();
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
 
-    if (!Site?.postgrestService) {
-      log.error('Brand presence APIs require PostgREST (DATA_SERVICE_PROVIDER=postgres)');
-      return badRequest('Brand presence data is not available. PostgreSQL data service is required.');
-    }
+      const q = buildExecutionsQuery(client, organizationId, params, defaults, filterByBrandId);
+      const { data, error } = await q;
 
-    try {
-      await getOrgAndValidateAccess(context);
-    } catch (error) {
-      if (error.message?.includes(ERR_ORG_ACCESS)) {
-        return forbidden('Only users belonging to the organization can view brand presence data');
-      }
-      if (error.message?.includes(ERR_NOT_FOUND)) {
+      if (error) {
         return badRequest(error.message);
       }
-      log.error(`Brand presence filter-dimensions error: ${error.message}`);
-      return badRequest(error.message);
-    }
 
-    const client = Site.postgrestService;
-    const { spaceCatId, brandId } = context.params;
-    const params = parseFilterDimensionsParams(context);
-    const defaults = defaultDateRange();
-    const organizationId = spaceCatId;
-    const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
-
-    const q = buildExecutionsQuery(client, organizationId, params, defaults, filterByBrandId);
-    const { data, error } = await q;
-
-    if (error) {
-      return badRequest(error.message);
-    }
-
-    const rows = data || [];
-    const siteFilter = params.siteId;
-    if (shouldApplyFilter(siteFilter)) {
-      const siteBelongsToOrg = await validateSiteBelongsToOrg(client, organizationId, siteFilter);
-      if (!siteBelongsToOrg) {
-        return forbidden('Site does not belong to the organization');
+      const rows = data || [];
+      const siteFilter = params.siteId;
+      if (shouldApplyFilter(siteFilter)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(client, organizationId, siteFilter);
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
       }
-    }
-    const siteIds = (filterByBrandId || shouldApplyFilter(siteFilter))
-      ? await resolveSiteIds(client, organizationId, siteFilter, filterByBrandId, rows)
-      : [];
-    const pageIntents = await fetchPageIntents(
-      client,
-      organizationId,
-      siteFilter,
-      filterByBrandId,
-      siteIds,
-    );
-    const {
-      brands,
-      categories,
-      topics,
-      origins,
-      regions,
-    } = buildDimensionOptions(rows);
+      const siteIds = (filterByBrandId || shouldApplyFilter(siteFilter))
+        ? await resolveSiteIds(client, organizationId, siteFilter, filterByBrandId, rows)
+        : [];
+      const pageIntents = await fetchPageIntents(
+        client,
+        organizationId,
+        siteFilter,
+        filterByBrandId,
+        siteIds,
+      );
+      const {
+        brands,
+        categories,
+        topics,
+        origins,
+        regions,
+      } = buildDimensionOptions(rows);
 
-    return ok({
-      brands,
-      categories,
-      topics,
-      origins,
-      regions,
-      page_intents: pageIntents,
-    });
-  };
+      return ok({
+        brands,
+        categories,
+        topics,
+        origins,
+        regions,
+        page_intents: pageIntents,
+      });
+    },
+  );
 }
