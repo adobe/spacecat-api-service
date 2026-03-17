@@ -101,7 +101,7 @@ describe('DetectCdnCommand', () => {
 
   it('notifies when env is undefined', async () => {
     extractURLFromSlackInputStub.returns('https://example.com');
-    const { env: _env, ...contextWithoutEnv } = context;
+    const { env: _, ...contextWithoutEnv } = context;
     const command = DetectCdnCommand(contextWithoutEnv);
 
     await command.handleExecution(['https://example.com'], slackContext);
