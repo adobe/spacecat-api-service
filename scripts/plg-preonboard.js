@@ -315,6 +315,19 @@ async function preonboardDomain({ domain, imsOrgId }, context) {
     // Step 2: Check site ownership
     let site = await Site.findByBaseURL(baseURL);
 
+    // Snapshot original site state for rollback reference (captured before any modifications)
+    const originalSiteSnapshot = site ? JSON.stringify({
+      siteId: site.getId(),
+      organizationId: site.getOrganizationId(),
+      deliveryType: site.getDeliveryType(),
+      deliveryConfig: site.getDeliveryConfig(),
+      code: site.getCode(),
+      hlxConfig: site.getHlxConfig(),
+      language: site.getLanguage(),
+      region: site.getRegion(),
+      fetchConfig: site.getConfig()?.getFetchConfig(),
+    }) : null;
+
     if (site) {
       const existingOrgId = site.getOrganizationId();
       if (existingOrgId !== organizationId
@@ -597,6 +610,7 @@ async function preonboardDomain({ domain, imsOrgId }, context) {
       region: site.getRegion() || '',
       entitlement: steps.entitlementCreated ? 'yes' : 'no',
       steps: Object.keys(steps).filter((k) => steps[k]).join(';'),
+      originalSite: originalSiteSnapshot || '',
     };
   } catch (error) {
     onboarding.setStatus(STATUSES.ERROR);
