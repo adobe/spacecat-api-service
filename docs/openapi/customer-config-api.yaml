@@ -481,7 +481,7 @@ v2-prompts-by-brand:
       schema:
         type: integer
         minimum: 1
-        maximum: 500
+        maximum: 5000
         default: 100
       description: Page size
     - name: page
@@ -588,7 +588,7 @@ v2-prompts-by-brand:
           schema:
             type: array
             minItems: 1
-            maxItems: 100
+            maxItems: 3000
             items:
               $ref: './schemas.yaml#/V2PromptInput'
     responses:

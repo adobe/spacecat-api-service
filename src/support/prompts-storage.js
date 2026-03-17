@@ -16,17 +16,14 @@ import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
 
 /**
  * Resolves brandId (path param) to Postgres brands.id (uuid).
- * Tries: 1) valid uuid, 2) brand name lookup, 3) config brand.id -> name -> lookup.
+ * Tries: 1) valid uuid lookup, 2) case-insensitive name lookup.
  *
  * @param {string} organizationId - SpaceCat organization UUID
- * @param {string} brandId - From API path (uuid, name, or config brand id)
+ * @param {string} brandId - From API path (uuid or name)
  * @param {object} postgrestClient - PostgREST client
- * @param {object} [customerConfig] - Optional v2 config for brand.id -> name
- * resolution
  * @returns {Promise<string|null>} brands.id (uuid) or null
  */
-// eslint-disable-next-line max-len
-export async function resolveBrandUuid(organizationId, brandId, postgrestClient, customerConfig = null) {
+export async function resolveBrandUuid(organizationId, brandId, postgrestClient) {
   if (!hasText(brandId) || !postgrestClient?.from) {
     return null;
   }
@@ -42,14 +39,11 @@ export async function resolveBrandUuid(organizationId, brandId, postgrestClient,
     return null;
   }
 
-  const brandName = customerConfig?.customer?.brands?.find((b) => b.id === brandId)?.name
-    || brandId;
-
   const { data, error } = await postgrestClient
     .from('brands')
     .select('id')
     .eq('organization_id', organizationId)
-    .ilike('name', brandName)
+    .ilike('name', brandId)
     .maybeSingle();
 
   if (!error && data?.id) return data.id;
@@ -114,6 +108,72 @@ async function buildLookupMaps(organizationId, postgrestClient) {
   return { categoryMap, topicMap };
 }
 
+/**
+ * Ensures that all referenced categories and topics exist in their respective
+ * tables. Creates any missing ones and updates the lookup maps in place.
+ */
+// eslint-disable-next-line max-len
+async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMap, postgrestClient, updatedBy) {
+  const missingCategories = [];
+  const missingTopics = [];
+
+  for (const p of prompts) {
+    if (hasText(p.categoryId) && !categoryMap.has(p.categoryId)) {
+      missingCategories.push(p.categoryId);
+    }
+    if (hasText(p.topicId) && !topicMap.has(p.topicId)) {
+      missingTopics.push(p.topicId);
+    }
+  }
+
+  const ops = [];
+
+  if (missingCategories.length > 0) {
+    const unique = [...new Set(missingCategories)];
+    const rows = unique.map((catId) => ({
+      organization_id: organizationId,
+      category_id: catId,
+      name: catId,
+      origin: 'human',
+      status: 'active',
+      updated_by: updatedBy,
+    }));
+    ops.push(
+      postgrestClient
+        .from('categories')
+        .upsert(rows, { onConflict: 'organization_id,category_id' })
+        .select('id,category_id')
+        .then(({ data, error }) => {
+          if (error) throw new Error(`Failed to auto-create categories: ${error.message}`);
+          (data || []).forEach((c) => categoryMap.set(c.category_id, c.id));
+        }),
+    );
+  }
+
+  if (missingTopics.length > 0) {
+    const unique = [...new Set(missingTopics)];
+    const rows = unique.map((topId) => ({
+      organization_id: organizationId,
+      topic_id: topId,
+      name: topId,
+      status: 'active',
+      updated_by: updatedBy,
+    }));
+    ops.push(
+      postgrestClient
+        .from('topics')
+        .upsert(rows, { onConflict: 'organization_id,topic_id' })
+        .select('id,topic_id')
+        .then(({ data, error }) => {
+          if (error) throw new Error(`Failed to auto-create topics: ${error.message}`);
+          (data || []).forEach((t) => topicMap.set(t.topic_id, t.id));
+        }),
+    );
+  }
+
+  if (ops.length > 0) await Promise.all(ops);
+}
+
 const SORT_COLUMN_MAP = {
   topic: 'topics(name)',
   prompt: 'text',
@@ -166,10 +226,9 @@ function mapRowToPrompt(row) {
  * @param {string} [params.sort] - Sort column (topic, prompt, category, origin,
  * status, updatedAt)
  * @param {string} [params.order] - Sort direction (asc, desc). Default desc
- * @param {number} [params.limit] - Page size (default 100, max 500)
+ * @param {number} [params.limit] - Page size (default 100, max 5000)
  * @param {number} [params.page] - Page number, 1-based (default 1)
  * @param {object} params.postgrestClient - PostgREST client
- * @param {object} [params.customerConfig] - Optional config for brand resolution
  * @returns {Promise<{items:object[],total:number,limit:number,page:number}>}
  */
 export async function listPrompts({
@@ -186,17 +245,20 @@ export async function listPrompts({
   limit = 100,
   page = 1,
   postgrestClient,
-  customerConfig = null,
 }) {
   if (!postgrestClient?.from) return [];
 
   let brandUuid = null;
   if (hasText(brandId)) {
-    brandUuid = await resolveBrandUuid(organizationId, brandId, postgrestClient, customerConfig);
+    brandUuid = await resolveBrandUuid(organizationId, brandId, postgrestClient);
     if (!brandUuid) return [];
   }
 
-  const limitNum = Math.min(Math.max(1, Number(limit) || 100), 500);
+  const MAX_LIMIT = 5000;
+  const limitNum = Number(limit) || 100;
+  if (limitNum < 1 || limitNum > MAX_LIMIT) {
+    throw new Error(`Limit must be between 1 and ${MAX_LIMIT}`);
+  }
   const pageNum = Math.max(1, Number(page) || 1);
   const offset = (pageNum - 1) * limitNum;
 
@@ -250,7 +312,7 @@ export async function listPrompts({
   }
 
   if (hasText(region)) {
-    baseQuery = baseQuery.contains('regions', JSON.stringify([region]));
+    baseQuery = baseQuery.contains('regions', [region]);
   }
 
   if (hasText(search)) {
@@ -375,6 +437,9 @@ export async function upsertPrompts({
   ]);
 
   const { categoryMap, topicMap } = lookups;
+
+  // eslint-disable-next-line no-await-in-loop,max-len
+  await ensureLookupEntries(organizationId, prompts, categoryMap, topicMap, postgrestClient, updatedBy);
 
   const getKey = (p) => {
     const norm = (p.regions || []).map((r) => String(r).toLowerCase()).sort();

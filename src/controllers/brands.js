@@ -26,15 +26,9 @@ import {
 
 import { ErrorWithStatusCode, getImsUserToken } from '../support/utils.js';
 import {
-  readCustomerConfigV2FromPostgres,
-  writeCustomerConfigV2ToPostgres,
-} from '../support/customer-config-v2-storage.js';
-import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { mergeCustomerConfigV2 } from '../support/customer-config-v2-metadata.js';
-import { syncBrandConfig, syncCategoriesConfig, syncTopicsConfig } from '../support/brand-presence-sync.js';
 import {
   listPrompts,
   getPromptById,
@@ -44,6 +38,18 @@ import {
   bulkDeletePrompts,
   resolveBrandUuid,
 } from '../support/prompts-storage.js';
+import {
+  listBrands,
+  upsertBrand,
+  updateBrand,
+  deleteBrand,
+} from '../support/brands-storage.js';
+import {
+  listCategories,
+  createCategory,
+  updateCategory,
+  deleteCategory,
+} from '../support/categories-storage.js';
 
 const HEADER_ERROR = 'x-error';
 
@@ -100,26 +106,6 @@ function BrandsController(ctx, log, env) {
   }
 
   /**
-   * Loads customer config from Postgres.
-   * @param {object} context - Request context (must have postgrestClient)
-   * @param {string} orgId - Organization ID
-   * @returns {Promise<object|null>} Customer config or null if not found/error
-   */
-  async function loadCustomerConfig(context, orgId) {
-    const postgrestClient = context.dataAccess?.services?.postgrestClient;
-    try {
-      const config = await readCustomerConfigV2FromPostgres(orgId, postgrestClient);
-      if (config) {
-        log.info(`Customer config loaded from Postgres for organization: ${orgId}`);
-      }
-      return config;
-    } catch (err) {
-      log.warn(`Failed to load customer config from Postgres for organization: ${orgId}`, err);
-      return null;
-    }
-  }
-
-  /**
    * Get query parameters from context
    * @param {object} context - The request context
    * @returns {object} Parsed query parameters
@@ -137,20 +123,6 @@ function BrandsController(ctx, log, env) {
       }
     });
     return params;
-  }
-
-  /**
-   * Filters items by status, excluding deleted by default.
-   * @param {Array} items - Items to filter
-   * @param {string} status - Optional status filter
-   * @returns {Array} Filtered items
-   */
-  function filterByStatus(items, status) {
-    if (!items) return [];
-    if (status) {
-      return items.filter((item) => item.status === status);
-    }
-    return items.filter((item) => item.status !== 'deleted');
   }
 
   function createErrorResponse(error) {
@@ -262,457 +234,6 @@ function BrandsController(ctx, log, env) {
     }
   };
 
-  /**
-   * Gets customer configuration for an organization (brands without prompts).
-   * Prompts are retrieved via the dedicated prompts endpoints.
-   * @param {object} context - Context of the request.
-   * @returns {Promise<Response>} Customer configuration.
-   */
-  const getCustomerConfig = async (context) => {
-    const { spaceCatId } = context.params || {};
-    const { status } = getQueryParams(context);
-
-    try {
-      if (!hasText(spaceCatId)) {
-        return badRequest('Organization ID required');
-      }
-
-      // Look up organization
-      const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) return organization; // Return if it's an error response
-
-      if (!await accessControlUtil.hasAccess(organization)) {
-        return forbidden('User does not have access to this organization');
-      }
-
-      const unavailable = requirePostgrestForV2Config(context);
-      if (unavailable) return unavailable;
-
-      const customerConfig = await loadCustomerConfig(context, spaceCatId)
-        || { customer: { brands: [] } };
-
-      // Filter by status if needed
-      const filteredConfig = {
-        customer: {
-          ...customerConfig.customer,
-          ...(customerConfig.customer.categories && {
-            categories: filterByStatus(customerConfig.customer.categories, status),
-          }),
-          ...(customerConfig.customer.topics && {
-            topics: filterByStatus(customerConfig.customer.topics, status),
-          }),
-          // eslint-disable-next-line no-unused-vars
-          brands: customerConfig.customer.brands.map(({ prompts, ...brand }) => brand),
-        },
-      };
-      return ok(filteredConfig);
-    } catch (error) {
-      log.error(`Error getting customer config for organization: ${spaceCatId}`, error);
-      return createErrorResponse(error);
-    }
-  };
-
-  /**
-   * Gets lean customer configuration (without prompts) for an organization.
-   * @param {object} context - Context of the request.
-   * @returns {Promise<Response>} Lean customer configuration.
-   */
-  const getCustomerConfigLean = async (context) => {
-    const { spaceCatId } = context.params || {};
-    const { status } = getQueryParams(context);
-
-    try {
-      if (!hasText(spaceCatId)) {
-        return badRequest('Organization ID required');
-      }
-
-      // Look up organization
-      const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) return organization; // Return if it's an error response
-
-      const unavailable = requirePostgrestForV2Config(context);
-      if (unavailable) return unavailable;
-
-      const customerConfig = await loadCustomerConfig(context, spaceCatId)
-        || { customer: { brands: [] } };
-
-      // Build maps for counting
-      const categoriesMap = new Map();
-      (customerConfig.customer.categories || []).forEach((cat) => {
-        categoriesMap.set(cat.id, cat);
-      });
-
-      const topicsMap = new Map();
-      (customerConfig.customer.topics || []).forEach((topic) => {
-        topicsMap.set(topic.id, topic);
-      });
-
-      // Remove prompts from brands but add counts
-      const leanConfig = {
-        customer: {
-          ...customerConfig.customer,
-          brands: customerConfig.customer.brands.map((brand) => {
-            // eslint-disable-next-line no-unused-vars
-            const { prompts, ...brandWithoutPrompts } = brand;
-
-            // Filter prompts by status for counting
-            const filteredPrompts = filterByStatus(prompts || [], status);
-
-            // Count unique categories and topics used by this brand's filtered prompts
-            const brandCategories = new Set();
-            const brandTopics = new Set();
-            filteredPrompts.forEach((prompt) => {
-              if (prompt.categoryId) brandCategories.add(prompt.categoryId);
-              if (prompt.topicId) brandTopics.add(prompt.topicId);
-            });
-
-            return {
-              ...brandWithoutPrompts,
-              totalCategories: brandCategories.size,
-              totalTopics: brandTopics.size,
-              totalPrompts: filteredPrompts.length,
-            };
-          }),
-          categories: undefined,
-          topics: undefined,
-        },
-      };
-
-      return ok(leanConfig);
-    } catch (error) {
-      log.error(`Error getting lean customer config for organization: ${spaceCatId}`, error);
-      return createErrorResponse(error);
-    }
-  };
-
-  /**
-   * Gets topics for an organization and optionally filters by brand.
-   * @param {object} context - Context of the request.
-   * @returns {Promise<Response>} Array of topics.
-   */
-  const getTopics = async (context) => {
-    const { spaceCatId } = context.params || {};
-    const { brandId, status } = getQueryParams(context);
-
-    try {
-      if (!hasText(spaceCatId)) {
-        return badRequest('Organization ID required');
-      }
-
-      // Look up organization
-      const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) return organization; // Return if it's an error response
-
-      const unavailable = requirePostgrestForV2Config(context);
-      if (unavailable) return unavailable;
-
-      const customerConfig = await loadCustomerConfig(context, spaceCatId)
-        || { customer: { brands: [], topics: [] } };
-
-      // Filter topics by status and optionally by brand
-      let topics = customerConfig.customer.topics || [];
-
-      // If brandId is provided, filter topics to only those used by that brand's prompts
-      if (brandId) {
-        const brand = customerConfig.customer.brands.find((b) => b.id === brandId);
-        if (!brand) {
-          return notFound(`Brand not found: ${brandId}`);
-        }
-
-        // Collect unique topic IDs used by this brand's prompts
-        const brandTopicIds = new Set();
-        (brand.prompts || []).forEach((prompt) => {
-          if (prompt.topicId) {
-            brandTopicIds.add(prompt.topicId);
-          }
-        });
-
-        topics = topics.filter((topic) => brandTopicIds.has(topic.id));
-      }
-
-      // Filter by status
-      topics = filterByStatus(topics, status);
-
-      return ok({ topics });
-    } catch (error) {
-      log.error(`Error getting topics for organization: ${spaceCatId}`, error);
-      return createErrorResponse(error);
-    }
-  };
-
-  /**
-   * Gets prompts for an organization and optionally filters by brand/category/topic.
-   * @param {object} context - Context of the request.
-   * @returns {Promise<Response>} Array of prompts with category/topic info.
-   */
-  const getPrompts = async (context) => {
-    const { spaceCatId } = context.params || {};
-    const {
-      brandId, categoryId, topicId, status,
-    } = getQueryParams(context);
-
-    try {
-      if (!hasText(spaceCatId)) {
-        return badRequest('Organization ID required');
-      }
-
-      // Look up organization
-      const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) return organization; // Return if it's an error response
-
-      const unavailable = requirePostgrestForV2Config(context);
-      if (unavailable) return unavailable;
-
-      const customerConfig = await loadCustomerConfig(context, spaceCatId)
-        || { customer: { brands: [], categories: [], topics: [] } };
-
-      // Build lookup maps for enrichment
-      const categoriesMap = new Map();
-      (customerConfig.customer.categories || []).forEach((cat) => {
-        categoriesMap.set(cat.id, cat);
-      });
-
-      const topicsMap = new Map();
-      (customerConfig.customer.topics || []).forEach((topic) => {
-        topicsMap.set(topic.id, topic);
-      });
-
-      // Collect and filter prompts
-      const allPrompts = [];
-      customerConfig.customer.brands.forEach((brand) => {
-        if (brandId && brand.id !== brandId) return;
-
-        (brand.prompts || []).forEach((prompt) => {
-          if (categoryId && prompt.categoryId !== categoryId) return;
-          if (topicId && prompt.topicId !== topicId) return;
-
-          // Filter by status
-          if (status && prompt.status !== status) return;
-          if (!status && prompt.status === 'deleted') return;
-
-          // Enrich prompt with category/topic info
-          const category = categoriesMap.get(prompt.categoryId);
-          const topic = topicsMap.get(prompt.topicId);
-
-          allPrompts.push({
-            ...prompt,
-            brandId: brand.id,
-            brandName: brand.name,
-            category: category ? {
-              id: category.id,
-              name: category.name,
-              origin: category.origin,
-            } : null,
-            topic: topic ? {
-              id: topic.id,
-              name: topic.name,
-              categoryId: topic.categoryId,
-            } : null,
-          });
-        });
-      });
-
-      return ok({ prompts: allPrompts });
-    } catch (error) {
-      log.error(`Error getting prompts for organization: ${spaceCatId}`, error);
-      return createErrorResponse(error);
-    }
-  };
-
-  /**
-   * Saves customer configuration for an organization.
-   * @param {object} context - Context of the request.
-   * @returns {Promise<Response>} Success response.
-   */
-  const saveCustomerConfig = async (context) => {
-    const { spaceCatId } = context.params || {};
-    try {
-      if (!hasText(spaceCatId)) {
-        return badRequest('Organization ID required');
-      }
-
-      // Look up organization
-      const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) return organization; // Return if it's an error response
-
-      const customerConfig = context.data;
-      if (!isNonEmptyObject(customerConfig)) {
-        return badRequest('Customer configuration data is required');
-      }
-
-      // Validate basic structure
-      const hasValidCustomer = customerConfig.customer
-        && customerConfig.customer.customerName;
-      if (!hasValidCustomer) {
-        return badRequest('Invalid customer configuration structure: customer.customerName is required');
-      }
-
-      const unavailable = requirePostgrestForV2Config(context);
-      if (unavailable) return unavailable;
-
-      const { postgrestClient } = context.dataAccess.services;
-      const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
-
-      try {
-        await writeCustomerConfigV2ToPostgres(
-          spaceCatId,
-          customerConfig,
-          postgrestClient,
-          updatedBy,
-        );
-      } catch (writeErr) {
-        log.warn(`Config blob write failed for ${spaceCatId} — proceeding with relational sync`, writeErr);
-      }
-
-      const syncErrors = [];
-      const syncOps = [
-        ['brands', () => syncBrandConfig({
-          customerConfig, organizationId: spaceCatId, postgrestClient, log, updatedBy,
-        })],
-        ['categories', () => syncCategoriesConfig({
-          customerConfig, organizationId: spaceCatId, postgrestClient, log, updatedBy,
-        })],
-        ['topics', () => syncTopicsConfig({
-          customerConfig, organizationId: spaceCatId, postgrestClient, log, updatedBy,
-        })],
-      ];
-
-      // eslint-disable-next-line no-await-in-loop
-      for (const [label, op] of syncOps) {
-        try {
-          // eslint-disable-next-line no-await-in-loop
-          await op();
-        } catch (syncErr) {
-          log.error(`${label} sync failed for ${spaceCatId}`, syncErr);
-          syncErrors.push(label);
-        }
-      }
-
-      if (syncErrors.length > 0) {
-        log.warn(`Partial sync failures for ${spaceCatId}: ${syncErrors.join(', ')}`);
-      }
-
-      log.info(`Customer config saved to Postgres for organization: ${spaceCatId}`);
-
-      return ok({ message: 'Customer configuration saved successfully' });
-    } catch (error) {
-      log.error(`Error saving customer config for organization: ${spaceCatId}`, error);
-      return createErrorResponse(error);
-    }
-  };
-
-  /**
-   * Patches (merges) customer configuration for an organization.
-   * @param {object} context - Context of the request.
-   * @returns {Promise<Response>} Success response with stats.
-   */
-  const patchCustomerConfig = async (context) => {
-    const { spaceCatId } = context.params || {};
-    const { authInfo } = context.attributes || {};
-    const userId = authInfo?.profile?.email || 'system';
-
-    try {
-      if (!hasText(spaceCatId)) {
-        return badRequest('Organization ID required');
-      }
-
-      // Look up organization
-      const organization = await getOrganizationOrNotFound(spaceCatId);
-      if (organization.status) return organization; // Return if it's an error response
-
-      if (!await accessControlUtil.hasAccess(organization)) {
-        return forbidden('User does not have access to this organization');
-      }
-
-      const updates = context.data;
-      if (!isNonEmptyObject(updates)) {
-        return badRequest('Customer configuration updates are required');
-      }
-
-      const unavailable = requirePostgrestForV2Config(context);
-      if (unavailable) return unavailable;
-
-      const { postgrestClient } = context.dataAccess.services;
-
-      const existingConfig = await loadCustomerConfig(context, spaceCatId);
-
-      // Merge updates with existing config
-      const { mergedConfig, stats } = mergeCustomerConfigV2(
-        updates,
-        existingConfig,
-        userId,
-      );
-
-      // Validate merged config has required fields
-      const hasValidCustomer = mergedConfig.customer
-        && mergedConfig.customer.customerName
-        && mergedConfig.customer.imsOrgID;
-      if (!hasValidCustomer) {
-        return badRequest('Invalid customer configuration: customer.customerName and customer.imsOrgID are required');
-      }
-
-      try {
-        await writeCustomerConfigV2ToPostgres(
-          spaceCatId,
-          mergedConfig,
-          postgrestClient,
-          userId,
-        );
-      } catch (writeErr) {
-        log.warn(`Config blob write failed for ${spaceCatId} — proceeding with relational sync`, writeErr);
-      }
-
-      const patchSyncErrors = [];
-      const patchSyncOps = [
-        ['brands', () => syncBrandConfig({
-          customerConfig: mergedConfig,
-          organizationId: spaceCatId,
-          postgrestClient,
-          log,
-          updatedBy: userId,
-        })],
-        ['categories', () => syncCategoriesConfig({
-          customerConfig: mergedConfig,
-          organizationId: spaceCatId,
-          postgrestClient,
-          log,
-          updatedBy: userId,
-        })],
-        ['topics', () => syncTopicsConfig({
-          customerConfig: mergedConfig,
-          organizationId: spaceCatId,
-          postgrestClient,
-          log,
-          updatedBy: userId,
-        })],
-      ];
-
-      for (const [label, op] of patchSyncOps) {
-        try {
-          // eslint-disable-next-line no-await-in-loop
-          await op();
-        } catch (syncErr) {
-          log.error(`${label} sync failed for ${spaceCatId}`, syncErr);
-          patchSyncErrors.push(label);
-        }
-      }
-
-      if (patchSyncErrors.length > 0) {
-        log.warn(`Partial sync failures for ${spaceCatId}: ${patchSyncErrors.join(', ')}`);
-      }
-
-      log.info(`Customer config patched for organization: ${spaceCatId} by ${userId}. Stats:`, stats);
-
-      return ok({
-        message: 'Customer configuration updated successfully',
-        stats,
-      });
-    } catch (error) {
-      log.error(`Error patching customer config for organization: ${spaceCatId}`, error);
-      return createErrorResponse(error);
-    }
-  };
-
   // ── Brand-scoped prompts CRUD (Aurora) ──
 
   const listPromptsByBrand = async (context) => {
@@ -727,6 +248,11 @@ function BrandsController(ctx, log, env) {
       if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
       if (!hasText(brandId)) return badRequest('Brand ID required');
 
+      const limitNum = Number(limit);
+      if (limit !== undefined && (Number.isNaN(limitNum) || limitNum < 1 || limitNum > 5000)) {
+        return badRequest('Limit must be between 1 and 5000');
+      }
+
       const organization = await getOrganizationOrNotFound(spaceCatId);
       if (organization.status) return organization;
       if (!await accessControlUtil.hasAccess(organization)) {
@@ -737,10 +263,8 @@ function BrandsController(ctx, log, env) {
       if (unavailable) return unavailable;
 
       const { postgrestClient } = context.dataAccess.services;
-      const customerConfig = await loadCustomerConfig(context, spaceCatId);
 
-      // eslint-disable-next-line max-len
-      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient, customerConfig);
+      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
       if (!brandUuid) return notFound(`Brand not found: ${brandId}`);
 
       const result = await listPrompts({
@@ -757,7 +281,6 @@ function BrandsController(ctx, log, env) {
         limit,
         page,
         postgrestClient,
-        customerConfig,
       });
 
       return ok(result);
@@ -786,10 +309,8 @@ function BrandsController(ctx, log, env) {
       if (unavailable) return unavailable;
 
       const { postgrestClient } = context.dataAccess.services;
-      const customerConfig = await loadCustomerConfig(context, spaceCatId);
 
-      // eslint-disable-next-line max-len
-      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient, customerConfig);
+      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
       if (!brandUuid) return notFound(`Brand not found: ${brandId}`);
 
       const prompt = await getPromptById({
@@ -815,8 +336,8 @@ function BrandsController(ctx, log, env) {
       if (!hasText(spaceCatId)) return badRequest('Organization ID required');
       if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
       if (!hasText(brandId)) return badRequest('Brand ID required');
-      if (!Array.isArray(prompts) || prompts.length === 0) return badRequest('Prompts array required (min 1, max 100)');
-      if (prompts.length > 100) return badRequest('Maximum 100 prompts per request');
+      if (!Array.isArray(prompts) || prompts.length === 0) return badRequest('Prompts array required (min 1, max 3000)');
+      if (prompts.length > 3000) return badRequest('Maximum 3000 prompts per request');
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
       if (organization.status) return organization;
@@ -828,11 +349,9 @@ function BrandsController(ctx, log, env) {
       if (unavailable) return unavailable;
 
       const { postgrestClient } = context.dataAccess.services;
-      const customerConfig = await loadCustomerConfig(context, spaceCatId);
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
 
-      // eslint-disable-next-line max-len
-      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient, customerConfig);
+      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
       if (!brandUuid) return notFound(`Brand not found: ${brandId}`);
 
       const { created, updated, prompts: outPrompts } = await upsertPrompts({
@@ -870,11 +389,9 @@ function BrandsController(ctx, log, env) {
       if (unavailable) return unavailable;
 
       const { postgrestClient } = context.dataAccess.services;
-      const customerConfig = await loadCustomerConfig(context, spaceCatId);
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
 
-      // eslint-disable-next-line max-len
-      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient, customerConfig);
+      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
       if (!brandUuid) return notFound(`Brand not found: ${brandId}`);
 
       const prompt = await updatePromptById({
@@ -913,11 +430,9 @@ function BrandsController(ctx, log, env) {
       if (unavailable) return unavailable;
 
       const { postgrestClient } = context.dataAccess.services;
-      const customerConfig = await loadCustomerConfig(context, spaceCatId);
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
 
-      // eslint-disable-next-line max-len
-      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient, customerConfig);
+      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
       if (!brandUuid) return notFound(`Brand not found: ${brandId}`);
 
       const deleted = await deletePromptById({
@@ -961,11 +476,9 @@ function BrandsController(ctx, log, env) {
       if (unavailable) return unavailable;
 
       const { postgrestClient } = context.dataAccess.services;
-      const customerConfig = await loadCustomerConfig(context, spaceCatId);
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
 
-      // eslint-disable-next-line max-len
-      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient, customerConfig);
+      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
       if (!brandUuid) return notFound(`Brand not found: ${brandId}`);
 
       const result = await bulkDeletePrompts({
@@ -983,23 +496,300 @@ function BrandsController(ctx, log, env) {
     }
   };
 
+  // ── Brand list (v2, reads from normalized tables) ──
+
+  const listBrandsForOrg = async (context) => {
+    const { spaceCatId } = context.params || {};
+    const { status } = getQueryParams(context);
+
+    try {
+      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
+      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) return organization;
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) return unavailable;
+
+      const { postgrestClient } = context.dataAccess.services;
+      const brands = await listBrands(spaceCatId, postgrestClient, { status });
+      return ok({ brands });
+    } catch (error) {
+      log.error(`Error listing brands for organization ${spaceCatId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  const listCategoriesForOrg = async (context) => {
+    const { spaceCatId } = context.params || {};
+    const { status } = getQueryParams(context);
+
+    try {
+      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
+      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) return organization;
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) return unavailable;
+
+      const { postgrestClient } = context.dataAccess.services;
+      // eslint-disable-next-line max-len
+      const categories = await listCategories({ organizationId: spaceCatId, postgrestClient, status });
+      return ok({ categories });
+    } catch (error) {
+      log.error(`Error listing categories for organization ${spaceCatId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  // ── Category CRUD (v2) ──
+
+  const createCategoryForOrg = async (context) => {
+    const { spaceCatId } = context.params || {};
+    const categoryData = context.data;
+
+    try {
+      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
+      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
+      if (!isNonEmptyObject(categoryData)) return badRequest('Category data is required');
+      if (!hasText(categoryData.name)) return badRequest('Category name is required');
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) return organization;
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) return unavailable;
+
+      const { postgrestClient } = context.dataAccess.services;
+      const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
+
+      const created = await createCategory({
+        organizationId: spaceCatId,
+        category: categoryData,
+        postgrestClient,
+        updatedBy,
+      });
+
+      return createResponse(created, 201);
+    } catch (error) {
+      log.error(`Error creating category for organization ${spaceCatId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  const updateCategoryForOrg = async (context) => {
+    const { spaceCatId, categoryId } = context.params || {};
+    const updates = context.data || {};
+
+    try {
+      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
+      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
+      if (!hasText(categoryId)) return badRequest('Category ID required');
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) return organization;
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) return unavailable;
+
+      const { postgrestClient } = context.dataAccess.services;
+      const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
+
+      const updated = await updateCategory({
+        organizationId: spaceCatId,
+        categoryId,
+        updates,
+        postgrestClient,
+        updatedBy,
+      });
+
+      if (!updated) return notFound(`Category not found: ${categoryId}`);
+      return ok(updated);
+    } catch (error) {
+      log.error(`Error updating category ${categoryId} for organization ${spaceCatId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  const deleteCategoryForOrg = async (context) => {
+    const { spaceCatId, categoryId } = context.params || {};
+
+    try {
+      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
+      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
+      if (!hasText(categoryId)) return badRequest('Category ID required');
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) return organization;
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) return unavailable;
+
+      const { postgrestClient } = context.dataAccess.services;
+      const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
+
+      const deleted = await deleteCategory({
+        organizationId: spaceCatId,
+        categoryId,
+        postgrestClient,
+        updatedBy,
+      });
+
+      if (!deleted) return notFound(`Category not found: ${categoryId}`);
+      return createResponse(null, 204);
+    } catch (error) {
+      log.error(`Error deleting category ${categoryId} for organization ${spaceCatId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  // ── Brand CRUD (v2) ──
+
+  const createBrandForOrg = async (context) => {
+    const { spaceCatId } = context.params || {};
+    const brandData = context.data;
+
+    try {
+      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
+      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
+      if (!isNonEmptyObject(brandData)) return badRequest('Brand data is required');
+      if (!hasText(brandData.name)) return badRequest('Brand name is required');
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) return organization;
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) return unavailable;
+
+      const { postgrestClient } = context.dataAccess.services;
+      const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
+
+      const created = await upsertBrand({
+        organizationId: spaceCatId,
+        brand: brandData,
+        postgrestClient,
+        updatedBy,
+      });
+
+      return createResponse(created, 201);
+    } catch (error) {
+      log.error(`Error creating brand for organization ${spaceCatId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  const updateBrandForOrg = async (context) => {
+    const { spaceCatId, brandId } = context.params || {};
+    const updates = context.data || {};
+
+    try {
+      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
+      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
+      if (!hasText(brandId)) return badRequest('Brand ID required');
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) return organization;
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) return unavailable;
+
+      const { postgrestClient } = context.dataAccess.services;
+      const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
+
+      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
+      if (!brandUuid) return notFound(`Brand not found: ${brandId}`);
+
+      const updated = await updateBrand({
+        organizationId: spaceCatId,
+        brandId: brandUuid,
+        updates,
+        postgrestClient,
+        updatedBy,
+      });
+
+      if (!updated) return notFound(`Brand not found: ${brandId}`);
+      return ok(updated);
+    } catch (error) {
+      log.error(`Error updating brand ${brandId} for organization ${spaceCatId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
+  const deleteBrandForOrg = async (context) => {
+    const { spaceCatId, brandId } = context.params || {};
+
+    try {
+      if (!hasText(spaceCatId)) return badRequest('Organization ID required');
+      if (!isValidUUID(spaceCatId)) return badRequest('Organization ID must be a valid UUID');
+      if (!hasText(brandId)) return badRequest('Brand ID required');
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) return organization;
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) return unavailable;
+
+      const { postgrestClient } = context.dataAccess.services;
+      const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
+
+      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
+      if (!brandUuid) return notFound(`Brand not found: ${brandId}`);
+
+      // eslint-disable-next-line max-len
+      const deleted = await deleteBrand(spaceCatId, brandUuid, postgrestClient, updatedBy);
+
+      if (!deleted) return notFound(`Brand not found: ${brandId}`);
+      return createResponse(null, 204);
+    } catch (error) {
+      log.error(`Error deleting brand ${brandId} for organization ${spaceCatId}:`, error);
+      return createErrorResponse(error);
+    }
+  };
+
   return {
     getBrandsForOrganization,
     getBrandGuidelinesForSite,
-    getCustomerConfig,
-    getCustomerConfigLean,
-    getTopics,
-    getPrompts,
-    saveCustomerConfig,
-    patchCustomerConfig,
+    listBrandsForOrg,
+    listCategoriesForOrg,
+    createCategoryForOrg,
+    updateCategoryForOrg,
+    deleteCategoryForOrg,
+    createBrandForOrg,
+    updateBrandForOrg,
+    deleteBrandForOrg,
     listPromptsByBrand,
     getPromptByBrandAndId,
     createPromptsByBrand,
     updatePromptByBrandAndId,
     deletePromptByBrandAndId,
     bulkDeletePromptsByBrand,
-    // Exported for testing
-    filterByStatus,
   };
 }
 
