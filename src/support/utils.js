@@ -685,6 +685,33 @@ export async function exchangePromiseToken(context, promiseToken) {
 }
 
 /**
+ * Parses and retrieves a specific cookie value by name from the request context.
+ * Uses indexOf-based splitting to correctly handle values containing '='
+ * (e.g. base64-encoded or encrypted tokens).
+ * @param {Object} context - The request context with pathInfo.headers.cookie
+ * @param {string} name - The cookie name to look up
+ * @returns {string|null} The cookie value, or null if not found
+ */
+export function getCookieValue(context, name) {
+  const cookieString = context.pathInfo?.headers?.cookie || '';
+  if (!cookieString) return null;
+
+  const cookies = cookieString.split(';');
+  for (const cookie of cookies) {
+    const trimmed = cookie.trim();
+    const idx = trimmed.indexOf('=');
+    if (idx !== -1) {
+      const cookieName = trimmed.substring(0, idx).trim();
+      const cookieValue = trimmed.substring(idx + 1).trim();
+      if (cookieName === name) {
+        return cookieValue;
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Build an S3 prefix for site content files.
  * @param {string} type - The type of content (e.g., 'scrapes', 'imports', 'accessibility').
  * @param {string} siteId - The site ID.

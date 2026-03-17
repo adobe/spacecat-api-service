@@ -4250,7 +4250,7 @@ describe('Suggestions Controller', () => {
       expect(error).to.have.property('message', 'Error getting promise token');
     });
 
-    it('uses x-promise-token header when present instead of IMS', async () => {
+    it('uses promiseToken cookie when present instead of IMS', async () => {
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0]),
           mockSuggestionEntity(suggs[2]),
@@ -4279,7 +4279,7 @@ describe('Suggestions Controller', () => {
         pathInfo: {
           headers: {
             authorization: 'Bearer token123',
-            'x-promise-token': 'header-promise-token',
+            cookie: 'promiseToken=promiseToken123',
           },
         },
         params: {
@@ -4291,11 +4291,11 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(207);
       expect(sqsSpy.firstCall.args[1]).to.have.property('promiseToken');
-      expect(sqsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token', 'header-promise-token');
+      expect(sqsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token', 'promiseToken123');
       expect(getIMSPromiseTokenStub).to.not.have.been.called;
     });
 
-    it('falls back to IMS when x-promise-token header is absent', async () => {
+    it('falls back to IMS when promiseToken cookie is absent', async () => {
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0]),
           mockSuggestionEntity(suggs[2]),
@@ -4321,7 +4321,7 @@ describe('Suggestions Controller', () => {
       expect(sqsSpy.firstCall.args[1].promiseToken).to.have.property('promise_token', 'promiseTokenExample');
     });
 
-    it('falls back to IMS when x-promise-token header is empty', async () => {
+    it('falls back to IMS when promiseToken cookie is not present among other cookies', async () => {
       mockSuggestion.allByOpportunityId.resolves(
         [mockSuggestionEntity(suggs[0]),
           mockSuggestionEntity(suggs[2]),
@@ -4333,7 +4333,7 @@ describe('Suggestions Controller', () => {
         pathInfo: {
           headers: {
             authorization: 'Bearer token123',
-            'x-promise-token': '',
+            cookie: 'otherCookie=abc',
           },
         },
         params: {

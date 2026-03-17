@@ -34,6 +34,7 @@ import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto
 import { FixDto } from '../dto/fix.js';
 import {
   sendAutofixMessage,
+  getCookieValue,
   getIMSPromiseToken,
   ErrorWithStatusCode,
   getHostName,
@@ -887,12 +888,14 @@ function SuggestionsController(ctx, sqs, env) {
    * Triggers auto-fix for the given suggestions. Validates the site, opportunity, and
    * suggestions, then queues an autofix message via SQS.
    *
-   * For promise token resolution, prefers the x-promise-token request header if present.
-   * Falls back to obtaining a token via IMS when the header is absent or empty.
+   * For promise token resolution, reads the promiseToken cookie sent by the browser
+   * (set via /auth/promise endpoint). Falls back to obtaining a token via IMS when
+   * the cookie is absent.
    *
    * @param {Object} context - The request context
    * @param {Object} [context.pathInfo] - The path info object
-   * @param {Object} [context.pathInfo.headers] - Request headers (x-promise-token preferred)
+   * @param {Object} [context.pathInfo.headers] - Request headers; must include a
+   *   `cookie` header with `promiseToken=<token>` for promise-based authoring types
    * @param {Object} context.params - Path parameters (siteId, opportunityId)
    * @param {Object} context.data - Request body containing suggestionIds
    * @returns {Promise<Response>} 207 multi-status response with per-suggestion results
@@ -1071,10 +1074,9 @@ function SuggestionsController(ctx, sqs, env) {
     let promiseTokenResponse;
     const skipPromiseToken = isAssessAction && precheckOnly === true;
     if (!skipPromiseToken) {
-      const { pathInfo } = context;
-      const headerToken = pathInfo?.headers?.['x-promise-token'];
-      if (hasText(headerToken)) {
-        promiseTokenResponse = { promise_token: headerToken };
+      const cookieToken = getCookieValue(context, 'promiseToken');
+      if (hasText(cookieToken)) {
+        promiseTokenResponse = { promise_token: cookieToken };
       } else {
         try {
           promiseTokenResponse = await getIMSPromiseToken(context);
