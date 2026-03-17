@@ -1,3 +1,10 @@
+## [1.351.2](https://github.com/adobe/spacecat-api-service/compare/v1.351.1...v1.351.2) (2026-03-17)
+
+
+### Bug Fixes
+
+* Restrict when the Summit PLG (product-led growth) experience is … ([#1967](https://github.com/adobe/spacecat-api-service/issues/1967)) ([744b932](https://github.com/adobe/spacecat-api-service/commit/744b932a434492c861adb0081a93819342a63dd2))
+
 ## [1.351.1](https://github.com/adobe/spacecat-api-service/compare/v1.351.0...v1.351.1) (2026-03-16)
 
 
