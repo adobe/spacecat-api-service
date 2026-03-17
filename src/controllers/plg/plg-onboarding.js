@@ -25,6 +25,7 @@ import {
   detectLocale,
   hasText,
   isValidIMSOrgId,
+  isValidUUID,
   resolveCanonicalUrl,
 } from '@adobe/spacecat-shared-utils';
 
@@ -457,6 +458,32 @@ async function performAsoPlgOnboarding({ domain, imsOrgId }, context) {
 function PlgOnboardingController(ctx) {
   const { log } = ctx;
 
+  /**
+   * Resolves imsOrgId from either a spacecatOrgId (spacecat Organization UUID)
+   * or a direct imsOrgId string. spacecatOrgId takes precedence when provided.
+   * @param {string|null} spacecatOrgId
+   * @param {string|null} imsOrgId
+   * @param {object} da - dataAccess object
+   * @returns {Promise<{imsOrgId: string}|{error: Response}>}
+   */
+  const resolveImsOrgId = async (spacecatOrgId, imsOrgId, da) => {
+    if (hasText(spacecatOrgId)) {
+      if (!isValidUUID(spacecatOrgId)) {
+        return { error: badRequest('Invalid spacecatOrgId format') };
+      }
+      const org = await da.Organization.findById(spacecatOrgId);
+      if (!org) {
+        return { error: notFound(`Organization not found for spacecatOrgId ${spacecatOrgId}`) };
+      }
+      const resolvedImsOrgId = org.getImsOrgId();
+      if (!hasText(resolvedImsOrgId)) {
+        return { error: badRequest(`Organization ${spacecatOrgId} has no IMS org ID`) };
+      }
+      return { imsOrgId: resolvedImsOrgId };
+    }
+    return { imsOrgId };
+  };
+
   // Authorization: any authenticated org member can onboard their own domains.
   const onboard = async (context) => {
     const { data, attributes } = context;
@@ -465,7 +492,11 @@ function PlgOnboardingController(ctx) {
       return badRequest('Request body is required');
     }
 
-    const { domain, imsOrgId: requestedImsOrgId } = data;
+    const {
+      domain,
+      imsOrgId: requestedImsOrgId,
+      spacecatOrgId,
+    } = data;
 
     if (!hasText(domain)) {
       return badRequest('domain is required');
@@ -475,6 +506,26 @@ function PlgOnboardingController(ctx) {
 
     if (!authInfo) {
       return badRequest('Authentication information is required');
+    }
+
+    // If spacecatOrgId is provided, resolve imsOrgId from the Organization record
+    // and skip token-tenant validation (admin-level operation).
+    if (hasText(spacecatOrgId)) {
+      const resolved = await resolveImsOrgId(spacecatOrgId, null, context.dataAccess);
+      if (resolved.error) return resolved.error;
+
+      try {
+        const onboarding = await performAsoPlgOnboarding(
+          { domain, imsOrgId: resolved.imsOrgId },
+          context,
+        );
+        return ok(PlgOnboardingDto.toJSON(onboarding));
+      } catch (error) {
+        log.error(`PLG onboarding failed for domain ${domain}: ${error.message}`);
+        if (error.conflict) return createResponse({ message: error.message }, 409);
+        if (error.clientError) return badRequest(error.message);
+        return internalServerError('Onboarding failed. Please try again later.');
+      }
     }
 
     const profile = authInfo.getProfile();
@@ -514,35 +565,44 @@ function PlgOnboardingController(ctx) {
 
   const getStatus = async (context) => {
     const { dataAccess: da, params, attributes } = context;
-    const { imsOrgId: requestedImsOrgId } = params;
+    const { imsOrgId: requestedImsOrgId, spacecatOrgId } = params;
 
-    if (!hasText(requestedImsOrgId) || !isValidIMSOrgId(requestedImsOrgId)) {
+    // Resolve imsOrgId — spacecatOrgId takes precedence
+    const resolved = await resolveImsOrgId(spacecatOrgId, requestedImsOrgId, da);
+    if (resolved.error) return resolved.error;
+
+    const { imsOrgId: resolvedImsOrgId } = resolved;
+
+    if (!hasText(resolvedImsOrgId) || !isValidIMSOrgId(resolvedImsOrgId)) {
       return badRequest('Valid imsOrgId is required');
     }
 
-    const { authInfo } = attributes;
+    // Skip token-tenant check when spacecatOrgId was used (admin-level lookup)
+    if (!hasText(spacecatOrgId)) {
+      const { authInfo } = attributes;
 
-    if (!authInfo) {
-      return badRequest('Authentication information is required');
-    }
+      if (!authInfo) {
+        return badRequest('Authentication information is required');
+      }
 
-    const profile = authInfo.getProfile();
+      const profile = authInfo.getProfile();
 
-    if (!profile?.tenants?.[0]?.id) {
-      return badRequest('User profile or organization ID not found in authentication token');
-    }
+      if (!profile?.tenants?.[0]?.id) {
+        return badRequest('User profile or organization ID not found in authentication token');
+      }
 
-    const matchedTenant = profile.tenants
-      .find((t) => `${t.id}@AdobeOrg` === requestedImsOrgId);
-    if (!matchedTenant) {
-      return forbidden('Not authorized for this IMS org');
+      const matchedTenant = profile.tenants
+        .find((t) => `${t.id}@AdobeOrg` === resolvedImsOrgId);
+      if (!matchedTenant) {
+        return forbidden('Not authorized for this IMS org');
+      }
     }
 
     const { PlgOnboarding } = da;
-    const records = await PlgOnboarding.allByImsOrgId(requestedImsOrgId);
+    const records = await PlgOnboarding.allByImsOrgId(resolvedImsOrgId);
 
     if (!records || records.length === 0) {
-      return notFound(`No onboarding records found for IMS org ${requestedImsOrgId}`);
+      return notFound(`No onboarding records found for IMS org ${resolvedImsOrgId}`);
     }
 
     return ok(records.map(PlgOnboardingDto.toJSON));

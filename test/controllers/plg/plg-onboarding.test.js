@@ -22,6 +22,7 @@ const TEST_DOMAIN = 'example.com';
 const TEST_BASE_URL = 'https://example.com';
 const TEST_IMS_ORG_ID = 'ABC123@AdobeOrg';
 const TEST_ORG_ID = 'org-uuid-1';
+const TEST_SPACECAT_ORG_ID = '12345678-1234-4234-b234-123456789012';
 const TEST_SITE_ID = 'site-uuid-1';
 const TEST_PROJECT_ID = 'project-uuid-1';
 const TEST_ONBOARDING_ID = 'onboarding-uuid-1';
@@ -161,6 +162,7 @@ describe('PlgOnboardingController', () => {
     // LLMO onboarding stubs
     mockOrganization = {
       getId: sandbox.stub().returns(TEST_ORG_ID),
+      getImsOrgId: sandbox.stub().returns(TEST_IMS_ORG_ID),
     };
     createOrFindOrganizationStub = sandbox.stub().resolves(mockOrganization);
     enableAuditsStub = sandbox.stub().resolves();
@@ -220,6 +222,7 @@ describe('PlgOnboardingController', () => {
       },
       Organization: {
         findByImsOrgId: sandbox.stub().resolves(mockOrganization),
+        findById: sandbox.stub().resolves(mockOrganization),
       },
       Project: {
         allByOrganizationId: sandbox.stub().resolves([]),
@@ -259,6 +262,7 @@ describe('PlgOnboardingController', () => {
           detectLocale: detectLocaleStub,
           hasText: (val) => typeof val === 'string' && val.trim().length > 0,
           isValidIMSOrgId: (val) => typeof val === 'string' && val.endsWith('@AdobeOrg'),
+          isValidUUID: (val) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val),
           resolveCanonicalUrl: resolveCanonicalUrlStub,
         },
         '@adobe/spacecat-shared-http-utils': {
@@ -963,6 +967,16 @@ describe('PlgOnboardingController', () => {
       );
     });
 
+    it('passes a no-op say callback to updateCodeConfig', async () => {
+      const context = buildContext({ domain: TEST_DOMAIN });
+
+      await controller.onboard(context);
+
+      const sayArg = updateCodeConfigStub.firstCall.args[2];
+      // Invoke say to cover the anonymous no-op function
+      expect(sayArg.say('test')).to.be.undefined;
+    });
+
     it('passes null host to updateCodeConfig when autoResolveAuthorUrl returns null', async () => {
       autoResolveAuthorUrlStub.resolves(null);
 
@@ -1612,6 +1626,212 @@ describe('PlgOnboardingController', () => {
       expect(res.value[0].domain).to.equal('example1.com');
       expect(res.value[1].id).to.equal('rec-2');
       expect(res.value[1].domain).to.equal('example2.com');
+    });
+  });
+
+  // --- onboard with spacecatOrgId ---
+
+  describe('onboard - spacecatOrgId support', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+    });
+
+    it('resolves imsOrgId from spacecatOrgId and onboards (skips token-tenant check)', async () => {
+      // authInfo from a DIFFERENT org — would fail tenant check normally, spacecatOrgId skips it
+      const differentOrgAuthInfo = {
+        getProfile: sandbox.stub().returns({
+          tenants: [{ id: 'COMPLETELY_DIFFERENT_ORG' }],
+        }),
+      };
+      const context = {
+        data: { domain: TEST_DOMAIN, spacecatOrgId: TEST_SPACECAT_ORG_ID },
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: { sendMessage: sandbox.stub().resolves() },
+        attributes: { authInfo: differentOrgAuthInfo },
+      };
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockDataAccess.Organization.findById).to.have.been.calledWith(TEST_SPACECAT_ORG_ID);
+      // imsOrgId resolved from org — was used for onboarding
+      expect(mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain)
+        .to.have.been.calledWith(TEST_IMS_ORG_ID, TEST_DOMAIN);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+    });
+
+    it('returns 400 when spacecatOrgId is not a valid UUID', async () => {
+      const context = {
+        data: { domain: TEST_DOMAIN, spacecatOrgId: 'not-a-uuid' },
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: { sendMessage: sandbox.stub().resolves() },
+        attributes: { authInfo: mockAuthInfo() },
+      };
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(400);
+      expect(res.value).to.equal('Invalid spacecatOrgId format');
+    });
+
+    it('returns 404 when organization not found for spacecatOrgId', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+
+      const context = {
+        data: { domain: TEST_DOMAIN, spacecatOrgId: TEST_SPACECAT_ORG_ID },
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: { sendMessage: sandbox.stub().resolves() },
+        attributes: { authInfo: mockAuthInfo() },
+      };
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(404);
+      expect(res.value).to.include('Organization not found for spacecatOrgId');
+    });
+
+    it('returns 400 when organization has no IMS org ID', async () => {
+      mockOrganization.getImsOrgId.returns('');
+
+      const context = {
+        data: { domain: TEST_DOMAIN, spacecatOrgId: TEST_SPACECAT_ORG_ID },
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: { sendMessage: sandbox.stub().resolves() },
+        attributes: { authInfo: mockAuthInfo() },
+      };
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(400);
+      expect(res.value).to.include('has no IMS org ID');
+    });
+
+    it('returns 409 when conflict error during spacecatOrgId onboarding', async () => {
+      const conflictError = new Error('Domain already claimed');
+      conflictError.conflict = true;
+      createOrFindOrganizationStub.rejects(conflictError);
+
+      const context = {
+        data: { domain: TEST_DOMAIN, spacecatOrgId: TEST_SPACECAT_ORG_ID },
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: { sendMessage: sandbox.stub().resolves() },
+        attributes: { authInfo: mockAuthInfo() },
+      };
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(409);
+      expect(res.value).to.deep.equal({ message: 'Domain already claimed' });
+    });
+
+    it('returns 400 when clientError during spacecatOrgId onboarding', async () => {
+      const clientErr = new Error('Invalid domain: must be a valid hostname');
+      clientErr.clientError = true;
+      // domain must pass isValidHostname locally so force the error deeper
+      tierClientCreateEntitlementStub.rejects(clientErr);
+
+      const context = {
+        data: { domain: TEST_DOMAIN, spacecatOrgId: TEST_SPACECAT_ORG_ID },
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: { sendMessage: sandbox.stub().resolves() },
+        attributes: { authInfo: mockAuthInfo() },
+      };
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 500 on unexpected error during spacecatOrgId onboarding', async () => {
+      tierClientCreateEntitlementStub.rejects(new Error('Tier service unavailable'));
+
+      const context = {
+        data: { domain: TEST_DOMAIN, spacecatOrgId: TEST_SPACECAT_ORG_ID },
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: mockEnv,
+        sqs: { sendMessage: sandbox.stub().resolves() },
+        attributes: { authInfo: mockAuthInfo() },
+      };
+
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(500);
+      expect(res.value).to.equal('Onboarding failed. Please try again later.');
+    });
+  });
+
+  // --- getStatus with spacecatOrgId ---
+
+  describe('getStatus - spacecatOrgId support', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingController({ log: mockLog });
+      mockDataAccess.PlgOnboarding.allByImsOrgId.resolves([createMockOnboarding()]);
+    });
+
+    it('resolves imsOrgId from spacecatOrgId and returns records (skips token-tenant check)', async () => {
+      const res = await controller.getStatus({
+        dataAccess: mockDataAccess,
+        params: { spacecatOrgId: TEST_SPACECAT_ORG_ID },
+        attributes: { authInfo: null }, // no valid authInfo — should be skipped
+      });
+
+      expect(res.status).to.equal(200);
+      expect(mockDataAccess.Organization.findById).to.have.been.calledWith(TEST_SPACECAT_ORG_ID);
+      expect(mockDataAccess.PlgOnboarding.allByImsOrgId)
+        .to.have.been.calledWith(TEST_IMS_ORG_ID);
+      expect(res.value).to.be.an('array').with.length(1);
+    });
+
+    it('returns 400 when spacecatOrgId is not a valid UUID', async () => {
+      const res = await controller.getStatus({
+        dataAccess: mockDataAccess,
+        params: { spacecatOrgId: 'bad-id' },
+        attributes: { authInfo: mockAuthInfo() },
+      });
+
+      expect(res.status).to.equal(400);
+      expect(res.value).to.equal('Invalid spacecatOrgId format');
+    });
+
+    it('returns 404 when organization not found for spacecatOrgId', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+
+      const res = await controller.getStatus({
+        dataAccess: mockDataAccess,
+        params: { spacecatOrgId: TEST_SPACECAT_ORG_ID },
+        attributes: { authInfo: mockAuthInfo() },
+      });
+
+      expect(res.status).to.equal(404);
+      expect(res.value).to.include('Organization not found for spacecatOrgId');
+    });
+
+    it('returns 400 when organization has no IMS org ID', async () => {
+      mockOrganization.getImsOrgId.returns('');
+
+      const res = await controller.getStatus({
+        dataAccess: mockDataAccess,
+        params: { spacecatOrgId: TEST_SPACECAT_ORG_ID },
+        attributes: { authInfo: mockAuthInfo() },
+      });
+
+      expect(res.status).to.equal(400);
+      expect(res.value).to.include('has no IMS org ID');
     });
   });
 });
