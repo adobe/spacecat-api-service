@@ -1,3 +1,10 @@
+## [1.352.1](https://github.com/adobe/spacecat-api-service/compare/v1.352.0...v1.352.1) (2026-03-17)
+
+
+### Bug Fixes
+
+* rename fix:read/write capability to fixEntity:read/write ([#1969](https://github.com/adobe/spacecat-api-service/issues/1969)) ([7c76393](https://github.com/adobe/spacecat-api-service/commit/7c763939ed42f01b320e3d9cbfdb919acf537aa1))
+
 # [1.352.0](https://github.com/adobe/spacecat-api-service/compare/v1.351.4...v1.352.0) (2026-03-17)
 
 
