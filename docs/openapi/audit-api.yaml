@@ -34,6 +34,8 @@ audit-for-site:
                 $ref: './examples.yaml#/commerce-product-enrichments-audit'
               prerender-audit:
                 $ref: './examples.yaml#/prerender-audit'
+              related-urls-audit:
+                $ref: './examples.yaml#/related-urls-audit'
               broken-internal-links-audit:
                 $ref: './examples.yaml#/broken-internal-links-audit'
       '400':
@@ -81,6 +83,8 @@ latest-audit-for-site:
                 $ref: './examples.yaml#/commerce-product-enrichments-audit'
               prerender-audit:
                 $ref: './examples.yaml#/prerender-audit'
+              related-urls-audit:
+                $ref: './examples.yaml#/related-urls-audit'
               broken-internal-links-audit:
                 $ref: './examples.yaml#/broken-internal-links-audit'
       '400':

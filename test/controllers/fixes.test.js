@@ -95,6 +95,9 @@ describe('Fixes Controller', () => {
     sandbox.stub(fixEntityCollection, 'findById');
     sandbox.stub(fixEntityCollection, 'setSuggestionsForFixEntity');
     sandbox.stub(fixEntityCollection, 'getAllFixesWithSuggestionByCreatedAt');
+    sandbox.stub(fixEntityCollection, 'updateByKeys');
+    sandbox.stub(fixEntityCollection, 'getSuggestionsByFixEntityId');
+    sandbox.stub(suggestionCollection, 'bulkUpdateStatus');
     sandbox.stub(suggestionCollection, 'allByIndexKeys');
     sandbox.stub(suggestionCollection, 'findById');
     sandbox.stub(fixEntitySuggestionCollection, 'createMany');
@@ -610,6 +613,9 @@ describe('Fixes Controller', () => {
         data: suggestions,
         unprocessed: [],
       });
+      fixEntityCollection.getSuggestionsByFixEntityId
+        .withArgs(fixId)
+        .resolves(suggestions);
       fixEntitySuggestionCollection.allByFixEntityId.resolves(suggestions.map((s) => ({
         getSuggestionId: () => s.getId(),
         getFixEntityId: () => fixId,
@@ -1619,6 +1625,9 @@ describe('Fixes Controller', () => {
         data: suggestions,
         unprocessed: [],
       });
+      fixEntityCollection.getSuggestionsByFixEntityId
+        .withArgs(fix.getId())
+        .resolves(suggestions);
 
       const executedAt = '2025-05-19T10:27:27.903Z';
       const publishedAt = '2025-05-19T11:27:27.903Z';
@@ -1665,6 +1674,9 @@ describe('Fixes Controller', () => {
         data: suggestions,
         unprocessed: [],
       });
+      fixEntityCollection.getSuggestionsByFixEntityId
+        .withArgs(fix.getId())
+        .resolves(suggestions);
 
       const newOrigin = FixEntity.ORIGINS.ASO;
       requestContext.data = {
@@ -1978,6 +1990,333 @@ describe('Fixes Controller', () => {
 
       expect(serialized.origin).to.equal(FixEntity.ORIGINS.SPACECAT);
       expect(serialized.status).to.equal(FixEntity.STATUSES.PENDING);
+    });
+  });
+
+  describe('rollbackFailedFix', () => {
+    async function createFixWithStatus(fixEntityId, status, opportunity = opportunityId) {
+      const fix = await fixEntityCollection.create({
+        fixEntityId,
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId: opportunity,
+        status,
+      });
+      fixEntityCollection.findById.withArgs(fixEntityId).resolves(fix);
+      sandbox.stub(fix.patcher, 'save');
+      return fix;
+    }
+
+    async function createSuggestionWithStatus(status, opportunity = opportunityId) {
+      const suggestion = await suggestionCollection.create({
+        opportunityId: opportunity,
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        status,
+      });
+      sandbox.stub(suggestion.patcher, 'save');
+      return suggestion;
+    }
+
+    it('responds 400 if siteId is not a valid UUID', async () => {
+      requestContext.params.siteId = 'not-a-uuid';
+      requestContext.params.fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'Site ID required' });
+    });
+
+    it('responds 400 if opportunityId is not a valid UUID', async () => {
+      requestContext.params.opportunityId = 'not-a-uuid';
+      requestContext.params.fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'Opportunity ID required' });
+    });
+
+    it('responds 400 if fixId is not a valid UUID', async () => {
+      requestContext.params.fixId = 'not-a-uuid';
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'Fix ID required' });
+    });
+
+    it('responds 403 if the request does not have authorization/access', async () => {
+      requestContext.params.fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+      accessControlUtil.hasAccess.resolves(false);
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 403 });
+      expect(await response.json()).deep.equals({
+        message: 'Only users belonging to the organization may access fix entities.',
+      });
+    });
+
+    it('responds 404 if the fix is not found', async () => {
+      const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+      requestContext.params.fixId = fixId;
+      fixEntityCollection.findById.withArgs(fixId).resolves(null);
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 404 });
+      expect(await response.json()).deep.equals({ message: 'Fix not found' });
+    });
+
+    it('responds 404 if the fix does not belong to the given opportunity', async () => {
+      const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+      requestContext.params.fixId = fixId;
+
+      const fix = await createFixWithStatus(fixId, 'FAILED', 'different-opportunity-id');
+      fixEntityCollection.findById.withArgs(fixId).resolves(fix);
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 404 });
+      expect(await response.json()).deep.equals({ message: 'Opportunity not found' });
+    });
+
+    it('responds 400 if the fix is not in FAILED status', async () => {
+      const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+      requestContext.params.fixId = fixId;
+
+      await createFixWithStatus(fixId, 'PENDING');
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 400 });
+      const json = await response.json();
+      expect(json.message).to.include("current status is 'PENDING'");
+      expect(json.message).to.include("expected 'FAILED'");
+    });
+
+    it('successfully rolls back when fix has no linked suggestions', async () => {
+      const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+      requestContext.params.fixId = fixId;
+
+      const fix = await createFixWithStatus(fixId, 'FAILED');
+      fixEntityCollection.getSuggestionsByFixEntityId
+        .withArgs(fixId)
+        .resolves([]);
+      fixEntityCollection.updateByKeys.resolves();
+
+      const mockUpdatedFix = {
+        getId: () => fixId,
+        getStatus: () => 'ROLLED_BACK',
+        getOpportunityId: () => opportunityId,
+        getType: () => 'CONTENT_UPDATE',
+        getCreatedAt: () => '2025-05-19T01:23:45.678Z',
+        getUpdatedAt: () => '2025-05-19T01:23:45.678Z',
+        getExecutedBy: () => 'test-user',
+        getExecutedAt: () => '2025-05-19T01:23:45.678Z',
+        getPublishedAt: () => '2025-05-19T01:23:45.678Z',
+        getChangeDetails: () => ({}),
+        getOrigin: () => 'SPACECAT',
+        record: { fixEntityId: fixId, status: 'ROLLED_BACK', opportunityId },
+      };
+      fixEntityCollection.findById.withArgs(fixId)
+        .onFirstCall()
+        .resolves(fix)
+        .onSecondCall()
+        .resolves(mockUpdatedFix);
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 200 });
+      const result = await response.json();
+      expect(result.fix.fix.status).to.equal('ROLLED_BACK');
+      expect(result.suggestions.updated).to.have.lengthOf(0);
+      expect(result.message).to.include('0 suggestion(s) marked as SKIPPED');
+    });
+
+    it('successfully rolls back a failed fix with suggestions', async () => {
+      const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+      requestContext.params.fixId = fixId;
+
+      const fix = await createFixWithStatus(fixId, 'FAILED');
+      const suggestion1 = await createSuggestionWithStatus('ERROR');
+      const suggestion2 = await createSuggestionWithStatus('ERROR');
+      suggestion1.setStatus('SKIPPED');
+      suggestion2.setStatus('SKIPPED');
+
+      const mockFixEntity = {
+        getId: () => fixId,
+        getStatus: () => 'ROLLED_BACK',
+        getOpportunityId: () => opportunityId,
+        getType: () => 'CONTENT_UPDATE',
+        getCreatedAt: () => '2025-05-19T01:23:45.678Z',
+        getUpdatedAt: () => '2025-05-19T01:23:45.678Z',
+        getExecutedBy: () => 'test-user',
+        getExecutedAt: () => '2025-05-19T01:23:45.678Z',
+        getPublishedAt: () => '2025-05-19T01:23:45.678Z',
+        getChangeDetails: () => ({ arbitrary: 'test value' }),
+        getOrigin: () => 'SPACECAT',
+        record: {
+          fixEntityId: fixId,
+          status: 'ROLLED_BACK',
+          opportunityId,
+          type: 'CONTENT_UPDATE',
+          createdAt: '2025-05-19T01:23:45.678Z',
+        },
+      };
+
+      fixEntityCollection.updateByKeys.resolves();
+      fixEntityCollection.getSuggestionsByFixEntityId
+        .withArgs(fixId)
+        .resolves([suggestion1, suggestion2]);
+      suggestionCollection.bulkUpdateStatus.resolves([suggestion1, suggestion2]);
+      fixEntityCollection.findById.withArgs(fixId)
+        .onFirstCall()
+        .resolves(fix)
+        .onSecondCall()
+        .resolves(mockFixEntity);
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 200 });
+
+      const result = await response.json();
+      expect(result.message).to.equal(
+        'Fix rolled back successfully. All 2 suggestion(s) marked as SKIPPED.',
+      );
+
+      // Check the wrapped response structure
+      expect(result.fix).to.exist;
+      expect(result.fix.fix.status).to.equal('ROLLED_BACK');
+      expect(result.fix.fix.id).to.equal(fixId); // Normalized id field
+      expect(result.fix.statusCode).to.equal(200);
+      expect(result.fix.index).to.equal(0);
+      expect(result.fix.uuid).to.equal(fixId);
+
+      expect(result.suggestions.updated).to.have.lengthOf(2);
+      expect(result.suggestions.updated[0].suggestion.status).to.equal('SKIPPED');
+      // Normalized id field
+      expect(result.suggestions.updated[0].suggestion.id).to.equal(suggestion1.getId());
+      expect(result.suggestions.updated[0].statusCode).to.equal(200);
+      expect(result.suggestions.updated[0].index).to.equal(0);
+      expect(result.suggestions.updated[0].uuid).to.equal(suggestion1.getId());
+      expect(result.suggestions.updated[1].suggestion.status).to.equal('SKIPPED');
+      // Normalized id field
+      expect(result.suggestions.updated[1].suggestion.id).to.equal(suggestion2.getId());
+      expect(result.suggestions.updated[1].statusCode).to.equal(200);
+      expect(result.suggestions.updated[1].index).to.equal(1);
+      expect(result.suggestions.updated[1].uuid).to.equal(suggestion2.getId());
+    });
+
+    it('handles fixData with id field when fixEntityId is missing', async () => {
+      const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+      requestContext.params.fixId = fixId;
+
+      const fix = await createFixWithStatus(fixId, 'FAILED');
+      const suggestion1 = await createSuggestionWithStatus('ERROR');
+      suggestion1.setStatus('SKIPPED');
+
+      const mockFixEntity = {
+        getId: () => fixId,
+        getStatus: () => 'ROLLED_BACK',
+        getOpportunityId: () => opportunityId,
+        getType: () => 'CONTENT_UPDATE',
+        getCreatedAt: () => '2025-05-19T01:23:45.678Z',
+        getUpdatedAt: () => '2025-05-19T01:23:45.678Z',
+        getExecutedBy: () => 'test-user',
+        getExecutedAt: () => '2025-05-19T01:23:45.678Z',
+        getPublishedAt: () => '2025-05-19T01:23:45.678Z',
+        getChangeDetails: () => ({ arbitrary: 'test value' }),
+        getOrigin: () => 'SPACECAT',
+        record: {
+          id: fixId,
+          status: 'ROLLED_BACK',
+          opportunityId,
+          type: 'CONTENT_UPDATE',
+          createdAt: '2025-05-19T01:23:45.678Z',
+        },
+      };
+
+      fixEntityCollection.updateByKeys.resolves();
+      fixEntityCollection.getSuggestionsByFixEntityId
+        .withArgs(fixId)
+        .resolves([suggestion1]);
+      suggestionCollection.bulkUpdateStatus.resolves([suggestion1]);
+      fixEntityCollection.findById.withArgs(fixId)
+        .onFirstCall()
+        .resolves(fix)
+        .onSecondCall()
+        .resolves(mockFixEntity);
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 200 });
+
+      const result = await response.json();
+      expect(result.message).to.equal(
+        'Fix rolled back successfully. All 1 suggestion(s) marked as SKIPPED.',
+      );
+
+      // With FixDto.toJSON(), the id field is always present because it calls fixEntity.getId()
+      // The DTO normalizes the id field regardless of the underlying record structure
+      expect(result.fix).to.exist;
+      expect(result.fix.fix.status).to.equal('ROLLED_BACK');
+      expect(result.fix.fix.id).to.equal(fixId); // DTO always includes id from getId()
+      expect(result.fix.statusCode).to.equal(200);
+      expect(result.fix.index).to.equal(0);
+      expect(result.fix.uuid).to.equal(fixId); // Controller calls fixEntity.getId() directly
+    });
+
+    it('responds 500 if an error occurs during rollback', async () => {
+      const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+      requestContext.params.fixId = fixId;
+
+      const fix = await createFixWithStatus(fixId, 'FAILED');
+      fix.patcher.save.rejects(new Error('Database connection failed'));
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 500 });
+
+      const result = await response.json();
+      expect(result.message).to.include('Error rolling back fix:');
+    });
+
+    it('reverts fix status and returns 500 when bulkUpdateStatus fails', async () => {
+      const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+      requestContext.params.fixId = fixId;
+
+      const fix = await createFixWithStatus(fixId, 'FAILED');
+      sandbox.spy(fix, 'setStatus');
+      const suggestion1 = await createSuggestionWithStatus('ERROR');
+      fixEntityCollection.getSuggestionsByFixEntityId
+        .withArgs(fixId)
+        .resolves([suggestion1]);
+      suggestionCollection.bulkUpdateStatus.rejects(new Error('Suggestion update failed'));
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 500 });
+
+      const result = await response.json();
+      expect(result.message).to.equal('Error rolling back fix: Suggestion update failed');
+
+      // Revert should have been attempted: fix status set back to FAILED and save called
+      expect(fix.setStatus).to.have.been.calledWith('FAILED');
+      expect(fix.patcher.save).to.have.been.calledTwice; // once for ROLLED_BACK, once for revert
+    });
+
+    it('returns 500 with bulk error when bulkUpdateStatus fails and revert save also fails', async () => {
+      const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+      requestContext.params.fixId = fixId;
+
+      const fix = await createFixWithStatus(fixId, 'FAILED');
+      const suggestion1 = await createSuggestionWithStatus('ERROR');
+      fixEntityCollection.getSuggestionsByFixEntityId
+        .withArgs(fixId)
+        .resolves([suggestion1]);
+      suggestionCollection.bulkUpdateStatus.rejects(new Error('Suggestion update failed'));
+      fix.patcher.save.onFirstCall().resolves();
+      fix.patcher.save.onSecondCall().rejects(new Error('Revert save failed'));
+
+      requestContext.log = { error: sandbox.stub() };
+
+      const response = await fixesController.rollbackFailedFix(requestContext);
+      expect(response).includes({ status: 500 });
+
+      const result = await response.json();
+      expect(result.message).to.equal('Error rolling back fix: Suggestion update failed');
+
+      expect(requestContext.log.error).to.have.been.calledOnce;
+      expect(requestContext.log.error.firstCall.args[0]).to.equal('Failed to revert fix status after suggestion update failure');
     });
   });
 });

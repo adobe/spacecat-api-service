@@ -30,10 +30,11 @@ import {
 
 import { Suggestion as SuggestionModel } from '@adobe/spacecat-shared-data-access';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
-import { SuggestionDto, SUGGESTION_VIEWS } from '../dto/suggestion.js';
+import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
 import { FixDto } from '../dto/fix.js';
 import {
   sendAutofixMessage,
+  getCookieValue,
   getIMSPromiseToken,
   ErrorWithStatusCode,
   getHostName,
@@ -117,6 +118,46 @@ function SuggestionsController(ctx, sqs, env) {
       throw new Error(`Invalid status value(s): ${invalidStatuses.join(', ')}. Valid: ${validStatuses.join(', ')}`);
     }
     return statuses;
+  };
+
+  const SKIP_DETAIL_MAX_LENGTH = 500;
+
+  /**
+   * Validates skipReason and skipDetail for SKIPPED status.
+   * @param {string} status - Target status
+   * @param {string} [skipReason] - Optional skip reason
+   * @param {string} [skipDetail] - Optional skip detail
+   * @returns {{ valid: boolean, error?: string }}
+   */
+  const validateSkipFields = (status, skipReason, skipDetail) => {
+    if (status !== SuggestionModel.STATUSES.SKIPPED) {
+      if (skipReason != null || skipDetail != null) {
+        return {
+          valid: false,
+          error: 'skipReason and skipDetail can only be provided when status is SKIPPED',
+        };
+      }
+      return { valid: true };
+    }
+    if (skipReason != null && skipReason !== '' && !SUGGESTION_SKIP_REASONS.includes(skipReason)) {
+      return {
+        valid: false,
+        error: `Invalid skipReason. Must be one of: ${SUGGESTION_SKIP_REASONS.join(', ')}`,
+      };
+    }
+    if (skipDetail != null && typeof skipDetail !== 'string') {
+      return {
+        valid: false,
+        error: 'skipDetail must be a string',
+      };
+    }
+    if (typeof skipDetail === 'string' && skipDetail.length > SKIP_DETAIL_MAX_LENGTH) {
+      return {
+        valid: false,
+        error: `skipDetail must be at most ${SKIP_DETAIL_MAX_LENGTH} characters`,
+      };
+    }
+    return { valid: true };
   };
 
   const shouldGroupSuggestionsForAutofix = (type) => !AUTOFIX_UNGROUPED_OPPTY_TYPES.includes(type);
@@ -553,9 +594,11 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     let hasUpdates = false;
-    const { rank, data, kpiDeltas } = context.data;
+    const {
+      rank, data, kpiDeltas, status, skipReason, skipDetail,
+    } = context.data;
     try {
-      if (rank && rank !== suggestion.rank) {
+      if (rank != null && rank !== suggestion.getRank()) {
         hasUpdates = true;
         suggestion.setRank(rank);
       }
@@ -568,6 +611,40 @@ function SuggestionsController(ctx, sqs, env) {
       if (kpiDeltas) {
         hasUpdates = true;
         suggestion.setKpiDeltas(kpiDeltas);
+      }
+
+      if (hasText(status) && status !== suggestion.getStatus()) {
+        const { valid, error } = validateSkipFields(status, skipReason, skipDetail);
+        if (!valid) {
+          return badRequest(error);
+        }
+        hasUpdates = true;
+        suggestion.setStatus(status);
+        if (status === SuggestionModel.STATUSES.SKIPPED) {
+          if (suggestion.setSkipReason) {
+            suggestion.setSkipReason(skipReason ?? null);
+            suggestion.setSkipDetail(skipDetail ?? null);
+          } else {
+            context.log.warn('Suggestion model does not support skip fields (setSkipReason). Upgrade spacecat-shared-data-access.');
+          }
+        } else if (suggestion.setSkipReason) {
+          suggestion.setSkipReason(null);
+          suggestion.setSkipDetail(null);
+        }
+      } else if (hasText(status) && status === SuggestionModel.STATUSES.SKIPPED) {
+        const { valid, error } = validateSkipFields(status, skipReason, skipDetail);
+        if (!valid) {
+          return badRequest(error);
+        }
+        if ((skipReason != null || skipDetail != null)) {
+          if (suggestion.setSkipReason) {
+            hasUpdates = true;
+            suggestion.setSkipReason(skipReason ?? null);
+            suggestion.setSkipDetail(skipDetail ?? null);
+          } else {
+            context.log.warn('Suggestion model does not support skip fields (setSkipReason). Upgrade spacecat-shared-data-access.');
+          }
+        }
       }
 
       if (hasUpdates) {
@@ -659,7 +736,10 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('Request body must be an array of [{ id: <suggestion id>, status: <suggestion status> },...]');
     }
 
-    const suggestionPromises = context.data.map(async ({ id, status }, index) => {
+    const suggestionPromises = context.data.map(async (item, index) => {
+      const {
+        id, status, skipReason, skipDetail,
+      } = item;
       if (!hasText(id)) {
         return {
           index,
@@ -673,6 +753,16 @@ function SuggestionsController(ctx, sqs, env) {
           index,
           uuid: id,
           message: 'status is required',
+          statusCode: 400,
+        };
+      }
+
+      const { valid, error } = validateSkipFields(status, skipReason, skipDetail);
+      if (!valid) {
+        return {
+          index,
+          uuid: id,
+          message: error,
           statusCode: 400,
         };
       }
@@ -723,7 +813,29 @@ function SuggestionsController(ctx, sqs, env) {
           }
 
           suggestion.setStatus(status);
+          if (status === SuggestionModel.STATUSES.SKIPPED) {
+            if (suggestion.setSkipReason) {
+              suggestion.setSkipReason(skipReason ?? null);
+              suggestion.setSkipDetail(skipDetail ?? null);
+            } else {
+              context.log.warn('Suggestion model does not support skip fields (setSkipReason). Upgrade spacecat-shared-data-access.');
+            }
+          } else if (suggestion.setSkipReason) {
+            suggestion.setSkipReason(null);
+            suggestion.setSkipDetail(null);
+          }
           suggestion.setUpdatedBy(profile.email);
+        } else if (
+          status === SuggestionModel.STATUSES.SKIPPED
+          && (skipReason != null || skipDetail != null)
+        ) {
+          if (suggestion.setSkipReason) {
+            suggestion.setSkipReason(skipReason ?? null);
+            suggestion.setSkipDetail(skipDetail ?? null);
+            suggestion.setUpdatedBy(profile.email);
+          } else {
+            context.log.warn('Suggestion model does not support skip fields (setSkipReason). Upgrade spacecat-shared-data-access.');
+          }
         } else {
           return {
             index,
@@ -749,11 +861,11 @@ function SuggestionsController(ctx, sqs, env) {
           suggestion: SuggestionDto.toJSON(updatedSuggestion),
           statusCode: 200,
         };
-      } catch (error) {
+      } catch (saveError) {
         return {
           index,
-          message: error.message,
-          statusCode: error?.name === VALIDATION_ERROR_NAME ? 400 : 500,
+          message: saveError.message,
+          statusCode: saveError?.name === VALIDATION_ERROR_NAME ? 400 : 500,
         };
       }
     });
@@ -776,12 +888,14 @@ function SuggestionsController(ctx, sqs, env) {
    * Triggers auto-fix for the given suggestions. Validates the site, opportunity, and
    * suggestions, then queues an autofix message via SQS.
    *
-   * For promise token resolution, prefers the x-promise-token request header if present.
-   * Falls back to obtaining a token via IMS when the header is absent or empty.
+   * For promise token resolution, reads the promiseToken cookie sent by the browser
+   * (set via /auth/promise endpoint). Falls back to obtaining a token via IMS when
+   * the cookie is absent.
    *
    * @param {Object} context - The request context
    * @param {Object} [context.pathInfo] - The path info object
-   * @param {Object} [context.pathInfo.headers] - Request headers (x-promise-token preferred)
+   * @param {Object} [context.pathInfo.headers] - Request headers; must include a
+   *   `cookie` header with `promiseToken=<token>` for promise-based authoring types
    * @param {Object} context.params - Path parameters (siteId, opportunityId)
    * @param {Object} context.data - Request body containing suggestionIds
    * @returns {Promise<Response>} 207 multi-status response with per-suggestion results
@@ -836,9 +950,23 @@ function SuggestionsController(ctx, sqs, env) {
       if (!isNonEmptyArray(pages)) {
         return badRequest('Request body must contain a non-empty array of pages (URLs) when action is assess-urls');
       }
-      const invalidPage = pages.find((p) => typeof p !== 'string' || !isValidUrl(p));
-      if (invalidPage !== undefined) {
-        return badRequest('Each page in the pages array must be a valid URL');
+      const invalidEntry = pages.find((p) => {
+        if (typeof p === 'string') {
+          return !isValidUrl(p);
+        }
+        if (isObject(p) && p !== null) {
+          const { pageUrl, imageUrls } = p;
+          if (typeof pageUrl !== 'string' || !isValidUrl(pageUrl)) return true;
+          if (imageUrls !== undefined) {
+            if (!isArray(imageUrls)) return true;
+            return imageUrls.some((u) => typeof u !== 'string' || !isValidUrl(u));
+          }
+          return false;
+        }
+        return true;
+      });
+      if (invalidEntry !== undefined) {
+        return badRequest('Each page must be a valid URL string or an object with pageUrl (valid URL) and optional imageUrls (array of valid URLs)');
       }
       const configuration = await Configuration.findLatest();
       if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-auto-fix`, site)) {
@@ -905,6 +1033,9 @@ function SuggestionsController(ctx, sqs, env) {
         const url = data?.url || data?.recommendations?.[0]?.pageUrl
           || data?.url_from
           || data?.urlFrom
+          || (opportunity.getType() === 'no-cta-above-the-fold'
+            ? data?.contentFix?.page_patch?.original_page_url
+            : null)
           || opportunityData?.page; // for high-organic-low-ctr
         if (!url) return acc;
 
@@ -946,10 +1077,9 @@ function SuggestionsController(ctx, sqs, env) {
     let promiseTokenResponse;
     const skipPromiseToken = isAssessAction && precheckOnly === true;
     if (!skipPromiseToken) {
-      const { pathInfo } = context;
-      const headerToken = pathInfo?.headers?.['x-promise-token'];
-      if (hasText(headerToken)) {
-        promiseTokenResponse = { promise_token: headerToken };
+      const cookieToken = getCookieValue(context, 'promiseToken');
+      if (hasText(cookieToken)) {
+        promiseTokenResponse = { promise_token: cookieToken };
       } else {
         try {
           promiseTokenResponse = await getIMSPromiseToken(context);
