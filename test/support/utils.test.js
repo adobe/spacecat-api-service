@@ -24,8 +24,6 @@ import {
   updateCodeConfig,
   getIsSummitPlgEnabled,
   getCookieValue,
-  resolveAemAccessToken,
-  ErrorWithStatusCode,
   sendAutofixMessage,
 } from '../../src/support/utils.js';
 
