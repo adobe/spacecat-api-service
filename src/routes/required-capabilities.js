@@ -195,7 +195,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit/:cursor': 'suggestion:read',
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit': 'suggestion:read',
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'suggestion:read',
-  'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': 'fix:read',
+  'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': 'fixEntity:read',
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions': 'suggestion:write',
   'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status': 'suggestion:write',
   'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'suggestion:write',
@@ -313,15 +313,15 @@ const routeRequiredCapabilities = {
   'GET /tools/scrape/jobs/by-url/:url': 'scrapeJob:read',
 
   // Fixes
-  'GET /sites/:siteId/opportunities/:opportunityId/fixes': 'fix:read',
-  'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': 'fix:read',
-  'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fix:read',
+  'GET /sites/:siteId/opportunities/:opportunityId/fixes': 'fixEntity:read',
+  'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': 'fixEntity:read',
+  'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/suggestions': 'suggestion:read',
-  'POST /sites/:siteId/opportunities/:opportunityId/fixes': 'fix:write',
+  'POST /sites/:siteId/opportunities/:opportunityId/fixes': 'fixEntity:write',
   'PATCH /sites/:siteId/opportunities/:opportunityId/status': 'opportunity:write',
-  'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fix:write',
-  'POST /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/actions/rolled_back': 'fix:write',
-  'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fix:write',
+  'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fixEntity:write',
+  'POST /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/actions/rolled_back': 'fixEntity:write',
+  'DELETE /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fixEntity:write',
 
   // LLMO
   'GET /sites/:siteId/llmo/sheet-data/:dataSource': 'site:read',
