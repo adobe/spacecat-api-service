@@ -1424,6 +1424,11 @@ describe('PlgOnboardingController', () => {
 
       expect(response.status).to.equal(200);
       expect(tierClientCreateForSiteStub).to.have.been.called;
+      expect(triggerAuditsStub).to.have.been.calledWith(
+        sinon.match.array,
+        sinon.match.any,
+        mockSite,
+      );
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
       expect(preonboardedOnboarding.setCompletedAt).to.have.been.called;
       expect(preonboardedOnboarding.setSteps).to.have.been.calledWith(
@@ -1437,6 +1442,25 @@ describe('PlgOnboardingController', () => {
       // Should NOT run full onboarding steps
       expect(createOrFindOrganizationStub).to.not.have.been.called;
       expect(detectBotBlockerStub).to.not.have.been.called;
+    });
+
+    it('fast-tracks preonboarded site when profile has no audits defined', async () => {
+      loadProfileConfigStub.returns({ imports: {} });
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        steps: null,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain
+        .resolves(preonboardedOnboarding);
+      mockDataAccess.Site.findById.resolves(mockSite);
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      expect(triggerAuditsStub).to.have.been.calledWith([], sinon.match.any, mockSite);
+      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
     });
 
     it('fast-tracks preonboarded site with null steps', async () => {
