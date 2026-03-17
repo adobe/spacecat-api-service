@@ -1,3 +1,10 @@
+## [1.351.1](https://github.com/adobe/spacecat-api-service/compare/v1.351.0...v1.351.1) (2026-03-16)
+
+
+### Bug Fixes
+
+* improve import service E2E test diagnostics ([#1938](https://github.com/adobe/spacecat-api-service/issues/1938)) ([f94101b](https://github.com/adobe/spacecat-api-service/commit/f94101b011e5c5bf60061e528643c795607354fe))
+
 # [1.351.0](https://github.com/adobe/spacecat-api-service/compare/v1.350.0...v1.351.0) (2026-03-16)
 
 
