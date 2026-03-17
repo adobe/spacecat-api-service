@@ -591,13 +591,25 @@ export async function resolveWwwUrl(site, context) {
  */
 export async function getIsSummitPlgEnabled(site, context) {
   try {
-    const { Configuration } = context.dataAccess || {};
+    const { Configuration, Entitlement } = context.dataAccess || {};
     if (!Configuration) return false;
     const configuration = await Configuration.findLatest();
     if (!configuration || typeof configuration.isHandlerEnabledForSite !== 'function') {
       return false;
     }
-    return configuration.isHandlerEnabledForSite('summit-plg', site);
+    if (!configuration.isHandlerEnabledForSite('summit-plg', site)) {
+      return false;
+    }
+
+    const organizationId = site.getOrganizationId();
+    if (!Entitlement || !organizationId) return false;
+
+    const entitlement = await Entitlement.findByOrganizationIdAndProductCode(
+      organizationId,
+      EntitlementModel.PRODUCT_CODES.ASO,
+    );
+
+    return entitlement?.getTier() === EntitlementModel.TIERS.FREE_TRIAL;
   } catch (err) {
     context.log?.error?.('Error checking audit summit-plg for site:', err);
     return false;
