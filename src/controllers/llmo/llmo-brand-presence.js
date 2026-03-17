@@ -19,6 +19,28 @@ import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
  * spaceCatId = organization_id. brandId = 'all' or UUID.
  */
 
+/**
+ * LLM model enum values from mysticat-data-service llm_model type.
+ * Must match db/migrations/*_brand_presence_model_enum.sql exactly.
+ */
+export const LLM_MODEL_VALUES = Object.freeze([
+  'chatgpt-paid',
+  'chatgpt-free',
+  'google-ai-overview',
+  'perplexity',
+  'google-ai-mode',
+  'copilot',
+  'gemini',
+  'google',
+  'microsoft',
+  'mistral',
+  'anthropic',
+  'amazon',
+]);
+
+const LLM_MODEL_SET = new Set(LLM_MODEL_VALUES);
+const DEFAULT_MODEL = 'chatgpt-free';
+
 const SKIP_VALUES = new Set(['all', '', undefined, null, '*']);
 const IN_FILTER_CHUNK_SIZE = 50;
 const QUERY_LIMIT = 5000;
@@ -73,6 +95,22 @@ function shouldApplyFilter(value) {
   if (value == null) return false;
   if (typeof value === 'string' && SKIP_VALUES.has(value.trim())) return false;
   return hasText(String(value));
+}
+
+/**
+ * Validates model param against llm_model enum. Returns resolved model or error.
+ * @param {string} [model] - Raw model from query (optional; defaults to chatgpt-free)
+ * @returns {{ valid: boolean, model?: string, error?: string }}
+ */
+function validateModel(model) {
+  const resolved = hasText(model) ? String(model).trim() : DEFAULT_MODEL;
+  if (!LLM_MODEL_SET.has(resolved)) {
+    return {
+      valid: false,
+      error: `Invalid model. Must be one of: ${LLM_MODEL_VALUES.join(', ')}`,
+    };
+  }
+  return { valid: true, model: resolved };
 }
 
 /** @internal Exported for testing null/undefined fallbacks */
@@ -131,9 +169,8 @@ function defaultDateRange() {
 function buildExecutionsQuery(client, organizationId, params, defaults, filterByBrandId) {
   const startDate = params.startDate || defaults.startDate;
   const endDate = params.endDate || defaults.endDate;
-  const model = params.model || 'chatgpt';
   const {
-    siteId, categoryId, topicIds, regionCode, origin,
+    model, siteId, categoryId, topicIds, regionCode, origin,
   } = params;
 
   let q = client
@@ -412,7 +449,11 @@ export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
     async (ctx, client) => {
       const params = parseWeeksParams(ctx);
       const { model: modelParam, siteId } = params;
-      const model = modelParam || 'chatgpt';
+      const modelValidation = validateModel(modelParam);
+      if (!modelValidation.valid) {
+        return badRequest(modelValidation.error);
+      }
+      const { model } = modelValidation;
       const { spaceCatId, brandId } = ctx.params;
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
@@ -2193,6 +2234,12 @@ export function createFilterDimensionsHandler(getOrgAndValidateAccess) {
     async (ctx, client) => {
       const { spaceCatId, brandId } = ctx.params;
       const params = parseFilterDimensionsParams(ctx);
+      const modelValidation = validateModel(params.model);
+      if (!modelValidation.valid) {
+        return badRequest(modelValidation.error);
+      }
+      params.model = modelValidation.model;
+
       const defaults = defaultDateRange();
       const organizationId = spaceCatId;
       const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;

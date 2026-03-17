@@ -523,6 +523,20 @@ describe('llmo-brand-presence', () => {
       );
     });
 
+    it('returns badRequest when model is invalid', async () => {
+      mockContext.dataAccess.Site.postgrestService = mockClient;
+      mockContext.data = { model: 'openai' };
+
+      const handler = createFilterDimensionsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('Invalid model');
+      expect(body.message).to.include('chatgpt-paid');
+      expect(body.message).to.include('chatgpt-free');
+    });
+
     it('handles executions query returning data: null (uses empty rows fallback)', async () => {
       const emptySites = { data: [], error: null };
       const emptyPageIntents = { data: [], error: null };
@@ -1068,25 +1082,39 @@ describe('llmo-brand-presence', () => {
       });
     });
 
-    it('defaults model to chatgpt when not provided', async () => {
+    it('defaults model to chatgpt-free when not provided', async () => {
       const chainMock = createChainableMock({ data: [], error: null });
       mockContext.dataAccess.Site.postgrestService = chainMock;
 
       const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.eq).to.have.been.calledWith('model', 'chatgpt');
+      expect(chainMock.eq).to.have.been.calledWith('model', 'chatgpt-free');
     });
 
     it('uses model from query param when provided', async () => {
       const chainMock = createChainableMock({ data: [], error: null });
-      mockContext.data = { model: 'openai' };
+      mockContext.data = { model: 'gemini' };
       mockContext.dataAccess.Site.postgrestService = chainMock;
 
       const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
       await handler(mockContext);
 
-      expect(chainMock.eq).to.have.been.calledWith('model', 'openai');
+      expect(chainMock.eq).to.have.been.calledWith('model', 'gemini');
+    });
+
+    it('returns badRequest when model is invalid', async () => {
+      mockContext.dataAccess.Site.postgrestService = mockClient;
+      mockContext.data = { model: 'invalid-model' };
+
+      const handler = createBrandPresenceWeeksHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('Invalid model');
+      expect(body.message).to.include('chatgpt-paid');
+      expect(body.message).to.include('chatgpt-free');
     });
 
     it('filters by brandId when single brand route', async () => {
