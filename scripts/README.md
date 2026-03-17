@@ -109,7 +109,7 @@ already-removed resources are skipped gracefully.
 
 1. Disables audits (`alt-text`, `cwv`, `broken-backlinks`, `scrape-top-pages`) + `summit-plg` via API
 2. Deletes ASO entitlement (only if `entitlementCreated` step is set)
-3. Deletes the site (only if `siteCreated` step is set — pre-existing sites are left alone)
+3. Site deletion — **not supported** (restricted operation); logs the site ID for manual removal if it was created by preonboarding
 4. Deletes the org (only if it has no remaining sites)
 5. Deletes the `PlgOnboarding` record
 
