@@ -17,6 +17,8 @@ import sinonChai from 'sinon-chai';
 import {
   createBrandPresenceWeeksHandler,
   createFilterDimensionsHandler,
+  createMarketTrackingTrendsHandler,
+  dateToIsoWeek,
   getWeekDateRange,
   resolveSiteIds,
   strCompare,
@@ -52,6 +54,90 @@ function createChainableMock(resolveValue = { data: [], error: null }, resolveSe
     then(resolve) { return Promise.resolve(resolveValue).then(resolve); },
   };
   return c;
+}
+
+/**
+ * Creates a mock PostgREST client that returns different results per table.
+ * Each `.from(tableName)` call returns a new independent chain object so that
+ * parallel queries (Promise.all) resolve independently with their own result.
+ * Shared sinon stubs on the root object accumulate all calls for assertions.
+ */
+function createTableAwareMock(tableResults = {}, defaultResult = { data: [], error: null }) {
+  // Declare stubs first so makeChain can close over them
+  const stubs = {
+    select: sinon.stub(),
+    eq: sinon.stub(),
+    gte: sinon.stub(),
+    lte: sinon.stub(),
+    ilike: sinon.stub(),
+    in: sinon.stub(),
+    order: sinon.stub(),
+    limit: sinon.stub(),
+    not: sinon.stub(),
+    filter: sinon.stub(),
+    or: sinon.stub(),
+  };
+
+  // Declare fromStub first so makeChain can reference it without a forward-reference lint error.
+  const fromStub = sinon.stub();
+
+  function makeChain(table) {
+    const result = tableResults[table] ?? defaultResult;
+    const chain = {
+      from: fromStub,
+      select(...args) {
+        stubs.select(...args);
+        return chain;
+      },
+      eq(...args) {
+        stubs.eq(...args);
+        return chain;
+      },
+      gte(...args) {
+        stubs.gte(...args);
+        return chain;
+      },
+      lte(...args) {
+        stubs.lte(...args);
+        return chain;
+      },
+      ilike(...args) {
+        stubs.ilike(...args);
+        return chain;
+      },
+      in(...args) {
+        stubs.in(...args);
+        return chain;
+      },
+      order(...args) {
+        stubs.order(...args);
+        return chain;
+      },
+      not(...args) {
+        stubs.not(...args);
+        return chain;
+      },
+      filter(...args) {
+        stubs.filter(...args);
+        return chain;
+      },
+      or(...args) {
+        stubs.or(...args);
+        return chain;
+      },
+      limit(...args) {
+        stubs.limit(...args);
+        return Promise.resolve(result);
+      },
+      then(resolve, reject) {
+        return Promise.resolve(result).then(resolve, reject);
+      },
+    };
+    return chain;
+  }
+
+  fromStub.callsFake((t) => makeChain(t));
+  return { from: fromStub, ...stubs };
 }
 
 describe('llmo-brand-presence', () => {
@@ -861,6 +947,652 @@ describe('llmo-brand-presence', () => {
       expect(chainMock.eq).to.have.been.calledWith('organization_id', mockContext.params.spaceCatId);
       expect(chainMock.order).to.have.been.calledWith('week', { ascending: false });
       expect(chainMock.limit).to.have.been.calledWith(200000);
+    });
+  });
+
+  describe('dateToIsoWeek', () => {
+    it('converts a Monday to the correct ISO week', () => {
+      expect(dateToIsoWeek('2026-03-09')).to.equal('2026-W11');
+    });
+
+    it('converts a Sunday (last day of a week) to the correct ISO week', () => {
+      expect(dateToIsoWeek('2026-03-15')).to.equal('2026-W11');
+    });
+
+    it('converts a Thursday correctly (ISO reference day)', () => {
+      expect(dateToIsoWeek('2026-01-01')).to.equal('2026-W01');
+    });
+
+    it('handles year boundary where Jan 1 belongs to prior year week 53', () => {
+      // 2026-01-01 is Thursday and belongs to 2026-W01
+      // 2025-12-29 is a Monday and belongs to 2026-W01 (ISO year 2026)
+      expect(dateToIsoWeek('2025-12-29')).to.equal('2026-W01');
+    });
+
+    it('is inverse of getWeekDateRange startDate', () => {
+      const range = getWeekDateRange('2026-W11');
+      expect(dateToIsoWeek(range.startDate)).to.equal('2026-W11');
+    });
+
+    it('is inverse of getWeekDateRange endDate', () => {
+      const range = getWeekDateRange('2026-W11');
+      expect(dateToIsoWeek(range.endDate)).to.equal('2026-W11');
+    });
+  });
+
+  describe('createMarketTrackingTrendsHandler', () => {
+    it('returns badRequest when postgrestService is missing', async () => {
+      mockContext.dataAccess.Site.postgrestService = null;
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      expect(getOrgAndValidateAccess).not.to.have.been.called;
+    });
+
+    it('returns forbidden when user has no org access', async () => {
+      mockContext.dataAccess.Site.postgrestService = mockClient;
+      getOrgAndValidateAccess.rejects(new Error('Only users belonging to the organization can view brand presence data'));
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns badRequest when organization not found', async () => {
+      mockContext.dataAccess.Site.postgrestService = mockClient;
+      getOrgAndValidateAccess.rejects(new Error('Organization not found: 0178a3f0-1234-7000-8000-000000000001'));
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+    });
+
+    it('returns badRequest when brand executions query returns error', async () => {
+      const queryError = { message: 'relation "brand_presence_executions" does not exist' };
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: null, error: queryError },
+        executions_competitor_data: { data: [], error: null },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('relation "brand_presence_executions" does not exist');
+      expect(mockContext.log.error).to.have.been.calledWith(
+        'Market-tracking-trends brand query error: relation "brand_presence_executions" does not exist',
+      );
+    });
+
+    it('returns badRequest when competitor data query returns error', async () => {
+      const queryError = { message: 'relation "executions_competitor_data" does not exist' };
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        executions_competitor_data: { data: null, error: queryError },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('relation "executions_competitor_data" does not exist');
+      expect(mockContext.log.error).to.have.been.calledWith(
+        'Market-tracking-trends competitor query error: relation "executions_competitor_data" does not exist',
+      );
+    });
+
+    it('returns ok with empty weeklyTrends when no data', async () => {
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock();
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.weeklyTrends).to.deep.equal([]);
+      expect(body.weeklyTrendsForComparison).to.deep.equal([]);
+    });
+
+    it('counts distinct prompts with mentions per week (deduplication)', async () => {
+      const brandRows = [
+        // Two rows with the same composite key in the same week — should count as 1 mention
+        {
+          execution_date: '2026-03-09',
+          prompt: 'What is Acrobat?',
+          topics: 'PDF',
+          region_code: 'US',
+          site_id: 'site-1',
+          mentions: true,
+          citations: false,
+        },
+        {
+          execution_date: '2026-03-10',
+          prompt: 'What is Acrobat?',
+          topics: 'PDF',
+          region_code: 'US',
+          site_id: 'site-1',
+          mentions: true,
+          citations: false,
+        },
+        // Different prompt in same week — should add 1 more mention
+        {
+          execution_date: '2026-03-11',
+          prompt: 'Best PDF tool?',
+          topics: 'PDF',
+          region_code: 'US',
+          site_id: 'site-1',
+          mentions: true,
+          citations: true,
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: brandRows, error: null },
+        executions_competitor_data: { data: [], error: null },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.weeklyTrends).to.have.lengthOf(1);
+      const week = body.weeklyTrends[0];
+      expect(week.week).to.equal('2026-W11');
+      expect(week.mentions).to.equal(2); // 2 distinct prompts with mentions
+      expect(week.citations).to.equal(1); // 1 distinct prompt with citations
+    });
+
+    it('does not deduplicate across different regions or topics', async () => {
+      const brandRows = [
+        {
+          execution_date: '2026-03-09',
+          prompt: 'What is Acrobat?',
+          topics: 'PDF',
+          region_code: 'US',
+          site_id: 'site-1',
+          mentions: true,
+          citations: false,
+        },
+        {
+          execution_date: '2026-03-09',
+          prompt: 'What is Acrobat?',
+          topics: 'PDF',
+          region_code: 'DE', // different region — different key
+          site_id: 'site-1',
+          mentions: true,
+          citations: false,
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: brandRows, error: null },
+        executions_competitor_data: { data: [], error: null },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.weeklyTrends[0].mentions).to.equal(2);
+    });
+
+    it('aggregates competitor mentions and citations per week', async () => {
+      const competitorRows = [
+        {
+          execution_date: '2026-03-09', competitor: 'CompA', mentions: 5, citations: 2,
+        },
+        {
+          execution_date: '2026-03-11', competitor: 'CompA', mentions: 3, citations: 1,
+        },
+        {
+          execution_date: '2026-03-09', competitor: 'CompB', mentions: 10, citations: 4,
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        executions_competitor_data: { data: competitorRows, error: null },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.weeklyTrends).to.have.lengthOf(1);
+      const week = body.weeklyTrends[0];
+      expect(week.week).to.equal('2026-W11');
+
+      const compA = week.competitors.find((c) => c.name === 'CompA');
+      const compB = week.competitors.find((c) => c.name === 'CompB');
+      expect(compA).to.deep.equal({ name: 'CompA', mentions: 8, citations: 3 });
+      expect(compB).to.deep.equal({ name: 'CompB', mentions: 10, citations: 4 });
+    });
+
+    it('sorts competitors by total activity descending', async () => {
+      const competitorRows = [
+        {
+          execution_date: '2026-03-09', competitor: 'LowActivity', mentions: 1, citations: 0,
+        },
+        {
+          execution_date: '2026-03-09', competitor: 'HighActivity', mentions: 10, citations: 5,
+        },
+        {
+          execution_date: '2026-03-09', competitor: 'MidActivity', mentions: 4, citations: 2,
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        executions_competitor_data: { data: competitorRows, error: null },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      const names = body.weeklyTrends[0].competitors.map((c) => c.name);
+      expect(names).to.deep.equal(['HighActivity', 'MidActivity', 'LowActivity']);
+    });
+
+    it('spans multiple weeks correctly', async () => {
+      const brandRows = [
+        {
+          execution_date: '2026-03-02',
+          prompt: 'q1',
+          topics: 't1',
+          region_code: 'US',
+          site_id: 's1',
+          mentions: true,
+          citations: false,
+        },
+        {
+          execution_date: '2026-03-09',
+          prompt: 'q2',
+          topics: 't1',
+          region_code: 'US',
+          site_id: 's1',
+          mentions: true,
+          citations: true,
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: brandRows, error: null },
+        executions_competitor_data: { data: [], error: null },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.weeklyTrends).to.have.lengthOf(2);
+      expect(body.weeklyTrends[0].week).to.equal('2026-W10');
+      expect(body.weeklyTrends[1].week).to.equal('2026-W11');
+      expect(body.weeklyTrends[0].mentions).to.equal(1);
+      expect(body.weeklyTrends[1].citations).to.equal(1);
+    });
+
+    it('weeklyTrendsForComparison mirrors weeklyTrends', async () => {
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock();
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.weeklyTrends).to.deep.equal(body.weeklyTrendsForComparison);
+    });
+
+    it('queries brand_presence_executions with correct fields', async () => {
+      const client = createTableAwareMock();
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.from).to.have.been.calledWith('brand_presence_executions');
+      expect(client.select).to.have.been.calledWith(
+        'execution_date, prompt, topics, region_code, site_id, mentions, citations',
+      );
+    });
+
+    it('queries executions_competitor_data for competitor rows', async () => {
+      const client = createTableAwareMock();
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.from).to.have.been.calledWith('executions_competitor_data');
+    });
+
+    it('defaults model to chatgpt when not provided', async () => {
+      const client = createTableAwareMock();
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('model', 'chatgpt');
+    });
+
+    it('uses model from query param when provided', async () => {
+      const client = createTableAwareMock();
+      mockContext.data = { model: 'gemini' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('model', 'gemini');
+    });
+
+    it('filters by brandId when single brand route', async () => {
+      const client = createTableAwareMock();
+      mockContext.params.brandId = '0178a3f0-1234-7000-8000-000000000002';
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('brand_id', '0178a3f0-1234-7000-8000-000000000002');
+    });
+
+    it('does not filter by brand_id when brandId is "all"', async () => {
+      const client = createTableAwareMock();
+      mockContext.params.brandId = 'all';
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      const brandIdCalls = client.eq.getCalls().filter((c) => c.args[0] === 'brand_id');
+      expect(brandIdCalls).to.have.lengthOf(0);
+    });
+
+    it('filters by category_id when categoryId is a valid UUID', async () => {
+      const client = createTableAwareMock();
+      mockContext.data = { categoryId: '0178a3f0-1234-7000-8000-000000000099' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('category_id', '0178a3f0-1234-7000-8000-000000000099');
+    });
+
+    it('filters by category_name when categoryId is not a UUID', async () => {
+      const client = createTableAwareMock();
+      mockContext.data = { categoryId: 'Acrobat' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('category_name', 'Acrobat');
+    });
+
+    it('filters by region_code when region is provided', async () => {
+      const client = createTableAwareMock();
+      mockContext.data = { region: 'US' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      expect(client.eq).to.have.been.calledWith('region_code', 'US');
+    });
+
+    it('does not filter by topic or origin (comparison filters stripped)', async () => {
+      const client = createTableAwareMock();
+      mockContext.data = { topic: 'PDF editing', origin: 'ai' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      await handler(mockContext);
+
+      const topicCalls = client.eq.getCalls().filter((c) => c.args[0] === 'topic' || c.args[0] === 'topics');
+      const originCalls = client.eq.getCalls().filter((c) => c.args[0] === 'origin');
+      expect(topicCalls).to.have.lengthOf(0);
+      expect(originCalls).to.have.lengthOf(0);
+    });
+
+    it('returns 403 when siteId does not belong to the organization', async () => {
+      const client = createTableAwareMock({
+        sites: { data: [], error: null },
+      });
+      mockContext.data = { siteId: 'cccdac43-1a22-4659-9086-b762f59b9928' };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(403);
+      const body = await result.json();
+      expect(body.message).to.equal('Site does not belong to the organization');
+    });
+
+    it('applies site_id filter on both queries when siteId belongs to org', async () => {
+      const siteId = 'cccdac43-1a22-4659-9086-b762f59b9928';
+      const client = createTableAwareMock({
+        sites: { data: [{ id: siteId }], error: null },
+        brand_presence_executions: { data: [], error: null },
+        executions_competitor_data: { data: [], error: null },
+      });
+      mockContext.data = { siteId };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const siteIdCalls = client.eq.getCalls().filter((c) => c.args[0] === 'site_id' && c.args[1] === siteId);
+      // site_id filter applied to brand query AND competitor query (2 calls)
+      expect(siteIdCalls).to.have.lengthOf.at.least(2);
+    });
+
+    it('accepts snake_case params (start_date, end_date, region_code)', async () => {
+      const client = createTableAwareMock();
+      mockContext.data = {
+        start_date: '2026-03-01',
+        end_date: '2026-03-15',
+        model: 'gemini',
+        region_code: 'DE',
+      };
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      expect(client.eq).to.have.been.calledWith('model', 'gemini');
+      expect(client.eq).to.have.been.calledWith('region_code', 'DE');
+    });
+
+    it('handles null context.data gracefully', async () => {
+      const client = createTableAwareMock();
+      mockContext.data = null;
+      mockContext.dataAccess.Site.postgrestService = client;
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+    });
+
+    it('handles null data from both queries (uses empty array fallback)', async () => {
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: null, error: null },
+        executions_competitor_data: { data: null, error: null },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.weeklyTrends).to.deep.equal([]);
+    });
+
+    it('skips competitor rows where competitor field is null or missing', async () => {
+      const competitorRows = [
+        {
+          execution_date: '2026-03-09', competitor: null, mentions: 5, citations: 2,
+        },
+        {
+          execution_date: '2026-03-09', competitor: 'ValidComp', mentions: 3, citations: 1,
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        executions_competitor_data: { data: competitorRows, error: null },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.weeklyTrends[0].competitors).to.have.lengthOf(1);
+      expect(body.weeklyTrends[0].competitors[0].name).to.equal('ValidComp');
+    });
+
+    it('treats null mentions/citations on competitor rows as 0', async () => {
+      const competitorRows = [
+        {
+          execution_date: '2026-03-09', competitor: 'CompA', mentions: null, citations: null,
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        executions_competitor_data: { data: competitorRows, error: null },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.weeklyTrends[0].competitors[0]).to.deep.equal({
+        name: 'CompA', mentions: 0, citations: 0,
+      });
+    });
+
+    it('handles mentions as string "true" (coercion from PostgREST text column)', async () => {
+      const brandRows = [
+        {
+          execution_date: '2026-03-09',
+          prompt: 'q1',
+          topics: 't1',
+          region_code: 'US',
+          site_id: 's1',
+          mentions: 'true',
+          citations: 'false',
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: brandRows, error: null },
+        executions_competitor_data: { data: [], error: null },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.weeklyTrends[0].mentions).to.equal(1);
+      expect(body.weeklyTrends[0].citations).to.equal(0);
+    });
+
+    it('skips brand rows where execution_date is null', async () => {
+      const brandRows = [
+        // Row with null execution_date — should be skipped entirely
+        {
+          execution_date: null,
+          prompt: 'q1',
+          topics: 't1',
+          region_code: 'US',
+          site_id: 's1',
+          mentions: true,
+          citations: true,
+        },
+        // Valid row that should be counted
+        {
+          execution_date: '2026-03-09',
+          prompt: 'q2',
+          topics: 't1',
+          region_code: 'US',
+          site_id: 's1',
+          mentions: true,
+          citations: false,
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: brandRows, error: null },
+        executions_competitor_data: { data: [], error: null },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.weeklyTrends).to.have.lengthOf(1);
+      expect(body.weeklyTrends[0].mentions).to.equal(1);
+    });
+
+    it('deduplicates using empty-string fallbacks for null prompt/topics/region/site fields', async () => {
+      const brandRows = [
+        // Both rows have null prompt/topics/region_code/site_id — same dedup key => count as 1
+        {
+          execution_date: '2026-03-09',
+          prompt: null,
+          topics: null,
+          region_code: null,
+          site_id: null,
+          mentions: true,
+          citations: true,
+        },
+        {
+          execution_date: '2026-03-10',
+          prompt: null,
+          topics: null,
+          region_code: null,
+          site_id: null,
+          mentions: true,
+          citations: true,
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: brandRows, error: null },
+        executions_competitor_data: { data: [], error: null },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.weeklyTrends[0].mentions).to.equal(1);
+      expect(body.weeklyTrends[0].citations).to.equal(1);
+    });
+
+    it('produces weekNumber 0 and year 0 when competitor execution_date yields an invalid ISO week', async () => {
+      // An invalid date string passes the !execution_date check (it is truthy) but
+      // dateToIsoWeek produces 'NaN-WNaN', causing parseIsoWeek to return {weekNumber:0, year:0}
+      const competitorRows = [
+        {
+          execution_date: 'invalid-date', competitor: 'CompA', mentions: 5, citations: 2,
+        },
+      ];
+      mockContext.dataAccess.Site.postgrestService = createTableAwareMock({
+        brand_presence_executions: { data: [], error: null },
+        executions_competitor_data: { data: competitorRows, error: null },
+      });
+
+      const handler = createMarketTrackingTrendsHandler(getOrgAndValidateAccess);
+      const result = await handler(mockContext);
+
+      const body = await result.json();
+      expect(body.weeklyTrends).to.have.lengthOf(1);
+      expect(body.weeklyTrends[0].weekNumber).to.equal(0);
+      expect(body.weeklyTrends[0].year).to.equal(0);
     });
   });
 });

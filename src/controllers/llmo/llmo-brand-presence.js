@@ -376,6 +376,233 @@ export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
   );
 }
 
+// ── Market Tracking Trends ──────────────────────────────────────────────────
+
+function parseMarketTrackingTrendsParams(context) {
+  const q = context.data || {};
+  return {
+    startDate: q.startDate || q.start_date,
+    endDate: q.endDate || q.end_date,
+    model: q.model,
+    siteId: q.siteId || q.site_id,
+    categoryId: q.categoryId || q.category_id,
+    regionCode: q.regionCode || q.region_code || q.region,
+  };
+}
+
+/**
+ * Converts a date string (YYYY-MM-DD) to an ISO week string (YYYY-Wnn).
+ * @param {string} dateStr - e.g. "2026-03-15"
+ * @returns {string} e.g. "2026-W11"
+ * @internal Exported for testing
+ */
+export function dateToIsoWeek(dateStr) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  const dayOfWeek = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayOfWeek);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNumber = Math.ceil(((d - yearStart) / MS_PER_DAY + 1) / 7);
+  const year = d.getUTCFullYear();
+  return `${year}-W${String(weekNumber).padStart(2, '0')}`;
+}
+
+function parseIsoWeek(weekStr) {
+  const match = /^(\d{4})-W(\d{2})$/.exec(weekStr);
+  if (!match) return { weekNumber: 0, year: 0 };
+  return {
+    year: Number.parseInt(match[1], 10),
+    weekNumber: Number.parseInt(match[2], 10),
+  };
+}
+
+/**
+ * Queries brand_presence_executions for raw execution rows.
+ * Mirrors the legacy UI approach which reads from the brand_all sheet
+ * (equivalent to brand_presence_executions) and deduplicates by unique prompt
+ * before counting mentions and citations per week.
+ *
+ * Deduplication key: prompt|topics|region_code|site_id — matches the legacy UI
+ * composite key (prompt|Region|Topics|siteId).
+ *
+ * TODO: Once prompt_id is populated on brand_presence_executions, replace the
+ * composite-key deduplication with a simple distinct count on prompt_id for
+ * better performance and correctness.
+ */
+function buildBrandExecutionsQuery(client, organizationId, params, defaults, filterByBrandId) {
+  const startDate = params.startDate || defaults.startDate;
+  const endDate = params.endDate || defaults.endDate;
+  const model = params.model || 'chatgpt';
+  const {
+    siteId, categoryId, regionCode,
+  } = params;
+
+  let q = client
+    .from('brand_presence_executions')
+    .select('execution_date, prompt, topics, region_code, site_id, mentions, citations')
+    .eq('organization_id', organizationId)
+    .eq('model', model)
+    .gte('execution_date', startDate)
+    .lte('execution_date', endDate);
+
+  if (shouldApplyFilter(siteId)) {
+    q = q.eq('site_id', siteId);
+  }
+  if (filterByBrandId) {
+    q = q.eq('brand_id', filterByBrandId);
+  }
+  if (shouldApplyFilter(categoryId)) {
+    q = isValidUUID(categoryId) ? q.eq('category_id', categoryId) : q.eq('category_name', categoryId);
+  }
+  if (shouldApplyFilter(regionCode)) {
+    q = q.eq('region_code', regionCode);
+  }
+
+  return q;
+}
+
+function buildCompetitorDataQuery(client, organizationId, params, defaults, filterByBrandId) {
+  const startDate = params.startDate || defaults.startDate;
+  const endDate = params.endDate || defaults.endDate;
+  const model = params.model || 'chatgpt';
+  const {
+    siteId, categoryId, regionCode,
+  } = params;
+
+  let q = client
+    .from('executions_competitor_data')
+    .select('execution_date, competitor, mentions, citations')
+    .eq('organization_id', organizationId)
+    .eq('model', model)
+    .gte('execution_date', startDate)
+    .lte('execution_date', endDate);
+
+  if (shouldApplyFilter(siteId)) {
+    q = q.eq('site_id', siteId);
+  }
+  if (filterByBrandId) {
+    q = q.eq('brand_id', filterByBrandId);
+  }
+  if (shouldApplyFilter(categoryId)) {
+    q = isValidUUID(categoryId) ? q.eq('category_id', categoryId) : q.eq('category_name', categoryId);
+  }
+  if (shouldApplyFilter(regionCode)) {
+    q = q.eq('region_code', regionCode);
+  }
+
+  return q;
+}
+
+function aggregateWeeklyTrends(brandRows, competitorRows) {
+  // Deduplicate brand rows by unique prompt key per week before counting.
+  // Key: prompt|topics|region_code|site_id — mirrors the legacy UI composite key.
+  const brandByWeek = new Map();
+  brandRows.forEach((r) => {
+    if (!r.execution_date) return;
+    const w = dateToIsoWeek(String(r.execution_date));
+    if (!brandByWeek.has(w)) {
+      brandByWeek.set(w, { mentionKeys: new Set(), citationKeys: new Set() });
+    }
+    const bucket = brandByWeek.get(w);
+    const key = `${r.prompt || ''}|${r.topics || ''}|${r.region_code || ''}|${r.site_id || ''}`;
+    if (r.mentions === true || r.mentions === 'true') bucket.mentionKeys.add(key);
+    if (r.citations === true || r.citations === 'true') bucket.citationKeys.add(key);
+  });
+
+  const competitorByWeek = new Map();
+  competitorRows.forEach((r) => {
+    if (!r.execution_date || !r.competitor) return;
+    const week = dateToIsoWeek(String(r.execution_date));
+    if (!competitorByWeek.has(week)) {
+      competitorByWeek.set(week, new Map());
+    }
+    const weekMap = competitorByWeek.get(week);
+    const existing = weekMap.get(r.competitor) || { mentions: 0, citations: 0 };
+    existing.mentions += r.mentions || 0;
+    existing.citations += r.citations || 0;
+    weekMap.set(r.competitor, existing);
+  });
+
+  const allWeeks = new Set([...brandByWeek.keys(), ...competitorByWeek.keys()]);
+  return [...allWeeks].sort().map((weekStr) => {
+    const { weekNumber, year } = parseIsoWeek(weekStr);
+    const brandBucket = brandByWeek.get(weekStr);
+    const brand = brandBucket
+      ? { mentions: brandBucket.mentionKeys.size, citations: brandBucket.citationKeys.size }
+      : { mentions: 0, citations: 0 };
+    const competitorMap = competitorByWeek.get(weekStr) || new Map();
+
+    const competitors = [...competitorMap.entries()]
+      .map(([name, data]) => ({ name, mentions: data.mentions, citations: data.citations }))
+      .sort((a, b) => (b.mentions + b.citations) - (a.mentions + a.citations));
+
+    return {
+      week: weekStr,
+      weekNumber,
+      year,
+      mentions: brand.mentions,
+      citations: brand.citations,
+      competitors,
+    };
+  });
+}
+
+/**
+ * Creates the getMarketTrackingTrends handler.
+ * Returns weekly brand mentions/citations + per-competitor breakdowns.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createMarketTrackingTrendsHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'market-tracking-trends',
+    async (ctx, client) => {
+      const { spaceCatId, brandId } = ctx.params;
+      const params = parseMarketTrackingTrendsParams(ctx);
+      const defaults = defaultDateRange();
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+
+      if (shouldApplyFilter(params.siteId)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(
+          client,
+          organizationId,
+          params.siteId,
+        );
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
+      }
+
+      // eslint-disable-next-line max-len
+      const brandQuery = buildBrandExecutionsQuery(client, organizationId, params, defaults, filterByBrandId);
+      // eslint-disable-next-line max-len
+      const competitorQuery = buildCompetitorDataQuery(client, organizationId, params, defaults, filterByBrandId);
+
+      const [brandResult, competitorResult] = await Promise.all([brandQuery, competitorQuery]);
+
+      if (brandResult.error) {
+        ctx.log.error(`Market-tracking-trends brand query error: ${brandResult.error.message}`);
+        return badRequest(brandResult.error.message);
+      }
+      if (competitorResult.error) {
+        ctx.log.error(`Market-tracking-trends competitor query error: ${competitorResult.error.message}`);
+        return badRequest(competitorResult.error.message);
+      }
+
+      const weeklyTrends = aggregateWeeklyTrends(
+        brandResult.data || [],
+        competitorResult.data || [],
+      );
+
+      return ok({
+        weeklyTrends,
+        weeklyTrendsForComparison: weeklyTrends,
+      });
+    },
+  );
+}
+
 /**
  * Creates the getFilterDimensions handler.
  * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
