@@ -539,18 +539,15 @@ describe('Suggestions Controller', () => {
     expect(suggestions[0]).to.have.property('opportunityId', OPPORTUNITY_ID);
   });
 
-  it('returns empty array when grant filtering throws an error', async () => {
+  it('propagates error when grant filtering throws an error', async () => {
     mockSuggestionGrant.splitSuggestionsByGrantStatus.rejects(new Error('db failure'));
-    const response = await suggestionsController.getAllForOpportunity({
+    await expect(suggestionsController.getAllForOpportunity({
       params: {
         siteId: SITE_ID,
         opportunityId: OPPORTUNITY_ID,
       },
       ...context,
-    });
-    expect(response.status).to.equal(200);
-    const suggestions = await response.json();
-    expect(suggestions).to.be.an('array').with.lengthOf(0);
+    })).to.be.rejectedWith('Failed to filter suggestions by grant status');
   });
 
   it('returns all suggestions without grant filtering when summit-plg is not enabled', async () => {

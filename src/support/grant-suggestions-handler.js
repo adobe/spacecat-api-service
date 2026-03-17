@@ -144,7 +144,8 @@ export async function grantSuggestionsForOpportunity(dataAccess, site, opportuni
     ? getTokenGrantConfigByOpportunity(oppType) : null;
   const tokenType = config?.tokenType;
 
-  if (!Suggestion || !SuggestionGrant || !Token || !siteId || !opptyId || !config) return;
+  if (!Suggestion || !SuggestionGrant || !Token || !siteId || !opptyId || !config
+    || !tokenType) return;
 
   const { STATUSES } = SuggestionModel;
   const newSuggestions = await Suggestion

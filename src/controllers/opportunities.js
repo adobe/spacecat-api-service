@@ -161,7 +161,8 @@ function OpportunitiesController(ctx) {
     if (await getIsSummitPlgEnabled(site, ctx)) {
       try {
         await grantSuggestionsForOpportunity(dataAccess, site, oppty);
-      /* c8 ignore next */ } catch (err) {
+      /* c8 ignore next 3 */
+      } catch (err) {
         ctx.log?.warn?.('Grant suggestions handler failed', err?.message ?? err);
       }
     }

@@ -199,9 +199,10 @@ function SuggestionsController(ctx, sqs, env) {
       const ids = suggestions.map((s) => s.getId());
       const { grantedIds } = await SuggestionGrant.splitSuggestionsByGrantStatus(ids);
       return suggestions.filter((s) => grantedIds.includes(s.getId()));
-    /* c8 ignore next */ } catch (err) {
-      ctx.log?.error?.('Failed to filter suggestions by grant status', err?.message ?? err);
-      return [];
+    } catch (err) {
+      const message = 'Failed to filter suggestions by grant status';
+      ctx.log?.error?.(message, err?.message ?? err);
+      throw new Error(message, { cause: err });
     }
   };
 
