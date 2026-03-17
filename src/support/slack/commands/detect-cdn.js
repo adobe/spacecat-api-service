@@ -88,6 +88,7 @@ export default function DetectCdnCommand(context) {
 
   return {
     ...baseCommand,
+    usageText: `${PHRASES[0]} {url}`,
     handleExecution,
   };
 }

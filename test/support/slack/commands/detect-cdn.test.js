@@ -31,7 +31,9 @@ describe('DetectCdnCommand', () => {
   beforeEach(async function beforeEachHook() {
     this.timeout(10000);
     extractURLFromSlackInputStub = sinon.stub();
-    postErrorMessageStub = sinon.stub().resolves();
+    postErrorMessageStub = sinon.stub().callsFake(async (sayFn, err) => {
+      await sayFn(`:nuclear-warning: Oops! Something went wrong: ${err.message}`);
+    });
 
     DetectCdnCommand = (await esmock(
       '../../../../src/support/slack/commands/detect-cdn.js',
