@@ -48,6 +48,7 @@ import runPageCitability from './commands/run-page-citability.js';
 import runA11yCodefix from './commands/run-a11y-codefix.js';
 import identifyRedirects from './commands/identify-redirects.js';
 import identifyAndUpdateRedirects from './commands/identify-and-update-redirects.js';
+import detectCdn from './commands/detect-cdn.js';
 
 /**
  * Returns all commands.
@@ -94,4 +95,5 @@ export default (context) => [
   runA11yCodefix(context),
   identifyRedirects(context),
   identifyAndUpdateRedirects(context),
+  detectCdn(context),
 ];
