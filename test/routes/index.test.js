@@ -478,6 +478,8 @@ describe('getRouteHandlers', () => {
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/filter-dimensions',
       'GET /org/:spaceCatId/brands/all/brand-presence/weeks',
       'GET /org/:spaceCatId/brands/:brandId/brand-presence/weeks',
+      'GET /org/:spaceCatId/brands/all/brand-presence/sentiment-overview',
+      'GET /org/:spaceCatId/brands/:brandId/brand-presence/sentiment-overview',
       'PATCH /v2/orgs/:spaceCatId/llmo-customer-config',
       'POST /v2/orgs/:spaceCatId/llmo-customer-config',
       'GET /organizations/:organizationId/projects',

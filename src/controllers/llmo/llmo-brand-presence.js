@@ -85,7 +85,7 @@ function parseFilterDimensionsParams(context) {
   return {
     startDate: q.startDate || q.start_date,
     endDate: q.endDate || q.end_date,
-    model: q.model,
+    model: q.model || q.platform,
     siteId: q.siteId || q.site_id,
     categoryId: q.categoryId || q.category_id,
     topicId: q.topicId || q.topic_id || q.topic || q.topics,
@@ -262,7 +262,7 @@ function buildDimensionOptions(rows) {
 function parseWeeksParams(context) {
   const q = context.data || {};
   return {
-    model: q.model,
+    model: q.model || q.platform,
     siteId: q.siteId || q.site_id,
   };
 }
@@ -372,6 +372,161 @@ export function createBrandPresenceWeeksHandler(getOrgAndValidateAccess) {
       });
 
       return ok({ weeks });
+    },
+  );
+}
+
+/**
+ * Converts a YYYY-MM-DD date string to an ISO week object.
+ * @param {string} dateStr - e.g. "2026-03-11"
+ * @returns {{ week: string, weekNumber: number, year: number }}
+ * @internal Exported for testing
+ */
+export function toISOWeek(dateStr) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  const thursday = new Date(d);
+  thursday.setUTCDate(thursday.getUTCDate() + 3 - ((thursday.getUTCDay() + 6) % 7));
+  const yearStart = new Date(Date.UTC(thursday.getUTCFullYear(), 0, 1));
+  const weekNumber = Math.ceil(((thursday - yearStart) / MS_PER_DAY + 1) / 7);
+  const year = thursday.getUTCFullYear();
+  return { week: `${year}-W${String(weekNumber).padStart(2, '0')}`, weekNumber, year };
+}
+
+const SENTIMENT_COLORS = {
+  positive: '#047857',
+  neutral: '#4B5563',
+  negative: '#B91C1C',
+};
+
+/**
+ * Aggregates execution rows into per-week sentiment percentages.
+ * Matches the format produced by the original brand-presence UI hook:
+ * sentiment values are percentages (summing to 100), names are capitalized,
+ * and each entry includes a color hex string.
+ * @param {Array<{execution_date: string, sentiment: string|null, prompt: string|null}>} rows
+ * @returns {Array<Object>} weeklyTrends sorted by week ascending
+ * @internal Exported for testing
+ */
+export function aggregateSentimentByWeek(rows) {
+  const weekMap = new Map();
+
+  rows.forEach((row) => {
+    const { week, weekNumber, year } = toISOWeek(row.execution_date);
+    if (!weekMap.has(week)) {
+      weekMap.set(week, {
+        week,
+        weekNumber,
+        year,
+        positive: 0,
+        neutral: 0,
+        negative: 0,
+        totalPrompts: 0,
+        promptsWithSentiment: 0,
+      });
+    }
+    const entry = weekMap.get(week);
+    entry.totalPrompts += 1;
+
+    const sentiment = (row.sentiment || '').toLowerCase().trim();
+    if (sentiment === 'positive') {
+      entry.positive += 1;
+      entry.promptsWithSentiment += 1;
+    } else if (sentiment === 'neutral') {
+      entry.neutral += 1;
+      entry.promptsWithSentiment += 1;
+    } else if (sentiment === 'negative') {
+      entry.negative += 1;
+      entry.promptsWithSentiment += 1;
+    }
+  });
+
+  return [...weekMap.values()]
+    .sort((a, b) => a.week.localeCompare(b.week))
+    .map((entry) => {
+      const total = entry.promptsWithSentiment;
+      const positivePct = total > 0 ? Math.round((entry.positive / total) * 100) : 0;
+      const negativePct = total > 0 ? Math.round((entry.negative / total) * 100) : 0;
+      const neutralPct = total > 0 ? 100 - positivePct - negativePct : 0;
+
+      return {
+        week: entry.week,
+        weekNumber: entry.weekNumber,
+        year: entry.year,
+        sentiment: [
+          { name: 'Positive', value: positivePct, color: SENTIMENT_COLORS.positive },
+          { name: 'Neutral', value: neutralPct, color: SENTIMENT_COLORS.neutral },
+          { name: 'Negative', value: negativePct, color: SENTIMENT_COLORS.negative },
+        ],
+        totalPrompts: entry.totalPrompts,
+        promptsWithSentiment: entry.promptsWithSentiment,
+        mentions: 0,
+        citations: 0,
+        visibilityScore: 0,
+        competitors: [],
+      };
+    });
+}
+
+/**
+ * Creates the getSentimentOverview handler.
+ * Returns per-week sentiment counts (positive, neutral, negative) and prompt metrics.
+ * @param {Function} getOrgAndValidateAccess - Async (context) => { organization }
+ */
+export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
+  return (context) => withBrandPresenceAuth(
+    context,
+    getOrgAndValidateAccess,
+    'sentiment-overview',
+    async (ctx, client) => {
+      const { spaceCatId, brandId } = ctx.params;
+      const params = parseFilterDimensionsParams(ctx);
+      const defaults = defaultDateRange();
+      const organizationId = spaceCatId;
+      const filterByBrandId = brandId && brandId !== 'all' ? brandId : null;
+
+      const startDate = params.startDate || defaults.startDate;
+      const endDate = params.endDate || defaults.endDate;
+      const model = params.model || 'chatgpt';
+
+      let q = client
+        .from('brand_presence_executions')
+        .select('execution_date, sentiment, prompt')
+        .eq('organization_id', organizationId)
+        .gte('execution_date', startDate)
+        .lte('execution_date', endDate)
+        .eq('model', model);
+
+      if (shouldApplyFilter(params.siteId)) q = q.eq('site_id', params.siteId);
+      if (filterByBrandId) q = q.eq('brand_id', filterByBrandId);
+      if (shouldApplyFilter(params.categoryId)) {
+        q = isValidUUID(params.categoryId)
+          ? q.eq('category_id', params.categoryId)
+          : q.eq('category_name', params.categoryId);
+      }
+      if (shouldApplyFilter(params.topicId)) q = q.eq('topics', params.topicId);
+      if (shouldApplyFilter(params.regionCode)) q = q.eq('region_code', params.regionCode);
+      if (shouldApplyFilter(params.origin)) q = q.ilike('origin', params.origin);
+
+      const { data, error } = await q.limit(WEEKS_QUERY_LIMIT);
+
+      if (error) {
+        ctx.log.error(`Brand presence sentiment-overview PostgREST error: ${error.message}`);
+        return badRequest(error.message);
+      }
+
+      if (shouldApplyFilter(params.siteId)) {
+        const siteBelongsToOrg = await validateSiteBelongsToOrg(
+          client,
+          organizationId,
+          params.siteId,
+        );
+        if (!siteBelongsToOrg) {
+          return forbidden('Site does not belong to the organization');
+        }
+      }
+
+      const weeklyTrends = aggregateSentimentByWeek(data || []);
+      return ok({ weeklyTrends });
     },
   );
 }
