@@ -1,3 +1,10 @@
+## [1.351.3](https://github.com/adobe/spacecat-api-service/compare/v1.351.2...v1.351.3) (2026-03-17)
+
+
+### Bug Fixes
+
+* use promise token cookie in preflight and suggestions controller ([#1917](https://github.com/adobe/spacecat-api-service/issues/1917)) ([ef3feb3](https://github.com/adobe/spacecat-api-service/commit/ef3feb3446620cb879e80a193303c3cab71427ea))
+
 ## [1.351.2](https://github.com/adobe/spacecat-api-service/compare/v1.351.1...v1.351.2) (2026-03-17)
 
 
