@@ -1,8 +1,8 @@
 /*
  * Copyright 2026 Adobe. All rights reserved.
  * This file is licensed to you under the Apache License, Version 2.0 (the "License");
- * you may not use it except in compliance with the License. You may obtain a copy
- * of the License at https://www.apache.org/licenses/LICENSE-2.0
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software distributed under
  * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
@@ -101,7 +101,7 @@ describe('DetectCdnCommand', () => {
 
   it('notifies when env is undefined', async () => {
     extractURLFromSlackInputStub.returns('https://example.com');
-    const { env, ...contextWithoutEnv } = context;
+    const { env: _env, ...contextWithoutEnv } = context;
     const command = DetectCdnCommand(contextWithoutEnv);
 
     await command.handleExecution(['https://example.com'], slackContext);
