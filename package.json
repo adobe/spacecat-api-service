@@ -39,10 +39,14 @@
     "testUrl": "/_status_check/healthcheck.json",
     "awsAttachAuthorizer": "spacecat-token-authorizer",
     "dev": {
-      "params-file": "secrets/dev-secrets.json"
+      "params-file": "secrets/dev-secrets.json",
+      "awsReservedConcurrency": 50
+    },
+    "stage": {
+      "awsReservedConcurrency": 75
     },
     "fastlyServiceId!important": "",
-    "awsReservedConcurrency": 50,
+    "awsReservedConcurrency": 100,
     "timeout": 900000,
     "nodeVersion": 24,
     "static": [
