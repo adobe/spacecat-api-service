@@ -475,6 +475,16 @@ describe('Suggestions Controller', () => {
         create: sandbox.stub(),
         findById: sandbox.stub(),
       },
+      DeploymentExperiment: {
+        create: sandbox.stub(),
+        findById: sandbox.stub().resolves({
+          getId: () => 'dep-exp-001',
+          getStatus: () => 'pre_analysis_submitted',
+          getPreDeploymentId: () => 'batch-pre-001',
+          getPostDeploymentId: () => null,
+          getError: () => null,
+        }),
+      },
     };
     mockSqs = {
       sendMessage: sandbox.stub().resolves(),
@@ -4659,6 +4669,8 @@ describe('Suggestions Controller', () => {
     const JOB_ID = 'c3a7b5e2-1234-4abc-9def-567890abcdef';
 
     beforeEach(() => {
+      context.pathInfo = { headers: { prefer: 'respond-async' } };
+      context.attributes.authInfo.profile = { email: 'default-owner@example.com' };
       sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(true);
       sandbox.stub(AccessControlUtil.prototype, 'isOwnerOfSite').resolves(true);
 
@@ -4717,10 +4729,10 @@ describe('Suggestions Controller', () => {
       mockSuggestion.allByOpportunityId.resolves(edgeSuggestions);
 
       mockDrsClient = {
-        submitExperiment: sandbox.stub().resolves({
-          experiment_id: 'exp-123',
-          experiment_batch_id: 'batch-pre-001',
-          status: 'RUNNING',
+        createExperimentSchedule: sandbox.stub().resolves({
+          schedule: {
+            schedule_id: 'sched-pre-001',
+          },
         }),
       };
       sandbox.stub(DrsClient, 'createFrom').returns(mockDrsClient);
@@ -4735,6 +4747,9 @@ describe('Suggestions Controller', () => {
           deployStatus: 'pre_analysis_submitted',
           preExperimentBatchId: 'batch-pre-001',
         }),
+      });
+      mockSuggestionDataAccess.DeploymentExperiment.create.resolves({
+        getId: () => 'dep-exp-001',
       });
     });
 
@@ -4778,6 +4793,19 @@ describe('Suggestions Controller', () => {
         data: { suggestionIds: [SUGGESTION_IDS[0]] },
         env: {},
       });
+      expect(response.status).to.equal(400);
+    });
+
+    it('uses baseURL fallback when hostname cannot be extracted', async () => {
+      site.getBaseURL = sandbox.stub().returns('');
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: 'invalid-uuid' },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: {},
+      });
+
       expect(response.status).to.equal(400);
     });
 
@@ -4865,6 +4893,45 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(400);
     });
 
+    it('returns 500 when DeploymentExperiment data access is missing', async () => {
+      const controllerWithoutDeploymentExperiment = SuggestionsController({
+        dataAccess: {
+          ...mockSuggestionDataAccess,
+          DeploymentExperiment: undefined,
+        },
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContext,
+      }, mockSqs, { AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue' });
+
+      const response = await controllerWithoutDeploymentExperiment.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: { prefer: 'respond-async' } },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: { AWS_ENV: 'dev' },
+      });
+
+      expect(response.status).to.equal(500);
+      const body = await response.json();
+      expect(body.message).to.include('DeploymentExperiment data access is not configured');
+    });
+
+    it('returns 500 when DeploymentExperiment create returns no id', async () => {
+      mockSuggestionDataAccess.DeploymentExperiment.create.resolves({});
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: { prefer: 'respond-async' } },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: { AWS_ENV: 'dev' },
+      });
+
+      expect(response.status).to.equal(500);
+      const body = await response.json();
+      expect(body.message).to.include('DeploymentExperiment was not created');
+    });
+
     it('filters out suggestions not in NEW status (non-domain-wide)', async () => {
       const approvedSugg = {
         getId: () => SUGGESTION_IDS[0],
@@ -4935,6 +5002,179 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(202);
     });
 
+    it('logs warning and continues when domain-wide regex is invalid', async () => {
+      const domainWideSugg = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          isDomainWide: true,
+          scope: 'domain-wide',
+          url: 'https://example.com',
+          allowedRegexPatterns: ['[invalid-regex'],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub(),
+        setUpdatedBy: sandbox.stub(),
+        save: sandbox.stub().resolves(),
+      };
+      const regularSugg = {
+        getId: () => SUGGESTION_IDS[1],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 2,
+        getData: () => ({ url: 'https://example.com/page2' }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub(),
+        setUpdatedBy: sandbox.stub(),
+        save: sandbox.stub().resolves(),
+      };
+      mockSuggestion.allByOpportunityId.resolves([domainWideSugg, regularSugg]);
+
+      const mockTokowakaClient = {
+        deploySuggestions: sandbox.stub().resolves({
+          succeededSuggestions: [regularSugg],
+          failedSuggestions: [],
+        }),
+        fetchMetaconfig: sandbox.stub().resolves({}),
+        uploadMetaconfig: sandbox.stub().resolves(),
+      };
+      sandbox.stub(TokowakaClient, 'createFrom').returns(mockTokowakaClient);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(context.log.warn.calledWithMatch('Invalid regex pattern')).to.equal(true);
+    });
+
+    it('uses fallback updatedBy for auto-covered suggestions when profile email is missing', async () => {
+      context.attributes.authInfo.profile = null;
+
+      const domainWideSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          isDomainWide: true,
+          scope: 'domain-wide',
+          url: 'https://example.com',
+          allowedRegexPatterns: ['^https://example\\.com/page1$'],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      const coveredSuggestion = {
+        getId: () => '20f74d47-2ce0-402c-bd7d-f10f7237bfa5',
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 2,
+        getData: () => ({ url: 'https://example.com/page1' }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion, coveredSuggestion]);
+      sandbox.stub(TokowakaClient, 'createFrom').returns({
+        fetchMetaconfig: sandbox.stub().resolves({}),
+        uploadMetaconfig: sandbox.stub().resolves(),
+      });
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(coveredSuggestion.setUpdatedBy.calledWith('domain-wide-deployment')).to.equal(true);
+    });
+
+    it('uses fallback updatedBy for same-batch skipped suggestions when profile email is missing', async () => {
+      context.attributes.authInfo.profile = null;
+
+      const domainWideSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          isDomainWide: true,
+          scope: 'domain-wide',
+          url: 'https://example.com',
+          allowedRegexPatterns: ['^https://example\\.com/page1$'],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      const skippedSuggestion = {
+        getId: () => SUGGESTION_IDS[1],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 2,
+        getData: () => ({ url: 'https://example.com/page1' }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion, skippedSuggestion]);
+      sandbox.stub(TokowakaClient, 'createFrom').returns({
+        deploySuggestions: sandbox.stub().resolves({
+          succeededSuggestions: [domainWideSuggestion],
+          failedSuggestions: [],
+        }),
+        fetchMetaconfig: sandbox.stub().resolves({}),
+        uploadMetaconfig: sandbox.stub().resolves(),
+      });
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(skippedSuggestion.setUpdatedBy.calledWith('domain-wide-deployment')).to.equal(true);
+    });
+
     it('returns 202 accepted with job details on success', async () => {
       const response = await suggestionsController.deploySuggestionToEdge({
         ...context,
@@ -4947,49 +5187,12 @@ describe('Suggestions Controller', () => {
       const body = await response.json();
       expect(body.jobId).to.equal(JOB_ID);
       expect(body.status).to.equal('pre_analysis_submitted');
-      expect(body.experimentBatchId).to.equal('batch-pre-001');
-      expect(body.pollUrl).to.include('/edge-deploy/');
-      expect(body.pollUrl).to.include('/status');
+      expect(body.experimentBatchId).to.equal('sched-pre-001');
+      expect(body.deploymentExperimentId).to.equal('dep-exp-001');
       expect(body.metadata.accepted).to.equal(2);
     });
 
-    it('includes dev path segment when AWS_ENV is dev', async () => {
-      const devController = SuggestionsController({
-        dataAccess: mockSuggestionDataAccess,
-        pathInfo: { headers: { 'x-product': 'llmo' } },
-        ...authContext,
-      }, mockSqs, { AWS_ENV: 'dev' });
-
-      const response = await devController.deploySuggestionToEdge({
-        ...context,
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
-        data: { suggestionIds: [SUGGESTION_IDS[0]] },
-      });
-
-      expect(response.status).to.equal(202);
-      const body = await response.json();
-      expect(body.pollUrl).to.include('/api/ci/');
-    });
-
-    it('includes prod path segment when AWS_ENV is not dev', async () => {
-      const prodController = SuggestionsController({
-        dataAccess: mockSuggestionDataAccess,
-        pathInfo: { headers: { 'x-product': 'llmo' } },
-        ...authContext,
-      }, mockSqs, { AWS_ENV: 'prod' });
-
-      const response = await prodController.deploySuggestionToEdge({
-        ...context,
-        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
-        data: { suggestionIds: [SUGGESTION_IDS[0]] },
-      });
-
-      expect(response.status).to.equal(202);
-      const body = await response.json();
-      expect(body.pollUrl).to.include('/api/v1/');
-    });
-
-    it('calls DrsClient.submitExperiment with correct params', async () => {
+    it('calls DrsClient.createExperimentSchedule with correct params', async () => {
       await suggestionsController.deploySuggestionToEdge({
         ...context,
         params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
@@ -4997,8 +5200,8 @@ describe('Suggestions Controller', () => {
         env: { AWS_ENV: 'dev' },
       });
 
-      expect(mockDrsClient.submitExperiment).to.have.been.calledOnce;
-      const callArgs = mockDrsClient.submitExperiment.firstCall.args[0];
+      expect(mockDrsClient.createExperimentSchedule).to.have.been.calledOnce;
+      const callArgs = mockDrsClient.createExperimentSchedule.firstCall.args[0];
       expect(callArgs.siteId).to.equal(SITE_ID);
       expect(callArgs.experimentPhase).to.equal('pre');
       expect(callArgs.experimentationUrls).to.deep.equal([
@@ -5021,8 +5224,34 @@ describe('Suggestions Controller', () => {
       expect(createArg.metadata.jobType).to.equal('experiment-deploy');
       expect(createArg.metadata.siteId).to.equal(SITE_ID);
       expect(createArg.metadata.opportunityId).to.equal(OPPORTUNITY_ID);
-      expect(createArg.metadata.deployStatus).to.equal('pre_analysis_submitted');
-      expect(createArg.metadata.preExperimentBatchId).to.equal('batch-pre-001');
+      expect(createArg.metadata.deploymentExperimentId).to.equal('dep-exp-001');
+      expect(mockSuggestionDataAccess.DeploymentExperiment.create).to.have.been.calledOnce;
+
+      const depExpCreateArg = mockSuggestionDataAccess.DeploymentExperiment.create.firstCall.args[0];
+      expect(depExpCreateArg.siteId).to.equal(SITE_ID);
+      expect(depExpCreateArg.opportunityId).to.equal(OPPORTUNITY_ID);
+      expect(depExpCreateArg.preDeploymentId).to.equal('sched-pre-001');
+      expect(depExpCreateArg.status).to.equal('pre_analysis_submitted');
+    });
+
+    it('supports createExperimentSchedule response with top-level schedule_id', async () => {
+      mockDrsClient.createExperimentSchedule.resolves({
+        schedule_id: 'sched-pre-flat-001',
+      });
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: { AWS_ENV: 'dev' },
+      });
+
+      expect(response.status).to.equal(202);
+      const body = await response.json();
+      expect(body.experimentBatchId).to.equal('sched-pre-flat-001');
+
+      const createArg = mockSuggestionDataAccess.AsyncJob.create.firstCall.args[0];
+      expect(createArg.metadata.deploymentExperimentId).to.equal('dep-exp-001');
     });
 
     it('updates valid suggestions with deploy metadata', async () => {
@@ -5035,13 +5264,37 @@ describe('Suggestions Controller', () => {
 
       expect(edgeSuggestions[0].setData).to.have.been.calledOnce;
       const dataArg = edgeSuggestions[0].setData.firstCall.args[0];
-      expect(dataArg.deployStatus).to.equal('pre_analysis_submitted');
-      expect(dataArg.experimentIds).to.deep.equal(['batch-pre-001']);
-      expect(dataArg.asyncJobId).to.equal(JOB_ID);
+      expect(dataArg.deploymentExperimentId).to.equal('dep-exp-001');
 
       expect(edgeSuggestions[0].save).to.have.been.calledOnce;
       expect(edgeSuggestions[1].setData).to.have.been.calledOnce;
       expect(edgeSuggestions[1].save).to.have.been.calledOnce;
+    });
+
+    it('uses profile email as updatedBy in async deploy flow', async () => {
+      context.attributes.authInfo.profile = { email: 'owner@example.com' };
+
+      await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: { AWS_ENV: 'dev' },
+      });
+
+      expect(edgeSuggestions[0].setUpdatedBy.calledWith('owner@example.com')).to.equal(true);
+    });
+
+    it('uses fallback updatedBy in async deploy flow when profile email is missing', async () => {
+      context.attributes.authInfo.profile = null;
+
+      await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+        env: { AWS_ENV: 'dev' },
+      });
+
+      expect(edgeSuggestions[0].setUpdatedBy.calledWith('experiment-deploy')).to.equal(true);
     });
 
     it('includes failedSuggestions in response when some are invalid', async () => {
@@ -5062,7 +5315,7 @@ describe('Suggestions Controller', () => {
     });
 
     it('returns 500 when DRS call fails', async () => {
-      mockDrsClient.submitExperiment.rejects(new Error('DRS unavailable'));
+      mockDrsClient.createExperimentSchedule.rejects(new Error('DRS unavailable'));
 
       const response = await suggestionsController.deploySuggestionToEdge({
         ...context,
@@ -5074,6 +5327,794 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(500);
       const body = await response.json();
       expect(body.message).to.include('DRS unavailable');
+    });
+
+    it('uses direct deploy flow when Prefer: respond-async is missing', async () => {
+      const mockTokowakaClient = {
+        deploySuggestions: sandbox.stub().resolves({
+          succeededSuggestions: [edgeSuggestions[0]],
+          failedSuggestions: [],
+        }),
+      };
+      const tokowakaCreateFromStub = sandbox.stub(TokowakaClient, 'createFrom').returns(mockTokowakaClient);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(tokowakaCreateFromStub).to.have.been.calledOnce;
+      expect(mockTokowakaClient.deploySuggestions).to.have.been.calledOnce;
+      expect(mockDrsClient.createExperimentSchedule).to.not.have.been.called;
+      expect(mockSuggestionDataAccess.AsyncJob.create).to.not.have.been.called;
+    });
+
+    it('uses profile email in direct deploy success path', async () => {
+      context.attributes.authInfo.profile = { email: 'owner@example.com' };
+      const mockTokowakaClient = {
+        deploySuggestions: sandbox.stub().resolves({
+          succeededSuggestions: [edgeSuggestions[0]],
+          failedSuggestions: [],
+        }),
+      };
+      sandbox.stub(TokowakaClient, 'createFrom').returns(mockTokowakaClient);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(edgeSuggestions[0].setUpdatedBy.calledWith('owner@example.com')).to.equal(true);
+      expect(context.log.info.calledWithMatch('by owner@example.com')).to.equal(true);
+    });
+
+    it('uses fallback updatedBy and log text in direct deploy success path when profile email is missing', async () => {
+      context.attributes.authInfo.profile = null;
+      const mockTokowakaClient = {
+        deploySuggestions: sandbox.stub().resolves({
+          succeededSuggestions: [edgeSuggestions[0]],
+          failedSuggestions: [],
+        }),
+      };
+      sandbox.stub(TokowakaClient, 'createFrom').returns(mockTokowakaClient);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(edgeSuggestions[0].setUpdatedBy.calledWith('tokowaka-deployment')).to.equal(true);
+      expect(context.log.info.calledWithMatch('by tokowaka-deployment')).to.equal(true);
+    });
+
+    it('marks suggestions as failed when direct deploy throws', async () => {
+      const mockTokowakaClient = {
+        deploySuggestions: sandbox.stub().rejects(new Error('tokowaka deploy failed')),
+      };
+      sandbox.stub(TokowakaClient, 'createFrom').returns(mockTokowakaClient);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.suggestions.some((s) => s.message === 'Deployment failed: Internal server error')).to.equal(true);
+    });
+
+    it('removes stale edgeOptimizeStatus and returns ineligible suggestions as failed', async () => {
+      const staleSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          url: 'https://example.com/page1',
+          edgeOptimizeStatus: 'STALE',
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      const ineligibleSuggestion = {
+        getId: () => SUGGESTION_IDS[1],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 2,
+        getData: () => ({ url: 'https://example.com/page2' }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      mockSuggestion.allByOpportunityId.resolves([staleSuggestion, ineligibleSuggestion]);
+
+      const mockTokowakaClient = {
+        deploySuggestions: sandbox.stub().resolves({
+          succeededSuggestions: [staleSuggestion],
+          failedSuggestions: [
+            { suggestion: ineligibleSuggestion, reason: 'Ineligible for edge deployment' },
+          ],
+        }),
+      };
+      sandbox.stub(TokowakaClient, 'createFrom').returns(mockTokowakaClient);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const staleSetDataArg = staleSuggestion.setData.firstCall.args[0];
+      expect(staleSetDataArg.edgeOptimizeStatus).to.equal(undefined);
+      const body = await response.json();
+      expect(body.metadata.failed).to.be.greaterThan(0);
+      expect(context.log.info.calledWithMatch('is ineligible')).to.equal(true);
+    });
+
+    it('includes autoCovered metadata when domain-wide deploy covers other suggestions', async () => {
+      const domainWideSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          isDomainWide: true,
+          scope: 'domain-wide',
+          url: 'https://example.com',
+          allowedRegexPatterns: ['^https://example\\.com/page1$'],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      const coveredSuggestion = {
+        getId: () => SUGGESTION_IDS[1],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 2,
+        getData: () => ({
+          url: 'https://example.com/page1',
+          recommendedAction: 'New Subtitle',
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion, coveredSuggestion]);
+
+      const mockTokowakaClient = {
+        fetchMetaconfig: sandbox.stub().resolves({}),
+        uploadMetaconfig: sandbox.stub().resolves(),
+      };
+      sandbox.stub(TokowakaClient, 'createFrom').returns(mockTokowakaClient);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.autoCovered).to.equal(1);
+      expect(body.metadata.message).to.equal(
+        '1 additional suggestion(s) automatically marked as deployed (covered by domain-wide configuration)',
+      );
+    });
+
+    it('keeps non-covered suggestions when filtering by same-batch domain-wide patterns', async () => {
+      const domainWideSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          isDomainWide: true,
+          scope: 'domain-wide',
+          url: 'https://example.com',
+          allowedRegexPatterns: ['^https://example\\.com/page1$'],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      const nonCoveredSuggestion = {
+        getId: () => SUGGESTION_IDS[1],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 2,
+        getData: () => ({
+          url: 'https://example.com/page2',
+          recommendedAction: 'Keep me deployable',
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion, nonCoveredSuggestion]);
+
+      const mockTokowakaClient = {
+        deploySuggestions: sandbox.stub().resolves({
+          succeededSuggestions: [nonCoveredSuggestion],
+          failedSuggestions: [],
+        }),
+        fetchMetaconfig: sandbox.stub().resolves({}),
+        uploadMetaconfig: sandbox.stub().resolves(),
+      };
+      sandbox.stub(TokowakaClient, 'createFrom').returns(mockTokowakaClient);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockTokowakaClient.deploySuggestions).to.have.been.calledOnce;
+    });
+
+    it('marks same-batch skipped suggestions as covered after domain-wide deploy', async () => {
+      const domainWideSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          isDomainWide: true,
+          scope: 'domain-wide',
+          url: 'https://example.com',
+          allowedRegexPatterns: ['^https://example\\.com/page1$'],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      const skippedSuggestion = {
+        getId: () => SUGGESTION_IDS[1],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 2,
+        getData: () => ({
+          url: 'https://example.com/page1',
+          recommendedAction: 'New Subtitle',
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion, skippedSuggestion]);
+
+      const mockTokowakaClient = {
+        deploySuggestions: sandbox.stub().resolves({
+          succeededSuggestions: [domainWideSuggestion],
+          failedSuggestions: [],
+        }),
+        fetchMetaconfig: sandbox.stub().resolves({}),
+        uploadMetaconfig: sandbox.stub().resolves(),
+      };
+      sandbox.stub(TokowakaClient, 'createFrom').returns(mockTokowakaClient);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(skippedSuggestion.save).to.have.been.calledOnce;
+      const body = await response.json();
+      expect(body.metadata.autoCovered).to.equal(1);
+    });
+
+    it('adds failed result when marking same-batch skipped suggestions fails', async () => {
+      const domainWideSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          isDomainWide: true,
+          scope: 'domain-wide',
+          url: 'https://example.com',
+          allowedRegexPatterns: ['^https://example\\.com/page1$'],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      const skippedSuggestion = {
+        getId: () => SUGGESTION_IDS[1],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 2,
+        getData: () => ({
+          url: 'https://example.com/page1',
+          recommendedAction: 'New Subtitle',
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().rejects(new Error('save failed')),
+      };
+      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion, skippedSuggestion]);
+
+      const mockTokowakaClient = {
+        deploySuggestions: sandbox.stub().resolves({
+          succeededSuggestions: [domainWideSuggestion],
+          failedSuggestions: [],
+        }),
+        fetchMetaconfig: sandbox.stub().resolves({}),
+        uploadMetaconfig: sandbox.stub().resolves(),
+      };
+      sandbox.stub(TokowakaClient, 'createFrom').returns(mockTokowakaClient);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.suggestions.some((s) => s.message === 'Failed to mark as covered by domain-wide')).to.equal(true);
+    });
+
+    it('continues domain-wide deployment when marking covered suggestions fails', async () => {
+      const domainWideSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          isDomainWide: true,
+          scope: 'domain-wide',
+          url: 'https://example.com',
+          allowedRegexPatterns: ['^https://example\\.com/page1$'],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      const coveredSuggestion = {
+        getId: () => SUGGESTION_IDS[1],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 2,
+        getData: () => ({
+          url: 'https://example.com/page1',
+          recommendedAction: 'New Subtitle',
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().rejects(new Error('covered save failed')),
+      };
+      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion, coveredSuggestion]);
+
+      const mockTokowakaClient = {
+        fetchMetaconfig: sandbox.stub().resolves({}),
+        uploadMetaconfig: sandbox.stub().resolves(),
+      };
+      sandbox.stub(TokowakaClient, 'createFrom').returns(mockTokowakaClient);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(context.log.error.calledWithMatch('Error marking covered suggestions')).to.equal(true);
+    });
+
+    it('skips non-domain suggestions without URL when evaluating domain-wide coverage', async () => {
+      const domainWideSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          isDomainWide: true,
+          scope: 'domain-wide',
+          url: 'https://example.com',
+          allowedRegexPatterns: ['^https://example\\.com/page1$'],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      const noUrlSuggestion = {
+        getId: () => SUGGESTION_IDS[1],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 2,
+        getData: () => ({}),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion, noUrlSuggestion]);
+
+      const mockTokowakaClient = {
+        fetchMetaconfig: sandbox.stub().resolves({}),
+        uploadMetaconfig: sandbox.stub().resolves(),
+      };
+      sandbox.stub(TokowakaClient, 'createFrom').returns(mockTokowakaClient);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+    });
+
+    it('handles no-url requested suggestions and auto-covers matching non-requested suggestions', async () => {
+      const domainWideSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          isDomainWide: true,
+          scope: 'domain-wide',
+          url: 'https://example.com',
+          allowedRegexPatterns: ['^https://example\\.com/page1$'],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      const noUrlRequestedSuggestion = {
+        getId: () => SUGGESTION_IDS[1],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 2,
+        getData: () => ({}),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      const nonRequestedCoveredSuggestion = {
+        getId: () => '8d86058b-2cc3-4d8d-9a40-b25013f9ad10',
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 3,
+        getData: () => ({
+          url: 'https://example.com/page1',
+          recommendedAction: 'Auto-covered content',
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      mockSuggestion.allByOpportunityId.resolves([
+        domainWideSuggestion,
+        noUrlRequestedSuggestion,
+        nonRequestedCoveredSuggestion,
+      ]);
+
+      const mockTokowakaClient = {
+        deploySuggestions: sandbox.stub().resolves({
+          succeededSuggestions: [domainWideSuggestion, noUrlRequestedSuggestion],
+          failedSuggestions: [],
+        }),
+        fetchMetaconfig: sandbox.stub().resolves({}),
+        uploadMetaconfig: sandbox.stub().resolves(),
+      };
+      sandbox.stub(TokowakaClient, 'createFrom').returns(mockTokowakaClient);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.metadata.autoCovered).to.equal(1);
+    });
+
+    it('creates a default metaconfig when fetchMetaconfig returns null', async () => {
+      const domainWideSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          isDomainWide: true,
+          scope: 'domain-wide',
+          url: 'https://example.com',
+          allowedRegexPatterns: ['^https://example\\.com/page1$'],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion]);
+
+      const mockTokowakaClient = {
+        fetchMetaconfig: sandbox.stub().resolves(null),
+        uploadMetaconfig: sandbox.stub().resolves(),
+      };
+      sandbox.stub(TokowakaClient, 'createFrom').returns(mockTokowakaClient);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(mockTokowakaClient.uploadMetaconfig).to.have.been.calledOnce;
+    });
+
+    it('skips non-NEW and domain-wide suggestions when evaluating covered suggestions', async () => {
+      const domainWideSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          isDomainWide: true,
+          scope: 'domain-wide',
+          url: 'https://example.com',
+          allowedRegexPatterns: ['^https://example\\.com/page1$'],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      const approvedSuggestion = {
+        getId: () => SUGGESTION_IDS[1],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'APPROVED',
+        getRank: () => 2,
+        getData: () => ({ url: 'https://example.com/page1' }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      const secondaryDomainWideSuggestion = {
+        getId: () => 'b67db722-b4ee-45f6-a127-e3b72b621f6a',
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 3,
+        getData: () => ({
+          isDomainWide: true,
+          scope: 'domain-wide',
+          url: 'https://example.com/other',
+          allowedRegexPatterns: ['^https://example\\.com/.*$'],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      mockSuggestion.allByOpportunityId.resolves([
+        domainWideSuggestion,
+        approvedSuggestion,
+        secondaryDomainWideSuggestion,
+      ]);
+
+      const mockTokowakaClient = {
+        fetchMetaconfig: sandbox.stub().resolves({}),
+        uploadMetaconfig: sandbox.stub().resolves(),
+      };
+      sandbox.stub(TokowakaClient, 'createFrom').returns(mockTokowakaClient);
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+    });
+
+    it('records domain-wide suggestion failure when domain-wide deploy step throws', async () => {
+      const domainWideSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          isDomainWide: true,
+          scope: 'domain-wide',
+          url: 'https://example.com',
+          allowedRegexPatterns: ['^https://example\\.com/page1$'],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion]);
+
+      sandbox.stub(TokowakaClient, 'createFrom').returns({
+        deploySuggestions: sandbox.stub().resolves({
+          succeededSuggestions: [],
+          failedSuggestions: [],
+        }),
+        fetchMetaconfig: sandbox.stub().rejects(new Error('metaconfig down')),
+      });
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.suggestions.some((s) => s.message === 'Deployment failed: metaconfig down')).to.equal(true);
+    });
+
+    it('fails domain-wide suggestions when domain-wide processing setup throws', async () => {
+      const domainWideSuggestion = {
+        getId: () => SUGGESTION_IDS[0],
+        getType: () => 'headings',
+        getOpportunityId: () => OPPORTUNITY_ID,
+        getStatus: () => 'NEW',
+        getRank: () => 1,
+        getData: () => ({
+          isDomainWide: true,
+          scope: 'domain-wide',
+          url: 'https://example.com',
+          allowedRegexPatterns: ['^https://example\\.com/page1$'],
+        }),
+        getKpiDeltas: () => ({}),
+        getCreatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedAt: () => '2025-01-15T10:00:00Z',
+        getUpdatedBy: () => 'system',
+        setData: sandbox.stub().returnsThis(),
+        setUpdatedBy: sandbox.stub().returnsThis(),
+        save: sandbox.stub().resolves(),
+      };
+      mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion]);
+
+      sandbox.stub(TokowakaClient, 'createFrom').throws(new Error('tokowaka init failed'));
+
+      const response = await suggestionsController.deploySuggestionToEdge({
+        ...context,
+        pathInfo: { headers: {} },
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { suggestionIds: [SUGGESTION_IDS[0]] },
+      });
+
+      expect(response.status).to.equal(207);
+      expect(context.log.error.calledWithMatch('Error deploying domain-wide suggestions')).to.equal(true);
     });
   });
 
@@ -5187,12 +6228,17 @@ describe('Suggestions Controller', () => {
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,
           experimentId: 'exp-test-123',
-          deployStatus: 'pre_analysis_submitted',
-          preExperimentBatchId: 'batch-pre-001',
-          postExperimentBatchId: null,
+          deploymentExperimentId: 'dep-exp-001',
         }),
         getStartedAt: () => '2025-01-01T00:00:00Z',
         getEndedAt: () => null,
+        getError: () => null,
+      });
+      mockSuggestionDataAccess.DeploymentExperiment.findById.resolves({
+        getId: () => 'dep-exp-001',
+        getStatus: () => 'pre_analysis_submitted',
+        getPreDeploymentId: () => 'batch-pre-001',
+        getPostDeploymentId: () => null,
         getError: () => null,
       });
 
@@ -5221,12 +6267,17 @@ describe('Suggestions Controller', () => {
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,
           experimentId: 'exp-test-123',
-          deployStatus: 'post_analysis_submitted',
-          preExperimentBatchId: 'batch-pre-001',
-          postExperimentBatchId: 'batch-post-002',
+          deploymentExperimentId: 'dep-exp-001',
         }),
         getStartedAt: () => '2025-01-01T00:00:00Z',
         getEndedAt: () => null,
+        getError: () => null,
+      });
+      mockSuggestionDataAccess.DeploymentExperiment.findById.resolves({
+        getId: () => 'dep-exp-001',
+        getStatus: () => 'post_analysis_submitted',
+        getPreDeploymentId: () => 'batch-pre-001',
+        getPostDeploymentId: () => 'batch-post-002',
         getError: () => null,
       });
 
@@ -5248,13 +6299,18 @@ describe('Suggestions Controller', () => {
           siteId: SITE_ID,
           opportunityId: OPPORTUNITY_ID,
           experimentId: 'exp-test-123',
-          deployStatus: 'failed',
-          preExperimentBatchId: 'batch-pre-001',
-          postExperimentBatchId: null,
+          deploymentExperimentId: 'dep-exp-001',
         }),
         getStartedAt: () => '2025-01-01T00:00:00Z',
         getEndedAt: () => '2025-01-01T01:00:00Z',
         getError: () => 'Pre-analysis failed at DRS',
+      });
+      mockSuggestionDataAccess.DeploymentExperiment.findById.resolves({
+        getId: () => 'dep-exp-001',
+        getStatus: () => 'failed',
+        getPreDeploymentId: () => 'batch-pre-001',
+        getPostDeploymentId: () => null,
+        getError: () => ({ message: 'Pre-analysis failed at DRS' }),
       });
 
       const response = await suggestionsController.getEdgeDeployStatus({
@@ -5267,6 +6323,56 @@ describe('Suggestions Controller', () => {
       expect(body.status).to.equal('FAILED');
       expect(body.endedAt).to.equal('2025-01-01T01:00:00Z');
       expect(body.error).to.equal('Pre-analysis failed at DRS');
+    });
+
+    it('returns notFound when deployment experiment does not exist', async () => {
+      mockSuggestionDataAccess.AsyncJob.findById.resolves({
+        getId: () => JOB_ID,
+        getStatus: () => 'IN_PROGRESS',
+        getMetadata: () => ({
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+          experimentId: 'exp-test-123',
+          deploymentExperimentId: 'dep-exp-404',
+        }),
+        getStartedAt: () => '2025-01-01T00:00:00Z',
+        getEndedAt: () => null,
+        getError: () => null,
+      });
+      mockSuggestionDataAccess.DeploymentExperiment.findById.resolves(null);
+
+      const response = await suggestionsController.getEdgeDeployStatus({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, jobId: JOB_ID },
+      });
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.equal('Deployment experiment not found');
+    });
+
+    it('returns notFound when job metadata has no deploymentExperimentId', async () => {
+      mockSuggestionDataAccess.AsyncJob.findById.resolves({
+        getId: () => JOB_ID,
+        getStatus: () => 'IN_PROGRESS',
+        getMetadata: () => ({
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+          experimentId: 'exp-test-123',
+        }),
+        getStartedAt: () => '2025-01-01T00:00:00Z',
+        getEndedAt: () => null,
+        getError: () => null,
+      });
+
+      const response = await suggestionsController.getEdgeDeployStatus({
+        ...context,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, jobId: JOB_ID },
+      });
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body.message).to.equal('Deployment experiment not found');
     });
   });
 

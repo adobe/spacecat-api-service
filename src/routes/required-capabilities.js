@@ -34,6 +34,7 @@ export const INTERNAL_ROUTES = [
   // TODO: Add these back in when we have a S2S consumer that needs them
   'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix',
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy',
+  'GET /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy/:jobId/status',
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-rollback',
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-preview',
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-live-preview',
