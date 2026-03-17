@@ -399,11 +399,26 @@ const SENTIMENT_COLORS = {
 };
 
 /**
+ * Builds a deduplication key matching the original UI's `buildPromptKey`:
+ *   prompt | region | topics
+ * @internal Exported for testing
+ */
+export function buildPromptKey(row) {
+  const prompt = row.prompt || '';
+  const region = row.region_code || 'Unknown';
+  const topics = row.topics || 'Unknown';
+  return `${prompt}|${region}|${topics}`;
+}
+
+/**
  * Aggregates execution rows into per-week sentiment percentages.
- * Matches the format produced by the original brand-presence UI hook:
- * sentiment values are percentages (summing to 100), names are capitalized,
- * and each entry includes a color hex string.
- * @param {Array<{execution_date: string, sentiment: string|null, prompt: string|null}>} rows
+ * Deduplicates by (prompt, region_code, topics) within each week to match
+ * the original brand-presence UI which counts unique prompts, not raw rows.
+ * When the same prompt appears for multiple brands, only the first-seen
+ * sentiment is used — this avoids inflating counts when using brands=all.
+ *
+ * @param {Array<{execution_date: string, sentiment: string|null, prompt: string|null,
+ *   region_code: string|null, topics: string|null}>} rows
  * @returns {Array<Object>} weeklyTrends sorted by week ascending
  * @internal Exported for testing
  */
@@ -422,9 +437,15 @@ export function aggregateSentimentByWeek(rows) {
         negative: 0,
         totalPrompts: 0,
         promptsWithSentiment: 0,
+        seenKeys: new Set(),
       });
     }
     const entry = weekMap.get(week);
+
+    const key = buildPromptKey(row);
+    if (entry.seenKeys.has(key)) return;
+    entry.seenKeys.add(key);
+
     entry.totalPrompts += 1;
 
     const sentiment = (row.sentiment || '').toLowerCase().trim();
@@ -490,7 +511,7 @@ export function createSentimentOverviewHandler(getOrgAndValidateAccess) {
 
       let q = client
         .from('brand_presence_executions')
-        .select('execution_date, sentiment, prompt')
+        .select('execution_date, sentiment, prompt, region_code, topics')
         .eq('organization_id', organizationId)
         .gte('execution_date', startDate)
         .lte('execution_date', endDate)
